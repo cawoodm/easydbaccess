@@ -1,0 +1,15 @@
+{
+  "appId": "ch.monads.easydbaccess",
+  "productName": "easyDBAccess",
+  "directories": {
+    "output": "dist-installer"
+  },
+  "files": [
+    "dist/**/*",
+    "../renderer/dist/**/*",
+    "../server/dist/**/*"
+  ],
+  "win": { "target": "nsis" },
+  "mac": { "target": "dmg" },
+  "linux": { "target": "AppImage" }
+}

@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "noEmit": true,
+    "useDefineForClassFields": false,
+    "experimentalDecorators": true
+  },
+  "include": ["src/**/*"],
+  "references": [{ "path": "../shared" }]
+}

@@ -1,0 +1,209 @@
+/**
+ * Single source of truth for the plugin contract.
+ *
+ * A plugin is a single ES module .js file. The host calls plugin.init(api)
+ * once at startup, then plugin.load(api) once the app is ready. Plugins MAY
+ * monkey-patch methods on the `api` object to override default behavior; the
+ * host treats it as a mutable namespace.
+ */
+
+import type {
+  ColumnSpec,
+  PluginRecord,
+  Row,
+  Setting,
+  Table,
+  Workspace,
+} from './types.js';
+
+// -- Plugin module shape --------------------------------------------------
+
+export interface PluginModule {
+  init?(api: HostApi): void | Promise<void>;
+  load?(api: HostApi): void | Promise<void>;
+  meta?: {
+    name?: string;
+    version?: string;
+    description?: string;
+    author?: string;
+  };
+}
+
+// -- Events ---------------------------------------------------------------
+
+export interface AppEvents {
+  'app:ready': { workspaceId: string };
+  'workspace:changed': { workspaceId: string };
+  'table:created': { table: Table };
+  'table:deleted': { tableId: string };
+  'table:rendered': { tableId: string; el: HTMLElement };
+  'row:created': { tableId: string; row: Row };
+  'row:updated': { tableId: string; row: Row; prev: Row };
+  'row:deleted': { tableId: string; rowId: string };
+  'drop:files': { files: File[]; event: DragEvent };
+  'import:before': { source: string; tableId?: string };
+  'import:after': { source: string; tableId: string; rowCount: number };
+  'export:before': { format: string; tableId: string };
+  'plugin:error': { url: string; phase: 'fetch' | 'init' | 'load' | 'runtime'; error: unknown };
+}
+
+export type Unsubscribe = () => void;
+export type Unregister = () => void;
+
+export interface EventBus {
+  on<K extends keyof AppEvents>(name: K, fn: (e: AppEvents[K]) => void): Unsubscribe;
+  emit<K extends keyof AppEvents>(name: K, payload: AppEvents[K]): void;
+}
+
+// -- Data store (subset of RxDB surface) ----------------------------------
+
+/**
+ * Minimal subset of RxDB's RxCollection that the plugin contract exposes.
+ * Plugins should not depend on the full RxDB surface; this interface lets us
+ * swap storage adapters without breaking plugins.
+ */
+export interface DataCollection<T> {
+  find(query?: Partial<T>): Promise<T[]>;
+  findOne(id: string): Promise<T | null>;
+  insert(doc: T): Promise<T>;
+  upsert(doc: T): Promise<T>;
+  patch(id: string, patch: Partial<T>): Promise<T>;
+  remove(id: string): Promise<void>;
+  /** Subscribe to changes; returns unsubscribe. */
+  subscribe(fn: (docs: T[]) => void): Unsubscribe;
+}
+
+export interface DataStore {
+  workspaces: DataCollection<Workspace>;
+  tables: DataCollection<Table>;
+  /** Lazily creates the row collection for a table if it doesn't exist. */
+  rows(tableId: string): DataCollection<Row>;
+  settings: DataCollection<Setting>;
+  plugins: DataCollection<PluginRecord>;
+}
+
+// -- UI slot registries ---------------------------------------------------
+
+export interface ButtonSpec {
+  id: string;
+  label: string;
+  icon?: string;
+  tooltip?: string;
+  order?: number;
+  onClick(api: HostApi): void | Promise<void>;
+}
+
+export interface TableButtonSpec {
+  id: string;
+  label: string;
+  icon?: string;
+  tooltip?: string;
+  order?: number;
+  onClick(api: HostApi, ctx: { tableId: string }): void | Promise<void>;
+}
+
+export interface ImporterSpec {
+  id: string;
+  label: string;
+  /** File extensions or MIME types this importer accepts. */
+  accept: string[];
+  parse(input: File | string): Promise<{ columns: ColumnSpec[]; rows: Array<Record<string, unknown>> }>;
+}
+
+export interface ExporterSpec {
+  id: string;
+  label: string;
+  extension: string;
+  serialize(table: Table, rows: Row[]): Promise<Blob | string>;
+}
+
+export type DropHandler = (
+  event: DragEvent,
+  api: HostApi,
+) => Promise<boolean> | boolean; // return true if handled
+
+export interface UrlSourceSpec {
+  id: string;
+  label: string;
+  /** Called when the user invokes this URL source; should add rows via the api. */
+  run(api: HostApi, opts: { url?: string }): Promise<void>;
+}
+
+export interface UiRegistry {
+  registerHeaderButton(spec: ButtonSpec): Unregister;
+  registerFooterButton(spec: ButtonSpec): Unregister;
+  registerTableButton(spec: TableButtonSpec): Unregister;
+  /**
+   * Register a cell renderer. `tag` is the custom element name (must contain
+   * a hyphen). The element receives `value` and `column` properties and
+   * dispatches a `change` event with `{ detail: { value } }` on edit.
+   */
+  registerCellRenderer(typeName: string, tag: string): Unregister;
+  registerRowRenderer(viewName: string, tag: string): Unregister;
+  registerTableRenderer(viewName: string, tag: string): Unregister;
+  registerImporter(spec: ImporterSpec): Unregister;
+  registerExporter(spec: ExporterSpec): Unregister;
+  registerDropHandler(fn: DropHandler): Unregister;
+  registerUrlSource(spec: UrlSourceSpec): Unregister;
+}
+
+// -- Window manager -------------------------------------------------------
+
+export interface WindowSpec {
+  id: string;
+  title: string;
+  content: HTMLElement;
+  geometry?: Partial<{ x: number; y: number; w: number; h: number }>;
+  resizable?: boolean;
+  closable?: boolean;
+}
+
+export interface WindowHandle {
+  id: string;
+  close(): void;
+  focus(): void;
+  setTitle(title: string): void;
+  setGeometry(g: Partial<{ x: number; y: number; w: number; h: number }>): void;
+}
+
+export interface WindowManager {
+  open(spec: WindowSpec): WindowHandle;
+  list(): WindowHandle[];
+  find(id: string): WindowHandle | null;
+}
+
+// -- Backend access -------------------------------------------------------
+
+export interface FetchOpts {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string | ArrayBuffer;
+  /** Maximum response size in bytes; backend enforces a hard ceiling too. */
+  maxBytes?: number;
+}
+
+export interface Backend {
+  /** URL fetch that works in both modes — proxied through Hono in the browser. */
+  fetch(url: string, opts?: FetchOpts): Promise<Response>;
+  /**
+   * Save bytes/text to a file the user picks. Browser mode triggers a download;
+   * Electron mode will route through a native save dialog. Plugins should call
+   * this instead of constructing their own <a download> so behavior stays
+   * consistent across browser and desktop.
+   */
+  saveFile(filename: string, body: Blob | string, mimeType?: string): Promise<void>;
+}
+
+// -- The HostApi the plugin receives --------------------------------------
+
+export interface HostApi {
+  store: DataStore;
+  events: EventBus;
+  ui: UiRegistry;
+  windows: WindowManager;
+  backend: Backend;
+  /** The current workspace id, when one is selected. */
+  workspaceId(): string | null;
+  /** Plugin's own URL — useful for relative resource loads. */
+  selfUrl(): string;
+}

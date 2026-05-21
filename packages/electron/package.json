@@ -1,0 +1,23 @@
+{
+  "name": "@easydb/electron",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "./dist/main.js",
+  "scripts": {
+    "dev": "node scripts/dev.cjs",
+    "build": "tsc -b",
+    "start": "electron .",
+    "package": "electron-builder --config electron-builder.json"
+  },
+  "dependencies": {
+    "@easydb/shared": "*",
+    "@easydb/server": "*"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}

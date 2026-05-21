@@ -1,0 +1,28 @@
+{
+  "name": "@easydb/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/standalone.ts",
+    "build": "tsc -b",
+    "start": "node dist/standalone.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@easydb/shared": "*",
+    "hono": "^4.6.0",
+    "@hono/node-server": "^1.13.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "vitest": "^2.0.0",
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}
