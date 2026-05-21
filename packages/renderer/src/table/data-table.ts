@@ -401,6 +401,18 @@ export class DataTable extends LitElement {
       </table>
       <div class="actions">
         <button @click=${this.addRow}>+ Add row</button>
+        <button
+          @click=${() =>
+            this.dispatchEvent(
+              new CustomEvent('easydb:edit-columns', {
+                detail: { tableId: this.tableId },
+                bubbles: true,
+                composed: true,
+              }),
+            )}
+        >
+          Edit columns
+        </button>
         <span style="color:#6b7280; font-size:.85em; align-self:center">
           ${rows.length} row${rows.length === 1 ? '' : 's'}
         </span>

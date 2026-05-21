@@ -7,10 +7,21 @@ interface ColumnRow {
   field: string;
   label: string;
   type: ColumnType;
+  /** field name in the saved table (edit mode only); used to detect field renames */
+  origField?: string;
 }
 
 const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'color', 'image'];
 
+/**
+ * Dual-purpose dialog: creates new tables and edits the columns of existing
+ * ones. Open mode is chosen by the optional tableId argument to open().
+ *
+ * Edit mode keeps existing field names intact by default (renames are
+ * destructive — they would require re-keying every row's data object).
+ * Renaming is still allowed if you really want it, but the warning text
+ * below the columns spells out what happens.
+ */
 @customElement('new-table-dialog')
 export class NewTableDialog extends LitElement {
   static override styles = css`
@@ -21,7 +32,7 @@ export class NewTableDialog extends LitElement {
       border: 0;
       border-radius: 0.5rem;
       padding: 0;
-      max-width: 540px;
+      max-width: 580px;
       width: 100%;
       box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
       font-family: system-ui, sans-serif;
@@ -60,8 +71,8 @@ export class NewTableDialog extends LitElement {
     .col-header,
     .col-row {
       display: grid;
-      grid-template-columns: 1fr 1fr 9rem 2rem;
-      gap: 0.5rem;
+      grid-template-columns: 1fr 1fr 8rem 1.5rem 1.5rem 1.5rem;
+      gap: 0.4rem;
       align-items: center;
     }
     .col-header {
@@ -70,12 +81,24 @@ export class NewTableDialog extends LitElement {
       letter-spacing: 0.04em;
       color: #6b7280;
     }
-    button.row-del {
+    button.icon-btn {
       background: transparent;
       border: 0;
+      color: #6b7280;
+      cursor: pointer;
+      padding: 0;
+      font-size: 1rem;
+    }
+    button.icon-btn:hover:not(:disabled) {
+      color: #111827;
+    }
+    button.icon-btn:disabled {
+      color: #d1d5db;
+      cursor: not-allowed;
+    }
+    button.row-del {
       color: #ef4444;
       font-size: 1.1rem;
-      cursor: pointer;
     }
     .actions {
       display: flex;
@@ -114,8 +137,14 @@ export class NewTableDialog extends LitElement {
       color: #ef4444;
       font-size: 0.85rem;
     }
+    .hint {
+      color: #6b7280;
+      font-size: 0.78rem;
+    }
   `;
 
+  @state() private mode: 'new' | 'edit' = 'new';
+  @state() private editTableId: string | null = null;
   @state() private name = '';
   @state() private columns: ColumnRow[] = [];
   @state() private errorMsg = '';
@@ -126,14 +155,37 @@ export class NewTableDialog extends LitElement {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
   }
 
-  open(): void {
-    this.name = '';
-    this.columns = [
-      { field: 'name', label: 'Name', type: 'string' },
-      { field: 'note', label: 'Note', type: 'string' },
-    ];
+  /**
+   * Open the dialog. If tableId is provided, opens in "edit" mode and pre-fills
+   * the form from the saved Table. Otherwise opens "new" mode with two default
+   * string columns.
+   */
+  async open(tableId?: string): Promise<void> {
     this.errorMsg = '';
-    this.updateComplete.then(() => this.dialogEl?.showModal());
+    if (tableId) {
+      const ctx = await getContext();
+      const t = await ctx.store.tables.findOne(tableId);
+      if (!t) return;
+      this.mode = 'edit';
+      this.editTableId = tableId;
+      this.name = t.name;
+      this.columns = t.columns.map((c) => ({
+        field: c.field,
+        label: c.label,
+        type: c.type,
+        origField: c.field,
+      }));
+    } else {
+      this.mode = 'new';
+      this.editTableId = null;
+      this.name = '';
+      this.columns = [
+        { field: 'name', label: 'Name', type: 'string' },
+        { field: 'note', label: 'Note', type: 'string' },
+      ];
+    }
+    await this.updateComplete;
+    this.dialogEl?.showModal();
   }
 
   private close(): void {
@@ -150,6 +202,15 @@ export class NewTableDialog extends LitElement {
 
   private removeColumn(idx: number): void {
     this.columns = this.columns.filter((_, i) => i !== idx);
+  }
+
+  private moveColumn(idx: number, delta: -1 | 1): void {
+    const j = idx + delta;
+    if (j < 0 || j >= this.columns.length) return;
+    const next = [...this.columns];
+    const [item] = next.splice(idx, 1);
+    next.splice(j, 0, item!);
+    this.columns = next;
   }
 
   private patchColumn(idx: number, patch: Partial<ColumnRow>): void {
@@ -187,23 +248,43 @@ export class NewTableDialog extends LitElement {
       label: c.label.trim() || c.field.trim(),
       type: c.type,
     }));
-    await ctx.store.tables.insert({
-      id: cryptoUUID(),
-      workspaceId: ctx.workspaceId,
-      name,
-      code: slug(name),
-      columns,
-      view: 'table',
-      updatedAt: Date.now(),
-    });
+
+    if (this.mode === 'edit' && this.editTableId) {
+      // Patch the saved table; row data isn't migrated. If a field was
+      // renamed, downstream cells will read undefined and display as empty.
+      await ctx.store.tables.patch(this.editTableId, {
+        name,
+        columns,
+        updatedAt: Date.now(),
+      });
+    } else {
+      await ctx.store.tables.insert({
+        id: cryptoUUID(),
+        workspaceId: ctx.workspaceId,
+        name,
+        code: slug(name),
+        columns,
+        view: 'table',
+        updatedAt: Date.now(),
+      });
+    }
     this.close();
   }
 
+  private renameDetected(): boolean {
+    return (
+      this.mode === 'edit' &&
+      this.columns.some((c) => c.origField && c.origField !== c.field.trim())
+    );
+  }
+
   override render() {
+    const title = this.mode === 'edit' ? 'Edit columns' : 'New table';
+    const submitLabel = this.mode === 'edit' ? 'Save' : 'Create';
     return html`
       <dialog @cancel=${this.close}>
         <form @submit=${this.submit}>
-          <h2>New table</h2>
+          <h2>${title}</h2>
           <label>
             Name
             <input
@@ -219,6 +300,8 @@ export class NewTableDialog extends LitElement {
               <span>Field</span>
               <span>Label</span>
               <span>Type</span>
+              <span></span>
+              <span></span>
               <span></span>
             </div>
             ${this.columns.map(
@@ -249,7 +332,25 @@ export class NewTableDialog extends LitElement {
                   </select>
                   <button
                     type="button"
-                    class="row-del"
+                    class="icon-btn"
+                    title="Move up"
+                    ?disabled=${i === 0}
+                    @click=${() => this.moveColumn(i, -1)}
+                  >
+                    ▲
+                  </button>
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    title="Move down"
+                    ?disabled=${i === this.columns.length - 1}
+                    @click=${() => this.moveColumn(i, 1)}
+                  >
+                    ▼
+                  </button>
+                  <button
+                    type="button"
+                    class="icon-btn row-del"
                     title="Remove column"
                     @click=${() => this.removeColumn(i)}
                   >
@@ -262,11 +363,17 @@ export class NewTableDialog extends LitElement {
 
           <button type="button" class="add" @click=${this.addColumn}>+ Add column</button>
 
+          ${this.renameDetected()
+            ? html`<div class="hint">
+                Renamed fields will appear empty for existing rows — the row data
+                isn't migrated automatically.
+              </div>`
+            : ''}
           ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''}
 
           <div class="actions">
             <button type="button" class="ghost" @click=${this.close}>Cancel</button>
-            <button type="submit" class="primary">Create</button>
+            <button type="submit" class="primary">${submitLabel}</button>
           </div>
         </form>
       </dialog>

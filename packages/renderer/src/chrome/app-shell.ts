@@ -91,8 +91,24 @@ export class AppShell extends LitElement {
     this.addEventListener('dragover', this.onDragOver);
     this.addEventListener('dragleave', this.onDragLeave);
     this.addEventListener('drop', this.onDrop);
+    // Panels live in light DOM (#easydb-panels), outside this shell's shadow,
+    // so we listen on the document root to receive their bubbling events.
+    document.addEventListener('easydb:edit-columns', this.onEditColumns as EventListener);
     void this.bindRegistries();
   }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    this.removeEventListener('dragover', this.onDragOver);
+    this.removeEventListener('dragleave', this.onDragLeave);
+    this.removeEventListener('drop', this.onDrop);
+    document.removeEventListener('easydb:edit-columns', this.onEditColumns as EventListener);
+  }
+
+  private onEditColumns = (e: Event) => {
+    const ce = e as CustomEvent<{ tableId: string }>;
+    void this.dialog?.open(ce.detail.tableId);
+  };
 
   private async bindRegistries() {
     const ctx = await getContext();
@@ -106,13 +122,6 @@ export class AppShell extends LitElement {
   private snapshotRegistries(ctx: { registries: { footerButtons: ButtonSpec[]; headerButtons: ButtonSpec[] } }) {
     this.footerButtons = [...ctx.registries.footerButtons];
     this.headerButtons = [...ctx.registries.headerButtons];
-  }
-
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    this.removeEventListener('dragover', this.onDragOver);
-    this.removeEventListener('dragleave', this.onDragLeave);
-    this.removeEventListener('drop', this.onDrop);
   }
 
   private onDragOver = (e: DragEvent) => {
