@@ -42,23 +42,40 @@ export class WorkspaceSelector extends LitElement {
     this.unsubscribe?.();
   }
 
+  /**
+   * Switch by reloading with ?space=<name>. Reload is the cleanest cut here
+   * — RxDB collections, jsPanel windows, and the plugin host all bind to a
+   * single workspaceId at boot, so swapping it live would require tearing
+   * down every panel and rebinding every subscription.
+   */
+  private switchWorkspace(id: string) {
+    const ws = this.workspaces.find((w) => w.id === id);
+    if (!ws) return;
+    const sp = new URLSearchParams(location.search);
+    sp.set('space', ws.name);
+    const url = `${location.pathname}?${sp.toString()}${location.hash}`;
+    location.assign(url);
+  }
+
   private async addWorkspace() {
-    const name = prompt('Workspace name?');
+    const name = window.prompt('Workspace name?');
     if (!name) return;
-    const ctx = await getContext();
-    const id = name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-    await ctx.store.workspaces.insert({
-      id,
-      name,
-      createdAt: Date.now(),
-      pluginUrls: [],
-    });
+    // Navigate to the new workspace — init() will create it on first load
+    // since it doesn't exist yet.
+    const sp = new URLSearchParams(location.search);
+    sp.set('space', name);
+    location.assign(`${location.pathname}?${sp.toString()}${location.hash}`);
   }
 
   override render() {
     return html`
-      <select .value=${this.current}>
-        ${this.workspaces.map((w) => html`<option value=${w.id}>${w.name}</option>`)}
+      <select
+        .value=${this.current}
+        @change=${(e: Event) => this.switchWorkspace((e.target as HTMLSelectElement).value)}
+      >
+        ${this.workspaces.map(
+          (w) => html`<option value=${w.id} ?selected=${w.id === this.current}>${w.name}</option>`,
+        )}
       </select>
       <button @click=${this.addWorkspace} title="New workspace">+</button>
     `;

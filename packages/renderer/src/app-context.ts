@@ -26,10 +26,29 @@ async function init(): Promise<AppContext> {
   const events = createEventBus();
   const registries = createRegistries();
 
-  // Ensure a default workspace exists.
+  // Workspace resolution priority:
+  //   1. ?space=NAME URL param — if a matching workspace exists, use it.
+  //                              If not, create one with that id+name.
+  //   2. Otherwise, the first workspace in the store.
+  //   3. Otherwise, create a "default" workspace.
+  const requested = readWorkspaceFromUrl();
   const existing = await store.workspaces.find();
   let workspaceId: string;
-  if (existing.length === 0) {
+  if (requested) {
+    const id = slugifyWorkspace(requested);
+    const hit = existing.find((w) => w.id === id || w.name === requested);
+    if (hit) {
+      workspaceId = hit.id;
+    } else {
+      const created = await store.workspaces.insert({
+        id,
+        name: requested,
+        createdAt: Date.now(),
+        pluginUrls: [],
+      });
+      workspaceId = created.id;
+    }
+  } else if (existing.length === 0) {
     const ws = await store.workspaces.insert({
       id: 'default',
       name: 'default',
@@ -57,4 +76,21 @@ async function init(): Promise<AppContext> {
   });
 
   return { store, events, workspaceId, registries, api };
+}
+
+function readWorkspaceFromUrl(): string | null {
+  if (typeof location === 'undefined') return null;
+  const sp = new URLSearchParams(location.search);
+  const v = sp.get('space');
+  return v && v.trim().length > 0 ? v.trim() : null;
+}
+
+function slugifyWorkspace(s: string): string {
+  return (
+    s
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'default'
+  );
 }
