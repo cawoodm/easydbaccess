@@ -2,7 +2,6 @@ import { LitElement, css, html } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import type { ButtonSpec, HostApi } from '@easydb/shared';
 import { getContext } from '../app-context.js';
-import { applyGlobalFilter } from '../window-mgr/jspanel-manager.js';
 import './workspace-selector.js';
 import './table-list.js';
 import '../dialogs/new-table-dialog.js';
@@ -133,7 +132,14 @@ export class AppShell extends LitElement {
     this.searchQuery = (e.target as HTMLInputElement).value;
     if (this.searchTimer != null) window.clearTimeout(this.searchTimer);
     this.searchTimer = window.setTimeout(() => {
-      void applyGlobalFilter(this.searchQuery);
+      // Broadcast to every <data-table> in any panel; they filter their own
+      // rows. We deliberately do NOT hide panels — keep the workspace layout
+      // stable so the user can scan multiple tables at once.
+      document.dispatchEvent(
+        new CustomEvent('easydb:global-search', {
+          detail: { query: this.searchQuery },
+        }),
+      );
     }, 200);
   };
 

@@ -152,19 +152,26 @@ export class DataTable extends LitElement {
   @state() private sortColumn: string | null = null;
   @state() private sortDir: SortDir = null;
   @state() private filters: Record<string, string> = {};
+  @state() private globalQuery = '';
   @state() private tableButtons: TableButtonSpec[] = [];
   private unsubscribe?: () => void;
   private filterSaveTimer: number | null = null;
 
   override async connectedCallback() {
     super.connectedCallback();
+    document.addEventListener('easydb:global-search', this.onGlobalSearch as EventListener);
     await this.bind();
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
+    document.removeEventListener('easydb:global-search', this.onGlobalSearch as EventListener);
     this.unsubscribe?.();
   }
+
+  private onGlobalSearch = (e: Event) => {
+    this.globalQuery = (e as CustomEvent<{ query: string }>).detail.query ?? '';
+  };
 
   override async updated(changed: Map<string, unknown>) {
     if (changed.has('tableId') && this.tableId) {
@@ -326,14 +333,21 @@ export class DataTable extends LitElement {
 
   private filteredRows(): Row[] {
     const active = Object.entries(this.filters).filter(([, q]) => q && q.trim().length > 0);
-    if (active.length === 0) return this.rows;
-    return this.rows.filter((r) =>
-      active.every(([field, query]) =>
+    const gq = this.globalQuery.trim().toLowerCase();
+    if (active.length === 0 && gq.length === 0) return this.rows;
+    return this.rows.filter((r) => {
+      if (gq.length > 0) {
+        const hit = Object.values(r.data).some(
+          (v) => v != null && String(v).toLowerCase().includes(gq),
+        );
+        if (!hit) return false;
+      }
+      return active.every(([field, query]) =>
         String(r.data[field] ?? '')
           .toLowerCase()
           .includes(query.toLowerCase()),
-      ),
-    );
+      );
+    });
   }
 
   private sortedRows(): Row[] {
