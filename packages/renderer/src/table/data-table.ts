@@ -1,6 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import type { ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, Row, Table, TableButtonSpec } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 
 type SortDir = 'asc' | 'desc' | null;
@@ -152,6 +152,7 @@ export class DataTable extends LitElement {
   @state() private sortColumn: string | null = null;
   @state() private sortDir: SortDir = null;
   @state() private filters: Record<string, string> = {};
+  @state() private tableButtons: TableButtonSpec[] = [];
   private unsubscribe?: () => void;
   private filterSaveTimer: number | null = null;
 
@@ -181,10 +182,24 @@ export class DataTable extends LitElement {
     this.sortColumn = table.sortColumn ?? null;
     this.sortDir = table.sortColumn ? (table.sortAsc === false ? 'desc' : 'asc') : null;
     this.filters = { ...(table.filters ?? {}) };
+    // Snapshot registered table buttons. They're populated during plugin
+    // load() which happens after the first connectedCallback; re-snapshot on
+    // app:ready so we don't miss any registered post-load.
+    this.tableButtons = [...ctx.registries.tableButtons];
+    ctx.events.on('app:ready', () => (this.tableButtons = [...ctx.registries.tableButtons]));
     const rowColl = ctx.store.rows(this.tableId);
     this.unsubscribe = rowColl.subscribe((r) => (this.rows = r));
     this.rows = await rowColl.find();
   }
+
+  private runTableButton = (spec: TableButtonSpec) => {
+    void getContext().then((ctx) => {
+      Promise.resolve(spec.onClick(ctx.api, { tableId: this.tableId })).catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error(`[table-button:${spec.id}]`, err);
+      });
+    });
+  };
 
   private async addRow() {
     const ctx = await getContext();
@@ -413,6 +428,13 @@ export class DataTable extends LitElement {
         >
           Edit columns
         </button>
+        ${this.tableButtons.map(
+          (b) => html`
+            <button title=${b.tooltip ?? ''} @click=${() => this.runTableButton(b)}>
+              ${b.label}
+            </button>
+          `,
+        )}
         <span style="color:#6b7280; font-size:.85em; align-self:center">
           ${rows.length} row${rows.length === 1 ? '' : 's'}
         </span>

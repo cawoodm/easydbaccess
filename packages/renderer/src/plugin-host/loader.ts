@@ -1,5 +1,6 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import * as csvImport from '../plugins/csv-import.js';
+import * as csvExport from '../plugins/csv-export.js';
 import * as jsonImport from '../plugins/json-import.js';
 import * as dumpExport from '../plugins/dump-export.js';
 
@@ -8,7 +9,7 @@ import * as dumpExport from '../plugins/dump-export.js';
  * PluginModule contract as URL-loaded plugins; the only difference is the
  * delivery mechanism (static import vs. dynamic import of a Blob URL).
  */
-const builtins: PluginModule[] = [csvImport, jsonImport, dumpExport];
+const builtins: PluginModule[] = [csvImport, jsonImport, csvExport, dumpExport];
 
 /**
  * Runs init() on every built-in plugin. Returns a function that runs load()
