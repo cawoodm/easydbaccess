@@ -2,6 +2,7 @@ import { LitElement, css, html } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import type { ButtonSpec, HostApi } from '@easydb/shared';
 import { getContext } from '../app-context.js';
+import { applyGlobalFilter } from '../window-mgr/jspanel-manager.js';
 import './workspace-selector.js';
 import './table-list.js';
 import '../dialogs/new-table-dialog.js';
@@ -61,6 +62,22 @@ export class AppShell extends LitElement {
     button.primary:hover {
       background: #2563eb;
     }
+    input.search {
+      background: #374151;
+      color: white;
+      border: 1px solid #4b5563;
+      padding: 0.3rem 0.6rem;
+      border-radius: 0.25rem;
+      font: inherit;
+      width: 14rem;
+    }
+    input.search::placeholder {
+      color: #9ca3af;
+    }
+    input.search:focus {
+      outline: 2px solid #3b82f6;
+      outline-offset: -1px;
+    }
     main {
       flex: 1;
       overflow: hidden;
@@ -84,7 +101,9 @@ export class AppShell extends LitElement {
   @query('new-table-dialog') private dialog!: NewTableDialog;
   @state() private footerButtons: ButtonSpec[] = [];
   @state() private headerButtons: ButtonSpec[] = [];
+  @state() private searchQuery = '';
   private api: HostApi | null = null;
+  private searchTimer: number | null = null;
 
   override connectedCallback() {
     super.connectedCallback();
@@ -108,6 +127,14 @@ export class AppShell extends LitElement {
   private onEditColumns = (e: Event) => {
     const ce = e as CustomEvent<{ tableId: string }>;
     void this.dialog?.open(ce.detail.tableId);
+  };
+
+  private onSearchInput = (e: Event) => {
+    this.searchQuery = (e.target as HTMLInputElement).value;
+    if (this.searchTimer != null) window.clearTimeout(this.searchTimer);
+    this.searchTimer = window.setTimeout(() => {
+      void applyGlobalFilter(this.searchQuery);
+    }, 200);
   };
 
   private async bindRegistries() {
@@ -172,6 +199,13 @@ export class AppShell extends LitElement {
     return html`
       <header>
         <strong>easyDBAccess <span class="version">v0.0.0</span></strong>
+        <input
+          class="search"
+          type="search"
+          placeholder="search all tables…"
+          .value=${this.searchQuery}
+          @input=${this.onSearchInput}
+        />
         ${this.headerButtons.map(
           (b) => html`
             <button class="slot" title=${b.tooltip ?? ''} @click=${() => this.runSlot(b)}>

@@ -28,6 +28,33 @@ type Panel = {
 const panels = new Map<string, Panel>();
 let initialized = false;
 
+/**
+ * Hide panels whose table contains no row matching the query.
+ * Empty/whitespace query restores all panels. Match is a case-insensitive
+ * substring across the stringified cell values of every row.
+ */
+export async function applyGlobalFilter(query: string): Promise<{ matched: number; total: number }> {
+  const ctx = await getContext();
+  const q = query.trim().toLowerCase();
+  const tables = (await ctx.store.tables.find()).filter((t) => t.workspaceId === ctx.workspaceId);
+  let matched = 0;
+  for (const t of tables) {
+    const panel = panels.get(t.id);
+    if (!panel) continue;
+    let visible = true;
+    if (q.length > 0) {
+      const rows = await ctx.store.rows(t.id).find();
+      visible = rows.some((r) =>
+        Object.values(r.data).some((v) => v != null && String(v).toLowerCase().includes(q)),
+      );
+    }
+    const el = document.getElementById(panel.id);
+    if (el) el.style.display = visible ? '' : 'none';
+    if (visible) matched++;
+  }
+  return { matched, total: tables.length };
+}
+
 export async function initWindowManager(): Promise<void> {
   if (initialized) return;
   initialized = true;
