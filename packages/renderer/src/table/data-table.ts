@@ -47,7 +47,7 @@ export class DataTable extends LitElement {
     th.sorted .sort-icon {
       color: #2563eb;
     }
-    td input {
+    td input[type='text'] {
       width: 100%;
       box-sizing: border-box;
       border: 0;
@@ -58,6 +58,43 @@ export class DataTable extends LitElement {
     td input:focus {
       outline: 2px solid #3b82f6;
       outline-offset: -2px;
+    }
+    td input[type='color'] {
+      width: 1.5rem;
+      height: 1.25rem;
+      padding: 0;
+      border: 1px solid #d1d5db;
+      background: transparent;
+      vertical-align: middle;
+      cursor: pointer;
+    }
+    td .color-cell {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    td .color-cell input[type='text'] {
+      width: 6rem;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+    }
+    td input[type='checkbox'] {
+      transform: translateY(1px);
+      cursor: pointer;
+    }
+    td .image-cell {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    td .image-cell img {
+      max-height: 32px;
+      max-width: 64px;
+      border-radius: 0.15rem;
+      border: 1px solid #e5e7eb;
+    }
+    td .image-cell button {
+      padding: 0.1rem 0.4rem;
+      font-size: 0.75rem;
     }
     .actions {
       display: flex;
@@ -144,6 +181,80 @@ export class DataTable extends LitElement {
     });
   }
 
+  private async setCell(row: Row, field: string, value: unknown) {
+    const ctx = await getContext();
+    await ctx.store.rows(this.tableId).patch(row.id, {
+      data: { ...row.data, [field]: value },
+      updatedAt: Date.now(),
+    });
+  }
+
+  private async pickImage(row: Row, field: string) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      await this.setCell(row, field, dataUrl);
+    });
+    input.click();
+  }
+
+  private renderCell(row: Row, col: ColumnSpec) {
+    const raw = row.data[col.field];
+    switch (col.type) {
+      case 'boolean': {
+        const checked = raw === true || raw === 'true' || raw === 1 || raw === '1';
+        return html`<input
+          type="checkbox"
+          .checked=${checked}
+          @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).checked)}
+        />`;
+      }
+      case 'color': {
+        const hex = typeof raw === 'string' && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw) ? raw : '#000000';
+        return html`<span class="color-cell">
+          <input
+            type="color"
+            .value=${hex}
+            @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
+          />
+          <input
+            type="text"
+            .value=${typeof raw === 'string' ? raw : ''}
+            @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
+          />
+        </span>`;
+      }
+      case 'image': {
+        const src = typeof raw === 'string' && raw.startsWith('data:image') ? raw : '';
+        return html`<span class="image-cell">
+          ${src ? html`<img src=${src} alt="" />` : html`<span style="color:#9ca3af">no image</span>`}
+          <button type="button" @click=${() => this.pickImage(row, col.field)}>
+            ${src ? 'replace' : 'upload'}
+          </button>
+          ${src
+            ? html`<button type="button" @click=${() => this.setCell(row, col.field, '')}>clear</button>`
+            : ''}
+        </span>`;
+      }
+      default:
+        return html`<input
+          type="text"
+          .value=${String(raw ?? '')}
+          @change=${(e: Event) =>
+            this.editCell(row, col.field, (e.target as HTMLInputElement).value)}
+        />`;
+    }
+  }
+
   private async deleteRow(rowId: string) {
     const ctx = await getContext();
     await ctx.store.rows(this.tableId).remove(rowId);
@@ -208,17 +319,7 @@ export class DataTable extends LitElement {
           ${rows.map(
             (r) => html`
               <tr>
-                ${this.columns.map(
-                  (c) => html`
-                    <td>
-                      <input
-                        .value=${String(r.data[c.field] ?? '')}
-                        @change=${(e: Event) =>
-                          this.editCell(r, c.field, (e.target as HTMLInputElement).value)}
-                      />
-                    </td>
-                  `,
-                )}
+                ${this.columns.map((c) => html`<td>${this.renderCell(r, c)}</td>`)}
                 <td><button class="danger" @click=${() => this.deleteRow(r.id)}>×</button></td>
               </tr>
             `,
