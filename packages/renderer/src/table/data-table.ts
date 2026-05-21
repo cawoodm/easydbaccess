@@ -47,6 +47,30 @@ export class DataTable extends LitElement {
     th.sorted .sort-icon {
       color: #2563eb;
     }
+    tr.filter-row th {
+      cursor: default;
+      background: #f3f4f6;
+      padding: 0.15rem 0.3rem;
+      top: 1.85em; /* sits just below the header row */
+      z-index: 1;
+    }
+    tr.filter-row th:hover {
+      background: #f3f4f6;
+    }
+    tr.filter-row input {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #d1d5db;
+      border-radius: 0.2rem;
+      background: white;
+      font: inherit;
+      font-size: 0.8rem;
+      padding: 0.1rem 0.3rem;
+    }
+    tr.filter-row input::placeholder {
+      color: #9ca3af;
+      font-style: italic;
+    }
     td input[type='text'] {
       width: 100%;
       box-sizing: border-box;
@@ -127,7 +151,9 @@ export class DataTable extends LitElement {
   @state() private rows: Row[] = [];
   @state() private sortColumn: string | null = null;
   @state() private sortDir: SortDir = null;
+  @state() private filters: Record<string, string> = {};
   private unsubscribe?: () => void;
+  private filterSaveTimer: number | null = null;
 
   override async connectedCallback() {
     super.connectedCallback();
@@ -154,6 +180,7 @@ export class DataTable extends LitElement {
     this.columns = table.columns;
     this.sortColumn = table.sortColumn ?? null;
     this.sortDir = table.sortColumn ? (table.sortAsc === false ? 'desc' : 'asc') : null;
+    this.filters = { ...(table.filters ?? {}) };
     const rowColl = ctx.store.rows(this.tableId);
     this.unsubscribe = rowColl.subscribe((r) => (this.rows = r));
     this.rows = await rowColl.find();
@@ -282,15 +309,45 @@ export class DataTable extends LitElement {
     await ctx.store.tables.patch(this.tableId, patch);
   }
 
+  private filteredRows(): Row[] {
+    const active = Object.entries(this.filters).filter(([, q]) => q && q.trim().length > 0);
+    if (active.length === 0) return this.rows;
+    return this.rows.filter((r) =>
+      active.every(([field, query]) =>
+        String(r.data[field] ?? '')
+          .toLowerCase()
+          .includes(query.toLowerCase()),
+      ),
+    );
+  }
+
   private sortedRows(): Row[] {
-    if (!this.sortColumn || !this.sortDir) return this.rows;
+    const base = this.filteredRows();
+    if (!this.sortColumn || !this.sortDir) return base;
     const field = this.sortColumn;
     const col = this.columns.find((c) => c.field === field);
     const type: ColumnType = col?.type ?? 'string';
     const factor = this.sortDir === 'asc' ? 1 : -1;
-    const arr = [...this.rows];
+    const arr = [...base];
     arr.sort((a, b) => compareValues(a.data[field], b.data[field], type) * factor);
     return arr;
+  }
+
+  private onFilterInput(field: string, value: string) {
+    this.filters = { ...this.filters, [field]: value };
+    // Debounce persistence so we don't write to RxDB on every keystroke.
+    if (this.filterSaveTimer != null) window.clearTimeout(this.filterSaveTimer);
+    this.filterSaveTimer = window.setTimeout(() => this.saveFilters(), 250);
+  }
+
+  private async saveFilters() {
+    const ctx = await getContext();
+    // Strip empty entries so the persisted shape stays tidy.
+    const cleaned: Record<string, string> = {};
+    for (const [k, v] of Object.entries(this.filters)) if (v && v.trim().length > 0) cleaned[k] = v;
+    const filters: Record<string, string> | undefined =
+      Object.keys(cleaned).length === 0 ? undefined : cleaned;
+    await ctx.store.tables.patch(this.tableId, { filters, updatedAt: Date.now() });
   }
 
   override render() {
@@ -313,6 +370,22 @@ export class DataTable extends LitElement {
               `;
             })}
             <th style="width:2rem"></th>
+          </tr>
+          <tr class="filter-row">
+            ${this.columns.map(
+              (c) => html`
+                <th>
+                  <input
+                    type="text"
+                    placeholder="filter…"
+                    .value=${this.filters[c.field] ?? ''}
+                    @input=${(e: Event) =>
+                      this.onFilterInput(c.field, (e.target as HTMLInputElement).value)}
+                  />
+                </th>
+              `,
+            )}
+            <th></th>
           </tr>
         </thead>
         <tbody>
