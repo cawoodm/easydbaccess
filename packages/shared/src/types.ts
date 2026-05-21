@@ -34,10 +34,10 @@ export interface Table {
   code: string;
   columns: ColumnSpec[];
   view: string;
-  windowGeometry?: WindowGeometry;
-  sortColumn?: string;
-  sortAsc?: boolean;
-  filters?: Record<string, string>;
+  windowGeometry?: WindowGeometry | undefined;
+  sortColumn?: string | undefined;
+  sortAsc?: boolean | undefined;
+  filters?: Record<string, string> | undefined;
   updatedAt: number;
 }
 

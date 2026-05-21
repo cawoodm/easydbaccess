@@ -1,7 +1,9 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import type { ColumnSpec, Row } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
 import { getContext } from '../app-context.js';
+
+type SortDir = 'asc' | 'desc' | null;
 
 @customElement('data-table')
 export class DataTable extends LitElement {
@@ -28,6 +30,22 @@ export class DataTable extends LitElement {
       position: sticky;
       top: 0;
       z-index: 1;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    th:hover {
+      background: #eef2f7;
+    }
+    th .sort-icon {
+      display: inline-block;
+      width: 0.75em;
+      color: #6b7280;
+      font-size: 0.75em;
+      margin-left: 0.25rem;
+    }
+    th.sorted .sort-icon {
+      color: #2563eb;
     }
     td input {
       width: 100%;
@@ -70,6 +88,8 @@ export class DataTable extends LitElement {
   @property({ type: String }) tableId = '';
   @state() private columns: ColumnSpec[] = [];
   @state() private rows: Row[] = [];
+  @state() private sortColumn: string | null = null;
+  @state() private sortDir: SortDir = null;
   private unsubscribe?: () => void;
 
   override async connectedCallback() {
@@ -95,6 +115,8 @@ export class DataTable extends LitElement {
     const table = await ctx.store.tables.findOne(this.tableId);
     if (!table) return;
     this.columns = table.columns;
+    this.sortColumn = table.sortColumn ?? null;
+    this.sortDir = table.sortColumn ? (table.sortAsc === false ? 'desc' : 'asc') : null;
     const rowColl = ctx.store.rows(this.tableId);
     this.unsubscribe = rowColl.subscribe((r) => (this.rows = r));
     this.rows = await rowColl.find();
@@ -127,17 +149,63 @@ export class DataTable extends LitElement {
     await ctx.store.rows(this.tableId).remove(rowId);
   }
 
+  /**
+   * Click cycle on a column header: none → asc → desc → none.
+   * Sort state is persisted on the Table record so it survives reloads
+   * and rides along through the dump/restore export path.
+   */
+  private async toggleSort(field: string) {
+    let nextDir: SortDir;
+    if (this.sortColumn !== field) nextDir = 'asc';
+    else if (this.sortDir === 'asc') nextDir = 'desc';
+    else if (this.sortDir === 'desc') nextDir = null;
+    else nextDir = 'asc';
+
+    this.sortColumn = nextDir ? field : null;
+    this.sortDir = nextDir;
+
+    const ctx = await getContext();
+    const patch: Partial<Table> = nextDir
+      ? { sortColumn: field, sortAsc: nextDir === 'asc', updatedAt: Date.now() }
+      : { sortColumn: undefined, sortAsc: undefined, updatedAt: Date.now() };
+    await ctx.store.tables.patch(this.tableId, patch);
+  }
+
+  private sortedRows(): Row[] {
+    if (!this.sortColumn || !this.sortDir) return this.rows;
+    const field = this.sortColumn;
+    const col = this.columns.find((c) => c.field === field);
+    const type: ColumnType = col?.type ?? 'string';
+    const factor = this.sortDir === 'asc' ? 1 : -1;
+    const arr = [...this.rows];
+    arr.sort((a, b) => compareValues(a.data[field], b.data[field], type) * factor);
+    return arr;
+  }
+
   override render() {
+    const rows = this.sortedRows();
     return html`
       <table>
         <thead>
           <tr>
-            ${this.columns.map((c) => html`<th title=${c.field}>${c.label}</th>`)}
+            ${this.columns.map((c) => {
+              const sorted = this.sortColumn === c.field && this.sortDir;
+              const icon = sorted === 'asc' ? '▲' : sorted === 'desc' ? '▼' : '⇅';
+              return html`
+                <th
+                  class=${sorted ? 'sorted' : ''}
+                  title=${`${c.field} — click to sort`}
+                  @click=${() => this.toggleSort(c.field)}
+                >
+                  ${c.label}<span class="sort-icon">${icon}</span>
+                </th>
+              `;
+            })}
             <th style="width:2rem"></th>
           </tr>
         </thead>
         <tbody>
-          ${this.rows.map(
+          ${rows.map(
             (r) => html`
               <tr>
                 ${this.columns.map(
@@ -160,14 +228,14 @@ export class DataTable extends LitElement {
       <div class="actions">
         <button @click=${this.addRow}>+ Add row</button>
         <span style="color:#6b7280; font-size:.85em; align-self:center">
-          ${this.rows.length} row${this.rows.length === 1 ? '' : 's'}
+          ${rows.length} row${rows.length === 1 ? '' : 's'}
         </span>
       </div>
     `;
   }
 }
 
-function coerce(raw: string, type: ColumnSpec['type']): unknown {
+function coerce(raw: string, type: ColumnType): unknown {
   switch (type) {
     case 'number': {
       const n = Number(raw);
@@ -179,6 +247,34 @@ function coerce(raw: string, type: ColumnSpec['type']): unknown {
       return raw;
     default:
       return raw;
+  }
+}
+
+function compareValues(a: unknown, b: unknown, type: ColumnType): number {
+  // Always sort null/undefined/empty to the end.
+  const aEmpty = a == null || a === '';
+  const bEmpty = b == null || b === '';
+  if (aEmpty && bEmpty) return 0;
+  if (aEmpty) return 1;
+  if (bEmpty) return -1;
+
+  switch (type) {
+    case 'number': {
+      const na = Number(a);
+      const nb = Number(b);
+      if (Number.isNaN(na) || Number.isNaN(nb)) return String(a).localeCompare(String(b));
+      return na - nb;
+    }
+    case 'boolean':
+      return (a ? 1 : 0) - (b ? 1 : 0);
+    case 'date': {
+      const ta = new Date(String(a)).getTime();
+      const tb = new Date(String(b)).getTime();
+      if (Number.isNaN(ta) || Number.isNaN(tb)) return String(a).localeCompare(String(b));
+      return ta - tb;
+    }
+    default:
+      return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
   }
 }
 
