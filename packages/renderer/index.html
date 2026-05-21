@@ -4,9 +4,45 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>easyDBAccess</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+      /*
+       * Light-DOM container that jsPanels mount into. Fixed between the
+       * app-shell's header and footer (their heights are pinned by their
+       * own CSS: ~48px each). Panels are constrained to this region by
+       * jsPanel's dragit.containment, so they can never overlap the chrome.
+       */
+      #easydb-panels {
+        position: fixed;
+        top: 48px;
+        bottom: 48px;
+        left: 0;
+        right: 0;
+        overflow: hidden;
+        pointer-events: none;
+      }
+      /* Panels themselves AND the minimized dock both need clicks. */
+      #easydb-panels > .jsPanel,
+      #easydb-panels > .jsPanel-minimized-container {
+        pointer-events: auto;
+      }
+      /* Make sure the minimized dock sits at the bottom of the container
+         (just above the footer) regardless of jsPanel's default. */
+      #easydb-panels > .jsPanel-minimized-container {
+        bottom: 0;
+        left: 0;
+      }
+    </style>
   </head>
   <body>
     <app-shell></app-shell>
+    <div id="easydb-panels"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

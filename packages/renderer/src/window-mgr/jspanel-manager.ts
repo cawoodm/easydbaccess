@@ -61,28 +61,70 @@ export async function initWindowManager(): Promise<void> {
   });
 }
 
+/** Minimum sensible panel dimensions; anything smaller is treated as corrupt. */
+const MIN_W = 200;
+const MIN_H = 100;
+/** Default size for new (or sanity-reset) panels — matches contentSize below. */
+const DEFAULT_W = 720;
+const DEFAULT_H = 360;
+
+/**
+ * Validates persisted geometry against the current container bounds.
+ *
+ * - If `g` is unusable (missing, NaN, too small, or larger than the container),
+ *   returns null so the caller falls back to defaults (cascade + 720x360).
+ * - If `g` fits dimensionally but its position would push it off-screen
+ *   (e.g. the window was resized smaller between sessions), the x/y are
+ *   clamped so the panel stays fully visible. Size is preserved.
+ *
+ * Saved geometry is never overwritten here; this is render-time-only.
+ */
+function sanitizeGeometry(
+  g: WindowGeometry | undefined,
+  container: HTMLElement,
+): WindowGeometry | null {
+  if (!g) return null;
+  if (!Number.isFinite(g.w) || !Number.isFinite(g.h)) return null;
+  if (g.w < MIN_W || g.h < MIN_H) return null;
+  const rect = container.getBoundingClientRect();
+  if (g.w > rect.width || g.h > rect.height) return null;
+  const x = Math.max(0, Math.min(g.x, rect.width - g.w));
+  const y = Math.max(0, Math.min(g.y, rect.height - g.h));
+  return { ...g, x, y };
+}
+
 function openPanel(t: Table, ctx: AppContext): void {
   const content = document.createElement('data-table');
   (content as HTMLElement & { tableId: string }).tableId = t.id;
   content.style.height = '100%';
 
-  const g = t.windowGeometry;
+  const container = document.getElementById('easydb-panels') ?? document.body;
+  const g = sanitizeGeometry(t.windowGeometry, container);
   const panelId = `panel-${cssSafe(t.id)}`;
 
   const position = g
     ? { my: 'left-top', at: 'left-top', offsetX: g.x, offsetY: g.y }
     : nextCascadePosition();
 
+  // Saved g.w/g.h come from offsetWidth/Height (total panel size including
+  // chrome), so restore via panelSize. New panels use contentSize so the
+  // default 720x360 describes the data area, not the chrome.
+  const sizeOpt = g
+    ? { panelSize: `${g.w} ${g.h}` }
+    : { contentSize: `${DEFAULT_W} ${DEFAULT_H}` };
+
   const panel = jsPanel.create({
     id: panelId,
+    container,
     headerTitle: t.name,
     headerControls: { smallify: 'remove' },
     theme: 'primary',
     content,
-    contentSize: g ? `${g.w} ${g.h}` : '720 360',
+    ...sizeOpt,
     position,
-    dragit: { stop: () => saveGeometry(t.id, ctx) },
-    resizeit: { stop: () => saveGeometry(t.id, ctx) },
+    minimizeTo: 'parent',
+    dragit: { containment: 0, stop: () => saveGeometry(t.id, ctx) },
+    resizeit: { containment: 0, stop: () => saveGeometry(t.id, ctx) },
     onbeforeclose: () => {
       const yes = window.confirm(`Delete table "${t.name}" and all its rows?`);
       return yes;
