@@ -68,27 +68,87 @@ async function importJsonFile(api: HostApi, file: File): Promise<void> {
 
   const baseName = file.name.replace(/\.db\.json$/i, '').replace(/\.json$/i, '') || 'imported';
   const tables = parsedToTables(parsed, baseName);
+  if (tables.length === 0) return;
 
+  // If any imported table name overlaps an existing one OR this is clearly a
+  // multi-table dump, ask the user how to resolve. Single-table imports with
+  // no name collision skip the prompt.
+  const existing = (await api.store.tables.find()).filter((t) => t.workspaceId === workspaceId);
+  const incomingNames = new Set(tables.map((t) => t.name));
+  const collisions = existing.filter((t) => incomingNames.has(t.name));
+
+  let mode: 'overwrite-matching' | 'replace-workspace' | 'append-new';
+  if (collisions.length === 0 && tables.length === 1) {
+    mode = 'append-new';
+  } else {
+    const opts = collisions.length > 0
+      ? [
+          `Overwrite matching (${collisions.length})`,
+          'Replace entire workspace',
+          'Add as new tables',
+        ]
+      : ['Add to current workspace', 'Replace entire workspace'];
+    const choice = await api.ui.dialogs.choice(
+      `Importing ${tables.length} table${tables.length === 1 ? '' : 's'} from "${file.name}".${
+        collisions.length > 0
+          ? `\n\n${collisions.length} table${collisions.length === 1 ? '' : 's'} share a name with existing data.`
+          : ''
+      }`,
+      opts,
+      'JSON import',
+    );
+    if (!choice) return; // cancelled
+    if (choice.startsWith('Overwrite matching')) mode = 'overwrite-matching';
+    else if (choice === 'Replace entire workspace') mode = 'replace-workspace';
+    else mode = 'append-new';
+  }
+
+  if (mode === 'replace-workspace') {
+    for (const t of existing) {
+      const rs = await api.store.rows(t.id).find();
+      for (const r of rs) await api.store.rows(t.id).remove(r.id);
+      await api.store.tables.remove(t.id);
+    }
+  }
+
+  const existingByName = new Map(existing.map((t) => [t.name, t] as const));
   for (const t of tables) {
-    const tableId = cryptoUUID();
-    api.events.emit('import:before', { source: 'json', tableId });
+    let tableId: string;
+    const match = mode === 'overwrite-matching' ? existingByName.get(t.name) : undefined;
+    if (match) {
+      // Overwrite: keep the id (and thus its panel position) but wipe rows
+      // and replace columns + sort + geometry from the import.
+      tableId = match.id;
+      const oldRows = await api.store.rows(tableId).find();
+      for (const r of oldRows) await api.store.rows(tableId).remove(r.id);
+      await api.store.tables.patch(tableId, {
+        columns: t.columns,
+        ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
+        ...(t.sortColumn
+          ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true }
+          : { sortColumn: undefined, sortAsc: undefined }),
+        updatedAt: Date.now(),
+      });
+    } else {
+      tableId = cryptoUUID();
+      api.events.emit('import:before', { source: 'json', tableId });
+      await api.store.tables.insert({
+        id: tableId,
+        workspaceId,
+        name: t.name,
+        code: slug(t.name),
+        columns: t.columns,
+        view: 'table',
+        ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
+        ...(t.sortColumn ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true } : {}),
+        updatedAt: Date.now(),
+      });
+    }
 
-    const created = await api.store.tables.insert({
-      id: tableId,
-      workspaceId,
-      name: t.name,
-      code: slug(t.name),
-      columns: t.columns,
-      view: 'table',
-      ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
-      ...(t.sortColumn ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true } : {}),
-      updatedAt: Date.now(),
-    });
-
-    const rowColl = api.store.rows(created.id);
+    const rowColl = api.store.rows(tableId);
     const docs = t.rows.map((row) => ({
       id: cryptoUUID(),
-      tableId: created.id,
+      tableId,
       data: row,
       updatedAt: Date.now(),
     }));
@@ -96,7 +156,7 @@ async function importJsonFile(api: HostApi, file: File): Promise<void> {
 
     api.events.emit('import:after', {
       source: 'json',
-      tableId: created.id,
+      tableId,
       rowCount: t.rows.length,
     });
   }

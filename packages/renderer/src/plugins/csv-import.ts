@@ -48,25 +48,70 @@ async function importCsvFile(api: HostApi, file: File): Promise<void> {
 
   const text = await file.text();
   const parsed = parseCsv(text);
-  const name = file.name.replace(/\.csv$/i, '') || 'imported';
-  const tableId = cryptoUUID();
+  const baseName = file.name.replace(/\.csv$/i, '') || 'imported';
 
-  api.events.emit('import:before', { source: 'csv', tableId });
+  // If a table with this name already exists in the workspace, ask the user
+  // what to do: append rows, overwrite (clear + insert), or create a new
+  // table under a unique name.
+  const existing = (await api.store.tables.find()).find(
+    (t) => t.workspaceId === workspaceId && t.name === baseName,
+  );
 
-  const created = await api.store.tables.insert({
-    id: tableId,
-    workspaceId,
-    name,
-    code: slug(name),
-    columns: parsed.columns,
-    view: 'table',
-    updatedAt: Date.now(),
-  });
+  let targetId: string;
+  let mode: 'new' | 'append' | 'overwrite';
 
-  const rowColl = api.store.rows(created.id);
+  if (existing) {
+    const choice = await api.ui.dialogs.choice(
+      `A table named "${baseName}" already exists in this workspace.`,
+      ['Append rows', 'Overwrite rows', 'Create as new table'],
+      'CSV import',
+    );
+    if (!choice) return; // cancelled
+    if (choice === 'Append rows') {
+      mode = 'append';
+      targetId = existing.id;
+    } else if (choice === 'Overwrite rows') {
+      mode = 'overwrite';
+      targetId = existing.id;
+    } else {
+      mode = 'new';
+      targetId = cryptoUUID();
+    }
+  } else {
+    mode = 'new';
+    targetId = cryptoUUID();
+  }
+
+  api.events.emit('import:before', { source: 'csv', tableId: targetId });
+
+  if (mode === 'new') {
+    const uniqueName =
+      mode === 'new' && existing ? `${baseName} (${Date.now().toString(36)})` : baseName;
+    await api.store.tables.insert({
+      id: targetId,
+      workspaceId,
+      name: uniqueName,
+      code: slug(uniqueName),
+      columns: parsed.columns,
+      view: 'table',
+      updatedAt: Date.now(),
+    });
+  } else if (mode === 'overwrite') {
+    // Wipe existing rows; keep the table id so its panel position is preserved.
+    const old = await api.store.rows(targetId).find();
+    for (const r of old) await api.store.rows(targetId).remove(r.id);
+    // Replace columns with the imported shape so types match the new data.
+    await api.store.tables.patch(targetId, {
+      columns: parsed.columns,
+      updatedAt: Date.now(),
+    });
+  }
+  // mode === 'append' just adds rows; existing columns kept.
+
+  const rowColl = api.store.rows(targetId);
   const docs = parsed.rows.map((row) => ({
     id: cryptoUUID(),
-    tableId: created.id,
+    tableId: targetId,
     data: row,
     updatedAt: Date.now(),
   }));
@@ -74,7 +119,7 @@ async function importCsvFile(api: HostApi, file: File): Promise<void> {
 
   api.events.emit('import:after', {
     source: 'csv',
-    tableId: created.id,
+    tableId: targetId,
     rowCount: parsed.rows.length,
   });
 }
