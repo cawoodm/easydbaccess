@@ -126,6 +126,25 @@ export class DataTable extends LitElement {
       padding: 0.5rem;
       background: #f9fafb;
       border-top: 1px solid #e5e7eb;
+      align-items: center;
+    }
+    .actions .spacer {
+      flex: 1;
+    }
+    .actions input.local-search {
+      font: inherit;
+      padding: 0.25rem 0.5rem;
+      border: 1px solid #d1d5db;
+      border-radius: 0.25rem;
+      width: 12rem;
+    }
+    .actions input.local-search:focus {
+      outline: 2px solid #3b82f6;
+      outline-offset: -1px;
+    }
+    .actions button.icon {
+      padding: 0.25rem 0.5rem;
+      line-height: 1;
     }
     button {
       font: inherit;
@@ -153,6 +172,8 @@ export class DataTable extends LitElement {
   @state() private sortDir: SortDir = null;
   @state() private filters: Record<string, string> = {};
   @state() private globalQuery = '';
+  @state() private localQuery = '';
+  @state() private localSearchOpen = false;
   @state() private tableButtons: TableButtonSpec[] = [];
   private unsubscribe?: () => void;
   private filterSaveTimer: number | null = null;
@@ -334,14 +355,13 @@ export class DataTable extends LitElement {
   private filteredRows(): Row[] {
     const active = Object.entries(this.filters).filter(([, q]) => q && q.trim().length > 0);
     const gq = this.globalQuery.trim().toLowerCase();
-    if (active.length === 0 && gq.length === 0) return this.rows;
+    const lq = this.localQuery.trim().toLowerCase();
+    if (active.length === 0 && gq.length === 0 && lq.length === 0) return this.rows;
     return this.rows.filter((r) => {
-      if (gq.length > 0) {
-        const hit = Object.values(r.data).some(
-          (v) => v != null && String(v).toLowerCase().includes(gq),
-        );
-        if (!hit) return false;
-      }
+      const matchAny = (needle: string) =>
+        Object.values(r.data).some((v) => v != null && String(v).toLowerCase().includes(needle));
+      if (gq.length > 0 && !matchAny(gq)) return false;
+      if (lq.length > 0 && !matchAny(lq)) return false;
       return active.every(([field, query]) =>
         String(r.data[field] ?? '')
           .toLowerCase()
@@ -449,7 +469,27 @@ export class DataTable extends LitElement {
             </button>
           `,
         )}
-        <span style="color:#6b7280; font-size:.85em; align-self:center">
+        <span class="spacer"></span>
+        ${this.localSearchOpen || this.localQuery.length > 0
+          ? html`<input
+              class="local-search"
+              type="search"
+              placeholder="search in table…"
+              .value=${this.localQuery}
+              autofocus
+              @input=${(e: Event) => (this.localQuery = (e.target as HTMLInputElement).value)}
+              @blur=${() => {
+                if (this.localQuery.trim().length === 0) this.localSearchOpen = false;
+              }}
+            />`
+          : html`<button
+              class="icon"
+              title="Search rows in this table"
+              @click=${() => (this.localSearchOpen = true)}
+            >
+              🔍
+            </button>`}
+        <span style="color:#6b7280; font-size:.85em">
           ${rows.length} row${rows.length === 1 ? '' : 's'}
         </span>
       </div>

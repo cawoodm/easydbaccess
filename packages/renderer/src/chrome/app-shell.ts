@@ -78,6 +78,19 @@ export class AppShell extends LitElement {
       outline: 2px solid #3b82f6;
       outline-offset: -1px;
     }
+    button.icon-btn {
+      background: transparent;
+      color: white;
+      border: 1px solid #4b5563;
+      padding: 0.3rem 0.6rem;
+      border-radius: 0.25rem;
+      font: inherit;
+      cursor: pointer;
+      line-height: 1;
+    }
+    button.icon-btn:hover {
+      background: #374151;
+    }
     main {
       flex: 1;
       overflow: hidden;
@@ -102,6 +115,7 @@ export class AppShell extends LitElement {
   @state() private footerButtons: ButtonSpec[] = [];
   @state() private headerButtons: ButtonSpec[] = [];
   @state() private searchQuery = '';
+  @state() private searchOpen = false;
   private api: HostApi | null = null;
   private searchTimer: number | null = null;
 
@@ -208,13 +222,25 @@ export class AppShell extends LitElement {
     return html`
       <header>
         <strong>easyDBAccess <span class="version">v0.0.0</span></strong>
-        <input
-          class="search"
-          type="search"
-          placeholder="search all tables…"
-          .value=${this.searchQuery}
-          @input=${this.onSearchInput}
-        />
+        ${this.searchOpen || this.searchQuery.length > 0
+          ? html`<input
+              class="search"
+              type="search"
+              placeholder="search all tables…"
+              autofocus
+              .value=${this.searchQuery}
+              @input=${this.onSearchInput}
+              @blur=${() => {
+                if (this.searchQuery.trim().length === 0) this.searchOpen = false;
+              }}
+            />`
+          : html`<button
+              class="icon-btn"
+              title="Search across all tables in this workspace"
+              @click=${() => (this.searchOpen = true)}
+            >
+              🔍
+            </button>`}
         ${this.headerButtons.map(
           (b) => html`
             <button
