@@ -147,10 +147,15 @@ export function parseCsv(text: string): ParseResult {
   const header = rows[0]!;
   const dataRows = rows.slice(1).filter((r) => !(r.length === 1 && r[0] === ''));
 
-  const fields = header.map((h, i) => slug(h || `col_${i + 1}`));
-  const labels = header.map((h, i) => h || `Column ${i + 1}`);
+  // Parse the mini-language. Each header cell may be either:
+  //   - "Plain Label"                             — pure label, type inferred
+  //   - "field:label"                             — explicit field/label
+  //   - "field:label:type"                        — + explicit type
+  //   - "field:label:type:default:max:flags"      — full spec
+  // Flags: u=unique, n=notnull, h=hidden (any combination, any order).
+  const headerSpecs = header.map((h, i) => parseHeaderCell(h, i));
+  const fields = headerSpecs.map((s) => s.field);
 
-  // Build raw rows keyed by field, then infer types from raw string values.
   const rawRows: Array<Record<string, string>> = dataRows.map((cells) => {
     const obj: Record<string, string> = {};
     for (let i = 0; i < fields.length; i++) {
@@ -159,15 +164,21 @@ export function parseCsv(text: string): ParseResult {
     return obj;
   });
 
-  const types: ColumnType[] = fields.map((f) =>
-    inferType(rawRows.map((r) => r[f] ?? '').filter((v) => v.length > 0)),
-  );
+  // Infer types only for columns whose header didn't pin one explicitly.
+  const types: ColumnType[] = headerSpecs.map((s, i) => {
+    if (s.type) return s.type;
+    return inferType(rawRows.map((r) => r[fields[i]!] ?? '').filter((v) => v.length > 0));
+  });
 
-  const columns: ColumnSpec[] = fields.map((field, i) => ({
-    field,
-    label: labels[i] ?? field,
-    type: types[i] ?? 'string',
-  }));
+  const columns: ColumnSpec[] = headerSpecs.map((s, i) => {
+    const col: ColumnSpec = { field: s.field, label: s.label, type: types[i] ?? 'string' };
+    if (s.default !== undefined) col.default = s.default;
+    if (s.max != null) col.max = s.max;
+    if (s.unique) col.unique = true;
+    if (s.notnull) col.notnull = true;
+    if (s.hidden) col.hidden = true;
+    return col;
+  });
 
   const coercedRows: Array<Record<string, unknown>> = rawRows.map((raw) => {
     const out: Record<string, unknown> = {};
@@ -180,6 +191,55 @@ export function parseCsv(text: string): ParseResult {
   });
 
   return { columns, rows: coercedRows };
+}
+
+interface HeaderSpec {
+  field: string;
+  label: string;
+  type?: ColumnType;
+  default?: unknown;
+  max?: number;
+  unique?: boolean;
+  notnull?: boolean;
+  hidden?: boolean;
+}
+
+const KNOWN_TYPES = new Set<ColumnType>([
+  'string',
+  'number',
+  'boolean',
+  'date',
+  'datetime',
+  'color',
+  'image',
+]);
+
+function parseHeaderCell(h: string, idx: number): HeaderSpec {
+  const trimmed = h.trim();
+  if (!trimmed.includes(':')) {
+    // Plain label; everything inferred.
+    return { field: slug(trimmed || `col_${idx + 1}`), label: trimmed || `Column ${idx + 1}` };
+  }
+  const parts = trimmed.split(':');
+  const field = slug(parts[0] || `col_${idx + 1}`);
+  const label = (parts[1] ?? parts[0] ?? '').trim() || field;
+  const spec: HeaderSpec = { field, label };
+  const typeStr = (parts[2] ?? '').trim();
+  if (typeStr && KNOWN_TYPES.has(typeStr as ColumnType)) {
+    spec.type = typeStr as ColumnType;
+  }
+  const defStr = (parts[3] ?? '').trim();
+  if (defStr) spec.default = defStr;
+  const maxStr = (parts[4] ?? '').trim();
+  if (maxStr) {
+    const n = Number(maxStr);
+    if (Number.isFinite(n) && n > 0) spec.max = n;
+  }
+  const flags = (parts[5] ?? '').toLowerCase();
+  if (flags.includes('u')) spec.unique = true;
+  if (flags.includes('n')) spec.notnull = true;
+  if (flags.includes('h')) spec.hidden = true;
+  return spec;
 }
 
 function detectSeparator(text: string): string {
