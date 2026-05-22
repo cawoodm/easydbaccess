@@ -67,6 +67,23 @@ async function init(): Promise<AppContext> {
     workspaceId: () => workspaceId,
   });
 
+  // Centralized import-status toasts so every importer (csv, json, gist pull,
+  // future ones) gets consistent UX without duplicating the toast call.
+  events.on('import:after', ({ source, tableId, rowCount }) => {
+    void api.store.tables.findOne(tableId).then((t) => {
+      api.ui.dialogs.toast(
+        `Imported ${rowCount} row${rowCount === 1 ? '' : 's'} into "${t?.name ?? tableId}".`,
+        { kind: 'success', title: source.toUpperCase() + ' import' },
+      );
+    });
+  });
+  events.on('plugin:error', ({ url, phase, error }) => {
+    api.ui.dialogs.toast(
+      `[${phase}] ${(error as Error)?.message ?? String(error)}`,
+      { kind: 'error', title: `Plugin: ${url}` },
+    );
+  });
+
   // init() built-ins synchronously, then trigger load() after we emit app:ready.
   const runLoad = await loadBuiltinPlugins(api);
 

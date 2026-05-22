@@ -134,11 +134,22 @@ async function push(api: HostApi): Promise<void> {
   }
 
   const files: Record<string, { content: string }> = {};
+  const oversize: string[] = [];
   for (const t of tables) {
     const rows = await api.store.rows(t.id).find();
-    files[`${slug(t.name)}.table.json`] = {
-      content: JSON.stringify(tableToFile(t, rows), null, 2),
-    };
+    const content = JSON.stringify(tableToFile(t, rows), null, 2);
+    if (content.length > 1_000_000) oversize.push(`${t.name} (${(content.length / 1_000_000).toFixed(2)} MB)`);
+    files[`${slug(t.name)}.table.json`] = { content };
+  }
+
+  // Gist enforces a 1 MB per-file limit. Warn the user before they hit
+  // an obscure GitHub API rejection mid-push.
+  if (oversize.length > 0) {
+    const proceed = await api.ui.dialogs.confirm(
+      `These tables exceed Gist's 1 MB-per-file limit and will be rejected:\n\n${oversize.join('\n')}\n\nPush anyway?`,
+      'Gist size warning',
+    );
+    if (!proceed) return;
   }
 
   // Marker file so we can detect that a gist was produced by easyDBAccess
@@ -147,7 +158,7 @@ async function push(api: HostApi): Promise<void> {
     content: JSON.stringify({ workspaceId: wsId, exportedAt: Date.now(), kind: 'easydb-workspace-v1' }, null, 2),
   };
 
-  let updated: { id: string };
+  let updated: { id: string; html_url?: string };
   if (creds.gistId) {
     const res = await fetch(`https://api.github.com/gists/${creds.gistId}`, {
       method: 'PATCH',
@@ -180,8 +191,9 @@ async function push(api: HostApi): Promise<void> {
     await saveCreds(api, creds);
   }
 
+  const url = updated.html_url ?? `https://gist.github.com/${creds.user}/${updated.id}`;
   api.ui.dialogs.toast(
-    `Pushed ${tables.length} table${tables.length === 1 ? '' : 's'} to gist ${updated.id}.`,
+    `Pushed ${tables.length} table${tables.length === 1 ? '' : 's'}.  ${url}`,
     { kind: 'success', title: 'Gist sync' },
   );
 }

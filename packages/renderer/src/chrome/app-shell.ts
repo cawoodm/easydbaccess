@@ -109,17 +109,25 @@ export class AppShell extends LitElement {
       position: relative;
     }
     :host(.drag-over) main::after {
-      content: 'Drop CSV here';
+      content: 'Drop CSV or JSON here';
       position: absolute;
       inset: 0.75rem;
-      border: 2px dashed #3b82f6;
-      border-radius: 0.5rem;
+      border: 3px dashed #3b82f6;
+      border-radius: 0.75rem;
       display: grid;
       place-items: center;
-      background: rgba(59, 130, 246, 0.06);
-      color: #2563eb;
-      font-weight: 600;
+      background: rgba(59, 130, 246, 0.12);
+      color: #1e3a8a;
+      font-weight: 700;
+      font-size: 1.6rem;
+      letter-spacing: 0.04em;
       pointer-events: none;
+      z-index: 90000;
+      animation: pulse-overlay 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse-overlay {
+      0%, 100% { background: rgba(59, 130, 246, 0.08); }
+      50% { background: rgba(59, 130, 246, 0.18); }
     }
   `,
   ];

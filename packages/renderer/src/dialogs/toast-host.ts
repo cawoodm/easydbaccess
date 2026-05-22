@@ -87,6 +87,11 @@ export class ToastHost extends LitElement {
         font-size: 0.9rem;
         margin-bottom: 0.1rem;
       }
+      .body a {
+        color: #2563eb;
+        text-decoration: underline;
+        word-break: break-all;
+      }
       button.close {
         background: transparent;
         border: 0;
@@ -158,7 +163,7 @@ export class ToastHost extends LitElement {
           <div class="toast ${t.kind}" role="status">
             <span class="mi lg">${iconFor(t.kind)}</span>
             <span class="body">
-              ${t.title ? html`<strong>${t.title}</strong>` : ''}${t.message}
+              ${t.title ? html`<strong>${t.title}</strong>` : ''}${linkify(t.message)}
             </span>
             <button class="close" title="Dismiss" @click=${() => this.dismiss(t.id)}>
               <span class="mi">close</span>
@@ -168,6 +173,26 @@ export class ToastHost extends LitElement {
       )}
     `;
   }
+}
+
+/** Split a string on URL boundaries; URLs become <a target=_blank>, rest stays text. */
+function linkify(s: string) {
+  const URL_RE = /(https?:\/\/[^\s)]+)/g;
+  const parts: Array<string | { url: string }> = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = URL_RE.exec(s)) !== null) {
+    if (m.index > last) parts.push(s.slice(last, m.index));
+    parts.push({ url: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) parts.push(s.slice(last));
+  if (parts.length === 0) return s;
+  return parts.map((p) =>
+    typeof p === 'string'
+      ? p
+      : html`<a href=${p.url} target="_blank" rel="noopener noreferrer">${p.url}</a>`,
+  );
 }
 
 function iconFor(k: ToastKind): string {
