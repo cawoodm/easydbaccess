@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import type { ColumnSpec, ColumnType, Row } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
+import { makeDialogDraggable } from './draggable.js';
 
 interface ColumnRow {
   field: string;
@@ -235,6 +236,8 @@ export class NewTableDialog extends LitElement {
 
   override firstUpdated() {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
+    const h2 = this.shadowRoot?.querySelector('h2') as HTMLElement | null;
+    if (this.dialogEl && h2) makeDialogDraggable(this.dialogEl, h2);
   }
 
   /**

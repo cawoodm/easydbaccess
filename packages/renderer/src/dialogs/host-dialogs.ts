@@ -1,5 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
+import { makeDialogDraggable } from './draggable.js';
 
 interface AlertState {
   kind: 'alert';
@@ -142,6 +143,14 @@ export class HostDialogs extends LitElement {
 
   override firstUpdated() {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
+  }
+
+  override updated() {
+    // Body re-renders each time `current` flips; the h2 inside is recreated,
+    // so we need to re-bind the drag handle each show.
+    if (!this.dialogEl) return;
+    const h2 = this.shadowRoot?.querySelector('h2') as HTMLElement | null;
+    if (h2) makeDialogDraggable(this.dialogEl, h2);
   }
 
   alert(message: string, title = 'Notice'): Promise<void> {

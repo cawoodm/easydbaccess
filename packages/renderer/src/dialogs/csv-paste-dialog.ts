@@ -2,6 +2,7 @@ import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { getContext } from '../app-context.js';
 import { parseCsv } from '../plugins/csv-import.js';
+import { makeDialogDraggable } from './draggable.js';
 
 /**
  * Paste-CSV modal. Lets users drop CSV text into a textarea without dragging
@@ -103,6 +104,8 @@ export class CsvPasteDialog extends LitElement {
 
   override firstUpdated() {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
+    const h2 = this.shadowRoot?.querySelector('h2') as HTMLElement | null;
+    if (this.dialogEl && h2) makeDialogDraggable(this.dialogEl, h2);
   }
 
   async open(): Promise<void> {
