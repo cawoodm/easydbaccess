@@ -2,6 +2,7 @@ import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { ColumnSpec, ColumnType } from '@easydb/shared';
 import { getContext } from '../app-context.js';
+import { materialIconStyles } from '../chrome/material-icon-css.js';
 
 interface ColumnRow {
   field: string;
@@ -28,7 +29,9 @@ const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'colo
  */
 @customElement('new-table-dialog')
 export class NewTableDialog extends LitElement {
-  static override styles = css`
+  static override styles = [
+    materialIconStyles,
+    css`
     :host {
       display: contents;
     }
@@ -157,7 +160,11 @@ export class NewTableDialog extends LitElement {
       color: #6b7280;
       font-size: 0.78rem;
     }
-  `;
+    .mi.sm {
+      font-size: 0.95rem;
+    }
+  `,
+  ];
 
   @state() private mode: 'new' | 'edit' = 'new';
   @state() private editTableId: string | null = null;
@@ -406,7 +413,7 @@ export class NewTableDialog extends LitElement {
                     ?disabled=${i === 0}
                     @click=${() => this.moveColumn(i, -1)}
                   >
-                    ▲
+                    <span class="mi sm">arrow_upward</span>
                   </button>
                   <button
                     type="button"
@@ -415,7 +422,7 @@ export class NewTableDialog extends LitElement {
                     ?disabled=${i === this.columns.length - 1}
                     @click=${() => this.moveColumn(i, 1)}
                   >
-                    ▼
+                    <span class="mi sm">arrow_downward</span>
                   </button>
                   <button
                     type="button"
@@ -423,7 +430,7 @@ export class NewTableDialog extends LitElement {
                     title="Remove column"
                     @click=${() => this.removeColumn(i)}
                   >
-                    ×
+                    <span class="mi sm">close</span>
                   </button>
                 </div>
               `,

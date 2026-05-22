@@ -11,6 +11,7 @@ export function init(api: HostApi): void {
   api.ui.registerFooterButton({
     id: 'dump-export:dump',
     label: 'Dump',
+    icon: 'archive',
     tooltip: 'Export the current workspace as a JSON dump file',
     onClick: async () => {
       const wsId = api.workspaceId();

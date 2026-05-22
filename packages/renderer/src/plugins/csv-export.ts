@@ -21,6 +21,7 @@ export function init(api: HostApi): void {
   api.ui.registerTableButton({
     id: 'csv-export:download',
     label: 'CSV',
+    icon: 'file_download',
     tooltip: 'Download this table as a .csv file',
     onClick: async (host, ctx) => {
       const t = await host.store.tables.findOne(ctx.tableId);

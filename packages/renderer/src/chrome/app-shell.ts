@@ -2,6 +2,7 @@ import { LitElement, css, html } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import type { ButtonSpec, HostApi } from '@easydb/shared';
 import { getContext } from '../app-context.js';
+import { materialIconStyles } from './material-icon-css.js';
 import './workspace-selector.js';
 import './table-list.js';
 import '../dialogs/new-table-dialog.js';
@@ -10,7 +11,9 @@ import type { NewTableDialog } from '../dialogs/new-table-dialog.js';
 
 @customElement('app-shell')
 export class AppShell extends LitElement {
-  static override styles = css`
+  static override styles = [
+    materialIconStyles,
+    css`
     :host {
       display: flex;
       flex-direction: column;
@@ -49,6 +52,12 @@ export class AppShell extends LitElement {
       opacity: 0.5;
       font-size: 0.75rem;
       margin-left: 0.5rem;
+    }
+    button.primary,
+    button.slot {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
     }
     button.primary {
       background: #3b82f6;
@@ -109,7 +118,8 @@ export class AppShell extends LitElement {
       font-weight: 600;
       pointer-events: none;
     }
-  `;
+  `,
+  ];
 
   @query('new-table-dialog') private dialog!: NewTableDialog;
   @state() private footerButtons: ButtonSpec[] = [];
@@ -218,6 +228,16 @@ export class AppShell extends LitElement {
     });
   };
 
+  private renderSlotButton(b: ButtonSpec, where: 'header' | 'footer') {
+    const cls = b.variant === 'primary' ? 'primary' : 'slot';
+    return html`
+      <button class=${cls} title=${b.tooltip ?? b.label} @click=${() => this.runSlot(b)}>
+        ${b.icon ? html`<span class="mi sm">${b.icon}</span>` : ''}
+        <span>${b.label}</span>
+      </button>
+    `;
+  }
+
   override render() {
     return html`
       <header>
@@ -239,31 +259,15 @@ export class AppShell extends LitElement {
               title="Search across all tables in this workspace"
               @click=${() => (this.searchOpen = true)}
             >
-              🔍
+              <span class="mi">search</span>
             </button>`}
-        ${this.headerButtons.map(
-          (b) => html`
-            <button
-              class=${b.variant === 'primary' ? 'primary' : 'slot'}
-              title=${b.tooltip ?? ''}
-              @click=${() => this.runSlot(b)}
-            >
-              ${b.label}
-            </button>
-          `,
-        )}
+        ${this.headerButtons.map((b) => this.renderSlotButton(b, 'header'))}
       </header>
       <main><table-list></table-list></main>
       <footer>
         <workspace-selector></workspace-selector>
         <span class="spacer"></span>
-        ${this.footerButtons.map(
-          (b) => html`
-            <button class="slot" title=${b.tooltip ?? ''} @click=${() => this.runSlot(b)}>
-              ${b.label}
-            </button>
-          `,
-        )}
+        ${this.footerButtons.map((b) => this.renderSlotButton(b, 'footer'))}
       </footer>
       <new-table-dialog></new-table-dialog>
       <host-dialogs></host-dialogs>

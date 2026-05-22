@@ -16,7 +16,8 @@ export const meta: NonNullable<PluginModule['meta']> = {
 export function init(api: HostApi): void {
   api.ui.registerHeaderButton({
     id: 'new-table:open',
-    label: '+ New Table',
+    label: 'New Table',
+    icon: 'add',
     variant: 'primary',
     tooltip: 'Create a new table',
     onClick: () => api.ui.openNewTableDialog(),

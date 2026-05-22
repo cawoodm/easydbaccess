@@ -2,12 +2,15 @@ import { LitElement, css, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
 import { getContext } from '../app-context.js';
+import { materialIconStyles } from '../chrome/material-icon-css.js';
 
 type SortDir = 'asc' | 'desc' | null;
 
 @customElement('data-table')
 export class DataTable extends LitElement {
-  static override styles = css`
+  static override styles = [
+    materialIconStyles,
+    css`
     :host {
       display: block;
       overflow: auto;
@@ -165,7 +168,11 @@ export class DataTable extends LitElement {
     td.t-number input[type='text'] {
       text-align: right;
     }
-  `;
+    .mi.sm {
+      font-size: 1rem;
+    }
+  `,
+  ];
 
   @property({ type: String }) tableId = '';
   @state() private columns: ColumnSpec[] = [];
@@ -546,7 +553,7 @@ export class DataTable extends LitElement {
                 )}
                 <td>
                   <button class="danger" title="Delete row" @click=${() => this.deleteRow(r.id)}>
-                    ×
+                    <span class="mi sm">close</span>
                   </button>
                 </td>
               </tr>

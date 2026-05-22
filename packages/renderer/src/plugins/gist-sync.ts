@@ -19,6 +19,7 @@ export function init(api: HostApi): void {
   api.ui.registerFooterButton({
     id: 'gist-sync:push',
     label: 'Push',
+    icon: 'cloud_upload',
     tooltip: 'Push the current workspace to a GitHub Gist',
     onClick: async () => {
       try {
@@ -31,6 +32,7 @@ export function init(api: HostApi): void {
   api.ui.registerFooterButton({
     id: 'gist-sync:pull',
     label: 'Pull',
+    icon: 'cloud_download',
     tooltip: 'Pull the latest tables from the configured Gist',
     onClick: async () => {
       try {

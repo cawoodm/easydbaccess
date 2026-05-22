@@ -2,10 +2,13 @@ import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { Workspace } from '@easydb/shared';
 import { getContext } from '../app-context.js';
+import { materialIconStyles } from './material-icon-css.js';
 
 @customElement('workspace-selector')
 export class WorkspaceSelector extends LitElement {
-  static override styles = css`
+  static override styles = [
+    materialIconStyles,
+    css`
     :host {
       display: inline-flex;
       align-items: center;
@@ -23,7 +26,11 @@ export class WorkspaceSelector extends LitElement {
     button:hover {
       background: #4b5563;
     }
-  `;
+    .mi.sm {
+      font-size: 1rem;
+    }
+  `,
+  ];
 
   @state() private workspaces: Workspace[] = [];
   @state() private current = '';
@@ -82,7 +89,9 @@ export class WorkspaceSelector extends LitElement {
           (w) => html`<option value=${w.id} ?selected=${w.id === this.current}>${w.name}</option>`,
         )}
       </select>
-      <button @click=${this.addWorkspace} title="New workspace">+</button>
+      <button @click=${this.addWorkspace} title="New workspace">
+        <span class="mi sm">add</span>
+      </button>
     `;
   }
 }

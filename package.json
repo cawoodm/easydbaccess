@@ -17,7 +17,8 @@
     "test": "npm run test --workspaces --if-present",
     "typecheck": "tsc -b",
     "lint": "eslint packages",
-    "format": "prettier --write \"packages/**/*.{ts,js,json,html,md}\""
+    "format": "prettier --write \"packages/**/*.{ts,js,json,html,md}\"",
+    "publish": "pwsh -File ./publish.ps1"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

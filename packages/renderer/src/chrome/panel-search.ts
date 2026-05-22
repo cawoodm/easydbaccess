@@ -1,5 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
+import { materialIconStyles } from './material-icon-css.js';
 
 /**
  * Collapsible search box that lives in a jsPanel's header toolbar. Default
@@ -10,7 +11,9 @@ import { customElement, property, state } from 'lit/decorators.js';
  */
 @customElement('panel-search')
 export class PanelSearch extends LitElement {
-  static override styles = css`
+  static override styles = [
+    materialIconStyles,
+    css`
     :host {
       display: inline-flex;
       align-items: center;
@@ -42,7 +45,11 @@ export class PanelSearch extends LitElement {
       outline: 2px solid #93c5fd;
       outline-offset: -1px;
     }
-  `;
+    .mi.sm {
+      font-size: 0.95rem;
+    }
+  `,
+  ];
 
   @property({ type: String }) tableId = '';
   @state() private query = '';
@@ -72,7 +79,7 @@ export class PanelSearch extends LitElement {
         title="Search rows in this table"
         @click=${() => (this.open = true)}
       >
-        🔍
+        <span class="mi sm">search</span>
       </button>`;
     }
     return html`<input

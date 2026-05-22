@@ -2,6 +2,7 @@ import { LitElement, css, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { ColumnSpec, TableButtonSpec } from '@easydb/shared';
 import { getContext } from '../app-context.js';
+import { materialIconStyles } from './material-icon-css.js';
 
 /**
  * Permanent action bar that lives in a jsPanel's footer toolbar. Stays visible
@@ -15,7 +16,9 @@ import { getContext } from '../app-context.js';
  */
 @customElement('panel-footer')
 export class PanelFooter extends LitElement {
-  static override styles = css`
+  static override styles = [
+    materialIconStyles,
+    css`
     :host {
       display: flex;
       align-items: center;
@@ -32,6 +35,9 @@ export class PanelFooter extends LitElement {
       background: white;
       border-radius: 0.25rem;
       cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
     }
     button:hover {
       background: #f3f4f6;
@@ -42,7 +48,11 @@ export class PanelFooter extends LitElement {
     .count {
       color: #6b7280;
     }
-  `;
+    .mi.sm {
+      font-size: 0.95rem;
+    }
+  `,
+  ];
 
   @property({ type: String }) tableId = '';
   @state() private rowCount = 0;
@@ -98,11 +108,16 @@ export class PanelFooter extends LitElement {
 
   override render() {
     return html`
-      <button @click=${this.addRow}>+ Add row</button>
-      <button @click=${this.editColumns}>Edit columns</button>
+      <button title="Add a blank row" @click=${this.addRow}>
+        <span class="mi sm">add</span><span>Add row</span>
+      </button>
+      <button title="Edit columns" @click=${this.editColumns}>
+        <span class="mi sm">view_column</span><span>Columns</span>
+      </button>
       ${this.tableButtons.map(
-        (b) => html`<button title=${b.tooltip ?? ''} @click=${() => this.runTableButton(b)}>
-          ${b.label}
+        (b) => html`<button title=${b.tooltip ?? b.label} @click=${() => this.runTableButton(b)}>
+          ${b.icon ? html`<span class="mi sm">${b.icon}</span>` : ''}
+          <span>${b.label}</span>
         </button>`,
       )}
       <span class="spacer"></span>
