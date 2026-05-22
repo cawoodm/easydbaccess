@@ -5,6 +5,7 @@ import * as jsonImport from '../plugins/json-import.js';
 import * as dumpExport from '../plugins/dump-export.js';
 import * as gistSync from '../plugins/gist-sync.js';
 import * as newTableButton from '../plugins/new-table-button.js';
+import * as pluginManagerButton from '../plugins/plugin-manager-button.js';
 
 /**
  * Built-in plugins shipped with the renderer. They satisfy the same
@@ -18,6 +19,7 @@ const builtins: PluginModule[] = [
   csvExport,
   dumpExport,
   gistSync,
+  pluginManagerButton,
 ];
 
 /**

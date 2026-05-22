@@ -188,6 +188,8 @@ export interface UiRegistry {
   openNewTableDialog(): void;
   /** Opens the shell's "paste CSV" dialog. */
   openCsvPasteDialog(): void;
+  /** Opens the Plugin Manager dialog (add/disable third-party plugin URLs). */
+  openPluginManager(): void;
   /** Promise-based alert/prompt/choice replacements for the native window.* APIs. */
   dialogs: Dialogs;
 }

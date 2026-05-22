@@ -9,8 +9,10 @@ import '../dialogs/new-table-dialog.js';
 import '../dialogs/host-dialogs.js';
 import '../dialogs/toast-host.js';
 import '../dialogs/csv-paste-dialog.js';
+import '../dialogs/plugin-manager-dialog.js';
 import type { NewTableDialog } from '../dialogs/new-table-dialog.js';
 import type { CsvPasteDialog } from '../dialogs/csv-paste-dialog.js';
+import type { PluginManagerDialog } from '../dialogs/plugin-manager-dialog.js';
 
 @customElement('app-shell')
 export class AppShell extends LitElement {
@@ -134,6 +136,7 @@ export class AppShell extends LitElement {
 
   @query('new-table-dialog') private dialog!: NewTableDialog;
   @query('csv-paste-dialog') private csvPasteDialog!: CsvPasteDialog;
+  @query('plugin-manager-dialog') private pluginManagerDialog!: PluginManagerDialog;
   @state() private footerButtons: ButtonSpec[] = [];
   @state() private headerButtons: ButtonSpec[] = [];
   @state() private searchQuery = '';
@@ -151,6 +154,7 @@ export class AppShell extends LitElement {
     document.addEventListener('easydb:edit-columns', this.onEditColumns as EventListener);
     document.addEventListener('easydb:open-new-table', this.onOpenNewTable);
     document.addEventListener('easydb:open-csv-paste', this.onOpenCsvPaste);
+    document.addEventListener('easydb:open-plugin-manager', this.onOpenPluginManager);
     void this.bindRegistries();
   }
 
@@ -162,6 +166,7 @@ export class AppShell extends LitElement {
     document.removeEventListener('easydb:edit-columns', this.onEditColumns as EventListener);
     document.removeEventListener('easydb:open-new-table', this.onOpenNewTable);
     document.removeEventListener('easydb:open-csv-paste', this.onOpenCsvPaste);
+    document.removeEventListener('easydb:open-plugin-manager', this.onOpenPluginManager);
   }
 
   private onEditColumns = (e: Event) => {
@@ -175,6 +180,10 @@ export class AppShell extends LitElement {
 
   private onOpenCsvPaste = () => {
     void this.csvPasteDialog?.open();
+  };
+
+  private onOpenPluginManager = () => {
+    void this.pluginManagerDialog?.open();
   };
 
   private onSearchInput = (e: Event) => {
@@ -289,6 +298,7 @@ export class AppShell extends LitElement {
       </footer>
       <new-table-dialog></new-table-dialog>
       <csv-paste-dialog></csv-paste-dialog>
+      <plugin-manager-dialog></plugin-manager-dialog>
       <host-dialogs></host-dialogs>
       <toast-host></toast-host>
     `;

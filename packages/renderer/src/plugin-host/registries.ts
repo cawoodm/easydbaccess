@@ -77,6 +77,9 @@ export function createUiRegistry(r: Registries): UiRegistry {
     openCsvPasteDialog: () => {
       document.dispatchEvent(new CustomEvent('easydb:open-csv-paste'));
     },
+    openPluginManager: () => {
+      document.dispatchEvent(new CustomEvent('easydb:open-plugin-manager'));
+    },
     dialogs: hostDialogsProxy,
   };
 }

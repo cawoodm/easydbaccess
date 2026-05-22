@@ -4,6 +4,7 @@ import { createEventBus } from './events/bus.js';
 import { createRegistries, type Registries } from './plugin-host/registries.js';
 import { createHostApi } from './plugin-host/api-factory.js';
 import { loadBuiltinPlugins } from './plugin-host/loader.js';
+import { loadUrlPlugins } from './plugin-host/url-loader.js';
 
 export interface AppContext {
   store: DataStore;
@@ -85,11 +86,15 @@ async function init(): Promise<AppContext> {
   });
 
   // init() built-ins synchronously, then trigger load() after we emit app:ready.
-  const runLoad = await loadBuiltinPlugins(api);
+  // URL plugins are loaded after built-ins so the latter establish the host
+  // surface (default cell renderers, importers, etc.) before user code runs.
+  const runLoadBuiltins = await loadBuiltinPlugins(api);
+  const runLoadUrls = await loadUrlPlugins(api);
 
   queueMicrotask(async () => {
     events.emit('app:ready', { workspaceId });
-    await runLoad();
+    await runLoadBuiltins();
+    await runLoadUrls();
   });
 
   return { store, events, workspaceId, registries, api };
