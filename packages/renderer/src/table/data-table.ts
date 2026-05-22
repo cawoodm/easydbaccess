@@ -1,6 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import type { ColumnSpec, ColumnType, Row, Table, TableButtonSpec } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 
 type SortDir = 'asc' | 'desc' | null;
@@ -120,32 +120,6 @@ export class DataTable extends LitElement {
       padding: 0.1rem 0.4rem;
       font-size: 0.75rem;
     }
-    .actions {
-      display: flex;
-      gap: 0.5rem;
-      padding: 0.5rem;
-      background: #f9fafb;
-      border-top: 1px solid #e5e7eb;
-      align-items: center;
-    }
-    .actions .spacer {
-      flex: 1;
-    }
-    .actions input.local-search {
-      font: inherit;
-      padding: 0.25rem 0.5rem;
-      border: 1px solid #d1d5db;
-      border-radius: 0.25rem;
-      width: 12rem;
-    }
-    .actions input.local-search:focus {
-      outline: 2px solid #3b82f6;
-      outline-offset: -1px;
-    }
-    .actions button.icon {
-      padding: 0.25rem 0.5rem;
-      line-height: 1;
-    }
     button {
       font: inherit;
       padding: 0.25rem 0.75rem;
@@ -189,26 +163,31 @@ export class DataTable extends LitElement {
   @state() private filters: Record<string, string> = {};
   @state() private globalQuery = '';
   @state() private localQuery = '';
-  @state() private localSearchOpen = false;
-  @state() private tableButtons: TableButtonSpec[] = [];
   private unsubscribe?: () => void;
   private filterSaveTimer: number | null = null;
 
   override async connectedCallback() {
     super.connectedCallback();
     document.addEventListener('easydb:global-search', this.onGlobalSearch as EventListener);
+    document.addEventListener('easydb:table-search', this.onTableSearch as EventListener);
     await this.bind();
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
     document.removeEventListener('easydb:global-search', this.onGlobalSearch as EventListener);
+    document.removeEventListener('easydb:table-search', this.onTableSearch as EventListener);
     this.unsubscribe?.();
     this.tableSubUnsub?.();
   }
 
   private onGlobalSearch = (e: Event) => {
     this.globalQuery = (e as CustomEvent<{ query: string }>).detail.query ?? '';
+  };
+
+  private onTableSearch = (e: Event) => {
+    const d = (e as CustomEvent<{ tableId: string; query: string }>).detail;
+    if (d.tableId === this.tableId) this.localQuery = d.query ?? '';
   };
 
   override async updated(changed: Map<string, unknown>) {
@@ -235,11 +214,6 @@ export class DataTable extends LitElement {
       const me = all.find((t) => t.id === this.tableId);
       if (me) this.applyTable(me);
     });
-    // Snapshot registered table buttons. They're populated during plugin
-    // load() which happens after the first connectedCallback; re-snapshot on
-    // app:ready so we don't miss any registered post-load.
-    this.tableButtons = [...ctx.registries.tableButtons];
-    ctx.events.on('app:ready', () => (this.tableButtons = [...ctx.registries.tableButtons]));
     const rowColl = ctx.store.rows(this.tableId);
     this.unsubscribe = rowColl.subscribe((r) => (this.rows = r));
     this.rows = await rowColl.find();
@@ -252,26 +226,6 @@ export class DataTable extends LitElement {
     this.filters = { ...(table.filters ?? {}) };
   }
 
-  private runTableButton = (spec: TableButtonSpec) => {
-    void getContext().then((ctx) => {
-      Promise.resolve(spec.onClick(ctx.api, { tableId: this.tableId })).catch((err) => {
-        // eslint-disable-next-line no-console
-        console.error(`[table-button:${spec.id}]`, err);
-      });
-    });
-  };
-
-  private async addRow() {
-    const ctx = await getContext();
-    const blank: Record<string, unknown> = {};
-    for (const c of this.columns) blank[c.field] = defaultFor(c);
-    await ctx.store.rows(this.tableId).insert({
-      id: crypto.randomUUID(),
-      tableId: this.tableId,
-      data: blank,
-      updatedAt: Date.now(),
-    });
-  }
 
   private async editCell(row: Row, field: string, raw: string) {
     const ctx = await getContext();
@@ -508,51 +462,6 @@ export class DataTable extends LitElement {
           )}
         </tbody>
       </table>
-      <div class="actions">
-        <button @click=${this.addRow}>+ Add row</button>
-        <button
-          @click=${() =>
-            this.dispatchEvent(
-              new CustomEvent('easydb:edit-columns', {
-                detail: { tableId: this.tableId },
-                bubbles: true,
-                composed: true,
-              }),
-            )}
-        >
-          Edit columns
-        </button>
-        ${this.tableButtons.map(
-          (b) => html`
-            <button title=${b.tooltip ?? ''} @click=${() => this.runTableButton(b)}>
-              ${b.label}
-            </button>
-          `,
-        )}
-        <span class="spacer"></span>
-        ${this.localSearchOpen || this.localQuery.length > 0
-          ? html`<input
-              class="local-search"
-              type="search"
-              placeholder="search in table…"
-              .value=${this.localQuery}
-              autofocus
-              @input=${(e: Event) => (this.localQuery = (e.target as HTMLInputElement).value)}
-              @blur=${() => {
-                if (this.localQuery.trim().length === 0) this.localSearchOpen = false;
-              }}
-            />`
-          : html`<button
-              class="icon"
-              title="Search rows in this table"
-              @click=${() => (this.localSearchOpen = true)}
-            >
-              🔍
-            </button>`}
-        <span style="color:#6b7280; font-size:.85em">
-          ${rows.length} row${rows.length === 1 ? '' : 's'}
-        </span>
-      </div>
     `;
   }
 }
@@ -569,18 +478,6 @@ function coerce(raw: string, type: ColumnType): unknown {
       return raw;
     default:
       return raw;
-  }
-}
-
-function defaultFor(c: ColumnSpec): unknown {
-  if (c.default !== undefined) return c.default;
-  switch (c.type) {
-    case 'boolean':
-      return false;
-    case 'number':
-      return null;
-    default:
-      return '';
   }
 }
 

@@ -17,6 +17,8 @@ import 'jspanel4/es6module/jspanel.css';
 import type { Table, WindowGeometry } from '@easydb/shared';
 import { getContext, type AppContext } from '../app-context.js';
 import '../table/data-table.js';
+import '../chrome/panel-search.js';
+import '../chrome/panel-footer.js';
 
 /** jsPanel instance — typed loose since the lib ships no .d.ts. */
 type Panel = {
@@ -105,6 +107,12 @@ function openPanel(t: Table, ctx: AppContext): void {
   (content as HTMLElement & { tableId: string }).tableId = t.id;
   content.style.height = '100%';
 
+  const search = document.createElement('panel-search');
+  (search as HTMLElement & { tableId: string }).tableId = t.id;
+
+  const footer = document.createElement('panel-footer');
+  (footer as HTMLElement & { tableId: string }).tableId = t.id;
+
   const container = document.getElementById('easydb-panels') ?? document.body;
   const g = sanitizeGeometry(t.windowGeometry, container);
   const panelId = `panel-${cssSafe(t.id)}`;
@@ -124,6 +132,7 @@ function openPanel(t: Table, ctx: AppContext): void {
     id: panelId,
     container,
     headerTitle: t.name,
+    footerToolbar: footer,
     headerControls: { smallify: 'remove' },
     theme: 'primary',
     content,
@@ -152,6 +161,13 @@ function openPanel(t: Table, ctx: AppContext): void {
   }) as Panel;
 
   panels.set(t.id, panel);
+
+  // Inject the per-table search into the controlbar (right side of the title
+  // row, next to min/max/close) so it shares the title bar instead of taking
+  // a second header strip — matches the minniDBMax v1 layout.
+  const panelEl = document.getElementById(panelId);
+  const controlbar = panelEl?.querySelector('.jsPanel-controlbar');
+  if (controlbar) controlbar.prepend(search);
 
   // Live-update the panel header with "<table-name> (<rowCount>)".
   // Subscribing here keeps the data-table component free of jsPanel knowledge.
