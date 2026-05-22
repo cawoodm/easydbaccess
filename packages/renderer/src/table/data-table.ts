@@ -3,6 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
+import { FilterPopover } from '../chrome/filter-popover.js';
 
 type SortDir = 'asc' | 'desc' | null;
 
@@ -102,6 +103,22 @@ export class DataTable extends LitElement {
     tr.filter-row input::placeholder {
       color: #9ca3af;
       font-style: italic;
+    }
+    th button.funnel {
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+      color: #9ca3af;
+      margin-left: 0.2rem;
+      padding: 0;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    th button.funnel.active {
+      color: #2563eb;
+    }
+    th button.funnel:hover {
+      color: #2563eb;
     }
     td input[type='text'] {
       width: 100%;
@@ -462,6 +479,30 @@ export class DataTable extends LitElement {
     return arr;
   }
 
+  private async openFilterPicker(e: Event, field: string) {
+    e.stopPropagation();
+    const btn = e.currentTarget as HTMLElement;
+    const popover = FilterPopover.instance;
+    if (!popover) return;
+    const counts = new Map<string, number>();
+    for (const r of this.rows) {
+      const v = r.data[field];
+      if (v == null) continue;
+      const s = String(v);
+      counts.set(s, (counts.get(s) ?? 0) + 1);
+    }
+    const values = [...counts.entries()]
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+    const result = await popover.open(btn.getBoundingClientRect(), values, this.filters[field] ?? '');
+    if (result === null) return;
+    if (typeof result === 'object' && 'clear' in result) {
+      this.onFilterInput(field, '');
+    } else if (typeof result === 'string') {
+      this.onFilterInput(field, result);
+    }
+  }
+
   private onFilterInput(field: string, value: string) {
     this.filters = { ...this.filters, [field]: value };
     // Debounce persistence so we don't write to RxDB on every keystroke.
@@ -610,6 +651,13 @@ export class DataTable extends LitElement {
                   }}
                 >
                   ${c.label}<span class="sort-icon">${icon}</span>
+                  <button
+                    class=${`funnel${this.filters[c.field] ? ' active' : ''}`}
+                    title="Filter by value"
+                    @click=${(e: Event) => this.openFilterPicker(e, c.field)}
+                  >
+                    <span class="mi sm">filter_list</span>
+                  </button>
                   <span
                     class="col-resize"
                     title="Drag to resize column"
