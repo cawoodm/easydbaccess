@@ -52,7 +52,10 @@ async function init(): Promise<EasyDatabase> {
       // v0 -> v1: added ColumnSpec.hidden. Existing column specs that lack
       // the field are simply treated as visible (hidden defaults to falsy).
       migrationStrategies: {
+        // v0 -> v1: added ColumnSpec.hidden
         1: (doc) => doc,
+        // v1 -> v2: added ColumnSpec.width
+        2: (doc) => doc,
       },
     },
     rows: { schema: rowSchema },

@@ -10,6 +10,8 @@ export interface ColumnSpec {
   notnull?: boolean;
   /** When true, the column is excluded from the rendered table (data preserved). */
   hidden?: boolean;
+  /** Persisted pixel width applied via the data-table's <colgroup>. */
+  width?: number;
 }
 
 export interface WindowGeometry {

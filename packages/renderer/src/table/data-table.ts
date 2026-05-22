@@ -53,6 +53,23 @@ export class DataTable extends LitElement {
     th[draggable='true'] {
       cursor: grab;
     }
+    /* 6px right-edge resize gutter; absolute so it doesn't push cell text. The
+       th is already position: sticky (declared in the main th rule above),
+       which is a containing block for absolute children. */
+    th .col-resize {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 6px;
+      height: 100%;
+      cursor: col-resize;
+      user-select: none;
+      z-index: 2;
+    }
+    th .col-resize:hover {
+      background: #3b82f6;
+      opacity: 0.4;
+    }
     th.drag-source {
       opacity: 0.4;
     }
@@ -202,6 +219,7 @@ export class DataTable extends LitElement {
   @state() private dragSourceField: string | null = null;
   @state() private dropTargetField: string | null = null;
   @state() private dropEdge: 'before' | 'after' | null = null;
+  @state() private resizing: { field: string; startX: number; startW: number } | null = null;
   private unsubscribe?: () => void;
   private filterSaveTimer: number | null = null;
 
@@ -455,6 +473,36 @@ export class DataTable extends LitElement {
     return this.columns.filter((c) => !c.hidden);
   }
 
+  private onResizeStart(e: PointerEvent, field: string, th: HTMLElement) {
+    e.preventDefault();
+    e.stopPropagation();
+    const startW = th.offsetWidth;
+    this.resizing = { field, startX: e.clientX, startW };
+    const onMove = (ev: PointerEvent) => {
+      if (!this.resizing) return;
+      const dx = ev.clientX - this.resizing.startX;
+      const w = Math.max(40, this.resizing.startW + dx);
+      // Live update: patch the in-memory column width so the colgroup reflows.
+      this.columns = this.columns.map((c) =>
+        c.field === this.resizing!.field ? { ...c, width: w } : c,
+      );
+    };
+    const onUp = async () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      const fld = this.resizing?.field;
+      this.resizing = null;
+      if (!fld) return;
+      const ctx = await getContext();
+      await ctx.store.tables.patch(this.tableId, {
+        columns: this.columns,
+        updatedAt: Date.now(),
+      });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
   private onColDragStart(e: DragEvent, field: string) {
     this.dragSourceField = field;
     if (e.dataTransfer) {
@@ -523,6 +571,13 @@ export class DataTable extends LitElement {
     const cols = this.visibleColumns;
     return html`
       <table>
+        <colgroup>
+          ${cols.map(
+            (c) =>
+              html`<col style=${c.width != null ? `width: ${c.width}px` : ''} />`,
+          )}
+          <col style="width:2rem" />
+        </colgroup>
         <thead>
           <tr>
             ${cols.map((c) => {
@@ -555,6 +610,14 @@ export class DataTable extends LitElement {
                   }}
                 >
                   ${c.label}<span class="sort-icon">${icon}</span>
+                  <span
+                    class="col-resize"
+                    title="Drag to resize column"
+                    @click=${(e: Event) => e.stopPropagation()}
+                    @pointerdown=${(e: PointerEvent) =>
+                      this.onResizeStart(e, c.field, (e.currentTarget as HTMLElement)
+                        .parentElement as HTMLElement)}
+                  ></span>
                 </th>
               `;
             })}
