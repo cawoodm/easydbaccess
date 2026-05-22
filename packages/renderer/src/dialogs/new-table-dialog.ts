@@ -7,8 +7,11 @@ interface ColumnRow {
   field: string;
   label: string;
   type: ColumnType;
+  max?: number | undefined;
+  unique?: boolean | undefined;
+  notnull?: boolean | undefined;
   /** field name in the saved table (edit mode only); used to detect field renames */
-  origField?: string;
+  origField?: string | undefined;
 }
 
 const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'color', 'image'];
@@ -71,9 +74,21 @@ export class NewTableDialog extends LitElement {
     .col-header,
     .col-row {
       display: grid;
-      grid-template-columns: 1fr 1fr 8rem 1.5rem 1.5rem 1.5rem;
+      grid-template-columns: 1fr 1fr 7rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem;
       gap: 0.4rem;
       align-items: center;
+    }
+    .col-row input[type='number'] {
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .col-row .flag {
+      display: inline-flex;
+      justify-content: center;
+    }
+    .col-header .flag-label {
+      font-size: 0.7rem;
+      text-align: center;
     }
     .col-header {
       font-size: 0.75rem;
@@ -173,6 +188,9 @@ export class NewTableDialog extends LitElement {
         field: c.field,
         label: c.label,
         type: c.type,
+        max: c.max,
+        unique: c.unique,
+        notnull: c.notnull,
         origField: c.field,
       }));
     } else {
@@ -243,11 +261,17 @@ export class NewTableDialog extends LitElement {
     }
 
     const ctx = await getContext();
-    const columns: ColumnSpec[] = this.columns.map((c) => ({
-      field: c.field.trim(),
-      label: c.label.trim() || c.field.trim(),
-      type: c.type,
-    }));
+    const columns: ColumnSpec[] = this.columns.map((c) => {
+      const spec: ColumnSpec = {
+        field: c.field.trim(),
+        label: c.label.trim() || c.field.trim(),
+        type: c.type,
+      };
+      if (c.max != null && c.max > 0) spec.max = c.max;
+      if (c.unique) spec.unique = true;
+      if (c.notnull) spec.notnull = true;
+      return spec;
+    });
 
     if (this.mode === 'edit' && this.editTableId) {
       // Patch the saved table; row data isn't migrated. If a field was
@@ -300,6 +324,9 @@ export class NewTableDialog extends LitElement {
               <span>Field</span>
               <span>Label</span>
               <span>Type</span>
+              <span class="flag-label">Max</span>
+              <span class="flag-label" title="Unique">U</span>
+              <span class="flag-label" title="Not null">!</span>
               <span></span>
               <span></span>
               <span></span>
@@ -330,6 +357,35 @@ export class NewTableDialog extends LitElement {
                       (t) => html`<option value=${t} ?selected=${t === c.type}>${t}</option>`,
                     )}
                   </select>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="—"
+                    title="Max length (strings) or max value (numbers)"
+                    .value=${c.max == null ? '' : String(c.max)}
+                    @input=${(e: Event) => {
+                      const v = (e.target as HTMLInputElement).value;
+                      this.patchColumn(i, { max: v === '' ? undefined : Number(v) });
+                    }}
+                  />
+                  <span class="flag">
+                    <input
+                      type="checkbox"
+                      title="Unique"
+                      .checked=${!!c.unique}
+                      @change=${(e: Event) =>
+                        this.patchColumn(i, { unique: (e.target as HTMLInputElement).checked })}
+                    />
+                  </span>
+                  <span class="flag">
+                    <input
+                      type="checkbox"
+                      title="Not null"
+                      .checked=${!!c.notnull}
+                      @change=${(e: Event) =>
+                        this.patchColumn(i, { notnull: (e.target as HTMLInputElement).checked })}
+                    />
+                  </span>
                   <button
                     type="button"
                     class="icon-btn"

@@ -204,6 +204,7 @@ export class DataTable extends LitElement {
     super.disconnectedCallback();
     document.removeEventListener('easydb:global-search', this.onGlobalSearch as EventListener);
     this.unsubscribe?.();
+    this.tableSubUnsub?.();
   }
 
   private onGlobalSearch = (e: Event) => {
@@ -217,15 +218,23 @@ export class DataTable extends LitElement {
     }
   }
 
+  private tableSubUnsub?: () => void;
+
   private async bind() {
     if (!this.tableId) return;
     const ctx = await getContext();
     const table = await ctx.store.tables.findOne(this.tableId);
     if (!table) return;
-    this.columns = table.columns;
-    this.sortColumn = table.sortColumn ?? null;
-    this.sortDir = table.sortColumn ? (table.sortAsc === false ? 'desc' : 'asc') : null;
-    this.filters = { ...(table.filters ?? {}) };
+    this.applyTable(table);
+    // Re-bind columns/sort/filters whenever this table's record changes
+    // (column editor, sort header click, filter input). Without this, the
+    // data-table would only pick up its own writes — external updates
+    // (e.g. column editor patching columns) wouldn't refresh until reload.
+    this.tableSubUnsub?.();
+    this.tableSubUnsub = ctx.store.tables.subscribe((all) => {
+      const me = all.find((t) => t.id === this.tableId);
+      if (me) this.applyTable(me);
+    });
     // Snapshot registered table buttons. They're populated during plugin
     // load() which happens after the first connectedCallback; re-snapshot on
     // app:ready so we don't miss any registered post-load.
@@ -234,6 +243,13 @@ export class DataTable extends LitElement {
     const rowColl = ctx.store.rows(this.tableId);
     this.unsubscribe = rowColl.subscribe((r) => (this.rows = r));
     this.rows = await rowColl.find();
+  }
+
+  private applyTable(table: Table) {
+    this.columns = table.columns;
+    this.sortColumn = table.sortColumn ?? null;
+    this.sortDir = table.sortColumn ? (table.sortAsc === false ? 'desc' : 'asc') : null;
+    this.filters = { ...(table.filters ?? {}) };
   }
 
   private runTableButton = (spec: TableButtonSpec) => {
@@ -248,7 +264,7 @@ export class DataTable extends LitElement {
   private async addRow() {
     const ctx = await getContext();
     const blank: Record<string, unknown> = {};
-    for (const c of this.columns) blank[c.field] = c.default ?? '';
+    for (const c of this.columns) blank[c.field] = defaultFor(c);
     await ctx.store.rows(this.tableId).insert({
       id: crypto.randomUUID(),
       tableId: this.tableId,
@@ -261,14 +277,35 @@ export class DataTable extends LitElement {
     const ctx = await getContext();
     const col = this.columns.find((c) => c.field === field);
     const value = coerce(raw, col?.type ?? 'string');
-    await ctx.store.rows(this.tableId).patch(row.id, {
-      data: { ...row.data, [field]: value },
-      updatedAt: Date.now(),
-    });
+    await this.commitCell(ctx, row, field, value);
   }
 
   private async setCell(row: Row, field: string, value: unknown) {
     const ctx = await getContext();
+    await this.commitCell(ctx, row, field, value);
+  }
+
+  /**
+   * Validate the proposed value against the column's constraints
+   * (notnull, max, unique) before writing. On rejection: pop a dialog with
+   * the reason and re-render so the cell input reverts to its prior value.
+   */
+  private async commitCell(
+    ctx: import('../app-context.js').AppContext,
+    row: Row,
+    field: string,
+    value: unknown,
+  ) {
+    const col = this.columns.find((c) => c.field === field);
+    if (col) {
+      const reason = validate(col, value, this.rows, row.id);
+      if (reason) {
+        await ctx.api.ui.dialogs.alert(reason, `Cannot save ${col.label}`);
+        // Force re-render so the input snaps back to the stored value.
+        this.requestUpdate();
+        return;
+      }
+    }
     await ctx.store.rows(this.tableId).patch(row.id, {
       data: { ...row.data, [field]: value },
       updatedAt: Date.now(),
@@ -533,6 +570,41 @@ function coerce(raw: string, type: ColumnType): unknown {
     default:
       return raw;
   }
+}
+
+function defaultFor(c: ColumnSpec): unknown {
+  if (c.default !== undefined) return c.default;
+  switch (c.type) {
+    case 'boolean':
+      return false;
+    case 'number':
+      return null;
+    default:
+      return '';
+  }
+}
+
+/** Returns a human-readable rejection reason, or null if value is acceptable. */
+function validate(col: ColumnSpec, value: unknown, allRows: Row[], rowId: string): string | null {
+  if (col.notnull) {
+    if (value === null || value === undefined) return `${col.label} cannot be empty.`;
+    if (typeof value === 'string' && value.trim().length === 0) {
+      return `${col.label} cannot be empty.`;
+    }
+  }
+  if (col.max != null && col.max > 0) {
+    if (typeof value === 'string' && value.length > col.max) {
+      return `${col.label} must be at most ${col.max} characters (got ${value.length}).`;
+    }
+    if (typeof value === 'number' && value > col.max) {
+      return `${col.label} must be at most ${col.max} (got ${value}).`;
+    }
+  }
+  if (col.unique && value !== null && value !== undefined && value !== '') {
+    const dup = allRows.find((r) => r.id !== rowId && r.data[col.field] === value);
+    if (dup) return `${col.label} must be unique. Another row already has "${String(value)}".`;
+  }
+  return null;
 }
 
 function compareValues(a: unknown, b: unknown, type: ColumnType): number {
