@@ -10,6 +10,7 @@ interface ColumnRow {
   max?: number | undefined;
   unique?: boolean | undefined;
   notnull?: boolean | undefined;
+  hidden?: boolean | undefined;
   /** field name in the saved table (edit mode only); used to detect field renames */
   origField?: string | undefined;
 }
@@ -74,7 +75,7 @@ export class NewTableDialog extends LitElement {
     .col-header,
     .col-row {
       display: grid;
-      grid-template-columns: 1fr 1fr 7rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem;
+      grid-template-columns: 1fr 1fr 7rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem;
       gap: 0.4rem;
       align-items: center;
     }
@@ -191,6 +192,7 @@ export class NewTableDialog extends LitElement {
         max: c.max,
         unique: c.unique,
         notnull: c.notnull,
+        hidden: c.hidden,
         origField: c.field,
       }));
     } else {
@@ -270,6 +272,7 @@ export class NewTableDialog extends LitElement {
       if (c.max != null && c.max > 0) spec.max = c.max;
       if (c.unique) spec.unique = true;
       if (c.notnull) spec.notnull = true;
+      if (c.hidden) spec.hidden = true;
       return spec;
     });
 
@@ -327,6 +330,7 @@ export class NewTableDialog extends LitElement {
               <span class="flag-label">Max</span>
               <span class="flag-label" title="Unique">U</span>
               <span class="flag-label" title="Not null">!</span>
+              <span class="flag-label" title="Visible">👁</span>
               <span></span>
               <span></span>
               <span></span>
@@ -384,6 +388,15 @@ export class NewTableDialog extends LitElement {
                       .checked=${!!c.notnull}
                       @change=${(e: Event) =>
                         this.patchColumn(i, { notnull: (e.target as HTMLInputElement).checked })}
+                    />
+                  </span>
+                  <span class="flag">
+                    <input
+                      type="checkbox"
+                      title="Visible — uncheck to hide the column without losing its data"
+                      .checked=${!c.hidden}
+                      @change=${(e: Event) =>
+                        this.patchColumn(i, { hidden: !(e.target as HTMLInputElement).checked })}
                     />
                   </span>
                   <button

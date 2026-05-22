@@ -8,6 +8,8 @@ export interface ColumnSpec {
   max?: number;
   unique?: boolean;
   notnull?: boolean;
+  /** When true, the column is excluded from the rendered table (data preserved). */
+  hidden?: boolean;
 }
 
 export interface WindowGeometry {

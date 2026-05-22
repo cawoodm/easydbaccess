@@ -20,7 +20,8 @@ export const workspaceSchema = {
 
 export const tableSchema = {
   title: 'table',
-  version: 0,
+  // v1: added ColumnSpec.hidden (existing rows get undefined, which is fine).
+  version: 1,
   primaryKey: 'id',
   type: 'object',
   properties: {
@@ -40,6 +41,7 @@ export const tableSchema = {
           max: { type: 'number' },
           unique: { type: 'boolean' },
           notnull: { type: 'boolean' },
+          hidden: { type: 'boolean' },
         },
         required: ['field', 'label', 'type'],
       },

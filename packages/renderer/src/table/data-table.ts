@@ -47,6 +47,18 @@ export class DataTable extends LitElement {
     th.sorted .sort-icon {
       color: #2563eb;
     }
+    th[draggable='true'] {
+      cursor: grab;
+    }
+    th.drag-source {
+      opacity: 0.4;
+    }
+    th.drop-before {
+      box-shadow: inset 3px 0 0 #3b82f6;
+    }
+    th.drop-after {
+      box-shadow: inset -3px 0 0 #3b82f6;
+    }
     tr.filter-row th {
       cursor: default;
       background: #f3f4f6;
@@ -163,6 +175,9 @@ export class DataTable extends LitElement {
   @state() private filters: Record<string, string> = {};
   @state() private globalQuery = '';
   @state() private localQuery = '';
+  @state() private dragSourceField: string | null = null;
+  @state() private dropTargetField: string | null = null;
+  @state() private dropEdge: 'before' | 'after' | null = null;
   private unsubscribe?: () => void;
   private filterSaveTimer: number | null = null;
 
@@ -396,6 +411,63 @@ export class DataTable extends LitElement {
     this.filterSaveTimer = window.setTimeout(() => this.saveFilters(), 250);
   }
 
+  private get visibleColumns(): ColumnSpec[] {
+    return this.columns.filter((c) => !c.hidden);
+  }
+
+  private onColDragStart(e: DragEvent, field: string) {
+    this.dragSourceField = field;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/x-easydb-col', field);
+    }
+  }
+
+  private onColDragOver(e: DragEvent, field: string, th: HTMLElement) {
+    if (!this.dragSourceField || this.dragSourceField === field) return;
+    e.preventDefault();
+    const rect = th.getBoundingClientRect();
+    const before = e.clientX < rect.left + rect.width / 2;
+    this.dropTargetField = field;
+    this.dropEdge = before ? 'before' : 'after';
+  }
+
+  private onColDragLeave(field: string) {
+    if (this.dropTargetField === field) {
+      this.dropTargetField = null;
+      this.dropEdge = null;
+    }
+  }
+
+  private async onColDrop(e: DragEvent, targetField: string) {
+    e.preventDefault();
+    const src = this.dragSourceField;
+    const edge = this.dropEdge;
+    this.dragSourceField = null;
+    this.dropTargetField = null;
+    this.dropEdge = null;
+    if (!src || src === targetField || !edge) return;
+
+    const next = [...this.columns];
+    const fromIdx = next.findIndex((c) => c.field === src);
+    if (fromIdx < 0) return;
+    const [moved] = next.splice(fromIdx, 1);
+    let toIdx = next.findIndex((c) => c.field === targetField);
+    if (toIdx < 0) {
+      // Target was the same as the moved column — shouldn't happen but bail safely.
+      next.splice(fromIdx, 0, moved!);
+      return;
+    }
+    if (edge === 'after') toIdx += 1;
+    next.splice(toIdx, 0, moved!);
+
+    const ctx = await getContext();
+    await ctx.store.tables.patch(this.tableId, {
+      columns: next,
+      updatedAt: Date.now(),
+    });
+  }
+
   private async saveFilters() {
     const ctx = await getContext();
     // Strip empty entries so the persisted shape stays tidy.
@@ -408,19 +480,39 @@ export class DataTable extends LitElement {
 
   override render() {
     const rows = this.sortedRows();
+    const cols = this.visibleColumns;
     return html`
       <table>
         <thead>
           <tr>
-            ${this.columns.map((c) => {
+            ${cols.map((c) => {
               const sorted = this.sortColumn === c.field && this.sortDir;
               const icon = sorted === 'asc' ? '▲' : sorted === 'desc' ? '▼' : '⇅';
               const typeClass = `t-${c.type}`;
+              const isSrc = this.dragSourceField === c.field;
+              const isTgt = this.dropTargetField === c.field;
+              const edgeClass =
+                isTgt && this.dropEdge === 'before'
+                  ? ' drop-before'
+                  : isTgt && this.dropEdge === 'after'
+                    ? ' drop-after'
+                    : '';
               return html`
                 <th
-                  class=${`${typeClass}${sorted ? ' sorted' : ''}`}
-                  title=${`${c.field} — click to sort`}
+                  class=${`${typeClass}${sorted ? ' sorted' : ''}${isSrc ? ' drag-source' : ''}${edgeClass}`}
+                  title=${`${c.field} — click to sort, drag to reorder`}
+                  draggable="true"
                   @click=${() => this.toggleSort(c.field)}
+                  @dragstart=${(e: DragEvent) => this.onColDragStart(e, c.field)}
+                  @dragover=${(e: DragEvent) =>
+                    this.onColDragOver(e, c.field, e.currentTarget as HTMLElement)}
+                  @dragleave=${() => this.onColDragLeave(c.field)}
+                  @drop=${(e: DragEvent) => this.onColDrop(e, c.field)}
+                  @dragend=${() => {
+                    this.dragSourceField = null;
+                    this.dropTargetField = null;
+                    this.dropEdge = null;
+                  }}
                 >
                   ${c.label}<span class="sort-icon">${icon}</span>
                 </th>
@@ -429,7 +521,7 @@ export class DataTable extends LitElement {
             <th style="width:2rem"></th>
           </tr>
           <tr class="filter-row">
-            ${this.columns.map(
+            ${cols.map(
               (c) => html`
                 <th>
                   <input
@@ -449,7 +541,7 @@ export class DataTable extends LitElement {
           ${rows.map(
             (r) => html`
               <tr>
-                ${this.columns.map(
+                ${cols.map(
                   (c) => html`<td class=${`t-${c.type}`}>${this.renderCell(r, c)}</td>`,
                 )}
                 <td>

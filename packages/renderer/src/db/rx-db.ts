@@ -35,6 +35,9 @@ async function init(): Promise<EasyDatabase> {
     const { RxDBDevModePlugin } = await import('rxdb/plugins/dev-mode');
     addRxPlugin(RxDBDevModePlugin);
   }
+  // Needed once schemas start having migrationStrategies.
+  const { RxDBMigrationSchemaPlugin } = await import('rxdb/plugins/migration-schema');
+  addRxPlugin(RxDBMigrationSchemaPlugin);
 
   const db = await createRxDatabase<EasyCollections>({
     name: 'easydb',
@@ -44,7 +47,14 @@ async function init(): Promise<EasyDatabase> {
 
   await db.addCollections({
     workspaces: { schema: workspaceSchema },
-    tables: { schema: tableSchema },
+    tables: {
+      schema: tableSchema,
+      // v0 -> v1: added ColumnSpec.hidden. Existing column specs that lack
+      // the field are simply treated as visible (hidden defaults to falsy).
+      migrationStrategies: {
+        1: (doc) => doc,
+      },
+    },
     rows: { schema: rowSchema },
     settings: { schema: settingSchema },
     plugins: { schema: pluginSchema },
