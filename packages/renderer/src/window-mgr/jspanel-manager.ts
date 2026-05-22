@@ -24,6 +24,8 @@ import '../chrome/panel-footer.js';
 type Panel = {
   id: string;
   close(): void;
+  minimize?: () => void;
+  maximize?: () => void;
   setHeaderTitle?: (title: string) => void;
   status: 'normalized' | 'minimized' | 'maximized' | 'smallified' | 'closed';
 };
@@ -138,7 +140,8 @@ function openPanel(t: Table, ctx: AppContext): void {
     container,
     headerTitle: t.name,
     footerToolbar: footer,
-    headerControls: { smallify: 'remove' },
+    // Default jsPanel controls; smallify (compact-header mode) is useful so
+    // we keep it enabled. min/max/normalize/close are all on by default.
     theme: 'primary',
     content,
     ...sizeOpt,
@@ -188,6 +191,14 @@ function openPanel(t: Table, ctx: AppContext): void {
   const panelEl = document.getElementById(panelId);
   const controlbar = panelEl?.querySelector('.jsPanel-controlbar');
   if (controlbar) controlbar.prepend(search);
+
+  // Restore minimized/maximized state. Defer to next tick so jsPanel's own
+  // init (centering, sizing) finishes before we drive a state change.
+  if (g?.maximized && typeof panel.maximize === 'function') {
+    queueMicrotask(() => panel.maximize?.());
+  } else if (g?.minimized && typeof panel.minimize === 'function') {
+    queueMicrotask(() => panel.minimize?.());
+  }
 
   // Live-update the panel header with "<table-name> (<rowCount>)".
   // Subscribing here keeps the data-table component free of jsPanel knowledge.

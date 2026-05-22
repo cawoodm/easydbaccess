@@ -286,11 +286,14 @@ function convertV1Dump(obj: Record<string, unknown>): NormalizedTable[] {
       });
 
     const nt: NormalizedTable = { name, columns, rows };
-    if (t.elementRect) {
-      const r = t.elementRect;
+    if (t.elementRect && typeof t.elementRect.x === 'number' && typeof t.elementRect.y === 'number') {
+      // Only honor the saved geometry when both x/y are present. Without an
+      // actual position from the dump, leave windowGeometry unset so the
+      // window manager cascades the new panel instead of stacking it at 0,0.
+      const r = t.elementRect as { x: number; y: number; width?: number; height?: number; zIndex?: number; minimized?: boolean; maximized?: boolean };
       nt.windowGeometry = {
-        x: r.x ?? 0,
-        y: r.y ?? 0,
+        x: r.x,
+        y: r.y,
         w: r.width ?? 600,
         h: r.height ?? 400,
         z: r.zIndex ?? 100,
