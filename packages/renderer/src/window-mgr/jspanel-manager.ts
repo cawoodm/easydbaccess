@@ -22,6 +22,7 @@ import '../table/data-table.js';
 type Panel = {
   id: string;
   close(): void;
+  setHeaderTitle?: (title: string) => void;
   status: 'normalized' | 'minimized' | 'maximized' | 'smallified' | 'closed';
 };
 
@@ -151,6 +152,32 @@ function openPanel(t: Table, ctx: AppContext): void {
   }) as Panel;
 
   panels.set(t.id, panel);
+
+  // Live-update the panel header with "<table-name> (<rowCount>)".
+  // Subscribing here keeps the data-table component free of jsPanel knowledge.
+  let lastName = t.name;
+  let unsub: (() => void) | null = null;
+  const updateTitle = (count: number) => {
+    if (typeof panel.setHeaderTitle === 'function') {
+      panel.setHeaderTitle(`${lastName} (${count})`);
+    }
+  };
+  void ctx.store.rows(t.id)
+    .find()
+    .then((rows) => updateTitle(rows.length));
+  unsub = ctx.store.rows(t.id).subscribe((rows) => updateTitle(rows.length));
+  void ctx.store.tables.subscribe((all) => {
+    const cur = all.find((x) => x.id === t.id);
+    if (cur && cur.name !== lastName) {
+      lastName = cur.name;
+    }
+  });
+  // Clean up the row subscription on close so it doesn't leak after table delete.
+  const origClose = panel.close.bind(panel);
+  panel.close = () => {
+    unsub?.();
+    return origClose();
+  };
 }
 
 let cascadeIdx = 0;

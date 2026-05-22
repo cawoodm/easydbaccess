@@ -158,10 +158,26 @@ export class DataTable extends LitElement {
       background: #f3f4f6;
     }
     button.danger {
-      color: #ef4444;
+      color: #9ca3af;
       border: 0;
       background: transparent;
       padding: 0 0.25rem;
+      font-size: 1.1rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    button.danger:hover {
+      color: #ef4444;
+    }
+    th.t-number,
+    td.t-number {
+      text-align: right;
+    }
+    th.t-number .sort-icon {
+      margin-left: 0.25rem;
+    }
+    td.t-number input[type='text'] {
+      text-align: right;
     }
   `;
 
@@ -408,9 +424,10 @@ export class DataTable extends LitElement {
             ${this.columns.map((c) => {
               const sorted = this.sortColumn === c.field && this.sortDir;
               const icon = sorted === 'asc' ? '▲' : sorted === 'desc' ? '▼' : '⇅';
+              const typeClass = `t-${c.type}`;
               return html`
                 <th
-                  class=${sorted ? 'sorted' : ''}
+                  class=${`${typeClass}${sorted ? ' sorted' : ''}`}
                   title=${`${c.field} — click to sort`}
                   @click=${() => this.toggleSort(c.field)}
                 >
@@ -441,8 +458,14 @@ export class DataTable extends LitElement {
           ${rows.map(
             (r) => html`
               <tr>
-                ${this.columns.map((c) => html`<td>${this.renderCell(r, c)}</td>`)}
-                <td><button class="danger" @click=${() => this.deleteRow(r.id)}>×</button></td>
+                ${this.columns.map(
+                  (c) => html`<td class=${`t-${c.type}`}>${this.renderCell(r, c)}</td>`,
+                )}
+                <td>
+                  <button class="danger" title="Delete row" @click=${() => this.deleteRow(r.id)}>
+                    ×
+                  </button>
+                </td>
               </tr>
             `,
           )}
