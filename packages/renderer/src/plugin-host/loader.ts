@@ -6,6 +6,9 @@ import * as dumpExport from '../plugins/dump-export.js';
 import * as gistSync from '../plugins/gist-sync.js';
 import * as newTableButton from '../plugins/new-table-button.js';
 import * as pluginManagerButton from '../plugins/plugin-manager-button.js';
+import * as cellColor from '../plugins/cell-color.js';
+import * as cellImage from '../plugins/cell-image.js';
+import * as headerClock from '../plugins/header-clock.js';
 
 /**
  * Built-in plugins shipped with the renderer. They satisfy the same
@@ -20,6 +23,9 @@ const builtins: PluginModule[] = [
   dumpExport,
   gistSync,
   pluginManagerButton,
+  cellColor,
+  cellImage,
+  headerClock,
 ];
 
 /**

@@ -1,4 +1,5 @@
 import { LitElement, css, html } from 'lit';
+import { html as staticHtml, unsafeStatic } from 'lit/static-html.js';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
 import { getContext } from '../app-context.js';
@@ -237,6 +238,7 @@ export class DataTable extends LitElement {
   @state() private dropTargetField: string | null = null;
   @state() private dropEdge: 'before' | 'after' | null = null;
   @state() private resizing: { field: string; startX: number; startW: number } | null = null;
+  @state() private cellRenderers: Map<string, string> = new Map();
   @state() private scrollY = 0;
   @state() private viewportHeight = 0;
   /** Median row height in px, measured from currently-rendered rows. */
@@ -322,6 +324,14 @@ export class DataTable extends LitElement {
       const me = all.find((t) => t.id === this.tableId);
       if (me) this.applyTable(me);
     });
+    // Snapshot the cell-renderer registry. Built-in renderer plugins
+    // register during init/load(); we resnapshot on app:ready so anything
+    // that registered late is picked up too.
+    this.cellRenderers = new Map(ctx.registries.cellRenderers);
+    ctx.events.on(
+      'app:ready',
+      () => (this.cellRenderers = new Map(ctx.registries.cellRenderers)),
+    );
     const rowColl = ctx.store.rows(this.tableId);
     this.unsubscribe = rowColl.subscribe((r) => (this.rows = r));
     this.rows = await rowColl.find();
@@ -374,26 +384,26 @@ export class DataTable extends LitElement {
     });
   }
 
-  private async pickImage(row: Row, field: string) {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.addEventListener('change', async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(file);
-      });
-      await this.setCell(row, field, dataUrl);
-    });
-    input.click();
-  }
-
   private renderCell(row: Row, col: ColumnSpec) {
     const raw = row.data[col.field];
+    // Plugin-registered cell renderers take precedence. The plugin's element
+    // takes a `value` property and dispatches a `change` event with detail.value.
+    const customTag = this.cellRenderers?.get(col.type);
+    if (customTag) {
+      // Use lit's static-html so the tag can be data-driven; the standard
+      // html`` template doesn't allow dynamic tag names. unsafeStatic is the
+      // correct primitive for tag names that come from a runtime registry —
+      // the trade-off is that plugin authors can register an arbitrary tag
+      // string, which is acceptable given the host trust model already lets
+      // plugins do anything.
+      const tag = unsafeStatic(customTag);
+      return staticHtml`<${tag}
+        .value=${raw ?? ''}
+        .column=${col}
+        @change=${(e: Event) =>
+          this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
+      ></${tag}>`;
+    }
     switch (col.type) {
       case 'boolean': {
         const checked = raw === true || raw === 'true' || raw === 1 || raw === '1';
@@ -419,33 +429,9 @@ export class DataTable extends LitElement {
           @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
         />`;
       }
-      case 'color': {
-        const hex = typeof raw === 'string' && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw) ? raw : '#000000';
-        return html`<span class="color-cell">
-          <input
-            type="color"
-            .value=${hex}
-            @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
-          />
-          <input
-            type="text"
-            .value=${typeof raw === 'string' ? raw : ''}
-            @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
-          />
-        </span>`;
-      }
-      case 'image': {
-        const src = typeof raw === 'string' && raw.startsWith('data:image') ? raw : '';
-        return html`<span class="image-cell">
-          ${src ? html`<img src=${src} alt="" />` : html`<span style="color:#9ca3af">no image</span>`}
-          <button type="button" @click=${() => this.pickImage(row, col.field)}>
-            ${src ? 'replace' : 'upload'}
-          </button>
-          ${src
-            ? html`<button type="button" @click=${() => this.setCell(row, col.field, '')}>clear</button>`
-            : ''}
-        </span>`;
-      }
+      // 'color' and 'image' types are rendered by the cell-color and
+      // cell-image built-in plugins via registerCellRenderer. If both
+      // plugins are disabled they fall through to the default text input.
       default:
         return html`<input
           type="text"
