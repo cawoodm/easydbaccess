@@ -16,7 +16,15 @@ interface ColumnRow {
   origField?: string | undefined;
 }
 
-const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'color', 'image'];
+const TYPE_OPTIONS: ColumnType[] = [
+  'string',
+  'number',
+  'boolean',
+  'date',
+  'datetime',
+  'color',
+  'image',
+];
 
 /**
  * Dual-purpose dialog: creates new tables and edits the columns of existing

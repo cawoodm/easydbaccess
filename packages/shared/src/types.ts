@@ -1,4 +1,4 @@
-export type ColumnType = 'string' | 'number' | 'date' | 'boolean' | 'color' | 'image';
+export type ColumnType = 'string' | 'number' | 'date' | 'datetime' | 'boolean' | 'color' | 'image';
 
 export interface ColumnSpec {
   field: string;

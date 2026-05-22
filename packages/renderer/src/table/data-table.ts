@@ -168,6 +168,23 @@ export class DataTable extends LitElement {
     td.t-number input[type='text'] {
       text-align: right;
     }
+    /* Null / empty cell highlight — picks them out at a glance without
+       shouting like full red. */
+    td.is-null {
+      background: #fef2f2;
+    }
+    td.is-null input[type='text'] {
+      background: transparent;
+    }
+    td input[type='date'],
+    td input[type='datetime-local'] {
+      font: inherit;
+      border: 0;
+      background: transparent;
+      padding: 0;
+      width: 100%;
+      box-sizing: border-box;
+    }
     .mi.sm {
       font-size: 1rem;
     }
@@ -315,6 +332,22 @@ export class DataTable extends LitElement {
           type="checkbox"
           .checked=${checked}
           @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).checked)}
+        />`;
+      }
+      case 'date': {
+        const iso = toDateIso(raw);
+        return html`<input
+          type="date"
+          .value=${iso}
+          @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
+        />`;
+      }
+      case 'datetime': {
+        const local = toDatetimeLocal(raw);
+        return html`<input
+          type="datetime-local"
+          .value=${local}
+          @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
         />`;
       }
       case 'color': {
@@ -548,9 +581,10 @@ export class DataTable extends LitElement {
           ${rows.map(
             (r) => html`
               <tr>
-                ${cols.map(
-                  (c) => html`<td class=${`t-${c.type}`}>${this.renderCell(r, c)}</td>`,
-                )}
+                ${cols.map((c) => {
+                  const nullClass = isNullish(r.data[c.field]) ? ' is-null' : '';
+                  return html`<td class=${`t-${c.type}${nullClass}`}>${this.renderCell(r, c)}</td>`;
+                })}
                 <td>
                   <button class="danger" title="Delete row" @click=${() => this.deleteRow(r.id)}>
                     <span class="mi sm">close</span>
@@ -563,6 +597,43 @@ export class DataTable extends LitElement {
       </table>
     `;
   }
+}
+
+function isNullish(v: unknown): boolean {
+  return v === null || v === undefined || (typeof v === 'string' && v.trim().length === 0);
+}
+
+/**
+ * Coerce arbitrary stored values into the YYYY-MM-DD string that
+ * <input type=date> expects. Returns '' if it can't parse — leaves the input
+ * empty rather than showing a misleading "Invalid Date".
+ */
+function toDateIso(raw: unknown): string {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return '';
+  const s = String(raw).trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Same idea for <input type=datetime-local> which wants YYYY-MM-DDTHH:MM
+ * (no timezone). We strip seconds/timezone bits because the input ignores them.
+ */
+function toDatetimeLocal(raw: unknown): string {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return '';
+  const s = String(raw).trim();
+  if (!s) return '';
+  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(s);
+  if (m) return `${m[1]}T${m[2]}`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return `${s}T00:00`;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return '';
+  // toISOString in UTC; for "local" inputs we feed back something close enough.
+  const iso = d.toISOString();
+  return `${iso.slice(0, 10)}T${iso.slice(11, 16)}`;
 }
 
 function coerce(raw: string, type: ColumnType): unknown {
