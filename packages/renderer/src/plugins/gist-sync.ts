@@ -232,14 +232,13 @@ async function pull(api: HostApi): Promise<void> {
       });
     }
 
-    for (const data of parsed.rows ?? []) {
-      await api.store.rows(table.id).insert({
-        id: cryptoUUID(),
-        tableId: table.id,
-        data,
-        updatedAt: Date.now(),
-      });
-    }
+    const docs = (parsed.rows ?? []).map((data) => ({
+      id: cryptoUUID(),
+      tableId: table.id,
+      data,
+      updatedAt: Date.now(),
+    }));
+    await api.store.rows(table.id).bulkInsert(docs);
     imported++;
   }
 

@@ -66,6 +66,8 @@ export interface DataCollection<T> {
   find(query?: Partial<T>): Promise<T[]>;
   findOne(id: string): Promise<T | null>;
   insert(doc: T): Promise<T>;
+  /** Batched insert. Use this in importers — single inserts on RxDB are ~25/sec. */
+  bulkInsert(docs: T[]): Promise<T[]>;
   upsert(doc: T): Promise<T>;
   patch(id: string, patch: Partial<T>): Promise<T>;
   remove(id: string): Promise<void>;

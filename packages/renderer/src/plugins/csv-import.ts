@@ -64,14 +64,13 @@ async function importCsvFile(api: HostApi, file: File): Promise<void> {
   });
 
   const rowColl = api.store.rows(created.id);
-  for (const row of parsed.rows) {
-    await rowColl.insert({
-      id: cryptoUUID(),
-      tableId: created.id,
-      data: row,
-      updatedAt: Date.now(),
-    });
-  }
+  const docs = parsed.rows.map((row) => ({
+    id: cryptoUUID(),
+    tableId: created.id,
+    data: row,
+    updatedAt: Date.now(),
+  }));
+  await rowColl.bulkInsert(docs);
 
   api.events.emit('import:after', {
     source: 'csv',

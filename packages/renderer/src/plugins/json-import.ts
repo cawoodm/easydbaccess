@@ -4,6 +4,7 @@ import type {
   HostApi,
   ImporterSpec,
   PluginModule,
+  WindowGeometry,
 } from '@easydb/shared';
 
 export const meta: NonNullable<PluginModule['meta']> = {
@@ -79,18 +80,19 @@ async function importJsonFile(api: HostApi, file: File): Promise<void> {
       code: slug(t.name),
       columns: t.columns,
       view: 'table',
+      ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
+      ...(t.sortColumn ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true } : {}),
       updatedAt: Date.now(),
     });
 
     const rowColl = api.store.rows(created.id);
-    for (const row of t.rows) {
-      await rowColl.insert({
-        id: cryptoUUID(),
-        tableId: created.id,
-        data: row,
-        updatedAt: Date.now(),
-      });
-    }
+    const docs = t.rows.map((row) => ({
+      id: cryptoUUID(),
+      tableId: created.id,
+      data: row,
+      updatedAt: Date.now(),
+    }));
+    await rowColl.bulkInsert(docs);
 
     api.events.emit('import:after', {
       source: 'json',
@@ -106,23 +108,45 @@ interface NormalizedTable {
   name: string;
   columns: ColumnSpec[];
   rows: Array<Record<string, unknown>>;
+  windowGeometry?: WindowGeometry;
+  sortColumn?: string;
+  sortAsc?: boolean;
 }
 
 /** Recognize known shapes; fall back to single-row import for unknown objects. */
 export function parsedToTables(parsed: unknown, fallbackName: string): NormalizedTable[] {
-  // Shape: { tables: [{ name, columns, rows }, ...] }  — native dump
+  // Shape: { "<Name>.table.json": { dataArray, columns, elementRect, ... } }
+  // — minniDBMax v1 / legacy dump format. Detected first because it overlaps
+  // structurally with the generic-object fallback below.
+  if (isObject(parsed) && looksLikeV1Dump(parsed as Record<string, unknown>)) {
+    return convertV1Dump(parsed as Record<string, unknown>);
+  }
+
+  // Shape: { tables: [{ name, columns, rows }, ...] }  — native dump.
+  // Entries may also be v1-shaped wrappers ({ "<name>.table.json": { dataArray, columns } })
+  // — happens when a v1 file was Dumped through us before v1 detection landed.
   if (
     isObject(parsed) &&
     Array.isArray((parsed as { tables?: unknown }).tables)
   ) {
     const dump = parsed as { tables: unknown[] };
-    return dump.tables
-      .filter(isNativeTable)
-      .map((t) => ({
-        name: String(t.name),
-        columns: t.columns.map(normalizeColumn),
-        rows: Array.isArray(t.rows) ? t.rows.filter(isObject) as Array<Record<string, unknown>> : [],
-      }));
+    const out: NormalizedTable[] = [];
+    for (const entry of dump.tables) {
+      if (isNativeTable(entry)) {
+        out.push({
+          name: String(entry.name),
+          columns: entry.columns.map(normalizeColumn),
+          rows: Array.isArray(entry.rows)
+            ? (entry.rows.filter(isObject) as Array<Record<string, unknown>>)
+            : [],
+        });
+        continue;
+      }
+      if (isObject(entry) && looksLikeV1Dump(entry as Record<string, unknown>)) {
+        out.push(...convertV1Dump(entry as Record<string, unknown>));
+      }
+    }
+    return out;
   }
 
   // Shape: [{...}, {...}]  — array of objects, infer columns from union of keys
@@ -139,6 +163,98 @@ export function parsedToTables(parsed: unknown, fallbackName: string): Normalize
   }
 
   return [];
+}
+
+// -- v1 / legacy minniDBMax dump format --------------------------------------
+
+interface V1Column {
+  field: string;
+  name?: string; // v1 calls the label "name"
+  type?: string;
+  isUnique?: boolean;
+  isNotNull?: boolean;
+}
+
+interface V1Table {
+  dataArray: unknown[][]; // positional rows aligned with `columns`
+  columns: V1Column[];
+  elementRect?: {
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+    zIndex?: number;
+    minimized?: boolean;
+    maximized?: boolean;
+  };
+  sortColumn?: number; // index into columns, or -1 for none
+  sortDirection?: 'asc' | 'desc';
+}
+
+function looksLikeV1Dump(obj: Record<string, unknown>): boolean {
+  for (const [k, v] of Object.entries(obj)) {
+    if (!/\.table\.json$/.test(k)) continue;
+    if (!isObject(v)) continue;
+    const o = v as Record<string, unknown>;
+    if (Array.isArray(o.dataArray) && Array.isArray(o.columns)) return true;
+  }
+  return false;
+}
+
+function convertV1Dump(obj: Record<string, unknown>): NormalizedTable[] {
+  const out: NormalizedTable[] = [];
+  for (const [key, raw] of Object.entries(obj)) {
+    if (!/\.table\.json$/.test(key)) continue;
+    if (!isObject(raw)) continue;
+    const t = raw as unknown as V1Table;
+    if (!Array.isArray(t.dataArray) || !Array.isArray(t.columns)) continue;
+
+    const name = key.replace(/\.table\.json$/, '');
+    const columns: ColumnSpec[] = t.columns.map((c) => normalizeV1Column(c));
+    const fields = columns.map((c) => c.field);
+
+    // dataArray rows are positional arrays aligned with the columns array.
+    // Translate each into a field-keyed row object.
+    const rows: Array<Record<string, unknown>> = t.dataArray
+      .filter((r) => Array.isArray(r))
+      .map((r) => {
+        const obj: Record<string, unknown> = {};
+        for (let i = 0; i < fields.length; i++) {
+          obj[fields[i]!] = (r as unknown[])[i];
+        }
+        return obj;
+      });
+
+    const nt: NormalizedTable = { name, columns, rows };
+    if (t.elementRect) {
+      const r = t.elementRect;
+      nt.windowGeometry = {
+        x: r.x ?? 0,
+        y: r.y ?? 0,
+        w: r.width ?? 600,
+        h: r.height ?? 400,
+        z: r.zIndex ?? 100,
+        minimized: !!r.minimized,
+        maximized: !!r.maximized,
+      };
+    }
+    if (typeof t.sortColumn === 'number' && t.sortColumn >= 0 && t.sortColumn < fields.length) {
+      nt.sortColumn = fields[t.sortColumn]!;
+      nt.sortAsc = (t.sortDirection ?? 'asc') !== 'desc';
+    }
+    out.push(nt);
+  }
+  return out;
+}
+
+function normalizeV1Column(c: V1Column): ColumnSpec {
+  const field = String(c.field ?? 'col');
+  const label = String(c.name ?? field);
+  const t = (typeof c.type === 'string' ? c.type : 'string') as ColumnType;
+  const spec: ColumnSpec = { field, label, type: t };
+  if (c.isUnique) spec.unique = true;
+  if (c.isNotNull) spec.notnull = true;
+  return spec;
 }
 
 function isNativeTable(v: unknown): v is { name: unknown; columns: unknown[]; rows?: unknown } {

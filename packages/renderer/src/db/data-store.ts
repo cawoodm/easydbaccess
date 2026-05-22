@@ -32,6 +32,11 @@ function wrap<T extends { id: string } | { url: string } | { key: string }>(
       const inserted = await coll.insert(doc);
       return inserted.toJSON() as T;
     },
+    async bulkInsert(docs) {
+      if (docs.length === 0) return [];
+      const res = await coll.bulkInsert(docs);
+      return res.success.map((d) => d.toJSON() as T);
+    },
     async upsert(doc) {
       const inserted = await coll.upsert(doc);
       return inserted.toJSON() as T;
@@ -74,6 +79,12 @@ function rowsView(coll: RxCollection<Row>, tableId: string): DataCollection<Row>
     async insert(doc) {
       const inserted = await coll.insert({ ...doc, tableId });
       return inserted.toJSON() as Row;
+    },
+    async bulkInsert(docs) {
+      if (docs.length === 0) return [];
+      const stamped = docs.map((d) => ({ ...d, tableId }));
+      const res = await coll.bulkInsert(stamped);
+      return res.success.map((d) => d.toJSON() as Row);
     },
     async upsert(doc) {
       const inserted = await coll.upsert({ ...doc, tableId });
