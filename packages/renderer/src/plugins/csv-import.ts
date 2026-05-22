@@ -309,6 +309,7 @@ function inferType(samples: string[]): ColumnType {
   if (samples.length === 0) return 'string';
   if (samples.every(isBool)) return 'boolean';
   if (samples.every(isNumber)) return 'number';
+  if (samples.every(isDateTime)) return 'datetime';
   if (samples.every(isDate)) return 'date';
   return 'string';
 }
@@ -325,11 +326,28 @@ function isNumber(s: string): boolean {
   return Number.isFinite(n);
 }
 
+/**
+ * Date-only detection. Accepts ISO YYYY-MM-DD plus D{/-.}M{/-.}Y patterns
+ * (both DMY and MDY ambiguous — we accept either; coerce() picks one).
+ * Rejects bare integers so a column of years/IDs doesn't become 'date'.
+ */
 function isDate(s: string): boolean {
   const t = s.trim();
-  if (t === '' || /^\d+$/.test(t)) return false; // bare integers are not dates
-  const d = new Date(t);
-  return !Number.isNaN(d.getTime());
+  if (t === '' || /^\d+$/.test(t)) return false;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return true;
+  if (/^\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}$/.test(t)) return true;
+  return false;
+}
+
+/** Datetime detection — requires a time component after a space or 'T'. */
+function isDateTime(s: string): boolean {
+  const t = s.trim();
+  if (t === '') return false;
+  // ISO with time: YYYY-MM-DD[T ]HH:MM[:SS]
+  if (/^\d{4}-\d{2}-\d{2}[T ]\d{1,2}:\d{2}(:\d{2})?/.test(t)) return true;
+  // D{/-.}M{/-.}Y space-or-T HH:MM
+  if (/^\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}[T ]\d{1,2}:\d{2}/.test(t)) return true;
+  return false;
 }
 
 function coerce(raw: string, type: ColumnType): unknown {
@@ -344,10 +362,67 @@ function coerce(raw: string, type: ColumnType): unknown {
       if (s === '') return null;
       return /^(true|yes|1)$/i.test(s);
     case 'date':
-      return s;
+      return normalizeDate(s);
+    case 'datetime':
+      return normalizeDateTime(s);
     default:
       return raw;
   }
+}
+
+/**
+ * Coerce a date-only string into ISO YYYY-MM-DD. Heuristic for the
+ * D{/-.}M{/-.}Y form: if the first part > 12, it must be the day (DMY);
+ * if the third part is two digits, treat as YY -> 20YY. Falls back to
+ * Date.parse for anything else.
+ */
+function normalizeDate(s: string): string {
+  if (s === '') return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/.exec(s);
+  if (m) {
+    let a = parseInt(m[1]!, 10);
+    let b = parseInt(m[2]!, 10);
+    const yr = m[3]!;
+    let year = parseInt(yr, 10);
+    if (yr.length === 2) year += 2000;
+    // a > 12 forces DMY; b > 12 forces MDY; ambiguous defaults to DMY (rest of world).
+    let day: number, month: number;
+    if (a > 12) {
+      day = a;
+      month = b;
+    } else if (b > 12) {
+      month = a;
+      day = b;
+    } else {
+      day = a;
+      month = b;
+    }
+    return `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+  }
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  return s;
+}
+
+function normalizeDateTime(s: string): string {
+  if (s === '') return '';
+  // Strip Z/timezone for the datetime-local input expectation.
+  const t = s.replace(/\s+/, 'T');
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{1,2}:\d{2})(?::\d{2})?/.exec(t);
+  if (m) return `${m[1]}T${m[2]!.padStart(5, '0')}`;
+  // D{/-.}M{/-.}Y [T ]HH:MM
+  const m2 = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})[T ](\d{1,2}:\d{2})/.exec(s);
+  if (m2) {
+    const datePart = normalizeDate(`${m2[1]}/${m2[2]}/${m2[3]}`);
+    return `${datePart}T${m2[4]!.padStart(5, '0')}`;
+  }
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) {
+    const iso = d.toISOString();
+    return `${iso.slice(0, 10)}T${iso.slice(11, 16)}`;
+  }
+  return s;
 }
 
 // -- helpers ------------------------------------------------------------------
