@@ -6,13 +6,15 @@ Feature-parity gap against `minniDBMax v0.0.29`, plus known bugs in
 Status keys: `bug` = broken, `feature` = missing, `polish` = works but UX
 gap, `perf` = correctness OK but slow.
 
-## Original list (existing)
+## Dialogs
+* Create an all-purpose choice() dialog which accepts an array of string options (e.g. OK, Ignore, Cancel) and displays them as a vertical list of buttons and returns the string of the button the user clicked
+* `window.prompt`; needs a proper dialog) - make an all-purpose prompt which can be used by plugins via the api 
+* `window.alert`; needs a proper dialog - make an all-purpose alert which can be used by plugins via the api
 
-* bug: z-order of windows is not persisting
+## General
+* bug: z-order of windows is not persisted, it should be saved with the geometry
 * feature: create new workspace is not implemented (the `+` button opens
-  `window.prompt`; needs a proper dialog)
-* feature: search in table not implemented (per-table local search)
-* feature: search bars should appear as icon and expand into input on focus
+* feature: search in table not implemented (per-table local search), search bars should appear as icon and expand into input on focus
 * polish: proper jsPanel footer is missing from tables with icon buttons:
   * Export csv (download icon)
   * Import csv (upload icon)
@@ -26,22 +28,21 @@ gap, `perf` = correctness OK but slow.
 * feature: null-value cell highlighting (light red background) so empties stand out
 * polish: number cells right-aligned (header and cell)
 * feature: date cells render in user locale short format when read-only,
-  use `<input type=date>` when editing
+  use `<input type=date>` when editing and datetime respectively
 * feature: separate `datetime` type (date + time of day); current `date` type
   is date-only
-* feature: row hover `⋯` ellipsis menu (currently only the `×` delete button)
-* polish: re-verify sticky table headers continue working after sort + filter
+* feature: Change the `×` delete button to a subtle gray icon which darkens on hover
   re-render
 
-## Columns
+## Columns Editor
 
 * feature: drag-to-reorder columns by dragging the `th` itself (currently
   only `▲`/`▼` buttons inside the column editor dialog)
 * feature: hide/show columns (`Column.hidden` flag + eye toggle in editor)
-* feature: change-type-in-editor re-serializes existing row data (today the
-  type changes but cell values stay as they were)
-* feature: primary-key indicator (`🔑`) when a column has both `unique` and
-  `notnull` set
+* Add max length to column editor
+* Column editor should preview a copy of the top 100 rows of existing data marking red what doesn't validate or parse according to live changes in the editor
+
+## Cell Editing
 * feature: constraint pre-flight scan — when enabling `unique`/`notnull` on
   an existing column, scan rows for violations and block save with details
 * feature: enforce `Column.max` on edit and insert (field exists in schema, never read)
@@ -52,7 +53,7 @@ gap, `perf` = correctness OK but slow.
 ## Import / export
 
 * feature: CSV paste textarea (currently only file drop)
-* feature: CSV import-mode dialog for existing tables — `Append` /
+* feature: CSV import-mode dialog for existing tables — use common api's choice() dialog for: `Append` /
   `Overwrite rows` / `Cancel` / `Create new table`
 * feature: CSV header colon mini-language parser
   `field:label:type:default:max:flags` (the type-from-data inference still
@@ -74,14 +75,6 @@ gap, `perf` = correctness OK but slow.
   (replace `window.alert`)
 * feature: Pre-push 1 MB-per-file size check + warning before the request
 * polish: surface the gist URL after a successful Push so user can open it
-
-## Workspaces
-
-* feature: New-workspace dialog (replace `prompt`) with name validation
-* feature: Delete workspace (no UI today; can be done via console only)
-* feature: Rename workspace
-* polish: workspace selector picks up workspaces created by the URL param
-  but never visited (currently it lists what's in the DB — verify)
 
 ## Filters
 

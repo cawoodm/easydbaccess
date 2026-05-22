@@ -24,7 +24,7 @@ export function init(api: HostApi): void {
       try {
         await push(api);
       } catch (err) {
-        alert(`Push failed: ${(err as Error).message}`);
+        await api.ui.dialogs.alert(`Push failed: ${(err as Error).message}`, 'Gist sync');
       }
     },
   });
@@ -36,7 +36,7 @@ export function init(api: HostApi): void {
       try {
         await pull(api);
       } catch (err) {
-        alert(`Pull failed: ${(err as Error).message}`);
+        await api.ui.dialogs.alert(`Pull failed: ${(err as Error).message}`, 'Gist sync');
       }
     },
   });
@@ -89,14 +89,18 @@ function parseConnectionString(raw: string): GistCreds | null {
 async function ensureCreds(api: HostApi): Promise<GistCreds | null> {
   const existing = await loadCreds(api);
   if (existing) return existing;
-  const input = window.prompt(
-    'Gist connection string\n\nFormat: user=<github-user>;gist_id=<id>;gist_token=<pat>;\n\n(Leave gist_id empty to create a new gist on first Push.)',
+  const input = await api.ui.dialogs.prompt(
+    'Connection string format:\nuser=<github-user>;gist_id=<id>;gist_token=<pat>;\n\nLeave gist_id empty to create a new gist on first Push.',
     '',
+    'Gist credentials',
   );
   if (!input) return null;
   const parsed = parseConnectionString(input);
   if (!parsed) {
-    alert('Could not parse connection string. Make sure it contains user=… and gist_token=….');
+    await api.ui.dialogs.alert(
+      'Could not parse connection string. Make sure it contains user=… and gist_token=….',
+      'Gist credentials',
+    );
     return null;
   }
   await saveCreds(api, parsed);
@@ -114,7 +118,10 @@ async function push(api: HostApi): Promise<void> {
 
   const tables = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
   if (tables.length === 0) {
-    alert('Nothing to push: the current workspace has no tables.');
+    await api.ui.dialogs.alert(
+      'Nothing to push: the current workspace has no tables.',
+      'Gist sync',
+    );
     return;
   }
 
@@ -165,8 +172,9 @@ async function push(api: HostApi): Promise<void> {
     await saveCreds(api, creds);
   }
 
-  alert(
+  await api.ui.dialogs.alert(
     `Pushed ${tables.length} table${tables.length === 1 ? '' : 's'} to gist ${updated.id}.`,
+    'Gist sync',
   );
 }
 
@@ -175,7 +183,10 @@ async function push(api: HostApi): Promise<void> {
 async function pull(api: HostApi): Promise<void> {
   const creds = await ensureCreds(api);
   if (!creds || !creds.gistId) {
-    alert('No gist id configured for this workspace. Push first or set it via the connection string.');
+    await api.ui.dialogs.alert(
+      'No gist id configured for this workspace. Push first or set it via the connection string.',
+      'Gist sync',
+    );
     return;
   }
 
@@ -195,7 +206,7 @@ async function pull(api: HostApi): Promise<void> {
     ([name]) => name.endsWith('.table.json') && !name.startsWith('_easydb'),
   );
   if (tableFiles.length === 0) {
-    alert('Gist contains no .table.json files.');
+    await api.ui.dialogs.alert('Gist contains no .table.json files.', 'Gist sync');
     return;
   }
 
@@ -242,7 +253,10 @@ async function pull(api: HostApi): Promise<void> {
     imported++;
   }
 
-  alert(`Pulled ${imported} table${imported === 1 ? '' : 's'} from gist ${creds.gistId}.`);
+  await api.ui.dialogs.alert(
+    `Pulled ${imported} table${imported === 1 ? '' : 's'} from gist ${creds.gistId}.`,
+    'Gist sync',
+  );
 }
 
 // -- helpers ------------------------------------------------------------------

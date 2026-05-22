@@ -139,10 +139,10 @@ function openPanel(t: Table, ctx: AppContext): void {
     // Use a wall-clock timestamp as the saved z instead: higher = more
     // recently fronted, and boot sorts by ascending z to restore the order.
     onfronted: () => stampFrontOrder(t.id, ctx),
-    onbeforeclose: () => {
-      const yes = window.confirm(`Delete table "${t.name}" and all its rows?`);
-      return yes;
-    },
+    // Synchronous confirm needed here — jsPanel's onbeforeclose can't await.
+    // Use a one-shot synchronous confirmation; once we have an async confirm
+    // primitive in api.ui.dialogs we'll route through it via a deferred close.
+    onbeforeclose: () => window.confirm(`Delete table "${t.name}" and all its rows?`),
     onclosed: async () => {
       panels.delete(t.id);
       await deleteTableCascade(t.id, ctx);

@@ -133,6 +133,25 @@ export interface UrlSourceSpec {
   run(api: HostApi, opts: { url?: string }): Promise<void>;
 }
 
+/**
+ * Promise-returning replacements for the native window.alert/prompt/confirm.
+ * Plugins should use these instead of touching window.* so behavior stays
+ * consistent across browser and Electron (where native dialogs may differ)
+ * and so plugins are testable without intercepting global modals.
+ */
+export interface Dialogs {
+  /** Modal message + OK button. Resolves when dismissed. */
+  alert(message: string, title?: string): Promise<void>;
+  /** Modal text input. Resolves to the entered string, or null if cancelled. */
+  prompt(message: string, defaultValue?: string, title?: string): Promise<string | null>;
+  /**
+   * Modal vertical button list. Each option becomes a button labelled with
+   * the string. Resolves to the chosen option, or null if cancelled.
+   * Useful for "Append / Overwrite / Cancel"-style decisions.
+   */
+  choice(message: string, options: string[], title?: string): Promise<string | null>;
+}
+
 export interface UiRegistry {
   registerHeaderButton(spec: ButtonSpec): Unregister;
   registerFooterButton(spec: ButtonSpec): Unregister;
@@ -151,6 +170,8 @@ export interface UiRegistry {
   registerUrlSource(spec: UrlSourceSpec): Unregister;
   /** Opens the shell's "new table" dialog. Plugins use this to drive table creation. */
   openNewTableDialog(): void;
+  /** Promise-based alert/prompt/choice replacements for the native window.* APIs. */
+  dialogs: Dialogs;
 }
 
 // -- Window manager -------------------------------------------------------

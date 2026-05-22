@@ -5,6 +5,7 @@ import { getContext } from '../app-context.js';
 import './workspace-selector.js';
 import './table-list.js';
 import '../dialogs/new-table-dialog.js';
+import '../dialogs/host-dialogs.js';
 import type { NewTableDialog } from '../dialogs/new-table-dialog.js';
 
 @customElement('app-shell')
@@ -239,6 +240,7 @@ export class AppShell extends LitElement {
         )}
       </footer>
       <new-table-dialog></new-table-dialog>
+      <host-dialogs></host-dialogs>
     `;
   }
 }

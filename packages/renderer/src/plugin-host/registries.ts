@@ -1,5 +1,6 @@
 import type {
   ButtonSpec,
+  Dialogs,
   DropHandler,
   ExporterSpec,
   ImporterSpec,
@@ -8,6 +9,7 @@ import type {
   Unregister,
   UrlSourceSpec,
 } from '@easydb/shared';
+import { HostDialogs } from '../dialogs/host-dialogs.js';
 
 /**
  * Mutable lists the app reads to render header/footer slots and to dispatch
@@ -71,5 +73,32 @@ export function createUiRegistry(r: Registries): UiRegistry {
     openNewTableDialog: () => {
       document.dispatchEvent(new CustomEvent('easydb:open-new-table'));
     },
+    dialogs: hostDialogsProxy,
   };
 }
+
+/**
+ * Lazy proxy that resolves the singleton <host-dialogs> instance at call time.
+ * Plugins receive this proxy in `init(api)` BEFORE the shell has rendered, so
+ * we can't capture the instance eagerly — we look it up on each invocation.
+ * If the host is somehow gone, we fall back to the native window primitives
+ * so plugins never crash mid-flow.
+ */
+const hostDialogsProxy: Dialogs = {
+  async alert(message, title) {
+    const h = HostDialogs.instance;
+    if (h) return h.alert(message, title);
+    window.alert(message);
+  },
+  async prompt(message, defaultValue, title) {
+    const h = HostDialogs.instance;
+    if (h) return h.prompt(message, defaultValue, title);
+    return window.prompt(message, defaultValue) ?? null;
+  },
+  async choice(message, options, title) {
+    const h = HostDialogs.instance;
+    if (h) return h.choice(message, options, title);
+    const picked = window.prompt(`${message}\n\nOptions: ${options.join(', ')}`);
+    return picked && options.includes(picked) ? picked : null;
+  },
+};

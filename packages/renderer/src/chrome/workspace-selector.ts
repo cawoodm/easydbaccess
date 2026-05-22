@@ -58,12 +58,17 @@ export class WorkspaceSelector extends LitElement {
   }
 
   private async addWorkspace() {
-    const name = window.prompt('Workspace name?');
-    if (!name) return;
+    const ctx = await getContext();
+    const name = await ctx.api.ui.dialogs.prompt(
+      'Name the new workspace. It will become active after creation.',
+      '',
+      'New workspace',
+    );
+    if (!name || !name.trim()) return;
     // Navigate to the new workspace — init() will create it on first load
     // since it doesn't exist yet.
     const sp = new URLSearchParams(location.search);
-    sp.set('space', name);
+    sp.set('space', name.trim());
     location.assign(`${location.pathname}?${sp.toString()}${location.hash}`);
   }
 
