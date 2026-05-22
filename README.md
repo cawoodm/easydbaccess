@@ -4,6 +4,8 @@ Local-first, plugin-extensible, multi-table database app. Runs in the browser
 and as an Electron desktop app. Successor to
 [`minniDBMax`](https://github.com/cawoodm/minniDBMax).
 
+Check it out at: https://cawoodm.github.io/easydbaccess/
+
 **Status:** scaffolding (Phase 1 of the rewrite plan). Not yet runnable.
 
 ## Architecture in one paragraph
