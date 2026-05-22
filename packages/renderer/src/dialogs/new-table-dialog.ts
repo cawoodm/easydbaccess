@@ -47,8 +47,9 @@ export class NewTableDialog extends LitElement {
       border: 0;
       border-radius: 0.5rem;
       padding: 0;
-      max-width: 580px;
-      width: 100%;
+      max-width: 92vw;
+      width: 880px;
+      max-height: 92vh;
       box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
       font-family: system-ui, sans-serif;
     }
@@ -171,6 +172,54 @@ export class NewTableDialog extends LitElement {
     .mi.sm {
       font-size: 0.95rem;
     }
+    /* Live preview table: shows the first 100 rows so the user can see
+       which cells would fail validation under the edited column specs. */
+    .preview {
+      border-top: 1px solid #e5e7eb;
+      margin-top: 0.5rem;
+      max-height: 36vh;
+      overflow: auto;
+    }
+    .preview h3 {
+      margin: 0;
+      padding: 0.6rem 0.4rem 0.4rem;
+      font-size: 0.85rem;
+      color: #6b7280;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .preview table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+    .preview th,
+    .preview td {
+      border: 1px solid #e5e7eb;
+      padding: 0.2rem 0.4rem;
+      text-align: left;
+      vertical-align: top;
+      white-space: nowrap;
+      max-width: 18rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .preview th {
+      background: #f9fafb;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    .preview td.violation {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    .preview .empty {
+      padding: 0.75rem 0.4rem;
+      color: #9ca3af;
+      font-style: italic;
+    }
   `,
   ];
 
@@ -179,6 +228,8 @@ export class NewTableDialog extends LitElement {
   @state() private name = '';
   @state() private columns: ColumnRow[] = [];
   @state() private errorMsg = '';
+  /** First 100 rows of the table being edited; populated only in edit mode. */
+  @state() private previewRows: Row[] = [];
 
   private dialogEl: HTMLDialogElement | null = null;
 
@@ -210,6 +261,11 @@ export class NewTableDialog extends LitElement {
         hidden: c.hidden,
         origField: c.field,
       }));
+      // Pull the first 100 rows for the live preview. We deliberately don't
+      // subscribe — the dialog is short-lived and external row edits during
+      // the dialog session are rare enough that a snapshot is fine.
+      const allRows = await ctx.store.rows(tableId).find();
+      this.previewRows = allRows.slice(0, 100);
     } else {
       this.mode = 'new';
       this.editTableId = null;
@@ -218,6 +274,7 @@ export class NewTableDialog extends LitElement {
         { field: 'name', label: 'Name', type: 'string' },
         { field: 'note', label: 'Note', type: 'string' },
       ];
+      this.previewRows = [];
     }
     await this.updateComplete;
     this.dialogEl?.showModal();
@@ -337,6 +394,54 @@ export class NewTableDialog extends LitElement {
       });
     }
     this.close();
+  }
+
+  private renderPreview() {
+    if (this.previewRows.length === 0) {
+      return html`<div class="preview"><div class="empty">No rows to preview.</div></div>`;
+    }
+    // Precompute duplicate maps for any unique column so per-row checks are O(1).
+    const duplicateSets = new Map<string, Set<unknown>>();
+    for (const c of this.columns) {
+      if (!c.unique) continue;
+      const seen = new Set<unknown>();
+      const dups = new Set<unknown>();
+      for (const r of this.previewRows) {
+        const v = r.data[c.field];
+        if (v == null || v === '') continue;
+        if (seen.has(v)) dups.add(v);
+        seen.add(v);
+      }
+      duplicateSets.set(c.field, dups);
+    }
+    return html`
+      <div class="preview">
+        <h3>Live preview — first ${this.previewRows.length} row${this.previewRows.length === 1 ? '' : 's'}</h3>
+        <table>
+          <thead>
+            <tr>
+              ${this.columns.map((c) => html`<th title=${c.field}>${c.label || c.field}</th>`)}
+            </tr>
+          </thead>
+          <tbody>
+            ${this.previewRows.map(
+              (r) => html`
+                <tr>
+                  ${this.columns.map((c) => {
+                    const v = r.data[c.field];
+                    const reason = validateAgainstSpec(c, v, duplicateSets.get(c.field));
+                    return html`<td
+                      class=${reason ? 'violation' : ''}
+                      title=${reason ?? ''}
+                    >${formatPreview(v)}</td>`;
+                  })}
+                </tr>
+              `,
+            )}
+          </tbody>
+        </table>
+      </div>
+    `;
   }
 
   private renameDetected(): boolean {
@@ -480,6 +585,7 @@ export class NewTableDialog extends LitElement {
               </div>`
             : ''}
           ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''}
+          ${this.mode === 'edit' ? this.renderPreview() : ''}
 
           <div class="actions">
             <button type="button" class="ghost" @click=${this.close}>Cancel</button>
@@ -489,6 +595,46 @@ export class NewTableDialog extends LitElement {
       </dialog>
     `;
   }
+}
+
+function formatPreview(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  return String(v);
+}
+
+/**
+ * Inline cell validation against a single (in-progress) ColumnRow spec.
+ * Powers the live preview: returns a short human reason when the cell
+ * would fail, or null when it's fine. `dupSet` is the set of values seen
+ * more than once across the preview slice for unique columns.
+ */
+function validateAgainstSpec(
+  c: ColumnRow,
+  v: unknown,
+  dupSet: Set<unknown> | undefined,
+): string | null {
+  const empty = v === null || v === undefined || (typeof v === 'string' && v.trim() === '');
+  if (c.notnull && empty) return `${c.label}: empty`;
+  if (empty) return null;
+  if (c.type === 'number' && typeof v !== 'number') {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return `${c.label}: not a number`;
+  }
+  if (c.type === 'boolean' && typeof v !== 'boolean') {
+    if (!/^(true|false|yes|no|0|1)$/i.test(String(v))) return `${c.label}: not boolean`;
+  }
+  if ((c.type === 'date' || c.type === 'datetime') && !empty) {
+    const d = new Date(String(v));
+    if (Number.isNaN(d.getTime())) return `${c.label}: not a date`;
+  }
+  if (c.max != null && c.max > 0) {
+    if (typeof v === 'string' && v.length > c.max) return `${c.label}: length > ${c.max}`;
+    if (typeof v === 'number' && v > c.max) return `${c.label}: > ${c.max}`;
+  }
+  if (c.unique && dupSet?.has(v)) return `${c.label}: duplicate`;
+  return null;
 }
 
 /**
