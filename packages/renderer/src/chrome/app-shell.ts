@@ -112,6 +112,7 @@ export class AppShell extends LitElement {
     // Panels live in light DOM (#easydb-panels), outside this shell's shadow,
     // so we listen on the document root to receive their bubbling events.
     document.addEventListener('easydb:edit-columns', this.onEditColumns as EventListener);
+    document.addEventListener('easydb:open-new-table', this.onOpenNewTable);
     void this.bindRegistries();
   }
 
@@ -121,11 +122,16 @@ export class AppShell extends LitElement {
     this.removeEventListener('dragleave', this.onDragLeave);
     this.removeEventListener('drop', this.onDrop);
     document.removeEventListener('easydb:edit-columns', this.onEditColumns as EventListener);
+    document.removeEventListener('easydb:open-new-table', this.onOpenNewTable);
   }
 
   private onEditColumns = (e: Event) => {
     const ce = e as CustomEvent<{ tableId: string }>;
     void this.dialog?.open(ce.detail.tableId);
+  };
+
+  private onOpenNewTable = () => {
+    void this.dialog?.open();
   };
 
   private onSearchInput = (e: Event) => {
@@ -189,10 +195,6 @@ export class AppShell extends LitElement {
     }
   };
 
-  private newTable = () => {
-    this.dialog.open();
-  };
-
   private runSlot = (spec: ButtonSpec) => {
     if (!this.api) return;
     void Promise.resolve(spec.onClick(this.api)).catch((err) => {
@@ -214,12 +216,15 @@ export class AppShell extends LitElement {
         />
         ${this.headerButtons.map(
           (b) => html`
-            <button class="slot" title=${b.tooltip ?? ''} @click=${() => this.runSlot(b)}>
+            <button
+              class=${b.variant === 'primary' ? 'primary' : 'slot'}
+              title=${b.tooltip ?? ''}
+              @click=${() => this.runSlot(b)}
+            >
               ${b.label}
             </button>
           `,
         )}
-        <button class="primary" @click=${this.newTable}>+ New Table</button>
       </header>
       <main><table-list></table-list></main>
       <footer>

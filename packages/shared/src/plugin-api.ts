@@ -92,6 +92,8 @@ export interface ButtonSpec {
   icon?: string;
   tooltip?: string;
   order?: number;
+  /** Visual prominence. `primary` is reserved for the main CTA in a slot. */
+  variant?: 'primary';
   onClick(api: HostApi): void | Promise<void>;
 }
 
@@ -147,6 +149,8 @@ export interface UiRegistry {
   registerExporter(spec: ExporterSpec): Unregister;
   registerDropHandler(fn: DropHandler): Unregister;
   registerUrlSource(spec: UrlSourceSpec): Unregister;
+  /** Opens the shell's "new table" dialog. Plugins use this to drive table creation. */
+  openNewTableDialog(): void;
 }
 
 // -- Window manager -------------------------------------------------------

@@ -68,5 +68,8 @@ export function createUiRegistry(r: Registries): UiRegistry {
     registerCellRenderer: (typeName, tag) => mapReg(r.cellRenderers, typeName, tag),
     registerRowRenderer: (viewName, tag) => mapReg(r.rowRenderers, viewName, tag),
     registerTableRenderer: (viewName, tag) => mapReg(r.tableRenderers, viewName, tag),
+    openNewTableDialog: () => {
+      document.dispatchEvent(new CustomEvent('easydb:open-new-table'));
+    },
   };
 }
