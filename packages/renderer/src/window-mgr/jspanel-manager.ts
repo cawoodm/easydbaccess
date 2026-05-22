@@ -34,10 +34,13 @@ export async function initWindowManager(): Promise<void> {
 
   const ctx = await getContext();
 
-  // Initial population.
+  // Initial population. Open in ascending saved-z order so jsPanel's internal
+  // zi.next() counter reproduces the user's last layering — the panel that
+  // was on top last session is opened last and ends up on top again.
   const tables = (await ctx.store.tables.find()).filter(
     (t) => t.workspaceId === ctx.workspaceId,
   );
+  tables.sort(byAscendingZ);
   for (const t of tables) openPanel(t, ctx);
 
   // Reactive sync: open new tables' panels, close panels whose tables vanished.
@@ -55,10 +58,13 @@ export async function initWindowManager(): Promise<void> {
         }
       }
     }
-    for (const t of inWs) {
-      if (!panels.has(t.id)) openPanel(t, ctx);
-    }
+    const toOpen = inWs.filter((t) => !panels.has(t.id)).sort(byAscendingZ);
+    for (const t of toOpen) openPanel(t, ctx);
   });
+}
+
+function byAscendingZ(a: Table, b: Table): number {
+  return (a.windowGeometry?.z ?? -Infinity) - (b.windowGeometry?.z ?? -Infinity);
 }
 
 /** Minimum sensible panel dimensions; anything smaller is treated as corrupt. */
@@ -125,6 +131,14 @@ function openPanel(t: Table, ctx: AppContext): void {
     minimizeTo: 'parent',
     dragit: { containment: 0, stop: () => saveGeometry(t.id, ctx) },
     resizeit: { containment: 0, stop: () => saveGeometry(t.id, ctx) },
+    // Fires when the panel is focused/brought-to-front by any means
+    // (click on chrome, click on content, programmatic .front()). We can't
+    // trust el.style.zIndex here — jsPanel calls resetZi() inside front(),
+    // which renormalizes all panel z-indexes to a contiguous 100..N range,
+    // so the fronted panel always ends up at "max" (same value every time).
+    // Use a wall-clock timestamp as the saved z instead: higher = more
+    // recently fronted, and boot sorts by ascending z to restore the order.
+    onfronted: () => stampFrontOrder(t.id, ctx),
     onbeforeclose: () => {
       const yes = window.confirm(`Delete table "${t.name}" and all its rows?`);
       return yes;
@@ -154,22 +168,55 @@ async function saveGeometry(tableId: string, ctx: AppContext): Promise<void> {
   const el = document.getElementById(`panel-${cssSafe(tableId)}`);
   if (!el) return;
   const status = (el as HTMLElement & { dataset: DOMStringMap }).dataset.status ?? 'normalized';
-  const geom: WindowGeometry = {
-    x: el.offsetLeft,
-    y: el.offsetTop,
-    w: el.offsetWidth,
-    h: el.offsetHeight,
-    z: parseInt(el.style.zIndex || '0', 10),
-    minimized: status === 'minimized',
-    maximized: status === 'maximized',
-  };
   try {
+    const t = await ctx.store.tables.findOne(tableId);
+    const prevZ = t?.windowGeometry?.z ?? 0;
+    const geom: WindowGeometry = {
+      x: el.offsetLeft,
+      y: el.offsetTop,
+      w: el.offsetWidth,
+      h: el.offsetHeight,
+      // Preserve the front-order timestamp written by stampFrontOrder.
+      // We can't read DOM z meaningfully — jsPanel renormalizes it on every
+      // .front() so it's not a stable per-panel identity.
+      z: prevZ,
+      minimized: status === 'minimized',
+      maximized: status === 'maximized',
+    };
     await ctx.store.tables.patch(tableId, {
       windowGeometry: geom,
       updatedAt: Date.now(),
     });
   } catch {
     // Table might have just been deleted — ignore.
+  }
+}
+
+/**
+ * Save a "front rank" — Date.now() — into windowGeometry.z. We don't read the
+ * DOM zIndex (jsPanel renormalizes it on every front() so all panels would
+ * show the same max), and we don't try to save all panels in a batch — each
+ * front fires once and the relative ordering follows from timestamps.
+ */
+async function stampFrontOrder(tableId: string, ctx: AppContext): Promise<void> {
+  try {
+    const t = await ctx.store.tables.findOne(tableId);
+    if (!t) return;
+    const geom = t.windowGeometry ?? {
+      x: 0,
+      y: 0,
+      w: 720,
+      h: 360,
+      z: 0,
+      minimized: false,
+      maximized: false,
+    };
+    await ctx.store.tables.patch(tableId, {
+      windowGeometry: { ...geom, z: Date.now() },
+      updatedAt: Date.now(),
+    });
+  } catch {
+    /* table may have just been deleted — ignore */
   }
 }
 
