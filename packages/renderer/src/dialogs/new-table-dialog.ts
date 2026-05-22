@@ -1,6 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import type { ColumnSpec, ColumnType } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, Row } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 
@@ -292,9 +292,35 @@ export class NewTableDialog extends LitElement {
     });
 
     if (this.mode === 'edit' && this.editTableId) {
+      // Pre-flight scan: if any column has just been flagged unique or notnull
+      // and the existing rows would violate it, block the save with a list of
+      // offending row indices so the user can fix the data first.
+      const tableId = this.editTableId;
+      const existingTable = await ctx.store.tables.findOne(tableId);
+      const prevSpecs = new Map((existingTable?.columns ?? []).map((c) => [c.field, c]));
+      const newConstraints = columns.filter((c) => {
+        const prev = prevSpecs.get(c.field);
+        return (
+          (c.unique && !prev?.unique) ||
+          (c.notnull && !prev?.notnull) ||
+          (c.max && c.max > 0 && c.max !== prev?.max)
+        );
+      });
+      if (newConstraints.length > 0) {
+        const rows = await ctx.store.rows(tableId).find();
+        const violations = scanConstraintViolations(newConstraints, rows);
+        if (violations.length > 0) {
+          this.errorMsg = `Cannot save: ${violations.length} existing ${
+            violations.length === 1 ? 'row violates' : 'rows violate'
+          } the new constraints.\n${violations.slice(0, 5).join('\n')}${
+            violations.length > 5 ? `\n…and ${violations.length - 5} more.` : ''
+          }`;
+          return;
+        }
+      }
       // Patch the saved table; row data isn't migrated. If a field was
       // renamed, downstream cells will read undefined and display as empty.
-      await ctx.store.tables.patch(this.editTableId, {
+      await ctx.store.tables.patch(tableId, {
         name,
         columns,
         updatedAt: Date.now(),
@@ -463,6 +489,48 @@ export class NewTableDialog extends LitElement {
       </dialog>
     `;
   }
+}
+
+/**
+ * Returns a list of "Row N: <reason>" strings for any row that violates one
+ * of the supplied (presumed newly-enabled) constraints. Empty list means
+ * the constraints can be applied cleanly.
+ */
+function scanConstraintViolations(specs: ColumnSpec[], rows: Row[]): string[] {
+  const out: string[] = [];
+  for (const c of specs) {
+    if (c.notnull) {
+      rows.forEach((r, i) => {
+        const v = r.data[c.field];
+        if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) {
+          out.push(`Row ${i + 1}: ${c.label} is empty.`);
+        }
+      });
+    }
+    if (c.max != null && c.max > 0) {
+      rows.forEach((r, i) => {
+        const v = r.data[c.field];
+        if (typeof v === 'string' && v.length > c.max!) {
+          out.push(`Row ${i + 1}: ${c.label} length ${v.length} > max ${c.max}.`);
+        } else if (typeof v === 'number' && v > c.max!) {
+          out.push(`Row ${i + 1}: ${c.label} value ${v} > max ${c.max}.`);
+        }
+      });
+    }
+    if (c.unique) {
+      const seen = new Map<unknown, number>();
+      rows.forEach((r, i) => {
+        const v = r.data[c.field];
+        if (v === null || v === undefined || v === '') return;
+        if (seen.has(v)) {
+          out.push(`Row ${i + 1}: ${c.label} duplicates row ${seen.get(v)! + 1} ("${String(v)}").`);
+        } else {
+          seen.set(v, i);
+        }
+      });
+    }
+  }
+  return out;
 }
 
 function slug(s: string): string {

@@ -8,7 +8,9 @@ import './table-list.js';
 import '../dialogs/new-table-dialog.js';
 import '../dialogs/host-dialogs.js';
 import '../dialogs/toast-host.js';
+import '../dialogs/csv-paste-dialog.js';
 import type { NewTableDialog } from '../dialogs/new-table-dialog.js';
+import type { CsvPasteDialog } from '../dialogs/csv-paste-dialog.js';
 
 @customElement('app-shell')
 export class AppShell extends LitElement {
@@ -123,6 +125,7 @@ export class AppShell extends LitElement {
   ];
 
   @query('new-table-dialog') private dialog!: NewTableDialog;
+  @query('csv-paste-dialog') private csvPasteDialog!: CsvPasteDialog;
   @state() private footerButtons: ButtonSpec[] = [];
   @state() private headerButtons: ButtonSpec[] = [];
   @state() private searchQuery = '';
@@ -139,6 +142,7 @@ export class AppShell extends LitElement {
     // so we listen on the document root to receive their bubbling events.
     document.addEventListener('easydb:edit-columns', this.onEditColumns as EventListener);
     document.addEventListener('easydb:open-new-table', this.onOpenNewTable);
+    document.addEventListener('easydb:open-csv-paste', this.onOpenCsvPaste);
     void this.bindRegistries();
   }
 
@@ -149,6 +153,7 @@ export class AppShell extends LitElement {
     this.removeEventListener('drop', this.onDrop);
     document.removeEventListener('easydb:edit-columns', this.onEditColumns as EventListener);
     document.removeEventListener('easydb:open-new-table', this.onOpenNewTable);
+    document.removeEventListener('easydb:open-csv-paste', this.onOpenCsvPaste);
   }
 
   private onEditColumns = (e: Event) => {
@@ -158,6 +163,10 @@ export class AppShell extends LitElement {
 
   private onOpenNewTable = () => {
     void this.dialog?.open();
+  };
+
+  private onOpenCsvPaste = () => {
+    void this.csvPasteDialog?.open();
   };
 
   private onSearchInput = (e: Event) => {
@@ -271,6 +280,7 @@ export class AppShell extends LitElement {
         ${this.footerButtons.map((b) => this.renderSlotButton(b, 'footer'))}
       </footer>
       <new-table-dialog></new-table-dialog>
+      <csv-paste-dialog></csv-paste-dialog>
       <host-dialogs></host-dialogs>
       <toast-host></toast-host>
     `;

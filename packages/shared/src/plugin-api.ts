@@ -186,6 +186,8 @@ export interface UiRegistry {
   registerUrlSource(spec: UrlSourceSpec): Unregister;
   /** Opens the shell's "new table" dialog. Plugins use this to drive table creation. */
   openNewTableDialog(): void;
+  /** Opens the shell's "paste CSV" dialog. */
+  openCsvPasteDialog(): void;
   /** Promise-based alert/prompt/choice replacements for the native window.* APIs. */
   dialogs: Dialogs;
 }

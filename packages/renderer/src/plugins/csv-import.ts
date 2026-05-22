@@ -15,6 +15,13 @@ export const meta: NonNullable<PluginModule['meta']> = {
 
 export function init(api: HostApi): void {
   api.ui.registerImporter(importerSpec);
+  api.ui.registerHeaderButton({
+    id: 'csv-import:paste',
+    label: 'Paste CSV',
+    icon: 'content_paste',
+    tooltip: 'Paste CSV text to create a new table',
+    onClick: () => api.ui.openCsvPasteDialog(),
+  });
   api.ui.registerDropHandler(async (event) => {
     const files = filesFrom(event);
     const csvs = files.filter(isCsv);
