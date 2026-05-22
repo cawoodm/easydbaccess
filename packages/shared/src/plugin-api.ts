@@ -133,6 +133,15 @@ export interface UrlSourceSpec {
   run(api: HostApi, opts: { url?: string }): Promise<void>;
 }
 
+export type ToastKind = 'info' | 'success' | 'error' | 'warning';
+
+export interface ToastOpts {
+  kind?: ToastKind | undefined;
+  title?: string | undefined;
+  /** Auto-dismiss after this many ms. Defaults: 4000 for info/success, 7000 for warning/error. */
+  durationMs?: number | undefined;
+}
+
 /**
  * Promise-returning replacements for the native window.alert/prompt/confirm.
  * Plugins should use these instead of touching window.* so behavior stays
@@ -142,6 +151,8 @@ export interface UrlSourceSpec {
 export interface Dialogs {
   /** Modal message + OK button. Resolves when dismissed. */
   alert(message: string, title?: string): Promise<void>;
+  /** Modal Yes/No question. Resolves to true if confirmed, false otherwise. */
+  confirm(message: string, title?: string): Promise<boolean>;
   /** Modal text input. Resolves to the entered string, or null if cancelled. */
   prompt(message: string, defaultValue?: string, title?: string): Promise<string | null>;
   /**
@@ -150,6 +161,11 @@ export interface Dialogs {
    * Useful for "Append / Overwrite / Cancel"-style decisions.
    */
   choice(message: string, options: string[], title?: string): Promise<string | null>;
+  /**
+   * Non-modal status notification stacked at the top of the workspace. Auto-
+   * dismisses; use kind='error'/'warning' for sticky-ish (7s) messages.
+   */
+  toast(message: string, opts?: ToastOpts): void;
 }
 
 export interface UiRegistry {

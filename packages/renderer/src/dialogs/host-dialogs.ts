@@ -150,6 +150,11 @@ export class HostDialogs extends LitElement {
     });
   }
 
+  async confirm(message: string, title = 'Confirm'): Promise<boolean> {
+    const answer = await this.choice(message, ['Yes', 'No'], title);
+    return answer === 'Yes';
+  }
+
   prompt(message: string, defaultValue = '', title = 'Input'): Promise<string | null> {
     return this.enqueue<string | null>((resolve) => {
       this.current = {

@@ -29,6 +29,11 @@ type Panel = {
 };
 
 const panels = new Map<string, Panel>();
+/**
+ * Set of table ids whose close-confirmation has been resolved positively.
+ * onbeforeclose short-circuits on a match so the user isn't asked twice.
+ */
+const confirmedClose = new Set<string>();
 let initialized = false;
 
 export async function initWindowManager(): Promise<void> {
@@ -149,12 +154,27 @@ function openPanel(t: Table, ctx: AppContext): void {
     // Use a wall-clock timestamp as the saved z instead: higher = more
     // recently fronted, and boot sorts by ascending z to restore the order.
     onfronted: () => stampFrontOrder(t.id, ctx),
-    // Synchronous confirm needed here — jsPanel's onbeforeclose can't await.
-    // Use a one-shot synchronous confirmation; once we have an async confirm
-    // primitive in api.ui.dialogs we'll route through it via a deferred close.
-    onbeforeclose: () => window.confirm(`Delete table "${t.name}" and all its rows?`),
+    // jsPanel onbeforeclose can't await, so we use a two-step pattern: first
+    // close attempt opens our async confirm dialog and returns false to cancel
+    // the close. If the user confirms, we set a flag and re-call panel.close,
+    // which short-circuits this guard and lets jsPanel proceed to onclosed.
+    onbeforeclose: () => {
+      if (confirmedClose.has(t.id)) return true;
+      void (async () => {
+        const yes = await ctx.api.ui.dialogs.confirm(
+          `Delete table "${t.name}" and all its rows?`,
+          'Confirm delete',
+        );
+        if (yes) {
+          confirmedClose.add(t.id);
+          panels.get(t.id)?.close();
+        }
+      })();
+      return false;
+    },
     onclosed: async () => {
       panels.delete(t.id);
+      confirmedClose.delete(t.id);
       await deleteTableCascade(t.id, ctx);
     },
     onstatuschange: () => saveGeometry(t.id, ctx),

@@ -25,7 +25,10 @@ export function init(api: HostApi): void {
       try {
         await push(api);
       } catch (err) {
-        await api.ui.dialogs.alert(`Push failed: ${(err as Error).message}`, 'Gist sync');
+        api.ui.dialogs.toast(`Push failed: ${(err as Error).message}`, {
+          kind: 'error',
+          title: 'Gist sync',
+        });
       }
     },
   });
@@ -38,7 +41,10 @@ export function init(api: HostApi): void {
       try {
         await pull(api);
       } catch (err) {
-        await api.ui.dialogs.alert(`Pull failed: ${(err as Error).message}`, 'Gist sync');
+        api.ui.dialogs.toast(`Pull failed: ${(err as Error).message}`, {
+          kind: 'error',
+          title: 'Gist sync',
+        });
       }
     },
   });
@@ -174,9 +180,9 @@ async function push(api: HostApi): Promise<void> {
     await saveCreds(api, creds);
   }
 
-  await api.ui.dialogs.alert(
+  api.ui.dialogs.toast(
     `Pushed ${tables.length} table${tables.length === 1 ? '' : 's'} to gist ${updated.id}.`,
-    'Gist sync',
+    { kind: 'success', title: 'Gist sync' },
   );
 }
 
@@ -255,9 +261,9 @@ async function pull(api: HostApi): Promise<void> {
     imported++;
   }
 
-  await api.ui.dialogs.alert(
+  api.ui.dialogs.toast(
     `Pulled ${imported} table${imported === 1 ? '' : 's'} from gist ${creds.gistId}.`,
-    'Gist sync',
+    { kind: 'success', title: 'Gist sync' },
   );
 }
 

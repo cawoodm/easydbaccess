@@ -7,6 +7,7 @@ import './workspace-selector.js';
 import './table-list.js';
 import '../dialogs/new-table-dialog.js';
 import '../dialogs/host-dialogs.js';
+import '../dialogs/toast-host.js';
 import type { NewTableDialog } from '../dialogs/new-table-dialog.js';
 
 @customElement('app-shell')
@@ -271,6 +272,7 @@ export class AppShell extends LitElement {
       </footer>
       <new-table-dialog></new-table-dialog>
       <host-dialogs></host-dialogs>
+      <toast-host></toast-host>
     `;
   }
 }

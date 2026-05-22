@@ -10,6 +10,7 @@ import type {
   UrlSourceSpec,
 } from '@easydb/shared';
 import { HostDialogs } from '../dialogs/host-dialogs.js';
+import { ToastHost } from '../dialogs/toast-host.js';
 
 /**
  * Mutable lists the app reads to render header/footer slots and to dispatch
@@ -90,6 +91,11 @@ const hostDialogsProxy: Dialogs = {
     if (h) return h.alert(message, title);
     window.alert(message);
   },
+  async confirm(message, title) {
+    const h = HostDialogs.instance;
+    if (h) return h.confirm(message, title);
+    return window.confirm(message);
+  },
   async prompt(message, defaultValue, title) {
     const h = HostDialogs.instance;
     if (h) return h.prompt(message, defaultValue, title);
@@ -100,5 +106,15 @@ const hostDialogsProxy: Dialogs = {
     if (h) return h.choice(message, options, title);
     const picked = window.prompt(`${message}\n\nOptions: ${options.join(', ')}`);
     return picked && options.includes(picked) ? picked : null;
+  },
+  toast(message, opts) {
+    const t = ToastHost.instance;
+    if (t) {
+      t.show(message, opts);
+    } else {
+      // Fallback if the chrome hasn't mounted yet — log so plugins don't lose info.
+      // eslint-disable-next-line no-console
+      console.log(`[toast:${opts?.kind ?? 'info'}]`, opts?.title ?? '', message);
+    }
   },
 };
