@@ -237,13 +237,27 @@ export class DataTable extends LitElement {
   @state() private dropTargetField: string | null = null;
   @state() private dropEdge: 'before' | 'after' | null = null;
   @state() private resizing: { field: string; startX: number; startW: number } | null = null;
+  @state() private scrollY = 0;
+  @state() private viewportHeight = 0;
+  /** Median row height in px, measured from currently-rendered rows. */
+  private rowHeight = 28;
+  private resizeObs: ResizeObserver | null = null;
   private unsubscribe?: () => void;
   private filterSaveTimer: number | null = null;
+  /** Tables with fewer rows than this skip virtualization (cheap to render). */
+  private readonly VIRT_THRESHOLD = 200;
+  /** Extra rows rendered above/below the viewport to mask scroll jank. */
+  private readonly OVERSCAN = 8;
 
   override async connectedCallback() {
     super.connectedCallback();
     document.addEventListener('easydb:global-search', this.onGlobalSearch as EventListener);
     document.addEventListener('easydb:table-search', this.onTableSearch as EventListener);
+    this.addEventListener('scroll', this.onScroll, { passive: true });
+    this.resizeObs = new ResizeObserver(() => {
+      this.viewportHeight = this.clientHeight;
+    });
+    this.resizeObs.observe(this);
     await this.bind();
   }
 
@@ -251,9 +265,19 @@ export class DataTable extends LitElement {
     super.disconnectedCallback();
     document.removeEventListener('easydb:global-search', this.onGlobalSearch as EventListener);
     document.removeEventListener('easydb:table-search', this.onTableSearch as EventListener);
+    this.removeEventListener('scroll', this.onScroll);
+    this.resizeObs?.disconnect();
+    this.resizeObs = null;
     this.unsubscribe?.();
     this.tableSubUnsub?.();
   }
+
+  private onScroll = () => {
+    // :host has overflow:auto so the data-table element itself is the
+    // scrolling container. Reading scrollTop off it triggers a @state-driven
+    // re-render via the assignment.
+    this.scrollY = (this as unknown as { scrollTop: number }).scrollTop;
+  };
 
   private onGlobalSearch = (e: Event) => {
     this.globalQuery = (e as CustomEvent<{ query: string }>).detail.query ?? '';
@@ -269,6 +293,16 @@ export class DataTable extends LitElement {
       this.unsubscribe?.();
       await this.bind();
     }
+    // Re-measure row height once we have content. Reading offsetHeight forces
+    // layout, so only do it when we actually need a number (still using the
+    // 28px default) — measure once, keep using the median.
+    const firstTr = this.shadowRoot?.querySelector('tbody tr:not(.spacer)') as
+      | HTMLElement
+      | null;
+    if (firstTr && firstTr.offsetHeight > 0) {
+      this.rowHeight = firstTr.offsetHeight;
+    }
+    if (!this.viewportHeight) this.viewportHeight = this.clientHeight;
   }
 
   private tableSubUnsub?: () => void;
@@ -607,9 +641,30 @@ export class DataTable extends LitElement {
     await ctx.store.tables.patch(this.tableId, { filters, updatedAt: Date.now() });
   }
 
+  /**
+   * Decide whether to render every row or just the visible slice.
+   * Returns the slice plus virtual padding heights for the rows skipped above
+   * and below the viewport. For small tables it just returns the whole list.
+   */
+  private virtualSlice(rows: Row[]): { slice: Row[]; topPad: number; bottomPad: number } {
+    if (rows.length <= this.VIRT_THRESHOLD || this.viewportHeight === 0) {
+      return { slice: rows, topPad: 0, bottomPad: 0 };
+    }
+    const rh = this.rowHeight;
+    const visibleRows = Math.ceil(this.viewportHeight / rh) + this.OVERSCAN * 2;
+    const startIdx = Math.max(0, Math.floor(this.scrollY / rh) - this.OVERSCAN);
+    const endIdx = Math.min(rows.length, startIdx + visibleRows);
+    return {
+      slice: rows.slice(startIdx, endIdx),
+      topPad: startIdx * rh,
+      bottomPad: (rows.length - endIdx) * rh,
+    };
+  }
+
   override render() {
     const rows = this.sortedRows();
     const cols = this.visibleColumns;
+    const { slice, topPad, bottomPad } = this.virtualSlice(rows);
     return html`
       <table>
         <colgroup>
@@ -689,7 +744,10 @@ export class DataTable extends LitElement {
           </tr>
         </thead>
         <tbody>
-          ${rows.map(
+          ${topPad > 0
+            ? html`<tr class="spacer" style=${`height:${topPad}px`}><td colspan=${cols.length + 1}></td></tr>`
+            : ''}
+          ${slice.map(
             (r) => html`
               <tr>
                 ${cols.map((c) => {
@@ -704,6 +762,9 @@ export class DataTable extends LitElement {
               </tr>
             `,
           )}
+          ${bottomPad > 0
+            ? html`<tr class="spacer" style=${`height:${bottomPad}px`}><td colspan=${cols.length + 1}></td></tr>`
+            : ''}
         </tbody>
       </table>
     `;
