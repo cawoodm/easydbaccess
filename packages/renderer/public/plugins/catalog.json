@@ -1,0 +1,12 @@
+{
+  "$schema": "easydb-plugin-catalog-v1",
+  "plugins": [
+    {
+      "id": "header-clock",
+      "name": "Header Clock",
+      "description": "Adds a 'Now' button to the header that toasts the current time. Useful as a minimal reference for registerHeaderButton.",
+      "author": "easyDBAccess reference",
+      "url": "./header-clock.js"
+    }
+  ]
+}

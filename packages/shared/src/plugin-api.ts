@@ -26,6 +26,12 @@ export interface PluginModule {
     version?: string;
     description?: string;
     author?: string;
+    /**
+     * Built-in plugins flagged optional are loaded by default but can be
+     * disabled from the Plugin Manager. The host stores the disabled state
+     * under the synthetic key `builtin:<name>` in the plugins collection.
+     */
+    optional?: boolean;
   };
 }
 

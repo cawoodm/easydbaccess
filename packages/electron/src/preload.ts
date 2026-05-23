@@ -10,7 +10,7 @@ import { contextBridge } from 'electron';
 
 contextBridge.exposeInMainWorld('easydb', {
   platform: 'electron',
-  version: '0.0.2',
+  version: '0.0.3',
 });
 
 // Type augmentation for renderer code (informational — the renderer imports

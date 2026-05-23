@@ -56,7 +56,7 @@ export function createServer(deps: ServerDeps) {
     );
   }
 
-  app.get('/health', (c) => c.json({ ok: true, version: '0.0.2S' }));
+  app.get('/health', (c) => c.json({ ok: true, version: '0.0.3S' }));
 
   mountSync(app, { store: deps.store });
   mountFetch(app, deps);

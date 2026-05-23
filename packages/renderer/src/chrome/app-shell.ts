@@ -275,7 +275,7 @@ export class AppShell extends LitElement {
   override render() {
     return html`
       <header>
-        <strong>easyDBAccess <span class="version">v0.0.2</span></strong>
+        <strong>easyDBAccess <span class="version">v0.0.3</span></strong>
         ${this.searchOpen || this.searchQuery.length > 0
           ? html`<input
               class="search"

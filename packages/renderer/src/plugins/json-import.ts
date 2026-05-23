@@ -50,10 +50,22 @@ const importerSpec: ImporterSpec = {
 // -- Core: file -> Tables -----------------------------------------------------
 
 async function importJsonFile(api: HostApi, file: File): Promise<void> {
+  await importJsonText(api, await file.text(), file.name);
+}
+
+/**
+ * Imports a JSON dump given its text body and a source filename. Used by both
+ * the drag-and-drop path and the sample-data plugin's URL fetch path. Behavior
+ * is identical: parse → detect shape → prompt user on collisions → write.
+ */
+export async function importJsonText(
+  api: HostApi,
+  text: string,
+  filename: string,
+): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('json-import: no active workspace');
 
-  const text = await file.text();
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -61,12 +73,12 @@ async function importJsonFile(api: HostApi, file: File): Promise<void> {
     api.events.emit('plugin:error', {
       url: 'json-import',
       phase: 'runtime',
-      error: new Error(`Invalid JSON in ${file.name}: ${(err as Error).message}`),
+      error: new Error(`Invalid JSON in ${filename}: ${(err as Error).message}`),
     });
     return;
   }
 
-  const baseName = file.name.replace(/\.db\.json$/i, '').replace(/\.json$/i, '') || 'imported';
+  const baseName = filename.replace(/\.db\.json$/i, '').replace(/\.json$/i, '') || 'imported';
   const tables = parsedToTables(parsed, baseName);
   if (tables.length === 0) return;
 
@@ -89,7 +101,7 @@ async function importJsonFile(api: HostApi, file: File): Promise<void> {
         ]
       : ['Add to current workspace', 'Replace entire workspace'];
     const choice = await api.ui.dialogs.choice(
-      `Importing ${tables.length} table${tables.length === 1 ? '' : 's'} from "${file.name}".${
+      `Importing ${tables.length} table${tables.length === 1 ? '' : 's'} from "${filename}".${
         collisions.length > 0
           ? `\n\n${collisions.length} table${collisions.length === 1 ? '' : 's'} share a name with existing data.`
           : ''
