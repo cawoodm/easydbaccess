@@ -504,8 +504,11 @@ export class DataTable extends LitElement {
     const btn = e.currentTarget as HTMLElement;
     const popover = FilterPopover.instance;
     if (!popover) return;
+    // Faceted: count values only across rows that pass every OTHER column's
+    // filter — so a column's own dropdown isn't pre-narrowed by what's
+    // already typed in that column's filter, but other filters do narrow it.
     const counts = new Map<string, number>();
-    for (const r of this.rows) {
+    for (const r of this.rowsFacetedFor(field)) {
       const v = r.data[field];
       if (v == null) continue;
       const s = String(v);
@@ -535,23 +538,50 @@ export class DataTable extends LitElement {
   }
 
   /**
+   * Faceted rows for a single column's filter dropdown: every row that
+   * passes every OTHER column's filter, ignoring the focused column's own.
+   * Matches the minniDBMax v1 _buildFilterOptionsArray behavior so dropdowns
+   * support drill-down (pick Country=Sweden, then City dropdown narrows to
+   * Swedish cities), while the Country dropdown itself still shows all
+   * countries (because its own filter is excluded from the facet).
+   *
+   * Pass `null` to evaluate against ALL per-column filters (used by the
+   * datalist for non-filtered columns).
+   */
+  private rowsFacetedFor(focusField: string | null): Row[] {
+    const active = Object.entries(this.filters)
+      .filter(([f, q]) => q && q.trim().length > 0 && f !== focusField)
+      .map(([f, q]) => [f, q.trim().toLowerCase()] as const);
+    if (active.length === 0) return this.rows;
+    return this.rows.filter((r) =>
+      active.every(([f, q]) =>
+        String(r.data[f] ?? '')
+          .toLowerCase()
+          .includes(q),
+      ),
+    );
+  }
+
+  /**
    * Decide per-column whether to surface a <datalist> autocomplete on the
    * filter input. Rule: every value in the first 100 rows must stringify to
    * fewer than 50 characters. Long-text or "description"-style columns are
    * excluded so the dropdown doesn't fill with multi-line content.
    *
    * Returns a Map from column field → sorted unique values (capped at 500).
-   * Empty map entry / absent key = no datalist for that column.
+   * The value list for each column is FACETED — it reflects only rows that
+   * pass the OTHER columns' filters, so selecting a value in one column
+   * narrows what's available in the others. Drill-down UX.
    */
   private computeFilterSuggestions(): Map<string, string[]> {
     const out = new Map<string, string[]>();
-    const sample = this.rows.slice(0, 100);
-    if (sample.length === 0) return out;
+    const eligibilitySample = this.rows.slice(0, 100);
+    if (eligibilitySample.length === 0) return out;
     const MAX_LEN = 50;
     const MAX_OPTIONS = 500;
     for (const c of this.visibleColumns) {
       let eligible = true;
-      for (const r of sample) {
+      for (const r of eligibilitySample) {
         const v = r.data[c.field];
         if (v == null) continue;
         const s = typeof v === 'string' ? v : String(v);
@@ -562,7 +592,8 @@ export class DataTable extends LitElement {
       }
       if (!eligible) continue;
       const seen = new Set<string>();
-      for (const r of this.rows) {
+      // Faceted source: rows passing every other column's filter.
+      for (const r of this.rowsFacetedFor(c.field)) {
         const v = r.data[c.field];
         if (v == null || v === '') continue;
         const s = typeof v === 'string' ? v : String(v);
