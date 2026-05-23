@@ -534,6 +534,47 @@ export class DataTable extends LitElement {
     return this.columns.filter((c) => !c.hidden);
   }
 
+  /**
+   * Decide per-column whether to surface a <datalist> autocomplete on the
+   * filter input. Rule: every value in the first 100 rows must stringify to
+   * fewer than 50 characters. Long-text or "description"-style columns are
+   * excluded so the dropdown doesn't fill with multi-line content.
+   *
+   * Returns a Map from column field → sorted unique values (capped at 500).
+   * Empty map entry / absent key = no datalist for that column.
+   */
+  private computeFilterSuggestions(): Map<string, string[]> {
+    const out = new Map<string, string[]>();
+    const sample = this.rows.slice(0, 100);
+    if (sample.length === 0) return out;
+    const MAX_LEN = 50;
+    const MAX_OPTIONS = 500;
+    for (const c of this.visibleColumns) {
+      let eligible = true;
+      for (const r of sample) {
+        const v = r.data[c.field];
+        if (v == null) continue;
+        const s = typeof v === 'string' ? v : String(v);
+        if (s.length >= MAX_LEN) {
+          eligible = false;
+          break;
+        }
+      }
+      if (!eligible) continue;
+      const seen = new Set<string>();
+      for (const r of this.rows) {
+        const v = r.data[c.field];
+        if (v == null || v === '') continue;
+        const s = typeof v === 'string' ? v : String(v);
+        if (s.length >= MAX_LEN) continue;
+        seen.add(s);
+        if (seen.size >= MAX_OPTIONS) break;
+      }
+      out.set(c.field, [...seen].sort());
+    }
+    return out;
+  }
+
   private onResizeStart(e: PointerEvent, field: string, th: HTMLElement) {
     e.preventDefault();
     e.stopPropagation();
@@ -651,6 +692,7 @@ export class DataTable extends LitElement {
     const rows = this.sortedRows();
     const cols = this.visibleColumns;
     const { slice, topPad, bottomPad } = this.virtualSlice(rows);
+    const suggestions = this.computeFilterSuggestions();
     return html`
       <table>
         <colgroup>
@@ -713,19 +755,27 @@ export class DataTable extends LitElement {
             <th style="width:2rem"></th>
           </tr>
           <tr class="filter-row">
-            ${cols.map(
-              (c) => html`
+            ${cols.map((c) => {
+              const opts = suggestions.get(c.field);
+              const listId = opts ? `fl-${c.field}` : undefined;
+              return html`
                 <th>
                   <input
                     type="text"
                     placeholder="filter…"
+                    list=${listId ?? ''}
                     .value=${this.filters[c.field] ?? ''}
                     @input=${(e: Event) =>
                       this.onFilterInput(c.field, (e.target as HTMLInputElement).value)}
                   />
+                  ${opts
+                    ? html`<datalist id=${listId!}>
+                        ${opts.map((v) => html`<option value=${v}></option>`)}
+                      </datalist>`
+                    : ''}
                 </th>
-              `,
-            )}
+              `;
+            })}
             <th></th>
           </tr>
         </thead>
