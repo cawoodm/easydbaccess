@@ -1,0 +1,56 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Verify package.json version matches tag
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$pkg" ]; then
+            echo "Tag v$tag does not match package.json version $pkg" >&2
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - name: Build shared
+        run: npm run build --workspace @easydb/shared
+
+      - name: Build server
+        run: npm run build --workspace @easydb/server
+
+      - name: Build renderer (relative base for file://)
+        working-directory: packages/renderer
+        run: npx vite build --base ./
+
+      - name: Build electron (tsc)
+        run: npm run build --workspace @easydb/electron
+
+      - name: Package & publish to GitHub Release
+        working-directory: packages/electron
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No Apple cert configured — skip auto-discovery to avoid CI failure.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npx electron-builder --config electron-builder.json --publish always

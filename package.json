@@ -15,6 +15,8 @@
     "start:electron": "npm run start --workspace @easydb/electron",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "typecheck": "tsc -b",
     "lint": "eslint packages",
     "format": "prettier --write \"packages/**/*.{ts,js,json,html,md}\"",
@@ -23,8 +25,9 @@
     "package:electron": "pwsh -File ./package-electron.ps1 -Installer"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^22.0.0",
     "prettier": "^3.3.0",
-    "@types/node": "^22.0.0"
+    "typescript": "^5.6.0"
   }
 }

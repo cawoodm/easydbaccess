@@ -263,7 +263,11 @@ export class AppShell extends LitElement {
   };
 
   private renderSlotButton(b: ButtonSpec, where: 'header' | 'footer') {
-    const cls = b.variant === 'primary' ? 'primary' : 'slot';
+    // Header buttons share one styled look — the dark header bar can't host
+    // unstyled native buttons, so everything in the header gets the primary
+    // treatment regardless of variant. Footer still distinguishes primary vs
+    // slot for less-prominent footer actions.
+    const cls = where === 'header' || b.variant === 'primary' ? 'primary' : 'slot';
     return html`
       <button class=${cls} title=${b.tooltip ?? b.label} @click=${() => this.runSlot(b)}>
         ${b.icon ? html`<span class="mi sm">${b.icon}</span>` : ''}
