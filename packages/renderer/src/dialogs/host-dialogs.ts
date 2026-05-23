@@ -42,6 +42,7 @@ export class HostDialogs extends LitElement {
       display: contents;
     }
     dialog {
+      position: relative;
       border: 0;
       border-radius: 0.5rem;
       padding: 0;
@@ -49,6 +50,23 @@ export class HostDialogs extends LitElement {
       max-width: 520px;
       box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
       font-family: system-ui, sans-serif;
+    }
+    button.close-x {
+      position: absolute;
+      top: 0.55rem;
+      right: 0.6rem;
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+      color: #9ca3af;
+      font-size: 1.1rem;
+      padding: 0.15rem 0.3rem;
+      line-height: 1;
+      border-radius: 0.2rem;
+    }
+    button.close-x:hover {
+      color: #111;
+      background: #f3f4f6;
     }
     dialog::backdrop {
       background: rgba(15, 23, 42, 0.4);
@@ -224,10 +242,25 @@ export class HostDialogs extends LitElement {
 
   private cancelPrompt = () => this.closeAndResolve(null);
 
+  /**
+   * Close via the X is semantically the same as the dialog's cancel event:
+   * alert resolves with undefined; prompt/choice resolve with null. We dispatch
+   * a synthetic 'cancel' event so the existing onCancel logic decides.
+   */
+  private onCloseX = () => {
+    if (this.dialogEl && !this.dialogEl.dispatchEvent(new Event('cancel', { cancelable: true }))) {
+      // listener preventDefault'd — already handled
+    } else {
+      // Fallback: call onCancel directly.
+      this.onCancel(new Event('cancel', { cancelable: true }));
+    }
+  };
+
   override render() {
     const c = this.current;
     return html`
       <dialog @cancel=${this.onCancel}>
+        <button type="button" class="close-x" title="Close" @click=${this.onCloseX}>×</button>
         ${c ? this.renderBody(c) : nothing}
       </dialog>
     `;

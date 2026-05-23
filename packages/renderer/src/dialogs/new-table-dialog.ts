@@ -45,6 +45,7 @@ export class NewTableDialog extends LitElement {
       display: contents;
     }
     dialog {
+      position: relative;
       border: 0;
       border-radius: 0.5rem;
       padding: 0;
@@ -53,6 +54,22 @@ export class NewTableDialog extends LitElement {
       max-height: 92vh;
       box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
       font-family: system-ui, sans-serif;
+    }
+    button.close-x {
+      position: absolute;
+      top: 0.55rem;
+      right: 0.6rem;
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+      color: #9ca3af;
+      padding: 0.15rem;
+      line-height: 1;
+      border-radius: 0.2rem;
+    }
+    button.close-x:hover {
+      color: #111;
+      background: #f3f4f6;
     }
     dialog::backdrop {
       background: rgba(15, 23, 42, 0.4);
@@ -459,6 +476,9 @@ export class NewTableDialog extends LitElement {
     const submitLabel = this.mode === 'edit' ? 'Save' : 'Create';
     return html`
       <dialog @cancel=${this.close}>
+        <button type="button" class="close-x" title="Close" @click=${this.close}>
+          <span class="mi sm">close</span>
+        </button>
         <form @submit=${this.submit}>
           <h2>${title}</h2>
           <label>

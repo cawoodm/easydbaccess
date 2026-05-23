@@ -16,6 +16,7 @@ export class CsvPasteDialog extends LitElement {
       display: contents;
     }
     dialog {
+      position: relative;
       border: 0;
       border-radius: 0.5rem;
       padding: 0;
@@ -23,6 +24,23 @@ export class CsvPasteDialog extends LitElement {
       max-width: 90vw;
       box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
       font-family: system-ui, sans-serif;
+    }
+    button.close-x {
+      position: absolute;
+      top: 0.55rem;
+      right: 0.6rem;
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+      color: #9ca3af;
+      font-size: 1.1rem;
+      padding: 0.15rem 0.3rem;
+      line-height: 1;
+      border-radius: 0.2rem;
+    }
+    button.close-x:hover {
+      color: #111;
+      background: #f3f4f6;
     }
     dialog::backdrop {
       background: rgba(15, 23, 42, 0.4);
@@ -166,6 +184,7 @@ export class CsvPasteDialog extends LitElement {
   override render() {
     return html`
       <dialog @cancel=${this.close}>
+        <button type="button" class="close-x" title="Close" @click=${this.close}>×</button>
         <form @submit=${this.submit}>
           <h2>Paste CSV</h2>
           <p class="hint">
