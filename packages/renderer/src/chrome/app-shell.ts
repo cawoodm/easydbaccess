@@ -1,137 +1,142 @@
+import type { ButtonSpec, HostApi } from '@easydb/shared';
 import { LitElement, css, html } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
-import type { ButtonSpec, HostApi } from '@easydb/shared';
 import { getContext } from '../app-context.js';
-import { materialIconStyles } from './material-icon-css.js';
-import './workspace-selector.js';
-import './table-list.js';
-import '../dialogs/new-table-dialog.js';
-import '../dialogs/host-dialogs.js';
-import '../dialogs/toast-host.js';
 import '../dialogs/csv-paste-dialog.js';
-import '../dialogs/plugin-manager-dialog.js';
-import type { NewTableDialog } from '../dialogs/new-table-dialog.js';
 import type { CsvPasteDialog } from '../dialogs/csv-paste-dialog.js';
+import '../dialogs/host-dialogs.js';
+import '../dialogs/new-table-dialog.js';
+import type { NewTableDialog } from '../dialogs/new-table-dialog.js';
+import '../dialogs/plugin-manager-dialog.js';
 import type { PluginManagerDialog } from '../dialogs/plugin-manager-dialog.js';
+import '../dialogs/toast-host.js';
+import { materialIconStyles } from './material-icon-css.js';
+import './table-list.js';
+import './workspace-selector.js';
 
 @customElement('app-shell')
 export class AppShell extends LitElement {
   static override styles = [
     materialIconStyles,
     css`
-    :host {
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-      font-family: system-ui, sans-serif;
-      background: #f3f4f6;
-    }
-    header,
-    footer {
-      background: #1f2937;
-      color: white;
-      padding: 0.5rem 1rem;
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      position: relative;
-      z-index: 100000;
-    }
-    header strong,
-    footer .spacer {
-      flex: 1;
-    }
-    footer button.slot {
-      background: transparent;
-      color: white;
-      border: 1px solid #4b5563;
-      padding: 0.3rem 0.7rem;
-      border-radius: 0.25rem;
-      cursor: pointer;
-      font: inherit;
-    }
-    footer button.slot:hover {
-      background: #374151;
-    }
-    header .version {
-      opacity: 0.5;
-      font-size: 0.75rem;
-      margin-left: 0.5rem;
-    }
-    button.primary,
-    button.slot {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-    }
-    button.primary {
-      background: #3b82f6;
-      color: white;
-      border: 0;
-      padding: 0.4rem 0.75rem;
-      border-radius: 0.25rem;
-      cursor: pointer;
-      font: inherit;
-    }
-    button.primary:hover {
-      background: #2563eb;
-    }
-    input.search {
-      background: #374151;
-      color: white;
-      border: 1px solid #4b5563;
-      padding: 0.3rem 0.6rem;
-      border-radius: 0.25rem;
-      font: inherit;
-      width: 14rem;
-    }
-    input.search::placeholder {
-      color: #9ca3af;
-    }
-    input.search:focus {
-      outline: 2px solid #3b82f6;
-      outline-offset: -1px;
-    }
-    button.icon-btn {
-      background: transparent;
-      color: white;
-      border: 1px solid #4b5563;
-      padding: 0.3rem 0.6rem;
-      border-radius: 0.25rem;
-      font: inherit;
-      cursor: pointer;
-      line-height: 1;
-    }
-    button.icon-btn:hover {
-      background: #374151;
-    }
-    main {
-      flex: 1;
-      overflow: hidden;
-      position: relative;
-    }
-    :host(.drag-over) main::after {
-      content: 'Drop CSV or JSON here';
-      position: absolute;
-      inset: 0.75rem;
-      border: 3px dashed #3b82f6;
-      border-radius: 0.75rem;
-      display: grid;
-      place-items: center;
-      background: rgba(59, 130, 246, 0.12);
-      color: #1e3a8a;
-      font-weight: 700;
-      font-size: 1.6rem;
-      letter-spacing: 0.04em;
-      pointer-events: none;
-      z-index: 90000;
-      animation: pulse-overlay 1.4s ease-in-out infinite;
-    }
-    @keyframes pulse-overlay {
-      0%, 100% { background: rgba(59, 130, 246, 0.08); }
-      50% { background: rgba(59, 130, 246, 0.18); }
-    }
-  `,
+      :host {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        font-family: system-ui, sans-serif;
+        background: #f3f4f6;
+      }
+      header,
+      footer {
+        background: #1f2937;
+        color: white;
+        padding: 0.5rem 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        position: relative;
+        z-index: 100000;
+      }
+      header strong,
+      footer .spacer {
+        flex: 1;
+      }
+      footer button.slot {
+        background: transparent;
+        color: white;
+        border: 1px solid #4b5563;
+        padding: 0.3rem 0.7rem;
+        border-radius: 0.25rem;
+        cursor: pointer;
+        font: inherit;
+      }
+      footer button.slot:hover {
+        background: #374151;
+      }
+      header .version {
+        opacity: 0.5;
+        font-size: 0.75rem;
+        margin-left: 0.5rem;
+      }
+      button.primary,
+      button.slot {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+      button.primary {
+        background: #3b82f6;
+        color: white;
+        border: 0;
+        padding: 0.4rem 0.75rem;
+        border-radius: 0.25rem;
+        cursor: pointer;
+        font: inherit;
+      }
+      button.primary:hover {
+        background: #2563eb;
+      }
+      input.search {
+        background: #374151;
+        color: white;
+        border: 1px solid #4b5563;
+        padding: 0.3rem 0.6rem;
+        border-radius: 0.25rem;
+        font: inherit;
+        width: 14rem;
+      }
+      input.search::placeholder {
+        color: #9ca3af;
+      }
+      input.search:focus {
+        outline: 2px solid #3b82f6;
+        outline-offset: -1px;
+      }
+      button.icon-btn {
+        background: transparent;
+        color: white;
+        border: 1px solid #4b5563;
+        padding: 0.3rem 0.6rem;
+        border-radius: 0.25rem;
+        font: inherit;
+        cursor: pointer;
+        line-height: 1;
+      }
+      button.icon-btn:hover {
+        background: #374151;
+      }
+      main {
+        flex: 1;
+        overflow: hidden;
+        position: relative;
+      }
+      :host(.drag-over) main::after {
+        content: 'Drop CSV or JSON here';
+        position: absolute;
+        inset: 0.75rem;
+        border: 3px dashed #3b82f6;
+        border-radius: 0.75rem;
+        display: grid;
+        place-items: center;
+        background: rgba(59, 130, 246, 0.12);
+        color: #1e3a8a;
+        font-weight: 700;
+        font-size: 1.6rem;
+        letter-spacing: 0.04em;
+        pointer-events: none;
+        z-index: 90000;
+        animation: pulse-overlay 1.4s ease-in-out infinite;
+      }
+      @keyframes pulse-overlay {
+        0%,
+        100% {
+          background: rgba(59, 130, 246, 0.08);
+        }
+        50% {
+          background: rgba(59, 130, 246, 0.18);
+        }
+      }
+    `,
   ];
 
   @query('new-table-dialog') private dialog!: NewTableDialog;
@@ -210,7 +215,9 @@ export class AppShell extends LitElement {
     ctx.events.on('app:ready', () => this.snapshotRegistries(ctx));
   }
 
-  private snapshotRegistries(ctx: { registries: { footerButtons: ButtonSpec[]; headerButtons: ButtonSpec[] } }) {
+  private snapshotRegistries(ctx: {
+    registries: { footerButtons: ButtonSpec[]; headerButtons: ButtonSpec[] };
+  }) {
     this.footerButtons = [...ctx.registries.footerButtons];
     this.headerButtons = [...ctx.registries.headerButtons];
   }
@@ -268,7 +275,7 @@ export class AppShell extends LitElement {
   override render() {
     return html`
       <header>
-        <strong>easyDBAccess <span class="version">v0.0.0</span></strong>
+        <strong>easyDBAccess <span class="version">v0.0.2</span></strong>
         ${this.searchOpen || this.searchQuery.length > 0
           ? html`<input
               class="search"

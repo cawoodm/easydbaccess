@@ -1,0 +1,17 @@
+directories:
+  output: dist-installer
+  buildResources: build
+appId: ch.marccawood.easydbaccess
+productName: easyDBAccess
+electronVersion: 33.4.11
+files:
+  - filter:
+      - dist/**/*
+      - ../renderer/dist/**/*
+      - ../server/dist/**/*
+win:
+  target: nsis
+mac:
+  target: dmg
+linux:
+  target: AppImage

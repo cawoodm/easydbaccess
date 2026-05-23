@@ -1,4 +1,5 @@
 import type { Hono } from 'hono';
+import { log } from '../log.js';
 import type { ServerDeps } from '../index.js';
 
 /**
@@ -10,10 +11,11 @@ import type { ServerDeps } from '../index.js';
  *   GET /plugins/registry        — returns a curated list of known plugins
  */
 export function mountPlugins(app: Hono, _deps: ServerDeps) {
-  app.get('/plugins/registry', (c) =>
-    c.json({
+  app.get('/plugins/registry', (c) => {
+    log('plugins', 'registry');
+    return c.json({
       plugins: [],
       todo: 'curated plugin list',
-    }),
-  );
+    });
+  });
 }

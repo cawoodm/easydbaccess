@@ -1,6 +1,7 @@
 {
-  "appId": "ch.monads.easydbaccess",
+  "appId": "ch.marccawood.easydbaccess",
   "productName": "easyDBAccess",
+  "electronVersion": "33.4.11",
   "directories": {
     "output": "dist-installer"
   },
@@ -9,7 +10,13 @@
     "../renderer/dist/**/*",
     "../server/dist/**/*"
   ],
-  "win": { "target": "nsis" },
-  "mac": { "target": "dmg" },
-  "linux": { "target": "AppImage" }
+  "win": {
+    "target": "nsis"
+  },
+  "mac": {
+    "target": "dmg"
+  },
+  "linux": {
+    "target": "AppImage"
+  }
 }

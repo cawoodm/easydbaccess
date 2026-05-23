@@ -1,6 +1,6 @@
 {
   "name": "easydbaccess",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "description": "Local-first, plugin-extensible, multi-table database app — runs in the browser and as an Electron desktop app.",
   "type": "module",
@@ -18,7 +18,9 @@
     "typecheck": "tsc -b",
     "lint": "eslint packages",
     "format": "prettier --write \"packages/**/*.{ts,js,json,html,md}\"",
-    "publish": "pwsh -File ./publish.ps1"
+    "publish": "pwsh -File ./publish.ps1",
+    "build:electron": "pwsh -File ./package-electron.ps1",
+    "package:electron": "pwsh -File ./package-electron.ps1 -Installer"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
