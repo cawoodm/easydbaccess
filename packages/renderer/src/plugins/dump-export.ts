@@ -45,6 +45,8 @@ export async function serializeWorkspace(api: HostApi): Promise<string> {
       name: t.name,
       columns: t.columns,
       rows: rows.map((r) => r.data),
+      ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
+      ...(t.sortColumn ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true } : {}),
     });
   }
 

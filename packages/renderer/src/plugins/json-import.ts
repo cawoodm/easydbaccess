@@ -193,12 +193,20 @@ export function parsedToTables(parsed: unknown, fallbackName: string): Normalize
     const out: NormalizedTable[] = [];
     for (const entry of dump.tables) {
       if (isNativeTable(entry)) {
+        const e = entry as Record<string, unknown>;
+        const geom = isObject(e.windowGeometry)
+          ? (e.windowGeometry as WindowGeometry)
+          : undefined;
+        const sortColumn = typeof e.sortColumn === 'string' ? e.sortColumn : undefined;
+        const sortAsc = typeof e.sortAsc === 'boolean' ? e.sortAsc : undefined;
         out.push({
           name: String(entry.name),
           columns: entry.columns.map(normalizeColumn),
           rows: Array.isArray(entry.rows)
             ? (entry.rows.filter(isObject) as Array<Record<string, unknown>>)
             : [],
+          ...(geom ? { windowGeometry: geom } : {}),
+          ...(sortColumn ? { sortColumn, sortAsc: sortAsc ?? true } : {}),
         });
         continue;
       }

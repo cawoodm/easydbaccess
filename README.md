@@ -54,7 +54,9 @@ constraints:
 ```
 id:ID:number::unique,notnull
 name:Full Name:string:::
+email:Email:string::unique
 joined:Joined On:date::
+active:Active:boolean::
 ```
 
 ![Header types](./docs/screenshots/column-types.png)
