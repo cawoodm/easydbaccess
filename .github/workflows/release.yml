@@ -65,6 +65,31 @@ jobs:
       - name: Build electron (tsc)
         run: npm run build --workspace @easydb/electron
 
+      # Defensive: electron-builder's app-builder.exe has been observed missing
+      # on GH-hosted Windows runners — Defender quarantining the .exe inside
+      # node_modules is the most likely cause. Verify the binary exists; if
+      # not, reinstall app-builder-bin. Logs the tree on miss to help diagnose.
+      - name: Verify app-builder-bin binary
+        shell: bash
+        run: |
+          set -e
+          case "${RUNNER_OS}" in
+            Windows) rel="win/x64/app-builder.exe" ;;
+            macOS)   rel="mac/app-builder_$(node -p 'process.arch === "arm64" ? "arm64" : "amd64"')" ;;
+            *)       rel="linux/$(node -p 'process.arch')/app-builder" ;;
+          esac
+          path="node_modules/app-builder-bin/$rel"
+          echo "== expecting app-builder at: $path"
+          if [ ! -f "$path" ]; then
+            echo "== MISSING — listing app-builder-bin tree:"
+            ls -R node_modules/app-builder-bin/ 2>&1 | head -80 || true
+            echo "== reinstalling app-builder-bin"
+            npm install --no-save --no-package-lock app-builder-bin
+            ls -la "node_modules/app-builder-bin/$(dirname "$rel")/" || { echo "still missing after reinstall"; exit 1; }
+          else
+            echo "== present"
+          fi
+
       - name: Package & publish to GitHub Release
         working-directory: packages/electron
         env:

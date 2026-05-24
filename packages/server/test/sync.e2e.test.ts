@@ -357,7 +357,7 @@ describe('sqlite adapter — structural', () => {
           { field: 'age', type: 'number' },
           { field: 'active', type: 'boolean' },
           { field: 'joined', type: 'date' },
-          { field: 'avatar', type: 'image' },
+          { field: 'avatar', type: 'string' },
         ],
         rows: [
           { name: 'Alice', age: 30, active: true, joined: '2026-01-01', avatar: 'x.png' },

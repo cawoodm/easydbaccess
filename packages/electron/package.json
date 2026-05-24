@@ -1,7 +1,9 @@
 {
   "name": "@easydb/electron",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "private": true,
+  "description": "easyDBAccess desktop shell — Electron wrapper around the renderer.",
+  "author": "Marc Cawood",
   "type": "commonjs",
   "main": "./dist/main.js",
   "scripts": {
@@ -11,8 +13,8 @@
     "package": "electron-builder --config electron-builder.json"
   },
   "dependencies": {
-    "@easydb/shared": "*",
-    "@easydb/server": "*"
+    "@easydb/shared": "file:../shared",
+    "@easydb/server": "file:../server"
   },
   "devDependencies": {
     "electron": "^33.0.0",

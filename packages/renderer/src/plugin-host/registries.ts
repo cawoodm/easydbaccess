@@ -15,6 +15,10 @@ import { ToastHost } from '../dialogs/toast-host.js';
 /**
  * Mutable lists the app reads to render header/footer slots and to dispatch
  * drops. Plugins write here via the UiRegistry returned by createUiRegistry.
+ *
+ * `cellRenderers` is keyed by renderer NAME (the value a column puts in its
+ * `renderer` field), not by column type. Names are arbitrary plugin-chosen
+ * strings — 'color', 'image', 'link', 'date', etc.
  */
 export interface Registries {
   headerButtons: ButtonSpec[];
@@ -68,7 +72,7 @@ export function createUiRegistry(r: Registries): UiRegistry {
     registerExporter: (spec) => pushReg(r.exporters, spec),
     registerUrlSource: (spec) => pushReg(r.urlSources, spec),
     registerDropHandler: (fn) => pushReg(r.dropHandlers, fn),
-    registerCellRenderer: (typeName, tag) => mapReg(r.cellRenderers, typeName, tag),
+    registerCellRenderer: (name, tag) => mapReg(r.cellRenderers, name, tag),
     registerRowRenderer: (viewName, tag) => mapReg(r.rowRenderers, viewName, tag),
     registerTableRenderer: (viewName, tag) => mapReg(r.tableRenderers, viewName, tag),
     openNewTableDialog: () => {

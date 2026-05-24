@@ -7,6 +7,9 @@ Status keys: `bug` = broken, `feature` = missing, `polish` = works but UX
 gap, `perf` = correctness OK but slow. Leading `✅` = done.
 `✅✅` = done with e2e test coverage.
 
+## Rendering
+* Create an html renderer which outputs the value of a cell without encoding
+
 ## Dialogs
 * ✅✅ Create an all-purpose choice() dialog which accepts an array of string options (e.g. OK, Ignore, Cancel) and displays them as a vertical list of buttons and returns the string of the button the user clicked
 * ✅✅ `window.prompt`; needs a proper dialog) - make an all-purpose prompt which can be used by plugins via the api 

@@ -8,8 +8,10 @@ import * as gistSync from '../plugins/gist-sync.js';
 import * as serverSync from '../plugins/server-sync.js';
 import * as newTableButton from '../plugins/new-table-button.js';
 import * as pluginManagerButton from '../plugins/plugin-manager-button.js';
+import * as coreRenderers from '../plugins/core-renderers.js';
 import * as cellColor from '../plugins/cell-color.js';
 import * as cellImage from '../plugins/cell-image.js';
+import * as cellLink from '../plugins/cell-link.js';
 import * as sampleData from '../plugins/sample-data.js';
 import * as autoSync from '../plugins/auto-sync.js';
 
@@ -32,8 +34,10 @@ const builtins: PluginModule[] = [
   gistSync,
   serverSync,
   pluginManagerButton,
+  coreRenderers,
   cellColor,
   cellImage,
+  cellLink,
   sampleData,
   autoSync,
 ];

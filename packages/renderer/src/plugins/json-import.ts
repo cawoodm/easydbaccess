@@ -353,11 +353,21 @@ function normalizeColumn(c: unknown): ColumnSpec {
   if (!isObject(c)) return { field: 'col', label: 'Col', type: 'string' };
   const o = c as Record<string, unknown>;
   const field = String(o.field ?? 'col');
-  return {
+  let type: ColumnType = (typeof o.type === 'string' ? o.type : 'string') as ColumnType;
+  let renderer = typeof o.renderer === 'string' ? o.renderer : undefined;
+  // Pre-v3 dumps stored color/image as column types rather than renderers.
+  // Rewrite on the way in so newly-imported tables match today's shape.
+  if ((type as string) === 'color' || (type as string) === 'image') {
+    renderer = renderer ?? (type as string);
+    type = 'string';
+  }
+  const spec: ColumnSpec = {
     field,
     label: String(o.label ?? field),
-    type: (typeof o.type === 'string' ? o.type : 'string') as ColumnType,
+    type,
   };
+  if (renderer) spec.renderer = renderer;
+  return spec;
 }
 
 // -- Column inference for array-of-objects ------------------------------------

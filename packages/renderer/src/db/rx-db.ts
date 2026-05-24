@@ -56,6 +56,24 @@ async function init(): Promise<EasyDatabase> {
         1: (doc) => doc,
         // v1 -> v2: added ColumnSpec.width
         2: (doc) => doc,
+        // v2 -> v3: dropped 'color'/'image' from ColumnType; those columns are
+        // rewritten to type:'string' with renderer set to the old type. The
+        // renderer attribute is also brand-new in v3 — existing columns
+        // simply lack it (read as plain text until the user picks one).
+        3: (doc) => ({
+          ...doc,
+          columns: Array.isArray(doc.columns)
+            ? doc.columns.map((c: { type?: string; renderer?: string }) => {
+                if (c.type === 'color') {
+                  return { ...c, type: 'string', renderer: c.renderer ?? 'color' };
+                }
+                if (c.type === 'image') {
+                  return { ...c, type: 'string', renderer: c.renderer ?? 'image' };
+                }
+                return c;
+              })
+            : doc.columns,
+        }),
       },
     },
     rows: { schema: rowSchema },

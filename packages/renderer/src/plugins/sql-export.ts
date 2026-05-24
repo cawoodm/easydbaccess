@@ -114,8 +114,6 @@ function sqlTypeFor(t: ColumnType): string {
     case 'datetime':
       return 'TIMESTAMP';
     case 'string':
-    case 'color':
-    case 'image':
     default:
       return 'TEXT';
   }

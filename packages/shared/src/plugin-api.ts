@@ -179,11 +179,14 @@ export interface UiRegistry {
   registerFooterButton(spec: ButtonSpec): Unregister;
   registerTableButton(spec: TableButtonSpec): Unregister;
   /**
-   * Register a cell renderer. `tag` is the custom element name (must contain
-   * a hyphen). The element receives `value` and `column` properties and
-   * dispatches a `change` event with `{ detail: { value } }` on edit.
+   * Register a cell renderer under a name. Columns opt in to it by setting
+   * `column.renderer` to this name (independent of the column's data type).
+   * `tag` is the custom element name (must contain a hyphen). The element
+   * receives `value` and `column` properties and dispatches a `change` event
+   * with `{ detail: { value } }` on edit. Columns without a renderer (or
+   * pointing at an unregistered name) fall back to read-only text.
    */
-  registerCellRenderer(typeName: string, tag: string): Unregister;
+  registerCellRenderer(name: string, tag: string): Unregister;
   registerRowRenderer(viewName: string, tag: string): Unregister;
   registerTableRenderer(viewName: string, tag: string): Unregister;
   registerImporter(spec: ImporterSpec): Unregister;

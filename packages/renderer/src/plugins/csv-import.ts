@@ -171,7 +171,15 @@ export function parseCsv(text: string): ParseResult {
   });
 
   const columns: ColumnSpec[] = headerSpecs.map((s, i) => {
-    const col: ColumnSpec = { field: s.field, label: s.label, type: types[i] ?? 'string' };
+    const finalType = types[i] ?? 'string';
+    const col: ColumnSpec = { field: s.field, label: s.label, type: finalType };
+    // Auto-assign a renderer when inference pinned a type with a built-in
+    // renderer. CSV import is the only path where renderer auto-detection
+    // is allowed — once a table exists, the user picks renderers manually.
+    // An explicit header annotation (s.renderer) wins over inference.
+    const autoRenderer = rendererForType(finalType);
+    const chosen = s.renderer ?? autoRenderer;
+    if (chosen) col.renderer = chosen;
     if (s.default !== undefined) col.default = s.default;
     if (s.max != null) col.max = s.max;
     if (s.unique) col.unique = true;
@@ -197,6 +205,7 @@ interface HeaderSpec {
   field: string;
   label: string;
   type?: ColumnType;
+  renderer?: string;
   default?: unknown;
   max?: number;
   unique?: boolean;
@@ -210,9 +219,23 @@ const KNOWN_TYPES = new Set<ColumnType>([
   'boolean',
   'date',
   'datetime',
-  'color',
-  'image',
 ]);
+
+/**
+ * Legacy CSV header type names that map onto renderer names in the post-
+ * `column.renderer` world. `bg:Background:color` keeps working — it just
+ * becomes `{type:'string', renderer:'color'}` instead of `{type:'color'}`.
+ */
+const LEGACY_TYPE_TO_RENDERER: Record<string, string> = {
+  color: 'color',
+  image: 'image',
+};
+
+/** Returns the matching renderer name for an inferred type, or undefined. */
+function rendererForType(t: ColumnType): string | undefined {
+  if (t === 'date' || t === 'datetime' || t === 'boolean') return t;
+  return undefined;
+}
 
 function parseHeaderCell(h: string, idx: number): HeaderSpec {
   const trimmed = h.trim();
@@ -225,8 +248,15 @@ function parseHeaderCell(h: string, idx: number): HeaderSpec {
   const label = (parts[1] ?? parts[0] ?? '').trim() || field;
   const spec: HeaderSpec = { field, label };
   const typeStr = (parts[2] ?? '').trim();
-  if (typeStr && KNOWN_TYPES.has(typeStr as ColumnType)) {
-    spec.type = typeStr as ColumnType;
+  if (typeStr) {
+    if (KNOWN_TYPES.has(typeStr as ColumnType)) {
+      spec.type = typeStr as ColumnType;
+    } else if (LEGACY_TYPE_TO_RENDERER[typeStr]) {
+      // Legacy 'color' / 'image' header annotations: keep data as a string
+      // and let the matching renderer decide how to display it.
+      spec.type = 'string';
+      spec.renderer = LEGACY_TYPE_TO_RENDERER[typeStr];
+    }
   }
   const defStr = (parts[3] ?? '').trim();
   if (defStr) spec.default = defStr;

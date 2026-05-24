@@ -277,7 +277,7 @@ interface Conn {
 
 // -- Body validation ---------------------------------------------------------
 
-type ColumnType = 'string' | 'number' | 'boolean' | 'date' | 'color' | 'image';
+type ColumnType = 'string' | 'number' | 'boolean' | 'date' | 'datetime';
 
 interface ColumnSpec {
   field: string;
@@ -371,8 +371,7 @@ function sqlAffinity(t: ColumnType): string {
       return 'INTEGER';
     case 'string':
     case 'date':
-    case 'color':
-    case 'image':
+    case 'datetime':
     default:
       return 'TEXT';
   }

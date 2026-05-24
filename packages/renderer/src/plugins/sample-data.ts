@@ -15,7 +15,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
 export function init(api: HostApi): void {
   api.ui.registerHeaderButton({
     id: 'sample-data:load',
-    label: 'Sample data',
+    label: '',
     icon: 'database',
     tooltip: 'Fetch a JSON dump from a URL and import it',
     onClick: () => loadSample(api),
@@ -37,10 +37,10 @@ async function loadSample(api: HostApi): Promise<void> {
     const filename = filenameFromUrl(url);
     await importJsonText(api, text, filename);
   } catch (err) {
-    api.ui.dialogs.toast(
-      `Could not load ${url}: ${(err as Error).message}`,
-      { kind: 'error', title: 'Sample data' },
-    );
+    api.ui.dialogs.toast(`Could not load ${url}: ${(err as Error).message}`, {
+      kind: 'error',
+      title: 'Sample data',
+    });
   }
 }
 

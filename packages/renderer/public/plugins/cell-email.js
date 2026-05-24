@@ -1,31 +1,32 @@
 /**
- * cell-link — URL/phone link cell renderer, dynamically loaded from the catalog.
+ * cell-email — renderer that turns email addresses into mailto: links.
  *
- * Overrides string-cell rendering: http(s) URLs render as <a target=_blank>,
- * phone-like values as <a href=tel:>. Non-matching values fall back to the
- * default text input. Demonstrates the override-the-default-renderer pattern
- * for the `string` cell type.
+ * Loaded by URL from the plugin catalog. Plain JS — no bare imports —
+ * because the host wraps the body in a Blob URL and dynamic-imports it.
  *
- * Plain JS — no bare imports — because the host wraps the body in a Blob URL
- * and dynamic-imports it; bare specifiers wouldn't resolve in that context.
+ * Within a single cell the renderer branches per value: addresses that
+ * look like emails become <a href="mailto:..."> with a pencil to switch
+ * to edit mode; non-matching values fall through to a plain text input.
+ * The renderer name is `email` — pick it in the column editor's
+ * Renderer dropdown.
  */
 
 export const meta = {
-  name: 'cell-link',
+  name: 'cell-email',
   version: '0.1.0',
   description:
-    'Renders http(s) URLs and phone-like values in string cells as clickable links. A pencil toggles to edit mode.',
+    'Renders email-shaped values as mailto: links. Apply by setting a column\'s renderer to "email".',
   author: 'easyDBAccess reference',
 };
 
 export function init(api) {
-  if (!customElements.get('cell-link')) {
-    customElements.define('cell-link', CellLink);
+  if (!customElements.get('cell-email')) {
+    customElements.define('cell-email', CellEmail);
   }
-  api.ui.registerCellRenderer('string', 'cell-link');
+  api.ui.registerCellRenderer('email', 'cell-email');
 }
 
-class CellLink extends HTMLElement {
+class CellEmail extends HTMLElement {
   constructor() {
     super();
     this._value = '';
@@ -50,22 +51,18 @@ class CellLink extends HTMLElement {
   render() {
     this.innerHTML = '';
     const v = this._value;
-    const url = !this._editing ? detectUrl(v) : null;
-    const tel = !this._editing && !url ? detectPhone(v) : null;
+    const email = !this._editing ? detectEmail(v) : null;
 
-    if (url || tel) {
+    if (email) {
       const wrap = document.createElement('span');
       wrap.style.cssText = 'display:inline-flex;align-items:center;gap:0.25rem;width:100%';
+
       const a = document.createElement('a');
-      a.href = url ? v : `tel:${v.replace(/[^\d+]/g, '')}`;
-      if (url) {
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-      }
-      a.textContent = v;
+      a.href = `mailto:${email}`;
+      a.textContent = email;
+      a.title = `Email ${email}`;
       a.style.cssText =
         'color:#2563eb;text-decoration:underline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-      a.title = url ? `Open ${v}` : `Call ${v}`;
 
       const edit = document.createElement('button');
       edit.type = 'button';
@@ -85,6 +82,7 @@ class CellLink extends HTMLElement {
     } else {
       const input = document.createElement('input');
       input.type = 'text';
+      input.placeholder = 'email address';
       input.value = v;
       input.style.cssText =
         'width:100%;box-sizing:border-box;border:0;background:transparent;font:inherit;padding:0';
@@ -117,28 +115,16 @@ class CellLink extends HTMLElement {
   }
 }
 
-function detectUrl(s) {
-  const t = s.trim();
-  if (/^https?:\/\/\S+$/i.test(t)) return t;
-  return null;
-}
-
 /**
- * Phone-shape detector. Accepts strings made of digits plus the usual
- * separators (+, space, parens, dot, hyphen) where the digit count falls in
- * the ITU E.164 range of 7–15. Conservative so we don't promote numeric IDs
- * or product codes into clickable phone links.
+ * Lightweight RFC-5322-inspired check: local-part allows the common
+ * unreserved characters (letters, digits, dot, underscore, plus, percent,
+ * hyphen); domain requires at least one dot and a 2+ character TLD. Not
+ * a full parser, but it rejects obvious non-addresses without false
+ * negatives on typical user-facing inputs.
  */
-function detectPhone(s) {
-  const t = s.trim();
+function detectEmail(s) {
+  const t = String(s).trim();
   if (!t) return null;
-  if (!/^[+0-9 ()\-.]+$/.test(t)) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
-  if (/^\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}$/.test(t)) return null;
-  const digits = t.replace(/\D/g, '');
-  if (digits.length < 7 || digits.length > 15) return null;
-  const hasSeparator = /[ ()\-.]/.test(t);
-  const hasPlus = t.startsWith('+');
-  if (!hasSeparator && !hasPlus && digits.length < 10) return null;
+  if (!/^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/.test(t)) return null;
   return t;
 }

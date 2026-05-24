@@ -22,7 +22,9 @@ export const tableSchema = {
   title: 'table',
   // v1: added ColumnSpec.hidden
   // v2: added ColumnSpec.width
-  version: 2,
+  // v3: added ColumnSpec.renderer; dropped 'color'/'image' from ColumnType
+  //     (legacy columns are migrated to type:'string' + renderer:'color'/'image')
+  version: 3,
   primaryKey: 'id',
   type: 'object',
   properties: {
@@ -38,6 +40,7 @@ export const tableSchema = {
           field: { type: 'string' },
           label: { type: 'string' },
           type: { type: 'string' },
+          renderer: { type: 'string' },
           default: {},
           max: { type: 'number' },
           unique: { type: 'boolean' },

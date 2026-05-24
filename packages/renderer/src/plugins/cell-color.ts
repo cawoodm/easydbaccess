@@ -3,14 +3,14 @@ import type { HostApi, PluginModule } from '@easydb/shared';
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'cell-color',
   version: '0.1.0',
-  description: 'Renders color-typed cells as a swatch + hex picker.',
+  description: 'Renderer for hex colour values: a swatch picker plus an editable hex text field. Apply by setting a column\'s renderer to "color".',
   author: 'easyDBAccess built-ins',
 };
 
 /**
- * Plugin that ships a `<cell-color>` custom element and registers it as the
- * renderer for color-typed columns. Dogfoods api.ui.registerCellRenderer —
- * the same path third-party plugins use to swap in their own renderers.
+ * Plugin that ships a `<cell-color>` custom element and registers it under
+ * the renderer name `color`. Dogfoods api.ui.registerCellRenderer — the same
+ * path third-party plugins use to swap in their own renderers.
  */
 export function init(api: HostApi): void {
   if (!customElements.get('cell-color')) {

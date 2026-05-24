@@ -207,6 +207,15 @@ export class DataTable extends LitElement {
       width: 100%;
       box-sizing: border-box;
     }
+    /* Fallback rendering when no renderer is registered for the column.
+       HTML-encoded plain text; wraps so long values stay legible. */
+    td .ro-cell {
+      display: inline-block;
+      width: 100%;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #374151;
+    }
     .mi.sm {
       font-size: 1rem;
     }
@@ -332,13 +341,6 @@ export class DataTable extends LitElement {
   }
 
 
-  private async editCell(row: Row, field: string, raw: string) {
-    const ctx = await getContext();
-    const col = this.columns.find((c) => c.field === field);
-    const value = coerce(raw, col?.type ?? 'string');
-    await this.commitCell(ctx, row, field, value);
-  }
-
   private async setCell(row: Row, field: string, value: unknown) {
     const ctx = await getContext();
     await this.commitCell(ctx, row, field, value);
@@ -373,9 +375,14 @@ export class DataTable extends LitElement {
 
   private renderCell(row: Row, col: ColumnSpec) {
     const raw = row.data[col.field];
-    // Plugin-registered cell renderers take precedence. The plugin's element
-    // takes a `value` property and dispatches a `change` event with detail.value.
-    const customTag = this.cellRenderers?.get(col.type);
+    // Cell rendering is dispatched by the column's `renderer` attribute, not
+    // its data type. If a renderer is registered for the column's chosen
+    // name we hand off to its custom element; otherwise the cell renders as
+    // read-only HTML-encoded text. The standard renderers (date, datetime,
+    // boolean) ship as the core-renderers built-in plugin; color/image/link
+    // come from their respective plugins.
+    const rendererName = col.renderer;
+    const customTag = rendererName ? this.cellRenderers?.get(rendererName) : undefined;
     if (customTag) {
       // Use lit's static-html so the tag can be data-driven; the standard
       // html`` template doesn't allow dynamic tag names. unsafeStatic is the
@@ -391,42 +398,11 @@ export class DataTable extends LitElement {
           this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
       ></${tag}>`;
     }
-    switch (col.type) {
-      case 'boolean': {
-        const checked = raw === true || raw === 'true' || raw === 1 || raw === '1';
-        return html`<input
-          type="checkbox"
-          .checked=${checked}
-          @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).checked)}
-        />`;
-      }
-      case 'date': {
-        const iso = toDateIso(raw);
-        return html`<input
-          type="date"
-          .value=${iso}
-          @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
-        />`;
-      }
-      case 'datetime': {
-        const local = toDatetimeLocal(raw);
-        return html`<input
-          type="datetime-local"
-          .value=${local}
-          @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
-        />`;
-      }
-      // 'color' and 'image' types are rendered by the cell-color and
-      // cell-image built-in plugins via registerCellRenderer. If both
-      // plugins are disabled they fall through to the default text input.
-      default:
-        return html`<input
-          type="text"
-          .value=${String(raw ?? '')}
-          @change=${(e: Event) =>
-            this.editCell(row, col.field, (e.target as HTMLInputElement).value)}
-        />`;
-    }
+    // No renderer set or unknown name — display as plain text. Lit text
+    // interpolation is HTML-encoded, so any `<` or `&` in the value renders
+    // literally rather than as markup. Cell is read-only in this mode; the
+    // user picks a renderer in the column editor to enable editing.
+    return html`<span class="ro-cell">${String(raw ?? '')}</span>`;
   }
 
   private async deleteRow(rowId: string) {
@@ -822,54 +798,6 @@ export class DataTable extends LitElement {
 
 function isNullish(v: unknown): boolean {
   return v === null || v === undefined || (typeof v === 'string' && v.trim().length === 0);
-}
-
-/**
- * Coerce arbitrary stored values into the YYYY-MM-DD string that
- * <input type=date> expects. Returns '' if it can't parse — leaves the input
- * empty rather than showing a misleading "Invalid Date".
- */
-function toDateIso(raw: unknown): string {
-  if (typeof raw !== 'string' && typeof raw !== 'number') return '';
-  const s = String(raw).trim();
-  if (!s) return '';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toISOString().slice(0, 10);
-}
-
-/**
- * Same idea for <input type=datetime-local> which wants YYYY-MM-DDTHH:MM
- * (no timezone). We strip seconds/timezone bits because the input ignores them.
- */
-function toDatetimeLocal(raw: unknown): string {
-  if (typeof raw !== 'string' && typeof raw !== 'number') return '';
-  const s = String(raw).trim();
-  if (!s) return '';
-  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(s);
-  if (m) return `${m[1]}T${m[2]}`;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return `${s}T00:00`;
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return '';
-  // toISOString in UTC; for "local" inputs we feed back something close enough.
-  const iso = d.toISOString();
-  return `${iso.slice(0, 10)}T${iso.slice(11, 16)}`;
-}
-
-function coerce(raw: string, type: ColumnType): unknown {
-  switch (type) {
-    case 'number': {
-      const n = Number(raw);
-      return Number.isFinite(n) ? n : raw;
-    }
-    case 'boolean':
-      return raw === 'true' || raw === '1';
-    case 'date':
-      return raw;
-    default:
-      return raw;
-  }
 }
 
 /** Returns a human-readable rejection reason, or null if value is acceptable. */

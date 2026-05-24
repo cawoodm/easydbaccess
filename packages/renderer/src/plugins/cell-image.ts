@@ -3,7 +3,7 @@ import type { HostApi, PluginModule } from '@easydb/shared';
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'cell-image',
   version: '0.1.0',
-  description: 'Renders image-typed cells as a thumbnail with upload/clear.',
+  description: 'Renderer for image cells: thumbnail with upload/clear. Apply by setting a column\'s renderer to "image". Values are kept as data: URIs.',
   author: 'easyDBAccess built-ins',
 };
 
@@ -46,20 +46,12 @@ class CellImage extends HTMLElement {
       placeholder.style.color = '#9ca3af';
       placeholder.textContent = 'no image';
       wrap.append(placeholder);
-    }
-    const upload = document.createElement('button');
-    upload.type = 'button';
-    upload.textContent = isDataUri ? 'replace' : 'upload';
-    upload.style.cssText = 'padding:0.1rem 0.4rem;font-size:0.75rem;cursor:pointer';
-    upload.addEventListener('click', () => this.pickFile());
-    wrap.append(upload);
-    if (isDataUri) {
-      const clear = document.createElement('button');
-      clear.type = 'button';
-      clear.textContent = 'clear';
-      clear.style.cssText = 'padding:0.1rem 0.4rem;font-size:0.75rem;cursor:pointer';
-      clear.addEventListener('click', () => this.commit(''));
-      wrap.append(clear);
+      const upload = document.createElement('button');
+      upload.type = 'button';
+      upload.textContent = 'upload';
+      upload.style.cssText = 'padding:0.1rem 0.4rem;font-size:0.75rem;cursor:pointer';
+      upload.addEventListener('click', () => this.pickFile());
+      wrap.append(upload);
     }
     this.append(wrap);
   }

@@ -1,9 +1,16 @@
-export type ColumnType = 'string' | 'number' | 'date' | 'datetime' | 'boolean' | 'color' | 'image';
+export type ColumnType = 'string' | 'number' | 'date' | 'datetime' | 'boolean';
 
 export interface ColumnSpec {
   field: string;
   label: string;
   type: ColumnType;
+  /**
+   * Optional cell renderer name. Looked up in `registries.cellRenderers` at
+   * render time. When unset (or no matching renderer is registered), cells
+   * render as read-only HTML-encoded text. Independent of `type`, which
+   * still drives coercion / sort / validation / SQL typing.
+   */
+  renderer?: string;
   default?: unknown;
   max?: number;
   unique?: boolean;

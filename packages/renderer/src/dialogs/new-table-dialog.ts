@@ -9,6 +9,7 @@ interface ColumnRow {
   field: string;
   label: string;
   type: ColumnType;
+  renderer?: string | undefined;
   max?: number | undefined;
   unique?: boolean | undefined;
   notnull?: boolean | undefined;
@@ -17,15 +18,7 @@ interface ColumnRow {
   origField?: string | undefined;
 }
 
-const TYPE_OPTIONS: ColumnType[] = [
-  'string',
-  'number',
-  'boolean',
-  'date',
-  'datetime',
-  'color',
-  'image',
-];
+const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'datetime'];
 
 /**
  * Dual-purpose dialog: creates new tables and edits the columns of existing
@@ -105,7 +98,7 @@ export class NewTableDialog extends LitElement {
     .col-header,
     .col-row {
       display: grid;
-      grid-template-columns: 1fr 1fr 7rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem;
+      grid-template-columns: 1fr 1fr 7rem 7rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem;
       gap: 0.4rem;
       align-items: center;
     }
@@ -248,6 +241,13 @@ export class NewTableDialog extends LitElement {
   @state() private errorMsg = '';
   /** First 100 rows of the table being edited; populated only in edit mode. */
   @state() private previewRows: Row[] = [];
+  /**
+   * Snapshot of renderer names registered at open time. Populated from
+   * `registries.cellRenderers` keys; built-in renderers (date, datetime,
+   * boolean, color, image, link) and any plugin-registered ones land here.
+   */
+  @state() private rendererOptions: string[] = [];
+  private rendererSubUnsub?: (() => void) | undefined;
 
   private dialogEl: HTMLDialogElement | null = null;
 
@@ -264,6 +264,15 @@ export class NewTableDialog extends LitElement {
    */
   async open(tableId?: string): Promise<void> {
     this.errorMsg = '';
+    // Snapshot the currently registered cell renderers and keep them fresh
+    // while the dialog is open — a plugin install after dialog open should
+    // surface its renderer too. The unsub fires on close().
+    const ctxForRenderers = await getContext();
+    this.rendererOptions = [...ctxForRenderers.registries.cellRenderers.keys()].sort();
+    this.rendererSubUnsub?.();
+    this.rendererSubUnsub = ctxForRenderers.events.on('app:ready', () => {
+      this.rendererOptions = [...ctxForRenderers.registries.cellRenderers.keys()].sort();
+    });
     if (tableId) {
       const ctx = await getContext();
       const t = await ctx.store.tables.findOne(tableId);
@@ -275,6 +284,7 @@ export class NewTableDialog extends LitElement {
         field: c.field,
         label: c.label,
         type: c.type,
+        renderer: c.renderer,
         max: c.max,
         unique: c.unique,
         notnull: c.notnull,
@@ -302,6 +312,8 @@ export class NewTableDialog extends LitElement {
 
   private close(): void {
     this.dialogEl?.close();
+    this.rendererSubUnsub?.();
+    this.rendererSubUnsub = undefined;
   }
 
   private addColumn(): void {
@@ -361,6 +373,7 @@ export class NewTableDialog extends LitElement {
         label: c.label.trim() || c.field.trim(),
         type: c.type,
       };
+      if (c.renderer) spec.renderer = c.renderer;
       if (c.max != null && c.max > 0) spec.max = c.max;
       if (c.unique) spec.unique = true;
       if (c.notnull) spec.notnull = true;
@@ -496,6 +509,7 @@ export class NewTableDialog extends LitElement {
               <span>Field</span>
               <span>Label</span>
               <span>Type</span>
+              <span>Renderer</span>
               <span class="flag-label">Max</span>
               <span class="flag-label" title="Unique">U</span>
               <span class="flag-label" title="Not null">!</span>
@@ -528,6 +542,19 @@ export class NewTableDialog extends LitElement {
                   >
                     ${TYPE_OPTIONS.map(
                       (t) => html`<option value=${t} ?selected=${t === c.type}>${t}</option>`,
+                    )}
+                  </select>
+                  <select
+                    title="Renderer — how cells in this column display. Read-only HTML-encoded text when blank."
+                    .value=${c.renderer ?? ''}
+                    @change=${(e: Event) => {
+                      const v = (e.target as HTMLSelectElement).value;
+                      this.patchColumn(i, { renderer: v || undefined });
+                    }}
+                  >
+                    <option value="" ?selected=${!c.renderer}>— none —</option>
+                    ${this.rendererOptions.map(
+                      (r) => html`<option value=${r} ?selected=${r === c.renderer}>${r}</option>`,
                     )}
                   </select>
                   <input
