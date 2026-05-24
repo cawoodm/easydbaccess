@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.1.2). No leading "v".'
+        required: true
+        type: string
 
 jobs:
   release:
@@ -24,10 +30,10 @@ jobs:
 
       - run: npm ci
 
-      - name: Set version from tag
+      - name: Set version
         shell: bash
         env:
-          REF_NAME: ${{ github.ref_name }}
+          REF_NAME: ${{ inputs.version || github.ref_name }}
         run: |
           node <<'NODE'
           const fs = require('fs');
