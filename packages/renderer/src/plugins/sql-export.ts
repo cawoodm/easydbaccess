@@ -1,0 +1,138 @@
+import type {
+  ColumnSpec,
+  ColumnType,
+  HostApi,
+  PluginModule,
+  Row,
+  Table,
+} from '@easydb/shared';
+
+export const meta: NonNullable<PluginModule['meta']> = {
+  name: 'sql-export',
+  version: '0.1.0',
+  description:
+    'Export the current workspace as a portable .sql script (CREATE TABLE + INSERT).',
+  author: 'easyDBAccess built-ins',
+};
+
+export function init(api: HostApi): void {
+  api.ui.registerFooterButton({
+    id: 'sql-export:dump',
+    label: 'SQL',
+    icon: 'storage',
+    tooltip: 'Export the current workspace as a .sql script',
+    onClick: async () => {
+      const wsId = api.workspaceId();
+      if (!wsId) return;
+      const text = await serializeWorkspaceAsSql(api);
+      await api.backend.saveFile(`workspace-${wsId}.sql`, text, 'application/sql');
+    },
+  });
+}
+
+/**
+ * Serializes every table in the active workspace as ANSI SQL: `DROP TABLE IF
+ * EXISTS` → `CREATE TABLE` → `INSERT INTO` per table, wrapped in a single
+ * transaction. Identifiers are double-quoted (ANSI standard — works as-is on
+ * PostgreSQL/SQLite; for MySQL, set `sql_mode='ANSI_QUOTES'` before running).
+ *
+ * The synthesized `__id` PRIMARY KEY column carries the Row.id so re-imports
+ * (or downstream tools) have a stable key — easyDBAccess row IDs are opaque
+ * strings, not auto-increment numbers.
+ */
+export async function serializeWorkspaceAsSql(api: HostApi): Promise<string> {
+  const wsId = api.workspaceId();
+  if (!wsId) throw new Error('sql-export: no active workspace');
+
+  const tables = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
+  const lines: string[] = [
+    `-- easyDBAccess SQL dump`,
+    `-- workspace: ${wsId}`,
+    `-- exported:  ${new Date().toISOString()}`,
+    `-- tables:    ${tables.length}`,
+    `-- Compatible with PostgreSQL and SQLite. For MySQL run`,
+    `--   SET sql_mode='ANSI_QUOTES';`,
+    `-- before executing, or rewrite "ident" to \`ident\`.`,
+    ``,
+    `BEGIN;`,
+    ``,
+  ];
+
+  for (const t of tables) {
+    const rows = await api.store.rows(t.id).find();
+    lines.push(renderTable(t, rows), '');
+  }
+
+  lines.push(`COMMIT;`, '');
+  return lines.join('\n');
+}
+
+function renderTable(table: Table, rows: Row[]): string {
+  const tableName = sanitizeIdent(table.code || table.name || `table_${table.id}`);
+  const colDefs = [
+    `  "__id" TEXT PRIMARY KEY`,
+    ...table.columns.map((c) => `  ${renderColumnDef(c)}`),
+  ];
+  const out: string[] = [
+    `DROP TABLE IF EXISTS "${tableName}";`,
+    `CREATE TABLE "${tableName}" (`,
+    colDefs.join(',\n'),
+    `);`,
+  ];
+
+  if (rows.length > 0) {
+    const fields = ['__id', ...table.columns.map((c) => c.field)];
+    const colList = fields.map((f) => `"${sanitizeIdent(f)}"`).join(', ');
+    for (const r of rows) {
+      const values = [
+        sqlLiteral(r.id),
+        ...table.columns.map((c) => sqlLiteral(r.data[c.field])),
+      ];
+      out.push(`INSERT INTO "${tableName}" (${colList}) VALUES (${values.join(', ')});`);
+    }
+  }
+  return out.join('\n');
+}
+
+function renderColumnDef(c: ColumnSpec): string {
+  const parts = [`"${sanitizeIdent(c.field)}"`, sqlTypeFor(c.type)];
+  if (c.notnull) parts.push('NOT NULL');
+  if (c.unique) parts.push('UNIQUE');
+  return parts.join(' ');
+}
+
+function sqlTypeFor(t: ColumnType): string {
+  switch (t) {
+    case 'number':
+      return 'NUMERIC';
+    case 'boolean':
+      return 'BOOLEAN';
+    case 'date':
+    case 'datetime':
+      return 'TIMESTAMP';
+    case 'string':
+    case 'color':
+    case 'image':
+    default:
+      return 'TEXT';
+  }
+}
+
+function sqlLiteral(v: unknown): string {
+  if (v == null) return 'NULL';
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';
+  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+  if (v instanceof Date) return quote(v.toISOString());
+  if (typeof v === 'string') return quote(v);
+  return quote(JSON.stringify(v));
+}
+
+function quote(s: string): string {
+  return `'${s.replace(/'/g, "''")}'`;
+}
+
+function sanitizeIdent(s: string): string {
+  let out = s.replace(/[^a-zA-Z0-9_]/g, '_');
+  if (/^[0-9]/.test(out)) out = `_${out}`;
+  return out || '_';
+}

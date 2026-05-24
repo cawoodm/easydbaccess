@@ -3,6 +3,7 @@ import * as csvImport from '../plugins/csv-import.js';
 import * as csvExport from '../plugins/csv-export.js';
 import * as jsonImport from '../plugins/json-import.js';
 import * as dumpExport from '../plugins/dump-export.js';
+import * as sqlExport from '../plugins/sql-export.js';
 import * as gistSync from '../plugins/gist-sync.js';
 import * as serverSync from '../plugins/server-sync.js';
 import * as newTableButton from '../plugins/new-table-button.js';
@@ -11,6 +12,7 @@ import * as cellColor from '../plugins/cell-color.js';
 import * as cellImage from '../plugins/cell-image.js';
 import * as cellLink from '../plugins/cell-link.js';
 import * as sampleData from '../plugins/sample-data.js';
+import * as autoSync from '../plugins/auto-sync.js';
 
 /**
  * Built-in plugins shipped with the renderer. They satisfy the same
@@ -27,6 +29,7 @@ const builtins: PluginModule[] = [
   jsonImport,
   csvExport,
   dumpExport,
+  sqlExport,
   gistSync,
   serverSync,
   pluginManagerButton,
@@ -34,6 +37,7 @@ const builtins: PluginModule[] = [
   cellImage,
   cellLink,
   sampleData,
+  autoSync,
 ];
 
 /** Public for the Plugin Manager dialog so it can render the optional list. */

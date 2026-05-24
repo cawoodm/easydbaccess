@@ -22,17 +22,29 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Verify package.json version matches tag
-        shell: bash
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          pkg=$(node -p "require('./package.json').version")
-          if [ "$tag" != "$pkg" ]; then
-            echo "Tag v$tag does not match package.json version $pkg" >&2
-            exit 1
-          fi
-
       - run: npm ci
+
+      - name: Set version from tag
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const v = process.env.REF_NAME.replace(/^v/, '');
+          const files = [
+            'package.json',
+            'packages/electron/package.json',
+            'packages/renderer/package.json',
+            'packages/server/package.json',
+            'packages/shared/package.json',
+          ];
+          for (const f of files) {
+            const p = JSON.parse(fs.readFileSync(f, 'utf8'));
+            p.version = v;
+            fs.writeFileSync(f, JSON.stringify(p, null, 2) + '\n');
+          }
+          NODE
 
       - name: Build shared
         run: npm run build --workspace @easydb/shared

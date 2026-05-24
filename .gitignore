@@ -10,6 +10,7 @@ out/
 coverage/
 test-results/
 playwright-report/
+.playwright-storage/
 *.log
 .env
 .env.*

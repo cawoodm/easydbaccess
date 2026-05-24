@@ -186,3 +186,6 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 * ✅ feature: a `color-cell` / `image-cell` plugin demonstrating
   `registerCellRenderer` (today these types are rendered in core
   `<data-table>`; move them out to dogfood the API)
+* ✅✅ feature: `auto-sync` plugin — silent push + prompted pull every minute
+  (optional built-in; reuses server-sync's URL + ETag, drives ticks on a
+  60s interval; shared helpers live in `server-sync-core.ts`)

@@ -28,10 +28,28 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: 'npm run dev:renderer',
-    url: 'http://localhost:5190',
-    reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
-  },
+  webServer: [
+    {
+      command: 'npm run dev:renderer',
+      url: 'http://localhost:5190',
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+    {
+      // Backing server for auto-sync e2e. Node 22+ — sqlite-store is OK.
+      // PORT/STORAGE_* env pre-empts packages/server/.env (process.loadEnvFile
+      // documents that it doesn't overwrite existing process.env entries).
+      // Port 3998 stays clear of the user's typical dev server on 3001.
+      command: 'npm run dev:server',
+      url: 'http://localhost:3998/health',
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+      env: {
+        PORT: '3998',
+        STORAGE_KIND: 'fs',
+        STORAGE_PATH: '.playwright-storage',
+        CORS_ORIGINS: 'http://localhost:5190',
+      },
+    },
+  ],
 });
