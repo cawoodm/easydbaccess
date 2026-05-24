@@ -219,6 +219,8 @@ export class PluginManagerDialog extends LitElement {
   @state() private dirtyBuiltins = false;
   @state() private catalog: CatalogResolved[] = [];
   @state() private catalogError: string | null = null;
+  @state() private serverCatalog: CatalogResolved[] = [];
+  @state() private serverCatalogError: string | null = null;
   @state() private installing: Set<string> = new Set();
   private dialogEl: HTMLDialogElement | null = null;
 
@@ -262,9 +264,12 @@ export class PluginManagerDialog extends LitElement {
     this.addUrl = '';
     await this.updateComplete;
     this.dialogEl?.showModal();
-    // Catalog fetch runs after the dialog is visible so a slow network doesn't
-    // block opening; the section just appears once the response lands.
+    // Catalog fetches run after the dialog is visible so a slow network
+    // doesn't block opening; the sections just appear once the responses
+    // land. The server registry is independent of the host catalog — both
+    // run in parallel.
     void this.refreshCatalog();
+    void this.refreshServerRegistry();
   }
 
   /**
@@ -289,6 +294,40 @@ export class PluginManagerDialog extends LitElement {
     } catch (err) {
       this.catalog = [];
       this.catalogError = (err as Error).message;
+    }
+  }
+
+  /**
+   * Fetches an operator-curated plugin list from the configured server
+   * (`${server-sync:url}/plugins/registry`). Silently no-ops when no server
+   * URL is set — the "From server" section just doesn't appear. Network /
+   * parse errors surface inline so misconfiguration is visible without
+   * breaking the rest of the dialog.
+   */
+  private async refreshServerRegistry(): Promise<void> {
+    const ctx = await getContext();
+    const setting = await ctx.store.settings.findOne('server-sync:url');
+    const raw = setting?.value;
+    if (typeof raw !== 'string' || raw.length === 0) {
+      this.serverCatalog = [];
+      this.serverCatalogError = null;
+      return;
+    }
+    const base = raw.replace(/\/+$/, '');
+    const registryUrl = `${base}/plugins/registry`;
+    try {
+      const res = await fetch(registryUrl, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as { plugins?: CatalogEntry[] };
+      const entries = Array.isArray(json.plugins) ? json.plugins : [];
+      this.serverCatalog = entries.map((e) => ({
+        ...e,
+        absUrl: new URL(e.url, registryUrl).toString(),
+      }));
+      this.serverCatalogError = null;
+    } catch (err) {
+      this.serverCatalog = [];
+      this.serverCatalogError = (err as Error).message;
     }
   }
 
@@ -471,6 +510,41 @@ export class PluginManagerDialog extends LitElement {
             ${this.catalogError
               ? html`<div class="meta err">
                   Host catalog unavailable: ${this.catalogError}
+                </div>`
+              : ''}
+
+            ${this.serverCatalog.length > 0 || this.serverCatalogError
+              ? html`<div class="section-h">From server</div>`
+              : ''}
+            ${this.serverCatalog.map((entry) => {
+              const installed = this.urls.includes(entry.absUrl);
+              const busy = this.installing.has(entry.absUrl);
+              return html`
+                <div class="row available">
+                  <span class="mi sm">extension</span>
+                  <div>
+                    <div>${entry.name}</div>
+                    <div class="meta">
+                      ${entry.description ?? entry.absUrl}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    class="install"
+                    ?disabled=${installed || busy}
+                    @click=${() => this.installFromCatalog(entry)}
+                  >
+                    <span class="mi sm">
+                      ${installed ? 'check' : busy ? 'hourglass_empty' : 'download'}
+                    </span>
+                    ${installed ? 'Installed' : busy ? 'Installing…' : 'Install'}
+                  </button>
+                </div>
+              `;
+            })}
+            ${this.serverCatalogError
+              ? html`<div class="meta err">
+                  Server registry unavailable: ${this.serverCatalogError}
                 </div>`
               : ''}
 

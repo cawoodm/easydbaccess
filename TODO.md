@@ -147,9 +147,12 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
   RxDB replication protocol (today both return 501)
 * ✅ feature: renderer wires `RxReplicationState` to the server endpoints so
   multi-device sync works end-to-end
-* feature: `/fetch` URL proxy actually used by plugins (today they call
-  `globalThis.fetch` directly; CORS-blocked APIs can't be imported)
-* feature: `/plugins/registry` returns a curated list (today an empty stub)
+* ✅✅ feature: `/fetch` URL proxy actually used by plugins
+  (`api.backend.fetch` routes through `${server-sync:url}/fetch` when the
+  setting is configured; direct fetch otherwise)
+* ✅✅ feature: `/plugins/registry` returns a curated list
+  (`PLUGINS_REGISTRY_PATH` env var → JSON file; Plugin Manager dialog
+  shows them in a "From server" section)
 
 ## Electron
 

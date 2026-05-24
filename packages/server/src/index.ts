@@ -29,6 +29,12 @@ export interface ServerDeps {
    * Pass an empty list to disable CORS entirely (Electron / same-origin).
    */
   corsOrigins?: '*' | string[] | undefined;
+  /**
+   * Optional path to a JSON file the `/plugins/registry` route serves.
+   * Shape matches `packages/renderer/public/plugins/catalog.json`. Unset →
+   * the route returns an empty list. See routes/plugins.ts.
+   */
+  pluginsRegistryPath?: string | undefined;
 }
 
 export function createServer(deps: ServerDeps) {

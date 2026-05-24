@@ -1,0 +1,10 @@
+{
+  "plugins": [
+    {
+      "id": "demo-from-server",
+      "name": "Server Demo",
+      "description": "Registered via PLUGINS_REGISTRY_PATH for e2e tests.",
+      "url": "http://localhost:3998/static/demo.js"
+    }
+  ]
+}

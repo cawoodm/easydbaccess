@@ -35,6 +35,7 @@ const app = createServer({
   fetchAllowlist: process.env.FETCH_ALLOWLIST?.split(',').map((s) => s.trim()),
   fetchMaxBytes: Number(process.env.FETCH_MAX_BYTES ?? 5_000_000),
   corsOrigins,
+  pluginsRegistryPath: process.env.PLUGINS_REGISTRY_PATH,
 });
 
 const server = serve({ fetch: app.fetch, port }, ({ port: p }) => {

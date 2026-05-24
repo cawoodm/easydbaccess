@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
 /**
@@ -49,6 +50,11 @@ export default defineConfig({
         STORAGE_KIND: 'fs',
         STORAGE_PATH: '.playwright-storage',
         CORS_ORIGINS: 'http://localhost:5190',
+        // Curated registry served at /plugins/registry — exercised by
+        // e2e/13-plugins-registry.spec.ts. Resolve to absolute because
+        // `npm run dev:server` changes cwd to packages/server/ where a
+        // bare relative path would miss.
+        PLUGINS_REGISTRY_PATH: resolve('e2e/fixtures/plugins-registry.json'),
       },
     },
   ],
