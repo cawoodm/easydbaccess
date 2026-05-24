@@ -42,10 +42,15 @@ CJS via `tsc`. Don't switch this to ESM without verifying
 
 ## What's intentionally not wired yet
 
-The architecture plan calls for:
+`@easydb/server` is already declared as a runtime dependency in `package.json`
+in anticipation, but `src/main.ts` does not import or boot it. The Phase 8
+work-items are:
 
 - **Hono in-process** — main process boots `createServer(...)` from
-  `@easydb/server` and mounts it on a localhost port.
+  `@easydb/server` and mounts it on a localhost port. The `store` it passes
+  in will be a `better-sqlite3`-backed `StoreAdapter` (not yet implemented in
+  the server package; current adapters are `fs-store` and `sqlite-store`
+  using `node:sqlite`).
 - **RxDB-IPC storage adapter** — the renderer talks to main-process
   RxDB-SQLite over IPC instead of using Dexie locally.
 - **Native saveFile / openFile** — `api.backend.saveFile` routes through

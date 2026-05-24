@@ -70,6 +70,9 @@ autocomplete, or type a substring.
 ![Sorting](./docs/screenshots/sorting.png)
 ![Filtering](./docs/screenshots/filter.png)
 
+Plugins can change the way data is rendered, for example as a hyperlink:
+![Rendering](./docs/screenshots/plugin-renderer.png)
+
 ### Export anywhere
 
 Each table can be exported as CSV. The whole workspace can be exported as a

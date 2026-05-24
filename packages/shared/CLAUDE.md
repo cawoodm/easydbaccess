@@ -10,7 +10,7 @@ must work in browser, Node, and Electron main equally.
 |---|---|
 | `src/types.ts` | TS interfaces: `Workspace`, `Table`, `Row`, `ColumnSpec`, `ColumnType`, `WindowGeometry`, `Setting`, `PluginRecord`. |
 | `src/schemas.ts` | RxDB JSON Schema documents. Must stay byte-compatible with the TS types. |
-| `src/plugin-api.ts` | The `HostApi`, `PluginModule`, `DataCollection<T>`, `DataStore`, registry specs, `AppEvents`. **Single source of truth for the plugin contract.** |
+| `src/plugin-api.ts` | The `HostApi`, `PluginModule`, `DataCollection<T>`, `DataStore`, `EventBus`, `Dialogs`, `WindowManager`, `Backend`, registry specs, `AppEvents`. **Single source of truth for the plugin contract.** |
 | `src/index.ts` | Just barrel re-exports. |
 
 ## Hot rule: lockstep across packages
@@ -45,6 +45,14 @@ the `HostApi` shape from here. Treat additions as a public-API change:
 prefer optional properties, don't rename existing methods. The host
 explicitly allows plugins to monkey-patch `api.*` methods; don't add
 guards that would block that.
+
+New events go on the `AppEvents` map, not on a sibling type — `EventBus.on`
+is typed against this map and silently drops unknown keys.
+
+`PluginModule.meta.optional = true` is the user-toggleable flag for built-ins.
+The renderer's Plugin Manager dialog reads this; disabled state is stored
+under the synthetic key `builtin:<name>` in the `plugins` collection. Don't
+repurpose `optional` for other semantics.
 
 ## Build
 

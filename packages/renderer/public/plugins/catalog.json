@@ -7,6 +7,13 @@
       "description": "Adds a 'Now' button to the header that toasts the current time. Useful as a minimal reference for registerHeaderButton.",
       "author": "easyDBAccess reference",
       "url": "./header-clock.js"
+    },
+    {
+      "id": "cell-link",
+      "name": "Cell Link Renderer",
+      "description": "Renders http(s) URLs and phone-like values in string cells as clickable links. A pencil toggles to edit mode.",
+      "author": "easyDBAccess reference",
+      "url": "./cell-link.js"
     }
   ]
 }

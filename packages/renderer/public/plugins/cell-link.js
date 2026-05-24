@@ -1,23 +1,24 @@
-import type { HostApi, PluginModule } from '@easydb/shared';
+/**
+ * cell-link — URL/phone link cell renderer, dynamically loaded from the catalog.
+ *
+ * Overrides string-cell rendering: http(s) URLs render as <a target=_blank>,
+ * phone-like values as <a href=tel:>. Non-matching values fall back to the
+ * default text input. Demonstrates the override-the-default-renderer pattern
+ * for the `string` cell type.
+ *
+ * Plain JS — no bare imports — because the host wraps the body in a Blob URL
+ * and dynamic-imports it; bare specifiers wouldn't resolve in that context.
+ */
 
-export const meta: NonNullable<PluginModule['meta']> = {
+export const meta = {
   name: 'cell-link',
   version: '0.1.0',
   description:
-    'Overrides string-cell rendering: http(s) URLs render as <a target=_blank>, phone-like values as <a href=tel:>. Non-matching values fall back to the default text input.',
-  author: 'easyDBAccess built-ins',
+    'Renders http(s) URLs and phone-like values in string cells as clickable links. A pencil toggles to edit mode.',
+  author: 'easyDBAccess reference',
 };
 
-/**
- * Demonstrates the override-the-default-renderer pattern: this plugin claims
- * the 'string' cell type, which is the default for most columns. Inside the
- * custom element we decide per-value whether to render a link or to fall back
- * to a normal <input>, so unrelated string cells are unaffected.
- *
- * A small pencil icon next to a rendered link toggles into edit mode (an
- * input); committing the edit (blur or Enter) swaps back to view mode.
- */
-export function init(api: HostApi): void {
+export function init(api) {
   if (!customElements.get('cell-link')) {
     customElements.define('cell-link', CellLink);
   }
@@ -25,17 +26,20 @@ export function init(api: HostApi): void {
 }
 
 class CellLink extends HTMLElement {
-  private _value = '';
-  private _editing = false;
+  constructor() {
+    super();
+    this._value = '';
+    this._editing = false;
+  }
 
-  set value(v: unknown) {
+  set value(v) {
     const s = v == null ? '' : String(v);
     if (this._value === s) return;
     this._value = s;
     this._editing = false;
     this.render();
   }
-  get value(): string {
+  get value() {
     return this._value;
   }
 
@@ -43,7 +47,7 @@ class CellLink extends HTMLElement {
     this.render();
   }
 
-  private render() {
+  render() {
     this.innerHTML = '';
     const v = this._value;
     const url = !this._editing ? detectUrl(v) : null;
@@ -79,7 +83,6 @@ class CellLink extends HTMLElement {
       wrap.append(a, edit);
       this.append(wrap);
     } else {
-      // Edit mode OR value doesn't look link-shaped — render the default input.
       const input = document.createElement('input');
       input.type = 'text';
       input.value = v;
@@ -97,7 +100,6 @@ class CellLink extends HTMLElement {
       });
       this.append(input);
       if (this._editing) {
-        // Defer focus until the input is in the DOM.
         setTimeout(() => {
           input.focus();
           input.select();
@@ -106,7 +108,7 @@ class CellLink extends HTMLElement {
     }
   }
 
-  private commit(v: string) {
+  commit(v) {
     this._value = v;
     this._editing = false;
     this.dispatchEvent(
@@ -115,29 +117,24 @@ class CellLink extends HTMLElement {
   }
 }
 
-function detectUrl(s: string): string | null {
+function detectUrl(s) {
   const t = s.trim();
   if (/^https?:\/\/\S+$/i.test(t)) return t;
   return null;
 }
 
 /**
- * Phone-shape detector. Accepts strings made up of digits plus the usual
+ * Phone-shape detector. Accepts strings made of digits plus the usual
  * separators (+, space, parens, dot, hyphen) where the digit count falls in
- * the ITU E.164 range of 7–15. Deliberately conservative so we don't promote
- * numeric IDs or product codes into clickable phone links.
+ * the ITU E.164 range of 7–15. Conservative so we don't promote numeric IDs
+ * or product codes into clickable phone links.
  */
-function detectPhone(s: string): string | null {
+function detectPhone(s) {
   const t = s.trim();
   if (!t) return null;
   if (!/^[+0-9 ()\-.]+$/.test(t)) return null;
-  // Reject date-shaped strings up front so 2024-01-15 / 15/03/2024 don't get
-  // turned into "phone" links by virtue of containing hyphens or slashes.
   if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
   if (/^\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}$/.test(t)) return null;
-  // Reject anything that doesn't look like real-world phone formatting:
-  // require at least one separator OR a leading '+', OR length >= 10. Bare
-  // 7-digit integers without separators are more likely IDs than phones.
   const digits = t.replace(/\D/g, '');
   if (digits.length < 7 || digits.length > 15) return null;
   const hasSeparator = /[ ()\-.]/.test(t);

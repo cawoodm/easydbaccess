@@ -5,6 +5,7 @@ import type { ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
+import '../chrome/filter-combobox.js';
 
 type SortDir = 'asc' | 'desc' | null;
 
@@ -90,20 +91,6 @@ export class DataTable extends LitElement {
     }
     tr.filter-row th:hover {
       background: #f3f4f6;
-    }
-    tr.filter-row input {
-      width: 100%;
-      box-sizing: border-box;
-      border: 1px solid #d1d5db;
-      border-radius: 0.2rem;
-      background: white;
-      font: inherit;
-      font-size: 0.8rem;
-      padding: 0.1rem 0.3rem;
-    }
-    tr.filter-row input::placeholder {
-      color: #9ca3af;
-      font-style: italic;
     }
     th button.funnel {
       background: transparent;
@@ -545,8 +532,7 @@ export class DataTable extends LitElement {
    * Swedish cities), while the Country dropdown itself still shows all
    * countries (because its own filter is excluded from the facet).
    *
-   * Pass `null` to evaluate against ALL per-column filters (used by the
-   * datalist for non-filtered columns).
+   * Pass `null` to evaluate against ALL per-column filters.
    */
   private rowsFacetedFor(focusField: string | null): Row[] {
     const active = Object.entries(this.filters)
@@ -563,9 +549,9 @@ export class DataTable extends LitElement {
   }
 
   /**
-   * Decide per-column whether to surface a <datalist> autocomplete on the
-   * filter input. Rule: every value in the first 100 rows must stringify to
-   * fewer than 50 characters. Long-text or "description"-style columns are
+   * Decide per-column whether to feed the <filter-combobox> a suggestion
+   * list. Rule: every value in the first 100 rows must stringify to fewer
+   * than 50 characters. Long-text or "description"-style columns are
    * excluded so the dropdown doesn't fill with multi-line content.
    *
    * Returns a Map from column field → sorted unique values (capped at 500).
@@ -787,23 +773,19 @@ export class DataTable extends LitElement {
           </tr>
           <tr class="filter-row">
             ${cols.map((c) => {
-              const opts = suggestions.get(c.field);
-              const listId = opts ? `fl-${c.field}` : undefined;
+              const opts = suggestions.get(c.field) ?? [];
               return html`
                 <th>
-                  <input
-                    type="text"
-                    placeholder="filter…"
-                    list=${listId ?? ''}
+                  <filter-combobox
                     .value=${this.filters[c.field] ?? ''}
-                    @input=${(e: Event) =>
-                      this.onFilterInput(c.field, (e.target as HTMLInputElement).value)}
-                  />
-                  ${opts
-                    ? html`<datalist id=${listId!}>
-                        ${opts.map((v) => html`<option value=${v}></option>`)}
-                      </datalist>`
-                    : ''}
+                    .options=${opts}
+                    placeholder="filter…"
+                    @filter-change=${(e: Event) =>
+                      this.onFilterInput(
+                        c.field,
+                        (e as CustomEvent<{ value: string }>).detail.value,
+                      )}
+                  ></filter-combobox>
                 </th>
               `;
             })}

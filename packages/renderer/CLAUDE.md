@@ -7,14 +7,14 @@ Lit web components + RxDB + Vite. The identical bundle runs in the browser
 
 | Dir | Role |
 |---|---|
-| `src/chrome/` | App-shell, header/footer, panel chrome, workspace selector, table list, search popover. No business logic — just lays out registered slot contents. |
+| `src/chrome/` | App-shell, panel chrome (`panel-footer`, `panel-search`), workspace selector, table list, filter popover/combobox, material-icon-css helper. No business logic — just lays out registered slot contents. |
 | `src/db/` | RxDB setup (`rx-db.ts`) and the `DataStore` wrapper (`data-store.ts`) that hides RxDB from plugins. |
-| `src/dialogs/` | Promise-returning host dialogs (alert/prompt/confirm/choice/toast), new-table editor, csv-paste, plugin manager. |
+| `src/dialogs/` | Promise-returning host dialogs (`host-dialogs.ts` — alert/prompt/confirm/choice), `toast-host.ts`, `new-table-dialog`, `csv-paste-dialog`, `plugin-manager-dialog`, `draggable.ts` helper. |
 | `src/events/` | The typed event bus (`AppEvents` from shared). |
-| `src/plugin-host/` | Built-in plugin loader, URL-plugin loader, registries, `HostApi` factory. |
-| `src/plugins/` | Built-in plugins. **Each one IS a plugin** — same contract as URL-loaded modules. |
+| `src/plugin-host/` | `loader.ts` (built-in plugin list + lifecycle), `url-loader.ts` (URL-fetched plugins with localStorage cache), `registries.ts` (slot lists), `api-factory.ts` (`HostApi` constructor). |
+| `src/plugins/` | Built-in plugins. **Each one IS a plugin** — same contract as URL-loaded modules. Current roster: `new-table-button`, `plugin-manager-button`, `csv-import`, `json-import`, `csv-export`, `dump-export`, `sql-export`, `gist-sync`, `server-sync` (+ `server-sync-core`), `auto-sync`, `cell-color`, `cell-image`, `sample-data`. (`cell-link` ships in the catalog at `public/plugins/`, not bundled.) |
 | `src/table/` | `<data-table>` element. Cell rendering looks up `registries.cellRenderers` first, falls back to the built-in switch. |
-| `src/window-mgr/` | jsPanel wrapper. Panels mount into the light-DOM `#easydb-panels` container in `index.html`. |
+| `src/window-mgr/` | `jspanel-manager.ts` — jsPanel wrapper. Each Table in the workspace renders as a draggable/resizable jsPanel containing a `<data-table>`. Geometry persisted to `Table.windowGeometry`. Panels mount into `document.body` (jsPanel's default). |
 | `src/main.ts` | App entry. Imports the shell + filter popover and lets `app-context.ts` lazy-init on first `getContext()`. |
 | `src/app-context.ts` | Singleton that wires store + events + registries + HostApi, then drives `init()` / `load()` on built-ins and URL plugins. |
 | `public/plugins/` | Static plugin assets served at `/plugins/*`. `catalog.json` lists what the Plugin Manager dialog offers for one-click install. |

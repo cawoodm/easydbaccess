@@ -17,7 +17,7 @@ exported app runs in two places:
 | `src/log.ts` | One-liner request/response logger. `EASYDB_LOG=quiet` silences it. |
 | `src/routes/sync.ts` | Whole-workspace JSON push/pull + SSE stream. |
 | `src/routes/fetch.ts` | Outbound URL proxy with allowlist + byte cap. |
-| `src/routes/plugins.ts` | Stub `/plugins/registry`. Real curation TBD. |
+| `src/routes/plugins.ts` | `/plugins/registry` — serves the JSON file at `PLUGINS_REGISTRY_PATH` (if set). Re-read per request so operators can edit without restart. |
 | `src/storage/types.ts` | `StoreAdapter` — the only interface backends implement. |
 | `src/storage/fs-store.ts` | One JSON file per workspace. Default. |
 | `src/storage/sqlite-store.ts` | One SQLite DB per workspace, single-row blob table. |
@@ -42,7 +42,7 @@ GET  /sync/:workspaceId             → pull blob, returns ETag header
 PUT  /sync/:workspaceId             → push blob, If-Match enforces concurrency (412 on conflict)
 GET  /sync/:workspaceId/stream      → SSE: { event: change, data: {etag} }
 POST /fetch                         → { url, method?, headers?, body? } proxy
-GET  /plugins/registry              → stub
+GET  /plugins/registry              → operator-curated catalog (file-backed, see below)
 ```
 
 ETag values are unquoted internally and quoted on the wire (`"abc123"`).
@@ -59,6 +59,7 @@ if you add ETag-aware routes.
 | `CORS_ORIGINS` | `*`, comma list, or unset (= `*`) | `*` |
 | `FETCH_ALLOWLIST` | Comma list of host suffixes for `/fetch` | unset (allow all) |
 | `FETCH_MAX_BYTES` | Cap on `/fetch` response bodies | `5_000_000` |
+| `PLUGINS_REGISTRY_PATH` | Path to a JSON file `{ plugins: [...] }` served by `/plugins/registry`. Same shape as `packages/renderer/public/plugins/catalog.json`. | unset → empty list |
 | `EASYDB_LOG` | `quiet` to silence logger | unset |
 
 `.env` is loaded from the package root via `process.loadEnvFile` (Node ≥20.12,
@@ -79,9 +80,17 @@ npm run build           # tsc -b → dist/
 npm start --workspace @easydb/server   # node dist/standalone.js
 ```
 
-## What's intentionally stubbed
+## Plugin registry — file lookup behaviour
 
-`/plugins/registry` returns `{ plugins: [], todo: 'curated plugin list' }`.
-For now, the renderer reads its plugin catalog from
-`packages/renderer/public/plugins/catalog.json` instead. The server-curated
-registry is a future replacement when third-party plugin hosting matters.
+`/plugins/registry` is a thin file-reader, not a database:
+
+- `PLUGINS_REGISTRY_PATH` unset → `{ plugins: [], note: '...' }` (200).
+- File missing at the configured path → empty list + note (200, not 500 —
+  the renderer treats this as "nothing curated yet").
+- File present but invalid JSON / missing `plugins` array → 500 with the
+  parse error, so operators notice the misconfiguration.
+
+The renderer's Plugin Manager dialog still falls back to the static
+`packages/renderer/public/plugins/catalog.json` for the "Available from this
+host" section. The server route is for operator-curated lists served from a
+deployment.
