@@ -86,7 +86,7 @@ function renderTable(table: Table, rows: Row[]): string {
     for (const r of rows) {
       const values = [
         sqlLiteral(r.id),
-        ...table.columns.map((c) => sqlLiteral(r.data[c.field])),
+        ...table.columns.map((c) => sqlLiteral(r.data[c.field], c.type)),
       ];
       out.push(`INSERT INTO "${tableName}" (${colList}) VALUES (${values.join(', ')});`);
     }
@@ -108,6 +108,9 @@ function sqlTypeFor(t: ColumnType): string {
     case 'boolean':
       return 'BOOLEAN';
     case 'date':
+      // Dates are serialized as 'YYYYMMDD' (see sqlLiteral) so a fixed-width
+      // CHAR keeps downstream JOINs predictable.
+      return 'CHAR(8)';
     case 'datetime':
       return 'TIMESTAMP';
     case 'string':
@@ -118,13 +121,52 @@ function sqlTypeFor(t: ColumnType): string {
   }
 }
 
-function sqlLiteral(v: unknown): string {
+function sqlLiteral(v: unknown, columnType?: ColumnType): string {
   if (v == null) return 'NULL';
+  // `date` columns get a compact 'YYYYMMDD' literal. Stored values are
+  // typically ISO strings ('2026-05-24') but Date objects and longer ISO
+  // forms ('2026-05-24T14:30') are also handled.
+  if (columnType === 'date') {
+    if (typeof v === 'string' && v.trim() === '') return 'NULL';
+    const ymd = toYyyymmdd(v);
+    return ymd === null ? 'NULL' : quote(ymd);
+  }
   if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';
   if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
   if (v instanceof Date) return quote(v.toISOString());
   if (typeof v === 'string') return quote(v);
   return quote(JSON.stringify(v));
+}
+
+/**
+ * Format any reasonable date input as 'YYYYMMDD'. Returns null when the input
+ * is empty/unparseable so the caller can emit SQL NULL.
+ *
+ * Uses UTC components for `Date` instances — we don't want the user's local
+ * timezone to shift the day forward or back when serializing.
+ */
+function toYyyymmdd(v: unknown): string | null {
+  if (v == null) return null;
+  if (v instanceof Date) {
+    return Number.isFinite(v.getTime()) ? ymdFromDate(v) : null;
+  }
+  if (typeof v === 'string') {
+    const s = v.trim();
+    if (s.length === 0) return null;
+    // Cheap path: any ISO-ish string starts with YYYY-MM-DD.
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    if (m) return `${m[1]}${m[2]}${m[3]}`;
+    const d = new Date(s);
+    return Number.isFinite(d.getTime()) ? ymdFromDate(d) : null;
+  }
+  return null;
+}
+
+function ymdFromDate(d: Date): string {
+  const y = String(d.getUTCFullYear()).padStart(4, '0');
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}${m}${day}`;
 }
 
 function quote(s: string): string {

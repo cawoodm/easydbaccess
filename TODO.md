@@ -189,3 +189,5 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 * ✅✅ feature: `auto-sync` plugin — silent push + prompted pull every minute
   (optional built-in; reuses server-sync's URL + ETag, drives ticks on a
   60s interval; shared helpers live in `server-sync-core.ts`)
+* ✅✅ feature: `sql-export` emits `date` columns as `'YYYYMMDD'` string
+  literals (CHAR(8)); `datetime` stays on ISO/TIMESTAMP
