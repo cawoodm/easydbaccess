@@ -14,7 +14,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Server's sqlite-store uses node:sqlite, which is a built-in from
+          # Node 22.5+. .nvmrc + package.json engines pin the floor; keep this
+          # in sync with both.
+          node-version-file: '.nvmrc'
           cache: npm
 
       - run: npm ci
