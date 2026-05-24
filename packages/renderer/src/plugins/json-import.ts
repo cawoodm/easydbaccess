@@ -367,6 +367,7 @@ function normalizeColumn(c: unknown): ColumnSpec {
     type,
   };
   if (renderer) spec.renderer = renderer;
+  if (typeof o.script === 'string') spec.script = o.script;
   return spec;
 }
 

@@ -24,7 +24,8 @@ export const tableSchema = {
   // v2: added ColumnSpec.width
   // v3: added ColumnSpec.renderer; dropped 'color'/'image' from ColumnType
   //     (legacy columns are migrated to type:'string' + renderer:'color'/'image')
-  version: 3,
+  // v4: added ColumnSpec.script (used by the `script` renderer)
+  version: 4,
   primaryKey: 'id',
   type: 'object',
   properties: {
@@ -41,6 +42,7 @@ export const tableSchema = {
           label: { type: 'string' },
           type: { type: 'string' },
           renderer: { type: 'string' },
+          script: { type: 'string' },
           default: {},
           max: { type: 'number' },
           unique: { type: 'boolean' },

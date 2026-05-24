@@ -74,6 +74,10 @@ async function init(): Promise<EasyDatabase> {
               })
             : doc.columns,
         }),
+        // v3 -> v4: added ColumnSpec.script (purely additive — existing
+        // columns simply lack it until the user opts a column into the
+        // `script` renderer and edits the source).
+        4: (doc) => doc,
       },
     },
     rows: { schema: rowSchema },

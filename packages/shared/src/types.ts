@@ -11,6 +11,12 @@ export interface ColumnSpec {
    * still drives coercion / sort / validation / SQL typing.
    */
   renderer?: string;
+  /**
+   * Source for the `script` renderer — a JavaScript body that must define
+   * `function render(row) { … }`. Edited via the column editor pencil and
+   * ignored when `renderer !== 'script'`. Not part of the CSV mini-language.
+   */
+  script?: string;
   default?: unknown;
   max?: number;
   unique?: boolean;

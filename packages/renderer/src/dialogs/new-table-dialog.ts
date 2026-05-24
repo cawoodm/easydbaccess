@@ -4,12 +4,15 @@ import type { ColumnSpec, ColumnType, Row } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { makeDialogDraggable } from './draggable.js';
+import { ScriptEditorDialog } from './script-editor-dialog.js';
 
 interface ColumnRow {
   field: string;
   label: string;
   type: ColumnType;
   renderer?: string | undefined;
+  /** JS body for the `script` renderer. Only meaningful when renderer === 'script'. */
+  script?: string | undefined;
   max?: number | undefined;
   unique?: boolean | undefined;
   notnull?: boolean | undefined;
@@ -98,7 +101,7 @@ export class NewTableDialog extends LitElement {
     .col-header,
     .col-row {
       display: grid;
-      grid-template-columns: 1fr 1fr 7rem 7rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem;
+      grid-template-columns: 1fr 1fr 7rem 7rem 1.5rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem;
       gap: 0.4rem;
       align-items: center;
     }
@@ -285,6 +288,7 @@ export class NewTableDialog extends LitElement {
         label: c.label,
         type: c.type,
         renderer: c.renderer,
+        script: c.script,
         max: c.max,
         unique: c.unique,
         notnull: c.notnull,
@@ -341,6 +345,23 @@ export class NewTableDialog extends LitElement {
     this.columns = this.columns.map((c, i) => (i === idx ? { ...c, ...patch } : c));
   }
 
+  /**
+   * Open the script-editor modal for the column at `idx`. Resolves to a
+   * patched column row (or no-op on cancel). The dialog is mounted as a
+   * sibling of this dialog in `<app-shell>`'s shadow root, so the static
+   * `ScriptEditorDialog.instance` accessor is how we reach it without
+   * leaking a query selector across shadow boundaries.
+   */
+  private async editScript(idx: number): Promise<void> {
+    const dlg = ScriptEditorDialog.instance;
+    if (!dlg) return;
+    const c = this.columns[idx];
+    if (!c) return;
+    const next = await dlg.open(c.script ?? '', c.label || c.field);
+    if (next === null) return;
+    this.patchColumn(idx, { script: next.trim() ? next : undefined });
+  }
+
   private async submit(e: Event): Promise<void> {
     e.preventDefault();
     const name = this.name.trim();
@@ -374,6 +395,7 @@ export class NewTableDialog extends LitElement {
         type: c.type,
       };
       if (c.renderer) spec.renderer = c.renderer;
+      if (c.script) spec.script = c.script;
       if (c.max != null && c.max > 0) spec.max = c.max;
       if (c.unique) spec.unique = true;
       if (c.notnull) spec.notnull = true;
@@ -510,6 +532,7 @@ export class NewTableDialog extends LitElement {
               <span>Label</span>
               <span>Type</span>
               <span>Renderer</span>
+              <span></span>
               <span class="flag-label">Max</span>
               <span class="flag-label" title="Unique">U</span>
               <span class="flag-label" title="Not null">!</span>
@@ -557,6 +580,16 @@ export class NewTableDialog extends LitElement {
                       (r) => html`<option value=${r} ?selected=${r === c.renderer}>${r}</option>`,
                     )}
                   </select>
+                  ${c.renderer === 'script'
+                    ? html`<button
+                        type="button"
+                        class="icon-btn"
+                        title="Edit JS render(row)"
+                        @click=${() => this.editScript(i)}
+                      >
+                        <span class="mi sm">edit</span>
+                      </button>`
+                    : html`<span></span>`}
                   <input
                     type="number"
                     min="0"

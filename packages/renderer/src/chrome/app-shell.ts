@@ -9,6 +9,7 @@ import '../dialogs/new-table-dialog.js';
 import type { NewTableDialog } from '../dialogs/new-table-dialog.js';
 import '../dialogs/plugin-manager-dialog.js';
 import type { PluginManagerDialog } from '../dialogs/plugin-manager-dialog.js';
+import '../dialogs/script-editor-dialog.js';
 import '../dialogs/toast-host.js';
 import { materialIconStyles } from './material-icon-css.js';
 import './table-list.js';
@@ -310,6 +311,7 @@ export class AppShell extends LitElement {
       <new-table-dialog></new-table-dialog>
       <csv-paste-dialog></csv-paste-dialog>
       <plugin-manager-dialog></plugin-manager-dialog>
+      <script-editor-dialog></script-editor-dialog>
       <host-dialogs></host-dialogs>
       <toast-host></toast-host>
     `;

@@ -391,9 +391,13 @@ export class DataTable extends LitElement {
       // string, which is acceptable given the host trust model already lets
       // plugins do anything.
       const tag = unsafeStatic(customTag);
+      // `.row` is the full row data object — most renderers ignore it; the
+      // `script` renderer needs it so user-authored render(row) functions
+      // can pull from neighbouring fields.
       return staticHtml`<${tag}
         .value=${raw ?? ''}
         .column=${col}
+        .row=${row.data}
         @change=${(e: Event) =>
           this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
       ></${tag}>`;

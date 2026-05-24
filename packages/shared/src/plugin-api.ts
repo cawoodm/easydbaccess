@@ -185,6 +185,11 @@ export interface UiRegistry {
    * receives `value` and `column` properties and dispatches a `change` event
    * with `{ detail: { value } }` on edit. Columns without a renderer (or
    * pointing at an unregistered name) fall back to read-only text.
+   *
+   * The element MAY also receive a `row` property (the full row's
+   * `data` object) for renderers that need neighbouring fields — for
+   * example the built-in `script` renderer. Renderers that only care
+   * about a single value can ignore it.
    */
   registerCellRenderer(name: string, tag: string): Unregister;
   registerRowRenderer(viewName: string, tag: string): Unregister;
