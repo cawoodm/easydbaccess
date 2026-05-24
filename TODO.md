@@ -37,35 +37,35 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 
 ## Columns Editor
 
-* ✅ feature: drag-to-reorder columns by dragging the `th` itself (currently
+* ✅✅ feature: drag-to-reorder columns by dragging the `th` itself (currently
   only `▲`/`▼` buttons inside the column editor dialog)
-* ✅ feature: hide/show columns (`Column.hidden` flag + eye toggle in editor)
-* ✅ Add max length to column editor
+* ✅✅ feature: hide/show columns (`Column.hidden` flag + eye toggle in editor)
+* ✅✅ Add max length to column editor
 * Column editor should preview a copy of the top 100 rows of existing data marking red what doesn't validate or parse according to live changes in the editor
 
 ## Cell Editing
-* ✅ feature: constraint pre-flight scan — when enabling `unique`/`notnull` on
+* ✅✅ feature: constraint pre-flight scan — when enabling `unique`/`notnull` on
   an existing column, scan rows for violations and block save with details
-* ✅ feature: enforce `Column.max` on edit and insert (field exists in schema, never read)
-* ✅ feature: enforce `Column.unique` (field exists, not validated)
-* ✅ feature: enforce `Column.notnull` (field exists, not validated)
-* ✅ feature: apply `Column.default` when inserting a row (field exists, currently we just `?? ''`)
+* ✅✅ feature: enforce `Column.max` on edit and insert (field exists in schema, never read)
+* ✅✅ feature: enforce `Column.unique` (field exists, not validated)
+* ✅✅ feature: enforce `Column.notnull` (field exists, not validated)
+* ✅✅ feature: apply `Column.default` when inserting a row (field exists, currently we just `?? ''`)
 
 ## Import / export
 
-* ✅ feature: CSV paste textarea (currently only file drop)
-* ✅ feature: CSV import-mode dialog for existing tables — use common api's choice() dialog for: `Append` /
+* ✅✅ feature: CSV paste textarea (currently only file drop)
+* ✅✅ feature: CSV import-mode dialog for existing tables — use common api's choice() dialog for: `Append` /
   `Overwrite rows` / `Cancel` / `Create new table`
-* ✅ feature: CSV header colon mini-language parser
+* ✅✅ feature: CSV header colon mini-language parser
   `field:label:type:default:max:flags` (the type-from-data inference still
   applies as fallback)
-* ✅ feature: JSON import-mode dialog — `Overwrite matching tables` / `Replace
+* ✅✅ feature: JSON import-mode dialog — `Overwrite matching tables` / `Replace
   entire workspace` / `Cancel` (currently always inserts new tables next to
   existing ones)
-* ✅ feature: cascade window positions for imported tables that have no
+* ✅✅ feature: cascade window positions for imported tables that have no
   `elementRect.x/y` (today the v1 importer honors saved positions; tables
   without coords stack)
-* ✅ feature: validate dump-export shape covers everything the JSON-import
+* ✅✅ feature: validate dump-export shape covers everything the JSON-import
   reader expects, so round-trips are lossless
 
 ## Sync (Gist)
@@ -79,12 +79,12 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 
 ## Filters
 
-* ✅ feature: per-column filter as a dropdown with unique-value picker capped at
+* ✅✅ feature: per-column filter as a dropdown with unique-value picker capped at
   ~500 values (currently substring text input only)
-* ✅ feature: funnel icon on the column header, active state highlights it blue
-* ✅ feature: faceted options — the dropdown's value list respects other active
+* ✅✅ feature: funnel icon on the column header, active state highlights it blue
+* ✅✅ feature: faceted options — the dropdown's value list respects other active
   per-column filters
-* ✅ polish: filter dropdown anchored under the column header, escapes panel
+* ✅✅ polish: filter dropdown anchored under the column header, escapes panel
   clip boundaries (use `document.body` portal pattern)
 
 ## Search
@@ -110,23 +110,23 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 * ✅✅ bug: z-order of windows is not persisting (above)
 * feature: restore `maximized` and `minimized` status on reload (today the
   geometry restores but the panel always opens "normalized")
-* ✅ feature: panel title shows row count after table name, e.g. `inventory (3)`
-* ✅ feature: header-drag visual feedback (opacity + drop-target borders) when
+* ✅✅ feature: panel title shows row count after table name, e.g. `inventory (3)`
+* ✅✅ feature: header-drag visual feedback (opacity + drop-target borders) when
   doing column reorder via the table header
 * polish: smallify control is currently removed; consider re-enabling
 
 ## UI niceties
 
-* ✅ feature: toast notification system (replace `alert()` in plugin flows —
+* ✅✅ feature: toast notification system (replace `alert()` in plugin flows —
   gist sync, import errors, etc.)
-* ✅ feature: confirm dialog (replace native `confirm` for row/table delete)
-* ✅ feature: Material Icons in buttons everywhere (currently text labels —
+* ✅✅ feature: confirm dialog (replace native `confirm` for row/table delete)
+* ✅✅ feature: Material Icons in buttons everywhere (currently text labels —
   `+ New Table`, `Push`, `Pull`, `Dump`, `CSV`, etc.)
 * feature: keyboard shortcuts — Enter to import, Esc to cancel cell edit,
   Esc to close dialogs
-* ✅ polish: more prominent page-level drag-drop overlay during a drag (today
+* ✅✅ polish: more prominent page-level drag-drop overlay during a drag (today
   the dashed border only appears via CSS; reliable visual cue would help)
-* ✅ feature: draggable modal dialogs (column editor, new-table dialog) — they
+* ✅✅ feature: draggable modal dialogs (column editor, new-table dialog) — they
   are currently centered modals, not draggable
 * feature: progress indicator during large imports (Northwind takes ~10s)
 
