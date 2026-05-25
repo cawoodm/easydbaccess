@@ -70,8 +70,11 @@ autocomplete, or type a substring.
 ![Sorting](./docs/screenshots/sorting.png)
 ![Filtering](./docs/screenshots/filter.png)
 
+## Rendering
 Plugins can change the way data is rendered, for example as a hyperlink:
 ![Rendering](./docs/screenshots/plugin-renderer.png)
+Or with a custom script:
+![alt text](./docs/screenshots/renderer-script.png)
 
 ### Export anywhere
 
@@ -86,7 +89,7 @@ Two flavours, pick one — or neither:
 - **Your own tiny server.** Run the bundled Hono server on a Raspberry Pi,
   Render, Fly, anywhere. Click **Sync ↑** to push, **Sync ↓** to pull.
   See [`docs/SYNCH.md`](./docs/SYNCH.md) for the details.
-- **A private GitHub Gist.** No server needed — your workspace is the gist.
+- **A private GitHub  Gist.** No server needed — your workspace is the gist.
 
 ---
 
