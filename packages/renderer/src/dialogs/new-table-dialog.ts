@@ -4,6 +4,7 @@ import type { ColumnSpec, ColumnType, Row } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { makeDialogDraggable } from './draggable.js';
+import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
 
 interface ColumnRow {
@@ -36,49 +37,11 @@ const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'date
 export class NewTableDialog extends LitElement {
   static override styles = [
     materialIconStyles,
+    dialogChromeStyles,
     css`
-    :host {
-      display: contents;
-    }
     dialog {
-      position: relative;
-      border: 0;
-      border-radius: 0.5rem;
-      padding: 0;
-      max-width: 92vw;
-      width: 880px;
-      max-height: 92vh;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
-      font-family: system-ui, sans-serif;
-    }
-    button.close-x {
-      position: absolute;
-      top: 0.55rem;
-      right: 0.6rem;
-      background: transparent;
-      border: 0;
-      cursor: pointer;
-      color: #9ca3af;
-      padding: 0.15rem;
-      line-height: 1;
-      border-radius: 0.2rem;
-    }
-    button.close-x:hover {
-      color: #111;
-      background: #f3f4f6;
-    }
-    dialog::backdrop {
-      background: rgba(15, 23, 42, 0.4);
-    }
-    form {
-      padding: 1.25rem;
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-    h2 {
-      margin: 0;
-      font-size: 1.1rem;
+      max-width: 96vw;
+      width: 1180px;
     }
     label {
       display: flex;
@@ -141,31 +104,6 @@ export class NewTableDialog extends LitElement {
     button.row-del {
       color: #ef4444;
       font-size: 1.1rem;
-    }
-    .actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 0.5rem;
-      border-top: 1px solid #e5e7eb;
-      padding-top: 0.75rem;
-    }
-    button.primary {
-      background: #3b82f6;
-      color: white;
-      border: 0;
-      padding: 0.45rem 0.9rem;
-      border-radius: 0.25rem;
-      cursor: pointer;
-    }
-    button.primary:hover {
-      background: #2563eb;
-    }
-    button.ghost {
-      background: transparent;
-      border: 1px solid #d1d5db;
-      padding: 0.45rem 0.9rem;
-      border-radius: 0.25rem;
-      cursor: pointer;
     }
     button.add {
       align-self: start;
@@ -256,8 +194,8 @@ export class NewTableDialog extends LitElement {
 
   override firstUpdated() {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
-    const h2 = this.shadowRoot?.querySelector('h2') as HTMLElement | null;
-    if (this.dialogEl && h2) makeDialogDraggable(this.dialogEl, h2);
+    const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
+    if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
   }
 
   /**
@@ -510,12 +448,19 @@ export class NewTableDialog extends LitElement {
     const title = this.mode === 'edit' ? 'Edit columns' : 'New table';
     const submitLabel = this.mode === 'edit' ? 'Save' : 'Create';
     return html`
-      <dialog @cancel=${this.close}>
+      <dialog @cancel=${this.close} @keydown=${ctrlEnterSubmits}>
         <button type="button" class="close-x" title="Close" @click=${this.close}>
           <span class="mi sm">close</span>
         </button>
         <form @submit=${this.submit}>
-          <h2>${title}</h2>
+          <div class="dialog-header">
+            <h2>${title}</h2>
+            <div class="header-actions">
+              <button type="button" class="ghost" @click=${this.close}>Cancel</button>
+              <button type="submit" class="primary">${submitLabel}</button>
+            </div>
+          </div>
+          <div class="dialog-body">
           <label>
             Name
             <input
@@ -669,10 +614,6 @@ export class NewTableDialog extends LitElement {
             : ''}
           ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''}
           ${this.mode === 'edit' ? this.renderPreview() : ''}
-
-          <div class="actions">
-            <button type="button" class="ghost" @click=${this.close}>Cancel</button>
-            <button type="submit" class="primary">${submitLabel}</button>
           </div>
         </form>
       </dialog>

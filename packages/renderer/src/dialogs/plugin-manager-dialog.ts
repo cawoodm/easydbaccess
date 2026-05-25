@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import type { PluginModule, PluginRecord } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
+import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 import { builtinKey, builtinPlugins } from '../plugin-host/loader.js';
 
@@ -42,49 +43,11 @@ interface CatalogResolved extends CatalogEntry {
 export class PluginManagerDialog extends LitElement {
   static override styles = [
     materialIconStyles,
+    dialogChromeStyles,
     css`
-      :host {
-        display: contents;
-      }
       dialog {
-        position: relative;
-        border: 0;
-        border-radius: 0.5rem;
-        padding: 0;
         width: 640px;
         max-width: 92vw;
-        max-height: 90vh;
-        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
-        font-family: system-ui, sans-serif;
-      }
-      button.close-x {
-        position: absolute;
-        top: 0.55rem;
-        right: 0.6rem;
-        background: transparent;
-        border: 0;
-        cursor: pointer;
-        color: #9ca3af;
-        padding: 0.15rem;
-        line-height: 1;
-        border-radius: 0.2rem;
-      }
-      button.close-x:hover {
-        color: #111;
-        background: #f3f4f6;
-      }
-      dialog::backdrop {
-        background: rgba(15, 23, 42, 0.4);
-      }
-      form {
-        padding: 1.1rem 1.25rem;
-        display: flex;
-        flex-direction: column;
-        gap: 0.75rem;
-      }
-      h2 {
-        margin: 0;
-        font-size: 1.05rem;
       }
       p.hint {
         margin: 0;
@@ -170,34 +133,6 @@ export class PluginManagerDialog extends LitElement {
         border: 1px solid #d1d5db;
         border-radius: 0.25rem;
       }
-      .actions {
-        display: flex;
-        justify-content: space-between;
-        gap: 0.5rem;
-        border-top: 1px solid #e5e7eb;
-        padding: 0.7rem 1.25rem;
-        background: #f9fafb;
-      }
-      button.primary {
-        background: #3b82f6;
-        color: white;
-        border: 0;
-        padding: 0.45rem 0.9rem;
-        border-radius: 0.25rem;
-        cursor: pointer;
-        font: inherit;
-      }
-      button.primary:hover {
-        background: #2563eb;
-      }
-      button.ghost {
-        background: transparent;
-        border: 1px solid #d1d5db;
-        padding: 0.45rem 0.9rem;
-        border-radius: 0.25rem;
-        cursor: pointer;
-        font: inherit;
-      }
       button.icon-only {
         background: transparent;
         border: 0;
@@ -226,8 +161,8 @@ export class PluginManagerDialog extends LitElement {
 
   override firstUpdated() {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
-    const h2 = this.shadowRoot?.querySelector('h2') as HTMLElement | null;
-    if (this.dialogEl && h2) makeDialogDraggable(this.dialogEl, h2);
+    const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
+    if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
   }
 
   async open(): Promise<void> {
@@ -466,12 +401,21 @@ export class PluginManagerDialog extends LitElement {
 
   override render() {
     return html`
-      <dialog @cancel=${this.close}>
+      <dialog @cancel=${this.close} @keydown=${ctrlEnterSubmits}>
         <button type="button" class="close-x" title="Close" @click=${this.close}>
           <span class="mi sm">close</span>
         </button>
         <form @submit=${this.addPlugin}>
-          <h2>Plugins</h2>
+          <div class="dialog-header">
+            <h2>Plugins</h2>
+            <div class="header-actions">
+              <button type="button" class="ghost" @click=${this.close}>Close</button>
+              <button type="button" class="primary" @click=${this.reload}>
+                <span class="mi sm">refresh</span> Reload to apply
+              </button>
+            </div>
+          </div>
+          <div class="dialog-body">
           <p class="hint">
             Plugins are JavaScript modules loaded by URL into this workspace.
             Changes take effect after reload.
@@ -634,12 +578,6 @@ export class PluginManagerDialog extends LitElement {
               <span class="mi sm">add</span> Add
             </button>
           </div>
-
-          <div class="actions">
-            <button type="button" class="ghost" @click=${this.close}>Close</button>
-            <button type="button" class="primary" @click=${this.reload}>
-              <span class="mi sm">refresh</span> Reload to apply
-            </button>
           </div>
         </form>
       </dialog>

@@ -168,7 +168,7 @@ test.describe('data-table rendering', () => {
 
   test('date column edits use <input type="date">', async ({ page }) => {
     const id = await createTable(page, 'Events', [
-      { field: 'when', type: 'date' },
+      { field: 'when', type: 'date', renderer: 'date' },
     ]);
     await waitForPanel(page, id);
     await addRow(page, id, { when: '2026-05-23' });
@@ -181,7 +181,7 @@ test.describe('data-table rendering', () => {
 
   test('datetime column edits use <input type="datetime-local">', async ({ page }) => {
     const id = await createTable(page, 'Stamps', [
-      { field: 'at', type: 'datetime' },
+      { field: 'at', type: 'datetime', renderer: 'datetime' },
     ]);
     await waitForPanel(page, id);
     await addRow(page, id, { at: '2026-05-23T14:30' });

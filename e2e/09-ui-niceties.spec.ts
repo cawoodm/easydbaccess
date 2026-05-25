@@ -12,9 +12,11 @@ import { test, expect } from './fixtures.js';
 test.describe('ui niceties', () => {
   test('header buttons embed Material Icons next to their labels', async ({ page }) => {
     // Sample a few of the well-known header buttons and assert they have an
-    // <span class="mi"> sibling alongside the label text.
+    // <span class="mi"> sibling alongside the label text. (The Sample-data
+    // button is icon-only since v0.0.5 — no accessible name to match — so
+    // it's intentionally excluded from this label check.)
     const header = page.locator('app-shell header');
-    for (const name of ['New Table', 'Paste CSV', 'Sample data']) {
+    for (const name of ['New Table', 'Paste CSV']) {
       const btn = header.getByRole('button', { name: new RegExp(name) });
       await expect(btn).toBeVisible();
       // The icon is rendered inside the button as <span class="mi sm">.

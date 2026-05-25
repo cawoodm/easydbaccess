@@ -1,21 +1,34 @@
 /**
- * Make a <dialog> draggable by one of its descendants (typically a header).
- * Native <dialog> elements center themselves at showModal(); the user can't
- * move them. This wires a pointerdown on the handle that listens for
- * pointermove/up on the window and translates the dialog by the delta.
+ * Make a <dialog> draggable by one of its descendants (typically the
+ * `.dialog-header` bar). Native <dialog> elements center themselves at
+ * showModal() and can't be moved by the user. This wires pointer events
+ * on the handle, captures the pointer for the duration of the drag, and
+ * translates the dialog by the delta via inline `left`/`top`.
  *
- * Idempotent — calling twice on the same dialog/handle pair just re-binds.
+ * Idempotent: re-invoking with the same handle is a no-op (a WeakSet keeps
+ * track). Dialogs whose header DOM node is recreated by Lit on a template
+ * switch will safely re-bind because the new node isn't in the set yet;
+ * the old node's listeners are GC'd with the orphaned element.
  */
+const boundHandles = new WeakSet<HTMLElement>();
+
 export function makeDialogDraggable(dialog: HTMLDialogElement, handle: HTMLElement): void {
+  if (boundHandles.has(handle)) return;
+  boundHandles.add(handle);
+
   let startX = 0;
   let startY = 0;
   let baseX = 0;
   let baseY = 0;
   let active = false;
 
-  const onDown = (e: PointerEvent) => {
-    // Don't start a drag if the user clicked an interactive child of the
-    // handle (button, input, select). Pointer captures interfere with click.
+  handle.style.cursor = 'grab';
+  handle.style.touchAction = 'none';
+  handle.style.userSelect = 'none';
+
+  handle.addEventListener('pointerdown', (e: PointerEvent) => {
+    // Skip drag if the click is on an interactive descendant — pointer
+    // capture would otherwise swallow the click.
     const target = e.target as HTMLElement;
     if (target.closest('button, input, textarea, select, a, label')) return;
     active = true;
@@ -26,13 +39,15 @@ export function makeDialogDraggable(dialog: HTMLDialogElement, handle: HTMLEleme
     baseY = rect.top;
     handle.setPointerCapture(e.pointerId);
     handle.style.cursor = 'grabbing';
-  };
+  });
 
-  const onMove = (e: PointerEvent) => {
+  handle.addEventListener('pointermove', (e: PointerEvent) => {
     if (!active) return;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
-    const minX = -dialog.offsetWidth + 80; // keep at least 80px on-screen
+    // Keep at least 80px of the dialog inside the viewport so the user
+    // can always grab it back.
+    const minX = -dialog.offsetWidth + 80;
     const maxX = window.innerWidth - 80;
     const minY = 0;
     const maxY = window.innerHeight - 40;
@@ -43,24 +58,18 @@ export function makeDialogDraggable(dialog: HTMLDialogElement, handle: HTMLEleme
     dialog.style.left = `${nx}px`;
     dialog.style.top = `${ny}px`;
     dialog.style.margin = '0';
-  };
+  });
 
-  const onUp = (e: PointerEvent) => {
+  const endDrag = (e: PointerEvent) => {
     if (!active) return;
     active = false;
-    handle.releasePointerCapture(e.pointerId);
+    try {
+      handle.releasePointerCapture(e.pointerId);
+    } catch {
+      /* capture already released — happens on pointercancel */
+    }
     handle.style.cursor = 'grab';
   };
-
-  // Replace any existing listeners (defensive against double-binding).
-  handle.removeEventListener('pointerdown', onDown);
-  handle.removeEventListener('pointermove', onMove);
-  handle.removeEventListener('pointerup', onUp);
-  handle.removeEventListener('pointercancel', onUp);
-  handle.addEventListener('pointerdown', onDown);
-  handle.addEventListener('pointermove', onMove);
-  handle.addEventListener('pointerup', onUp);
-  handle.addEventListener('pointercancel', onUp);
-  handle.style.cursor = 'grab';
-  handle.style.touchAction = 'none';
+  handle.addEventListener('pointerup', endDrag);
+  handle.addEventListener('pointercancel', endDrag);
 }

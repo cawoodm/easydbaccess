@@ -1,6 +1,20 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
+import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
+
+/**
+ * Boilerplate inserted into a fresh script editor. Shows the required
+ * `render(row)` signature, the contract (returns an HTML string), and a
+ * minimal working example so the user can hit Save once and see the
+ * cell render without writing anything themselves.
+ */
+const BOILERPLATE = `function render(row) {
+  // \`row\` is the full row object — access any field by name (row.field).
+  // Return an HTML string; it is injected into the cell as raw HTML.
+  return '<b>' + (row.name ?? '') + '</b>';
+}
+`;
 
 /**
  * Modal editor for a column's `script` source — the JS body used by the
@@ -18,99 +32,35 @@ import { makeDialogDraggable } from './draggable.js';
 export class ScriptEditorDialog extends LitElement {
   static instance: ScriptEditorDialog | null = null;
 
-  static override styles = css`
-    :host {
-      display: contents;
-    }
-    dialog {
-      position: relative;
-      border: 0;
-      border-radius: 0.5rem;
-      padding: 0;
-      width: 720px;
-      max-width: 92vw;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
-      font-family: system-ui, sans-serif;
-    }
-    button.close-x {
-      position: absolute;
-      top: 0.55rem;
-      right: 0.6rem;
-      background: transparent;
-      border: 0;
-      cursor: pointer;
-      color: #9ca3af;
-      font-size: 1.1rem;
-      padding: 0.15rem 0.3rem;
-      line-height: 1;
-      border-radius: 0.2rem;
-    }
-    button.close-x:hover {
-      color: #111;
-      background: #f3f4f6;
-    }
-    dialog::backdrop {
-      background: rgba(15, 23, 42, 0.4);
-    }
-    form {
-      padding: 1.1rem 1.25rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-    h2 {
-      margin: 0;
-      font-size: 1.05rem;
-    }
-    p.hint {
-      margin: 0;
-      color: #6b7280;
-      font-size: 0.85rem;
-    }
-    p.hint code {
-      font-family: ui-monospace, SFMono-Regular, monospace;
-      background: #f3f4f6;
-      padding: 0.05rem 0.25rem;
-      border-radius: 0.2rem;
-    }
-    textarea {
-      font: 0.85rem ui-monospace, SFMono-Regular, monospace;
-      padding: 0.6rem 0.75rem;
-      border: 1px solid #d1d5db;
-      border-radius: 0.25rem;
-      min-height: 320px;
-      resize: vertical;
-      tab-size: 2;
-    }
-    .actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 0.5rem;
-      border-top: 1px solid #e5e7eb;
-      padding: 0.7rem 1.25rem;
-      background: #f9fafb;
-    }
-    button.primary {
-      background: #3b82f6;
-      color: white;
-      border: 0;
-      padding: 0.45rem 0.9rem;
-      border-radius: 0.25rem;
-      cursor: pointer;
-      font: inherit;
-    }
-    button.primary:hover {
-      background: #2563eb;
-    }
-    button.ghost {
-      background: transparent;
-      border: 1px solid #d1d5db;
-      padding: 0.45rem 0.9rem;
-      border-radius: 0.25rem;
-      cursor: pointer;
-      font: inherit;
-    }
-  `;
+  static override styles = [
+    dialogChromeStyles,
+    css`
+      dialog {
+        width: 720px;
+        max-width: 92vw;
+      }
+      p.hint {
+        margin: 0;
+        color: #6b7280;
+        font-size: 0.85rem;
+      }
+      p.hint code {
+        font-family: ui-monospace, SFMono-Regular, monospace;
+        background: #f3f4f6;
+        padding: 0.05rem 0.25rem;
+        border-radius: 0.2rem;
+      }
+      textarea {
+        font: 0.85rem ui-monospace, SFMono-Regular, monospace;
+        padding: 0.6rem 0.75rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+        min-height: 320px;
+        resize: vertical;
+        tab-size: 2;
+      }
+    `,
+  ];
 
   @state() private text = '';
   @state() private columnLabel = '';
@@ -129,8 +79,8 @@ export class ScriptEditorDialog extends LitElement {
 
   override firstUpdated() {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
-    const h2 = this.shadowRoot?.querySelector('h2') as HTMLElement | null;
-    if (this.dialogEl && h2) makeDialogDraggable(this.dialogEl, h2);
+    const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
+    if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
   }
 
   /**
@@ -146,7 +96,10 @@ export class ScriptEditorDialog extends LitElement {
       this.resolver(null);
       this.resolver = null;
     }
-    this.text = initial ?? '';
+    // Pre-fill with boilerplate so users opening a fresh column-script see
+    // the expected shape instead of an intimidating empty textarea. An
+    // existing script wins — we never overwrite the user's source.
+    this.text = initial && initial.trim() ? initial : BOILERPLATE;
     this.columnLabel = columnLabel ?? '';
     await this.updateComplete;
     this.dialogEl?.showModal();
@@ -171,24 +124,28 @@ export class ScriptEditorDialog extends LitElement {
 
   override render() {
     return html`
-      <dialog @cancel=${this.onCancel}>
+      <dialog @cancel=${this.onCancel} @keydown=${ctrlEnterSubmits}>
         <button type="button" class="close-x" title="Close" @click=${this.onCancel}>×</button>
         <form @submit=${this.onSubmit}>
-          <h2>Edit script${this.columnLabel ? ` — ${this.columnLabel}` : ''}</h2>
-          <p class="hint">
-            Define <code>function render(row) { … }</code>. <code>row</code> is
-            the full row object; return an HTML string. Throws or non-string
-            returns show a small error chip in the cell.
-          </p>
-          <textarea
-            spellcheck="false"
-            autofocus
-            .value=${this.text}
-            @input=${(e: Event) => (this.text = (e.target as HTMLTextAreaElement).value)}
-          ></textarea>
-          <div class="actions">
-            <button type="button" class="ghost" @click=${this.onCancel}>Cancel</button>
-            <button type="submit" class="primary">Save</button>
+          <div class="dialog-header">
+            <h2>Edit script${this.columnLabel ? ` — ${this.columnLabel}` : ''}</h2>
+            <div class="header-actions">
+              <button type="button" class="ghost" @click=${this.onCancel}>Cancel</button>
+              <button type="submit" class="primary">Save</button>
+            </div>
+          </div>
+          <div class="dialog-body">
+            <p class="hint">
+              Define <code>function render(row) { … }</code>. <code>row</code> is
+              the full row object; return an HTML string. Throws or non-string
+              returns show a small error chip in the cell.
+            </p>
+            <textarea
+              spellcheck="false"
+              autofocus
+              .value=${this.text}
+              @input=${(e: Event) => (this.text = (e.target as HTMLTextAreaElement).value)}
+            ></textarea>
           </div>
         </form>
       </dialog>

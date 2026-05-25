@@ -1,5 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
+import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 
 interface AlertState {
@@ -37,113 +38,51 @@ type DialogState = AlertState | PromptState | ChoiceState | null;
 export class HostDialogs extends LitElement {
   static instance: HostDialogs | null = null;
 
-  static override styles = css`
-    :host {
-      display: contents;
-    }
-    dialog {
-      position: relative;
-      border: 0;
-      border-radius: 0.5rem;
-      padding: 0;
-      min-width: 360px;
-      max-width: 520px;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
-      font-family: system-ui, sans-serif;
-    }
-    button.close-x {
-      position: absolute;
-      top: 0.55rem;
-      right: 0.6rem;
-      background: transparent;
-      border: 0;
-      cursor: pointer;
-      color: #9ca3af;
-      font-size: 1.1rem;
-      padding: 0.15rem 0.3rem;
-      line-height: 1;
-      border-radius: 0.2rem;
-    }
-    button.close-x:hover {
-      color: #111;
-      background: #f3f4f6;
-    }
-    dialog::backdrop {
-      background: rgba(15, 23, 42, 0.4);
-    }
-    .body {
-      padding: 1.1rem 1.25rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.85rem;
-    }
-    h2 {
-      margin: 0;
-      font-size: 1.05rem;
-    }
-    p.message {
-      margin: 0;
-      color: #374151;
-      white-space: pre-wrap;
-      font-size: 0.95rem;
-    }
-    input[type='text'] {
-      font: inherit;
-      padding: 0.45rem 0.55rem;
-      border: 1px solid #d1d5db;
-      border-radius: 0.25rem;
-      width: 100%;
-      box-sizing: border-box;
-    }
-    .actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 0.5rem;
-      border-top: 1px solid #e5e7eb;
-      padding: 0.75rem 1.25rem;
-      background: #f9fafb;
-      border-radius: 0 0 0.5rem 0.5rem;
-    }
-    .choices {
-      display: flex;
-      flex-direction: column;
-      gap: 0.4rem;
-      padding: 0.75rem 1.25rem 1rem;
-    }
-    button.primary {
-      background: #3b82f6;
-      color: white;
-      border: 0;
-      padding: 0.45rem 0.9rem;
-      border-radius: 0.25rem;
-      cursor: pointer;
-      font: inherit;
-    }
-    button.primary:hover {
-      background: #2563eb;
-    }
-    button.ghost {
-      background: transparent;
-      border: 1px solid #d1d5db;
-      padding: 0.45rem 0.9rem;
-      border-radius: 0.25rem;
-      cursor: pointer;
-      font: inherit;
-    }
-    button.choice {
-      background: white;
-      border: 1px solid #d1d5db;
-      padding: 0.5rem 0.75rem;
-      border-radius: 0.25rem;
-      cursor: pointer;
-      font: inherit;
-      text-align: left;
-    }
-    button.choice:hover {
-      background: #f3f4f6;
-      border-color: #9ca3af;
-    }
-  `;
+  static override styles = [
+    dialogChromeStyles,
+    css`
+      dialog {
+        min-width: 360px;
+        max-width: 520px;
+      }
+      /* Shorter, looser body for the simple alert/prompt/choice modes. */
+      .dialog-body {
+        gap: 0.85rem;
+      }
+      p.message {
+        margin: 0;
+        color: #374151;
+        white-space: pre-wrap;
+        font-size: 0.95rem;
+      }
+      input[type='text'] {
+        font: inherit;
+        padding: 0.45rem 0.55rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .choices {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+      }
+      button.choice {
+        background: white;
+        border: 1px solid #d1d5db;
+        padding: 0.5rem 0.75rem;
+        border-radius: 0.25rem;
+        cursor: pointer;
+        font: inherit;
+        text-align: left;
+      }
+      button.choice:hover {
+        background: #f3f4f6;
+        border-color: #9ca3af;
+      }
+    `,
+  ];
 
   @state() private current: DialogState = null;
   private queue: (() => void)[] = [];
@@ -164,11 +103,12 @@ export class HostDialogs extends LitElement {
   }
 
   override updated() {
-    // Body re-renders each time `current` flips; the h2 inside is recreated,
-    // so we need to re-bind the drag handle each show.
+    // Body re-renders each time `current` flips; the header inside is
+    // recreated (different template per dialog kind), so re-call the helper
+    // each show — it's idempotent on already-bound nodes via a WeakSet.
     if (!this.dialogEl) return;
-    const h2 = this.shadowRoot?.querySelector('h2') as HTMLElement | null;
-    if (h2) makeDialogDraggable(this.dialogEl, h2);
+    const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
+    if (header) makeDialogDraggable(this.dialogEl, header);
   }
 
   alert(message: string, title = 'Notice'): Promise<void> {
@@ -240,6 +180,11 @@ export class HostDialogs extends LitElement {
     this.closeAndResolve(this.current.value);
   };
 
+  private submitAlert = (e: Event) => {
+    e.preventDefault();
+    this.closeAndResolve(undefined);
+  };
+
   private cancelPrompt = () => this.closeAndResolve(null);
 
   /**
@@ -259,7 +204,7 @@ export class HostDialogs extends LitElement {
   override render() {
     const c = this.current;
     return html`
-      <dialog @cancel=${this.onCancel}>
+      <dialog @cancel=${this.onCancel} @keydown=${ctrlEnterSubmits}>
         <button type="button" class="close-x" title="Close" @click=${this.onCloseX}>×</button>
         ${c ? this.renderBody(c) : nothing}
       </dialog>
@@ -269,20 +214,33 @@ export class HostDialogs extends LitElement {
   private renderBody(c: NonNullable<DialogState>) {
     switch (c.kind) {
       case 'alert':
+        // Wrapped in a form so the shared Ctrl+Enter helper can submit it
+        // (calling closeAndResolve via the submit handler). The OK button
+        // is the form's submit button.
         return html`
-          <div class="body">
-            <h2>${c.title}</h2>
-            <p class="message">${c.message}</p>
-          </div>
-          <div class="actions">
-            <button class="primary" @click=${() => this.closeAndResolve(undefined)}>OK</button>
-          </div>
+          <form @submit=${this.submitAlert}>
+            <div class="dialog-header">
+              <h2>${c.title}</h2>
+              <div class="header-actions">
+                <button type="submit" class="primary">OK</button>
+              </div>
+            </div>
+            <div class="dialog-body">
+              <p class="message">${c.message}</p>
+            </div>
+          </form>
         `;
       case 'prompt':
         return html`
           <form @submit=${this.submitPrompt}>
-            <div class="body">
+            <div class="dialog-header">
               <h2>${c.title}</h2>
+              <div class="header-actions">
+                <button type="button" class="ghost" @click=${this.cancelPrompt}>Cancel</button>
+                <button type="submit" class="primary">OK</button>
+              </div>
+            </div>
+            <div class="dialog-body">
               <p class="message">${c.message}</p>
               <input
                 type="text"
@@ -295,26 +253,29 @@ export class HostDialogs extends LitElement {
                 }}
               />
             </div>
-            <div class="actions">
-              <button type="button" class="ghost" @click=${this.cancelPrompt}>Cancel</button>
-              <button type="submit" class="primary">OK</button>
-            </div>
           </form>
         `;
       case 'choice':
+        // Choice options are themselves the actions, so they stay in the
+        // body. The header keeps the consistent title bar + a Cancel so
+        // the action area still lives at the top.
         return html`
-          <div class="body">
+          <div class="dialog-header">
             <h2>${c.title}</h2>
-            ${c.message ? html`<p class="message">${c.message}</p>` : nothing}
+            <div class="header-actions">
+              <button class="ghost" @click=${() => this.closeAndResolve(null)}>Cancel</button>
+            </div>
           </div>
-          <div class="choices">
-            ${c.options.map(
-              (opt) =>
-                html`<button class="choice" @click=${() => this.closeAndResolve(opt)}>
-                  ${opt}
-                </button>`,
-            )}
-            <button class="ghost" @click=${() => this.closeAndResolve(null)}>Cancel</button>
+          <div class="dialog-body">
+            ${c.message ? html`<p class="message">${c.message}</p>` : nothing}
+            <div class="choices">
+              ${c.options.map(
+                (opt) =>
+                  html`<button class="choice" @click=${() => this.closeAndResolve(opt)}>
+                    ${opt}
+                  </button>`,
+              )}
+            </div>
           </div>
         `;
     }

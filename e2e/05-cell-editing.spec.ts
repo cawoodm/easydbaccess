@@ -12,7 +12,7 @@ import { addRow, createTable, panelDomId, readRows, waitForPanel } from './helpe
 test.describe('cell editing constraints', () => {
   test('notnull rejects empty values with a dialog and reverts', async ({ page }) => {
     const id = await createTable(page, 'Required', [
-      { field: 'name' },
+      { field: 'name', renderer: 'link' },
     ]);
     await waitForPanel(page, id);
     // Patch the column to set notnull=true (createTable helper doesn't pass flags).
@@ -46,7 +46,7 @@ test.describe('cell editing constraints', () => {
   });
 
   test('max length rejects overlong strings', async ({ page }) => {
-    const id = await createTable(page, 'Limit', [{ field: 'code' }]);
+    const id = await createTable(page, 'Limit', [{ field: 'code', renderer: 'link' }]);
     await waitForPanel(page, id);
     await page.evaluate(
       async ({ tableId }) => {
@@ -76,7 +76,7 @@ test.describe('cell editing constraints', () => {
   });
 
   test('unique rejects duplicate values', async ({ page }) => {
-    const id = await createTable(page, 'Codes', [{ field: 'code' }]);
+    const id = await createTable(page, 'Codes', [{ field: 'code', renderer: 'link' }]);
     await waitForPanel(page, id);
     await page.evaluate(
       async ({ tableId }) => {

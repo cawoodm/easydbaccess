@@ -2,6 +2,7 @@ import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { getContext } from '../app-context.js';
 import { parseCsv } from '../plugins/csv-import.js';
+import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 
 /**
@@ -11,109 +12,45 @@ import { makeDialogDraggable } from './draggable.js';
  */
 @customElement('csv-paste-dialog')
 export class CsvPasteDialog extends LitElement {
-  static override styles = css`
-    :host {
-      display: contents;
-    }
-    dialog {
-      position: relative;
-      border: 0;
-      border-radius: 0.5rem;
-      padding: 0;
-      width: 640px;
-      max-width: 90vw;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
-      font-family: system-ui, sans-serif;
-    }
-    button.close-x {
-      position: absolute;
-      top: 0.55rem;
-      right: 0.6rem;
-      background: transparent;
-      border: 0;
-      cursor: pointer;
-      color: #9ca3af;
-      font-size: 1.1rem;
-      padding: 0.15rem 0.3rem;
-      line-height: 1;
-      border-radius: 0.2rem;
-    }
-    button.close-x:hover {
-      color: #111;
-      background: #f3f4f6;
-    }
-    dialog::backdrop {
-      background: rgba(15, 23, 42, 0.4);
-    }
-    form {
-      padding: 1.1rem 1.25rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-    h2 {
-      margin: 0;
-      font-size: 1.05rem;
-    }
-    p.hint {
-      margin: 0;
-      color: #6b7280;
-      font-size: 0.85rem;
-    }
-    label {
-      display: flex;
-      flex-direction: column;
-      gap: 0.3rem;
-      font-size: 0.85rem;
-      color: #374151;
-    }
-    input[type='text'] {
-      font: inherit;
-      padding: 0.4rem 0.5rem;
-      border: 1px solid #d1d5db;
-      border-radius: 0.25rem;
-    }
-    textarea {
-      font: 0.85rem ui-monospace, SFMono-Regular, monospace;
-      padding: 0.5rem;
-      border: 1px solid #d1d5db;
-      border-radius: 0.25rem;
-      min-height: 240px;
-      resize: vertical;
-    }
-    .actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 0.5rem;
-      border-top: 1px solid #e5e7eb;
-      padding: 0.7rem 1.25rem;
-      background: #f9fafb;
-    }
-    button.primary {
-      background: #3b82f6;
-      color: white;
-      border: 0;
-      padding: 0.45rem 0.9rem;
-      border-radius: 0.25rem;
-      cursor: pointer;
-      font: inherit;
-    }
-    button.primary:hover {
-      background: #2563eb;
-    }
-    button.ghost {
-      background: transparent;
-      border: 1px solid #d1d5db;
-      padding: 0.45rem 0.9rem;
-      border-radius: 0.25rem;
-      cursor: pointer;
-      font: inherit;
-    }
-    .error {
-      color: #ef4444;
-      font-size: 0.85rem;
-    }
-  `;
+  static override styles = [
+    dialogChromeStyles,
+    css`
+      dialog {
+        width: 640px;
+        max-width: 90vw;
+      }
+      p.hint {
+        margin: 0;
+        color: #6b7280;
+        font-size: 0.85rem;
+      }
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        font-size: 0.85rem;
+        color: #374151;
+      }
+      input[type='text'] {
+        font: inherit;
+        padding: 0.4rem 0.5rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+      }
+      textarea {
+        font: 0.85rem ui-monospace, SFMono-Regular, monospace;
+        padding: 0.5rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+        min-height: 240px;
+        resize: vertical;
+      }
+      .error {
+        color: #ef4444;
+        font-size: 0.85rem;
+      }
+    `,
+  ];
 
   @state() private name = '';
   @state() private text = '';
@@ -122,8 +59,8 @@ export class CsvPasteDialog extends LitElement {
 
   override firstUpdated() {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
-    const h2 = this.shadowRoot?.querySelector('h2') as HTMLElement | null;
-    if (this.dialogEl && h2) makeDialogDraggable(this.dialogEl, h2);
+    const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
+    if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
   }
 
   async open(): Promise<void> {
@@ -183,36 +120,40 @@ export class CsvPasteDialog extends LitElement {
 
   override render() {
     return html`
-      <dialog @cancel=${this.close}>
+      <dialog @cancel=${this.close} @keydown=${ctrlEnterSubmits}>
         <button type="button" class="close-x" title="Close" @click=${this.close}>×</button>
         <form @submit=${this.submit}>
-          <h2>Paste CSV</h2>
-          <p class="hint">
-            First line is treated as the header. Separator is auto-detected
-            (comma / semicolon / tab). Column types are inferred from data.
-          </p>
-          <label>
-            Table name
-            <input
-              type="text"
-              autofocus
-              .value=${this.name}
-              placeholder="pasted"
-              @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)}
-            />
-          </label>
-          <label>
-            CSV
-            <textarea
-              spellcheck="false"
-              .value=${this.text}
-              @input=${(e: Event) => (this.text = (e.target as HTMLTextAreaElement).value)}
-            ></textarea>
-          </label>
-          ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''}
-          <div class="actions">
-            <button type="button" class="ghost" @click=${this.close}>Cancel</button>
-            <button type="submit" class="primary">Import</button>
+          <div class="dialog-header">
+            <h2>Paste CSV</h2>
+            <div class="header-actions">
+              <button type="button" class="ghost" @click=${this.close}>Cancel</button>
+              <button type="submit" class="primary">Import</button>
+            </div>
+          </div>
+          <div class="dialog-body">
+            <p class="hint">
+              First line is treated as the header. Separator is auto-detected
+              (comma / semicolon / tab). Column types are inferred from data.
+            </p>
+            <label>
+              Table name
+              <input
+                type="text"
+                autofocus
+                .value=${this.name}
+                placeholder="pasted"
+                @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)}
+              />
+            </label>
+            <label>
+              CSV
+              <textarea
+                spellcheck="false"
+                .value=${this.text}
+                @input=${(e: Event) => (this.text = (e.target as HTMLTextAreaElement).value)}
+              ></textarea>
+            </label>
+            ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''}
           </div>
         </form>
       </dialog>

@@ -91,7 +91,7 @@ test.describe('general', () => {
   });
 
   test('per-table search filters rows in its panel', async ({ page }) => {
-    const id = await createTable(page, 'People', [{ field: 'name' }]);
+    const id = await createTable(page, 'People', [{ field: 'name', renderer: 'link' }]);
     await waitForPanel(page, id);
     await addRow(page, id, { name: 'Alice' });
     await addRow(page, id, { name: 'Bob' });

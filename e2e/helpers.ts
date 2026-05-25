@@ -9,7 +9,15 @@ import type { Page } from '@playwright/test';
 export interface TestColumn {
   field: string;
   label?: string;
-  type?: 'string' | 'number' | 'boolean' | 'date' | 'datetime' | 'color' | 'image';
+  type?: 'string' | 'number' | 'boolean' | 'date' | 'datetime';
+  /**
+   * Cell renderer name. The app stopped auto-picking renderers in v0.0.5
+   * — a column without one renders as read-only HTML-encoded text. Tests
+   * that want editable cells must pick a renderer explicitly (e.g.
+   * `'link'` for plain string editing; `'date'` / `'datetime'` /
+   * `'boolean'` for the matching native inputs).
+   */
+  renderer?: string;
 }
 
 /** Creates a table via the data-store. Returns the new table id. */
@@ -28,11 +36,20 @@ export async function createTable(
         workspaceId: ctx.workspaceId,
         name,
         code: name.toLowerCase().replace(/\s+/g, '-') || 'table',
-        columns: columns.map((c) => ({
-          field: c.field,
-          label: c.label ?? c.field,
-          type: c.type ?? 'string',
-        })),
+        columns: columns.map((c) => {
+          const col: {
+            field: string;
+            label: string;
+            type: string;
+            renderer?: string;
+          } = {
+            field: c.field,
+            label: c.label ?? c.field,
+            type: c.type ?? 'string',
+          };
+          if (c.renderer) col.renderer = c.renderer;
+          return col;
+        }),
         view: 'table',
         updatedAt: Date.now(),
       });
