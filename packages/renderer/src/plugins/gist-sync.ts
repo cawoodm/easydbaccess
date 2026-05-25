@@ -138,15 +138,16 @@ async function push(api: HostApi): Promise<void> {
   for (const t of tables) {
     const rows = await api.store.rows(t.id).find();
     const content = JSON.stringify(tableToFile(t, rows), null, 2);
-    if (content.length > 1_000_000) oversize.push(`${t.name} (${(content.length / 1_000_000).toFixed(2)} MB)`);
+    if (content.length > 10_000_000)
+      oversize.push(`${t.name} (${(content.length / 1_000_000).toFixed(2)} MB)`);
     files[`${slug(t.name)}.table.json`] = { content };
   }
 
-  // Gist enforces a 1 MB per-file limit. Warn the user before they hit
+  // Gist enforces a 10 MB per-file limit. Warn the user before they hit
   // an obscure GitHub API rejection mid-push.
   if (oversize.length > 0) {
     const proceed = await api.ui.dialogs.confirm(
-      `These tables exceed Gist's 1 MB-per-file limit and will be rejected:\n\n${oversize.join('\n')}\n\nPush anyway?`,
+      `These tables exceed Gist's 10 MB-per-file limit and will be rejected:\n\n${oversize.join('\n')}\n\nPush anyway?`,
       'Gist size warning',
     );
     if (!proceed) return;
@@ -155,7 +156,11 @@ async function push(api: HostApi): Promise<void> {
   // Marker file so we can detect that a gist was produced by easyDBAccess
   // when pulling (vs. some unrelated gist the user pointed at by accident).
   files['_easydb.workspace.json'] = {
-    content: JSON.stringify({ workspaceId: wsId, exportedAt: Date.now(), kind: 'easydb-workspace-v1' }, null, 2),
+    content: JSON.stringify(
+      { workspaceId: wsId, exportedAt: Date.now(), kind: 'easydb-workspace-v1' },
+      null,
+      2,
+    ),
   };
 
   let updated: { id: string; html_url?: string };
@@ -192,10 +197,10 @@ async function push(api: HostApi): Promise<void> {
   }
 
   const url = updated.html_url ?? `https://gist.github.com/${creds.user}/${updated.id}`;
-  api.ui.dialogs.toast(
-    `Pushed ${tables.length} table${tables.length === 1 ? '' : 's'}.  ${url}`,
-    { kind: 'success', title: 'Gist sync' },
-  );
+  api.ui.dialogs.toast(`Pushed ${tables.length} table${tables.length === 1 ? '' : 's'}.  ${url}`, {
+    kind: 'success',
+    title: 'Gist sync',
+  });
 }
 
 // -- Pull ---------------------------------------------------------------------
@@ -231,14 +236,16 @@ async function pull(api: HostApi): Promise<void> {
   }
 
   // Index existing tables by name so we upsert instead of duplicating.
-  const existingTables = (await api.store.tables.find()).filter(
-    (t) => t.workspaceId === wsId,
-  );
+  const existingTables = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
   const byName = new Map(existingTables.map((t) => [t.name, t]));
 
   let imported = 0;
   for (const [, file] of tableFiles) {
-    const parsed = JSON.parse(file.content) as { name: string; columns: Table['columns']; rows: Array<Row['data']> };
+    const parsed = JSON.parse(file.content) as {
+      name: string;
+      columns: Table['columns'];
+      rows: Array<Row['data']>;
+    };
     if (!parsed.name || !Array.isArray(parsed.columns)) continue;
 
     let table: Table;
