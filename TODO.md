@@ -8,7 +8,7 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 `✅✅` = done with e2e test coverage.
 
 ## Rendering
-* Create an html renderer which outputs the value of a cell without encoding
+* ✅ Create an html renderer which outputs the value of a cell without encoding
 
 ## Dialogs
 * ✅✅ Create an all-purpose choice() dialog which accepts an array of string options (e.g. OK, Ignore, Cancel) and displays them as a vertical list of buttons and returns the string of the button the user clicked
@@ -145,7 +145,7 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
   with stack trace and "disable plugin" affordance
 
 ## Backend / server
-
+* Let's remove rxdb completely and replace it with dexie, we don't need live row-level updates, this is a push/pull system 
 * ✅✅ feature: `/replicate/:collection/pull` and `/push` actually implement the
   RxDB replication protocol (today both return 501)
 * ✅ feature: renderer wires `RxReplicationState` to the server endpoints so
@@ -197,3 +197,9 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
   60s interval; shared helpers live in `server-sync-core.ts`)
 * ✅✅ feature: `sql-export` emits `date` columns as `'YYYYMMDD'` string
   literals (CHAR(8)); `datetime` stays on ISO/TIMESTAMP
+
+## Bugs
+* ✅ bug: When importing a .db.json file and choosing the replace option it should delete all existing data first
+  (data was being deleted but old jsPanel windows stayed open with stale content
+  because the subscription-driven close tripped the user-confirm `onbeforeclose`
+  guard — fixed in `jspanel-manager.ts` with an `externallyClosed` flag)
