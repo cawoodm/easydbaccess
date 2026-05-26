@@ -105,8 +105,9 @@ async function importCsvFile(api: HostApi, file: File): Promise<void> {
     });
   } else if (mode === 'overwrite') {
     // Wipe existing rows; keep the table id so its panel position is preserved.
-    const old = await api.store.rows(targetId).find();
-    for (const r of old) await api.store.rows(targetId).remove(r.id);
+    const rows = api.store.rows(targetId);
+    const old = await rows.find();
+    await rows.bulkRemove(old.map((r) => r.id));
     // Replace columns with the imported shape so types match the new data.
     await api.store.tables.patch(targetId, {
       columns: parsed.columns,

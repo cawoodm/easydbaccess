@@ -117,8 +117,9 @@ export async function importJsonText(
 
   if (mode === 'replace-workspace') {
     for (const t of existing) {
-      const rs = await api.store.rows(t.id).find();
-      for (const r of rs) await api.store.rows(t.id).remove(r.id);
+      const rowColl = api.store.rows(t.id);
+      const rs = await rowColl.find();
+      await rowColl.bulkRemove(rs.map((r) => r.id));
       await api.store.tables.remove(t.id);
     }
   }
@@ -131,8 +132,9 @@ export async function importJsonText(
       // Overwrite: keep the id (and thus its panel position) but wipe rows
       // and replace columns + sort + geometry from the import.
       tableId = match.id;
-      const oldRows = await api.store.rows(tableId).find();
-      for (const r of oldRows) await api.store.rows(tableId).remove(r.id);
+      const rowColl = api.store.rows(tableId);
+      const oldRows = await rowColl.find();
+      await rowColl.bulkRemove(oldRows.map((r) => r.id));
       await api.store.tables.patch(tableId, {
         columns: t.columns,
         ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),

@@ -256,8 +256,9 @@ async function pull(api: HostApi): Promise<void> {
         updatedAt: Date.now(),
       });
       // Wipe existing rows for clean reimport (simplest correct behavior).
-      const oldRows = await api.store.rows(existing.id).find();
-      for (const r of oldRows) await api.store.rows(existing.id).remove(r.id);
+      const rowColl = api.store.rows(existing.id);
+      const oldRows = await rowColl.find();
+      await rowColl.bulkRemove(oldRows.map((r) => r.id));
     } else {
       table = await api.store.tables.insert({
         id: cryptoUUID(),

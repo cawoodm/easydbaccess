@@ -216,6 +216,67 @@ test.describe('import / export', () => {
     expect(positions.a).not.toEqual(positions.b);
   });
 
+  test('JSON drop with Replace entire workspace wipes all existing tables and rows first', async ({
+    page,
+    workspaceId,
+  }) => {
+    // Pre-existing tables that should be GONE after the replace.
+    const aId = await createTable(page, 'alpha', [{ field: 'name' }]);
+    await addRow(page, aId, { name: 'one' });
+    await addRow(page, aId, { name: 'two' });
+    const bId = await createTable(page, 'bravo', [{ field: 'tag' }]);
+    await addRow(page, bId, { tag: 'x' });
+
+    // Imported dump has no name collisions — Replace should still nuke alpha+bravo.
+    const dump = JSON.stringify({
+      workspaceId: 'whatever',
+      exportedAt: Date.now(),
+      tables: [
+        {
+          name: 'gamma',
+          columns: [{ field: 'val', label: 'Val', type: 'string' }],
+          rows: [{ val: 'g1' }, { val: 'g2' }],
+        },
+        {
+          name: 'delta',
+          columns: [{ field: 'val', label: 'Val', type: 'string' }],
+          rows: [{ val: 'd1' }],
+        },
+      ],
+    });
+    const dropPromise = dropFile(page, 'replace.db.json', dump, 'application/json');
+    const dialog = page.locator('host-dialogs');
+    await expect(dialog.getByRole('button', { name: 'Replace entire workspace' })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Replace entire workspace' }).click();
+    await dropPromise;
+
+    const tables = await page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => (window as any).__easydb.store.tables.find(),
+    );
+    const inWorkspace = (tables as Array<{ name: string; workspaceId: string }>).filter(
+      (t) => t.workspaceId === workspaceId,
+    );
+    expect(inWorkspace.map((t) => t.name).sort()).toEqual(['delta', 'gamma']);
+
+    // And no orphan rows belonging to the wiped tables remain in the rows coll.
+    const orphanRows = await page.evaluate(
+      ([wipedA, wipedB]) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__easydb.store;
+        return Promise.all([store.rows(wipedA).find(), store.rows(wipedB).find()]).then(
+          ([ra, rb]: [unknown[], unknown[]]) => ra.length + rb.length,
+        );
+      },
+      [aId, bId] as const,
+    );
+    expect(orphanRows).toBe(0);
+
+    // The jsPanel windows for the wiped tables must close too.
+    await expect(page.locator(`#${panelDomId(aId)}`)).toHaveCount(0);
+    await expect(page.locator(`#${panelDomId(bId)}`)).toHaveCount(0);
+  });
+
   test('dump-export → json-import is lossless for columns + rows', async ({ page }) => {
     // Build two tables with distinct schemas + rows.
     const idA = await createTable(page, 'Alpha', [

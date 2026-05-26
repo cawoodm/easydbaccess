@@ -7,14 +7,7 @@
  * host treats it as a mutable namespace.
  */
 
-import type {
-  ColumnSpec,
-  PluginRecord,
-  Row,
-  Setting,
-  Table,
-  Workspace,
-} from './types.js';
+import type { ColumnSpec, PluginRecord, Row, Setting, Table, Workspace } from './types.js';
 
 // -- Plugin module shape --------------------------------------------------
 
@@ -77,6 +70,7 @@ export interface DataCollection<T> {
   upsert(doc: T): Promise<T>;
   patch(id: string, patch: Partial<T>): Promise<T>;
   remove(id: string): Promise<void>;
+  bulkRemove(ids: string[]): Promise<void>;
   /** Subscribe to changes; returns unsubscribe. */
   subscribe(fn: (docs: T[]) => void): Unsubscribe;
 }
@@ -117,7 +111,9 @@ export interface ImporterSpec {
   label: string;
   /** File extensions or MIME types this importer accepts. */
   accept: string[];
-  parse(input: File | string): Promise<{ columns: ColumnSpec[]; rows: Array<Record<string, unknown>> }>;
+  parse(
+    input: File | string,
+  ): Promise<{ columns: ColumnSpec[]; rows: Array<Record<string, unknown>> }>;
 }
 
 export interface ExporterSpec {
@@ -127,10 +123,7 @@ export interface ExporterSpec {
   serialize(table: Table, rows: Row[]): Promise<Blob | string>;
 }
 
-export type DropHandler = (
-  event: DragEvent,
-  api: HostApi,
-) => Promise<boolean> | boolean; // return true if handled
+export type DropHandler = (event: DragEvent, api: HostApi) => Promise<boolean> | boolean; // return true if handled
 
 export interface UrlSourceSpec {
   id: string;

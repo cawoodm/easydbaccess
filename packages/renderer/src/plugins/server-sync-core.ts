@@ -76,8 +76,9 @@ export async function replaceWorkspace(
 
   const existing = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
   for (const t of existing) {
-    const rows = await api.store.rows(t.id).find();
-    for (const r of rows) await api.store.rows(t.id).remove(r.id);
+    const rowColl = api.store.rows(t.id);
+    const rows = await rowColl.find();
+    await rowColl.bulkRemove(rows.map((r) => r.id));
     await api.store.tables.remove(t.id);
   }
 

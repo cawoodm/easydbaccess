@@ -36,6 +36,14 @@ const panels = new Map<string, Panel>();
  * onbeforeclose short-circuits on a match so the user isn't asked twice.
  */
 const confirmedClose = new Set<string>();
+/**
+ * Set of table ids whose panels are being closed because the table was
+ * removed externally (json-import "Replace entire workspace", server/gist
+ * pull). onclosed reads this to skip the cascade delete — the data is
+ * already gone, and re-running deleteTableCascade is a redundant no-op
+ * that also briefly logs RxDB "not found" noise.
+ */
+const externallyClosed = new Set<string>();
 let initialized = false;
 
 export async function initWindowManager(): Promise<void> {
@@ -61,6 +69,12 @@ export async function initWindowManager(): Promise<void> {
     for (const [id, panel] of panels) {
       if (!liveIds.has(id)) {
         panels.delete(id);
+        // The table was removed externally (e.g. json-import "Replace entire
+        // workspace", server/gist pull). Mark the close as confirmed so
+        // onbeforeclose doesn't pop a "Delete table?" prompt for data that's
+        // already gone — and tell onclosed to skip its cascade delete.
+        confirmedClose.add(id);
+        externallyClosed.add(id);
         try {
           if (panel.status !== 'closed') panel.close();
         } catch {
@@ -226,6 +240,9 @@ function openPanel(t: Table, ctx: AppContext): void {
     onclosed: async () => {
       panels.delete(t.id);
       confirmedClose.delete(t.id);
+      // Skip the cascade delete when the table was removed externally
+      // (subscription-driven close) — the deletion has already been done.
+      if (externallyClosed.delete(t.id)) return;
       await deleteTableCascade(t.id, ctx);
     },
     onstatuschange: () => saveGeometry(t.id, ctx),
@@ -343,8 +360,9 @@ async function stampFrontOrder(tableId: string, ctx: AppContext): Promise<void> 
 }
 
 async function deleteTableCascade(tableId: string, ctx: AppContext): Promise<void> {
-  const rows = await ctx.store.rows(tableId).find();
-  for (const r of rows) await ctx.store.rows(tableId).remove(r.id);
+  const rowColl = ctx.store.rows(tableId);
+  const rows = await rowColl.find();
+  await rowColl.bulkRemove(rows.map((r) => r.id));
   await ctx.store.tables.remove(tableId);
 }
 
