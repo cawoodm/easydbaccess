@@ -1,6 +1,6 @@
 # @easydb/renderer
 
-Lit web components + RxDB + Vite. The identical bundle runs in the browser
+Lit web components + Dexie + Vite. The identical bundle runs in the browser
 (`npm run dev:renderer`, port 5190) and inside the Electron renderer process.
 
 ## Directory layout
@@ -8,7 +8,7 @@ Lit web components + RxDB + Vite. The identical bundle runs in the browser
 | Dir | Role |
 |---|---|
 | `src/chrome/` | App-shell, panel chrome (`panel-footer`, `panel-search`), workspace selector, table list, filter popover/combobox, material-icon-css helper. No business logic — just lays out registered slot contents. |
-| `src/db/` | RxDB setup (`rx-db.ts`) and the `DataStore` wrapper (`data-store.ts`) that hides RxDB from plugins. |
+| `src/db/` | Dexie setup (`dexie-db.ts`) and the `DataStore` wrapper (`data-store-dexie.ts`) that hides Dexie from plugins. |
 | `src/dialogs/` | Promise-returning host dialogs (`host-dialogs.ts` — alert/prompt/confirm/choice), `toast-host.ts`, `new-table-dialog`, `csv-paste-dialog`, `plugin-manager-dialog`, `draggable.ts` helper. |
 | `src/events/` | The typed event bus (`AppEvents` from shared). |
 | `src/plugin-host/` | `loader.ts` (built-in plugin list + lifecycle), `url-loader.ts` (URL-fetched plugins with localStorage cache), `registries.ts` (slot lists), `api-factory.ts` (`HostApi` constructor). |
@@ -23,7 +23,7 @@ Lit web components + RxDB + Vite. The identical bundle runs in the browser
 
 `app-context.ts:init()` runs once on first `getContext()`:
 
-1. Open RxDB → wrap in `DataStore`.
+1. Open Dexie → wrap in `DataStore`.
 2. Resolve workspace (URL `?space=` → existing → create `default`).
 3. Build `HostApi` from store + events + registries.
 4. `loadBuiltinPlugins(api)` — runs every `init()` synchronously, returns a
@@ -51,20 +51,23 @@ This works because slot registries (`headerButtons`, etc.) are append-only
 arrays — adding never invalidates existing entries. Removing a plugin still
 requires a reload because the registry contract has no `unregister` story.
 
-## RxDB is hidden from plugins
+## Dexie is hidden from plugins
 
-Plugins must never import from `rxdb`. They receive `DataStore` from
-`@easydb/shared`, which is satisfied by `data-store.ts`. When adding a new
-collection:
+Plugins must never import from `dexie`. They receive `DataStore` from
+`@easydb/shared`, which is satisfied by `data-store-dexie.ts`. When adding a
+new collection:
 
-1. Schema in `packages/shared/src/schemas.ts`
-2. TS type in `packages/shared/src/types.ts`
-3. Registration in `src/db/rx-db.ts`
-4. Plugin-facing wrapper in `src/db/data-store.ts`
+1. TS type in `packages/shared/src/types.ts`
+2. Dexie schema + typed accessor in `src/db/dexie-db.ts`
+3. Plugin-facing wrapper in `src/db/data-store-dexie.ts`
 
-`store.rows(tableId)` returns a *view* over the single `rows` RxDB
-collection — `tableId` is auto-injected on insert and as a selector filter on
-queries. There is **not** one RxDB collection per table.
+`store.rows(tableId)` returns a *view* over the single `rows` Dexie table —
+`tableId` is auto-injected on insert and used as the `where('tableId').equals(...)`
+filter on queries. There is **not** one Dexie table per logical row table.
+
+Subscriptions use Dexie's `liveQuery` — the closure re-runs whenever any
+write hits the underlying table. Chrome callers always consume the full
+result set, so the broader re-run granularity is harmless.
 
 ## Lit + decorator gotcha
 

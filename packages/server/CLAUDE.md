@@ -27,8 +27,9 @@ exported app runs in two places:
 
 **The server stores one JSON document per workspace.** It does not inspect
 the shape, does not parse rows, does not index columns. The client decides
-the document structure (RxDB collections serialized in a wrapper) and the
-merge semantics. The server only enforces ETag-based optimistic concurrency.
+the document structure (the renderer's Dexie tables serialized into a
+`{ tables: [...] }` wrapper — see `dump-export.ts`) and the merge semantics.
+The server only enforces ETag-based optimistic concurrency.
 
 This is deliberate — it means adding a new backend (Postgres, S3, etc.) is a
 single `StoreAdapter` implementation, ~80 lines.

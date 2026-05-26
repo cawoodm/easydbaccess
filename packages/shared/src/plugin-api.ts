@@ -54,18 +54,18 @@ export interface EventBus {
   emit<K extends keyof AppEvents>(name: K, payload: AppEvents[K]): void;
 }
 
-// -- Data store (subset of RxDB surface) ----------------------------------
+// -- Data store ------------------------------------------------------------
 
 /**
- * Minimal subset of RxDB's RxCollection that the plugin contract exposes.
- * Plugins should not depend on the full RxDB surface; this interface lets us
+ * Minimal collection contract the plugin API exposes. Plugins should not
+ * depend on the underlying storage (currently Dexie); this interface lets us
  * swap storage adapters without breaking plugins.
  */
 export interface DataCollection<T> {
   find(query?: Partial<T>): Promise<T[]>;
   findOne(id: string): Promise<T | null>;
   insert(doc: T): Promise<T>;
-  /** Batched insert. Use this in importers — single inserts on RxDB are ~25/sec. */
+  /** Batched insert. Always prefer this over a loop of `insert()` in importers. */
   bulkInsert(docs: T[]): Promise<T[]>;
   upsert(doc: T): Promise<T>;
   patch(id: string, patch: Partial<T>): Promise<T>;

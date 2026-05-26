@@ -2,7 +2,7 @@
  * Preload — bridges the renderer to main-process services via contextBridge.
  *
  * Today this only exposes a version stamp so the renderer can detect Electron.
- * The RxDB-IPC adapter and main-process saveFile/fetch routing land in a
+ * The IPC storage adapter and main-process saveFile/fetch routing land in a
  * follow-up slice; when they do, those handlers attach here.
  */
 

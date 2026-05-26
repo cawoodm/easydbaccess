@@ -33,7 +33,7 @@ interface CatalogResolved extends CatalogEntry {
  * Lists plugins installed for the current workspace and lets the user add,
  * enable/disable, or remove them by URL. Plugin URLs live on
  * Workspace.pluginUrls so they sync across devices; per-URL state (cached
- * body, enabled flag, last error) lives on the `plugins` RxDB collection.
+ * body, enabled flag, last error) lives on the `plugins` Dexie table.
  *
  * Changes apply on the next reload — see Apply button copy. Hot-loading
  * a plugin would require unregistering its slot registrations and

@@ -495,7 +495,7 @@ export class DataTable extends LitElement {
 
   private onFilterInput(field: string, value: string) {
     this.filters = { ...this.filters, [field]: value };
-    // Debounce persistence so we don't write to RxDB on every keystroke.
+    // Debounce persistence so we don't write to IndexedDB on every keystroke.
     if (this.filterSaveTimer != null) window.clearTimeout(this.filterSaveTimer);
     this.filterSaveTimer = window.setTimeout(() => this.saveFilters(), 250);
   }

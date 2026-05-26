@@ -42,7 +42,7 @@ devices.
 
 These live as TS modules under `packages/renderer/src/plugins/` and load on
 startup. Each conforms to the same `PluginModule` shape that URL-loaded
-plugins must follow — they only use `HostApi`, no `rxdb` imports.
+plugins must follow — they only use `HostApi`, no `dexie` imports.
 
 - **csv-import** ([source](../packages/renderer/src/plugins/csv-import.ts))
   — drag-drop `.csv` files. Auto-detects separator (`,`/`;`/`\t`), parses

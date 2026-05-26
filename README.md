@@ -97,7 +97,7 @@ Two flavours, pick one — or neither:
 
 | Where it runs | Where data lives |
 |---|---|
-| Browser | IndexedDB (via RxDB) |
+| Browser | IndexedDB (via Dexie) |
 | Desktop (Electron) | A real SQLite file on disk |
 | Server (optional, for sync) | One JSON-per-workspace, in a folder or SQLite |
 

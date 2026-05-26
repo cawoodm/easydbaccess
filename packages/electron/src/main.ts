@@ -4,7 +4,7 @@
  * For now this is the minimum viable shell: a BrowserWindow that loads the
  * Vite-served renderer in dev (via EASYDB_RENDERER_URL) or the built renderer
  * in production. The renderer continues to use Dexie/IndexedDB locally — the
- * IPC bridge to a main-process RxDB-SQLite store lands in a follow-up slice.
+ * IPC bridge to a main-process better-sqlite3 store lands in a follow-up slice.
  */
 
 import { app, BrowserWindow } from 'electron';

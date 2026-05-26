@@ -145,7 +145,10 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
   with stack trace and "disable plugin" affordance
 
 ## Backend / server
-* Let's remove rxdb completely and replace it with dexie, we don't need live row-level updates, this is a push/pull system 
+* ✅ feature: removed rxdb entirely; renderer now talks to Dexie directly via
+  `dexie-db.ts` + `data-store-dexie.ts`. Plugin API surface is unchanged.
+  Subscriptions use `liveQuery`. Local v1 data isn't migrated — users on the
+  upgrade path should Dump first.
 * ✅✅ feature: `/replicate/:collection/pull` and `/push` actually implement the
   RxDB replication protocol (today both return 501)
 * ✅ feature: renderer wires `RxReplicationState` to the server endpoints so
@@ -161,7 +164,8 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 
 * feature: bundle Hono into the Electron main process (today just opens a
   `BrowserWindow` pointing at the Vite dev URL — renderer still uses Dexie)
-* feature: IPC bridge in preload exposes the RxDB-IPC storage adapter
+* feature: IPC bridge in preload exposes a Dexie-over-IPC storage adapter
+  proxying to main-process better-sqlite3
 * feature: `better-sqlite3` storage in main process (data goes to a real file
   instead of IndexedDB inside Electron's renderer)
 * feature: `electron-builder` packaging exercised end-to-end (config exists,
@@ -176,17 +180,18 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
   inference, geometry sanitizer, column-editor validation
 * feature: Playwright e2e — both `browser` and `electron` projects, covering
   drop-import → sort → filter → export → re-import (full round-trip)
-* feature: schema migration test — open a DB written by an older schema
-  version and confirm RxDB migrates cleanly
+* feature: schema migration test — open a DB written by an older Dexie
+  version and confirm the .version(N).upgrade() chain runs cleanly
 * feature: lint pipeline (`eslint` config + npm script + CI)
 
 ## Architectural follow-ups (not parity, but worth doing)
 
 * ✅ perf: `bulkInsert` already in importers; do a pass for any other tight
   loops calling single `insert` in plugins
-* ✅ feature: schema versioning — bump `version` field in `schemas.ts` with a
-  migration when adding required fields (RxDB enforces this)
-* feature: undo/redo (RxDB has a revision-history primitive)
+* ✅ feature: schema versioning — Dexie `.version(N).stores({...}).upgrade(...)`
+  in `dexie-db.ts` (used to be RxDB schema bumps with migrationStrategies)
+* feature: undo/redo — needs a revision-history primitive on top of Dexie
+  (no longer free now that RxDB is gone)
 * ✅ feature: a `header-clock` reference plugin to prove `registerHeaderButton`
   end-to-end and document the trivial-plugin shape
 * ✅ feature: a `color-cell` / `image-cell` plugin demonstrating

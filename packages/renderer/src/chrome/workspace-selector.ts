@@ -51,7 +51,7 @@ export class WorkspaceSelector extends LitElement {
 
   /**
    * Switch by reloading with ?space=<name>. Reload is the cleanest cut here
-   * — RxDB collections, jsPanel windows, and the plugin host all bind to a
+   * — Dexie tables, jsPanel windows, and the plugin host all bind to a
    * single workspaceId at boot, so swapping it live would require tearing
    * down every panel and rebinding every subscription.
    */

@@ -51,8 +51,11 @@ work-items are:
   in will be a `better-sqlite3`-backed `StoreAdapter` (not yet implemented in
   the server package; current adapters are `fs-store` and `sqlite-store`
   using `node:sqlite`).
-- **RxDB-IPC storage adapter** — the renderer talks to main-process
-  RxDB-SQLite over IPC instead of using Dexie locally.
+- **Dexie-over-IPC storage adapter** — the renderer's `DataStore` swaps to
+  an IPC-backed implementation that proxies to main-process `better-sqlite3`,
+  instead of using Dexie/IndexedDB locally. Plugin contract stays identical
+  (`DataCollection<T>`); only `db/data-store-dexie.ts` is replaced at boot
+  when `window.easydb?.platform === 'electron'`.
 - **Native saveFile / openFile** — `api.backend.saveFile` routes through
   Electron's `dialog.showSaveDialog` instead of a `<a download>`.
 

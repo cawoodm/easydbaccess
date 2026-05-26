@@ -41,7 +41,7 @@ const confirmedClose = new Set<string>();
  * removed externally (json-import "Replace entire workspace", server/gist
  * pull). onclosed reads this to skip the cascade delete — the data is
  * already gone, and re-running deleteTableCascade is a redundant no-op
- * that also briefly logs RxDB "not found" noise.
+ * that also briefly logs storage-layer "not found" noise.
  */
 const externallyClosed = new Set<string>();
 let initialized = false;
