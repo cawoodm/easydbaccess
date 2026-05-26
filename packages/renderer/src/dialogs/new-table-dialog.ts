@@ -64,9 +64,32 @@ export class NewTableDialog extends LitElement {
     .col-header,
     .col-row {
       display: grid;
-      grid-template-columns: 1fr 1fr 7rem 7rem 1.5rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem;
+      grid-template-columns: 1.25rem 1fr 1fr 7rem 7rem 1.5rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem;
       gap: 0.4rem;
       align-items: center;
+    }
+    .drag-handle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #9ca3af;
+      cursor: grab;
+      user-select: none;
+    }
+    .drag-handle:active {
+      cursor: grabbing;
+    }
+    .drag-handle:hover {
+      color: #374151;
+    }
+    .col-row.drag-source {
+      opacity: 0.4;
+    }
+    .col-row.drop-before {
+      box-shadow: inset 0 3px 0 #3b82f6;
+    }
+    .col-row.drop-after {
+      box-shadow: inset 0 -3px 0 #3b82f6;
     }
     .col-row input[type='number'] {
       width: 100%;
@@ -102,8 +125,11 @@ export class NewTableDialog extends LitElement {
       cursor: not-allowed;
     }
     button.row-del {
-      color: #ef4444;
+      color: #9ca3af;
       font-size: 1.1rem;
+    }
+    button.row-del:hover:not(:disabled) {
+      color: #ef4444;
     }
     button.add {
       align-self: start;
@@ -180,6 +206,9 @@ export class NewTableDialog extends LitElement {
   @state() private name = '';
   @state() private columns: ColumnRow[] = [];
   @state() private errorMsg = '';
+  @state() private dragSrcIdx: number | null = null;
+  @state() private dropTargetIdx: number | null = null;
+  @state() private dropEdge: 'before' | 'after' | null = null;
   /** First 100 rows of the table being edited; populated only in edit mode. */
   @state() private previewRows: Row[] = [];
   /**
@@ -277,6 +306,54 @@ export class NewTableDialog extends LitElement {
     const [item] = next.splice(idx, 1);
     next.splice(j, 0, item!);
     this.columns = next;
+  }
+
+  private onRowDragStart(e: DragEvent, idx: number) {
+    this.dragSrcIdx = idx;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/x-easydb-coleditor-row', String(idx));
+    }
+  }
+
+  private onRowDragOver(e: DragEvent, idx: number, row: HTMLElement) {
+    if (this.dragSrcIdx === null || this.dragSrcIdx === idx) return;
+    e.preventDefault();
+    const rect = row.getBoundingClientRect();
+    const before = e.clientY < rect.top + rect.height / 2;
+    this.dropTargetIdx = idx;
+    this.dropEdge = before ? 'before' : 'after';
+  }
+
+  private onRowDragLeave(idx: number) {
+    if (this.dropTargetIdx === idx) {
+      this.dropTargetIdx = null;
+      this.dropEdge = null;
+    }
+  }
+
+  private onRowDrop(e: DragEvent, targetIdx: number) {
+    e.preventDefault();
+    const src = this.dragSrcIdx;
+    const edge = this.dropEdge;
+    this.dragSrcIdx = null;
+    this.dropTargetIdx = null;
+    this.dropEdge = null;
+    if (src === null || src === targetIdx || !edge) return;
+
+    const next = [...this.columns];
+    const [moved] = next.splice(src, 1);
+    // After splice, the target index shifts left by 1 when src < target.
+    let toIdx = targetIdx + (src < targetIdx ? -1 : 0);
+    if (edge === 'after') toIdx += 1;
+    next.splice(toIdx, 0, moved!);
+    this.columns = next;
+  }
+
+  private onRowDragEnd() {
+    this.dragSrcIdx = null;
+    this.dropTargetIdx = null;
+    this.dropEdge = null;
   }
 
   private patchColumn(idx: number, patch: Partial<ColumnRow>): void {
@@ -473,6 +550,7 @@ export class NewTableDialog extends LitElement {
 
           <div class="columns">
             <div class="col-header">
+              <span></span>
               <span>Field</span>
               <span>Label</span>
               <span>Type</span>
@@ -487,8 +565,32 @@ export class NewTableDialog extends LitElement {
               <span></span>
             </div>
             ${this.columns.map(
-              (c, i) => html`
-                <div class="col-row">
+              (c, i) => {
+                const isSrc = this.dragSrcIdx === i;
+                const isTgt = this.dropTargetIdx === i;
+                const edgeClass =
+                  isTgt && this.dropEdge === 'before'
+                    ? ' drop-before'
+                    : isTgt && this.dropEdge === 'after'
+                      ? ' drop-after'
+                      : '';
+                return html`
+                <div
+                  class=${`col-row${isSrc ? ' drag-source' : ''}${edgeClass}`}
+                  @dragover=${(e: DragEvent) =>
+                    this.onRowDragOver(e, i, e.currentTarget as HTMLElement)}
+                  @dragleave=${() => this.onRowDragLeave(i)}
+                  @drop=${(e: DragEvent) => this.onRowDrop(e, i)}
+                >
+                  <span
+                    class="drag-handle"
+                    title="Drag to reorder"
+                    draggable="true"
+                    @dragstart=${(e: DragEvent) => this.onRowDragStart(e, i)}
+                    @dragend=${() => this.onRowDragEnd()}
+                  >
+                    <span class="mi sm">drag_indicator</span>
+                  </span>
                   <input
                     type="text"
                     .value=${c.field}
@@ -597,10 +699,11 @@ export class NewTableDialog extends LitElement {
                     title="Remove column"
                     @click=${() => this.removeColumn(i)}
                   >
-                    <span class="mi sm">close</span>
+                    <span class="mi sm">delete</span>
                   </button>
                 </div>
-              `,
+              `;
+              },
             )}
           </div>
 

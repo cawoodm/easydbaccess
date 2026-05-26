@@ -3,7 +3,7 @@ import type { HostApi, PluginModule } from '@easydb/shared';
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'cell-color',
   version: '0.1.0',
-  description: 'Renderer for hex colour values: a swatch picker plus an editable hex text field. Apply by setting a column\'s renderer to "color".',
+  description: 'Renderer for hex colour values: a native swatch picker. Apply by setting a column\'s renderer to "color".',
   author: 'easyDBAccess built-ins',
 };
 
@@ -46,22 +46,13 @@ class CellColor extends HTMLElement {
   private render() {
     const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(this._value) ? this._value : '#000000';
     this.innerHTML = '';
-    const wrap = document.createElement('span');
-    wrap.style.cssText = 'display:inline-flex;align-items:center;gap:0.4rem';
     const picker = document.createElement('input');
     picker.type = 'color';
     picker.value = hex;
     picker.style.cssText =
       'width:1.5rem;height:1.25rem;padding:0;border:1px solid #d1d5db;background:transparent;vertical-align:middle;cursor:pointer';
     picker.addEventListener('change', () => this.commit(picker.value));
-    const text = document.createElement('input');
-    text.type = 'text';
-    text.value = this._value;
-    text.style.cssText =
-      'width:6rem;font-family:ui-monospace,SFMono-Regular,monospace;border:0;background:transparent;font:inherit;padding:0';
-    text.addEventListener('change', () => this.commit(text.value));
-    wrap.append(picker, text);
-    this.append(wrap);
+    this.append(picker);
   }
 
   private commit(v: string) {

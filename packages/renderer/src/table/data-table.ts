@@ -199,22 +199,15 @@ export class DataTable extends LitElement {
       background: transparent;
     }
     td input[type='date'],
-    td input[type='datetime-local'] {
+    td input[type='datetime-local'],
+    td input[type='text'],
+    td input[type='number'] {
       font: inherit;
       border: 0;
       background: transparent;
       padding: 0;
       width: 100%;
       box-sizing: border-box;
-    }
-    /* Fallback rendering when no renderer is registered for the column.
-       HTML-encoded plain text; wraps so long values stay legible. */
-    td .ro-cell {
-      display: inline-block;
-      width: 100%;
-      white-space: pre-wrap;
-      word-break: break-word;
-      color: #374151;
     }
     .mi.sm {
       font-size: 1rem;
@@ -301,6 +294,26 @@ export class DataTable extends LitElement {
       this.rowHeight = firstTr.offsetHeight;
     }
     if (!this.viewportHeight) this.viewportHeight = this.clientHeight;
+    this.markEmptyCells();
+  }
+
+  /**
+   * Toggle `is-null` on each data cell based on its *rendered* content, not
+   * the stored value. Runs after Lit has updated the DOM and each cell
+   * renderer's `connectedCallback` has populated its custom element, so the
+   * check sees what the user sees.
+   */
+  private markEmptyCells() {
+    const tds = this.shadowRoot?.querySelectorAll<HTMLTableCellElement>(
+      'tbody tr:not(.spacer) > td',
+    );
+    if (!tds) return;
+    for (const td of tds) {
+      // Trailing action <td> has no `t-*` class — skip it; it's the delete
+      // button cell.
+      if (!td.className.startsWith('t-')) continue;
+      td.classList.toggle('is-null', isCellEmpty(td));
+    }
   }
 
   private tableSubUnsub?: () => void;
@@ -402,11 +415,50 @@ export class DataTable extends LitElement {
           this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
       ></${tag}>`;
     }
-    // No renderer set or unknown name — display as plain text. Lit text
-    // interpolation is HTML-encoded, so any `<` or `&` in the value renders
-    // literally rather than as markup. Cell is read-only in this mode; the
-    // user picks a renderer in the column editor to enable editing.
-    return html`<span class="ro-cell">${String(raw ?? '')}</span>`;
+    // No renderer set or unknown name — fall back to a native editor chosen
+    // by the column's data type. Renderers are a display concern; editing
+    // works on any cell by default.
+    switch (col.type) {
+      case 'boolean': {
+        const checked = raw === true || raw === 'true' || raw === 1 || raw === '1';
+        return html`<input
+          type="checkbox"
+          .checked=${checked}
+          @change=${(e: Event) =>
+            this.setCell(row, col.field, (e.target as HTMLInputElement).checked)}
+        />`;
+      }
+      case 'date':
+        return html`<input
+          type="date"
+          .value=${toDateIso(raw)}
+          @change=${(e: Event) =>
+            this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
+        />`;
+      case 'datetime':
+        return html`<input
+          type="datetime-local"
+          .value=${toDatetimeLocal(raw)}
+          @change=${(e: Event) =>
+            this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
+        />`;
+      case 'number':
+        return html`<input
+          type="number"
+          .value=${raw == null ? '' : String(raw)}
+          @change=${(e: Event) => {
+            const v = (e.target as HTMLInputElement).value;
+            this.setCell(row, col.field, v === '' ? null : Number(v));
+          }}
+        />`;
+      default:
+        return html`<input
+          type="text"
+          .value=${String(raw ?? '')}
+          @change=${(e: Event) =>
+            this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
+        />`;
+    }
   }
 
   private async deleteRow(rowId: string) {
@@ -779,13 +831,12 @@ export class DataTable extends LitElement {
           ${slice.map(
             (r) => html`
               <tr>
-                ${cols.map((c) => {
-                  const nullClass = isNullish(r.data[c.field]) ? ' is-null' : '';
-                  return html`<td class=${`t-${c.type}${nullClass}`}>${this.renderCell(r, c)}</td>`;
-                })}
+                ${cols.map(
+                  (c) => html`<td class=${`t-${c.type}`}>${this.renderCell(r, c)}</td>`,
+                )}
                 <td>
                   <button class="danger" title="Delete row" @click=${() => this.deleteRow(r.id)}>
-                    <span class="mi sm">close</span>
+                    <span class="mi sm">delete</span>
                   </button>
                 </td>
               </tr>
@@ -800,8 +851,21 @@ export class DataTable extends LitElement {
   }
 }
 
-function isNullish(v: unknown): boolean {
-  return v === null || v === undefined || (typeof v === 'string' && v.trim().length === 0);
+/**
+ * Visual-emptiness check for a rendered `<td>`. Used by `markEmptyCells` to
+ * decide whether to apply the `is-null` highlight. A cell is empty iff it
+ * shows no text, no image, and every input it contains is empty (checkboxes
+ * excluded — they're meaningful in both states).
+ */
+function isCellEmpty(td: Element): boolean {
+  if ((td.textContent ?? '').trim() !== '') return false;
+  if (td.querySelector('img')) return false;
+  const inputs = td.querySelectorAll('input');
+  for (const inp of Array.from(inputs)) {
+    if (inp.type === 'checkbox') return false;
+    if (inp.value !== '') return false;
+  }
+  return true;
 }
 
 /** Returns a human-readable rejection reason, or null if value is acceptable. */
@@ -825,6 +889,29 @@ function validate(col: ColumnSpec, value: unknown, allRows: Row[], rowId: string
     if (dup) return `${col.label} must be unique. Another row already has "${String(value)}".`;
   }
   return null;
+}
+
+function toDateIso(raw: unknown): string {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return '';
+  const s = String(raw).trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
+function toDatetimeLocal(raw: unknown): string {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return '';
+  const s = String(raw).trim();
+  if (!s) return '';
+  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(s);
+  if (m) return `${m[1]}T${m[2]}`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return `${s}T00:00`;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return '';
+  const iso = d.toISOString();
+  return `${iso.slice(0, 10)}T${iso.slice(11, 16)}`;
 }
 
 function compareValues(a: unknown, b: unknown, type: ColumnType): number {
