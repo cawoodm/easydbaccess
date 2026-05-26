@@ -2,9 +2,9 @@ import type { HostApi, PluginModule } from '@easydb/shared';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'cell-link',
-  version: '0.1.0',
+  version: '0.2.0',
   description:
-    'Renderer for URL/phone cells. Inside a single cell, http(s) URLs render as <a target=_blank>, phone-like values as <a href=tel:>, anything else falls back to a text input. A pencil toggles to edit mode.',
+    'Renderer for URL/email/phone cells. Inside a single cell, http(s) URLs render as <a target=_blank>, email addresses as <a href=mailto:>, phone-like values as <a href=tel:>, anything else falls back to a text input. A pencil toggles to edit mode.',
   author: 'easyDBAccess built-ins',
 };
 
@@ -13,7 +13,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
  * `renderer: 'link'`; the type of the column stays whatever the user picked
  * (usually 'string'). Per-value branching inside the cell is preserved from
  * the pre-rewrite implementation — the renderer is set per column, but the
- * URL/phone detection is per value.
+ * URL/email/phone detection is per value.
  */
 export function init(api: HostApi): void {
   if (!customElements.get('cell-link')) {
@@ -44,14 +44,19 @@ class CellLink extends HTMLElement {
   private render() {
     this.innerHTML = '';
     const v = this._value;
+    // Priority: URL → email → phone. Email and URL never collide (no '@' in
+    // an http URL host that's also bare), but URLs are still checked first
+    // because http(s)://… is the unambiguous winner. Phone last because its
+    // shape (digits + separators) overlaps least with the other two.
     const url = !this._editing ? detectUrl(v) : null;
-    const tel = !this._editing && !url ? detectPhone(v) : null;
+    const email = !this._editing && !url ? detectEmail(v) : null;
+    const tel = !this._editing && !url && !email ? detectPhone(v) : null;
 
-    if (url || tel) {
+    if (url || email || tel) {
       const wrap = document.createElement('span');
       wrap.style.cssText = 'display:inline-flex;align-items:center;gap:0.25rem;width:100%';
       const a = document.createElement('a');
-      a.href = url ? v : `tel:${v.replace(/[^\d+]/g, '')}`;
+      a.href = url ? v : email ? `mailto:${v.trim()}` : `tel:${v.replace(/[^\d+]/g, '')}`;
       if (url) {
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
@@ -59,7 +64,7 @@ class CellLink extends HTMLElement {
       a.textContent = v;
       a.style.cssText =
         'color:#2563eb;text-decoration:underline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-      a.title = url ? `Open ${v}` : `Call ${v}`;
+      a.title = url ? `Open ${v}` : email ? `Email ${v}` : `Call ${v}`;
 
       const edit = document.createElement('button');
       edit.type = 'button';
@@ -114,6 +119,19 @@ class CellLink extends HTMLElement {
 function detectUrl(s: string): string | null {
   const t = s.trim();
   if (/^https?:\/\/\S+$/i.test(t)) return t;
+  return null;
+}
+
+/**
+ * Email-shape detector. Pragmatic check (not RFC-5322) — a single `@`, a
+ * non-empty local part with no whitespace, a host with at least one dot,
+ * and a TLD of 2+ letters. Tight enough to reject phone numbers, dates,
+ * and plain text; loose enough for any real-world address.
+ */
+function detectEmail(s: string): string | null {
+  const t = s.trim();
+  if (!t) return null;
+  if (/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)*\.[A-Za-z]{2,}$/.test(t)) return t;
   return null;
 }
 

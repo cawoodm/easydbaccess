@@ -221,4 +221,37 @@ test.describe('data-table rendering', () => {
     await deleteBtn.click();
     await expect(panel.locator('data-table tbody tr:not(.spacer)')).toHaveCount(1);
   });
+
+  test('cell-link renders mailto: for email values, http(s) for URLs, tel: for phones', async ({
+    page,
+  }) => {
+    const id = await createTable(page, 'Contacts', [{ field: 'contact', renderer: 'link' }]);
+    await waitForPanel(page, id);
+    await addRow(page, id, { contact: 'alice@example.com' });
+    await addRow(page, id, { contact: 'https://example.org' });
+    await addRow(page, id, { contact: '+1 (555) 123-4567' });
+    await addRow(page, id, { contact: 'not a link at all' });
+
+    const panel = page.locator(`#${panelDomId(id)}`);
+    await expect(panel.locator('data-table tbody tr:not(.spacer)')).toHaveCount(4);
+
+    // Email → mailto: anchor, no target=_blank (mail clients handle their own).
+    const mailLink = panel.locator('cell-link a[href="mailto:alice@example.com"]');
+    await expect(mailLink).toHaveCount(1);
+    expect(await mailLink.getAttribute('target')).toBeNull();
+
+    // URL → http(s), opens in a new tab.
+    const urlLink = panel.locator('cell-link a[href="https://example.org"]');
+    await expect(urlLink).toHaveCount(1);
+    expect(await urlLink.getAttribute('target')).toBe('_blank');
+
+    // Phone → tel: with non-digit/+ stripped.
+    const telLink = panel.locator('cell-link a[href="tel:+15551234567"]');
+    await expect(telLink).toHaveCount(1);
+
+    // Plain text → falls back to a text input, not an anchor.
+    // The input's value lives in the attribute, not as text content — locate by it.
+    await expect(panel.locator('cell-link input[type="text"]')).toHaveCount(1);
+    await expect(panel.locator('cell-link input').nth(0)).toHaveValue('not a link at all');
+  });
 });
