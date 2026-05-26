@@ -31,9 +31,11 @@ async function createWindow(): Promise<void> {
     await win.loadURL(url);
     win.webContents.openDevTools({ mode: 'detach' });
   } else {
-    // Built renderer lives at packages/renderer/dist/index.html relative to
-    // packages/electron/dist/main.js.
-    await win.loadFile(path.join(__dirname, '../../renderer/dist/index.html'));
+    // Built renderer lives at packages/electron/frontend/index.html, produced
+    // by `npm run build:electron --workspace @easydb/renderer` (base=./).
+    // Kept separate from packages/renderer/dist/ so the gh-pages build
+    // (--base /easydbaccess/) doesn't collide with the file:// build.
+    await win.loadFile(path.join(__dirname, '../frontend/index.html'));
   }
 }
 

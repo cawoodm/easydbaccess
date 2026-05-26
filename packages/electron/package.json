@@ -8,7 +8,7 @@
   "main": "./dist/main.js",
   "scripts": {
     "dev": "node scripts/dev.cjs",
-    "build": "tsc -b",
+    "build": "tsc -b --force",
     "start": "electron .",
     "package": "electron-builder --config electron-builder.json"
   },

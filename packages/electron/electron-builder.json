@@ -7,7 +7,7 @@
   },
   "files": [
     "dist/**/*",
-    "../renderer/dist/**/*",
+    "frontend/**/*",
     "../server/dist/**/*"
   ],
   "win": {

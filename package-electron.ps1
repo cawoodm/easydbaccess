@@ -11,11 +11,12 @@ function main() {
   npm run build --workspace @easydb/server
   if ($LASTEXITCODE -ne 0) { throw "server build failed" }
 
-  # 2. Build renderer with relative base so assets resolve under file://
-  Push-Location packages\renderer
-  npx vite build --base ./
-  if ($LASTEXITCODE -ne 0) { Pop-Location; throw "renderer build failed" }
-  Pop-Location
+  # 2. Build renderer into packages/electron/frontend/ with base=./ so
+  #    assets resolve under file://. Kept separate from packages/renderer/dist/
+  #    so the gh-pages build (publish.ps1, --base /easydbaccess/) does not
+  #    overwrite the Electron build (and vice versa).
+  npm run build:electron --workspace @easydb/renderer
+  if ($LASTEXITCODE -ne 0) { throw "renderer build failed" }
 
   # 3. Build electron main + preload (tsc)
   npm run build --workspace @easydb/electron

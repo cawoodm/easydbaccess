@@ -3,6 +3,7 @@ node_modules/
 dist/
 build/
 out/
+packages/electron/frontend/
 *.tsbuildinfo
 .DS_Store
 .vite/

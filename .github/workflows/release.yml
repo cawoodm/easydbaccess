@@ -58,9 +58,8 @@ jobs:
       - name: Build server
         run: npm run build --workspace @easydb/server
 
-      - name: Build renderer (relative base for file://)
-        working-directory: packages/renderer
-        run: npx vite build --base ./
+      - name: Build renderer for Electron (base=./, outputs to packages/electron/frontend/)
+        run: npm run build:electron --workspace @easydb/renderer
 
       - name: Build electron (tsc)
         run: npm run build --workspace @easydb/electron
