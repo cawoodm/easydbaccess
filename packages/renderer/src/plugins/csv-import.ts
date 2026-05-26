@@ -54,7 +54,6 @@ async function importCsvFile(api: HostApi, file: File): Promise<void> {
   if (!workspaceId) throw new Error('csv-import: no active workspace');
 
   const text = await file.text();
-  const parsed = parseCsv(text);
   const baseName = file.name.replace(/\.csv$/i, '') || 'imported';
 
   // If a table with this name already exists in the workspace, ask the user
@@ -91,9 +90,16 @@ async function importCsvFile(api: HostApi, file: File): Promise<void> {
 
   api.events.emit('import:before', { source: 'csv', tableId: targetId });
 
+  // Build the rows to insert. For 'new' mode the CSV defines the schema, so
+  // we run the full parser. For 'append'/'overwrite' we map CSV cells onto
+  // the existing column schema BY INDEX — header names are ignored, so a
+  // CSV column whose header doesn't match doesn't go missing (which is what
+  // happened when we keyed by `slug(header)` instead).
+  let docs: Array<{ id: string; tableId: string; data: Record<string, unknown>; updatedAt: number }>;
+
   if (mode === 'new') {
-    const uniqueName =
-      mode === 'new' && existing ? `${baseName} (${Date.now().toString(36)})` : baseName;
+    const parsed = parseCsv(text);
+    const uniqueName = existing ? `${baseName} (${Date.now().toString(36)})` : baseName;
     await api.store.tables.insert({
       id: targetId,
       workspaceId,
@@ -103,32 +109,42 @@ async function importCsvFile(api: HostApi, file: File): Promise<void> {
       view: 'table',
       updatedAt: Date.now(),
     });
-  } else if (mode === 'overwrite') {
-    // Wipe existing rows; keep the table id so its panel position is preserved.
-    const rows = api.store.rows(targetId);
-    const old = await rows.find();
-    await rows.bulkRemove(old.map((r) => r.id));
-    // Replace columns with the imported shape so types match the new data.
-    await api.store.tables.patch(targetId, {
-      columns: parsed.columns,
+    docs = parsed.rows.map((row) => ({
+      id: cryptoUUID(),
+      tableId: targetId,
+      data: row,
       updatedAt: Date.now(),
+    }));
+  } else {
+    // append + overwrite: existing columns are preserved (widths, types,
+    // renderers, constraints — all of it). CSV cells map to existing
+    // columns by position, then coerce through each column's declared type.
+    const targetCols = existing!.columns;
+    const raw = parseCsvRaw(text);
+    docs = raw.rows.map((cells) => {
+      const data: Record<string, unknown> = {};
+      for (let i = 0; i < targetCols.length; i++) {
+        const col = targetCols[i]!;
+        data[col.field] = coerce(cells[i] ?? '', col.type);
+      }
+      return { id: cryptoUUID(), tableId: targetId, data, updatedAt: Date.now() };
     });
+    if (mode === 'overwrite') {
+      // Wipe existing rows; keep the table id (panel position) AND its
+      // columns (widths, renderers, etc. survive).
+      const rows = api.store.rows(targetId);
+      const old = await rows.find();
+      await rows.bulkRemove(old.map((r) => r.id));
+    }
   }
-  // mode === 'append' just adds rows; existing columns kept.
 
   const rowColl = api.store.rows(targetId);
-  const docs = parsed.rows.map((row) => ({
-    id: cryptoUUID(),
-    tableId: targetId,
-    data: row,
-    updatedAt: Date.now(),
-  }));
   await rowColl.bulkInsert(docs);
 
   api.events.emit('import:after', {
     source: 'csv',
     tableId: targetId,
-    rowCount: parsed.rows.length,
+    rowCount: docs.length,
   });
 }
 
@@ -137,6 +153,22 @@ async function importCsvFile(api: HostApi, file: File): Promise<void> {
 interface ParseResult {
   columns: ColumnSpec[];
   rows: Array<Record<string, unknown>>;
+}
+
+/**
+ * Tokenize-only entry point. Returns header + data rows as raw strings,
+ * with no header mini-language parsing, no type inference, and no coercion.
+ * Used by importers that map CSV cells onto an existing table's column
+ * schema by index — the existing columns' types drive coercion instead.
+ */
+export function parseCsvRaw(text: string): { header: string[]; rows: string[][] } {
+  const normalized = text.replace(/﻿/, ''); // strip BOM
+  const sep = detectSeparator(normalized);
+  const all = parseLines(normalized, sep);
+  if (all.length === 0) return { header: [], rows: [] };
+  const header = all[0]!;
+  const rows = all.slice(1).filter((r) => !(r.length === 1 && r[0] === ''));
+  return { header, rows };
 }
 
 export function parseCsv(text: string): ParseResult {

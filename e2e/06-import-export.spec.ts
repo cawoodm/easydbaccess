@@ -4,6 +4,7 @@ import {
   createTable,
   panelDomId,
   readRows,
+  readTable,
   waitForPanel,
 } from './helpers.js';
 
@@ -65,6 +66,84 @@ test.describe('import / export', () => {
       (t as unknown as { id: string }).id,
     );
     expect(rows).toHaveLength(2);
+  });
+
+  test('CSV append maps cells to existing columns by index when header names differ', async ({
+    page,
+  }) => {
+    // Existing table has fields [name, age]. CSV header is [Person Name, Years]
+    // — names slugify to different strings (person_name, years), so the OLD
+    // behavior dropped the data on the floor. Index-mapping must put column 0
+    // into `name` and column 1 into `age`.
+    const tableId = await createTable(page, 'mismatched', [
+      { field: 'name' },
+      { field: 'age', type: 'number' },
+    ]);
+
+    const dropPromise = dropFile(
+      page,
+      'mismatched.csv',
+      'Person Name,Years\nAlice,30\nBob,25',
+      'text/csv',
+    );
+    const dialog = page.locator('host-dialogs');
+    await expect(dialog.getByRole('button', { name: 'Append rows' })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Append rows' }).click();
+    await dropPromise;
+
+    const rows = await readRows(page, tableId);
+    expect(rows).toHaveLength(2);
+    const sorted = [...rows].sort((a, b) =>
+      String(a.data.name).localeCompare(String(b.data.name)),
+    );
+    expect(sorted[0]?.data).toEqual({ name: 'Alice', age: 30 });
+    expect(sorted[1]?.data).toEqual({ name: 'Bob', age: 25 });
+  });
+
+  test('CSV overwrite preserves existing column definitions and maps by index', async ({
+    page,
+  }) => {
+    // Existing table has fields [name, age] with width=200 on name. After
+    // Overwrite, the column definitions must survive (width preserved) and
+    // the CSV data must populate by position.
+    const tableId = await createTable(page, 'preserve-schema', [
+      { field: 'name' },
+      { field: 'age', type: 'number' },
+    ]);
+    await addRow(page, tableId, { name: 'old', age: 1 });
+    await page.evaluate(
+      async (id) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__easydb.store;
+        const t = await store.tables.findOne(id);
+        t.columns[0].width = 200;
+        await store.tables.patch(id, { columns: t.columns, updatedAt: Date.now() });
+      },
+      tableId,
+    );
+
+    const dropPromise = dropFile(
+      page,
+      'preserve-schema.csv',
+      'WhateverHeader,SomethingElse\nCarol,40\nDan,50',
+      'text/csv',
+    );
+    const dialog = page.locator('host-dialogs');
+    await dialog.getByRole('button', { name: 'Overwrite rows' }).click();
+    await dropPromise;
+
+    const tbl = await readTable(page, tableId);
+    expect(tbl.columns[0].field).toBe('name');
+    expect(tbl.columns[0].width).toBe(200); // preserved
+    expect(tbl.columns[1].field).toBe('age');
+
+    const rows = await readRows(page, tableId);
+    expect(rows).toHaveLength(2); // old row wiped, only CSV rows remain
+    const sorted = [...rows].sort((a, b) =>
+      String(a.data.name).localeCompare(String(b.data.name)),
+    );
+    expect(sorted[0]?.data).toEqual({ name: 'Carol', age: 40 });
+    expect(sorted[1]?.data).toEqual({ name: 'Dan', age: 50 });
   });
 
   test('CSV header mini-language parses field:label:type into ColumnSpec', async ({ page }) => {
