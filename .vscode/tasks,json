@@ -1,0 +1,18 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "*** DEV",
+      "windows": {
+        "command": "${workspaceFolder}/ci/dev.cmd"
+      },
+      "linux": {
+        "command": "${workspaceFolder}/ci/dev.sh"
+      },
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
