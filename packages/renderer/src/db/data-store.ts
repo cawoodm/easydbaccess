@@ -51,6 +51,10 @@ function wrap<T extends { id: string } | { url: string } | { key: string }>(
       const doc = await coll.findOne(id as string).exec();
       if (doc) await doc.remove();
     },
+    async bulkRemove(ids) {
+      if (ids.length === 0) return;
+      await coll.bulkRemove(ids);
+    },
     subscribe(fn): Unsubscribe {
       const sub = coll
         .find()
@@ -99,6 +103,10 @@ function rowsView(coll: RxCollection<Row>, tableId: string): DataCollection<Row>
     async remove(id) {
       const doc = await coll.findOne(id).exec();
       if (doc) await doc.remove();
+    },
+    async bulkRemove(ids) {
+      if (ids.length === 0) return;
+      await coll.bulkRemove(ids);
     },
     subscribe(fn): Unsubscribe {
       const sub = coll
