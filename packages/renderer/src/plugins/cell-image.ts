@@ -3,7 +3,8 @@ import type { HostApi, PluginModule } from '@easydb/shared';
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'cell-image',
   version: '0.1.0',
-  description: 'Renderer for image cells: thumbnail with upload/clear. Apply by setting a column\'s renderer to "image". Values are kept as data: URIs.',
+  description:
+    'Renderer for image cells: thumbnail with upload/clear. Apply by setting a column\'s renderer to "image". Values are kept as data: URIs.',
   author: 'easyDBAccess built-ins',
 };
 
@@ -34,12 +35,15 @@ class CellImage extends HTMLElement {
     this.innerHTML = '';
     const wrap = document.createElement('span');
     wrap.style.cssText = 'display:inline-flex;align-items:center;gap:0.4rem';
-    const isDataUri = typeof this._value === 'string' && this._value.startsWith('data:image');
+    const isDataUri =
+      typeof this._value === 'string' &&
+      (this._value.startsWith('data:image') || this._value.startsWith('http'));
     if (isDataUri) {
       const img = document.createElement('img');
       img.src = this._value;
       img.alt = '';
-      img.style.cssText = 'max-height:32px;max-width:64px;border-radius:.15rem;border:1px solid #e5e7eb';
+      img.style.cssText =
+        'max-height:32px;max-width:64px;border-radius:.15rem;border:1px solid #e5e7eb';
       wrap.append(img);
     } else {
       const placeholder = document.createElement('span');
