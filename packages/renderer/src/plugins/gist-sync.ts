@@ -138,16 +138,17 @@ async function push(api: HostApi): Promise<void> {
   for (const t of tables) {
     const rows = await api.store.rows(t.id).find();
     const content = JSON.stringify(tableToFile(t, rows), null, 2);
-    if (content.length > 10_000_000)
+    if (content.length > 100_000_000)
       oversize.push(`${t.name} (${(content.length / 1_000_000).toFixed(2)} MB)`);
     files[`${slug(t.name)}.table.json`] = { content };
   }
 
-  // Gist enforces a 10 MB per-file limit. Warn the user before they hit
+  // Gist enforces a 100 MB per-file limit. Warn the user before they hit
   // an obscure GitHub API rejection mid-push.
+  // https://github.com/orgs/community/discussions/147837
   if (oversize.length > 0) {
     const proceed = await api.ui.dialogs.confirm(
-      `These tables exceed Gist's 10 MB-per-file limit and will be rejected:\n\n${oversize.join('\n')}\n\nPush anyway?`,
+      `These tables exceed Gist's 100 MB-per-file limit and will be rejected:\n\n${oversize.join('\n')}\n\nPush anyway?`,
       'Gist size warning',
     );
     if (!proceed) return;
