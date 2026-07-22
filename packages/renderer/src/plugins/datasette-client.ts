@@ -118,6 +118,31 @@ export function extractTableNames(json: any): string[] {
   return out;
 }
 
+/**
+ * Like extractTableNames but also carries each table's row count (from the
+ * database page's `tables[].count`). Hidden tables are skipped.
+ */
+export function extractTables(json: any): Array<{ name: string; count: number | null }> {
+  const out: Array<{ name: string; count: number | null }> = [];
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const tables = json?.tables;
+  if (Array.isArray(tables)) {
+    for (const item of tables) {
+      if (typeof item === 'string') out.push({ name: item, count: null });
+      else if (item && typeof item === 'object') {
+        if (item.hidden === true) continue;
+        if (typeof item.name === 'string') out.push({ name: item.name, count: num(item.count) });
+      }
+    }
+  } else if (tables && typeof tables === 'object') {
+    for (const [name, meta] of Object.entries(tables)) {
+      if (meta && typeof meta === 'object' && (meta as any).hidden === true) continue;
+      out.push({ name, count: meta && typeof meta === 'object' ? num((meta as any).count) : null });
+    }
+  }
+  return out;
+}
+
 /** Ensure a URL (e.g. a next_url) carries the given params without overwriting. */
 export function ensureParams(urlStr: string, params: Record<string, string | number>): string {
   const u = new URL(urlStr);

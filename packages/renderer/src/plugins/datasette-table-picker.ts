@@ -1,15 +1,40 @@
 // packages/renderer/src/plugins/datasette-table-picker.ts
 //
-// Modal shown before a whole-database Datasette import: lists the discovered
-// tables (all selected by default) so the user can deselect any they don't
-// want. Resolves to the chosen table names, or null if cancelled. Reached via
-// the static `instance` accessor and mounted lazily into <body>, mirroring the
-// Import dialog's pattern.
+// Modal shown before a whole-database Datasette import. Lists the discovered
+// tables with their row count and an estimated size, flags any that collide
+// with an existing local table (offering Overwrite vs Rename), and lets the
+// user deselect any they don't want. Resolves to the chosen tables (each with
+// an `overwrite` flag), or null if cancelled. Reached via the static
+// `instance` accessor and mounted lazily into <body>.
 
-import { LitElement, css, html } from 'lit';
+import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from '../dialogs/dialog-chrome.js';
 import { makeDialogDraggable } from '../dialogs/draggable.js';
+
+export interface PickerTable {
+  name: string;
+  rows: number | null;
+  bytes: number | null; // null = unknown / still estimating
+  exists: boolean; // a local table with the target name already exists
+}
+
+export interface PickerChoice {
+  table: string;
+  /** true → overwrite the existing local table; false → import as a new table. */
+  overwrite: boolean;
+}
+
+function fmtRows(n: number | null): string {
+  return n == null ? '? rows' : `${n.toLocaleString()} row${n === 1 ? '' : 's'}`;
+}
+
+function fmtBytes(b: number | null): string {
+  if (b == null) return '…';
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(b < 10240 ? 1 : 0)} KB`;
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 @customElement('datasette-table-picker')
 export class DatasetteTablePicker extends LitElement {
@@ -19,8 +44,8 @@ export class DatasetteTablePicker extends LitElement {
     dialogChromeStyles,
     css`
       dialog {
-        min-width: 380px;
-        max-width: 520px;
+        min-width: 460px;
+        max-width: 600px;
       }
       .all {
         display: flex;
@@ -34,30 +59,72 @@ export class DatasetteTablePicker extends LitElement {
       .list {
         display: flex;
         flex-direction: column;
-        gap: 0.3rem;
-        max-height: 50vh;
+        gap: 0.1rem;
+        max-height: 52vh;
         overflow: auto;
       }
-      .list label {
-        display: flex;
+      .row {
+        display: grid;
+        grid-template-columns: 1rem 1fr auto auto;
         align-items: center;
-        gap: 0.5rem;
+        gap: 0.6rem;
+        padding: 0.25rem 0.1rem;
         font-size: 0.9rem;
         color: #374151;
+      }
+      .row .name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .row .size {
+        color: #6b7280;
+        font-size: 0.8rem;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .row .collision {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+      .badge {
+        background: #fef3c7;
+        color: #92400e;
+        border-radius: 0.2rem;
+        padding: 0.05rem 0.3rem;
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+      select {
+        font: inherit;
+        font-size: 0.8rem;
+        padding: 0.1rem 0.25rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.2rem;
       }
       input[type='checkbox'] {
         width: 1rem;
         height: 1rem;
       }
+      .footer {
+        color: #6b7280;
+        font-size: 0.8rem;
+        border-top: 1px solid #e5e7eb;
+        padding-top: 0.5rem;
+      }
     `,
   ];
 
   @state() private dbName = '';
-  @state() private tables: string[] = [];
+  @state() private items: PickerTable[] = [];
   @state() private selected = new Set<string>();
+  /** Names the user switched from the default Overwrite to Rename. */
+  @state() private renameMode = new Set<string>();
 
   private dialogEl: HTMLDialogElement | null = null;
-  private resolveFn: ((v: string[] | null) => void) | null = null;
+  private resolveFn: ((v: PickerChoice[] | null) => void) | null = null;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -75,18 +142,43 @@ export class DatasetteTablePicker extends LitElement {
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
   }
 
-  /** Open the picker. Resolves with the selected table names, or null on cancel. */
-  open(dbName: string, tables: string[]): Promise<string[] | null> {
+  /**
+   * Open the picker. `estimate` (optional) is called per table to fill in the
+   * size lazily so the dialog opens instantly. Resolves with the chosen tables,
+   * or null on cancel.
+   */
+  open(
+    dbName: string,
+    tables: PickerTable[],
+    estimate?: (name: string) => Promise<number | null>,
+  ): Promise<PickerChoice[] | null> {
     this.dbName = dbName;
-    this.tables = [...tables];
-    this.selected = new Set(tables); // all selected by default
-    return new Promise<string[] | null>((resolve) => {
+    this.items = tables.map((t) => ({ ...t }));
+    this.selected = new Set(tables.map((t) => t.name)); // all selected by default
+    this.renameMode = new Set(); // existing tables default to Overwrite
+    return new Promise<PickerChoice[] | null>((resolve) => {
       this.resolveFn = resolve;
-      void this.updateComplete.then(() => this.dialogEl?.showModal());
+      void this.updateComplete.then(() => {
+        this.dialogEl?.showModal();
+        if (estimate) this.runEstimates(estimate);
+      });
     });
   }
 
-  private finish(value: string[] | null): void {
+  private runEstimates(estimate: (name: string) => Promise<number | null>): void {
+    this.items.forEach((item, i) => {
+      if (item.bytes != null) return;
+      void estimate(item.name)
+        .then((bytes) => {
+          this.items = this.items.map((it, idx) => (idx === i ? { ...it, bytes } : it));
+        })
+        .catch(() => {
+          /* leave as unknown */
+        });
+    });
+  }
+
+  private finish(value: PickerChoice[] | null): void {
     this.dialogEl?.close();
     const resolve = this.resolveFn;
     this.resolveFn = null;
@@ -106,18 +198,32 @@ export class DatasetteTablePicker extends LitElement {
   }
 
   private toggleAll(checked: boolean): void {
-    this.selected = checked ? new Set(this.tables) : new Set();
+    this.selected = checked ? new Set(this.items.map((t) => t.name)) : new Set();
+  }
+
+  private setMode(name: string, mode: string): void {
+    const next = new Set(this.renameMode);
+    if (mode === 'rename') next.add(name);
+    else next.delete(name);
+    this.renameMode = next;
   }
 
   private submit = (e: Event): void => {
     e.preventDefault();
     if (this.selected.size === 0) return;
-    // Preserve the source table order.
-    this.finish(this.tables.filter((t) => this.selected.has(t)));
+    const chosen: PickerChoice[] = this.items
+      .filter((it) => this.selected.has(it.name))
+      .map((it) => ({ table: it.name, overwrite: it.exists && !this.renameMode.has(it.name) }));
+    this.finish(chosen);
   };
 
   override render() {
-    const allChecked = this.tables.length > 0 && this.selected.size === this.tables.length;
+    const allChecked = this.items.length > 0 && this.selected.size === this.items.length;
+    const sel = this.items.filter((it) => this.selected.has(it.name));
+    const totalRows = sel.reduce((s, it) => s + (it.rows ?? 0), 0);
+    const totalBytes = sel.some((it) => it.bytes == null)
+      ? null
+      : sel.reduce((s, it) => s + (it.bytes ?? 0), 0);
     return html`
       <dialog @cancel=${this.onCancel} @keydown=${ctrlEnterSubmits}>
         <button type="button" class="close-x" title="Close" @click=${() => this.finish(null)}>
@@ -129,7 +235,7 @@ export class DatasetteTablePicker extends LitElement {
             <div class="header-actions">
               <button type="button" class="ghost" @click=${() => this.finish(null)}>Cancel</button>
               <button type="submit" class="primary" ?disabled=${this.selected.size === 0}>
-                Import ${this.selected.size}/${this.tables.length}
+                Import ${this.selected.size}/${this.items.length}
               </button>
             </div>
           </div>
@@ -143,20 +249,44 @@ export class DatasetteTablePicker extends LitElement {
               Select all
             </label>
             <div class="list">
-              ${this.tables.map(
-                (name) => html`
-                  <label>
+              ${this.items.map(
+                (it) => html`
+                  <label class="row">
                     <input
                       type="checkbox"
-                      data-table=${name}
-                      .checked=${this.selected.has(name)}
+                      data-table=${it.name}
+                      .checked=${this.selected.has(it.name)}
                       @change=${(e: Event) =>
-                        this.toggle(name, (e.target as HTMLInputElement).checked)}
+                        this.toggle(it.name, (e.target as HTMLInputElement).checked)}
                     />
-                    ${name}
+                    <span class="name" title=${it.name}>${it.name}</span>
+                    <span class="size">${fmtRows(it.rows)} · ${fmtBytes(it.bytes)}</span>
+                    ${it.exists
+                      ? html`<span class="collision">
+                          <span class="badge" title="A local table with this name already exists"
+                            >exists</span
+                          >
+                          <select
+                            data-mode=${it.name}
+                            @change=${(e: Event) =>
+                              this.setMode(it.name, (e.target as HTMLSelectElement).value)}
+                          >
+                            <option value="overwrite" ?selected=${!this.renameMode.has(it.name)}>
+                              Overwrite
+                            </option>
+                            <option value="rename" ?selected=${this.renameMode.has(it.name)}>
+                              Rename
+                            </option>
+                          </select>
+                        </span>`
+                      : nothing}
                   </label>
                 `,
               )}
+            </div>
+            <div class="footer">
+              ${this.selected.size} selected · ${totalRows.toLocaleString()} rows ·
+              ${totalBytes == null ? '~' : ''}${fmtBytes(totalBytes)}
             </div>
           </div>
         </form>
@@ -166,13 +296,17 @@ export class DatasetteTablePicker extends LitElement {
 }
 
 /** Open the table picker for a database import. Lazily mounts the element. */
-export function pickDatasetteTables(dbName: string, tables: string[]): Promise<string[] | null> {
+export function pickDatasetteTables(
+  dbName: string,
+  tables: PickerTable[],
+  estimate?: (name: string) => Promise<number | null>,
+): Promise<PickerChoice[] | null> {
   const el =
     DatasetteTablePicker.instance ??
     (document.body.appendChild(
       document.createElement('datasette-table-picker'),
     ) as DatasetteTablePicker);
-  return el.open(dbName, tables);
+  return el.open(dbName, tables, estimate);
 }
 
 declare global {

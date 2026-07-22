@@ -115,10 +115,14 @@ async function stubDatasetteDatabase(page: import('@playwright/test').Page): Pro
         const u = new URL(url);
         const segs = u.pathname.replace(/\.json$/, '').split('/').filter(Boolean);
         if (segs.length === 1) {
-          // Database page: two real tables + one hidden (FTS shadow) table.
+          // Database page: two real tables (with row counts) + one hidden table.
           return json({
             ok: true,
-            tables: [{ name: 'plants' }, { name: 'regions' }, { name: 'plants_fts', hidden: true }],
+            tables: [
+              { name: 'plants', count: 2 },
+              { name: 'regions', count: 1 },
+              { name: 'plants_fts', hidden: true },
+            ],
           });
         }
         const table = segs[1];
@@ -380,6 +384,90 @@ test.describe('datasette import', () => {
     expect(info.regions).toBe(1);
     // The hidden FTS shadow table must be skipped.
     expect(info.names).not.toContain('energy/plants_fts');
+  });
+
+  test('the picker shows row counts and estimated sizes', async ({ page }) => {
+    await stubDatasetteDatabase(page);
+
+    await page.locator('app-shell header button[title="Import data from a URL"]').click();
+    await page.locator('import-dialog input[type="text"]').fill('https://ds.example.test/energy');
+    await page.locator('import-dialog select').nth(1).selectOption('datasette');
+    await page.locator('import-dialog button[type="submit"]').click();
+
+    const picker = page.locator('datasette-table-picker');
+    await expect(picker).toContainText('2 rows'); // plants
+    await expect(picker).toContainText('1 row'); // regions
+    // Size estimate resolves to a byte/KB/MB figure (the "…" placeholder clears).
+    await expect(picker.locator('.list')).toContainText(/\d+\s?(B|KB|MB)/);
+
+    await confirmPicker(page);
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ctx = (window as any).__easydb;
+          return (await ctx.store.tables.find()).length;
+        }),
+      )
+      .toBe(2);
+  });
+
+  test('re-importing a database overwrites existing tables by default', async ({ page }) => {
+    await stubDatasetteDatabase(page);
+    const names = async () =>
+      page.evaluate(async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctx = (window as any).__easydb;
+        const tables = await ctx.store.tables.find();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return tables.map((t: any) => t.name).sort();
+      });
+
+    const importEnergy = async () => {
+      await page.locator('app-shell header button[title="Import data from a URL"]').click();
+      await page.locator('import-dialog input[type="text"]').fill('https://ds.example.test/energy');
+      await page.locator('import-dialog select').nth(1).selectOption('datasette');
+      await page.locator('import-dialog button[type="submit"]').click();
+      await confirmPicker(page);
+    };
+
+    await importEnergy();
+    await expect.poll(names).toEqual(['energy/plants', 'energy/regions']);
+
+    // Second import: both tables now show as "exists"; default is Overwrite.
+    await importEnergy();
+    await expect(page.locator('datasette-table-picker')).toBeHidden(); // picker closed
+    // Still exactly two tables — overwritten in place, not duplicated.
+    await expect.poll(names).toEqual(['energy/plants', 'energy/regions']);
+  });
+
+  test('the picker can rename on collision to keep both copies', async ({ page }) => {
+    await stubDatasetteDatabase(page);
+    const names = async () =>
+      page.evaluate(async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctx = (window as any).__easydb;
+        const tables = await ctx.store.tables.find();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return tables.map((t: any) => t.name).sort();
+      });
+
+    const openEnergy = async () => {
+      await page.locator('app-shell header button[title="Import data from a URL"]').click();
+      await page.locator('import-dialog input[type="text"]').fill('https://ds.example.test/energy');
+      await page.locator('import-dialog select').nth(1).selectOption('datasette');
+      await page.locator('import-dialog button[type="submit"]').click();
+    };
+
+    await openEnergy();
+    await confirmPicker(page);
+    await expect.poll(names).toEqual(['energy/plants', 'energy/regions']);
+
+    // Re-import; keep the existing "plants" by importing the new one under a new name.
+    await openEnergy();
+    await page.locator('datasette-table-picker select[data-mode="plants"]').selectOption('rename');
+    await confirmPicker(page);
+    await expect.poll(names).toEqual(['energy/plants', 'energy/plants (2)', 'energy/regions']);
   });
 
   test('database import lets you deselect tables in the picker', async ({ page }) => {

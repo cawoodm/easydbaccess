@@ -12,14 +12,20 @@
 import type { HostApi, PluginModule, Row } from '@easydb/shared';
 import {
   parseDatasetteUrl,
+  buildTableUrl,
   fetchTableMeta,
   fetchRows,
-  extractTableNames,
+  extractTables,
   inferColumnsFromRows,
   DatasetteError,
   type DatasetteRef,
 } from './datasette-client.js';
 import { pickDatasetteTables } from './datasette-table-picker.js';
+
+interface DbTable {
+  name: string;
+  count: number | null;
+}
 
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'datasette-source',
@@ -116,14 +122,14 @@ export async function importDatasette(api: HostApi, input: string): Promise<void
 async function probeDatasette(
   fetchFn: (url: string, opts?: any) => Promise<Response>,
   input: string,
-): Promise<{ kind: 'table' | 'database'; tables: string[] }> {
+): Promise<{ kind: 'table' | 'database'; tables: DbTable[] }> {
   const u = new URL(input);
   u.pathname = u.pathname.replace(/\.(json|csv)$/i, '') + '.json';
   const res = await fetchFn(u.toString());
   const json: any = await res.json();
   if (json && json.ok === false) throw new DatasetteError(json, res.status);
 
-  const tables = extractTableNames(json);
+  const tables = extractTables(json);
   const looksDatabase = Array.isArray(json?.tables);
   const looksTable = Array.isArray(json?.rows) || Array.isArray(json?.columns);
   if (looksDatabase && !looksTable) return { kind: 'database', tables };
@@ -154,7 +160,7 @@ interface TableImportResult {
 async function importTableRef(
   api: HostApi,
   ref: DatasetteRef,
-  opts: { announce?: boolean } = {},
+  opts: { announce?: boolean; overwrite?: boolean } = {},
 ): Promise<TableImportResult> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('datasette-source: no active workspace');
@@ -182,18 +188,42 @@ async function importTableRef(
   }
 
   const now = Date.now();
-  const tableId = cryptoUUID();
-  const name = `${ref.db}/${ref.table}`;
-  api.events.emit('import:before', { source: 'datasette', tableId });
-  await api.store.tables.insert({
-    id: tableId,
-    workspaceId,
-    name,
-    code: slug(`${ref.db}-${ref.table}`),
-    columns: columnSpecs,
-    view: 'table',
-    updatedAt: now,
-  });
+  const baseName = `${ref.db}/${ref.table}`;
+  const existing = (await api.store.tables.find()).filter((t) => t.workspaceId === workspaceId);
+  const byName = new Map(existing.map((t) => [t.name, t] as const));
+
+  let name = baseName;
+  const overwriteTarget = opts.overwrite ? byName.get(baseName) : undefined;
+  if (!overwriteTarget && byName.has(baseName)) {
+    // Name collision but not overwriting → import under a unique "(n)" name.
+    let i = 2;
+    while (byName.has(`${baseName} (${i})`)) i += 1;
+    name = `${baseName} (${i})`;
+  }
+
+  let tableId: string;
+  if (overwriteTarget) {
+    // Overwrite in place: keep the id (and its panel position), wipe rows, replace columns.
+    tableId = overwriteTarget.id;
+    name = overwriteTarget.name;
+    api.events.emit('import:before', { source: 'datasette', tableId });
+    const rowColl = api.store.rows(tableId);
+    const old = await rowColl.find();
+    await rowColl.bulkRemove(old.map((r) => r.id));
+    await api.store.tables.patch(tableId, { columns: columnSpecs, updatedAt: now });
+  } else {
+    tableId = cryptoUUID();
+    api.events.emit('import:before', { source: 'datasette', tableId });
+    await api.store.tables.insert({
+      id: tableId,
+      workspaceId,
+      name,
+      code: slug(name),
+      columns: columnSpecs,
+      view: 'table',
+      updatedAt: now,
+    });
+  }
 
   const docs: Row[] = rows.map((data) => ({ id: cryptoUUID(), tableId, data, updatedAt: now }));
   await api.store.rows(tableId).bulkInsert(docs);
@@ -219,12 +249,51 @@ async function importTableRef(
   return { tableId, name, rowCount: rows.length, count, hasMore, truncated };
 }
 
-/** Import selected non-hidden tables in a Datasette database (names from the probe). */
-async function importDatabaseRef(api: HostApi, ref: DatasetteRef, names: string[]): Promise<void> {
-  if (names.length === 0) throw new Error(`No tables found in database "${ref.db}".`);
+/** Estimate a table's byte size from a small sample × its row count. */
+async function estimateBytes(
+  fetchFn: (u: string, o?: any) => Promise<Response>,
+  ref: DatasetteRef,
+  table: string,
+  count: number | null,
+): Promise<number | null> {
+  if (count === 0) return 0;
+  try {
+    const url = buildTableUrl({ ...ref, table }, { _shape: 'objects', _size: 20 });
+    const res = await fetchFn(url);
+    const json: any = await res.json();
+    const sample = Array.isArray(json?.rows) ? json.rows : [];
+    if (sample.length === 0) return count == null ? null : 0;
+    const perRow = JSON.stringify(sample).length / sample.length;
+    const n = count == null ? sample.length : count;
+    return Math.round(perRow * n);
+  } catch {
+    return null;
+  }
+}
 
-  // Let the user deselect tables before pulling any data.
-  const chosen = await pickDatasetteTables(ref.db ?? '', names);
+/** Import selected non-hidden tables in a Datasette database (from the probe). */
+async function importDatabaseRef(api: HostApi, ref: DatasetteRef, tables: DbTable[]): Promise<void> {
+  if (tables.length === 0) throw new Error(`No tables found in database "${ref.db}".`);
+
+  const fetchFn = (u: string, o?: any) => api.backend.fetch(u, o);
+  const workspaceId = api.workspaceId();
+  const existing = workspaceId
+    ? (await api.store.tables.find()).filter((t) => t.workspaceId === workspaceId)
+    : [];
+  const existingNames = new Set(existing.map((t) => t.name));
+  const countByName = new Map(tables.map((t) => [t.name, t.count] as const));
+
+  // Show the picker immediately (rows + collision known up front); sizes fill
+  // in lazily via the estimate callback.
+  const items = tables.map((t) => ({
+    name: t.name,
+    rows: t.count,
+    bytes: null as number | null,
+    exists: existingNames.has(`${ref.db}/${t.name}`),
+  }));
+  const estimate = (name: string) => estimateBytes(fetchFn, ref, name, countByName.get(name) ?? null);
+
+  const chosen = await pickDatasetteTables(ref.db ?? '', items, estimate);
   if (chosen === null) return; // cancelled
   if (chosen.length === 0) return; // nothing selected
 
@@ -236,23 +305,33 @@ async function importDatabaseRef(api: HostApi, ref: DatasetteRef, names: string[
   let imported = 0;
   let rowTotal = 0;
   let capped = 0;
+  let overwritten = 0;
   const failures: string[] = [];
-  for (const table of chosen) {
+  for (const sel of chosen) {
     try {
-      const res = await importTableRef(api, { ...ref, table }, { announce: false });
+      const res = await importTableRef(
+        api,
+        { ...ref, table: sel.table },
+        { announce: false, overwrite: sel.overwrite },
+      );
       imported += 1;
       rowTotal += res.rowCount;
       if (res.hasMore || res.truncated) capped += 1;
+      if (sel.overwrite) overwritten += 1;
     } catch (err) {
-      failures.push(`${table}: ${(err as Error)?.message ?? err}`);
+      failures.push(`${sel.table}: ${(err as Error)?.message ?? err}`);
     }
   }
 
-  const cappedNote = capped > 0 ? ` (${capped} capped at ${SETTINGS.maxImportRows} rows)` : '';
+  const notes = [
+    capped > 0 ? `${capped} capped at ${SETTINGS.maxImportRows} rows` : '',
+    overwritten > 0 ? `${overwritten} overwritten` : '',
+  ].filter(Boolean);
+  const noteStr = notes.length ? ` (${notes.join('; ')})` : '';
   if (imported > 0) {
     api.ui.dialogs.toast(
       `Imported ${imported}/${chosen.length} table${chosen.length === 1 ? '' : 's'} ` +
-        `(${rowTotal} rows) from ${ref.db}${cappedNote}.`,
+        `(${rowTotal} rows) from ${ref.db}${noteStr}.`,
       { kind: failures.length ? 'warning' : 'success' },
     );
   }
