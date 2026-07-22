@@ -14,7 +14,7 @@ import {
   parseDatasetteUrl,
   fetchTableMeta,
   fetchRows,
-  fetchDatabaseTables,
+  extractTableNames,
   inferColumnsFromRows,
   DatasetteError,
   type DatasetteRef,
@@ -83,20 +83,52 @@ function isDatasetteUrl(text: string): boolean {
 }
 
 /**
- * Import from any Datasette URL. A table URL (`.../<db>/<table>`) imports that
- * one table; a database URL (`.../<db>`) imports every non-hidden table in it.
+ * Import from any Datasette URL. Whether the URL names a single table or a
+ * whole database is decided from the JSON *response* — a database page returns
+ * a `tables` list; a table returns `rows` — rather than from the path shape,
+ * which is fragile (mount prefixes, `.json` suffixes, etc.). A database imports
+ * every non-hidden table; a table imports just itself.
  */
 export async function importDatasette(api: HostApi, input: string): Promise<void> {
   const ref = parseDatasetteUrl(input);
-  if (ref.db && ref.table) {
-    await importTableRef(api, ref, { announce: true });
+  if (!ref.db) {
+    throw new Error('URL must point to a Datasette database or table, e.g. .../<database>[/<table>]');
+  }
+  const fetchFn = (u: string, o?: any) => api.backend.fetch(u, o);
+
+  const probe = await probeDatasette(fetchFn, input);
+  if (probe.kind === 'database') {
+    await importDatabaseRef(api, ref, probe.tables);
     return;
   }
-  if (ref.db) {
-    await importDatabaseRef(api, ref);
-    return;
+  if (!ref.table) {
+    throw new Error('That URL responds like a Datasette table but has no table name in its path.');
   }
-  throw new Error('URL must point to a Datasette database or table, e.g. .../<database>[/<table>]');
+  await importTableRef(api, ref, { announce: true });
+}
+
+/**
+ * Fetch the URL's `.json` once and classify it: a database page carries a
+ * `tables` list; a table carries `rows`. Returns the discovered table names
+ * for the database case so the caller needn't re-fetch the page.
+ */
+async function probeDatasette(
+  fetchFn: (url: string, opts?: any) => Promise<Response>,
+  input: string,
+): Promise<{ kind: 'table' | 'database'; tables: string[] }> {
+  const u = new URL(input);
+  u.pathname = u.pathname.replace(/\.(json|csv)$/i, '') + '.json';
+  const res = await fetchFn(u.toString());
+  const json: any = await res.json();
+  if (json && json.ok === false) throw new DatasetteError(json, res.status);
+
+  const tables = extractTableNames(json);
+  const looksDatabase = Array.isArray(json?.tables);
+  const looksTable = Array.isArray(json?.rows) || Array.isArray(json?.columns);
+  if (looksDatabase && !looksTable) return { kind: 'database', tables };
+  if (looksTable) return { kind: 'table', tables: [] };
+  // Ambiguous response — fall back to the URL shape.
+  return { kind: tables.length > 0 ? 'database' : 'table', tables };
 }
 
 /** Back-compat single-table entry: parse an input URL, require a table. */
@@ -186,10 +218,8 @@ async function importTableRef(
   return { tableId, name, rowCount: rows.length, count, hasMore, truncated };
 }
 
-/** Import every non-hidden table in a Datasette database. */
-async function importDatabaseRef(api: HostApi, ref: DatasetteRef): Promise<void> {
-  const fetchFn = (u: string, o?: any) => api.backend.fetch(u, o);
-  const names = await fetchDatabaseTables(fetchFn, ref);
+/** Import every non-hidden table in a Datasette database (names from the probe). */
+async function importDatabaseRef(api: HostApi, ref: DatasetteRef, names: string[]): Promise<void> {
   if (names.length === 0) throw new Error(`No tables found in database "${ref.db}".`);
 
   api.ui.dialogs.toast(

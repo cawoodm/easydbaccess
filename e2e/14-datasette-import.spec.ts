@@ -144,6 +144,35 @@ async function stubDatasetteDatabase(page: import('@playwright/test').Page): Pro
   });
 }
 
+/**
+ * Stub where the URL path looks like a table (`catalog/overview`) but the
+ * response at that path is a database page. Detection must follow the response.
+ */
+async function stubDatasetteResponseOverride(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    const orig = window.fetch.bind(window);
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    window.fetch = (async (input: unknown, init?: unknown) => {
+      const url = String(
+        typeof input === 'string' ? input : (input as { url?: string })?.url ?? input,
+      );
+      if (url.includes('ov.example.test')) {
+        const segs = new URL(url).pathname.replace(/\.json$/, '').split('/').filter(Boolean);
+        if (segs[1] === 'overview') {
+          // Probe target: responds like a database, not a table.
+          return json({ ok: true, tables: [{ name: 'books' }, { name: 'authors' }] });
+        }
+        return json({ ok: true, next_url: null, rows: [{ id: 1, title: `${segs[1]}-row` }] });
+      }
+      return orig(input as RequestInfo, init as RequestInit);
+    }) as typeof window.fetch;
+  });
+}
+
 test.describe('datasette import', () => {
   test('imports a Datasette table via the Import dialog', async ({ page }) => {
     await stubDatasette(page);
@@ -292,6 +321,39 @@ test.describe('datasette import', () => {
     expect(info.regions).toBe(1);
     // The hidden FTS shadow table must be skipped.
     expect(info.names).not.toContain('energy/plants_fts');
+  });
+
+  test('detects database vs table from the response, not the URL path', async ({ page }) => {
+    await stubDatasetteResponseOverride(page);
+
+    await page.locator('app-shell header button[title="Import data from a URL"]').click();
+    // Path parses as a table (db "catalog", table "overview"), but the response
+    // is a database page — so all its tables should be imported.
+    await page.locator('import-dialog input[type="text"]').fill('https://ov.example.test/catalog/overview');
+    await page.locator('import-dialog select').nth(1).selectOption('datasette');
+    await page.locator('import-dialog button[type="submit"]').click();
+
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ctx = (window as any).__easydb;
+          const tables = await ctx.store.tables.find();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return tables.map((t: any) => t.name).sort();
+        }),
+      )
+      .toEqual(['catalog/authors', 'catalog/books']);
+
+    const names = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      const tables = await ctx.store.tables.find();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return tables.map((t: any) => t.name);
+    });
+    // Path-based dispatch would have created a single "catalog/overview" table.
+    expect(names).not.toContain('catalog/overview');
   });
 
   test('the global-power-plants sample points at a real table URL', async ({ page }) => {

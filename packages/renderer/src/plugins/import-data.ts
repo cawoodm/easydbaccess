@@ -193,6 +193,15 @@ export class ImportDialog extends LitElement {
         color: #6b7280;
         font-size: 0.78rem;
         margin: 0;
+        line-height: 1.5;
+      }
+      .hint code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.72rem;
+        background: #f3f4f6;
+        padding: 0.05rem 0.25rem;
+        border-radius: 0.2rem;
+        word-break: break-all;
       }
     `,
   ];
@@ -295,7 +304,7 @@ export class ImportDialog extends LitElement {
               <input
                 type="text"
                 autofocus
-                placeholder="https://… (JSON dump or Datasette table)"
+                placeholder="e.g. https://datasette.io/global-power-plants/global-power-plants"
                 .value=${this.url}
                 @input=${(e: Event) => {
                   this.url = (e.target as HTMLInputElement).value;
@@ -316,15 +325,17 @@ export class ImportDialog extends LitElement {
                 <option value="auto" ?selected=${this.kind === 'auto'}>Auto-detect</option>
                 <option value="json" ?selected=${this.kind === 'json'}>JSON dump</option>
                 <option value="datasette" ?selected=${this.kind === 'datasette'}>
-                  Datasette table
+                  Datasette
                 </option>
               </select>
             </label>
 
             <p class="hint">
-              Paste any URL or pick a sample above. JSON dumps import every table in the file;
-              a Datasette table URL imports that table, and a Datasette database URL imports all
-              of its tables — read-only snapshots, capped at 10,000 rows each.
+              Paste any URL or pick a sample above. A JSON dump imports every table in the file;
+              a Datasette URL imports one table or a whole database — auto-detected from the
+              response — as read-only snapshots, capped at 10,000 rows each.<br />
+              Examples: <code>https://datasette.io/global-power-plants/global-power-plants</code>
+              (one table) · <code>https://datasette.io/global-power-plants</code> (whole database).
             </p>
           </div>
         </form>
