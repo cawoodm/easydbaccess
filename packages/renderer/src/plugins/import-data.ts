@@ -42,18 +42,13 @@ const NORTHWIND_URL =
 const PREDEFINED: PredefinedSource[] = [
   { label: 'Northwind — sample database (JSON dump)', url: NORTHWIND_URL, kind: 'json' },
   {
-    label: 'Datasette — fixtures / facetable',
-    url: 'https://latest.datasette.io/fixtures/facetable',
-    kind: 'datasette',
-  },
-  {
-    label: 'Datasette — fixtures / roadside_attractions',
-    url: 'https://latest.datasette.io/fixtures/roadside_attractions',
-    kind: 'datasette',
-  },
-  {
-    label: 'Datasette — global power plants',
+    label: 'Datasette — global power plants (table)',
     url: 'https://datasette.io/global-power-plants/global-power-plants',
+    kind: 'datasette',
+  },
+  {
+    label: 'Datasette — US legislators (whole database)',
+    url: 'https://datasette.io/legislators',
     kind: 'datasette',
   },
 ];

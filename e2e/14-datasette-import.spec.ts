@@ -451,16 +451,21 @@ test.describe('datasette import', () => {
     expect(names).not.toContain('catalog/overview');
   });
 
-  test('the global-power-plants sample points at a real table URL', async ({ page }) => {
-    // Guards against the regression this test suite was written for: the old
-    // sample pointed at the retired global-power-plants.datasettes.com host.
+  test('sample sources point at real URLs (table + whole database)', async ({ page }) => {
+    // Guards against the regression this suite was written for: the old power
+    // plants sample pointed at the retired global-power-plants.datasettes.com.
     await page.locator('app-shell header button[title="Import data from a URL"]').click();
     const dialog = page.locator('import-dialog');
-    await dialog.locator('select').first().selectOption({ label: 'Datasette — global power plants' });
+    const url = dialog.locator('input[type="text"]');
+    const kind = dialog.locator('select').nth(1);
+    const preset = dialog.locator('select').first();
 
-    await expect(dialog.locator('input[type="text"]')).toHaveValue(
-      'https://datasette.io/global-power-plants/global-power-plants',
-    );
-    await expect(dialog.locator('select').nth(1)).toHaveValue('datasette');
+    await preset.selectOption({ label: 'Datasette — global power plants (table)' });
+    await expect(url).toHaveValue('https://datasette.io/global-power-plants/global-power-plants');
+    await expect(kind).toHaveValue('datasette');
+
+    await preset.selectOption({ label: 'Datasette — US legislators (whole database)' });
+    await expect(url).toHaveValue('https://datasette.io/legislators');
+    await expect(kind).toHaveValue('datasette');
   });
 });
