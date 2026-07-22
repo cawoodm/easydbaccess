@@ -10,6 +10,8 @@ import {
   refineColumnTypes,
   mapColumns,
   fetchTableMeta,
+  fetchTablesForDb,
+  DatasetteError,
 } from './datasette-client.js';
 
 describe('parseDatabaseList', () => {
@@ -353,5 +355,36 @@ describe('response carrying count + primary_keys but no columns key', () => {
     expect(byField.end).toBe('datetime');
     expect(byField.type).toBe('string');
     expect(byField.party).toBe('string');
+  });
+});
+
+// --- Discovery failure diagnostics ------------------------------------------
+// A database/instance URL that can't be reached must produce a clear, actionable
+// error — not an opaque fetch rejection like "Load failed".
+
+describe('discovery failure diagnostics', () => {
+  it('turns a fetch rejection (CORS/offline) into an actionable message', async () => {
+    const fetchFn = vi.fn(() => Promise.reject(new TypeError('Load failed')));
+    await expect(fetchTablesForDb(fetchFn, 'https://latest.datasette.io', 'fixtures')).rejects.toThrow(
+      /--cors/,
+    );
+    // And it names the URL it couldn't reach.
+    await expect(
+      fetchTablesForDb(fetchFn, 'https://latest.datasette.io', 'fixtures'),
+    ).rejects.toThrow(/latest\.datasette\.io\/fixtures\.json/);
+  });
+
+  it('surfaces an HTTP error status (e.g. a redirect to a non-CORS URL, or 404)', async () => {
+    const fetchFn = vi.fn(() =>
+      Promise.resolve({
+        ok: false,
+        status: 404,
+        json: () => Promise.resolve({ error: 'Database not found' }),
+      } as unknown as Response),
+    );
+    const err = await fetchTablesForDb(fetchFn, 'https://x.datasette.io', 'nope').catch((e) => e);
+    expect(err).toBeInstanceOf(DatasetteError);
+    expect((err as DatasetteError).status).toBe(404);
+    expect((err as Error).message).toContain('Database not found');
   });
 });

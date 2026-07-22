@@ -66,10 +66,14 @@ async function runImport(api: HostApi, input: string): Promise<void> {
   try {
     await importDatasette(api, input);
   } catch (err) {
-    const msg =
-      err instanceof DatasetteError
-        ? `Datasette error (${err.status ?? '?'}): ${err.message}`
-        : `Could not import: ${(err as Error)?.message ?? err}`;
+    let msg: string;
+    if (err instanceof DatasetteError) {
+      // Only prefix with a status when there's a real HTTP one (network
+      // failures carry status 0 and a self-explanatory message).
+      msg = err.status ? `Datasette error (${err.status}): ${err.message}` : err.message;
+    } else {
+      msg = `Could not import: ${(err as Error)?.message ?? err}`;
+    }
     await api.ui.dialogs.alert(msg, 'Datasette import failed');
   }
 }

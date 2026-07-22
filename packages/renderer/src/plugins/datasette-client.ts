@@ -320,12 +320,51 @@ export function parseTableList(json: any, db: string): TableRef[] {
 
 type FetchFn = (url: string, opts?: any) => Promise<Response>;
 
-/** List database names for an instance (`{base}/-/databases.json`). */
-export async function fetchDatabaseNames(fetchFn: FetchFn, base: string): Promise<string[]> {
-  const res = await fetchFn(`${base}/-/databases.json`);
+/**
+ * Fetch a Datasette JSON endpoint with clear failure modes. Turns the three
+ * ways a request can go wrong into a `DatasetteError` carrying a useful message
+ * instead of an opaque `fetch` rejection ("Load failed" / "Failed to fetch"):
+ *  - the request never completes (CORS block, DNS, offline, dead proxy);
+ *  - it completes with an HTTP error status (redirect-to-non-CORS, 404, 500);
+ *  - it returns Datasette's `{ ok:false, error }` envelope.
+ */
+async function fetchJson(fetchFn: FetchFn, url: string): Promise<any> {
+  let res: Response;
+  try {
+    res = await fetchFn(url);
+  } catch (err) {
+    const reason = (err as Error)?.message || 'network error';
+    throw new DatasetteError(
+      {
+        error:
+          `Couldn't reach ${url} (${reason}). If this is a Datasette instance, it must be ` +
+          `served with --cors for direct browser access — otherwise configure an eda sync ` +
+          `server to proxy the request.`,
+      },
+      0,
+    );
+  }
+  // Strict `=== false` so response doubles in tests (which omit `ok`) are fine.
+  if (res && res.ok === false) {
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new DatasetteError(
+      body && typeof body === 'object' ? body : { error: `HTTP ${res.status} for ${url}` },
+      res.status,
+    );
+  }
   const json: any = await res.json();
   if (json && json.ok === false) throw new DatasetteError(json, res.status);
-  return parseDatabaseList(json);
+  return json;
+}
+
+/** List database names for an instance (`{base}/-/databases.json`). */
+export async function fetchDatabaseNames(fetchFn: FetchFn, base: string): Promise<string[]> {
+  return parseDatabaseList(await fetchJson(fetchFn, `${base}/-/databases.json`));
 }
 
 /** List tables (with counts) for one database (`{base}/{db}.json`). */
@@ -334,10 +373,7 @@ export async function fetchTablesForDb(
   base: string,
   db: string,
 ): Promise<TableRef[]> {
-  const res = await fetchFn(`${base}/${encodeURIComponent(db)}.json`);
-  const json: any = await res.json();
-  if (json && json.ok === false) throw new DatasetteError(json, res.status);
-  return parseTableList(json, db);
+  return parseTableList(await fetchJson(fetchFn, `${base}/${encodeURIComponent(db)}.json`), db);
 }
 
 /**
@@ -367,9 +403,7 @@ export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promi
     _size: 0,
     _extra: 'columns,column_details,primary_keys,count',
   });
-  const res = await fetchFn(url);
-  const json: any = await res.json();
-  if (json && json.ok === false) throw new DatasetteError(json, res.status);
+  const json: any = await fetchJson(fetchFn, url);
   const { columns, pks } = mapColumns(json);
   const typed = !!json && json.column_details != null;
   return { columns, pks, count: json?.count ?? null, typed, raw: json };
@@ -418,9 +452,7 @@ export async function fetchRows(
   let pages = 0;
 
   while (url) {
-    const res = await fetchFn(url);
-    const json: any = await res.json();
-    if (json && json.ok === false) throw new DatasetteError(json, res.status);
+    const json: any = await fetchJson(fetchFn, url);
     const info = classifyPage(json);
     rows.push(...info.rows);
     truncated = truncated || info.truncated;
