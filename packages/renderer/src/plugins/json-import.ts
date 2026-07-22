@@ -55,7 +55,7 @@ async function importJsonFile(api: HostApi, file: File): Promise<void> {
 
 /**
  * Imports a JSON dump given its text body and a source filename. Used by both
- * the drag-and-drop path and the sample-data plugin's URL fetch path. Behavior
+ * the drag-and-drop path and the import-data plugin's URL fetch path. Behavior
  * is identical: parse → detect shape → prompt user on collisions → write.
  */
 export async function importJsonText(
