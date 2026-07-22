@@ -15,6 +15,7 @@ import {
   fetchTableMeta,
   fetchRows,
   inferColumnsFromRows,
+  refineColumnTypes,
   DatasetteError,
   type DatasetteRef,
 } from './datasette-client.js';
@@ -174,10 +175,12 @@ async function importOneTable(
   // tolerated too — the row fetch will surface any real problem.
   let metaColumns: ColumnSpec[] = [];
   let count: number | null = null;
+  let typed = false;
   try {
     const meta = await fetchTableMeta(fetchFn, ref);
     metaColumns = meta.columns;
     count = meta.count;
+    typed = meta.typed;
   } catch {
     // fall back to row inference
   }
@@ -187,7 +190,15 @@ async function importOneTable(
     pageSize: SETTINGS.pageSize,
   });
 
-  const columns = metaColumns.length > 0 ? metaColumns : inferColumnsFromRows(rows);
+  // Prefer the schema's columns; if it gave no columns at all, infer from rows;
+  // if it gave names but no type details (e.g. datasette.io's `?_extra=columns`
+  // returns a bare name array), keep the names but refine types from the rows.
+  const columns =
+    metaColumns.length === 0
+      ? inferColumnsFromRows(rows)
+      : typed
+        ? metaColumns
+        : refineColumnTypes(metaColumns, rows);
 
   const now = Date.now();
   const tableId = cryptoUUID();

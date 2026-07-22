@@ -30,6 +30,13 @@ export interface TableMeta {
   columns: ColumnSpec[];
   pks: string[];
   count: number | null;
+  /**
+   * Whether the response carried real per-column type info (`column_details`).
+   * When false the columns are just names (every type defaulted to 'string')
+   * and the caller should refine types from row data — some instances answer
+   * `?_extra=columns` with a bare name array and ignore `column_details`.
+   */
+  typed: boolean;
   raw: unknown;
 }
 
@@ -364,7 +371,28 @@ export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promi
   const json: any = await res.json();
   if (json && json.ok === false) throw new DatasetteError(json, res.status);
   const { columns, pks } = mapColumns(json);
-  return { columns, pks, count: json?.count ?? null, raw: json };
+  const typed = !!json && json.column_details != null;
+  return { columns, pks, count: json?.count ?? null, typed, raw: json };
+}
+
+/**
+ * Upgrade column types from sampled rows when the schema came back as bare
+ * names (no `column_details`, so every type defaulted to 'string'). Keeps the
+ * authoritative names/labels/pk flags from the schema; only a column still
+ * typed 'string' is reconsidered, and only upgraded when the rows agree on a
+ * more specific type. No-op when there are no rows to learn from.
+ */
+export function refineColumnTypes(
+  columns: ColumnSpec[],
+  rows: Array<Record<string, unknown>>,
+): ColumnSpec[] {
+  if (rows.length === 0) return columns;
+  const inferred = new Map(inferColumnsFromRows(rows).map((c) => [c.field, c.type]));
+  return columns.map((c) => {
+    if (c.type !== 'string') return c;
+    const t = inferred.get(c.field);
+    return t && t !== 'string' ? { ...c, type: t } : c;
+  });
 }
 
 /**

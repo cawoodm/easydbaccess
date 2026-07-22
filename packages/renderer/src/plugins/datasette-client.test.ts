@@ -7,6 +7,9 @@ import {
   classifyPage,
   fetchRows,
   inferColumnsFromRows,
+  refineColumnTypes,
+  mapColumns,
+  fetchTableMeta,
 } from './datasette-client.js';
 
 describe('parseDatabaseList', () => {
@@ -225,5 +228,78 @@ describe('inferColumnsFromRows (fallback when ?_extra= gives no schema)', () => 
   it('does not misread an all-null column and keeps it importable', () => {
     const cols = inferColumnsFromRows([{ a: null }, { a: null }]);
     expect(cols).toEqual([{ field: 'a', label: 'A', type: 'string' }]);
+  });
+});
+
+// --- Regression: real ?_size=0&_extra=columns response from datasette.io -----
+// That instance answers with a BARE column-name array — no column_details, no
+// primary_keys, no count — and (with _size=0) no rows. So every mapped type
+// defaults to 'string' and must be refined from the separately-fetched rows.
+
+const GPP_META = {
+  ok: true,
+  next: null,
+  truncated: false,
+  rows: [],
+  columns: [
+    'rowid',
+    'country',
+    'country_long',
+    'name',
+    'gppd_idnr',
+    'capacity_mw',
+    'latitude',
+    'longitude',
+    'primary_fuel',
+    'commissioning_year',
+    'year_of_capacity_data',
+  ],
+};
+
+describe('mapColumns / fetchTableMeta against the bare-name schema response', () => {
+  it('maps a bare column-name array to columns (all string, no type info)', () => {
+    const { columns, pks } = mapColumns(GPP_META);
+    expect(pks).toEqual([]);
+    expect(columns).toHaveLength(GPP_META.columns.length);
+    expect(columns.every((c) => c.type === 'string')).toBe(true);
+    expect(columns[0]).toMatchObject({ field: 'rowid', label: 'Rowid', type: 'string' });
+    expect(columns.map((c) => c.field)).toEqual(GPP_META.columns);
+  });
+
+  it('fetchTableMeta reports typed=false when column_details is absent', async () => {
+    const seen: string[] = [];
+    const fetchFn = vi.fn((url: string) => {
+      seen.push(url);
+      return jsonRes(GPP_META);
+    });
+    const ref = parseDatasetteUrl(GPP_URL);
+    const meta = await fetchTableMeta(fetchFn, ref);
+    expect(meta.typed).toBe(false);
+    expect(meta.count).toBeNull();
+    expect(meta.columns).toHaveLength(GPP_META.columns.length);
+    // Requested the schema-probe shape.
+    expect(seen[0]).toContain('_extra=');
+    expect(seen[0]).toContain('_size=0');
+  });
+});
+
+describe('refineColumnTypes upgrades bare-name columns from row data', () => {
+  it('turns numeric columns into number while leaving text as string', () => {
+    const { columns } = mapColumns(GPP_META); // all 'string'
+    const refined = refineColumnTypes(columns, GPP_PAGE1.rows);
+    const byField = Object.fromEntries(refined.map((c) => [c.field, c.type]));
+    expect(byField.rowid).toBe('number');
+    expect(byField.capacity_mw).toBe('number');
+    expect(byField.country).toBe('string');
+    expect(byField.name).toBe('string');
+    // A column absent from the sampled rows can't be refined — stays string.
+    expect(byField.latitude).toBe('string');
+    // Order + count preserved (still the schema's authoritative set).
+    expect(refined.map((c) => c.field)).toEqual(columns.map((c) => c.field));
+  });
+
+  it('is a no-op when there are no rows to learn from', () => {
+    const { columns } = mapColumns(GPP_META);
+    expect(refineColumnTypes(columns, [])).toEqual(columns);
   });
 });
