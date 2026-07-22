@@ -44,11 +44,13 @@ The `dev` script chains renderer + server with `&`; on Windows prefer running
 
 ## Versioning
 
-**Every commit bumps the patch version**, and the version shown in
-`packages/renderer/index.html`'s `<title>` is always kept in sync with
-`package.json` (the single source of truth). This is automated by
-`.githooks/pre-commit`, which runs `scripts/bump-version.mjs` (increments
-`package.json` `version`, rewrites the `<title>`, and stages both). Enable the
+**Every commit bumps the patch version**, and every place the version is shown
+is kept in sync with `package.json` (the single source of truth): the
+`<title>` in `packages/renderer/index.html` **and** the header-bar
+`<span class="version">` in `packages/renderer/src/chrome/app-shell.ts`. This
+is automated by `.githooks/pre-commit`, which runs `scripts/bump-version.mjs`
+(increments `package.json` `version`, rewrites both displayed spots, and stages
+the files). Enable the
 hook in a fresh clone with `git config core.hooksPath .githooks` (git config is
 local, so it must be re-run per clone). If you commit somewhere the hook isn't
 active, run it manually first: `node scripts/bump-version.mjs` (or
