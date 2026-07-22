@@ -408,10 +408,10 @@ export async function discoverTables(fetchFn: FetchFn, ref: DatasetteRef): Promi
 
 /** Fetch a table's schema via ?_extra=columns,column_details,primary_keys,count. */
 export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promise<TableMeta> {
-  // Only `_extra=columns` — the valid extra for column names. `column_details`
-  // is NOT a valid `_extra` (a bad value triggers a non-CORS error that shows as
-  // "Load failed"), and `_shape` is dropped too (objects are the default). Row
-  // count and column types are derived from the rows, so nothing else is needed.
+  // Request `_extra=columns` alone: that returns the `columns` name list.
+  // `column_details` is not a real extra (the response just omits column info),
+  // and combining extras (e.g. adding count/primary_keys) drops the `columns`
+  // key — so keep it to `columns`. Column types are refined from the rows.
   const url = buildTableUrl(ref, { _size: 0, _extra: 'columns' });
   const json: any = await fetchJson(fetchFn, url);
   const { columns, pks } = mapColumns(json);
@@ -449,13 +449,12 @@ export async function fetchRows(
   opts: { maxRows?: number; pageSize?: number | 'max'; extraParams?: Record<string, string> } = {},
 ): Promise<{ rows: Array<Record<string, unknown>>; truncated: boolean; hasMore: boolean; pages: number }> {
   const maxRows = opts.maxRows ?? 10000;
-  // Numeric page size, not `_size=max`: datasette.io returns a non-CORS error
-  // for `_size=max` (surfacing as "Load failed" in the browser), while a plain
-  // numeric `_size` works. Datasette clamps it to the instance's
-  // max_returned_rows, and we page with the cursor regardless.
+  // Fixed numeric page size for predictable cursor paging. `_size=max` is also
+  // valid (Datasette clamps to max_returned_rows) but a fixed size keeps page
+  // hops uniform; we follow the `next` cursor to the cap either way.
   const pageSize = opts.pageSize ?? 1000;
-  // No `_shape=objects`: it's the default on modern Datasette and rejected by
-  // some 1.0 instances; classifyPage normalises array rows for older ones.
+  // `_shape` is omitted: objects are the default on modern Datasette, and
+  // classifyPage normalises positional-array rows for older instances.
   const baseParams: Record<string, string | number> = {
     _size: pageSize,
     ...(opts.extraParams || {}),

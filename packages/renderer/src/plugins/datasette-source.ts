@@ -31,7 +31,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
 
 const SETTINGS = {
   maxImportRows: 10_000, // safety cap on a single table's import
-  pageSize: 1000, // _size per page hop (numeric; `_size=max` errors on datasette.io)
+  pageSize: 1000, // _size per page hop (fixed size for uniform cursor paging)
 };
 
 const EXAMPLE = 'https://latest.datasette.io/fixtures/facetable';
