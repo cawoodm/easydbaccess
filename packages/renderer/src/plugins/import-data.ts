@@ -16,7 +16,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { importJsonText } from './json-import.js';
-import { importDatasetteTable } from './datasette-source.js';
+import { importDatasette } from './datasette-source.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from '../dialogs/dialog-chrome.js';
 import { makeDialogDraggable } from '../dialogs/draggable.js';
 
@@ -34,6 +34,15 @@ const NORTHWIND_URL =
   'https://raw.githubusercontent.com/cawoodm/easydbaccess/main/data/northwind.db.json';
 
 /**
+ * Inline "import" glyph (arrow descending into a tray) rendered as an SVG on
+ * the header button. The shell renders `icon` strings that begin with `<svg`
+ * as inline SVG (fill: currentColor) rather than as a Material Icons ligature.
+ */
+const IMPORT_ICON_SVG =
+  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+  '<path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>';
+
+/**
  * Curated starting points. The first is our own JSON dump; the rest are public
  * Datasette instances served with CORS so they work from the static browser
  * build (no sync server required). Picking one fills the URL box and sets the
@@ -42,13 +51,13 @@ const NORTHWIND_URL =
 const PREDEFINED: PredefinedSource[] = [
   { label: 'Northwind — sample database (JSON dump)', url: NORTHWIND_URL, kind: 'json' },
   {
-    label: 'Datasette — fixtures / facetable',
+    label: 'Datasette — fixtures / facetable (single table)',
     url: 'https://latest.datasette.io/fixtures/facetable',
     kind: 'datasette',
   },
   {
-    label: 'Datasette — fixtures / roadside_attractions',
-    url: 'https://latest.datasette.io/fixtures/roadside_attractions',
+    label: 'Datasette — fixtures (whole database, pick tables)',
+    url: 'https://latest.datasette.io/fixtures',
     kind: 'datasette',
   },
   {
@@ -62,7 +71,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   name: 'import-data',
   version: '0.2.0',
   description:
-    'Header button that imports a table from a URL — a JSON dump (e.g. Northwind) or a Datasette table — with a picker of sample sources.',
+    'Header button that imports data from a URL — a JSON dump (e.g. Northwind) or a Datasette table, database, or whole instance — with a picker of sample sources.',
   author: 'easyDBAccess built-ins',
   optional: true,
 };
@@ -71,7 +80,7 @@ export function init(api: HostApi): void {
   api.ui.registerHeaderButton({
     id: 'import-data:open',
     label: '',
-    icon: 'cloud_download',
+    icon: IMPORT_ICON_SVG,
     tooltip: 'Import data from a URL',
     onClick: () => openImport(api),
   });
@@ -85,9 +94,9 @@ async function openImport(api: HostApi): Promise<void> {
   const { url, kind } = result;
   try {
     if (kind === 'datasette') {
-      // importDatasetteTable emits its own toasts (incl. the honest
-      // "imported first N of M" when the row cap is hit).
-      await importDatasetteTable(api, url);
+      // importDatasette emits its own toasts. A table URL imports directly; a
+      // database/instance URL opens the table picker before importing.
+      await importDatasette(api, url);
     } else {
       const res = await api.backend.fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
@@ -120,11 +129,13 @@ function detectKind(url: string): ResolvedKind {
   try {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
-    const path = u.pathname.replace(/\.(json|csv)$/i, '');
-    const segments = path.split('/').filter(Boolean);
     const hasDatasetteParams = [...u.searchParams.keys()].some((k) => k.startsWith('_'));
+    // A `.json`/`.csv` file path with no Datasette markers reads as a dump.
+    // Anything on a datasette host (or carrying `?_`-prefixed API params) reads
+    // as Datasette — at any depth, so instance and database URLs work too.
     const looksDatasette = host.includes('datasette') || hasDatasetteParams;
-    if (segments.length >= 2 && looksDatasette) return 'datasette';
+    if (/\.(json|csv)$/i.test(u.pathname) && !hasDatasetteParams) return 'json';
+    if (looksDatasette) return 'datasette';
     return 'json';
   } catch {
     return 'json';
@@ -314,14 +325,15 @@ export class ImportDialog extends LitElement {
                 <option value="auto" ?selected=${this.kind === 'auto'}>Auto-detect</option>
                 <option value="json" ?selected=${this.kind === 'json'}>JSON dump</option>
                 <option value="datasette" ?selected=${this.kind === 'datasette'}>
-                  Datasette table
+                  Datasette (table or instance)
                 </option>
               </select>
             </label>
 
             <p class="hint">
-              Paste any URL or pick a sample above. JSON dumps import every table in the file;
-              Datasette tables import a read-only snapshot (capped at 10,000 rows).
+              Paste any URL or pick a sample above. Multi-table sources — a JSON dump with
+              several tables, or a Datasette database/instance URL — let you choose which tables
+              to import. Datasette tables import a read-only snapshot (capped at 10,000 rows each).
             </p>
           </div>
         </form>

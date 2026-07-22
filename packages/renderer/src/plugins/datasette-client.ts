@@ -216,7 +216,94 @@ export function translateQuery(state: {
   return params;
 }
 
+export interface TableRef {
+  db: string;
+  table: string;
+  count: number | null;
+  hidden: boolean;
+}
+
+/**
+ * Parse `/-/databases.json` into a list of database names. Datasette (<1.0)
+ * returns an array of `{ name, ... }`; tolerate a bare string array and a
+ * `{ databases: [...] }` wrapper too.
+ */
+export function parseDatabaseList(json: any): string[] {
+  const arr = Array.isArray(json) ? json : Array.isArray(json?.databases) ? json.databases : [];
+  const names: string[] = [];
+  for (const entry of arr) {
+    if (typeof entry === 'string') names.push(entry);
+    else if (entry && typeof entry === 'object' && typeof entry.name === 'string') names.push(entry.name);
+  }
+  return names;
+}
+
+/**
+ * Parse `/<db>.json` into a list of tables with row counts. Datasette (<1.0)
+ * returns `{ tables: [{ name, count, hidden }, ...] }`; tolerate a bare array,
+ * a string array, and missing count/hidden fields.
+ */
+export function parseTableList(json: any, db: string): TableRef[] {
+  const arr = Array.isArray(json) ? json : Array.isArray(json?.tables) ? json.tables : [];
+  const out: TableRef[] = [];
+  for (const entry of arr) {
+    if (typeof entry === 'string') {
+      out.push({ db, table: entry, count: null, hidden: false });
+      continue;
+    }
+    if (entry && typeof entry === 'object' && typeof entry.name === 'string') {
+      out.push({
+        db,
+        table: entry.name,
+        count: typeof entry.count === 'number' ? entry.count : null,
+        hidden: entry.hidden === true,
+      });
+    }
+  }
+  return out;
+}
+
 type FetchFn = (url: string, opts?: any) => Promise<Response>;
+
+/** List database names for an instance (`{base}/-/databases.json`). */
+export async function fetchDatabaseNames(fetchFn: FetchFn, base: string): Promise<string[]> {
+  const res = await fetchFn(`${base}/-/databases.json`);
+  const json: any = await res.json();
+  if (json && json.ok === false) throw new DatasetteError(json, res.status);
+  return parseDatabaseList(json);
+}
+
+/** List tables (with counts) for one database (`{base}/{db}.json`). */
+export async function fetchTablesForDb(
+  fetchFn: FetchFn,
+  base: string,
+  db: string,
+): Promise<TableRef[]> {
+  const res = await fetchFn(`${base}/${encodeURIComponent(db)}.json`);
+  const json: any = await res.json();
+  if (json && json.ok === false) throw new DatasetteError(json, res.status);
+  return parseTableList(json, db);
+}
+
+/**
+ * Discover the importable tables a URL refers to:
+ *  - table URL  (db + table) → just that table (count unknown here);
+ *  - database URL (db only)   → every table in that database;
+ *  - instance URL (neither)   → every table across every database.
+ * Hidden tables (FTS shadow tables etc.) are excluded.
+ */
+export async function discoverTables(fetchFn: FetchFn, ref: DatasetteRef): Promise<TableRef[]> {
+  if (ref.db && ref.table) {
+    return [{ db: ref.db, table: ref.table, count: null, hidden: false }];
+  }
+  const dbs = ref.db ? [ref.db] : await fetchDatabaseNames(fetchFn, ref.base);
+  const out: TableRef[] = [];
+  for (const db of dbs) {
+    const tables = await fetchTablesForDb(fetchFn, ref.base, db);
+    for (const t of tables) if (!t.hidden) out.push(t);
+  }
+  return out;
+}
 
 /** Fetch a table's schema via ?_extra=columns,column_details,primary_keys,count. */
 export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promise<TableMeta> {

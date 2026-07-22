@@ -1,27 +1,34 @@
 // packages/renderer/src/plugins/datasette-source.ts
 //
-// easyDBAccess built-in plugin — Phase 1: import a table from any online Datasette
-// instance by URL as a local eda table (read-only snapshot). Registers a URL source
-// and a drop handler. The Phase-2 live read-write connector builds on the same
-// datasette-client core.
-//
-// Wire-up: add `import * as datasetteSource from '../plugins/datasette-source.js';`
-// and include `datasetteSource` in the `builtins` array in
-// packages/renderer/src/plugin-host/loader.ts.
+// easyDBAccess built-in plugin — import from any online Datasette instance as
+// local eda tables (read-only snapshots). A URL may point at:
+//   - a single table      (.../<db>/<table>)  → imported directly;
+//   - a whole database     (.../<db>)          → pick tables from a checklist;
+//   - an entire instance   (https://host)      → pick tables across all databases.
+// Registers a URL source and a (table-only) drop handler. The Phase-2 live
+// read-write connector builds on the same datasette-client core.
 
 import type { HostApi, PluginModule, Row } from '@easydb/shared';
-import { parseDatasetteUrl, fetchTableMeta, fetchRows, DatasetteError } from './datasette-client.js';
+import {
+  parseDatasetteUrl,
+  discoverTables,
+  fetchTableMeta,
+  fetchRows,
+  DatasetteError,
+  type DatasetteRef,
+} from './datasette-client.js';
+import { chooseTables } from '../dialogs/table-select-dialog.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'datasette-source',
-  version: '0.1.0',
-  description: 'Import a table from any online Datasette instance by URL',
+  version: '0.2.0',
+  description: 'Import tables from any online Datasette instance, database, or single table by URL',
   author: 'easyDBAccess built-ins',
   optional: true,
 };
 
 const SETTINGS = {
-  maxImportRows: 10_000, // safety cap on a single import
+  maxImportRows: 10_000, // safety cap on a single table's import
   pageSize: 'max' as const, // _size per page hop
 };
 
@@ -30,11 +37,15 @@ const EXAMPLE = 'https://latest.datasette.io/fixtures/facetable';
 export function init(api: HostApi): void {
   api.ui.registerUrlSource({
     id: 'datasette',
-    label: 'Datasette table…',
+    label: 'Datasette (table or instance)…',
     async run(api, { url }) {
       const input =
         url ||
-        (await api.ui.dialogs.prompt(`Datasette table URL\n\ne.g. ${EXAMPLE}`, '', 'Import from Datasette'));
+        (await api.ui.dialogs.prompt(
+          `Datasette URL — a single table, a database, or an instance root.\n\ne.g. ${EXAMPLE}`,
+          '',
+          'Import from Datasette',
+        ));
       if (!input) return;
       await runImport(api, input);
     },
@@ -51,7 +62,7 @@ export function init(api: HostApi): void {
 
 async function runImport(api: HostApi, input: string): Promise<void> {
   try {
-    await importDatasetteTable(api, input);
+    await importDatasette(api, input);
   } catch (err) {
     const msg =
       err instanceof DatasetteError
@@ -70,16 +81,91 @@ function isDatasetteTableUrl(text: string): boolean {
   }
 }
 
-/** Fetch schema + rows from Datasette and create a local eda table. */
-export async function importDatasetteTable(api: HostApi, input: string): Promise<string> {
+interface OneResult {
+  name: string;
+  rowCount: number;
+  hasMore: boolean;
+  truncated: boolean;
+  pages: number;
+  count: number | null;
+}
+
+/**
+ * Smart entry point. Resolves a Datasette URL to one or many tables and imports
+ * them. A single-table URL imports straight away; a database/instance URL
+ * discovers its tables and opens a checklist (all pre-selected) so the user
+ * chooses what to pull in.
+ */
+export async function importDatasette(api: HostApi, input: string): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('datasette-source: no active workspace');
 
   const ref = parseDatasetteUrl(input);
-  if (!ref.db || !ref.table) {
-    throw new Error('URL must point to a table, e.g. .../<database>/<table>');
+  const fetchFn = (u: string) => api.backend.fetch(u);
+
+  // Single explicit table → import directly (no picker).
+  if (ref.db && ref.table) {
+    const r = await importOneTable(api, workspaceId, ref);
+    if (r.hasMore || r.truncated) toastCapped(api, r);
+    // The plain success toast comes from app-context's import:after listener.
+    return;
   }
-  const fetchFn = (u: string, o?: any) => api.backend.fetch(u, o);
+
+  // Database or instance → discover, then let the user choose.
+  const candidates = await discoverTables(fetchFn, ref);
+  if (candidates.length === 0) {
+    await api.ui.dialogs.alert('No tables found at that Datasette URL.', 'Datasette import');
+    return;
+  }
+
+  const multiDb = new Set(candidates.map((c) => c.db)).size > 1;
+  const host = ref.base.replace(/^https?:\/\//, '');
+  const picked = await chooseTables(
+    candidates.map((c) => ({
+      name: multiDb ? `${c.db}/${c.table}` : c.table,
+      size: c.count,
+      detail: multiDb ? undefined : c.db,
+    })),
+    {
+      title: 'Import from Datasette',
+      message: `Choose the tables to import from ${host}.`,
+      confirmLabel: 'Import',
+    },
+  );
+  if (!picked) return;
+
+  let imported = 0;
+  let totalRows = 0;
+  const capped: string[] = [];
+  const failed: string[] = [];
+  for (const i of picked) {
+    const c = candidates[i]!;
+    try {
+      const r = await importOneTable(api, workspaceId, {
+        base: ref.base,
+        db: c.db,
+        table: c.table,
+        query: {},
+      });
+      imported += 1;
+      totalRows += r.rowCount;
+      if (r.hasMore || r.truncated) capped.push(`${c.db}/${c.table}`);
+    } catch (err) {
+      failed.push(`${c.db}/${c.table}: ${(err as Error)?.message ?? String(err)}`);
+    }
+  }
+
+  summariseBatch(api, { imported, totalRows, capped, failed, requested: picked.length });
+}
+
+/** Fetch schema + rows for one table and create the local eda table. No toast. */
+async function importOneTable(
+  api: HostApi,
+  workspaceId: string,
+  ref: DatasetteRef,
+): Promise<OneResult> {
+  const name = `${ref.db}/${ref.table}`;
+  const fetchFn = (u: string) => api.backend.fetch(u);
 
   const { columns, count } = await fetchTableMeta(fetchFn, ref);
   const { rows, truncated, hasMore, pages } = await fetchRows(fetchFn, ref, {
@@ -93,7 +179,7 @@ export async function importDatasetteTable(api: HostApi, input: string): Promise
   await api.store.tables.insert({
     id: tableId,
     workspaceId,
-    name: `${ref.db}/${ref.table}`,
+    name,
     code: slug(`${ref.db}-${ref.table}`),
     columns,
     view: 'table',
@@ -105,20 +191,44 @@ export async function importDatasetteTable(api: HostApi, input: string): Promise
 
   api.events.emit('import:after', { source: 'datasette', tableId, rowCount: rows.length });
 
-  const total = count != null ? ` of ${count}` : '';
-  if (hasMore || truncated) {
+  return { name, rowCount: rows.length, hasMore, truncated, pages, count };
+}
+
+function toastCapped(api: HostApi, r: OneResult): void {
+  const total = r.count != null ? ` of ${r.count}` : '';
+  const table = r.name.split('/').pop() ?? r.name;
+  api.ui.dialogs.toast(
+    `Imported first ${r.rowCount}${total} rows from ${table} — more available ` +
+      `(capped at ${SETTINGS.maxImportRows}). Live paging arrives with the Phase-2 connector.`,
+    { kind: 'warning', title: 'Datasette import' },
+  );
+}
+
+function summariseBatch(
+  api: HostApi,
+  s: { imported: number; totalRows: number; capped: string[]; failed: string[]; requested: number },
+): void {
+  const rows = `${s.totalRows.toLocaleString()} row${s.totalRows === 1 ? '' : 's'}`;
+  const tables = `${s.imported} table${s.imported === 1 ? '' : 's'}`;
+  if (s.failed.length > 0) {
     api.ui.dialogs.toast(
-      `Imported first ${rows.length}${total} rows from ${ref.table} — more available ` +
-        `(capped at ${SETTINGS.maxImportRows}). Live paging arrives with the Phase-2 connector.`,
-      { kind: 'warning' },
+      `Imported ${tables} (${rows}); ${s.failed.length} failed:\n${s.failed.join('\n')}`,
+      { kind: 'error', title: 'Datasette import' },
     );
-  } else {
-    api.ui.dialogs.toast(
-      `Imported ${rows.length} rows from ${ref.table} (${pages} page${pages === 1 ? '' : 's'}).`,
-      { kind: 'success' },
-    );
+    return;
   }
-  return tableId;
+  if (s.capped.length > 0) {
+    api.ui.dialogs.toast(
+      `Imported ${tables} (${rows}). ${s.capped.length} capped at ${SETTINGS.maxImportRows} — ` +
+        `more available: ${s.capped.join(', ')}.`,
+      { kind: 'warning', title: 'Datasette import' },
+    );
+    return;
+  }
+  api.ui.dialogs.toast(`Imported ${tables} (${rows}) from Datasette.`, {
+    kind: 'success',
+    title: 'Datasette import',
+  });
 }
 
 function slug(s: string): string {
