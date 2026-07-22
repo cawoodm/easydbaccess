@@ -205,6 +205,29 @@ async function stubDatasettePaging(page: import('@playwright/test').Page): Promi
   });
 }
 
+/**
+ * Stub an instance that answers with a non-JSON page (as datasette.io does when
+ * it redirects an automated request to a Cloudflare Turnstile challenge). The
+ * import should fail with an explicit HTTP code + reason, not a JSON parse error.
+ */
+async function stubDatasetteChallenge(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    const orig = window.fetch.bind(window);
+    window.fetch = (async (input: unknown, init?: unknown) => {
+      const url = String(
+        typeof input === 'string' ? input : (input as { url?: string })?.url ?? input,
+      );
+      if (url.includes('err.example.test')) {
+        return new Response('<html><body>Redirecting…</body></html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        });
+      }
+      return orig(input as RequestInfo, init as RequestInit);
+    }) as typeof window.fetch;
+  });
+}
+
 /** Confirm the database table-picker (imports the currently-selected tables). */
 async function confirmPicker(page: import('@playwright/test').Page): Promise<void> {
   await page.locator('datasette-table-picker button[type="submit"]').click();
@@ -537,6 +560,28 @@ test.describe('datasette import', () => {
     });
     // Path-based dispatch would have created a single "catalog/overview" table.
     expect(names).not.toContain('catalog/overview');
+  });
+
+  test('surfaces the HTTP code and reason when a request is not JSON', async ({ page }) => {
+    await stubDatasetteChallenge(page);
+
+    await page.locator('app-shell header button[title="Import data from a URL"]').click();
+    await page.locator('import-dialog input[type="text"]').fill('https://err.example.test/db/tbl');
+    await page.locator('import-dialog select').nth(1).selectOption('datasette');
+    await page.locator('import-dialog button[type="submit"]').click();
+
+    // Error toast names the HTTP status and the reason (not "Unexpected token <").
+    const toast = page.locator('toast-host');
+    await expect(toast).toContainText('HTTP 200');
+    await expect(toast).toContainText(/JSON/i);
+
+    // Nothing imported.
+    const count = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      return (await ctx.store.tables.find()).length;
+    });
+    expect(count).toBe(0);
   });
 
   test('sample sources point at real URLs (table + whole database)', async ({ page }) => {

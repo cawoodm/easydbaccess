@@ -47,6 +47,42 @@ export class DatasetteError extends Error {
 }
 
 /**
+ * Read a Datasette JSON response, turning the common failure modes into a
+ * DatasetteError with an explicit HTTP code and reason instead of a cryptic
+ * "Unexpected token '<'" JSON parse error:
+ *  - a Datasette `{ok:false,error}` body,
+ *  - a non-JSON body (the request was redirected to a login/challenge page —
+ *    e.g. Cloudflare Turnstile at `/-/turnstile` when the instance is
+ *    rate-limiting automated requests),
+ *  - a non-OK HTTP status.
+ */
+export async function readDatasetteJson(res: Response): Promise<any> {
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('json')) {
+    let json: any;
+    try {
+      json = await res.json();
+    } catch (e) {
+      throw new DatasetteError(
+        { error: `HTTP ${res.status}: invalid JSON response (${(e as Error).message})` },
+        res.status,
+      );
+    }
+    if (json && json.ok === false) throw new DatasetteError(json, res.status);
+    return json;
+  }
+  // Not JSON — usually a redirect to a challenge/login page the browser followed.
+  const url = res.url || '';
+  const challenge = /\/-\/turnstile|\/cdn-cgi\/|\/-\/login/.test(url);
+  const detail = challenge
+    ? `blocked by a bot/rate-limit challenge (Cloudflare Turnstile) at ${url} — the Datasette instance is throttling automated requests; try again shortly or import fewer tables at once`
+    : res.redirected && url
+      ? `redirected to a non-JSON page (${url})`
+      : `expected JSON but received ${contentType || 'a non-JSON response'}`;
+  throw new DatasetteError({ error: `HTTP ${res.status}: ${detail}` }, res.status);
+}
+
+/**
  * Parse any Datasette URL into {base, db, table, query}. Accepts instance root,
  * database, table, ".json" links and links with filters. A mount prefix is
  * absorbed into `base`; single-segment URLs are treated as a database.
@@ -337,8 +373,7 @@ type FetchFn = (url: string, opts?: any) => Promise<Response>;
 /** Fetch a database's importable table names from its `<db>.json` page. */
 export async function fetchDatabaseTables(fetchFn: FetchFn, ref: DatasetteRef): Promise<string[]> {
   const res = await fetchFn(buildDatabaseUrl(ref));
-  const json: any = await res.json();
-  if (json && json.ok === false) throw new DatasetteError(json, res.status);
+  const json: any = await readDatasetteJson(res);
   return extractTableNames(json);
 }
 
@@ -350,8 +385,7 @@ export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promi
     _extra: 'columns,column_details,primary_keys,count',
   });
   const res = await fetchFn(url);
-  const json: any = await res.json();
-  if (json && json.ok === false) throw new DatasetteError(json, res.status);
+  const json: any = await readDatasetteJson(res);
   const { columns, pks } = mapColumns(json);
   return { columns, pks, count: json?.count ?? null, raw: json };
 }
@@ -378,8 +412,7 @@ export async function fetchRows(
 
   while (url) {
     const res = await fetchFn(url);
-    const json: any = await res.json();
-    if (json && json.ok === false) throw new DatasetteError(json, res.status);
+    const json: any = await readDatasetteJson(res);
     const info = classifyPage(json);
     rows.push(...info.rows);
     truncated = truncated || info.truncated;

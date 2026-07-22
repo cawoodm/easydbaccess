@@ -17,6 +17,7 @@ import {
   fetchRows,
   extractTables,
   inferColumnsFromRows,
+  readDatasetteJson,
   DatasetteError,
   type DatasetteRef,
 } from './datasette-client.js';
@@ -72,9 +73,10 @@ async function runImport(api: HostApi, input: string): Promise<void> {
   try {
     await importDatasette(api, input);
   } catch (err) {
+    // DatasetteError messages already carry the HTTP code + reason.
     const msg =
       err instanceof DatasetteError
-        ? `Datasette error (${err.status ?? '?'}): ${err.message}`
+        ? err.message
         : `Could not import: ${(err as Error)?.message ?? err}`;
     await api.ui.dialogs.alert(msg, 'Datasette import failed');
   }
@@ -126,8 +128,7 @@ async function probeDatasette(
   const u = new URL(input);
   u.pathname = u.pathname.replace(/\.(json|csv)$/i, '') + '.json';
   const res = await fetchFn(u.toString());
-  const json: any = await res.json();
-  if (json && json.ok === false) throw new DatasetteError(json, res.status);
+  const json: any = await readDatasetteJson(res);
 
   const tables = extractTables(json);
   const looksDatabase = Array.isArray(json?.tables);
