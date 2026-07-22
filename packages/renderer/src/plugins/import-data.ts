@@ -53,7 +53,7 @@ const PREDEFINED: PredefinedSource[] = [
   },
   {
     label: 'Datasette — global power plants',
-    url: 'https://global-power-plants.datasettes.com/global-power-plants/global-power-plants',
+    url: 'https://datasette.io/global-power-plants/global-power-plants',
     kind: 'datasette',
   },
 ];
