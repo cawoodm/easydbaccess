@@ -42,6 +42,19 @@ All scripts run from the repo root (`npm` workspaces). Node ≥24 required
 The `dev` script chains renderer + server with `&`; on Windows prefer running
 `dev:renderer` and `dev:server` in separate terminals.
 
+## Versioning
+
+**Every commit bumps the patch version**, and the version shown in
+`packages/renderer/index.html`'s `<title>` is always kept in sync with
+`package.json` (the single source of truth). This is automated by
+`.githooks/pre-commit`, which runs `scripts/bump-version.mjs` (increments
+`package.json` `version`, rewrites the `<title>`, and stages both). Enable the
+hook in a fresh clone with `git config core.hooksPath .githooks` (git config is
+local, so it must be re-run per clone). If you commit somewhere the hook isn't
+active, run it manually first: `node scripts/bump-version.mjs` (or
+`--sync-only` to only repair index.html drift without bumping). The publish
+scripts read the version from `package.json`.
+
 ## Architecture in one paragraph
 
 Three logical pieces:
