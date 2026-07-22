@@ -19,6 +19,7 @@ import {
   DatasetteError,
   type DatasetteRef,
 } from './datasette-client.js';
+import { pickDatasetteTables } from './datasette-table-picker.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'datasette-source',
@@ -218,12 +219,17 @@ async function importTableRef(
   return { tableId, name, rowCount: rows.length, count, hasMore, truncated };
 }
 
-/** Import every non-hidden table in a Datasette database (names from the probe). */
+/** Import selected non-hidden tables in a Datasette database (names from the probe). */
 async function importDatabaseRef(api: HostApi, ref: DatasetteRef, names: string[]): Promise<void> {
   if (names.length === 0) throw new Error(`No tables found in database "${ref.db}".`);
 
+  // Let the user deselect tables before pulling any data.
+  const chosen = await pickDatasetteTables(ref.db ?? '', names);
+  if (chosen === null) return; // cancelled
+  if (chosen.length === 0) return; // nothing selected
+
   api.ui.dialogs.toast(
-    `Importing ${names.length} table${names.length === 1 ? '' : 's'} from ${ref.db}…`,
+    `Importing ${chosen.length} table${chosen.length === 1 ? '' : 's'} from ${ref.db}…`,
     { kind: 'info' },
   );
 
@@ -231,7 +237,7 @@ async function importDatabaseRef(api: HostApi, ref: DatasetteRef, names: string[
   let rowTotal = 0;
   let capped = 0;
   const failures: string[] = [];
-  for (const table of names) {
+  for (const table of chosen) {
     try {
       const res = await importTableRef(api, { ...ref, table }, { announce: false });
       imported += 1;
@@ -245,7 +251,7 @@ async function importDatabaseRef(api: HostApi, ref: DatasetteRef, names: string[
   const cappedNote = capped > 0 ? ` (${capped} capped at ${SETTINGS.maxImportRows} rows)` : '';
   if (imported > 0) {
     api.ui.dialogs.toast(
-      `Imported ${imported}/${names.length} table${names.length === 1 ? '' : 's'} ` +
+      `Imported ${imported}/${chosen.length} table${chosen.length === 1 ? '' : 's'} ` +
         `(${rowTotal} rows) from ${ref.db}${cappedNote}.`,
       { kind: failures.length ? 'warning' : 'success' },
     );

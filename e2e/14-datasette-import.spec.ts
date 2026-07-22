@@ -173,6 +173,11 @@ async function stubDatasetteResponseOverride(page: import('@playwright/test').Pa
   });
 }
 
+/** Confirm the database table-picker (imports the currently-selected tables). */
+async function confirmPicker(page: import('@playwright/test').Page): Promise<void> {
+  await page.locator('datasette-table-picker button[type="submit"]').click();
+}
+
 test.describe('datasette import', () => {
   test('imports a Datasette table via the Import dialog', async ({ page }) => {
     await stubDatasette(page);
@@ -290,6 +295,9 @@ test.describe('datasette import', () => {
     await page.locator('import-dialog select').nth(1).selectOption('datasette');
     await page.locator('import-dialog button[type="submit"]').click();
 
+    // A picker lists the database's tables (all selected by default); confirm it.
+    await confirmPicker(page);
+
     await expect
       .poll(async () =>
         page.evaluate(async () => {
@@ -323,6 +331,41 @@ test.describe('datasette import', () => {
     expect(info.names).not.toContain('energy/plants_fts');
   });
 
+  test('database import lets you deselect tables in the picker', async ({ page }) => {
+    await stubDatasetteDatabase(page);
+
+    await page.locator('app-shell header button[title="Import data from a URL"]').click();
+    await page.locator('import-dialog input[type="text"]').fill('https://ds.example.test/energy');
+    await page.locator('import-dialog select').nth(1).selectOption('datasette');
+    await page.locator('import-dialog button[type="submit"]').click();
+
+    // Deselect "regions" in the picker, then import.
+    await page.locator('datasette-table-picker input[data-table="regions"]').uncheck();
+    await confirmPicker(page);
+
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ctx = (window as any).__easydb;
+          const tables = await ctx.store.tables.find();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return tables.map((t: any) => t.name).sort();
+        }),
+      )
+      .toEqual(['energy/plants']);
+
+    // "regions" was deselected, so it must not have been imported.
+    const names = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      const tables = await ctx.store.tables.find();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return tables.map((t: any) => t.name);
+    });
+    expect(names).not.toContain('energy/regions');
+  });
+
   test('detects database vs table from the response, not the URL path', async ({ page }) => {
     await stubDatasetteResponseOverride(page);
 
@@ -332,6 +375,7 @@ test.describe('datasette import', () => {
     await page.locator('import-dialog input[type="text"]').fill('https://ov.example.test/catalog/overview');
     await page.locator('import-dialog select').nth(1).selectOption('datasette');
     await page.locator('import-dialog button[type="submit"]').click();
+    await confirmPicker(page);
 
     await expect
       .poll(async () =>
