@@ -14,8 +14,10 @@ import {
   parseDatasetteUrl,
   fetchTableMeta,
   fetchRows,
+  fetchDatabaseTables,
   inferColumnsFromRows,
   DatasetteError,
+  type DatasetteRef,
 } from './datasette-client.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
@@ -36,11 +38,15 @@ const EXAMPLE = 'https://latest.datasette.io/fixtures/facetable';
 export function init(api: HostApi): void {
   api.ui.registerUrlSource({
     id: 'datasette',
-    label: 'Datasette table…',
+    label: 'Datasette table or database…',
     async run(api, { url }) {
       const input =
         url ||
-        (await api.ui.dialogs.prompt(`Datasette table URL\n\ne.g. ${EXAMPLE}`, '', 'Import from Datasette'));
+        (await api.ui.dialogs.prompt(
+          `Datasette table or database URL\n\ne.g. ${EXAMPLE}`,
+          '',
+          'Import from Datasette',
+        ));
       if (!input) return;
       await runImport(api, input);
     },
@@ -48,7 +54,7 @@ export function init(api: HostApi): void {
 
   api.ui.registerDropHandler(async (event, api) => {
     const text = event.dataTransfer?.getData('text/plain') || '';
-    if (!isDatasetteTableUrl(text)) return false;
+    if (!isDatasetteUrl(text)) return false;
     event.preventDefault();
     await runImport(api, text);
     return true;
@@ -57,7 +63,7 @@ export function init(api: HostApi): void {
 
 async function runImport(api: HostApi, input: string): Promise<void> {
   try {
-    await importDatasetteTable(api, input);
+    await importDatasette(api, input);
   } catch (err) {
     const msg =
       err instanceof DatasetteError
@@ -67,24 +73,60 @@ async function runImport(api: HostApi, input: string): Promise<void> {
   }
 }
 
-function isDatasetteTableUrl(text: string): boolean {
+/** A database or table URL both qualify for drag-drop import. */
+function isDatasetteUrl(text: string): boolean {
   try {
-    const ref = parseDatasetteUrl(text);
-    return !!(ref.db && ref.table);
+    return !!parseDatasetteUrl(text).db;
   } catch {
     return false;
   }
 }
 
-/** Fetch schema + rows from Datasette and create a local eda table. */
-export async function importDatasetteTable(api: HostApi, input: string): Promise<string> {
-  const workspaceId = api.workspaceId();
-  if (!workspaceId) throw new Error('datasette-source: no active workspace');
+/**
+ * Import from any Datasette URL. A table URL (`.../<db>/<table>`) imports that
+ * one table; a database URL (`.../<db>`) imports every non-hidden table in it.
+ */
+export async function importDatasette(api: HostApi, input: string): Promise<void> {
+  const ref = parseDatasetteUrl(input);
+  if (ref.db && ref.table) {
+    await importTableRef(api, ref, { announce: true });
+    return;
+  }
+  if (ref.db) {
+    await importDatabaseRef(api, ref);
+    return;
+  }
+  throw new Error('URL must point to a Datasette database or table, e.g. .../<database>[/<table>]');
+}
 
+/** Back-compat single-table entry: parse an input URL, require a table. */
+export async function importDatasetteTable(api: HostApi, input: string): Promise<string> {
   const ref = parseDatasetteUrl(input);
   if (!ref.db || !ref.table) {
     throw new Error('URL must point to a table, e.g. .../<database>/<table>');
   }
+  return (await importTableRef(api, ref, { announce: true })).tableId;
+}
+
+interface TableImportResult {
+  tableId: string;
+  name: string;
+  rowCount: number;
+  count: number | null;
+  hasMore: boolean;
+  truncated: boolean;
+}
+
+/** Fetch schema + rows for one table (given a resolved ref) and store it locally. */
+async function importTableRef(
+  api: HostApi,
+  ref: DatasetteRef,
+  opts: { announce?: boolean } = {},
+): Promise<TableImportResult> {
+  const workspaceId = api.workspaceId();
+  if (!workspaceId) throw new Error('datasette-source: no active workspace');
+  if (!ref.db || !ref.table) throw new Error('datasette-source: table ref requires db + table');
+
   const fetchFn = (u: string, o?: any) => api.backend.fetch(u, o);
 
   const { columns, pks, count } = await fetchTableMeta(fetchFn, ref);
@@ -108,11 +150,12 @@ export async function importDatasetteTable(api: HostApi, input: string): Promise
 
   const now = Date.now();
   const tableId = cryptoUUID();
+  const name = `${ref.db}/${ref.table}`;
   api.events.emit('import:before', { source: 'datasette', tableId });
   await api.store.tables.insert({
     id: tableId,
     workspaceId,
-    name: `${ref.db}/${ref.table}`,
+    name,
     code: slug(`${ref.db}-${ref.table}`),
     columns: columnSpecs,
     view: 'table',
@@ -124,20 +167,67 @@ export async function importDatasetteTable(api: HostApi, input: string): Promise
 
   api.events.emit('import:after', { source: 'datasette', tableId, rowCount: rows.length });
 
-  const total = count != null ? ` of ${count}` : '';
-  if (hasMore || truncated) {
+  if (opts.announce) {
+    const total = count != null ? ` of ${count}` : '';
+    if (hasMore || truncated) {
+      api.ui.dialogs.toast(
+        `Imported first ${rows.length}${total} rows from ${ref.table} — more available ` +
+          `(capped at ${SETTINGS.maxImportRows}). Live paging arrives with the Phase-2 connector.`,
+        { kind: 'warning' },
+      );
+    } else {
+      api.ui.dialogs.toast(
+        `Imported ${rows.length} rows from ${ref.table} (${pages} page${pages === 1 ? '' : 's'}).`,
+        { kind: 'success' },
+      );
+    }
+  }
+
+  return { tableId, name, rowCount: rows.length, count, hasMore, truncated };
+}
+
+/** Import every non-hidden table in a Datasette database. */
+async function importDatabaseRef(api: HostApi, ref: DatasetteRef): Promise<void> {
+  const fetchFn = (u: string, o?: any) => api.backend.fetch(u, o);
+  const names = await fetchDatabaseTables(fetchFn, ref);
+  if (names.length === 0) throw new Error(`No tables found in database "${ref.db}".`);
+
+  api.ui.dialogs.toast(
+    `Importing ${names.length} table${names.length === 1 ? '' : 's'} from ${ref.db}…`,
+    { kind: 'info' },
+  );
+
+  let imported = 0;
+  let rowTotal = 0;
+  let capped = 0;
+  const failures: string[] = [];
+  for (const table of names) {
+    try {
+      const res = await importTableRef(api, { ...ref, table }, { announce: false });
+      imported += 1;
+      rowTotal += res.rowCount;
+      if (res.hasMore || res.truncated) capped += 1;
+    } catch (err) {
+      failures.push(`${table}: ${(err as Error)?.message ?? err}`);
+    }
+  }
+
+  const cappedNote = capped > 0 ? ` (${capped} capped at ${SETTINGS.maxImportRows} rows)` : '';
+  if (imported > 0) {
     api.ui.dialogs.toast(
-      `Imported first ${rows.length}${total} rows from ${ref.table} — more available ` +
-        `(capped at ${SETTINGS.maxImportRows}). Live paging arrives with the Phase-2 connector.`,
-      { kind: 'warning' },
-    );
-  } else {
-    api.ui.dialogs.toast(
-      `Imported ${rows.length} rows from ${ref.table} (${pages} page${pages === 1 ? '' : 's'}).`,
-      { kind: 'success' },
+      `Imported ${imported}/${names.length} table${names.length === 1 ? '' : 's'} ` +
+        `(${rowTotal} rows) from ${ref.db}${cappedNote}.`,
+      { kind: failures.length ? 'warning' : 'success' },
     );
   }
-  return tableId;
+  if (failures.length > 0) {
+    api.ui.dialogs.toast(
+      `${failures.length} table${failures.length === 1 ? '' : 's'} failed to import:\n${failures
+        .slice(0, 5)
+        .join('\n')}${failures.length > 5 ? `\n…and ${failures.length - 5} more.` : ''}`,
+      { kind: 'error', title: 'Datasette import' },
+    );
+  }
 }
 
 function slug(s: string): string {

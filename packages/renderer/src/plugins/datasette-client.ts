@@ -85,6 +85,37 @@ export function buildTableUrl(
   return u.toString();
 }
 
+/** Build a database JSON URL (`<base>/<db>.json`) for listing its tables. */
+export function buildDatabaseUrl(ref: DatasetteRef): string {
+  return new URL(`${ref.base}/${encodeURIComponent(ref.db!)}.json`).toString();
+}
+
+/**
+ * Extract importable table names from a Datasette database-page JSON. Tolerates
+ * the shapes seen across versions: `tables` as an array of `{name, hidden}`
+ * objects, an array of bare strings, or an object keyed by table name. Hidden
+ * tables (FTS shadow tables, etc.) are skipped.
+ */
+export function extractTableNames(json: any): string[] {
+  const out: string[] = [];
+  const tables = json?.tables;
+  if (Array.isArray(tables)) {
+    for (const item of tables) {
+      if (typeof item === 'string') out.push(item);
+      else if (item && typeof item === 'object') {
+        if (item.hidden === true) continue;
+        if (typeof item.name === 'string') out.push(item.name);
+      }
+    }
+  } else if (tables && typeof tables === 'object') {
+    for (const [name, meta] of Object.entries(tables)) {
+      if (meta && typeof meta === 'object' && (meta as any).hidden === true) continue;
+      out.push(name);
+    }
+  }
+  return out;
+}
+
 /** Ensure a URL (e.g. a next_url) carries the given params without overwriting. */
 export function ensureParams(urlStr: string, params: Record<string, string | number>): string {
   const u = new URL(urlStr);
@@ -270,6 +301,14 @@ export function translateQuery(state: {
 }
 
 type FetchFn = (url: string, opts?: any) => Promise<Response>;
+
+/** Fetch a database's importable table names from its `<db>.json` page. */
+export async function fetchDatabaseTables(fetchFn: FetchFn, ref: DatasetteRef): Promise<string[]> {
+  const res = await fetchFn(buildDatabaseUrl(ref));
+  const json: any = await res.json();
+  if (json && json.ok === false) throw new DatasetteError(json, res.status);
+  return extractTableNames(json);
+}
 
 /** Fetch a table's schema via ?_extra=columns,column_details,primary_keys,count. */
 export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promise<TableMeta> {

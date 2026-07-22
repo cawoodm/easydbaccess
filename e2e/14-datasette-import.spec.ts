@@ -95,6 +95,55 @@ async function stubDatasetteNoColumnMeta(page: import('@playwright/test').Page):
   });
 }
 
+/**
+ * Stub a whole database: a `<db>.json` page listing tables (one hidden), plus
+ * meta + rows for each real table. Exercises database-level import.
+ */
+async function stubDatasetteDatabase(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    const orig = window.fetch.bind(window);
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    window.fetch = (async (input: unknown, init?: unknown) => {
+      const url = String(
+        typeof input === 'string' ? input : (input as { url?: string })?.url ?? input,
+      );
+      if (url.includes('ds.example.test')) {
+        const u = new URL(url);
+        const segs = u.pathname.replace(/\.json$/, '').split('/').filter(Boolean);
+        if (segs.length === 1) {
+          // Database page: two real tables + one hidden (FTS shadow) table.
+          return json({
+            ok: true,
+            tables: [{ name: 'plants' }, { name: 'regions' }, { name: 'plants_fts', hidden: true }],
+          });
+        }
+        const table = segs[1];
+        const isMeta = u.searchParams.get('_size') === '0';
+        if (table === 'plants') {
+          return json(
+            isMeta
+              ? { ok: true, count: 2, primary_keys: ['id'], columns: ['id', 'name'] }
+              : { ok: true, next_url: null, rows: [{ id: 1, name: 'Alpha' }, { id: 2, name: 'Beta' }] },
+          );
+        }
+        if (table === 'regions') {
+          return json(
+            isMeta
+              ? { ok: true, count: 1, primary_keys: ['id'], columns: ['id', 'region'] }
+              : { ok: true, next_url: null, rows: [{ id: 1, region: 'North' }] },
+          );
+        }
+        return json({ ok: true, rows: [] }); // hidden tables should never be fetched
+      }
+      return orig(input as RequestInfo, init as RequestInit);
+    }) as typeof window.fetch;
+  });
+}
+
 test.describe('datasette import', () => {
   test('imports a Datasette table via the Import dialog', async ({ page }) => {
     await stubDatasette(page);
@@ -202,6 +251,47 @@ test.describe('datasette import', () => {
     expect(info.nameType).toBe('string');
     expect(info.capacityType).toBe('number');
     expect(info.commissionedType).toBe('datetime'); // name heuristic
+  });
+
+  test('imports every non-hidden table from a Datasette database URL', async ({ page }) => {
+    await stubDatasetteDatabase(page);
+
+    await page.locator('app-shell header button[title="Import data from a URL"]').click();
+    await page.locator('import-dialog input[type="text"]').fill('https://ds.example.test/energy');
+    await page.locator('import-dialog select').nth(1).selectOption('datasette');
+    await page.locator('import-dialog button[type="submit"]').click();
+
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ctx = (window as any).__easydb;
+          const tables = await ctx.store.tables.find();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return tables.map((t: any) => t.name).sort();
+        }),
+      )
+      .toEqual(['energy/plants', 'energy/regions']);
+
+    const info = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      const tables = await ctx.store.tables.find();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const byName: Record<string, any> = Object.fromEntries(tables.map((t: any) => [t.name, t]));
+      const rowCount = async (n: string) => (await ctx.store.rows(byName[n].id).find()).length;
+      return {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        names: tables.map((t: any) => t.name),
+        plants: await rowCount('energy/plants'),
+        regions: await rowCount('energy/regions'),
+      };
+    });
+
+    expect(info.plants).toBe(2);
+    expect(info.regions).toBe(1);
+    // The hidden FTS shadow table must be skipped.
+    expect(info.names).not.toContain('energy/plants_fts');
   });
 
   test('the global-power-plants sample points at a real table URL', async ({ page }) => {

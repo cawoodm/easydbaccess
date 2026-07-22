@@ -16,7 +16,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { importJsonText } from './json-import.js';
-import { importDatasetteTable } from './datasette-source.js';
+import { importDatasette } from './datasette-source.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from '../dialogs/dialog-chrome.js';
 import { makeDialogDraggable } from '../dialogs/draggable.js';
 
@@ -85,9 +85,9 @@ async function openImport(api: HostApi): Promise<void> {
   const { url, kind } = result;
   try {
     if (kind === 'datasette') {
-      // importDatasetteTable emits its own toasts (incl. the honest
-      // "imported first N of M" when the row cap is hit).
-      await importDatasetteTable(api, url);
+      // importDatasette emits its own toasts. A table URL imports one table; a
+      // database URL imports every non-hidden table in it.
+      await importDatasette(api, url);
     } else {
       const res = await api.backend.fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
@@ -124,7 +124,9 @@ function detectKind(url: string): ResolvedKind {
     const segments = path.split('/').filter(Boolean);
     const hasDatasetteParams = [...u.searchParams.keys()].some((k) => k.startsWith('_'));
     const looksDatasette = host.includes('datasette') || hasDatasetteParams;
-    if (segments.length >= 2 && looksDatasette) return 'datasette';
+    // A Datasette host with at least a database segment (db, or db/table)
+    // routes to the Datasette importer; a bare .json elsewhere is a dump.
+    if (looksDatasette && segments.length >= 1) return 'datasette';
     return 'json';
   } catch {
     return 'json';
@@ -321,7 +323,8 @@ export class ImportDialog extends LitElement {
 
             <p class="hint">
               Paste any URL or pick a sample above. JSON dumps import every table in the file;
-              Datasette tables import a read-only snapshot (capped at 10,000 rows).
+              a Datasette table URL imports that table, and a Datasette database URL imports all
+              of its tables — read-only snapshots, capped at 10,000 rows each.
             </p>
           </div>
         </form>
