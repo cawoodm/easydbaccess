@@ -169,6 +169,25 @@ describe('classifyPage against the real datasette.io response', () => {
     expect(info.hasMore).toBe(false);
     expect(info.nextToken).toBeNull();
   });
+
+  it('normalises positional-array rows (older Datasette) into objects via columns', () => {
+    // Response shape from an instance where the default is arrays, not objects
+    // — so we can drop `_shape=objects` and still get keyed rows.
+    const info = classifyPage({
+      ok: true,
+      next: null,
+      truncated: false,
+      columns: ['id', 'name'],
+      rows: [
+        [1, 'Alice'],
+        [2, 'Bob'],
+      ],
+    });
+    expect(info.rows).toEqual([
+      { id: 1, name: 'Alice' },
+      { id: 2, name: 'Bob' },
+    ]);
+  });
 });
 
 describe('fetchRows follows the `next` token', () => {
@@ -180,16 +199,19 @@ describe('fetchRows follows the `next` token', () => {
     });
     const ref = parseDatasetteUrl(GPP_URL);
 
-    const out = await fetchRows(fetchFn, ref, { pageSize: 'max' });
+    const out = await fetchRows(fetchFn, ref); // default numeric page size
 
     expect(out.rows).toHaveLength(3); // 2 + 1, not silently capped at page 1
     expect(out.pages).toBe(2);
     expect(out.hasMore).toBe(false);
     expect(out.truncated).toBe(false);
-    // Second request rebuilt the table URL with the token + object shape.
+    // Second request rebuilt the table URL with the token, a numeric _size
+    // (not `_size=max`, which errors on datasette.io), and no `_shape`.
     expect(seen).toHaveLength(2);
     expect(seen[1]).toContain('_next=100');
-    expect(seen[1]).toContain('_shape=objects');
+    expect(seen[1]).toContain('_size=1000');
+    expect(seen[1]).not.toContain('_size=max');
+    expect(seen[1]).not.toContain('_shape');
   });
 
   it('stops at maxRows and honestly reports hasMore=true (capped, not complete)', async () => {

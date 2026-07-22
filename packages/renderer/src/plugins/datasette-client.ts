@@ -115,8 +115,18 @@ export function classifyPage(json: any): PageInfo {
   const nextUrl = json?.next_url ?? null;
   const rawNext = json?.next;
   const nextToken = rawNext != null && rawNext !== false ? String(rawNext) : null;
+  const rawRows: unknown[] = Array.isArray(json?.rows) ? json.rows : [];
+  const cols: string[] | null = Array.isArray(json?.columns) ? json.columns : null;
+  // Modern Datasette returns row objects by default; older versions return
+  // positional arrays alongside a `columns` list. Normalise arrays to objects
+  // so we don't have to send `_shape=objects` (which newer versions reject).
+  const rows = rawRows.map((r) =>
+    Array.isArray(r) && cols
+      ? Object.fromEntries(cols.map((c, i) => [c, r[i]]))
+      : (r as Record<string, unknown>),
+  );
   return {
-    rows: Array.isArray(json?.rows) ? json.rows : [],
+    rows,
     nextUrl,
     nextToken,
     hasMore: nextUrl != null || nextToken != null,
@@ -398,10 +408,12 @@ export async function discoverTables(fetchFn: FetchFn, ref: DatasetteRef): Promi
 
 /** Fetch a table's schema via ?_extra=columns,column_details,primary_keys,count. */
 export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promise<TableMeta> {
+  // No `_shape` (rejected by newer Datasette; objects are the default) and no
+  // `column_details` (unsupported on some instances — a bad `_extra` triggers a
+  // non-CORS error). Types are refined from the rows anyway.
   const url = buildTableUrl(ref, {
-    _shape: 'objects',
     _size: 0,
-    _extra: 'columns,column_details,primary_keys,count',
+    _extra: 'columns,count,primary_keys',
   });
   const json: any = await fetchJson(fetchFn, url);
   const { columns, pks } = mapColumns(json);
@@ -439,9 +451,14 @@ export async function fetchRows(
   opts: { maxRows?: number; pageSize?: number | 'max'; extraParams?: Record<string, string> } = {},
 ): Promise<{ rows: Array<Record<string, unknown>>; truncated: boolean; hasMore: boolean; pages: number }> {
   const maxRows = opts.maxRows ?? 10000;
-  const pageSize = opts.pageSize ?? 'max';
+  // Numeric page size, not `_size=max`: datasette.io returns a non-CORS error
+  // for `_size=max` (surfacing as "Load failed" in the browser), while a plain
+  // numeric `_size` works. Datasette clamps it to the instance's
+  // max_returned_rows, and we page with the cursor regardless.
+  const pageSize = opts.pageSize ?? 1000;
+  // No `_shape=objects`: it's the default on modern Datasette and rejected by
+  // some 1.0 instances; classifyPage normalises array rows for older ones.
   const baseParams: Record<string, string | number> = {
-    _shape: 'objects',
     _size: pageSize,
     ...(opts.extraParams || {}),
   };
@@ -462,7 +479,7 @@ export async function fetchRows(
     // URL with the `next` token (datasette.io sends only the token, no next_url).
     const nextPage =
       info.nextUrl != null
-        ? ensureParams(info.nextUrl, { _shape: 'objects' })
+        ? info.nextUrl
         : info.nextToken != null
           ? buildTableUrl(ref, { ...baseParams, _next: info.nextToken })
           : null;
