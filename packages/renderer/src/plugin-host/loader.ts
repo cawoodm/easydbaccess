@@ -13,7 +13,7 @@ import * as coreRenderers from '../plugins/core-renderers.js';
 import * as cellColor from '../plugins/cell-color.js';
 import * as cellImage from '../plugins/cell-image.js';
 import * as cellLink from '../plugins/cell-link.js';
-import * as sampleData from '../plugins/sample-data.js';
+import * as importData from '../plugins/import-data.js';
 import * as autoSync from '../plugins/auto-sync.js';
 
 /**
@@ -40,7 +40,7 @@ const builtins: PluginModule[] = [
   cellColor,
   cellImage,
   cellLink,
-  sampleData,
+  importData,
   autoSync,
 ];
 

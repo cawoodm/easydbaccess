@@ -84,7 +84,7 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
 - **Built-in features ARE plugins.** The full built-in roster (`plugin-host/loader.ts`)
   is currently: `new-table-button`, `csv-import`, `json-import`, `csv-export`,
   `dump-export`, `sql-export`, `gist-sync`, `server-sync`, `plugin-manager-button`,
-  `cell-color`, `cell-image`, `sample-data`, `auto-sync`. Don't
+  `cell-color`, `cell-image`, `import-data`, `auto-sync`. Don't
   add a feature to the core if it can be a plugin.
 - `meta.optional = true` marks a built-in as user-toggleable. The Plugin
   Manager dialog surfaces these; disabled state is stored under the synthetic
