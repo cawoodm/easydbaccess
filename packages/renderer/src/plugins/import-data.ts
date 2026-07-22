@@ -51,13 +51,8 @@ const IMPORT_ICON_SVG =
 const PREDEFINED: PredefinedSource[] = [
   { label: 'Northwind — sample database (JSON dump)', url: NORTHWIND_URL, kind: 'json' },
   {
-    label: 'Datasette — fixtures / facetable (single table)',
-    url: 'https://latest.datasette.io/fixtures/facetable',
-    kind: 'datasette',
-  },
-  {
-    label: 'Datasette — fixtures (whole database, pick tables)',
-    url: 'https://latest.datasette.io/fixtures',
+    label: 'Datasette — US legislators (whole database, pick tables)',
+    url: 'https://datasette.io/legislators',
     kind: 'datasette',
   },
   {
