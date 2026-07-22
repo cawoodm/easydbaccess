@@ -303,3 +303,55 @@ describe('refineColumnTypes upgrades bare-name columns from row data', () => {
     expect(refineColumnTypes(columns, [])).toEqual(columns);
   });
 });
+
+// --- Regression: real ?_extra=columns,count,primary_keys response ------------
+// From https://datasette.io/legislators/executive_terms.json?_extra=columns,count,primary_keys
+// Notable: `count` and `primary_keys` ARE returned, but there is NO `columns`
+// key and no `column_details`. So schema mapping yields nothing, and the
+// importer must source columns from the rows instead — while still surfacing
+// the row count for the "imported N of M" messaging.
+
+const ET_EXTRA = {
+  ok: true,
+  next: '100',
+  count: 131,
+  primary_keys: [] as string[],
+  truncated: false,
+  // no `columns` key
+  rows: [
+    { rowid: 1, type: 'prez', start: '1789-04-30', end: '1793-03-04', party: 'no party', how: 'election', executive_id: 1 },
+    { rowid: 3, type: 'viceprez', start: '1789-04-21', end: '1793-03-04', party: 'Federalist', how: 'election', executive_id: 2 },
+  ],
+};
+
+describe('response carrying count + primary_keys but no columns key', () => {
+  it('mapColumns yields nothing (no columns / column_details to map)', () => {
+    const { columns, pks } = mapColumns(ET_EXTRA);
+    expect(columns).toEqual([]);
+    expect(pks).toEqual([]);
+  });
+
+  it('fetchTableMeta still surfaces the count, with typed=false and no columns', async () => {
+    const fetchFn = vi.fn((_url: string) => jsonRes(ET_EXTRA));
+    const meta = await fetchTableMeta(
+      fetchFn,
+      parseDatasetteUrl('https://datasette.io/legislators/executive_terms'),
+    );
+    expect(meta.count).toBe(131);
+    expect(meta.pks).toEqual([]);
+    expect(meta.columns).toEqual([]);
+    expect(meta.typed).toBe(false);
+  });
+
+  it('columns then come from row inference (the importer\'s empty-schema path)', () => {
+    const byField = Object.fromEntries(
+      inferColumnsFromRows(ET_EXTRA.rows).map((c) => [c.field, c.type]),
+    );
+    expect(byField.rowid).toBe('number');
+    expect(byField.executive_id).toBe('number');
+    expect(byField.start).toBe('datetime');
+    expect(byField.end).toBe('datetime');
+    expect(byField.type).toBe('string');
+    expect(byField.party).toBe('string');
+  });
+});
