@@ -4,6 +4,9 @@ import {
   parseTableList,
   discoverTables,
   parseDatasetteUrl,
+  classifyPage,
+  fetchRows,
+  inferColumnsFromRows,
 } from './datasette-client.js';
 
 describe('parseDatabaseList', () => {
@@ -96,5 +99,131 @@ describe('discoverTables', () => {
       { db: 'a', table: 't1', count: 2, hidden: false },
       { db: 'b', table: 't2', count: 5, hidden: false },
     ]);
+  });
+});
+
+// --- Regression: real response from datasette.io ----------------------------
+// Captured from https://datasette.io/global-power-plants/global-power-plants.json
+// Its defining trait: paging is signalled by a `next` TOKEN with NO `next_url`.
+// An earlier classifyPage keyed only off `next_url`, so it stopped after page 1
+// and silently reported a 33k-row table as "fully loaded (100 rows)".
+
+const GPP_URL = 'https://datasette.io/global-power-plants/global-power-plants';
+
+const GPP_PAGE1 = {
+  ok: true,
+  next: '100', // token → more rows available
+  truncated: false,
+  // (note: no `next_url` key — exactly like the real instance)
+  rows: [
+    {
+      rowid: 1,
+      country: 'AFG',
+      country_long: 'Afghanistan',
+      name: 'Kajaki Hydroelectric Power Plant Afghanistan',
+      capacity_mw: 33.0,
+      primary_fuel: 'Hydro',
+      commissioning_year: null,
+    },
+    {
+      rowid: 2,
+      country: 'AFG',
+      country_long: 'Afghanistan',
+      name: 'Kandahar DOG',
+      capacity_mw: 10.0,
+      primary_fuel: 'Solar',
+      commissioning_year: null,
+    },
+  ],
+};
+
+const GPP_PAGE2 = {
+  ok: true,
+  next: null, // exhausted
+  truncated: false,
+  rows: [
+    { rowid: 3, country: 'AFG', name: 'Kandahar JOL', capacity_mw: 10.0, primary_fuel: 'Solar' },
+  ],
+};
+
+const jsonRes = (body: unknown): Promise<Response> =>
+  Promise.resolve({ json: () => Promise.resolve(body) } as unknown as Response);
+
+describe('classifyPage against the real datasette.io response', () => {
+  it('detects "more available" from the `next` token even without `next_url`', () => {
+    const info = classifyPage(GPP_PAGE1);
+    expect(info.nextUrl).toBeNull();
+    expect(info.nextToken).toBe('100');
+    expect(info.hasMore).toBe(true);
+    expect(info.truncated).toBe(false);
+    expect(info.rows).toHaveLength(2);
+  });
+
+  it('reports exhaustion when the token is null', () => {
+    const info = classifyPage(GPP_PAGE2);
+    expect(info.hasMore).toBe(false);
+    expect(info.nextToken).toBeNull();
+  });
+});
+
+describe('fetchRows follows the `next` token', () => {
+  it('pages via ?_next=<token> and accumulates every row', async () => {
+    const seen: string[] = [];
+    const fetchFn = vi.fn((url: string) => {
+      seen.push(url);
+      return jsonRes(url.includes('_next=') ? GPP_PAGE2 : GPP_PAGE1);
+    });
+    const ref = parseDatasetteUrl(GPP_URL);
+
+    const out = await fetchRows(fetchFn, ref, { pageSize: 'max' });
+
+    expect(out.rows).toHaveLength(3); // 2 + 1, not silently capped at page 1
+    expect(out.pages).toBe(2);
+    expect(out.hasMore).toBe(false);
+    expect(out.truncated).toBe(false);
+    // Second request rebuilt the table URL with the token + object shape.
+    expect(seen).toHaveLength(2);
+    expect(seen[1]).toContain('_next=100');
+    expect(seen[1]).toContain('_shape=objects');
+  });
+
+  it('stops at maxRows and honestly reports hasMore=true (capped, not complete)', async () => {
+    const fetchFn = vi.fn(() => jsonRes(GPP_PAGE1)); // always says "more available"
+    const ref = parseDatasetteUrl(GPP_URL);
+
+    const out = await fetchRows(fetchFn, ref, { maxRows: 2, pageSize: 'max' });
+
+    expect(out.rows).toHaveLength(2);
+    expect(out.pages).toBe(1);
+    expect(out.hasMore).toBe(true); // the importer will show the honest "capped" toast
+  });
+});
+
+describe('inferColumnsFromRows (fallback when ?_extra= gives no schema)', () => {
+  it('derives ordered, typed columns from the real global-power-plants rows', () => {
+    const cols = inferColumnsFromRows(GPP_PAGE1.rows);
+    // Order preserved (union of keys, first-seen order).
+    expect(cols.map((c) => c.field)).toEqual([
+      'rowid',
+      'country',
+      'country_long',
+      'name',
+      'capacity_mw',
+      'primary_fuel',
+      'commissioning_year',
+    ]);
+    const byField = Object.fromEntries(cols.map((c) => [c.field, c]));
+    expect(byField.rowid!.type).toBe('number');
+    expect(byField.capacity_mw!.type).toBe('number');
+    expect(byField.country!.type).toBe('string');
+    // All-null column defaults to string, not a bogus type.
+    expect(byField.commissioning_year!.type).toBe('string');
+    // Labels are prettified from snake_case.
+    expect(byField.country_long!.label).toBe('Country Long');
+  });
+
+  it('does not misread an all-null column and keeps it importable', () => {
+    const cols = inferColumnsFromRows([{ a: null }, { a: null }]);
+    expect(cols).toEqual([{ field: 'a', label: 'A', type: 'string' }]);
   });
 });

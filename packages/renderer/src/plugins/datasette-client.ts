@@ -18,7 +18,10 @@ export interface DatasetteRef {
 
 export interface PageInfo {
   rows: Array<Record<string, unknown>>;
+  /** Ready-made absolute cursor URL, when the instance provides one. */
   nextUrl: string | null;
+  /** Raw cursor token (`next`), which some instances send instead of `next_url`. */
+  nextToken: string | null;
   hasMore: boolean;
   truncated: boolean;
 }
@@ -96,14 +99,20 @@ export function ensureParams(urlStr: string, params: Record<string, string | num
 
 /**
  * Classify a Datasette JSON response: did we get everything?
- *  - hasMore:   table endpoints expose a `next_url` cursor ⇒ more via paging.
+ *  - hasMore:   table endpoints signal more rows via a `next_url` cursor URL
+ *               and/or a raw `next` token. Some instances (e.g. datasette.io)
+ *               send only the token, so we honour either.
  *  - truncated: SQL/query results hard-cap at max_returned_rows with NO cursor.
  */
 export function classifyPage(json: any): PageInfo {
+  const nextUrl = json?.next_url ?? null;
+  const rawNext = json?.next;
+  const nextToken = rawNext != null && rawNext !== false ? String(rawNext) : null;
   return {
     rows: Array.isArray(json?.rows) ? json.rows : [],
-    nextUrl: json?.next_url ?? null,
-    hasMore: json?.next_url != null,
+    nextUrl,
+    nextToken,
+    hasMore: nextUrl != null || nextToken != null,
     truncated: json?.truncated === true,
   };
 }
@@ -163,6 +172,45 @@ function prettifyLabel(field: string): string {
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase())
     .trim();
+}
+
+/**
+ * Infer eda columns from materialized rows. This is the fallback when a table's
+ * schema endpoint (`?_extra=columns,column_details,...`) yields nothing —
+ * older Datasette instances that don't support `_extra` still return row data,
+ * and a table with data but no column definitions renders blank. Column order
+ * is the union of keys in first-seen order; types come from the values.
+ */
+export function inferColumnsFromRows(rows: Array<Record<string, unknown>>): ColumnSpec[] {
+  const fields: string[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    for (const k of Object.keys(r)) {
+      if (!seen.has(k)) {
+        seen.add(k);
+        fields.push(k);
+      }
+    }
+  }
+  return fields.map((field) => ({
+    field,
+    label: prettifyLabel(field),
+    type: inferColumnType(rows.map((r) => r[field])),
+  }));
+}
+
+function inferColumnType(values: unknown[]): ColumnType {
+  const samples = values.filter((v) => v !== null && v !== undefined && v !== '');
+  if (samples.length === 0) return 'string';
+  if (samples.every((v) => typeof v === 'boolean')) return 'boolean';
+  if (samples.every((v) => typeof v === 'number' && Number.isFinite(v))) return 'number';
+  if (samples.every((v) => typeof v === 'string' && isIsoDateish(v))) return 'datetime';
+  return 'string';
+}
+
+/** Conservative ISO-8601-ish check — never treats a bare number as a date. */
+function isIsoDateish(s: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2})?/.test(s);
 }
 
 /**
@@ -330,7 +378,12 @@ export async function fetchRows(
 ): Promise<{ rows: Array<Record<string, unknown>>; truncated: boolean; hasMore: boolean; pages: number }> {
   const maxRows = opts.maxRows ?? 10000;
   const pageSize = opts.pageSize ?? 'max';
-  let url: string | null = buildTableUrl(ref, { _shape: 'objects', _size: pageSize, ...(opts.extraParams || {}) });
+  const baseParams: Record<string, string | number> = {
+    _shape: 'objects',
+    _size: pageSize,
+    ...(opts.extraParams || {}),
+  };
+  let url: string | null = buildTableUrl(ref, baseParams);
   const rows: Array<Record<string, unknown>> = [];
   let truncated = false;
   let hasMore = false;
@@ -345,10 +398,24 @@ export async function fetchRows(
     truncated = truncated || info.truncated;
     pages += 1;
 
-    if (info.nextUrl && rows.length < maxRows) {
-      url = ensureParams(info.nextUrl, { _shape: 'objects' });
+    // Follow the ready-made cursor URL if present; otherwise rebuild the table
+    // URL with the `next` token (datasette.io sends only the token, no next_url).
+    const nextPage =
+      info.nextUrl != null
+        ? ensureParams(info.nextUrl, { _shape: 'objects' })
+        : info.nextToken != null
+          ? buildTableUrl(ref, { ...baseParams, _next: info.nextToken })
+          : null;
+
+    // Keep paging while there's a cursor, we're under the cap, and the page
+    // actually returned rows (the last guard prevents a pathological loop on a
+    // stuck token).
+    if (nextPage && rows.length < maxRows && info.rows.length > 0) {
+      url = nextPage;
     } else {
-      hasMore = info.nextUrl != null;
+      // "More available" only when a live cursor remains after a page that had
+      // rows — i.e. we stopped at the cap, not because the table was exhausted.
+      hasMore = nextPage != null && info.rows.length > 0;
       url = null;
     }
   }

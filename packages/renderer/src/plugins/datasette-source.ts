@@ -8,12 +8,13 @@
 // Registers a URL source and a (table-only) drop handler. The Phase-2 live
 // read-write connector builds on the same datasette-client core.
 
-import type { HostApi, PluginModule, Row } from '@easydb/shared';
+import type { ColumnSpec, HostApi, PluginModule, Row } from '@easydb/shared';
 import {
   parseDatasetteUrl,
   discoverTables,
   fetchTableMeta,
   fetchRows,
+  inferColumnsFromRows,
   DatasetteError,
   type DatasetteRef,
 } from './datasette-client.js';
@@ -167,11 +168,26 @@ async function importOneTable(
   const name = `${ref.db}/${ref.table}`;
   const fetchFn = (u: string) => api.backend.fetch(u);
 
-  const { columns, count } = await fetchTableMeta(fetchFn, ref);
+  // Schema discovery via ?_extra=… is best-effort: instances that don't
+  // support it (older Datasette) simply give us no columns, and we infer them
+  // from the fetched rows below. A hard failure here (e.g. network) is
+  // tolerated too — the row fetch will surface any real problem.
+  let metaColumns: ColumnSpec[] = [];
+  let count: number | null = null;
+  try {
+    const meta = await fetchTableMeta(fetchFn, ref);
+    metaColumns = meta.columns;
+    count = meta.count;
+  } catch {
+    // fall back to row inference
+  }
+
   const { rows, truncated, hasMore, pages } = await fetchRows(fetchFn, ref, {
     maxRows: SETTINGS.maxImportRows,
     pageSize: SETTINGS.pageSize,
   });
+
+  const columns = metaColumns.length > 0 ? metaColumns : inferColumnsFromRows(rows);
 
   const now = Date.now();
   const tableId = cryptoUUID();
