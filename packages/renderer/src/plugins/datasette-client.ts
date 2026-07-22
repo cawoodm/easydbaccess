@@ -166,6 +166,59 @@ function prettifyLabel(field: string): string {
 }
 
 /**
+ * Infer eda ColumnSpec[] directly from materialized rows. Fallback for
+ * instances whose metadata endpoint returns no `columns` (older Datasette, or
+ * an `_extra` the server doesn't honor): without this, a table imports its
+ * rows but shows no columns. Types are inferred from the values, with a
+ * name-based date heuristic mirroring sqliteTypeToEda. Primary keys (when
+ * known) are flagged unique + not-null.
+ */
+export function inferColumnsFromRows(
+  rows: Array<Record<string, unknown>>,
+  pks: string[] = [],
+): ColumnSpec[] {
+  const fields: string[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    for (const k of Object.keys(r)) {
+      if (!seen.has(k)) {
+        seen.add(k);
+        fields.push(k);
+      }
+    }
+  }
+  return fields.map((field) => {
+    const spec: ColumnSpec = {
+      field,
+      label: prettifyLabel(field),
+      type: inferEdaType(
+        rows.map((r) => r[field]),
+        field,
+      ),
+    };
+    if (pks.includes(field)) {
+      spec.unique = true;
+      spec.notnull = true;
+    }
+    return spec;
+  });
+}
+
+function inferEdaType(values: unknown[], name: string): ColumnType {
+  const samples = values.filter((v) => v !== null && v !== undefined && v !== '');
+  if (samples.length === 0) return 'string';
+  if (samples.every((v) => typeof v === 'boolean')) return 'boolean';
+  if (samples.every((v) => typeof v === 'number' && Number.isFinite(v))) return 'number';
+  if (
+    /(_at|_date|^date$|^created$|^updated$|^modified$)$/i.test(name) &&
+    samples.every((v) => !Number.isNaN(new Date(String(v)).getTime()))
+  ) {
+    return 'datetime';
+  }
+  return 'string';
+}
+
+/**
  * Tilde-encode a value for a Datasette row-PK URL segment. Any char outside
  * [A-Za-z0-9_-] becomes ~XX (uppercase hex of the UTF-8 byte). Browser-safe.
  */

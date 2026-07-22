@@ -10,7 +10,13 @@
 // packages/renderer/src/plugin-host/loader.ts.
 
 import type { HostApi, PluginModule, Row } from '@easydb/shared';
-import { parseDatasetteUrl, fetchTableMeta, fetchRows, DatasetteError } from './datasette-client.js';
+import {
+  parseDatasetteUrl,
+  fetchTableMeta,
+  fetchRows,
+  inferColumnsFromRows,
+  DatasetteError,
+} from './datasette-client.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'datasette-source',
@@ -81,11 +87,24 @@ export async function importDatasetteTable(api: HostApi, input: string): Promise
   }
   const fetchFn = (u: string, o?: any) => api.backend.fetch(u, o);
 
-  const { columns, count } = await fetchTableMeta(fetchFn, ref);
+  const { columns, pks, count } = await fetchTableMeta(fetchFn, ref);
   const { rows, truncated, hasMore, pages } = await fetchRows(fetchFn, ref, {
     maxRows: SETTINGS.maxImportRows,
     pageSize: SETTINGS.pageSize,
   });
+
+  // Some Datasette instances/versions don't return column metadata for our
+  // `_extra` request, which used to yield a table with rows but no columns.
+  // Fall back to inferring columns from the rows, and union in any row keys
+  // the metadata didn't cover.
+  let columnSpecs = columns;
+  if (columnSpecs.length === 0) {
+    columnSpecs = inferColumnsFromRows(rows, pks);
+  } else {
+    const known = new Set(columnSpecs.map((c) => c.field));
+    const extra = inferColumnsFromRows(rows, pks).filter((c) => !known.has(c.field));
+    if (extra.length > 0) columnSpecs = [...columnSpecs, ...extra];
+  }
 
   const now = Date.now();
   const tableId = cryptoUUID();
@@ -95,7 +114,7 @@ export async function importDatasetteTable(api: HostApi, input: string): Promise
     workspaceId,
     name: `${ref.db}/${ref.table}`,
     code: slug(`${ref.db}-${ref.table}`),
-    columns,
+    columns: columnSpecs,
     view: 'table',
     updatedAt: now,
   });

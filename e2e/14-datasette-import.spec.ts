@@ -60,6 +60,41 @@ async function stubDatasette(page: import('@playwright/test').Page): Promise<voi
   });
 }
 
+/**
+ * Stub an instance whose metadata endpoint returns NO column list (older
+ * Datasette, or an `_extra` the server ignores) — the shape that caused
+ * "rows imported but the table has no columns". Rows still come back.
+ */
+async function stubDatasetteNoColumnMeta(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    const orig = window.fetch.bind(window);
+    window.fetch = (async (input: unknown, init?: unknown) => {
+      const url = String(
+        typeof input === 'string' ? input : (input as { url?: string })?.url ?? input,
+      );
+      if (url.includes('ds.example.test')) {
+        const isMeta = new URL(url).searchParams.get('_size') === '0';
+        const body = isMeta
+          ? { ok: true, count: 3, primary_keys: ['id'] } // no columns / column_details
+          : {
+              ok: true,
+              next_url: null,
+              rows: [
+                { id: 1, name: 'Alpha', capacity_mw: 12.5, commissioned_at: '2001-05-01' },
+                { id: 2, name: 'Beta', capacity_mw: 7, commissioned_at: '2010-01-01' },
+                { id: 3, name: 'Gamma', capacity_mw: 3.2, commissioned_at: '2020-11-20' },
+              ],
+            };
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return orig(input as RequestInfo, init as RequestInit);
+    }) as typeof window.fetch;
+  });
+}
+
 test.describe('datasette import', () => {
   test('imports a Datasette table via the Import dialog', async ({ page }) => {
     await stubDatasette(page);
@@ -115,6 +150,58 @@ test.describe('datasette import', () => {
     expect(info.capacityType).toBe('number'); // REAL
     expect(info.activeType).toBe('boolean'); // "is_" prefix
     expect(info.commissionedType).toBe('datetime'); // "_at" suffix
+  });
+
+  test('infers columns from rows when metadata has none', async ({ page }) => {
+    await stubDatasetteNoColumnMeta(page);
+
+    await page.locator('app-shell header button[title="Import data from a URL"]').click();
+    await page.locator('import-dialog input[type="text"]').fill(TABLE_URL);
+    await page.locator('import-dialog select').nth(1).selectOption('datasette');
+    await page.locator('import-dialog button[type="submit"]').click();
+
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ctx = (window as any).__easydb;
+          const tables = await ctx.store.tables.find();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const t = tables.find((x: any) => x.name === 'energy/plants');
+          return t ? t.columns.length : 0;
+        }),
+      )
+      .toBe(4);
+
+    const info = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      const tables = await ctx.store.tables.find();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const t = tables.find((x: any) => x.name === 'energy/plants');
+      const rows = await ctx.store.rows(t.id).find();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const col = (f: string) => t.columns.find((c: any) => c.field === f);
+      return {
+        rowCount: rows.length,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        fields: t.columns.map((c: any) => c.field),
+        idType: col('id')?.type,
+        idUnique: col('id')?.unique === true,
+        nameType: col('name')?.type,
+        capacityType: col('capacity_mw')?.type,
+        commissionedType: col('commissioned_at')?.type,
+      };
+    });
+
+    // The bug: rows import but columns stay empty. Now they're inferred.
+    expect(info.rowCount).toBe(3);
+    expect(info.fields).toEqual(['id', 'name', 'capacity_mw', 'commissioned_at']);
+    expect(info.idType).toBe('number'); // value-inferred
+    expect(info.idUnique).toBe(true); // primary_keys still honoured
+    expect(info.nameType).toBe('string');
+    expect(info.capacityType).toBe('number');
+    expect(info.commissionedType).toBe('datetime'); // name heuristic
   });
 
   test('the global-power-plants sample points at a real table URL', async ({ page }) => {
