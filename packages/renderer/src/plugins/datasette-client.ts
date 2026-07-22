@@ -19,6 +19,8 @@ export interface DatasetteRef {
 export interface PageInfo {
   rows: Array<Record<string, unknown>>;
   nextUrl: string | null;
+  /** Cursor token (Datasette 1.0 `next`) when no absolute `next_url` is given. */
+  nextToken: string | null;
   hasMore: boolean;
   truncated: boolean;
 }
@@ -127,14 +129,19 @@ export function ensureParams(urlStr: string, params: Record<string, string | num
 
 /**
  * Classify a Datasette JSON response: did we get everything?
- *  - hasMore:   table endpoints expose a `next_url` cursor ⇒ more via paging.
+ *  - hasMore:   more rows are available via paging. Older Datasette exposes an
+ *    absolute `next_url`; Datasette 1.0 returns only a `next` cursor token
+ *    (with no `next_url`) that must be replayed as `?_next=<token>`.
  *  - truncated: SQL/query results hard-cap at max_returned_rows with NO cursor.
  */
 export function classifyPage(json: any): PageInfo {
+  const nextToken = json?.next != null ? String(json.next) : null;
+  const nextUrl = json?.next_url ?? null;
   return {
     rows: Array.isArray(json?.rows) ? json.rows : [],
-    nextUrl: json?.next_url ?? null,
-    hasMore: json?.next_url != null,
+    nextUrl,
+    nextToken,
+    hasMore: nextUrl != null || nextToken != null,
     truncated: json?.truncated === true,
   };
 }
@@ -325,8 +332,10 @@ export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promi
 }
 
 /**
- * Materialize rows by following `next_url` until the cursor is exhausted or the
+ * Materialize rows by following the paging cursor until it's exhausted or the
  * cap is reached, returning honest completeness flags (§5.3.1 of the design).
+ * Handles both the old absolute `next_url` and Datasette 1.0's `next` token
+ * (replayed as `?_next=<token>` against the same table URL).
  */
 export async function fetchRows(
   fetchFn: FetchFn,
@@ -335,7 +344,8 @@ export async function fetchRows(
 ): Promise<{ rows: Array<Record<string, unknown>>; truncated: boolean; hasMore: boolean; pages: number }> {
   const maxRows = opts.maxRows ?? 10000;
   const pageSize = opts.pageSize ?? 'max';
-  let url: string | null = buildTableUrl(ref, { _shape: 'objects', _size: pageSize, ...(opts.extraParams || {}) });
+  const baseParams = { _shape: 'objects' as const, _size: pageSize, ...(opts.extraParams || {}) };
+  let url: string | null = buildTableUrl(ref, baseParams);
   const rows: Array<Record<string, unknown>> = [];
   let truncated = false;
   let hasMore = false;
@@ -350,10 +360,12 @@ export async function fetchRows(
     truncated = truncated || info.truncated;
     pages += 1;
 
-    if (info.nextUrl && rows.length < maxRows) {
-      url = ensureParams(info.nextUrl, { _shape: 'objects' });
+    if ((info.nextUrl || info.nextToken) && rows.length < maxRows) {
+      url = info.nextUrl
+        ? ensureParams(info.nextUrl, { _shape: 'objects' })
+        : buildTableUrl(ref, { ...baseParams, _next: info.nextToken as string });
     } else {
-      hasMore = info.nextUrl != null;
+      hasMore = info.nextUrl != null || info.nextToken != null;
       url = null;
     }
   }

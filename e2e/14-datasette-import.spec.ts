@@ -173,6 +173,34 @@ async function stubDatasetteResponseOverride(page: import('@playwright/test').Pa
   });
 }
 
+/**
+ * Stub a table paginated with Datasette 1.0's `next` cursor token (no
+ * `next_url`): page 1 returns two rows + next="2", page 2 (?_next=2) returns
+ * the last row + next=null. Metadata has no columns (inference path).
+ */
+async function stubDatasettePaging(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    const orig = window.fetch.bind(window);
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    window.fetch = (async (input: unknown, init?: unknown) => {
+      const url = String(
+        typeof input === 'string' ? input : (input as { url?: string })?.url ?? input,
+      );
+      if (url.includes('pg.example.test')) {
+        const params = new URL(url).searchParams;
+        if (params.get('_size') === '0') return json({ ok: true, count: 3, primary_keys: ['id'] });
+        if (params.get('_next') === '2') return json({ ok: true, next: null, rows: [{ id: 3, v: 'c' }] });
+        return json({ ok: true, next: '2', rows: [{ id: 1, v: 'a' }, { id: 2, v: 'b' }] });
+      }
+      return orig(input as RequestInfo, init as RequestInit);
+    }) as typeof window.fetch;
+  });
+}
+
 /** Confirm the database table-picker (imports the currently-selected tables). */
 async function confirmPicker(page: import('@playwright/test').Page): Promise<void> {
   await page.locator('datasette-table-picker button[type="submit"]').click();
@@ -285,6 +313,29 @@ test.describe('datasette import', () => {
     expect(info.nameType).toBe('string');
     expect(info.capacityType).toBe('number');
     expect(info.commissionedType).toBe('datetime'); // name heuristic
+  });
+
+  test('follows the Datasette 1.0 `next` cursor across pages', async ({ page }) => {
+    await stubDatasettePaging(page);
+
+    await page.locator('app-shell header button[title="Import data from a URL"]').click();
+    await page.locator('import-dialog input[type="text"]').fill('https://pg.example.test/db/big');
+    await page.locator('import-dialog select').nth(1).selectOption('datasette');
+    await page.locator('import-dialog button[type="submit"]').click();
+
+    // Both pages (2 + 1 rows) must be imported, not just the first.
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ctx = (window as any).__easydb;
+          const tables = await ctx.store.tables.find();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const t = tables.find((x: any) => x.name === 'db/big');
+          return t ? (await ctx.store.rows(t.id).find()).length : -1;
+        }),
+      )
+      .toBe(3);
   });
 
   test('imports every non-hidden table from a Datasette database URL', async ({ page }) => {
