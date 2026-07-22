@@ -408,13 +408,11 @@ export async function discoverTables(fetchFn: FetchFn, ref: DatasetteRef): Promi
 
 /** Fetch a table's schema via ?_extra=columns,column_details,primary_keys,count. */
 export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promise<TableMeta> {
-  // No `_shape` (rejected by newer Datasette; objects are the default) and no
-  // `column_details` (unsupported on some instances — a bad `_extra` triggers a
-  // non-CORS error). Types are refined from the rows anyway.
-  const url = buildTableUrl(ref, {
-    _size: 0,
-    _extra: 'columns,count,primary_keys',
-  });
+  // Only `_extra=columns` — the valid extra for column names. `column_details`
+  // is NOT a valid `_extra` (a bad value triggers a non-CORS error that shows as
+  // "Load failed"), and `_shape` is dropped too (objects are the default). Row
+  // count and column types are derived from the rows, so nothing else is needed.
+  const url = buildTableUrl(ref, { _size: 0, _extra: 'columns' });
   const json: any = await fetchJson(fetchFn, url);
   const { columns, pks } = mapColumns(json);
   const typed = !!json && json.column_details != null;
