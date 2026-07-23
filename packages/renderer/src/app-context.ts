@@ -38,6 +38,24 @@ async function init(): Promise<AppContext> {
     for (const t of all) tableCache.set(t.id, t);
   });
 
+  // Seed the cache synchronously the instant a table is inserted/updated —
+  // before the async subscription above can fire. A freshly-connected live
+  // table (source-backed) must be routable the moment its grid panel reads
+  // `rows(id)`; otherwise the panel binds to the empty *local* collection and
+  // shows its columns but no rows until the next subscription tick (the
+  // "Connect shows no rows" bug — Import is unaffected as it has no `source`).
+  const cachingTables: typeof baseStore.tables = {
+    ...baseStore.tables,
+    insert: (doc) => {
+      tableCache.set(doc.id, doc);
+      return baseStore.tables.insert(doc);
+    },
+    upsert: (doc) => {
+      tableCache.set(doc.id, doc);
+      return baseStore.tables.upsert(doc);
+    },
+  };
+
   // Providers created lazily at `rows()` time need `backend.fetch`, which is
   // built on the HostApi below. Expose it through a getter so the ctx can be
   // constructed before the api without a second backend implementation.
@@ -53,7 +71,7 @@ async function init(): Promise<AppContext> {
   };
 
   const store = createRoutedDataStore({
-    base: baseStore,
+    base: { ...baseStore, tables: cachingTables },
     providers: registries.rowSources,
     tableById: (id) => tableCache.get(id),
     ctx: rowSourceCtx,

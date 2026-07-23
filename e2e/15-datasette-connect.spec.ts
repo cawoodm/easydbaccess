@@ -84,6 +84,14 @@ test.describe('datasette live connect', () => {
     // The grid panel mounted for the live table.
     await expect(page.locator(`#${panelDomId(tableId)}`)).toBeVisible();
 
+    // …and the grid actually RENDERS the two live rows. (Regression guard: a
+    // source-backed table must route to the live collection the instant its
+    // panel binds `rows(id)`; if the routing cache is cold it silently reads
+    // the empty local table — columns show, no rows.)
+    await expect(
+      page.locator(`#${panelDomId(tableId)}`).locator('tbody tr:not(.spacer)'),
+    ).toHaveCount(2);
+
     // Edit row id=1 through the routed store → the live collection writes back.
     const patched = await page.evaluate(async (id) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
