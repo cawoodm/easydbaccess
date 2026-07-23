@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>easyDBAccess v0.0.27</title>
+    <title>easyDBAccess v0.0.28</title>
     <style>
       html,
       body {
@@ -27,22 +27,39 @@
         overflow: hidden;
         pointer-events: none;
       }
+      /* Inner viewport that pan/zoom transforms. jsPanels mount here; it fills
+         the overlay, so panel geometry stays in the same layout coordinates
+         jsPanel already uses (transform is purely visual). */
+      #easydb-panels-viewport {
+        position: absolute;
+        inset: 0;
+        transform-origin: 0 0;
+        pointer-events: none;
+      }
       /* Panels themselves AND the minimized dock both need clicks. */
-      #easydb-panels > .jsPanel,
-      #easydb-panels > .jsPanel-minimized-container {
+      #easydb-panels-viewport > .jsPanel,
+      #easydb-panels-viewport > .jsPanel-minimized-container {
         pointer-events: auto;
       }
       /* Make sure the minimized dock sits at the bottom of the container
          (just above the footer) regardless of jsPanel's default. */
-      #easydb-panels > .jsPanel-minimized-container {
+      #easydb-panels-viewport > .jsPanel-minimized-container {
         bottom: 0;
         left: 0;
+      }
+      /* On touch devices the overlay itself becomes pointer-interactive so it
+         can catch pan/zoom gestures on the empty canvas background. On desktop
+         it stays click-through (pointer-events:none) — unchanged behaviour. */
+      @media (pointer: coarse) {
+        #easydb-panels {
+          pointer-events: auto;
+        }
       }
     </style>
   </head>
   <body>
     <app-shell></app-shell>
-    <div id="easydb-panels"></div>
+    <div id="easydb-panels"><div id="easydb-panels-viewport"></div></div>
     <filter-popover></filter-popover>
     <script type="module" src="/src/main.ts"></script>
   </body>

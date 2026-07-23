@@ -162,6 +162,27 @@ export class AppShell extends LitElement {
           background: rgba(59, 130, 246, 0.18);
         }
       }
+      /* Mobile / narrow: the header wraps. The app name + version take their
+         own line; the buttons wrap below as icon-only chips (labels hidden on
+         any button that carries an icon, so nothing goes blank). */
+      @media (max-width: 640px) {
+        header {
+          flex-wrap: wrap;
+          row-gap: 0.4rem;
+        }
+        header > strong {
+          flex: 1 0 100%;
+        }
+        input.search {
+          width: 100%;
+        }
+        button.primary:has(.icon-svg) .btn-label,
+        button.primary:has(.mi) .btn-label,
+        button.slot:has(.icon-svg) .btn-label,
+        button.slot:has(.mi) .btn-label {
+          display: none;
+        }
+      }
     `,
   ];
 
@@ -297,7 +318,7 @@ export class AppShell extends LitElement {
     return html`
       <button class=${cls} title=${b.tooltip ?? b.label} @click=${() => this.runSlot(b)}>
         ${renderButtonIcon(b.icon)}
-        <span>${b.label}</span>
+        <span class="btn-label">${b.label}</span>
       </button>
     `;
   }
@@ -305,7 +326,7 @@ export class AppShell extends LitElement {
   override render() {
     return html`
       <header>
-        <strong>easyDBAccess <span class="version">v0.0.27</span></strong>
+        <strong>easyDBAccess <span class="version">v0.0.28</span></strong>
         ${this.searchOpen || this.searchQuery.length > 0
           ? html`<input
               class="search"

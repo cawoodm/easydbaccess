@@ -16,9 +16,19 @@ import 'jspanel4/es6module/jspanel.css';
 
 import type { Table, WindowGeometry } from '@easydb/shared';
 import { getContext, type AppContext } from '../app-context.js';
+import { initPanZoom } from './panzoom.js';
 import '../table/data-table.js';
 import '../chrome/panel-search.js';
 import '../chrome/panel-footer.js';
+
+/** The element jsPanels mount into — the pan/zoom-transformed viewport. */
+function panelContainer(): HTMLElement {
+  return (
+    document.getElementById('easydb-panels-viewport') ??
+    document.getElementById('easydb-panels') ??
+    document.body
+  );
+}
 
 /** jsPanel instance — typed loose since the lib ships no .d.ts. */
 type Panel = {
@@ -51,6 +61,12 @@ export async function initWindowManager(): Promise<void> {
   initialized = true;
 
   const ctx = await getContext();
+
+  // Touch pan/zoom over the whole table canvas (mobile). No-op on desktop —
+  // the overlay only receives touch events under `@media (pointer: coarse)`.
+  const outer = document.getElementById('easydb-panels');
+  const viewport = document.getElementById('easydb-panels-viewport');
+  if (outer && viewport) initPanZoom(outer, viewport);
 
   // Initial population. Open in ascending saved-z order so jsPanel's internal
   // zi.next() counter reproduces the user's last layering — the panel that
@@ -170,7 +186,7 @@ function openPanel(t: Table, ctx: AppContext): void {
   const footer = document.createElement('panel-footer');
   (footer as HTMLElement & { tableId: string }).tableId = t.id;
 
-  const container = document.getElementById('easydb-panels') ?? document.body;
+  const container = panelContainer();
   const g = sanitizeGeometry(t.windowGeometry, container);
   const panelId = `panel-${cssSafe(t.id)}`;
 
