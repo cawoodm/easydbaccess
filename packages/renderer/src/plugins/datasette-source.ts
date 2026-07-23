@@ -103,7 +103,7 @@ export async function importDatasette(api: HostApi, input: string): Promise<void
   if (!ref.db) {
     throw new Error('URL must point to a Datasette database or table, e.g. .../<database>[/<table>]');
   }
-  const fetchFn = (u: string, o?: any) => api.backend.fetch(u, o);
+  const fetchFn = datasetteFetch(api);
 
   const probe = await probeDatasette(fetchFn, input);
   if (probe.kind === 'database') {
@@ -167,7 +167,7 @@ async function importTableRef(
   if (!workspaceId) throw new Error('datasette-source: no active workspace');
   if (!ref.db || !ref.table) throw new Error('datasette-source: table ref requires db + table');
 
-  const fetchFn = (u: string, o?: any) => api.backend.fetch(u, o);
+  const fetchFn = datasetteFetch(api);
 
   const { columns, pks, count } = await fetchTableMeta(fetchFn, ref);
   const { rows, truncated, hasMore, pages } = await fetchRows(fetchFn, ref, {
@@ -276,7 +276,7 @@ async function estimateBytes(
 async function importDatabaseRef(api: HostApi, ref: DatasetteRef, tables: DbTable[]): Promise<void> {
   if (tables.length === 0) throw new Error(`No tables found in database "${ref.db}".`);
 
-  const fetchFn = (u: string, o?: any) => api.backend.fetch(u, o);
+  const fetchFn = datasetteFetch(api);
   const workspaceId = api.workspaceId();
   const existing = workspaceId
     ? (await api.store.tables.find()).filter((t) => t.workspaceId === workspaceId)
@@ -344,6 +344,35 @@ async function importDatabaseRef(api: HostApi, ref: DatasetteRef, tables: DbTabl
       { kind: 'error', title: 'Datasette import' },
     );
   }
+}
+
+/**
+ * Wrap api.backend.fetch so a *rejected* fetch (network/CORS failure — e.g. the
+ * browser blocking a cross-origin redirect to a Cloudflare Turnstile challenge,
+ * which surfaces only as a bare "Load failed" / "Failed to fetch" TypeError)
+ * becomes a DatasetteError with an actionable reason. Non-JSON *responses* are
+ * handled separately by readDatasetteJson.
+ */
+function datasetteFetch(api: HostApi): (u: string, o?: any) => Promise<Response> {
+  return async (u, o) => {
+    try {
+      return await api.backend.fetch(u, o);
+    } catch (e) {
+      let host = u;
+      try {
+        host = new URL(u).host;
+      } catch {
+        /* keep raw */
+      }
+      throw new DatasetteError({
+        error:
+          `network error reaching ${host} (${(e as Error)?.message || 'fetch failed'}) — the request was ` +
+          `likely redirected to a cross-origin challenge page (e.g. Cloudflare Turnstile) that the browser ` +
+          `blocks, or CORS refused it. The instance may be rate-limiting; try again shortly or import fewer ` +
+          `tables at once.`,
+      });
+    }
+  };
 }
 
 function slug(s: string): string {

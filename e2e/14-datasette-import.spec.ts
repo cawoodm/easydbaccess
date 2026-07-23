@@ -228,6 +228,24 @@ async function stubDatasetteChallenge(page: import('@playwright/test').Page): Pr
   });
 }
 
+/**
+ * Stub a fetch that REJECTS (as the browser does when it blocks a cross-origin
+ * redirect to a challenge page with no CORS headers — surfaces as a bare
+ * "Load failed" / "Failed to fetch" TypeError, never a Response).
+ */
+async function stubDatasetteReject(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    const orig = window.fetch.bind(window);
+    window.fetch = (async (input: unknown, init?: unknown) => {
+      const url = String(
+        typeof input === 'string' ? input : (input as { url?: string })?.url ?? input,
+      );
+      if (url.includes('reject.example.test')) throw new TypeError('Load failed');
+      return orig(input as RequestInfo, init as RequestInit);
+    }) as typeof window.fetch;
+  });
+}
+
 /** Confirm the database table-picker (imports the currently-selected tables). */
 async function confirmPicker(page: import('@playwright/test').Page): Promise<void> {
   await page.locator('datasette-table-picker button[type="submit"]').click();
@@ -560,6 +578,28 @@ test.describe('datasette import', () => {
     });
     // Path-based dispatch would have created a single "catalog/overview" table.
     expect(names).not.toContain('catalog/overview');
+  });
+
+  test('surfaces a reason when the fetch is blocked (bare "Load failed")', async ({ page }) => {
+    await stubDatasetteReject(page);
+
+    await page.locator('app-shell header button[title="Import data from a URL"]').click();
+    await page
+      .locator('import-dialog input[type="text"]')
+      .fill('https://reject.example.test/db/tbl');
+    await page.locator('import-dialog select').nth(1).selectOption('datasette');
+    await page.locator('import-dialog button[type="submit"]').click();
+
+    // The bare "Load failed" is turned into an explained network/CORS/challenge reason.
+    const toast = page.locator('toast-host');
+    await expect(toast).toContainText(/cross-origin|Turnstile|network error/i);
+
+    const count = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      return (await ctx.store.tables.find()).length;
+    });
+    expect(count).toBe(0);
   });
 
   test('surfaces the HTTP code and reason when a request is not JSON', async ({ page }) => {
