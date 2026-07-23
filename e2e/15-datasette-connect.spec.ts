@@ -256,6 +256,65 @@ test.describe('datasette live connect', () => {
     expect(writes).toEqual([]);
   });
 
+  test('a connected live table has a Refresh button that re-pulls remote rows', async ({
+    page,
+    workspaceId,
+  }) => {
+    let people = [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }];
+    await page.route('https://ds.example/**', async (route) => {
+      const u = new URL(route.request().url());
+      const jm = (body: unknown) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          headers: { 'access-control-allow-origin': '*' },
+          body: JSON.stringify(body),
+        });
+      if (u.pathname === '/-/versions.json') return jm({ datasette: { version: '1.0a37' } });
+      if (u.pathname === '/-/actor.json') return jm({ ok: true, actor: null });
+      if (u.pathname === '/db/people.json') {
+        if (u.search.includes('_extra=primary_keys')) return jm({ ok: true, primary_keys: ['id'], rows: [] });
+        if (u.search.includes('_extra=columns')) return jm({ ok: true, columns: ['id', 'name'], rows: [] });
+        return jm({ ok: true, next: null, rows: people });
+      }
+      return route.fulfill({ status: 404, body: '{"ok":false}' });
+    });
+
+    await page.getByTitle(/Connect a live/).click();
+    const dlg = page.locator('datasette-connect-dialog dialog');
+    await dlg.locator('input[type="text"]').fill('https://ds.example/db/people');
+    await dlg.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect(dlg).toBeHidden();
+
+    const tableId: string = await (async () => {
+      await expect
+        .poll(() =>
+          page.evaluate(async (ws) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const ts = await (window as any).__easydb.store.tables.find();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            return ts.some((x: any) => x.workspaceId === ws && x.source?.type === 'datasette');
+          }, workspaceId),
+        )
+        .toBe(true);
+      return page.evaluate(async (ws) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ts = await (window as any).__easydb.store.tables.find();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return ts.find((x: any) => x.workspaceId === ws && x.source?.type === 'datasette').id;
+      }, workspaceId);
+    })();
+
+    const footer = page.locator(`#${panelDomId(tableId)} panel-footer`);
+    await expect(footer).toContainText('2 rows');
+    await expect(footer.getByRole('button', { name: 'Refresh' })).toBeVisible();
+
+    // Remote gains a row; Refresh reloads the shared collection → grid + footer update.
+    people = [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }, { id: 3, name: 'Carol' }];
+    await footer.getByRole('button', { name: 'Refresh' }).click();
+    await expect(footer).toContainText('3 rows');
+  });
+
   test('the connect dialog is prefilled with https://datasette.io', async ({ page }) => {
     await page.getByTitle(/Connect a live/).click();
     const dlg = page.locator('datasette-connect-dialog dialog');

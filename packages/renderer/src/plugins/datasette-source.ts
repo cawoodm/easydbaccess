@@ -8,7 +8,7 @@
 // Registers a URL source and a (table-only) drop handler. The Phase-2 live
 // read-write connector builds on the same datasette-client core.
 
-import type { ColumnSpec, HostApi, PluginModule, Row } from '@easydb/shared';
+import type { ColumnSpec, HostApi, PluginModule, Row, Table } from '@easydb/shared';
 import {
   parseDatasetteUrl,
   fetchDatabaseNames,
@@ -138,6 +138,18 @@ export function init(api: HostApi): void {
   // Phase-2a seam). Snapshot imports are unaffected — they create plain local
   // tables with no `source`. Guarded so a host without this seam still shows
   // the Connect button above (live routing just won't be available).
+  // A per-table Refresh button, shown only on Datasette-backed tables (live
+  // connections and imported snapshots). Live tables re-pull from the remote;
+  // snapshots re-fetch and replace their local rows.
+  api.ui.registerTableButton({
+    id: 'datasette:refresh',
+    label: 'Refresh',
+    icon: 'refresh',
+    tooltip: 'Reload this table from its Datasette backend',
+    visible: (table) => table.source?.type === 'datasette' || table.origin?.type === 'datasette',
+    onClick: (a, { tableId }) => refreshDatasetteTable(a, tableId),
+  });
+
   if (typeof api.registerRowSource === 'function') {
     api.registerRowSource({ type: 'datasette', create: createDatasetteCollection });
   }
@@ -301,6 +313,13 @@ async function importOneTable(
     code: slug(`${ref.db}-${ref.table}`),
     columns,
     view: 'table',
+    // Record where this snapshot came from so it can be refreshed later. This
+    // is NOT a live `source` — rows stay local; `origin` only says how to
+    // re-pull them.
+    origin: {
+      type: 'datasette',
+      url: `${ref.base}/${encodeURIComponent(ref.db!)}/${encodeURIComponent(ref.table!)}`,
+    },
     updatedAt: now,
   });
 
@@ -500,6 +519,57 @@ async function createLiveTable(
   if (existing) await api.store.tables.upsert(record);
   else await api.store.tables.insert(record);
   return tableId;
+}
+
+/**
+ * Refresh a Datasette-backed table. Live (`source`) tables re-pull from the
+ * shared remote collection (find() reloads its cache and notifies the grid).
+ * Snapshot (`origin`) tables re-fetch their rows and replace the local copy.
+ */
+async function refreshDatasetteTable(api: HostApi, tableId: string): Promise<void> {
+  const t = await api.store.tables.findOne(tableId);
+  if (!t) return;
+  try {
+    if (t.source?.type === 'datasette') {
+      // Live table: force the shared collection to re-read (find() alone would
+      // return its cache), which also notifies the grid + footer subscribers.
+      const coll = api.store.rows(tableId);
+      if (typeof coll.refresh === 'function') await coll.refresh();
+      const rows = await coll.find();
+      api.ui.dialogs.toast(`Reloaded ${rows.length} rows from Datasette.`, {
+        kind: 'success',
+        title: 'Refresh',
+      });
+    } else if (t.origin?.type === 'datasette') {
+      await refreshSnapshot(api, t);
+    }
+  } catch (err) {
+    const msg = err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
+    api.ui.dialogs.toast(`Refresh failed: ${msg}`, { kind: 'error', title: 'Refresh' });
+  }
+}
+
+/** Re-fetch a snapshot table's rows from its origin URL and replace them locally. */
+async function refreshSnapshot(api: HostApi, t: Table): Promise<void> {
+  const ref = parseDatasetteUrl(t.origin!.url);
+  const fetchFn = (u: string) => api.backend.fetch(u);
+  const { rows, hasMore, truncated } = await fetchRows(fetchFn, ref, {
+    maxRows: SETTINGS.maxImportRows,
+    pageSize: SETTINGS.pageSize,
+  });
+  const now = Date.now();
+  const rowColl = api.store.rows(t.id);
+  const old = await rowColl.find();
+  await rowColl.bulkRemove(old.map((r) => r.id));
+  await rowColl.bulkInsert(
+    rows.map((data) => ({ id: cryptoUUID(), tableId: t.id, data, updatedAt: now })),
+  );
+  await api.store.tables.patch(t.id, { updatedAt: now });
+  const capped = hasMore || truncated ? ` (capped at ${SETTINGS.maxImportRows})` : '';
+  api.ui.dialogs.toast(`Refreshed ${rows.length} rows from ${ref.db}/${ref.table}${capped}.`, {
+    kind: hasMore || truncated ? 'warning' : 'success',
+    title: 'Refresh',
+  });
 }
 
 function slug(s: string): string {

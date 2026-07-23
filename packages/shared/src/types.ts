@@ -79,7 +79,22 @@ export interface Table {
   filters?: Record<string, string> | undefined;
   /** Non-local backing store; absent ⇒ ordinary local table (unchanged behaviour). */
   source?: TableSource | undefined;
+  /**
+   * Where a *snapshot* table's rows were imported from, so it can be refreshed
+   * (re-fetched) later. Unlike `source`, this does NOT route reads to a remote
+   * — the rows live locally; `origin` just records how to re-pull them. Absent
+   * for live (`source`) tables and hand-made local tables.
+   */
+  origin?: TableOrigin | undefined;
   updatedAt: number;
+}
+
+/** Records the backend a snapshot table was imported from, for later refresh. */
+export interface TableOrigin {
+  /** Backend kind, e.g. 'datasette'. */
+  type: string;
+  /** Canonical source URL to re-import from (e.g. a Datasette table URL). */
+  url: string;
 }
 
 export interface Row {

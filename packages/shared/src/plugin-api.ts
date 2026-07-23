@@ -73,6 +73,13 @@ export interface DataCollection<T> {
   bulkRemove(ids: string[]): Promise<void>;
   /** Subscribe to changes; returns unsubscribe. */
   subscribe(fn: (docs: T[]) => void): Unsubscribe;
+  /**
+   * Optional: force a re-read from the backing store and notify subscribers.
+   * Local (Dexie) collections are always live so they don't implement it;
+   * remote-backed collections (e.g. Datasette) that cache reads expose it so a
+   * user "Refresh" can bypass the cache. Callers must feature-detect it.
+   */
+  refresh?(): Promise<void>;
 }
 
 export interface DataStore {
@@ -139,6 +146,11 @@ export interface TableButtonSpec {
   icon?: string;
   tooltip?: string;
   order?: number;
+  /**
+   * Optional per-table visibility predicate. Called with the table record;
+   * return false to hide the button for that table. Omitted ⇒ always shown.
+   */
+  visible?(table: Table): boolean;
   onClick(api: HostApi, ctx: { tableId: string }): void | Promise<void>;
 }
 

@@ -209,6 +209,12 @@ export function createDatasetteCollection(table: Table, ctx: RowSourceCtx): Data
         if (timer) clearInterval(timer);
       };
     },
+
+    // Force a fresh network read (bypassing the `loaded` cache) and notify
+    // subscribers — powers the per-table "Refresh" button.
+    async refresh() {
+      await loadAll();
+    },
   };
 }
 

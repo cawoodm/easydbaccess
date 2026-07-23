@@ -1,6 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import type { ColumnSpec, TableButtonSpec } from '@easydb/shared';
+import type { ColumnSpec, Table, TableButtonSpec } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from './material-icon-css.js';
 
@@ -57,7 +57,9 @@ export class PanelFooter extends LitElement {
   @property({ type: String }) tableId = '';
   @state() private rowCount = 0;
   @state() private tableButtons: TableButtonSpec[] = [];
+  @state() private table: Table | null = null;
   private unsubRows?: () => void;
+  private unsubTables?: () => void;
 
   override async connectedCallback() {
     super.connectedCallback();
@@ -67,11 +69,18 @@ export class PanelFooter extends LitElement {
     const rows = ctx.store.rows(this.tableId);
     this.unsubRows = rows.subscribe((r) => (this.rowCount = r.length));
     this.rowCount = (await rows.find()).length;
+    // Track this table's record so per-table button visibility (e.g. a
+    // backend Refresh button) reacts to it gaining/losing a source.
+    this.table = (await ctx.store.tables.findOne(this.tableId)) ?? null;
+    this.unsubTables = ctx.store.tables.subscribe((all) => {
+      this.table = all.find((t) => t.id === this.tableId) ?? null;
+    });
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
     this.unsubRows?.();
+    this.unsubTables?.();
   }
 
   private async addRow() {
@@ -114,12 +123,14 @@ export class PanelFooter extends LitElement {
       <button title="Edit columns" @click=${this.editColumns}>
         <span class="mi sm">view_column</span><span>Columns</span>
       </button>
-      ${this.tableButtons.map(
-        (b) => html`<button title=${b.tooltip ?? b.label} @click=${() => this.runTableButton(b)}>
-          ${b.icon ? html`<span class="mi sm">${b.icon}</span>` : ''}
-          <span>${b.label}</span>
-        </button>`,
-      )}
+      ${this.tableButtons
+        .filter((b) => !b.visible || (this.table != null && b.visible(this.table)))
+        .map(
+          (b) => html`<button title=${b.tooltip ?? b.label} @click=${() => this.runTableButton(b)}>
+            ${b.icon ? html`<span class="mi sm">${b.icon}</span>` : ''}
+            <span>${b.label}</span>
+          </button>`,
+        )}
       <span class="spacer"></span>
       <span class="count">${this.rowCount} row${this.rowCount === 1 ? '' : 's'}</span>
     `;

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { test, expect } from './fixtures.js';
+import { panelDomId } from './helpers.js';
 
 /**
  * Importing an entire Datasette DATABASE (multiple tables) end-to-end.
@@ -181,6 +182,71 @@ test.describe('datasette import — whole database', () => {
     expect(execTerms.columns.executive_id).toBe('number');
     expect(execTerms.columns.start).toBe('datetime');
     expect(execTerms.columns.type).toBe('string');
+  });
+
+  test('an imported table records its origin and the Refresh button re-pulls it', async ({
+    page,
+    workspaceId,
+  }) => {
+    // Override the suite route with a controllable single-table database.
+    let people = [{ id: 1, name: 'Alice' }];
+    await page.route('https://datasette.io/**', (route) => {
+      const u = new URL(route.request().url());
+      if (u.pathname === '/mini.json')
+        return route.fulfill(
+          json({ ok: true, tables: [{ name: 'people', count: people.length, primary_keys: ['id'] }] }),
+        );
+      if (u.pathname === '/mini/people.json') {
+        if ((u.searchParams.get('_extra') ?? '').includes('columns'))
+          return route.fulfill(json({ ok: true, columns: ['id', 'name'], rows: [] }));
+        return route.fulfill(json({ ok: true, next: null, rows: people }));
+      }
+      return route.fulfill({ status: 404, body: '{"ok":false}' });
+    });
+
+    await page.getByTitle('Import data from a URL').click();
+    const importDialog = page.locator('import-dialog dialog');
+    await importDialog.locator('input[type="text"]').fill('https://datasette.io/mini');
+    await importDialog.getByRole('button', { name: 'Import' }).click();
+    await page.locator('table-select-dialog dialog').getByRole('button', { name: /^Import \(1\)$/ }).click();
+
+    const tableId: string = await (async () => {
+      await expect
+        .poll(() =>
+          page.evaluate(async (ws) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const ts = await (window as any).__easydb.store.tables.find();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            return ts.some((t: any) => t.workspaceId === ws && t.name === 'mini/people');
+          }, workspaceId),
+        )
+        .toBe(true);
+      return page.evaluate(async (ws) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ts = await (window as any).__easydb.store.tables.find();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return ts.find((t: any) => t.workspaceId === ws && t.name === 'mini/people').id;
+      }, workspaceId);
+    })();
+
+    // The snapshot records where to re-pull from (not a live `source`).
+    const rec = await page.evaluate(async (id) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const t = await (window as any).__easydb.store.tables.findOne(id);
+      return { origin: t.origin, hasSource: t.source != null };
+    }, tableId);
+    expect(rec).toEqual({
+      origin: { type: 'datasette', url: 'https://datasette.io/mini/people' },
+      hasSource: false,
+    });
+
+    const footer = page.locator(`#${panelDomId(tableId)} panel-footer`);
+    await expect(footer).toContainText('1 row');
+
+    // Backend gains a row; Refresh re-fetches and replaces the local snapshot.
+    people = [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }];
+    await footer.getByRole('button', { name: 'Refresh' }).click();
+    await expect(footer).toContainText('2 rows');
   });
 });
 
