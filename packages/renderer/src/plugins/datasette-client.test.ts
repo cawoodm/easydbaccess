@@ -225,12 +225,13 @@ describe('fetchRows follows the `next` token', () => {
     expect(out.pages).toBe(2);
     expect(out.hasMore).toBe(false);
     expect(out.truncated).toBe(false);
-    // Second request rebuilt the table URL with the token, a numeric _size
-    // (not `_size=max`, which errors on datasette.io), and no `_shape`.
+    // Second request rebuilt the table URL with the token ALONE — no `_size`
+    // and no `_shape`. Keeping the follow-up to a single `_`-param avoids
+    // datasette.io's Cloudflare WAF, which challenges `.json` requests carrying
+    // two or more `_`-prefixed params (a `_size`+`_next` pair would 302).
     expect(seen).toHaveLength(2);
     expect(seen[1]).toContain('_next=100');
-    expect(seen[1]).toContain('_size=1000');
-    expect(seen[1]).not.toContain('_size=max');
+    expect(seen[1]).not.toContain('_size');
     expect(seen[1]).not.toContain('_shape');
   });
 
@@ -275,10 +276,11 @@ describe('inferColumnsFromRows (fallback when ?_extra= gives no schema)', () => 
   });
 });
 
-// --- Regression: real ?_size=0&_extra=columns response from datasette.io -----
+// --- Regression: real ?_extra=columns response from datasette.io ------------
 // That instance answers with a BARE column-name array — no column_details, no
-// primary_keys, no count — and (with _size=0) no rows. So every mapped type
-// defaults to 'string' and must be refined from the separately-fetched rows.
+// primary_keys, no count. So every mapped type defaults to 'string' and must be
+// refined from the separately-fetched rows. (The probe sends `_extra=columns`
+// as its only param — see fetchTableMeta on why a second `_`-param would 302.)
 
 const GPP_META = {
   ok: true,
@@ -321,9 +323,10 @@ describe('mapColumns / fetchTableMeta against the bare-name schema response', ()
     expect(meta.typed).toBe(false);
     expect(meta.count).toBeNull();
     expect(meta.columns).toHaveLength(GPP_META.columns.length);
-    // Requested the schema-probe shape.
-    expect(seen[0]).toContain('_extra=');
-    expect(seen[0]).toContain('_size=0');
+    // Requested the schema-probe shape: `_extra=columns` as the ONLY param
+    // (no `_size` — a second `_`-param would trip datasette.io's WAF).
+    expect(seen[0]).toContain('_extra=columns');
+    expect(seen[0]).not.toContain('_size');
   });
 });
 
@@ -522,7 +525,7 @@ describe('fetchPrimaryKeys', () => {
     const pks = await fetchPrimaryKeys(fetchFn, parseDatasetteUrl('https://x.datasette.io/db/t'));
     expect(pks).toEqual(['id']);
     expect(seen[0]).toContain('_extra=primary_keys');
-    expect(seen[0]).toContain('_size=0');
+    expect(seen[0]).not.toContain('_size'); // single `_`-param only (WAF-safe)
   });
 });
 

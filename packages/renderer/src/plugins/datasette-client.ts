@@ -418,13 +418,17 @@ export async function discoverTables(fetchFn: FetchFn, ref: DatasetteRef): Promi
   return out;
 }
 
-/** Fetch a table's schema via ?_extra=columns,column_details,primary_keys,count. */
+/** Fetch a table's schema via ?_extra=columns. */
 export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promise<TableMeta> {
-  // Request `_extra=columns` alone: that returns the `columns` name list.
-  // `column_details` is not a real extra (the response just omits column info),
-  // and combining extras (e.g. adding count/primary_keys) drops the `columns`
-  // key — so keep it to `columns`. Column types are refined from the rows.
-  const url = buildTableUrl(ref, { _size: 0, _extra: 'columns' });
+  // `_extra=columns` alone returns the `columns` name list (+ a default page of
+  // rows we ignore). Deliberately the ONLY query param: some hosts front
+  // Datasette with a WAF (datasette.io sits behind Cloudflare) that challenges
+  // any `.json` request carrying two or more `_`-prefixed params. Adding
+  // `_size=0` here would turn every schema probe into a 302 → Turnstile page,
+  // which then flags the whole browser session so even plain row fetches get
+  // bounced — the "columns show but no rows" symptom. Column types are refined
+  // from the rows, and `column_details` is not a real extra (it's just omitted).
+  const url = buildTableUrl(ref, { _extra: 'columns' });
   const json: any = await fetchJson(fetchFn, url);
   const { columns, pks } = mapColumns(json);
   const typed = !!json && json.column_details != null;
@@ -486,11 +490,16 @@ export async function fetchRows(
 
     // Follow the ready-made cursor URL if present; otherwise rebuild the table
     // URL with the `next` token (datasette.io sends only the token, no next_url).
+    // The rebuilt URL carries `_next` ALONE — no `_size` — so it stays a single
+    // `_`-param and doesn't trip datasette.io's Cloudflare WAF (which challenges
+    // any `.json` request with two or more `_`-prefixed params; see
+    // fetchTableMeta). Subsequent pages fall back to Datasette's default page
+    // size, which is fine — we accumulate rows to the cap regardless.
     const nextPage =
       info.nextUrl != null
         ? info.nextUrl
         : info.nextToken != null
-          ? buildTableUrl(ref, { ...baseParams, _next: info.nextToken })
+          ? buildTableUrl(ref, { _next: info.nextToken })
           : null;
 
     // Keep paging while there's a cursor, we're under the cap, and the page
@@ -627,7 +636,8 @@ export async function upsertRows(
 
 /** Fetch a table's primary-key columns (`?_extra=primary_keys`). [] if none. */
 export async function fetchPrimaryKeys(fetchFn: FetchFn, ref: DatasetteRef): Promise<string[]> {
-  const url = buildTableUrl(ref, { _size: 0, _extra: 'primary_keys' });
+  // Single `_`-param only — see fetchTableMeta for why `_size` is not added.
+  const url = buildTableUrl(ref, { _extra: 'primary_keys' });
   const json = await fetchJson(fetchFn, url);
   return Array.isArray(json?.primary_keys) ? json.primary_keys : [];
 }
