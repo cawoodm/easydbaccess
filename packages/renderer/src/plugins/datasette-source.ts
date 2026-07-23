@@ -355,6 +355,7 @@ async function openConnectDialog(api: HostApi): Promise<void> {
   const dlg = DatasetteConnectDialog.instance ?? mountConnectDialog();
   const fetchFn = (u: string, o?: unknown) => api.backend.fetch(u, o as never);
   const result = await dlg.open({
+    initialUrl: 'https://datasette.io',
     async onTest(url, token) {
       const ref = parseDatasetteUrl(url);
       const status = await testConnection(fetchFn, ref.base, { token: token || undefined });

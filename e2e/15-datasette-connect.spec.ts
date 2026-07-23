@@ -256,6 +256,13 @@ test.describe('datasette live connect', () => {
     expect(writes).toEqual([]);
   });
 
+  test('the connect dialog is prefilled with https://datasette.io', async ({ page }) => {
+    await page.getByTitle(/Connect a live/).click();
+    const dlg = page.locator('datasette-connect-dialog dialog');
+    await expect(dlg).toBeVisible();
+    await expect(dlg.locator('input[type="text"]')).toHaveValue('https://datasette.io');
+  });
+
   test('a database URL lists that database\'s tables (no db picker) and connects them', async ({
     page,
     workspaceId,
