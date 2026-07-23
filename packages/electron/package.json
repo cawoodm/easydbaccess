@@ -1,6 +1,6 @@
 {
   "name": "@easydb/electron",
-  "version": "0.0.8",
+  "version": "0.0.10",
   "private": true,
   "description": "easyDBAccess desktop shell — Electron wrapper around the renderer.",
   "author": "Marc Cawood",

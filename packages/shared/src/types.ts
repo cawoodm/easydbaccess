@@ -44,6 +44,28 @@ export interface Workspace {
   pluginUrls: string[];
 }
 
+/**
+ * Optional backing-store descriptor for a table. Absent ⇒ the table is a
+ * plain local (Dexie) table and behaves exactly as it always has. When
+ * present, the routed DataStore hands `rows(tableId)` to the
+ * `RowCollectionProvider` registered for `type` (see plugin-api.ts), letting
+ * a plugin back the table with live remote data instead of IndexedDB.
+ */
+export interface TableSource {
+  /** Provider key, matched against a registered `RowCollectionProvider.type` (e.g. 'datasette'). */
+  type: string;
+  /** Provider-specific connection/config, e.g. `{ base, db, table, pks, connectionId }`. */
+  config: Record<string, unknown>;
+  /** Resolved write capability; absent ⇒ unknown/treated read-only until probed. */
+  writable?: boolean | undefined;
+  /**
+   * When true, the grid skips its in-memory sort/filter because the provider
+   * applies them server-side and the snapshot is only the current window.
+   * Absent/false ⇒ the grid sorts/filters the full snapshot as usual.
+   */
+  serverQuery?: boolean | undefined;
+}
+
 export interface Table {
   id: string;
   workspaceId: string;
@@ -55,7 +77,24 @@ export interface Table {
   sortColumn?: string | undefined;
   sortAsc?: boolean | undefined;
   filters?: Record<string, string> | undefined;
+  /** Non-local backing store; absent ⇒ ordinary local table (unchanged behaviour). */
+  source?: TableSource | undefined;
+  /**
+   * Where a *snapshot* table's rows were imported from, so it can be refreshed
+   * (re-fetched) later. Unlike `source`, this does NOT route reads to a remote
+   * — the rows live locally; `origin` just records how to re-pull them. Absent
+   * for live (`source`) tables and hand-made local tables.
+   */
+  origin?: TableOrigin | undefined;
   updatedAt: number;
+}
+
+/** Records the backend a snapshot table was imported from, for later refresh. */
+export interface TableOrigin {
+  /** Backend kind, e.g. 'datasette'. */
+  type: string;
+  /** Canonical source URL to re-import from (e.g. a Datasette table URL). */
+  url: string;
 }
 
 export interface Row {

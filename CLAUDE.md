@@ -42,6 +42,21 @@ All scripts run from the repo root (`npm` workspaces). Node ≥24 required
 The `dev` script chains renderer + server with `&`; on Windows prefer running
 `dev:renderer` and `dev:server` in separate terminals.
 
+## Versioning
+
+**Every commit bumps the patch version**, and every place the version is shown
+is kept in sync with `package.json` (the single source of truth): the
+`<title>` in `packages/renderer/index.html` **and** the header-bar
+`<span class="version">` in `packages/renderer/src/chrome/app-shell.ts`. This
+is automated by `.githooks/pre-commit`, which runs `scripts/bump-version.mjs`
+(increments `package.json` `version`, rewrites both displayed spots, and stages
+the files). Enable the
+hook in a fresh clone with `git config core.hooksPath .githooks` (git config is
+local, so it must be re-run per clone). If you commit somewhere the hook isn't
+active, run it manually first: `node scripts/bump-version.mjs` (or
+`--sync-only` to only repair index.html drift without bumping). The publish
+scripts read the version from `package.json`.
+
 ## Architecture in one paragraph
 
 Three logical pieces:
@@ -84,7 +99,7 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
 - **Built-in features ARE plugins.** The full built-in roster (`plugin-host/loader.ts`)
   is currently: `new-table-button`, `csv-import`, `json-import`, `csv-export`,
   `dump-export`, `sql-export`, `gist-sync`, `server-sync`, `plugin-manager-button`,
-  `cell-color`, `cell-image`, `sample-data`, `auto-sync`. Don't
+  `cell-color`, `cell-image`, `import-data`, `auto-sync`. Don't
   add a feature to the core if it can be a plugin.
 - `meta.optional = true` marks a built-in as user-toggleable. The Plugin
   Manager dialog surfaces these; disabled state is stored under the synthetic

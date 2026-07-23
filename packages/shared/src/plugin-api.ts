@@ -7,7 +7,7 @@
  * host treats it as a mutable namespace.
  */
 
-import type { ColumnSpec, PluginRecord, Row, Setting, Table, Workspace } from './types.js';
+import type { ColumnSpec, PluginRecord, Row, Setting, Table, TableSource, Workspace } from './types.js';
 
 // -- Plugin module shape --------------------------------------------------
 
@@ -73,6 +73,13 @@ export interface DataCollection<T> {
   bulkRemove(ids: string[]): Promise<void>;
   /** Subscribe to changes; returns unsubscribe. */
   subscribe(fn: (docs: T[]) => void): Unsubscribe;
+  /**
+   * Optional: force a re-read from the backing store and notify subscribers.
+   * Local (Dexie) collections are always live so they don't implement it;
+   * remote-backed collections (e.g. Datasette) that cache reads expose it so a
+   * user "Refresh" can bypass the cache. Callers must feature-detect it.
+   */
+  refresh?(): Promise<void>;
 }
 
 export interface DataStore {
@@ -83,6 +90,42 @@ export interface DataStore {
   settings: DataCollection<Setting>;
   plugins: DataCollection<PluginRecord>;
 }
+
+// -- Row-source providers (routing seam) ----------------------------------
+
+/**
+ * Context handed to a `RowCollectionProvider` when the store instantiates a
+ * non-local collection for a sourced table. Deliberately free of DOM/UI
+ * surface so providers stay storage-agnostic and unit-testable:
+ *  - `backend.fetch` is the CORS-aware fetch (direct, or proxied through the
+ *    Hono `/fetch` route when a sync server is configured).
+ *  - `events` lets a provider emit `row:*` events on remote mutations.
+ *  - `settings` exposes device-local settings (thresholds, connection refs)
+ *    — never the workspace dump, so tokens stay off synced data.
+ */
+export interface RowSourceCtx {
+  backend: Backend;
+  events: EventBus;
+  settings: DataCollection<Setting>;
+  workspaceId(): string | null;
+}
+
+/**
+ * Backs certain tables with a non-local row collection (e.g. a live remote
+ * database). Registered via `HostApi.registerRowSource`. When a Table carries
+ * a `source` descriptor whose `type` equals this provider's `type`, the store
+ * routes `rows(tableId)` to `create(table, ctx)` instead of the default local
+ * (Dexie) collection. Tables without a matching `source` are never routed, so
+ * registering a provider cannot change how existing local tables behave.
+ */
+export interface RowCollectionProvider {
+  /** Matched against `TableSource.type`. */
+  type: string;
+  create(table: Table, ctx: RowSourceCtx): DataCollection<Row>;
+}
+
+/** Re-export so downstream code can import the descriptor from the contract. */
+export type { TableSource };
 
 // -- UI slot registries ---------------------------------------------------
 
@@ -103,6 +146,11 @@ export interface TableButtonSpec {
   icon?: string;
   tooltip?: string;
   order?: number;
+  /**
+   * Optional per-table visibility predicate. Called with the table record;
+   * return false to hide the button for that table. Omitted ⇒ always shown.
+   */
+  visible?(table: Table): boolean;
   onClick(api: HostApi, ctx: { tableId: string }): void | Promise<void>;
 }
 
@@ -256,6 +304,13 @@ export interface HostApi {
   ui: UiRegistry;
   windows: WindowManager;
   backend: Backend;
+  /**
+   * Register a provider that backs `source`-carrying tables with a non-local
+   * row collection (e.g. a live remote database). Returns an unregister fn.
+   * This is a data-layer seam, not a UI slot — hence it sits on the HostApi
+   * rather than `ui`. Tables without a matching `source` are unaffected.
+   */
+  registerRowSource(provider: RowCollectionProvider): Unregister;
   /** The current workspace id, when one is selected. */
   workspaceId(): string | null;
   /** Plugin's own URL — useful for relative resource loads. */

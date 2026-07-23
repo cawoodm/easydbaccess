@@ -6,6 +6,7 @@ import type {
   PluginModule,
   WindowGeometry,
 } from '@easydb/shared';
+import { chooseTables } from '../dialogs/table-select-dialog.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'json-import',
@@ -55,7 +56,7 @@ async function importJsonFile(api: HostApi, file: File): Promise<void> {
 
 /**
  * Imports a JSON dump given its text body and a source filename. Used by both
- * the drag-and-drop path and the sample-data plugin's URL fetch path. Behavior
+ * the drag-and-drop path and the import-data plugin's URL fetch path. Behavior
  * is identical: parse → detect shape → prompt user on collisions → write.
  */
 export async function importJsonText(
@@ -79,8 +80,24 @@ export async function importJsonText(
   }
 
   const baseName = filename.replace(/\.db\.json$/i, '').replace(/\.json$/i, '') || 'imported';
-  const tables = parsedToTables(parsed, baseName);
-  if (tables.length === 0) return;
+  const allTables = parsedToTables(parsed, baseName);
+  if (allTables.length === 0) return;
+
+  // Multi-table dumps: let the user pick which tables to import (all selected
+  // by default). Single-table dumps skip the picker.
+  let tables = allTables;
+  if (allTables.length > 1) {
+    const picked = await chooseTables(
+      allTables.map((t) => ({ name: t.name, size: t.rows.length })),
+      {
+        title: 'Import tables',
+        message: `"${filename}" contains ${allTables.length} tables. Choose which to import.`,
+        confirmLabel: 'Import',
+      },
+    );
+    if (!picked) return; // cancelled
+    tables = picked.map((i) => allTables[i]!);
+  }
 
   // If any imported table name overlaps an existing one OR this is clearly a
   // multi-table dump, ask the user how to resolve. Single-table imports with

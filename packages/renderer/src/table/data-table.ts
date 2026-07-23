@@ -343,7 +343,18 @@ export class DataTable extends LitElement {
     );
     const rowColl = ctx.store.rows(this.tableId);
     this.unsubscribe = rowColl.subscribe((r) => (this.rows = r));
-    this.rows = await rowColl.find();
+    try {
+      this.rows = await rowColl.find();
+    } catch (err) {
+      // A remote-backed table (e.g. a live Datasette source) can fail to load
+      // its rows — a blocked cross-origin fetch, a bot challenge, an auth
+      // error. Surface it instead of leaving a silently empty grid.
+      this.rows = [];
+      ctx.api.ui.dialogs.toast(`Couldn't load rows: ${(err as Error)?.message ?? String(err)}`, {
+        kind: 'error',
+        title: 'Load failed',
+      });
+    }
   }
 
   private applyTable(table: Table) {
@@ -380,10 +391,21 @@ export class DataTable extends LitElement {
         return;
       }
     }
-    await ctx.store.rows(this.tableId).patch(row.id, {
-      data: { ...row.data, [field]: value },
-      updatedAt: Date.now(),
-    });
+    try {
+      await ctx.store.rows(this.tableId).patch(row.id, {
+        data: { ...row.data, [field]: value },
+        updatedAt: Date.now(),
+      });
+    } catch (err) {
+      // Remote (e.g. Datasette) sources can reject a write — read-only table,
+      // expired token, server error. Surface it and revert the cell instead of
+      // leaving an unhandled rejection and a stale-looking value.
+      await ctx.api.ui.dialogs.alert(
+        (err as Error)?.message ?? 'Could not save the change.',
+        'Save failed',
+      );
+      this.requestUpdate();
+    }
   }
 
   private renderCell(row: Row, col: ColumnSpec) {
@@ -463,7 +485,14 @@ export class DataTable extends LitElement {
 
   private async deleteRow(rowId: string) {
     const ctx = await getContext();
-    await ctx.store.rows(this.tableId).remove(rowId);
+    try {
+      await ctx.store.rows(this.tableId).remove(rowId);
+    } catch (err) {
+      await ctx.api.ui.dialogs.alert(
+        (err as Error)?.message ?? 'Could not delete the row.',
+        'Delete failed',
+      );
+    }
   }
 
   /**

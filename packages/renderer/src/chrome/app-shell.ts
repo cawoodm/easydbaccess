@@ -1,6 +1,7 @@
 import type { ButtonSpec, HostApi } from '@easydb/shared';
 import { LitElement, css, html } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
+import { unsafeSVG } from 'lit/directives/unsafe-svg.js';
 import { getContext } from '../app-context.js';
 import '../dialogs/csv-paste-dialog.js';
 import type { CsvPasteDialog } from '../dialogs/csv-paste-dialog.js';
@@ -14,6 +15,19 @@ import '../dialogs/toast-host.js';
 import { materialIconStyles } from './material-icon-css.js';
 import './table-list.js';
 import './workspace-selector.js';
+
+/**
+ * Render a button's `icon`. An icon string that begins with `<svg` is rendered
+ * as inline SVG (sized + coloured by CSS); anything else is treated as a
+ * Material Icons ligature name, the long-standing default.
+ */
+function renderButtonIcon(icon: string | undefined) {
+  if (!icon) return '';
+  if (icon.trimStart().startsWith('<svg')) {
+    return html`<span class="icon-svg">${unsafeSVG(icon)}</span>`;
+  }
+  return html`<span class="mi sm">${icon}</span>`;
+}
 
 @customElement('app-shell')
 export class AppShell extends LitElement {
@@ -105,6 +119,17 @@ export class AppShell extends LitElement {
       }
       button.icon-btn:hover {
         background: #374151;
+      }
+      /* Inline-SVG button icons (icon strings that start with "<svg"). The svg
+         inherits the button's text colour via fill/stroke: currentColor. */
+      .icon-svg {
+        display: inline-flex;
+        align-items: center;
+      }
+      .icon-svg svg {
+        width: 1.05rem;
+        height: 1.05rem;
+        display: block;
       }
       main {
         flex: 1;
@@ -271,7 +296,7 @@ export class AppShell extends LitElement {
     const cls = where === 'header' || b.variant === 'primary' ? 'primary' : 'slot';
     return html`
       <button class=${cls} title=${b.tooltip ?? b.label} @click=${() => this.runSlot(b)}>
-        ${b.icon ? html`<span class="mi sm">${b.icon}</span>` : ''}
+        ${renderButtonIcon(b.icon)}
         <span>${b.label}</span>
       </button>
     `;
@@ -280,7 +305,7 @@ export class AppShell extends LitElement {
   override render() {
     return html`
       <header>
-        <strong>easyDBAccess <span class="version">v0.0.3</span></strong>
+        <strong>easyDBAccess <span class="version">v0.0.27</span></strong>
         ${this.searchOpen || this.searchQuery.length > 0
           ? html`<input
               class="search"

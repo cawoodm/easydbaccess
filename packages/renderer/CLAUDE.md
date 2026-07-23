@@ -12,7 +12,7 @@ Lit web components + Dexie + Vite. The identical bundle runs in the browser
 | `src/dialogs/` | Promise-returning host dialogs (`host-dialogs.ts` — alert/prompt/confirm/choice), `toast-host.ts`, `new-table-dialog`, `csv-paste-dialog`, `plugin-manager-dialog`, `draggable.ts` helper. |
 | `src/events/` | The typed event bus (`AppEvents` from shared). |
 | `src/plugin-host/` | `loader.ts` (built-in plugin list + lifecycle), `url-loader.ts` (URL-fetched plugins with localStorage cache), `registries.ts` (slot lists), `api-factory.ts` (`HostApi` constructor). |
-| `src/plugins/` | Built-in plugins. **Each one IS a plugin** — same contract as URL-loaded modules. Current roster: `new-table-button`, `plugin-manager-button`, `csv-import`, `json-import`, `csv-export`, `dump-export`, `sql-export`, `gist-sync`, `server-sync` (+ `server-sync-core`), `auto-sync`, `cell-color`, `cell-image`, `sample-data`. (`cell-link` ships in the catalog at `public/plugins/`, not bundled.) |
+| `src/plugins/` | Built-in plugins. **Each one IS a plugin** — same contract as URL-loaded modules. Current roster: `new-table-button`, `plugin-manager-button`, `csv-import`, `json-import`, `csv-export`, `dump-export`, `sql-export`, `gist-sync`, `server-sync` (+ `server-sync-core`), `auto-sync`, `cell-color`, `cell-image`, `import-data`. (`cell-link` ships in the catalog at `public/plugins/`, not bundled.) |
 | `src/table/` | `<data-table>` element. Cell rendering looks up `registries.cellRenderers` first, falls back to the built-in switch. |
 | `src/window-mgr/` | `jspanel-manager.ts` — jsPanel wrapper. Each Table in the workspace renders as a draggable/resizable jsPanel containing a `<data-table>`. Geometry persisted to `Table.windowGeometry`. Panels mount into `document.body` (jsPanel's default). |
 | `src/main.ts` | App entry. Imports the shell + filter popover and lets `app-context.ts` lazy-init on first `getContext()`. |
@@ -68,6 +68,23 @@ filter on queries. There is **not** one Dexie table per logical row table.
 Subscriptions use Dexie's `liveQuery` — the closure re-runs whenever any
 write hits the underlying table. Chrome callers always consume the full
 result set, so the broader re-run granularity is harmless.
+
+## Row-source routing (`routed-data-store.ts`)
+
+A table may carry an optional `source: TableSource` descriptor (in
+`@easydb/shared`). When present, `createRoutedDataStore` — a thin decorator
+`app-context.ts` wraps around the Dexie store — routes `rows(tableId)` to the
+`RowCollectionProvider` a plugin registered via `api.registerRowSource(...)`
+for `source.type`, instead of the local Dexie collection. Everything else on
+the store passes straight through.
+
+**The routing is a strict no-op for local tables.** A table with no `source`,
+a `source.type` with no registered provider, or one not yet in the sync-primed
+`tableCache`, all resolve to `base.rows(tableId)` — identical to the
+un-decorated store. `data-table.ts` and every other `store.rows(...)` caller
+are untouched. This is the one contained core seam for the live-Datasette
+connector (design: the `eda-datasette-integration` plan); the actual remote
+`DataCollection` provider is a later phase.
 
 ## Lit + decorator gotcha
 

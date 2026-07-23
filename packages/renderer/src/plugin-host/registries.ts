@@ -4,6 +4,7 @@ import type {
   DropHandler,
   ExporterSpec,
   ImporterSpec,
+  RowCollectionProvider,
   TableButtonSpec,
   UiRegistry,
   Unregister,
@@ -31,6 +32,8 @@ export interface Registries {
   cellRenderers: Map<string, string>;
   rowRenderers: Map<string, string>;
   tableRenderers: Map<string, string>;
+  /** Row-collection providers keyed by `RowCollectionProvider.type`. */
+  rowSources: Map<string, RowCollectionProvider>;
 }
 
 export function createRegistries(): Registries {
@@ -45,6 +48,7 @@ export function createRegistries(): Registries {
     cellRenderers: new Map(),
     rowRenderers: new Map(),
     tableRenderers: new Map(),
+    rowSources: new Map(),
   };
 }
 

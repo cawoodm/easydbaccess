@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# Bump the build version and keep packages/renderer/index.html's <title> in
+# sync on every commit. Enable in a fresh clone with:
+#   git config core.hooksPath .githooks
+node "$(git rev-parse --show-toplevel)/scripts/bump-version.mjs" || exit 1

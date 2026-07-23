@@ -2,6 +2,8 @@ import type {
   DataStore,
   EventBus,
   HostApi,
+  RowCollectionProvider,
+  Unregister,
   WindowHandle,
   WindowManager,
   WindowSpec,
@@ -22,6 +24,14 @@ export interface ApiFactoryOpts {
  */
 export function createHostApi(opts: ApiFactoryOpts): HostApi {
   const ui = createUiRegistry(opts.registries);
+
+  const rowSources = opts.registries.rowSources;
+  const registerRowSource = (provider: RowCollectionProvider): Unregister => {
+    rowSources.set(provider.type, provider);
+    return () => {
+      if (rowSources.get(provider.type) === provider) rowSources.delete(provider.type);
+    };
+  };
 
   const windows: WindowManager = {
     open(spec: WindowSpec): WindowHandle {
@@ -45,6 +55,7 @@ export function createHostApi(opts: ApiFactoryOpts): HostApi {
     events: opts.events,
     ui,
     windows,
+    registerRowSource,
     backend: {
       /**
        * Routes through the Hono `/fetch` proxy when the user has configured

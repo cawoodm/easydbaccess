@@ -2,6 +2,7 @@ import type { HostApi, PluginModule } from '@easydb/shared';
 import * as csvImport from '../plugins/csv-import.js';
 import * as csvExport from '../plugins/csv-export.js';
 import * as jsonImport from '../plugins/json-import.js';
+import * as datasetteSource from '../plugins/datasette-source.js';
 import * as dumpExport from '../plugins/dump-export.js';
 import * as sqlExport from '../plugins/sql-export.js';
 import * as gistSync from '../plugins/gist-sync.js';
@@ -12,7 +13,7 @@ import * as coreRenderers from '../plugins/core-renderers.js';
 import * as cellColor from '../plugins/cell-color.js';
 import * as cellImage from '../plugins/cell-image.js';
 import * as cellLink from '../plugins/cell-link.js';
-import * as sampleData from '../plugins/sample-data.js';
+import * as importData from '../plugins/import-data.js';
 import * as autoSync from '../plugins/auto-sync.js';
 
 /**
@@ -28,6 +29,7 @@ const builtins: PluginModule[] = [
   newTableButton,
   csvImport,
   jsonImport,
+  datasetteSource,
   csvExport,
   dumpExport,
   sqlExport,
@@ -38,7 +40,7 @@ const builtins: PluginModule[] = [
   cellColor,
   cellImage,
   cellLink,
-  sampleData,
+  importData,
   autoSync,
 ];
 
