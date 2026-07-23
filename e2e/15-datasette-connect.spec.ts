@@ -46,7 +46,7 @@ test.describe('datasette live connect', () => {
     });
 
     // Open the connect dialog from the header button, fill URL + token, connect.
-    await page.getByTitle('Connect a live Datasette table').click();
+    await page.getByTitle(/Connect a live/).click();
     const dlg = page.locator('datasette-connect-dialog dialog');
     await expect(dlg).toBeVisible();
     await dlg.locator('input[type="text"]').fill('https://ds.example/db/people');
@@ -130,7 +130,7 @@ test.describe('datasette live connect', () => {
     });
 
     // Connect with NO token → read-only.
-    await page.getByTitle('Connect a live Datasette table').click();
+    await page.getByTitle(/Connect a live/).click();
     const dlg = page.locator('datasette-connect-dialog dialog');
     await dlg.locator('input[type="text"]').fill('https://ds.example/db/people');
     await dlg.getByRole('button', { name: 'Connect', exact: true }).click();
@@ -168,5 +168,83 @@ test.describe('datasette live connect', () => {
 
     await expect(page.locator('host-dialogs').getByText(/read-only/i)).toBeVisible();
     expect(writes).toEqual([]); // no write request was attempted
+  });
+
+  test('an instance URL lists databases (skipping _memory, honouring custom routes), then tables', async ({
+    page,
+    workspaceId,
+  }) => {
+    await page.route('https://inst.example/**', async (route) => {
+      const u = new URL(route.request().url());
+      const json = (body: unknown) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          headers: { 'access-control-allow-origin': '*' },
+          body: JSON.stringify(body),
+        });
+      switch (u.pathname) {
+        case '/-/versions.json':
+          return json({ datasette: { version: '1.0a37' } });
+        case '/-/actor.json':
+          return json({ ok: true, actor: null });
+        case '/-/databases.json':
+          return json({
+            ok: true,
+            databases: [
+              { name: '_memory', route: '_memory', is_memory: true }, // must be skipped
+              { name: 'main', route: 'main' },
+              { name: 'special', route: 'alt-route' }, // custom route: name ≠ route
+            ],
+          });
+        case '/main.json':
+          return json({ ok: true, tables: [{ name: 'people', count: 2, primary_keys: ['id'] }] });
+        case '/alt-route.json': // reached only if the ROUTE (not name 'special') is used
+          return json({ ok: true, tables: [{ name: 'widgets', count: 3, primary_keys: ['id'] }] });
+        case '/alt-route/widgets.json':
+          if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'label'], rows: [] });
+          if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
+          return json({ ok: true, next: null, rows: [{ id: 1, label: 'a' }, { id: 2, label: 'b' }, { id: 3, label: 'c' }] });
+        default:
+          return route.fulfill({ status: 404, body: '{"ok":false}' });
+      }
+    });
+
+    await page.getByTitle(/Connect a live/).click();
+    const connect = page.locator('datasette-connect-dialog dialog');
+    await connect.locator('input[type="text"]').fill('https://inst.example');
+    await connect.getByRole('button', { name: 'Connect', exact: true }).click();
+
+    // Step 1: the database picker — _memory is gone; the custom-route db is
+    // listed by its route.
+    const picker = page.locator('table-select-dialog dialog');
+    await expect(picker.getByRole('button', { name: /Next: choose tables/ })).toBeVisible();
+    const dbNames = (await picker.locator('ul.tables li .name').allInnerTexts()).map((s) => s.trim());
+    expect(dbNames).toEqual(['main', 'alt-route']);
+
+    // Choose only the custom-route database.
+    await picker.getByRole('button', { name: 'None' }).click();
+    await picker.locator('input[type="checkbox"]').nth(1).check(); // alt-route
+    await picker.getByRole('button', { name: /Next: choose tables/ }).click();
+
+    // Step 2: the table picker for that database.
+    await expect(picker.getByRole('button', { name: /^Connect \(/ })).toBeVisible();
+    await expect(picker.locator('ul.tables li .name')).toHaveText(['widgets']);
+    await picker.getByRole('button', { name: /^Connect \(1\)$/ }).click();
+
+    // A live table was created for alt-route/widgets with the route as its db.
+    await expect
+      .poll(() =>
+        page.evaluate(async (ws) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const t = (await (window as any).__easydb.store.tables.find()).find(
+            (x: any) => x.workspaceId === ws && x.source?.type === 'datasette',
+          );
+          if (!t) return null;
+          const rows = await (window as any).__easydb.store.rows(t.id).find();
+          return { db: t.source.config.db, table: t.source.config.table, rowCount: rows.length };
+        }, workspaceId),
+      )
+      .toEqual({ db: 'alt-route', table: 'widgets', rowCount: 3 });
   });
 });

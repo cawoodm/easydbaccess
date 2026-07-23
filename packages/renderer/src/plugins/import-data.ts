@@ -74,9 +74,9 @@ export const meta: NonNullable<PluginModule['meta']> = {
 export function init(api: HostApi): void {
   api.ui.registerHeaderButton({
     id: 'import-data:open',
-    label: '',
+    label: 'Import',
     icon: IMPORT_ICON_SVG,
-    tooltip: 'Import data from a URL',
+    tooltip: 'Import data from a URL (snapshot into a local table)',
     onClick: () => openImport(api),
   });
 }

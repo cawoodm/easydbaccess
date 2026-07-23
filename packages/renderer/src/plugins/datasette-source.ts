@@ -11,7 +11,8 @@
 import type { ColumnSpec, HostApi, PluginModule, Row } from '@easydb/shared';
 import {
   parseDatasetteUrl,
-  discoverTables,
+  fetchDatabaseNames,
+  fetchTablesForDb,
   fetchTableMeta,
   fetchRows,
   fetchPrimaryKeys,
@@ -23,6 +24,75 @@ import {
   type DatasetteRef,
   type TableRef,
 } from './datasette-client.js';
+
+type FetchFn = (url: string, opts?: unknown) => Promise<Response>;
+
+const host = (base: string): string => base.replace(/^https?:\/\//, '');
+
+/**
+ * Resolve the tables the user wants to act on from a Datasette URL:
+ *  - table URL      → that one table (no picker);
+ *  - database URL   → its tables, via the table checklist;
+ *  - instance URL   → pick database(s) first, then their tables.
+ * Returns the chosen tables, [] if none exist, or null if cancelled.
+ */
+async function resolveChosenTables(
+  fetchFn: FetchFn,
+  ref: DatasetteRef,
+  verb: 'Import' | 'Connect',
+): Promise<TableRef[] | null> {
+  if (ref.db && ref.table) {
+    return [{ db: ref.db, table: ref.table, count: null, hidden: false, pks: [] }];
+  }
+
+  let tables: TableRef[] = [];
+  if (ref.db) {
+    for (const t of await fetchTablesForDb(fetchFn, ref.base, ref.db)) if (!t.hidden) tables.push(t);
+  } else {
+    // Instance URL: list databases and let the user choose which to pull from.
+    const dbs = await fetchDatabaseNames(fetchFn, ref.base);
+    if (dbs.length === 0) return [];
+    let chosenDbs = dbs;
+    if (dbs.length > 1) {
+      const picked = await chooseTables(
+        dbs.map((d) => ({ name: d, size: null })),
+        {
+          title: `${verb} from Datasette`,
+          message: `Choose databases on ${host(ref.base)}, then their tables.`,
+          confirmLabel: 'Next: choose tables',
+        },
+      );
+      if (!picked) return null;
+      chosenDbs = picked.map((i) => dbs[i]!);
+    }
+    for (const db of chosenDbs) {
+      // Skip a database we can't list (permissions, odd route) rather than
+      // aborting the whole instance.
+      try {
+        for (const t of await fetchTablesForDb(fetchFn, ref.base, db)) if (!t.hidden) tables.push(t);
+      } catch {
+        /* skip */
+      }
+    }
+  }
+
+  if (tables.length === 0) return [];
+  const multiDb = new Set(tables.map((t) => t.db)).size > 1;
+  const picked = await chooseTables(
+    tables.map((t) => ({
+      name: multiDb ? `${t.db}/${t.table}` : t.table,
+      size: t.count,
+      detail: multiDb ? undefined : t.db,
+    })),
+    {
+      title: `${verb} from Datasette`,
+      message: `Choose tables to ${verb.toLowerCase()} from ${host(ref.base)}.`,
+      confirmLabel: verb,
+    },
+  );
+  if (!picked) return null;
+  return picked.map((i) => tables[i]!);
+}
 import { chooseTables } from '../dialogs/table-select-dialog.js';
 import { createDatasetteCollection, tokenSettingKey } from './datasette-collection.js';
 import '../dialogs/datasette-connect-dialog.js';
@@ -58,9 +128,9 @@ export function init(api: HostApi): void {
   // button, which snapshots rows into a plain local table).
   api.ui.registerHeaderButton({
     id: 'datasette:connect',
-    label: '',
+    label: 'Connect',
     icon: CONNECT_ICON_SVG,
-    tooltip: 'Connect a live Datasette table',
+    tooltip: 'Connect a live, editable Datasette table',
     onClick: () => openConnectDialog(api),
   });
 
@@ -136,43 +206,25 @@ export async function importDatasette(api: HostApi, input: string): Promise<void
   const ref = parseDatasetteUrl(input);
   const fetchFn = (u: string) => api.backend.fetch(u);
 
-  // Single explicit table → import directly (no picker).
-  if (ref.db && ref.table) {
-    const r = await importOneTable(api, workspaceId, ref);
-    if (r.hasMore || r.truncated) toastCapped(api, r);
-    // The plain success toast comes from app-context's import:after listener.
-    return;
-  }
-
-  // Database or instance → discover, then let the user choose.
-  const candidates = await discoverTables(fetchFn, ref);
-  if (candidates.length === 0) {
+  const chosen = await resolveChosenTables(fetchFn, ref, 'Import');
+  if (chosen === null) return; // cancelled
+  if (chosen.length === 0) {
     await api.ui.dialogs.alert('No tables found at that Datasette URL.', 'Datasette import');
     return;
   }
 
-  const multiDb = new Set(candidates.map((c) => c.db)).size > 1;
-  const host = ref.base.replace(/^https?:\/\//, '');
-  const picked = await chooseTables(
-    candidates.map((c) => ({
-      name: multiDb ? `${c.db}/${c.table}` : c.table,
-      size: c.count,
-      detail: multiDb ? undefined : c.db,
-    })),
-    {
-      title: 'Import from Datasette',
-      message: `Choose the tables to import from ${host}.`,
-      confirmLabel: 'Import',
-    },
-  );
-  if (!picked) return;
+  // Single explicit table (from a table URL) keeps its per-table toast.
+  if (ref.db && ref.table && chosen.length === 1) {
+    const r = await importOneTable(api, workspaceId, ref);
+    if (r.hasMore || r.truncated) toastCapped(api, r);
+    return;
+  }
 
   let imported = 0;
   let totalRows = 0;
   const capped: string[] = [];
   const failed: string[] = [];
-  for (const i of picked) {
-    const c = candidates[i]!;
+  for (const c of chosen) {
     try {
       const r = await importOneTable(api, workspaceId, {
         base: ref.base,
@@ -188,7 +240,7 @@ export async function importDatasette(api: HostApi, input: string): Promise<void
     }
   }
 
-  summariseBatch(api, { imported, totalRows, capped, failed, requested: picked.length });
+  summariseBatch(api, { imported, totalRows, capped, failed, requested: chosen.length });
 }
 
 /** Fetch schema + rows for one table and create the local eda table. No toast. */
@@ -338,31 +390,11 @@ export async function connectDatasette(api: HostApi, input: string, token: strin
   // so the token never leaves this device or lands in a workspace export.
   if (token) await api.store.settings.upsert({ key: tokenSettingKey(ref.base), value: token });
 
-  const candidates = await discoverTables(fetchFn, ref);
-  if (candidates.length === 0) {
+  const chosen = await resolveChosenTables(fetchFn, ref, 'Connect');
+  if (chosen === null) return; // cancelled
+  if (chosen.length === 0) {
     await api.ui.dialogs.alert('No tables found at that URL.', 'Connect Datasette');
     return;
-  }
-
-  let chosen: TableRef[];
-  if (ref.db && ref.table) {
-    chosen = candidates;
-  } else {
-    const multiDb = new Set(candidates.map((c) => c.db)).size > 1;
-    const picked = await chooseTables(
-      candidates.map((c) => ({
-        name: multiDb ? `${c.db}/${c.table}` : c.table,
-        size: c.count,
-        detail: multiDb ? undefined : c.db,
-      })),
-      {
-        title: 'Connect Datasette',
-        message: `Choose tables from ${ref.base.replace(/^https?:\/\//, '')} to open live.`,
-        confirmLabel: 'Connect',
-      },
-    );
-    if (!picked) return;
-    chosen = picked.map((i) => candidates[i]!);
   }
 
   let connected = 0;

@@ -91,7 +91,7 @@ test.describe('datasette import — whole database', () => {
     // The multi-table picker appears, listing all six tables of the database.
     const picker = page.locator('table-select-dialog dialog');
     await expect(picker).toBeVisible();
-    await expect(picker.getByText('Choose the tables to import from datasette.io.')).toBeVisible();
+    await expect(picker.getByText('Choose tables to import from datasette.io.')).toBeVisible();
 
     const rows = picker.locator('ul.tables li');
     await expect(rows).toHaveCount(6);

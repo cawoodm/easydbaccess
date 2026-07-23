@@ -47,7 +47,7 @@ function mountDialog(): TableSelectDialog {
 }
 
 function formatSize(size: number | null): string {
-  if (size == null) return 'unknown size';
+  if (size == null) return ''; // unknown / not a row count (e.g. a database entry)
   return `${size.toLocaleString()} row${size === 1 ? '' : 's'}`;
 }
 

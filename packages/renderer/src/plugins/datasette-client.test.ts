@@ -38,6 +38,19 @@ describe('parseDatabaseList', () => {
     expect(parseDatabaseList(null)).toEqual([]);
     expect(parseDatabaseList({ nope: 1 })).toEqual([]);
   });
+
+  it('uses each database route (not name) and skips the _memory scratch db', () => {
+    expect(
+      parseDatabaseList({
+        ok: true,
+        databases: [
+          { name: '_memory', route: '_memory', is_memory: true },
+          { name: 'fixtures', route: 'fixtures' },
+          { name: 'fixtures2', route: 'alternative-route' }, // custom mount → route ≠ name
+        ],
+      }),
+    ).toEqual(['fixtures', 'alternative-route']);
+  });
 });
 
 describe('parseTableList', () => {

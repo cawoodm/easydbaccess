@@ -291,18 +291,27 @@ export interface TableRef {
 }
 
 /**
- * Parse `/-/databases.json` into a list of database names. Datasette (<1.0)
- * returns an array of `{ name, ... }`; tolerate a bare string array and a
- * `{ databases: [...] }` wrapper too.
+ * Parse `/-/databases.json` into the list of database URL segments. Returns
+ * each database's `route` (which can differ from its `name` — Datasette lets a
+ * database be mounted at a custom route, e.g. name `fixtures2` at route
+ * `alternative-route`; URLs must use the route or they 404). Skips the built-in
+ * `_memory` scratch database (never has user tables). Tolerates a bare string
+ * array and a `{ databases: [...] }` wrapper.
  */
 export function parseDatabaseList(json: any): string[] {
   const arr = Array.isArray(json) ? json : Array.isArray(json?.databases) ? json.databases : [];
-  const names: string[] = [];
+  const routes: string[] = [];
   for (const entry of arr) {
-    if (typeof entry === 'string') names.push(entry);
-    else if (entry && typeof entry === 'object' && typeof entry.name === 'string') names.push(entry.name);
+    if (typeof entry === 'string') {
+      routes.push(entry);
+      continue;
+    }
+    if (entry && typeof entry === 'object' && typeof entry.name === 'string') {
+      if (entry.name === '_memory') continue;
+      routes.push(typeof entry.route === 'string' && entry.route ? entry.route : entry.name);
+    }
   }
-  return names;
+  return routes;
 }
 
 /**
