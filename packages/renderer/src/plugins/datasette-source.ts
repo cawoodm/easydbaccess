@@ -118,11 +118,10 @@ const SETTINGS = {
 const EXAMPLE = 'https://latest.datasette.io/fixtures/facetable';
 
 export function init(api: HostApi): void {
-  // Phase 2c: tables carrying `source: { type: 'datasette', ... }` are backed
-  // by a live read-write Datasette collection instead of Dexie (routed by the
-  // Phase-2a seam). Snapshot imports above are unaffected — they create plain
-  // local tables with no `source`.
-  api.registerRowSource({ type: 'datasette', create: createDatasetteCollection });
+  // Register the visible UI first, so a later failure (e.g. an older host that
+  // predates `registerRowSource`) can never prevent the Connect button from
+  // appearing. The button is this plugin's only discoverable entry point;
+  // losing it silently is exactly the "I don't see a connect button" trap.
 
   // "Connect Datasette (live)" — opens a live read-write table (vs the Import
   // button, which snapshots rows into a plain local table).
@@ -133,6 +132,15 @@ export function init(api: HostApi): void {
     tooltip: 'Connect a live, editable Datasette table',
     onClick: () => openConnectDialog(api),
   });
+
+  // Phase 2c: tables carrying `source: { type: 'datasette', ... }` are backed
+  // by a live read-write Datasette collection instead of Dexie (routed by the
+  // Phase-2a seam). Snapshot imports are unaffected — they create plain local
+  // tables with no `source`. Guarded so a host without this seam still shows
+  // the Connect button above (live routing just won't be available).
+  if (typeof api.registerRowSource === 'function') {
+    api.registerRowSource({ type: 'datasette', create: createDatasetteCollection });
+  }
 
   api.ui.registerUrlSource({
     id: 'datasette',
