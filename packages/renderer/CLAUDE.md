@@ -69,6 +69,23 @@ Subscriptions use Dexie's `liveQuery` — the closure re-runs whenever any
 write hits the underlying table. Chrome callers always consume the full
 result set, so the broader re-run granularity is harmless.
 
+## Row-source routing (`routed-data-store.ts`)
+
+A table may carry an optional `source: TableSource` descriptor (in
+`@easydb/shared`). When present, `createRoutedDataStore` — a thin decorator
+`app-context.ts` wraps around the Dexie store — routes `rows(tableId)` to the
+`RowCollectionProvider` a plugin registered via `api.registerRowSource(...)`
+for `source.type`, instead of the local Dexie collection. Everything else on
+the store passes straight through.
+
+**The routing is a strict no-op for local tables.** A table with no `source`,
+a `source.type` with no registered provider, or one not yet in the sync-primed
+`tableCache`, all resolve to `base.rows(tableId)` — identical to the
+un-decorated store. `data-table.ts` and every other `store.rows(...)` caller
+are untouched. This is the one contained core seam for the live-Datasette
+connector (design: the `eda-datasette-integration` plan); the actual remote
+`DataCollection` provider is a later phase.
+
 ## Lit + decorator gotcha
 
 `tsconfig.json` sets `"useDefineForClassFields": false` and

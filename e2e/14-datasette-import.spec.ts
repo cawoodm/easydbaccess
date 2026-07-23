@@ -1,647 +1,185 @@
+import { readFileSync } from 'node:fs';
 import { test, expect } from './fixtures.js';
 
 /**
- * Datasette import (PR #1 / Phase 1), reachable from the Import dialog added
- * by the `import-data` built-in.
+ * Importing an entire Datasette DATABASE (multiple tables) end-to-end.
  *
- * The import talks to a Datasette instance through `api.backend.fetch`, which
- * — with no sync server configured — is a plain browser `fetch`. We stub
- * `window.fetch` to serve Datasette-shaped JSON for a fake instance, so the
- * test is hermetic: it exercises URL parsing, schema → ColumnType mapping and
- * row materialization without depending on a live host (or its CORS config).
+ * Drives the real UI: the Import header button → the Import dialog (URL entry)
+ * → the multi-table picker → the tables landing locally with rows. The three
+ * Datasette responses are the actual captures from datasette.io (a database
+ * listing + two table responses), served via page.route so no network is hit.
+ *
+ * The captured responses exercise the real-world quirks this feature handles:
+ *  - the database page lists tables with row counts;
+ *  - table responses carry a bare column-NAME array (no column_details), so
+ *    column types must be refined from the rows;
+ *  - `executive_terms` pages via a `next` TOKEN (no next_url) — the importer
+ *    must follow it to pull every row, not stop at the first 100.
  */
 
-const INSTANCE = 'https://ds.example.test';
-const TABLE_URL = `${INSTANCE}/energy/plants`;
+const readFixture = (name: string): unknown =>
+  JSON.parse(readFileSync(new URL(`./fixtures/datasette/${name}`, import.meta.url), 'utf8'));
 
-/** Serve Datasette metadata + rows for our fake instance; pass everything else through. */
-async function stubDatasette(page: import('@playwright/test').Page): Promise<void> {
-  await page.evaluate(() => {
-    const orig = window.fetch.bind(window);
-    window.fetch = (async (input: unknown, init?: unknown) => {
-      const url = String(
-        typeof input === 'string' ? input : (input as { url?: string })?.url ?? input,
-      );
-      if (url.includes('ds.example.test')) {
-        // The meta request is the one asking for zero rows (_size=0); the row
-        // request follows with _size=max. Both hit <base>/<db>/<table>.json.
-        const isMeta = new URL(url).searchParams.get('_size') === '0';
-        const body = isMeta
-          ? {
-              ok: true,
-              count: 3,
-              primary_keys: ['id'],
-              columns: ['id', 'name', 'capacity_mw', 'is_active', 'commissioned_at'],
-              column_details: [
-                { column: 'id', sqlite_type: 'INTEGER', is_pk: 1, notnull: 1 },
-                { column: 'name', sqlite_type: 'TEXT' },
-                { column: 'capacity_mw', sqlite_type: 'REAL' },
-                { column: 'is_active', sqlite_type: 'INTEGER' },
-                { column: 'commissioned_at', sqlite_type: 'TEXT' },
-              ],
-              rows: [],
-            }
-          : {
-              ok: true,
-              next_url: null,
-              rows: [
-                { id: 1, name: 'Alpha', capacity_mw: 12.5, is_active: 1, commissioned_at: '2001-05-01' },
-                { id: 2, name: 'Beta', capacity_mw: 7, is_active: 0, commissioned_at: '2010-01-01' },
-                { id: 3, name: 'Gamma', capacity_mw: 3.2, is_active: 1, commissioned_at: '2020-11-20' },
-              ],
-            };
-        return new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
-      }
-      return orig(input as RequestInfo, init as RequestInit);
-    }) as typeof window.fetch;
-  });
-}
+const DB_LISTING = readFixture('legislators.db-listing.json');
+const EXECUTIVES = readFixture('executives.json');
+const EXECUTIVE_TERMS_PAGE1 = readFixture('executive_terms.json') as {
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+};
 
-/**
- * Stub an instance whose metadata endpoint returns NO column list (older
- * Datasette, or an `_extra` the server ignores) — the shape that caused
- * "rows imported but the table has no columns". Rows still come back.
- */
-async function stubDatasetteNoColumnMeta(page: import('@playwright/test').Page): Promise<void> {
-  await page.evaluate(() => {
-    const orig = window.fetch.bind(window);
-    window.fetch = (async (input: unknown, init?: unknown) => {
-      const url = String(
-        typeof input === 'string' ? input : (input as { url?: string })?.url ?? input,
-      );
-      if (url.includes('ds.example.test')) {
-        const isMeta = new URL(url).searchParams.get('_size') === '0';
-        const body = isMeta
-          ? { ok: true, count: 3, primary_keys: ['id'] } // no columns / column_details
-          : {
-              ok: true,
-              next_url: null,
-              rows: [
-                { id: 1, name: 'Alpha', capacity_mw: 12.5, commissioned_at: '2001-05-01' },
-                { id: 2, name: 'Beta', capacity_mw: 7, commissioned_at: '2010-01-01' },
-                { id: 3, name: 'Gamma', capacity_mw: 3.2, commissioned_at: '2020-11-20' },
-              ],
-            };
-        return new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
-      }
-      return orig(input as RequestInfo, init as RequestInit);
-    }) as typeof window.fetch;
-  });
-}
+// Synthetic terminating page for executive_terms: rows 101..131 (the real table
+// has 131 rows; the captured page 1 holds the first 100 and a `next` token).
+const EXECUTIVE_TERMS_PAGE2 = {
+  ok: true,
+  next: null,
+  truncated: false,
+  columns: EXECUTIVE_TERMS_PAGE1.columns,
+  rows: Array.from({ length: 31 }, (_, i) => ({
+    rowid: 101 + i,
+    type: i % 2 ? 'viceprez' : 'prez',
+    start: '1970-01-20',
+    end: '1974-01-20',
+    party: 'Independent',
+    how: 'election',
+    executive_id: 60 + i,
+  })),
+};
 
-/**
- * Stub a whole database: a `<db>.json` page listing tables (one hidden), plus
- * meta + rows for each real table. Exercises database-level import.
- */
-async function stubDatasetteDatabase(page: import('@playwright/test').Page): Promise<void> {
-  await page.evaluate(() => {
-    const orig = window.fetch.bind(window);
-    const json = (body: unknown) =>
-      new Response(JSON.stringify(body), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    window.fetch = (async (input: unknown, init?: unknown) => {
-      const url = String(
-        typeof input === 'string' ? input : (input as { url?: string })?.url ?? input,
-      );
-      if (url.includes('ds.example.test')) {
-        const u = new URL(url);
-        const segs = u.pathname.replace(/\.json$/, '').split('/').filter(Boolean);
-        if (segs.length === 1) {
-          // Database page: two real tables (with row counts) + one hidden table.
-          return json({
-            ok: true,
-            tables: [
-              { name: 'plants', count: 2 },
-              { name: 'regions', count: 1 },
-              { name: 'plants_fts', hidden: true },
-            ],
-          });
-        }
-        const table = segs[1];
-        const isMeta = u.searchParams.get('_size') === '0';
-        if (table === 'plants') {
-          return json(
-            isMeta
-              ? { ok: true, count: 2, primary_keys: ['id'], columns: ['id', 'name'] }
-              : { ok: true, next_url: null, rows: [{ id: 1, name: 'Alpha' }, { id: 2, name: 'Beta' }] },
+const json = (body: unknown) => ({
+  status: 200,
+  contentType: 'application/json',
+  // The importer fetches datasette.io cross-origin; a --cors instance answers
+  // with this header, so the fulfilled response must carry it too or the
+  // browser rejects the fetch.
+  headers: { 'access-control-allow-origin': '*' },
+  body: JSON.stringify(body),
+});
+
+test.describe('datasette import — whole database', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route('https://datasette.io/**', (route) => {
+      const url = new URL(route.request().url());
+      switch (url.pathname) {
+        case '/legislators.json':
+          return route.fulfill(json(DB_LISTING));
+        case '/legislators/executives.json':
+          return route.fulfill(json(EXECUTIVES));
+        case '/legislators/executive_terms.json':
+          return route.fulfill(
+            json(url.searchParams.get('_next') ? EXECUTIVE_TERMS_PAGE2 : EXECUTIVE_TERMS_PAGE1),
           );
-        }
-        if (table === 'regions') {
-          return json(
-            isMeta
-              ? { ok: true, count: 1, primary_keys: ['id'], columns: ['id', 'region'] }
-              : { ok: true, next_url: null, rows: [{ id: 1, region: 'North' }] },
-          );
-        }
-        return json({ ok: true, rows: [] }); // hidden tables should never be fetched
+        default:
+          return route.fulfill({ status: 404, body: '{"ok":false}' });
       }
-      return orig(input as RequestInfo, init as RequestInit);
-    }) as typeof window.fetch;
+    });
   });
-}
 
-/**
- * Stub where the URL path looks like a table (`catalog/overview`) but the
- * response at that path is a database page. Detection must follow the response.
- */
-async function stubDatasetteResponseOverride(page: import('@playwright/test').Page): Promise<void> {
-  await page.evaluate(() => {
-    const orig = window.fetch.bind(window);
-    const json = (body: unknown) =>
-      new Response(JSON.stringify(body), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    window.fetch = (async (input: unknown, init?: unknown) => {
-      const url = String(
-        typeof input === 'string' ? input : (input as { url?: string })?.url ?? input,
+  test('lists every table with sizes, then imports the chosen subset with typed columns', async ({
+    page,
+    workspaceId,
+  }) => {
+    // Open the Import dialog from the header button (inline import SVG icon).
+    await page.getByTitle('Import data from a URL').click();
+    const importDialog = page.locator('import-dialog dialog');
+    await expect(importDialog).toBeVisible();
+
+    // A database URL (no table segment). "Import as" auto-detects Datasette
+    // from the host, so we only need the URL.
+    await importDialog.locator('input[type="text"]').fill('https://datasette.io/legislators');
+    await importDialog.getByRole('button', { name: 'Import' }).click();
+
+    // The multi-table picker appears, listing all six tables of the database.
+    const picker = page.locator('table-select-dialog dialog');
+    await expect(picker).toBeVisible();
+    await expect(picker.getByText('Choose tables to import from datasette.io.')).toBeVisible();
+
+    const rows = picker.locator('ul.tables li');
+    await expect(rows).toHaveCount(6);
+    // Names come from the database listing (asserted on the .name spans — the
+    // db name also appears as each row's .detail, so a plain text match would
+    // be ambiguous).
+    const names = await picker.locator('ul.tables li .name').allInnerTexts();
+    expect(names.map((s) => s.trim()).sort()).toEqual([
+      'executive_terms',
+      'executives',
+      'legislator_terms',
+      'legislators',
+      'offices',
+      'social_media',
+    ]);
+    // Sizes come straight from the database listing's counts.
+    const sizes = (await picker.locator('ul.tables li .size').allInnerTexts()).map((s) => s.trim());
+    expect(sizes).toContain('80 rows'); // executives
+    expect(sizes).toContain('131 rows'); // executive_terms
+    expect(sizes.filter((s) => s === '10,001 rows')).toHaveLength(2); // legislators + legislator_terms
+
+    // Everything starts selected.
+    const checkboxes = picker.locator('input[type="checkbox"]');
+    await expect(checkboxes).toHaveCount(6);
+    for (let i = 0; i < 6; i++) await expect(checkboxes.nth(i)).toBeChecked();
+
+    // Narrow to the two tables we have data for: clear, then pick them.
+    // Discovery order mirrors the listing: [executive_terms, executives, …].
+    await picker.getByRole('button', { name: 'None' }).click();
+    await checkboxes.nth(0).check(); // executive_terms
+    await checkboxes.nth(1).check(); // executives
+
+    await picker.getByRole('button', { name: /^Import \(2\)$/ }).click();
+    await expect(picker).toBeHidden();
+
+    // Wait until both tables have been created locally. (expect.poll awaits the
+    // async poller; page.waitForFunction would resolve on the truthy Promise.)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async (ws) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const tables = await (window as any).__easydb.store.tables.find();
+            return tables
+              .filter((t: { workspaceId: string }) => t.workspaceId === ws)
+              .map((t: { name: string }) => t.name)
+              .sort();
+          }, workspaceId),
+        { timeout: 15_000 },
+      )
+      .toEqual(['legislators/executive_terms', 'legislators/executives']);
+
+    // Exactly the two chosen tables were imported — not the whole database.
+    const summary = await page.evaluate(async (ws) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__easydb.store;
+      const tables = (await store.tables.find()).filter(
+        (t: { workspaceId: string }) => t.workspaceId === ws,
       );
-      if (url.includes('ov.example.test')) {
-        const segs = new URL(url).pathname.replace(/\.json$/, '').split('/').filter(Boolean);
-        if (segs[1] === 'overview') {
-          // Probe target: responds like a database, not a table.
-          return json({ ok: true, tables: [{ name: 'books' }, { name: 'authors' }] });
-        }
-        return json({ ok: true, next_url: null, rows: [{ id: 1, title: `${segs[1]}-row` }] });
+      const out: Record<string, { rowCount: number; columns: Record<string, string> }> = {};
+      for (const t of tables) {
+        const rows = await store.rows(t.id).find();
+        out[t.name] = {
+          rowCount: rows.length,
+          columns: Object.fromEntries(
+            t.columns.map((c: { field: string; type: string }) => [c.field, c.type]),
+          ),
+        };
       }
-      return orig(input as RequestInfo, init as RequestInit);
-    }) as typeof window.fetch;
-  });
-}
+      return { names: tables.map((t: { name: string }) => t.name).sort(), tables: out };
+    }, workspaceId);
 
-/**
- * Stub a table paginated with Datasette 1.0's `next` cursor token (no
- * `next_url`): page 1 returns two rows + next="2", page 2 (?_next=2) returns
- * the last row + next=null. Metadata has no columns (inference path).
- */
-async function stubDatasettePaging(page: import('@playwright/test').Page): Promise<void> {
-  await page.evaluate(() => {
-    const orig = window.fetch.bind(window);
-    const json = (body: unknown) =>
-      new Response(JSON.stringify(body), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    window.fetch = (async (input: unknown, init?: unknown) => {
-      const url = String(
-        typeof input === 'string' ? input : (input as { url?: string })?.url ?? input,
-      );
-      if (url.includes('pg.example.test')) {
-        const params = new URL(url).searchParams;
-        if (params.get('_size') === '0') return json({ ok: true, count: 3, primary_keys: ['id'] });
-        if (params.get('_next') === '2') return json({ ok: true, next: null, rows: [{ id: 3, v: 'c' }] });
-        return json({ ok: true, next: '2', rows: [{ id: 1, v: 'a' }, { id: 2, v: 'b' }] });
-      }
-      return orig(input as RequestInfo, init as RequestInit);
-    }) as typeof window.fetch;
-  });
-}
+    expect(summary.names).toEqual(['legislators/executive_terms', 'legislators/executives']);
 
-/**
- * Stub an instance that answers with a non-JSON page (as datasette.io does when
- * it redirects an automated request to a Cloudflare Turnstile challenge). The
- * import should fail with an explicit HTTP code + reason, not a JSON parse error.
- */
-async function stubDatasetteChallenge(page: import('@playwright/test').Page): Promise<void> {
-  await page.evaluate(() => {
-    const orig = window.fetch.bind(window);
-    window.fetch = (async (input: unknown, init?: unknown) => {
-      const url = String(
-        typeof input === 'string' ? input : (input as { url?: string })?.url ?? input,
-      );
-      if (url.includes('err.example.test')) {
-        return new Response('<html><body>Redirecting…</body></html>', {
-          status: 200,
-          headers: { 'content-type': 'text/html; charset=utf-8' },
-        });
-      }
-      return orig(input as RequestInfo, init as RequestInit);
-    }) as typeof window.fetch;
-  });
-}
+    // executives: single page, all 80 rows; types refined from the rows even
+    // though the schema gave only bare column names.
+    const executives = summary.tables['legislators/executives']!;
+    expect(executives.rowCount).toBe(80);
+    expect(executives.columns.id).toBe('number');
+    expect(executives.columns.bio_birthday).toBe('datetime');
+    expect(executives.columns.name).toBe('string');
 
-/**
- * Stub a fetch that REJECTS (as the browser does when it blocks a cross-origin
- * redirect to a challenge page with no CORS headers — surfaces as a bare
- * "Load failed" / "Failed to fetch" TypeError, never a Response).
- */
-async function stubDatasetteReject(page: import('@playwright/test').Page): Promise<void> {
-  await page.evaluate(() => {
-    const orig = window.fetch.bind(window);
-    window.fetch = (async (input: unknown, init?: unknown) => {
-      const url = String(
-        typeof input === 'string' ? input : (input as { url?: string })?.url ?? input,
-      );
-      if (url.includes('reject.example.test')) throw new TypeError('Load failed');
-      return orig(input as RequestInfo, init as RequestInit);
-    }) as typeof window.fetch;
-  });
-}
-
-/** Confirm the database table-picker (imports the currently-selected tables). */
-async function confirmPicker(page: import('@playwright/test').Page): Promise<void> {
-  await page.locator('datasette-table-picker button[type="submit"]').click();
-}
-
-test.describe('datasette import', () => {
-  test('imports a Datasette table via the Import dialog', async ({ page }) => {
-    await stubDatasette(page);
-
-    await page.locator('app-shell header button[title="Import data from a URL"]').click();
-
-    // Paste the table URL and force the Datasette route, then import.
-    await page.locator('import-dialog input[type="text"]').fill(TABLE_URL);
-    await page.locator('import-dialog select').nth(1).selectOption('datasette');
-    await page.locator('import-dialog button[type="submit"]').click();
-
-    // A local table named "<db>/<table>" should appear.
-    await expect
-      .poll(async () =>
-        page.evaluate(async () => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const ctx = (window as any).__easydb;
-          const tables = await ctx.store.tables.find();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return tables.map((t: any) => t.name);
-        }),
-      )
-      .toContain('energy/plants');
-
-    const info = await page.evaluate(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ctx = (window as any).__easydb;
-      const tables = await ctx.store.tables.find();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const t = tables.find((x: any) => x.name === 'energy/plants');
-      const rows = await ctx.store.rows(t.id).find();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const col = (f: string) => t.columns.find((c: any) => c.field === f);
-      return {
-        rowCount: rows.length,
-        idType: col('id')?.type,
-        idUnique: col('id')?.unique === true,
-        nameType: col('name')?.type,
-        capacityType: col('capacity_mw')?.type,
-        activeType: col('is_active')?.type,
-        commissionedType: col('commissioned_at')?.type,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        names: rows.map((r: any) => r.data.name).sort(),
-      };
-    });
-
-    expect(info.rowCount).toBe(3);
-    expect(info.names).toEqual(['Alpha', 'Beta', 'Gamma']);
-    // SQLite type + column-name heuristics → eda ColumnType.
-    expect(info.idType).toBe('number');
-    expect(info.idUnique).toBe(true); // primary key → unique
-    expect(info.nameType).toBe('string');
-    expect(info.capacityType).toBe('number'); // REAL
-    expect(info.activeType).toBe('boolean'); // "is_" prefix
-    expect(info.commissionedType).toBe('datetime'); // "_at" suffix
-  });
-
-  test('infers columns from rows when metadata has none', async ({ page }) => {
-    await stubDatasetteNoColumnMeta(page);
-
-    await page.locator('app-shell header button[title="Import data from a URL"]').click();
-    await page.locator('import-dialog input[type="text"]').fill(TABLE_URL);
-    await page.locator('import-dialog select').nth(1).selectOption('datasette');
-    await page.locator('import-dialog button[type="submit"]').click();
-
-    await expect
-      .poll(async () =>
-        page.evaluate(async () => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const ctx = (window as any).__easydb;
-          const tables = await ctx.store.tables.find();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const t = tables.find((x: any) => x.name === 'energy/plants');
-          return t ? t.columns.length : 0;
-        }),
-      )
-      .toBe(4);
-
-    const info = await page.evaluate(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ctx = (window as any).__easydb;
-      const tables = await ctx.store.tables.find();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const t = tables.find((x: any) => x.name === 'energy/plants');
-      const rows = await ctx.store.rows(t.id).find();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const col = (f: string) => t.columns.find((c: any) => c.field === f);
-      return {
-        rowCount: rows.length,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        fields: t.columns.map((c: any) => c.field),
-        idType: col('id')?.type,
-        idUnique: col('id')?.unique === true,
-        nameType: col('name')?.type,
-        capacityType: col('capacity_mw')?.type,
-        commissionedType: col('commissioned_at')?.type,
-      };
-    });
-
-    // The bug: rows import but columns stay empty. Now they're inferred.
-    expect(info.rowCount).toBe(3);
-    expect(info.fields).toEqual(['id', 'name', 'capacity_mw', 'commissioned_at']);
-    expect(info.idType).toBe('number'); // value-inferred
-    expect(info.idUnique).toBe(true); // primary_keys still honoured
-    expect(info.nameType).toBe('string');
-    expect(info.capacityType).toBe('number');
-    expect(info.commissionedType).toBe('datetime'); // name heuristic
-  });
-
-  test('follows the Datasette 1.0 `next` cursor across pages', async ({ page }) => {
-    await stubDatasettePaging(page);
-
-    await page.locator('app-shell header button[title="Import data from a URL"]').click();
-    await page.locator('import-dialog input[type="text"]').fill('https://pg.example.test/db/big');
-    await page.locator('import-dialog select').nth(1).selectOption('datasette');
-    await page.locator('import-dialog button[type="submit"]').click();
-
-    // Both pages (2 + 1 rows) must be imported, not just the first.
-    await expect
-      .poll(async () =>
-        page.evaluate(async () => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const ctx = (window as any).__easydb;
-          const tables = await ctx.store.tables.find();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const t = tables.find((x: any) => x.name === 'db/big');
-          return t ? (await ctx.store.rows(t.id).find()).length : -1;
-        }),
-      )
-      .toBe(3);
-  });
-
-  test('imports every non-hidden table from a Datasette database URL', async ({ page }) => {
-    await stubDatasetteDatabase(page);
-
-    await page.locator('app-shell header button[title="Import data from a URL"]').click();
-    await page.locator('import-dialog input[type="text"]').fill('https://ds.example.test/energy');
-    await page.locator('import-dialog select').nth(1).selectOption('datasette');
-    await page.locator('import-dialog button[type="submit"]').click();
-
-    // A picker lists the database's tables (all selected by default); confirm it.
-    await confirmPicker(page);
-
-    await expect
-      .poll(async () =>
-        page.evaluate(async () => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const ctx = (window as any).__easydb;
-          const tables = await ctx.store.tables.find();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return tables.map((t: any) => t.name).sort();
-        }),
-      )
-      .toEqual(['energy/plants', 'energy/regions']);
-
-    const info = await page.evaluate(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ctx = (window as any).__easydb;
-      const tables = await ctx.store.tables.find();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const byName: Record<string, any> = Object.fromEntries(tables.map((t: any) => [t.name, t]));
-      const rowCount = async (n: string) => (await ctx.store.rows(byName[n].id).find()).length;
-      return {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        names: tables.map((t: any) => t.name),
-        plants: await rowCount('energy/plants'),
-        regions: await rowCount('energy/regions'),
-      };
-    });
-
-    expect(info.plants).toBe(2);
-    expect(info.regions).toBe(1);
-    // The hidden FTS shadow table must be skipped.
-    expect(info.names).not.toContain('energy/plants_fts');
-  });
-
-  test('the picker shows row counts and estimated sizes', async ({ page }) => {
-    await stubDatasetteDatabase(page);
-
-    await page.locator('app-shell header button[title="Import data from a URL"]').click();
-    await page.locator('import-dialog input[type="text"]').fill('https://ds.example.test/energy');
-    await page.locator('import-dialog select').nth(1).selectOption('datasette');
-    await page.locator('import-dialog button[type="submit"]').click();
-
-    const picker = page.locator('datasette-table-picker');
-    await expect(picker).toContainText('2 rows'); // plants
-    await expect(picker).toContainText('1 row'); // regions
-    // Size estimate resolves to a byte/KB/MB figure (the "…" placeholder clears).
-    await expect(picker.locator('.list')).toContainText(/\d+\s?(B|KB|MB)/);
-
-    await confirmPicker(page);
-    await expect
-      .poll(async () =>
-        page.evaluate(async () => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const ctx = (window as any).__easydb;
-          return (await ctx.store.tables.find()).length;
-        }),
-      )
-      .toBe(2);
-  });
-
-  test('re-importing a database overwrites existing tables by default', async ({ page }) => {
-    await stubDatasetteDatabase(page);
-    const names = async () =>
-      page.evaluate(async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ctx = (window as any).__easydb;
-        const tables = await ctx.store.tables.find();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return tables.map((t: any) => t.name).sort();
-      });
-
-    const importEnergy = async () => {
-      await page.locator('app-shell header button[title="Import data from a URL"]').click();
-      await page.locator('import-dialog input[type="text"]').fill('https://ds.example.test/energy');
-      await page.locator('import-dialog select').nth(1).selectOption('datasette');
-      await page.locator('import-dialog button[type="submit"]').click();
-      await confirmPicker(page);
-    };
-
-    await importEnergy();
-    await expect.poll(names).toEqual(['energy/plants', 'energy/regions']);
-
-    // Second import: both tables now show as "exists"; default is Overwrite.
-    await importEnergy();
-    await expect(page.locator('datasette-table-picker')).toBeHidden(); // picker closed
-    // Still exactly two tables — overwritten in place, not duplicated.
-    await expect.poll(names).toEqual(['energy/plants', 'energy/regions']);
-  });
-
-  test('the picker can rename on collision to keep both copies', async ({ page }) => {
-    await stubDatasetteDatabase(page);
-    const names = async () =>
-      page.evaluate(async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ctx = (window as any).__easydb;
-        const tables = await ctx.store.tables.find();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return tables.map((t: any) => t.name).sort();
-      });
-
-    const openEnergy = async () => {
-      await page.locator('app-shell header button[title="Import data from a URL"]').click();
-      await page.locator('import-dialog input[type="text"]').fill('https://ds.example.test/energy');
-      await page.locator('import-dialog select').nth(1).selectOption('datasette');
-      await page.locator('import-dialog button[type="submit"]').click();
-    };
-
-    await openEnergy();
-    await confirmPicker(page);
-    await expect.poll(names).toEqual(['energy/plants', 'energy/regions']);
-
-    // Re-import; keep the existing "plants" by importing the new one under a new name.
-    await openEnergy();
-    await page.locator('datasette-table-picker select[data-mode="plants"]').selectOption('rename');
-    await confirmPicker(page);
-    await expect.poll(names).toEqual(['energy/plants', 'energy/plants (2)', 'energy/regions']);
-  });
-
-  test('database import lets you deselect tables in the picker', async ({ page }) => {
-    await stubDatasetteDatabase(page);
-
-    await page.locator('app-shell header button[title="Import data from a URL"]').click();
-    await page.locator('import-dialog input[type="text"]').fill('https://ds.example.test/energy');
-    await page.locator('import-dialog select').nth(1).selectOption('datasette');
-    await page.locator('import-dialog button[type="submit"]').click();
-
-    // Deselect "regions" in the picker, then import.
-    await page.locator('datasette-table-picker input[data-table="regions"]').uncheck();
-    await confirmPicker(page);
-
-    await expect
-      .poll(async () =>
-        page.evaluate(async () => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const ctx = (window as any).__easydb;
-          const tables = await ctx.store.tables.find();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return tables.map((t: any) => t.name).sort();
-        }),
-      )
-      .toEqual(['energy/plants']);
-
-    // "regions" was deselected, so it must not have been imported.
-    const names = await page.evaluate(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ctx = (window as any).__easydb;
-      const tables = await ctx.store.tables.find();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return tables.map((t: any) => t.name);
-    });
-    expect(names).not.toContain('energy/regions');
-  });
-
-  test('detects database vs table from the response, not the URL path', async ({ page }) => {
-    await stubDatasetteResponseOverride(page);
-
-    await page.locator('app-shell header button[title="Import data from a URL"]').click();
-    // Path parses as a table (db "catalog", table "overview"), but the response
-    // is a database page — so all its tables should be imported.
-    await page.locator('import-dialog input[type="text"]').fill('https://ov.example.test/catalog/overview');
-    await page.locator('import-dialog select').nth(1).selectOption('datasette');
-    await page.locator('import-dialog button[type="submit"]').click();
-    await confirmPicker(page);
-
-    await expect
-      .poll(async () =>
-        page.evaluate(async () => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const ctx = (window as any).__easydb;
-          const tables = await ctx.store.tables.find();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return tables.map((t: any) => t.name).sort();
-        }),
-      )
-      .toEqual(['catalog/authors', 'catalog/books']);
-
-    const names = await page.evaluate(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ctx = (window as any).__easydb;
-      const tables = await ctx.store.tables.find();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return tables.map((t: any) => t.name);
-    });
-    // Path-based dispatch would have created a single "catalog/overview" table.
-    expect(names).not.toContain('catalog/overview');
-  });
-
-  test('surfaces a reason when the fetch is blocked (bare "Load failed")', async ({ page }) => {
-    await stubDatasetteReject(page);
-
-    await page.locator('app-shell header button[title="Import data from a URL"]').click();
-    await page
-      .locator('import-dialog input[type="text"]')
-      .fill('https://reject.example.test/db/tbl');
-    await page.locator('import-dialog select').nth(1).selectOption('datasette');
-    await page.locator('import-dialog button[type="submit"]').click();
-
-    // The bare "Load failed" is wrapped with the host + the raw error + the
-    // possible causes (no invented single cause).
-    const toast = page.locator('toast-host');
-    await expect(toast).toContainText('reject.example.test');
-    await expect(toast).toContainText('Load failed');
-    await expect(toast).toContainText(/CORS|rate-limit|could not fetch/i);
-
-    const count = await page.evaluate(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ctx = (window as any).__easydb;
-      return (await ctx.store.tables.find()).length;
-    });
-    expect(count).toBe(0);
-  });
-
-  test('surfaces the HTTP code and reason when a request is not JSON', async ({ page }) => {
-    await stubDatasetteChallenge(page);
-
-    await page.locator('app-shell header button[title="Import data from a URL"]').click();
-    await page.locator('import-dialog input[type="text"]').fill('https://err.example.test/db/tbl');
-    await page.locator('import-dialog select').nth(1).selectOption('datasette');
-    await page.locator('import-dialog button[type="submit"]').click();
-
-    // Error toast names the HTTP status and the reason (not "Unexpected token <").
-    const toast = page.locator('toast-host');
-    await expect(toast).toContainText('HTTP 200');
-    await expect(toast).toContainText(/JSON/i);
-
-    // Nothing imported.
-    const count = await page.evaluate(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ctx = (window as any).__easydb;
-      return (await ctx.store.tables.find()).length;
-    });
-    expect(count).toBe(0);
-  });
-
-  test('sample sources point at real URLs (table + whole database)', async ({ page }) => {
-    // Guards against the regression this suite was written for: the old power
-    // plants sample pointed at the retired global-power-plants.datasettes.com.
-    await page.locator('app-shell header button[title="Import data from a URL"]').click();
-    const dialog = page.locator('import-dialog');
-    const url = dialog.locator('input[type="text"]');
-    const kind = dialog.locator('select').nth(1);
-    const preset = dialog.locator('select').first();
-
-    await preset.selectOption({ label: 'Datasette — global power plants (table)' });
-    await expect(url).toHaveValue('https://datasette.io/global-power-plants/global-power-plants');
-    await expect(kind).toHaveValue('datasette');
-
-    await preset.selectOption({ label: 'Datasette — US legislators (whole database)' });
-    await expect(url).toHaveValue('https://datasette.io/legislators');
-    await expect(kind).toHaveValue('datasette');
+    // executive_terms: paged via the `next` token to pull all 131 rows
+    // (100 from page 1 + 31 from the terminating page), not just the first 100.
+    const execTerms = summary.tables['legislators/executive_terms']!;
+    expect(execTerms.rowCount).toBe(131);
+    expect(execTerms.columns.executive_id).toBe('number');
+    expect(execTerms.columns.start).toBe('datetime');
+    expect(execTerms.columns.type).toBe('string');
   });
 });

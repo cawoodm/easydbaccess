@@ -37,6 +37,17 @@ async function dropFile(page: import('@playwright/test').Page, filename: string,
   );
 }
 
+/**
+ * Multi-table imports now open the table-select picker first (all rows
+ * pre-selected). Accept it so the flow proceeds to the import-mode choice.
+ */
+async function confirmTableSelect(page: import('@playwright/test').Page, count: number) {
+  const picker = page.locator('table-select-dialog dialog');
+  await expect(picker).toBeVisible();
+  await picker.getByRole('button', { name: new RegExp(`^Import \\(${count}\\)$`) }).click();
+  await expect(picker).toBeHidden();
+}
+
 test.describe('import / export', () => {
   test('CSV paste dialog creates a table from pasted text', async ({ page }) => {
     // Open the paste dialog via the chrome event hook.
@@ -222,6 +233,7 @@ test.describe('import / export', () => {
     });
     const dropPromise = dropFile(page, 'dump.db.json', dump, 'application/json');
 
+    await confirmTableSelect(page, 2);
     const dialog = page.locator('host-dialogs');
     await expect(dialog.getByText(/Importing 2 tables/i)).toBeVisible();
     await expect(dialog.getByRole('button', { name: /Overwrite matching/ })).toBeVisible();
@@ -264,8 +276,9 @@ test.describe('import / export', () => {
       ],
     });
     const dropPromise = dropFile(page, 'cascade.db.json', dump, 'application/json');
-    // First table has no collision so json-import skips the prompt; but
-    // it sees a multi-table dump → still prompts. Pick "Add to current workspace".
+    // Multi-table dump → the table picker opens first, then the import-mode
+    // prompt. Pick "Add to current workspace".
+    await confirmTableSelect(page, 2);
     const dialog = page.locator('host-dialogs');
     await expect(dialog.getByText(/Importing 2 tables/i)).toBeVisible();
     await dialog.getByRole('button', { name: 'Add to current workspace' }).click();
@@ -324,6 +337,7 @@ test.describe('import / export', () => {
       ],
     });
     const dropPromise = dropFile(page, 'replace.db.json', dump, 'application/json');
+    await confirmTableSelect(page, 2);
     const dialog = page.locator('host-dialogs');
     await expect(dialog.getByRole('button', { name: 'Replace entire workspace' })).toBeVisible();
     await dialog.getByRole('button', { name: 'Replace entire workspace' }).click();
@@ -401,6 +415,7 @@ test.describe('import / export', () => {
 
     // Round-trip: drop the dump back in. Multi-table → choice dialog appears.
     const dropPromise = dropFile(page, 'round.db.json', serialized, 'application/json');
+    await confirmTableSelect(page, 2);
     const dialog = page.locator('host-dialogs');
     await expect(dialog.getByText(/Importing 2 tables/i)).toBeVisible();
     await dialog.getByRole('button', { name: 'Add to current workspace' }).click();

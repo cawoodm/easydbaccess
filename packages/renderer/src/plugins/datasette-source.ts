@@ -1,57 +1,155 @@
 // packages/renderer/src/plugins/datasette-source.ts
 //
-// easyDBAccess built-in plugin — Phase 1: import a table from any online Datasette
-// instance by URL as a local eda table (read-only snapshot). Registers a URL source
-// and a drop handler. The Phase-2 live read-write connector builds on the same
-// datasette-client core.
-//
-// Wire-up: add `import * as datasetteSource from '../plugins/datasette-source.js';`
-// and include `datasetteSource` in the `builtins` array in
-// packages/renderer/src/plugin-host/loader.ts.
+// easyDBAccess built-in plugin — import from any online Datasette instance as
+// local eda tables (read-only snapshots). A URL may point at:
+//   - a single table      (.../<db>/<table>)  → imported directly;
+//   - a whole database     (.../<db>)          → pick tables from a checklist;
+//   - an entire instance   (https://host)      → pick tables across all databases.
+// Registers a URL source and a (table-only) drop handler. The Phase-2 live
+// read-write connector builds on the same datasette-client core.
 
-import type { HostApi, PluginModule, Row } from '@easydb/shared';
+import type { ColumnSpec, HostApi, PluginModule, Row } from '@easydb/shared';
 import {
   parseDatasetteUrl,
-  buildTableUrl,
+  fetchDatabaseNames,
+  fetchTablesForDb,
   fetchTableMeta,
   fetchRows,
-  extractTables,
+  fetchPrimaryKeys,
   inferColumnsFromRows,
-  readDatasetteJson,
+  refineColumnTypes,
+  testConnection,
+  withAuthFetch,
   DatasetteError,
   type DatasetteRef,
+  type TableRef,
 } from './datasette-client.js';
-import { pickDatasetteTables } from './datasette-table-picker.js';
 
-interface DbTable {
-  name: string;
-  count: number | null;
+type FetchFn = (url: string, opts?: unknown) => Promise<Response>;
+
+const host = (base: string): string => base.replace(/^https?:\/\//, '');
+
+/**
+ * Resolve the tables the user wants to act on from a Datasette URL:
+ *  - table URL      → that one table (no picker);
+ *  - database URL   → its tables, via the table checklist;
+ *  - instance URL   → pick database(s) first, then their tables.
+ * Returns the chosen tables, [] if none exist, or null if cancelled.
+ */
+async function resolveChosenTables(
+  fetchFn: FetchFn,
+  ref: DatasetteRef,
+  verb: 'Import' | 'Connect',
+): Promise<TableRef[] | null> {
+  if (ref.db && ref.table) {
+    return [{ db: ref.db, table: ref.table, count: null, hidden: false, pks: [] }];
+  }
+
+  let tables: TableRef[] = [];
+  if (ref.db) {
+    for (const t of await fetchTablesForDb(fetchFn, ref.base, ref.db)) if (!t.hidden) tables.push(t);
+  } else {
+    // Instance URL: list databases and let the user choose which to pull from.
+    const dbs = await fetchDatabaseNames(fetchFn, ref.base);
+    if (dbs.length === 0) return [];
+    let chosenDbs = dbs;
+    if (dbs.length > 1) {
+      const picked = await chooseTables(
+        dbs.map((d) => ({ name: d, size: null })),
+        {
+          title: `${verb} from Datasette`,
+          message: `Choose databases on ${host(ref.base)}, then their tables.`,
+          confirmLabel: 'Next: choose tables',
+        },
+      );
+      if (!picked) return null;
+      chosenDbs = picked.map((i) => dbs[i]!);
+    }
+    for (const db of chosenDbs) {
+      // Skip a database we can't list (permissions, odd route) rather than
+      // aborting the whole instance.
+      try {
+        for (const t of await fetchTablesForDb(fetchFn, ref.base, db)) if (!t.hidden) tables.push(t);
+      } catch {
+        /* skip */
+      }
+    }
+  }
+
+  if (tables.length === 0) return [];
+  const multiDb = new Set(tables.map((t) => t.db)).size > 1;
+  const picked = await chooseTables(
+    tables.map((t) => ({
+      name: multiDb ? `${t.db}/${t.table}` : t.table,
+      size: t.count,
+      detail: multiDb ? undefined : t.db,
+    })),
+    {
+      title: `${verb} from Datasette`,
+      message: `Choose tables to ${verb.toLowerCase()} from ${host(ref.base)}.`,
+      confirmLabel: verb,
+    },
+  );
+  if (!picked) return null;
+  return picked.map((i) => tables[i]!);
 }
+import { chooseTables } from '../dialogs/table-select-dialog.js';
+import { createDatasetteCollection, tokenSettingKey } from './datasette-collection.js';
+import '../dialogs/datasette-connect-dialog.js';
+import { DatasetteConnectDialog } from '../dialogs/datasette-connect-dialog.js';
+
+const CONNECT_ICON_SVG =
+  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+  '<path d="M3.9 12a3.1 3.1 0 0 1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7A3.1 3.1 0 0 1 3.9 12zM8 13h8v-2H8v2zm9-6h-4v1.9h4A3.1 3.1 0 0 1 17 15h-4v1.9h4a5 5 0 0 0 0-10z"/></svg>';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'datasette-source',
-  version: '0.1.0',
-  description: 'Import a table from any online Datasette instance by URL',
+  version: '0.2.0',
+  description: 'Import tables from any online Datasette instance, database, or single table by URL',
   author: 'easyDBAccess built-ins',
   optional: true,
 };
 
 const SETTINGS = {
-  maxImportRows: 10_000, // safety cap on a single import
-  pageSize: 'max' as const, // _size per page hop
+  maxImportRows: 10_000, // safety cap on a single table's import
+  pageSize: 1000, // _size per page hop (fixed size for uniform cursor paging)
 };
 
 const EXAMPLE = 'https://latest.datasette.io/fixtures/facetable';
 
 export function init(api: HostApi): void {
+  // Register the visible UI first, so a later failure (e.g. an older host that
+  // predates `registerRowSource`) can never prevent the Connect button from
+  // appearing. The button is this plugin's only discoverable entry point;
+  // losing it silently is exactly the "I don't see a connect button" trap.
+
+  // "Connect Datasette (live)" — opens a live read-write table (vs the Import
+  // button, which snapshots rows into a plain local table).
+  api.ui.registerHeaderButton({
+    id: 'datasette:connect',
+    label: 'Connect',
+    icon: CONNECT_ICON_SVG,
+    tooltip: 'Connect a live, editable Datasette table',
+    onClick: () => openConnectDialog(api),
+  });
+
+  // Phase 2c: tables carrying `source: { type: 'datasette', ... }` are backed
+  // by a live read-write Datasette collection instead of Dexie (routed by the
+  // Phase-2a seam). Snapshot imports are unaffected — they create plain local
+  // tables with no `source`. Guarded so a host without this seam still shows
+  // the Connect button above (live routing just won't be available).
+  if (typeof api.registerRowSource === 'function') {
+    api.registerRowSource({ type: 'datasette', create: createDatasetteCollection });
+  }
+
   api.ui.registerUrlSource({
     id: 'datasette',
-    label: 'Datasette table or database…',
+    label: 'Datasette (table or instance)…',
     async run(api, { url }) {
       const input =
         url ||
         (await api.ui.dialogs.prompt(
-          `Datasette table or database URL\n\ne.g. ${EXAMPLE}`,
+          `Datasette URL — a single table, a database, or an instance root.\n\ne.g. ${EXAMPLE}`,
           '',
           'Import from Datasette',
         ));
@@ -62,7 +160,7 @@ export function init(api: HostApi): void {
 
   api.ui.registerDropHandler(async (event, api) => {
     const text = event.dataTransfer?.getData('text/plain') || '';
-    if (!isDatasetteUrl(text)) return false;
+    if (!isDatasetteTableUrl(text)) return false;
     event.preventDefault();
     await runImport(api, text);
     return true;
@@ -73,309 +171,308 @@ async function runImport(api: HostApi, input: string): Promise<void> {
   try {
     await importDatasette(api, input);
   } catch (err) {
-    // DatasetteError messages already carry the HTTP code + reason.
-    const msg =
-      err instanceof DatasetteError
-        ? err.message
-        : `Could not import: ${(err as Error)?.message ?? err}`;
+    let msg: string;
+    if (err instanceof DatasetteError) {
+      // Only prefix with a status when there's a real HTTP one (network
+      // failures carry status 0 and a self-explanatory message).
+      msg = err.status ? `Datasette error (${err.status}): ${err.message}` : err.message;
+    } else {
+      msg = `Could not import: ${(err as Error)?.message ?? err}`;
+    }
     await api.ui.dialogs.alert(msg, 'Datasette import failed');
   }
 }
 
-/** A database or table URL both qualify for drag-drop import. */
-function isDatasetteUrl(text: string): boolean {
+function isDatasetteTableUrl(text: string): boolean {
   try {
-    return !!parseDatasetteUrl(text).db;
+    const ref = parseDatasetteUrl(text);
+    return !!(ref.db && ref.table);
   } catch {
     return false;
   }
 }
 
-/**
- * Import from any Datasette URL. Whether the URL names a single table or a
- * whole database is decided from the JSON *response* — a database page returns
- * a `tables` list; a table returns `rows` — rather than from the path shape,
- * which is fragile (mount prefixes, `.json` suffixes, etc.). A database imports
- * every non-hidden table; a table imports just itself.
- */
-export async function importDatasette(api: HostApi, input: string): Promise<void> {
-  const ref = parseDatasetteUrl(input);
-  if (!ref.db) {
-    throw new Error('URL must point to a Datasette database or table, e.g. .../<database>[/<table>]');
-  }
-  const fetchFn = datasetteFetch(api);
-
-  const probe = await probeDatasette(fetchFn, input);
-  if (probe.kind === 'database') {
-    await importDatabaseRef(api, ref, probe.tables);
-    return;
-  }
-  if (!ref.table) {
-    throw new Error('That URL responds like a Datasette table but has no table name in its path.');
-  }
-  await importTableRef(api, ref, { announce: true });
-}
-
-/**
- * Fetch the URL's `.json` once and classify it: a database page carries a
- * `tables` list; a table carries `rows`. Returns the discovered table names
- * for the database case so the caller needn't re-fetch the page.
- */
-async function probeDatasette(
-  fetchFn: (url: string, opts?: any) => Promise<Response>,
-  input: string,
-): Promise<{ kind: 'table' | 'database'; tables: DbTable[] }> {
-  const u = new URL(input);
-  u.pathname = u.pathname.replace(/\.(json|csv)$/i, '') + '.json';
-  const res = await fetchFn(u.toString());
-  const json: any = await readDatasetteJson(res);
-
-  const tables = extractTables(json);
-  const looksDatabase = Array.isArray(json?.tables);
-  const looksTable = Array.isArray(json?.rows) || Array.isArray(json?.columns);
-  if (looksDatabase && !looksTable) return { kind: 'database', tables };
-  if (looksTable) return { kind: 'table', tables: [] };
-  // Ambiguous response — fall back to the URL shape.
-  return { kind: tables.length > 0 ? 'database' : 'table', tables };
-}
-
-/** Back-compat single-table entry: parse an input URL, require a table. */
-export async function importDatasetteTable(api: HostApi, input: string): Promise<string> {
-  const ref = parseDatasetteUrl(input);
-  if (!ref.db || !ref.table) {
-    throw new Error('URL must point to a table, e.g. .../<database>/<table>');
-  }
-  return (await importTableRef(api, ref, { announce: true })).tableId;
-}
-
-interface TableImportResult {
-  tableId: string;
+interface OneResult {
   name: string;
   rowCount: number;
-  count: number | null;
   hasMore: boolean;
   truncated: boolean;
+  pages: number;
+  count: number | null;
 }
 
-/** Fetch schema + rows for one table (given a resolved ref) and store it locally. */
-async function importTableRef(
-  api: HostApi,
-  ref: DatasetteRef,
-  opts: { announce?: boolean; overwrite?: boolean } = {},
-): Promise<TableImportResult> {
+/**
+ * Smart entry point. Resolves a Datasette URL to one or many tables and imports
+ * them. A single-table URL imports straight away; a database/instance URL
+ * discovers its tables and opens a checklist (all pre-selected) so the user
+ * chooses what to pull in.
+ */
+export async function importDatasette(api: HostApi, input: string): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('datasette-source: no active workspace');
-  if (!ref.db || !ref.table) throw new Error('datasette-source: table ref requires db + table');
 
-  const fetchFn = datasetteFetch(api);
+  const ref = parseDatasetteUrl(input);
+  const fetchFn = (u: string) => api.backend.fetch(u);
 
-  const { columns, pks, count } = await fetchTableMeta(fetchFn, ref);
+  const chosen = await resolveChosenTables(fetchFn, ref, 'Import');
+  if (chosen === null) return; // cancelled
+  if (chosen.length === 0) {
+    await api.ui.dialogs.alert('No tables found at that Datasette URL.', 'Datasette import');
+    return;
+  }
+
+  // Single explicit table (from a table URL) keeps its per-table toast.
+  if (ref.db && ref.table && chosen.length === 1) {
+    const r = await importOneTable(api, workspaceId, ref);
+    if (r.hasMore || r.truncated) toastCapped(api, r);
+    return;
+  }
+
+  let imported = 0;
+  let totalRows = 0;
+  const capped: string[] = [];
+  const failed: string[] = [];
+  for (const c of chosen) {
+    try {
+      const r = await importOneTable(api, workspaceId, {
+        base: ref.base,
+        db: c.db,
+        table: c.table,
+        query: {},
+      });
+      imported += 1;
+      totalRows += r.rowCount;
+      if (r.hasMore || r.truncated) capped.push(`${c.db}/${c.table}`);
+    } catch (err) {
+      failed.push(`${c.db}/${c.table}: ${(err as Error)?.message ?? String(err)}`);
+    }
+  }
+
+  summariseBatch(api, { imported, totalRows, capped, failed, requested: chosen.length });
+}
+
+/** Fetch schema + rows for one table and create the local eda table. No toast. */
+async function importOneTable(
+  api: HostApi,
+  workspaceId: string,
+  ref: DatasetteRef,
+): Promise<OneResult> {
+  const name = `${ref.db}/${ref.table}`;
+  const fetchFn = (u: string) => api.backend.fetch(u);
+
+  // Schema discovery via ?_extra=… is best-effort: instances that don't
+  // support it (older Datasette) simply give us no columns, and we infer them
+  // from the fetched rows below. A hard failure here (e.g. network) is
+  // tolerated too — the row fetch will surface any real problem.
+  let metaColumns: ColumnSpec[] = [];
+  let count: number | null = null;
+  let typed = false;
+  try {
+    const meta = await fetchTableMeta(fetchFn, ref);
+    metaColumns = meta.columns;
+    count = meta.count;
+    typed = meta.typed;
+  } catch {
+    // fall back to row inference
+  }
+
   const { rows, truncated, hasMore, pages } = await fetchRows(fetchFn, ref, {
     maxRows: SETTINGS.maxImportRows,
     pageSize: SETTINGS.pageSize,
   });
 
-  // Some Datasette instances/versions don't return column metadata for our
-  // `_extra` request, which used to yield a table with rows but no columns.
-  // Fall back to inferring columns from the rows, and union in any row keys
-  // the metadata didn't cover.
-  let columnSpecs = columns;
-  if (columnSpecs.length === 0) {
-    columnSpecs = inferColumnsFromRows(rows, pks);
-  } else {
-    const known = new Set(columnSpecs.map((c) => c.field));
-    const extra = inferColumnsFromRows(rows, pks).filter((c) => !known.has(c.field));
-    if (extra.length > 0) columnSpecs = [...columnSpecs, ...extra];
-  }
+  // Prefer the schema's columns; if it gave no columns at all, infer from rows;
+  // if it gave names but no type details (e.g. datasette.io's `?_extra=columns`
+  // returns a bare name array), keep the names but refine types from the rows.
+  const columns =
+    metaColumns.length === 0
+      ? inferColumnsFromRows(rows)
+      : typed
+        ? metaColumns
+        : refineColumnTypes(metaColumns, rows);
 
   const now = Date.now();
-  const baseName = `${ref.db}/${ref.table}`;
-  const existing = (await api.store.tables.find()).filter((t) => t.workspaceId === workspaceId);
-  const byName = new Map(existing.map((t) => [t.name, t] as const));
-
-  let name = baseName;
-  const overwriteTarget = opts.overwrite ? byName.get(baseName) : undefined;
-  if (!overwriteTarget && byName.has(baseName)) {
-    // Name collision but not overwriting → import under a unique "(n)" name.
-    let i = 2;
-    while (byName.has(`${baseName} (${i})`)) i += 1;
-    name = `${baseName} (${i})`;
-  }
-
-  let tableId: string;
-  if (overwriteTarget) {
-    // Overwrite in place: keep the id (and its panel position), wipe rows, replace columns.
-    tableId = overwriteTarget.id;
-    name = overwriteTarget.name;
-    api.events.emit('import:before', { source: 'datasette', tableId });
-    const rowColl = api.store.rows(tableId);
-    const old = await rowColl.find();
-    await rowColl.bulkRemove(old.map((r) => r.id));
-    await api.store.tables.patch(tableId, { columns: columnSpecs, updatedAt: now });
-  } else {
-    tableId = cryptoUUID();
-    api.events.emit('import:before', { source: 'datasette', tableId });
-    await api.store.tables.insert({
-      id: tableId,
-      workspaceId,
-      name,
-      code: slug(name),
-      columns: columnSpecs,
-      view: 'table',
-      updatedAt: now,
-    });
-  }
+  const tableId = cryptoUUID();
+  api.events.emit('import:before', { source: 'datasette', tableId });
+  await api.store.tables.insert({
+    id: tableId,
+    workspaceId,
+    name,
+    code: slug(`${ref.db}-${ref.table}`),
+    columns,
+    view: 'table',
+    updatedAt: now,
+  });
 
   const docs: Row[] = rows.map((data) => ({ id: cryptoUUID(), tableId, data, updatedAt: now }));
   await api.store.rows(tableId).bulkInsert(docs);
 
   api.events.emit('import:after', { source: 'datasette', tableId, rowCount: rows.length });
 
-  if (opts.announce) {
-    const total = count != null ? ` of ${count}` : '';
-    if (hasMore || truncated) {
-      api.ui.dialogs.toast(
-        `Imported first ${rows.length}${total} rows from ${ref.table} — more available ` +
-          `(capped at ${SETTINGS.maxImportRows}). Live paging arrives with the Phase-2 connector.`,
-        { kind: 'warning' },
-      );
-    } else {
-      api.ui.dialogs.toast(
-        `Imported ${rows.length} rows from ${ref.table} (${pages} page${pages === 1 ? '' : 's'}).`,
-        { kind: 'success' },
-      );
-    }
-  }
-
-  return { tableId, name, rowCount: rows.length, count, hasMore, truncated };
+  return { name, rowCount: rows.length, hasMore, truncated, pages, count };
 }
 
-/** Estimate a table's byte size from a small sample × its row count. */
-async function estimateBytes(
-  fetchFn: (u: string, o?: any) => Promise<Response>,
-  ref: DatasetteRef,
-  table: string,
-  count: number | null,
-): Promise<number | null> {
-  if (count === 0) return 0;
-  try {
-    const url = buildTableUrl({ ...ref, table }, { _shape: 'objects', _size: 20 });
-    const res = await fetchFn(url);
-    const json: any = await res.json();
-    const sample = Array.isArray(json?.rows) ? json.rows : [];
-    if (sample.length === 0) return count == null ? null : 0;
-    const perRow = JSON.stringify(sample).length / sample.length;
-    const n = count == null ? sample.length : count;
-    return Math.round(perRow * n);
-  } catch {
-    return null;
-  }
-}
-
-/** Import selected non-hidden tables in a Datasette database (from the probe). */
-async function importDatabaseRef(api: HostApi, ref: DatasetteRef, tables: DbTable[]): Promise<void> {
-  if (tables.length === 0) throw new Error(`No tables found in database "${ref.db}".`);
-
-  const fetchFn = datasetteFetch(api);
-  const workspaceId = api.workspaceId();
-  const existing = workspaceId
-    ? (await api.store.tables.find()).filter((t) => t.workspaceId === workspaceId)
-    : [];
-  const existingNames = new Set(existing.map((t) => t.name));
-  const countByName = new Map(tables.map((t) => [t.name, t.count] as const));
-
-  // Show the picker immediately (rows + collision known up front); sizes fill
-  // in lazily via the estimate callback.
-  const items = tables.map((t) => ({
-    name: t.name,
-    rows: t.count,
-    bytes: null as number | null,
-    exists: existingNames.has(`${ref.db}/${t.name}`),
-  }));
-  const estimate = (name: string) => estimateBytes(fetchFn, ref, name, countByName.get(name) ?? null);
-
-  const chosen = await pickDatasetteTables(ref.db ?? '', items, estimate);
-  if (chosen === null) return; // cancelled
-  if (chosen.length === 0) return; // nothing selected
-
+function toastCapped(api: HostApi, r: OneResult): void {
+  const total = r.count != null ? ` of ${r.count}` : '';
+  const table = r.name.split('/').pop() ?? r.name;
   api.ui.dialogs.toast(
-    `Importing ${chosen.length} table${chosen.length === 1 ? '' : 's'} from ${ref.db}…`,
-    { kind: 'info' },
+    `Imported first ${r.rowCount}${total} rows from ${table} — more available ` +
+      `(capped at ${SETTINGS.maxImportRows}). Live paging arrives with the Phase-2 connector.`,
+    { kind: 'warning', title: 'Datasette import' },
   );
+}
 
-  let imported = 0;
-  let rowTotal = 0;
-  let capped = 0;
-  let overwritten = 0;
-  const failures: string[] = [];
-  for (const sel of chosen) {
-    try {
-      const res = await importTableRef(
-        api,
-        { ...ref, table: sel.table },
-        { announce: false, overwrite: sel.overwrite },
-      );
-      imported += 1;
-      rowTotal += res.rowCount;
-      if (res.hasMore || res.truncated) capped += 1;
-      if (sel.overwrite) overwritten += 1;
-    } catch (err) {
-      failures.push(`${sel.table}: ${(err as Error)?.message ?? err}`);
-    }
-  }
-
-  const notes = [
-    capped > 0 ? `${capped} capped at ${SETTINGS.maxImportRows} rows` : '',
-    overwritten > 0 ? `${overwritten} overwritten` : '',
-  ].filter(Boolean);
-  const noteStr = notes.length ? ` (${notes.join('; ')})` : '';
-  if (imported > 0) {
+function summariseBatch(
+  api: HostApi,
+  s: { imported: number; totalRows: number; capped: string[]; failed: string[]; requested: number },
+): void {
+  const rows = `${s.totalRows.toLocaleString()} row${s.totalRows === 1 ? '' : 's'}`;
+  const tables = `${s.imported} table${s.imported === 1 ? '' : 's'}`;
+  if (s.failed.length > 0) {
     api.ui.dialogs.toast(
-      `Imported ${imported}/${chosen.length} table${chosen.length === 1 ? '' : 's'} ` +
-        `(${rowTotal} rows) from ${ref.db}${noteStr}.`,
-      { kind: failures.length ? 'warning' : 'success' },
-    );
-  }
-  if (failures.length > 0) {
-    api.ui.dialogs.toast(
-      `${failures.length} table${failures.length === 1 ? '' : 's'} failed to import:\n${failures
-        .slice(0, 5)
-        .join('\n')}${failures.length > 5 ? `\n…and ${failures.length - 5} more.` : ''}`,
+      `Imported ${tables} (${rows}); ${s.failed.length} failed:\n${s.failed.join('\n')}`,
       { kind: 'error', title: 'Datasette import' },
     );
+    return;
+  }
+  if (s.capped.length > 0) {
+    api.ui.dialogs.toast(
+      `Imported ${tables} (${rows}). ${s.capped.length} capped at ${SETTINGS.maxImportRows} — ` +
+        `more available: ${s.capped.join(', ')}.`,
+      { kind: 'warning', title: 'Datasette import' },
+    );
+    return;
+  }
+  api.ui.dialogs.toast(`Imported ${tables} (${rows}) from Datasette.`, {
+    kind: 'success',
+    title: 'Datasette import',
+  });
+}
+
+// -- Live connect (Phase 2b) -------------------------------------------------
+
+async function openConnectDialog(api: HostApi): Promise<void> {
+  const dlg = DatasetteConnectDialog.instance ?? mountConnectDialog();
+  const fetchFn = (u: string, o?: unknown) => api.backend.fetch(u, o as never);
+  const result = await dlg.open({
+    async onTest(url, token) {
+      const ref = parseDatasetteUrl(url);
+      const status = await testConnection(fetchFn, ref.base, { token: token || undefined });
+      if (!status.reachable) return `Unreachable: ${status.error ?? 'no response'}`;
+      const v = status.version ? ` (Datasette ${status.version})` : '';
+      return status.writable
+        ? `Reachable${v} — signed in, read-write.`
+        : `Reachable${v} — read-only (no token / not authenticated).`;
+    },
+  });
+  if (!result) return;
+  try {
+    await connectDatasette(api, result.url, result.token);
+  } catch (err) {
+    const msg = err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
+    await api.ui.dialogs.alert(msg, 'Connect Datasette failed');
   }
 }
 
-/**
- * Wrap api.backend.fetch so a *rejected* fetch (network/CORS failure — e.g. the
- * browser blocking a cross-origin redirect to a Cloudflare Turnstile challenge,
- * which surfaces only as a bare "Load failed" / "Failed to fetch" TypeError)
- * becomes a DatasetteError with an actionable reason. Non-JSON *responses* are
- * handled separately by readDatasetteJson.
- */
-function datasetteFetch(api: HostApi): (u: string, o?: any) => Promise<Response> {
-  return async (u, o) => {
+function mountConnectDialog(): DatasetteConnectDialog {
+  const el = document.createElement('datasette-connect-dialog') as DatasetteConnectDialog;
+  document.body.appendChild(el);
+  return el;
+}
+
+/** Open live read-write table(s) for a Datasette URL (table, database, or instance). */
+export async function connectDatasette(api: HostApi, input: string, token: string): Promise<void> {
+  const workspaceId = api.workspaceId();
+  if (!workspaceId) throw new Error('datasette-source: no active workspace');
+
+  const ref = parseDatasetteUrl(input);
+  const baseFetch = (u: string, o?: unknown) => api.backend.fetch(u, o as never);
+  // Authenticated reads so discovery/metadata work on private instances too.
+  const fetchFn = withAuthFetch(baseFetch, token || undefined);
+
+  const status = await testConnection(baseFetch, ref.base, { token: token || undefined });
+  if (!status.reachable) {
+    throw new Error(`Couldn't reach ${ref.base}${status.error ? `: ${status.error}` : ''}.`);
+  }
+  // Store the token device-local (per instance base). Settings are not synced,
+  // so the token never leaves this device or lands in a workspace export.
+  if (token) await api.store.settings.upsert({ key: tokenSettingKey(ref.base), value: token });
+
+  const chosen = await resolveChosenTables(fetchFn, ref, 'Connect');
+  if (chosen === null) return; // cancelled
+  if (chosen.length === 0) {
+    await api.ui.dialogs.alert('No tables found at that URL.', 'Connect Datasette');
+    return;
+  }
+
+  let connected = 0;
+  for (const c of chosen) {
+    await createLiveTable(api, workspaceId, ref.base, c, status.writable, token);
+    connected += 1;
+  }
+  const mode = status.writable ? 'read-write' : 'read-only';
+  api.ui.dialogs.toast(
+    `Connected ${connected} live table${connected === 1 ? '' : 's'} from Datasette (${mode}).`,
+    { kind: 'success', title: 'Connect Datasette' },
+  );
+}
+
+/** Create a Table with a live `datasette` source (columns discovered; no local rows). */
+async function createLiveTable(
+  api: HostApi,
+  workspaceId: string,
+  base: string,
+  c: TableRef,
+  writable: boolean,
+  token: string,
+): Promise<string> {
+  const ref: DatasetteRef = { base, db: c.db, table: c.table, query: {} };
+  const fetchFn = withAuthFetch((u: string, o?: unknown) => api.backend.fetch(u, o as never), token || undefined);
+
+  // Columns: schema names refined from a small sample (see importOneTable).
+  let metaColumns: ColumnSpec[] = [];
+  let typed = false;
+  try {
+    const meta = await fetchTableMeta(fetchFn, ref);
+    metaColumns = meta.columns;
+    typed = meta.typed;
+  } catch {
+    /* fall back to row inference */
+  }
+  const { rows: sample } = await fetchRows(fetchFn, ref, { maxRows: 50, pageSize: 50 });
+  const baseColumns =
+    metaColumns.length === 0
+      ? inferColumnsFromRows(sample)
+      : typed
+        ? metaColumns
+        : refineColumnTypes(metaColumns, sample);
+
+  // PKs from the database listing, else a dedicated probe. Needed to address
+  // rows for update/delete.
+  let pks = c.pks;
+  if (!pks || pks.length === 0) {
     try {
-      return await api.backend.fetch(u, o);
-    } catch (e) {
-      let host = u;
-      try {
-        host = new URL(u).host;
-      } catch {
-        /* keep raw */
-      }
-      // The browser withholds the cause of a cross-origin fetch failure, so we
-      // can only report the raw error + host and list the possibilities — we
-      // must NOT assert a specific cause we didn't observe.
-      throw new DatasetteError({
-        error:
-          `could not fetch ${host} (${(e as Error)?.message || 'fetch failed'}). The browser doesn't ` +
-          `report why a cross-origin request failed; common causes are no network, a CORS restriction, or ` +
-          `the request being redirected to a login/challenge page. If only some tables fail, the instance ` +
-          `is probably rate-limiting — retry shortly or import fewer tables.`,
-      });
+      pks = await fetchPrimaryKeys(fetchFn, ref);
+    } catch {
+      pks = [];
     }
-  };
+  }
+  const columns = baseColumns.map((col) =>
+    pks.includes(col.field) ? { ...col, unique: true, notnull: true } : col,
+  );
+
+  const tableId = cryptoUUID();
+  await api.store.tables.insert({
+    id: tableId,
+    workspaceId,
+    name: `${c.db}/${c.table}`,
+    code: slug(`${c.db}-${c.table}`),
+    columns,
+    view: 'table',
+    source: { type: 'datasette', writable, config: { base, db: c.db, table: c.table, pks } },
+    updatedAt: Date.now(),
+  });
+  return tableId;
 }
 
 function slug(s: string): string {

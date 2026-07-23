@@ -34,6 +34,15 @@ const NORTHWIND_URL =
   'https://raw.githubusercontent.com/cawoodm/easydbaccess/main/data/northwind.db.json';
 
 /**
+ * Inline "import" glyph (arrow descending into a tray) rendered as an SVG on
+ * the header button. The shell renders `icon` strings that begin with `<svg`
+ * as inline SVG (fill: currentColor) rather than as a Material Icons ligature.
+ */
+const IMPORT_ICON_SVG =
+  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+  '<path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>';
+
+/**
  * Curated starting points. The first is our own JSON dump; the rest are public
  * Datasette instances served with CORS so they work from the static browser
  * build (no sync server required). Picking one fills the URL box and sets the
@@ -42,13 +51,13 @@ const NORTHWIND_URL =
 const PREDEFINED: PredefinedSource[] = [
   { label: 'Northwind — sample database (JSON dump)', url: NORTHWIND_URL, kind: 'json' },
   {
-    label: 'Datasette — global power plants (table)',
-    url: 'https://datasette.io/global-power-plants/global-power-plants',
+    label: 'Datasette — US legislators (whole database, pick tables)',
+    url: 'https://datasette.io/legislators',
     kind: 'datasette',
   },
   {
-    label: 'Datasette — US legislators (whole database)',
-    url: 'https://datasette.io/legislators',
+    label: 'Datasette — global power plants',
+    url: 'https://global-power-plants.datasettes.com/global-power-plants/global-power-plants',
     kind: 'datasette',
   },
 ];
@@ -57,7 +66,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   name: 'import-data',
   version: '0.2.0',
   description:
-    'Header button that imports a table from a URL — a JSON dump (e.g. Northwind) or a Datasette table — with a picker of sample sources.',
+    'Header button that imports data from a URL — a JSON dump (e.g. Northwind) or a Datasette table, database, or whole instance — with a picker of sample sources.',
   author: 'easyDBAccess built-ins',
   optional: true,
 };
@@ -65,9 +74,9 @@ export const meta: NonNullable<PluginModule['meta']> = {
 export function init(api: HostApi): void {
   api.ui.registerHeaderButton({
     id: 'import-data:open',
-    label: '',
-    icon: 'cloud_download',
-    tooltip: 'Import data from a URL',
+    label: 'Import',
+    icon: IMPORT_ICON_SVG,
+    tooltip: 'Import data from a URL (snapshot into a local table)',
     onClick: () => openImport(api),
   });
 }
@@ -80,8 +89,8 @@ async function openImport(api: HostApi): Promise<void> {
   const { url, kind } = result;
   try {
     if (kind === 'datasette') {
-      // importDatasette emits its own toasts. A table URL imports one table; a
-      // database URL imports every non-hidden table in it.
+      // importDatasette emits its own toasts. A table URL imports directly; a
+      // database/instance URL opens the table picker before importing.
       await importDatasette(api, url);
     } else {
       const res = await api.backend.fetch(url);
@@ -115,13 +124,13 @@ function detectKind(url: string): ResolvedKind {
   try {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
-    const path = u.pathname.replace(/\.(json|csv)$/i, '');
-    const segments = path.split('/').filter(Boolean);
     const hasDatasetteParams = [...u.searchParams.keys()].some((k) => k.startsWith('_'));
+    // A `.json`/`.csv` file path with no Datasette markers reads as a dump.
+    // Anything on a datasette host (or carrying `?_`-prefixed API params) reads
+    // as Datasette — at any depth, so instance and database URLs work too.
     const looksDatasette = host.includes('datasette') || hasDatasetteParams;
-    // A Datasette host with at least a database segment (db, or db/table)
-    // routes to the Datasette importer; a bare .json elsewhere is a dump.
-    if (looksDatasette && segments.length >= 1) return 'datasette';
+    if (/\.(json|csv)$/i.test(u.pathname) && !hasDatasetteParams) return 'json';
+    if (looksDatasette) return 'datasette';
     return 'json';
   } catch {
     return 'json';
@@ -188,15 +197,6 @@ export class ImportDialog extends LitElement {
         color: #6b7280;
         font-size: 0.78rem;
         margin: 0;
-        line-height: 1.5;
-      }
-      .hint code {
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 0.72rem;
-        background: #f3f4f6;
-        padding: 0.05rem 0.25rem;
-        border-radius: 0.2rem;
-        word-break: break-all;
       }
     `,
   ];
@@ -299,7 +299,7 @@ export class ImportDialog extends LitElement {
               <input
                 type="text"
                 autofocus
-                placeholder="e.g. https://datasette.io/global-power-plants/global-power-plants"
+                placeholder="https://… (JSON dump or Datasette table)"
                 .value=${this.url}
                 @input=${(e: Event) => {
                   this.url = (e.target as HTMLInputElement).value;
@@ -320,17 +320,15 @@ export class ImportDialog extends LitElement {
                 <option value="auto" ?selected=${this.kind === 'auto'}>Auto-detect</option>
                 <option value="json" ?selected=${this.kind === 'json'}>JSON dump</option>
                 <option value="datasette" ?selected=${this.kind === 'datasette'}>
-                  Datasette
+                  Datasette (table or instance)
                 </option>
               </select>
             </label>
 
             <p class="hint">
-              Paste any URL or pick a sample above. A JSON dump imports every table in the file;
-              a Datasette URL imports one table or a whole database — auto-detected from the
-              response — as read-only snapshots, capped at 10,000 rows each.<br />
-              Examples: <code>https://datasette.io/global-power-plants/global-power-plants</code>
-              (one table) · <code>https://datasette.io/global-power-plants</code> (whole database).
+              Paste any URL or pick a sample above. Multi-table sources — a JSON dump with
+              several tables, or a Datasette database/instance URL — let you choose which tables
+              to import. Datasette tables import a read-only snapshot (capped at 10,000 rows each).
             </p>
           </div>
         </form>
