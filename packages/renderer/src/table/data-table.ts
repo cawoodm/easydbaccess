@@ -343,7 +343,18 @@ export class DataTable extends LitElement {
     );
     const rowColl = ctx.store.rows(this.tableId);
     this.unsubscribe = rowColl.subscribe((r) => (this.rows = r));
-    this.rows = await rowColl.find();
+    try {
+      this.rows = await rowColl.find();
+    } catch (err) {
+      // A remote-backed table (e.g. a live Datasette source) can fail to load
+      // its rows — a blocked cross-origin fetch, a bot challenge, an auth
+      // error. Surface it instead of leaving a silently empty grid.
+      this.rows = [];
+      ctx.api.ui.dialogs.toast(`Couldn't load rows: ${(err as Error)?.message ?? String(err)}`, {
+        kind: 'error',
+        title: 'Load failed',
+      });
+    }
   }
 
   private applyTable(table: Table) {

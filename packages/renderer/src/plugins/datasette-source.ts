@@ -461,17 +461,35 @@ async function createLiveTable(
     pks.includes(col.field) ? { ...col, unique: true, notnull: true } : col,
   );
 
-  const tableId = cryptoUUID();
-  await api.store.tables.insert({
+  // Reuse an existing live table for the same (base, db, table) rather than
+  // piling up duplicates on every reconnect. When found, refresh its columns +
+  // source in place (keeping window geometry, sort, filters) instead of
+  // inserting a new record.
+  const existing = (await api.store.tables.find()).find((t) => {
+    const cfg = t.source?.config as { base?: string; db?: string; table?: string } | undefined;
+    return (
+      t.workspaceId === workspaceId &&
+      t.source?.type === 'datasette' &&
+      cfg?.base === base &&
+      cfg?.db === c.db &&
+      cfg?.table === c.table
+    );
+  });
+
+  const tableId = existing?.id ?? cryptoUUID();
+  const record = {
+    ...(existing ?? {}),
     id: tableId,
     workspaceId,
     name: `${c.db}/${c.table}`,
     code: slug(`${c.db}-${c.table}`),
     columns,
-    view: 'table',
+    view: existing?.view ?? 'table',
     source: { type: 'datasette', writable, config: { base, db: c.db, table: c.table, pks } },
     updatedAt: Date.now(),
-  });
+  };
+  if (existing) await api.store.tables.upsert(record);
+  else await api.store.tables.insert(record);
   return tableId;
 }
 
