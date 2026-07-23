@@ -390,15 +390,23 @@ export async function connectDatasette(api: HostApi, input: string, token: strin
   // Authenticated reads so discovery/metadata work on private instances too.
   const fetchFn = withAuthFetch(baseFetch, token || undefined);
 
+  // The /-/versions.json + /-/actor.json probe only tells us the version and
+  // whether the token authenticates (→ writability). It's advisory: some hosts
+  // (e.g. datasette.io behind Cloudflare) challenge those endpoints even though
+  // table pages read fine. So don't hard-fail on it — let table discovery below
+  // be the real reachability gate.
   const status = await testConnection(baseFetch, ref.base, { token: token || undefined });
-  if (!status.reachable) {
-    throw new Error(`Couldn't reach ${ref.base}${status.error ? `: ${status.error}` : ''}.`);
-  }
   // Store the token device-local (per instance base). Settings are not synced,
   // so the token never leaves this device or lands in a workspace export.
   if (token) await api.store.settings.upsert({ key: tokenSettingKey(ref.base), value: token });
 
-  const chosen = await resolveChosenTables(fetchFn, ref, 'Connect');
+  let chosen: TableRef[] | null;
+  try {
+    chosen = await resolveChosenTables(fetchFn, ref, 'Connect');
+  } catch (err) {
+    const detail = err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
+    throw new Error(`Couldn't read tables from ${host(ref.base)}: ${detail}`);
+  }
   if (chosen === null) return; // cancelled
   if (chosen.length === 0) {
     await api.ui.dialogs.alert('No tables found at that URL.', 'Connect Datasette');

@@ -76,6 +76,14 @@ export class DatasetteConnectDialog extends LitElement {
         color: #6b7280;
         font-size: 0.78rem;
         margin: 0;
+        line-height: 1.5;
+      }
+      .hint code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.72rem;
+        background: #f3f4f6;
+        padding: 0.05rem 0.25rem;
+        border-radius: 0.2rem;
       }
     `,
   ];
@@ -164,7 +172,7 @@ export class DatasetteConnectDialog extends LitElement {
           </div>
           <div class="dialog-body">
             <label>
-              URL
+              URL — a table, a database, or an instance
               <input
                 type="text"
                 autofocus
@@ -195,9 +203,11 @@ export class DatasetteConnectDialog extends LitElement {
               <span class="status ${this.statusKind}">${this.status}</span>
             </div>
             <p class="hint">
-              Opens a live table backed by the remote Datasette — reads stay remote, and edits
-              write back when the token grants them. The token is stored on this device only and
-              is never synced or exported. A blank token opens the table read-only.
+              Enter a single table (<code>…/db/table</code>), a whole database (<code>…/db</code>),
+              or an instance root — you'll pick which tables to connect. Opens live tables backed by
+              the remote Datasette: reads stay remote, and edits write back when the token grants
+              them. The token is stored on this device only and is never synced or exported. A blank
+              token opens tables read-only.
             </p>
           </div>
         </form>

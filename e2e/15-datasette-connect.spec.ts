@@ -256,6 +256,128 @@ test.describe('datasette live connect', () => {
     expect(writes).toEqual([]);
   });
 
+  test('a database URL lists that database\'s tables (no db picker) and connects them', async ({
+    page,
+    workspaceId,
+  }) => {
+    await page.route('https://dbc.example/**', async (route) => {
+      const u = new URL(route.request().url());
+      const json = (body: unknown) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          headers: { 'access-control-allow-origin': '*' },
+          body: JSON.stringify(body),
+        });
+      switch (u.pathname) {
+        case '/-/versions.json':
+          return json({ datasette: { version: '1.0a37' } });
+        case '/-/actor.json':
+          return json({ ok: true, actor: null });
+        case '/legislators.json': // the database page → its tables
+          return json({
+            ok: true,
+            tables: [
+              { name: 'legislators', count: 10001, primary_keys: ['id'] },
+              { name: 'offices', count: 1312, primary_keys: ['id'] },
+              { name: 'legislators_fts', count: 0, hidden: true }, // must be skipped
+            ],
+          });
+        case '/legislators/legislators.json':
+          if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'name'], rows: [] });
+          if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
+          return json({ ok: true, next: null, rows: [{ id: 1, name: 'A' }] });
+        case '/legislators/offices.json':
+          if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'city'], rows: [] });
+          if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
+          return json({ ok: true, next: null, rows: [{ id: 1, city: 'DC' }] });
+        default:
+          return route.fulfill({ status: 404, body: '{"ok":false}' });
+      }
+    });
+
+    await page.getByTitle(/Connect a live/).click();
+    const connect = page.locator('datasette-connect-dialog dialog');
+    await connect.locator('input[type="text"]').fill('https://dbc.example/legislators');
+    await connect.getByRole('button', { name: 'Connect', exact: true }).click();
+
+    // Goes straight to the table picker (no database step for a single-db URL);
+    // the hidden FTS table is excluded.
+    const picker = page.locator('table-select-dialog dialog');
+    await expect(picker.getByRole('button', { name: /^Connect \(/ })).toBeVisible();
+    await expect(picker.locator('ul.tables li .name')).toHaveText(['legislators', 'offices']);
+    await picker.getByRole('button', { name: /^Connect \(2\)$/ }).click();
+
+    // Two live tables from the "legislators" database are connected.
+    await expect
+      .poll(() =>
+        page.evaluate(async (ws) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ts = (await (window as any).__easydb.store.tables.find())
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .filter((x: any) => x.workspaceId === ws && x.source?.type === 'datasette')
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .map((x: any) => `${x.source.config.db}/${x.source.config.table}`)
+            .sort();
+          return ts;
+        }, workspaceId),
+      )
+      .toEqual(['legislators/legislators', 'legislators/offices']);
+  });
+
+  test('connects when the version probe is blocked but table pages read (Cloudflare case)', async ({
+    page,
+    workspaceId,
+  }) => {
+    // Mimic datasette.io behind Cloudflare: /-/versions.json + /-/actor.json are
+    // challenged (non-JSON), but the database page and table pages read fine.
+    await page.route('https://wafed.example/**', async (route) => {
+      const u = new URL(route.request().url());
+      const json = (body: unknown) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          headers: { 'access-control-allow-origin': '*' },
+          body: JSON.stringify(body),
+        });
+      if (u.pathname === '/-/versions.json' || u.pathname === '/-/actor.json') {
+        return route.fulfill({ status: 200, contentType: 'text/html', body: '<html>challenge</html>' });
+      }
+      if (u.pathname === '/legislators.json') {
+        return json({ ok: true, tables: [{ name: 'offices', count: 1312, primary_keys: ['id'] }] });
+      }
+      if (u.pathname === '/legislators/offices.json') {
+        if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'city'], rows: [] });
+        if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
+        return json({ ok: true, next: null, rows: [{ id: 1, city: 'DC' }] });
+      }
+      return route.fulfill({ status: 404, body: '{"ok":false}' });
+    });
+
+    await page.getByTitle(/Connect a live/).click();
+    const connect = page.locator('datasette-connect-dialog dialog');
+    await connect.locator('input[type="text"]').fill('https://wafed.example/legislators');
+    await connect.getByRole('button', { name: 'Connect', exact: true }).click();
+
+    // The blocked version probe must NOT abort the connect — discovery still works.
+    const picker = page.locator('table-select-dialog dialog');
+    await expect(picker.getByRole('button', { name: /^Connect \(1\)$/ })).toBeVisible();
+    await picker.getByRole('button', { name: /^Connect \(1\)$/ }).click();
+
+    await expect
+      .poll(() =>
+        page.evaluate(async (ws) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const t = (await (window as any).__easydb.store.tables.find()).find(
+            (x: any) => x.workspaceId === ws && x.source?.type === 'datasette',
+          );
+          return t ? { table: t.source.config.table, writable: t.source.writable } : null;
+        }, workspaceId),
+      )
+      // Read-only: the probe couldn't confirm auth, so it safely defaults to read-only.
+      .toEqual({ table: 'offices', writable: false });
+  });
+
   test('an instance URL lists databases (skipping _memory, honouring custom routes), then tables', async ({
     page,
     workspaceId,
