@@ -64,6 +64,32 @@ describe('createDatasetteCollection — read', () => {
   });
 });
 
+describe('createDatasetteCollection — request dedup', () => {
+  const rowReqs = (calls: Array<{ url: string }>) =>
+    calls.filter((c) => c.url.includes('/db/t.json')).length;
+
+  it('subscribe + find on one instance issue a single row request', async () => {
+    const { ctx, calls } = makeCtx(() => ({ ok: true, next: null, rows: [{ id: 1, name: 'a' }] }));
+    const coll = createDatasetteCollection(sourcedTable(false), ctx);
+    // The grid does exactly this on mount: subscribe, then find.
+    const seen: number[] = [];
+    coll.subscribe((r) => seen.push(r.length));
+    const rows = await coll.find();
+    // one network round-trip shared by both, not one each
+    expect(rowReqs(calls)).toBe(1);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('a second find() after load serves the cache without refetching', async () => {
+    const { ctx, calls } = makeCtx(() => ({ ok: true, next: null, rows: [{ id: 1, name: 'a' }] }));
+    const coll = createDatasetteCollection(sourcedTable(false), ctx);
+    await coll.find();
+    await coll.find();
+    await coll.findOne('1');
+    expect(rowReqs(calls)).toBe(1);
+  });
+});
+
 describe('createDatasetteCollection — read-only guard', () => {
   const ro = () => createDatasetteCollection(sourcedTable(false), makeCtx(() => ({ ok: true, rows: [] })).ctx);
 

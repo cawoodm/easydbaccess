@@ -100,23 +100,42 @@ export function createDatasetteCollection(table: Table, ctx: RowSourceCtx): Data
 
   const subscribers = new Set<(rows: Row[]) => void>();
   let cache: Row[] = [];
+  let loaded = false;
+  let inFlight: Promise<Row[]> | null = null;
 
-  async function loadAll(): Promise<Row[]> {
-    const { rows } = await fetchRows(fetchFn, ref, { maxRows });
-    cache = rows.map(toRow);
-    for (const fn of subscribers) fn(cache);
-    return cache;
+  // Materialise all rows, collapsing concurrent callers onto a single request.
+  // The grid both subscribes AND calls find() on mount, and other chrome
+  // (footer row-count, search) opens the collection too. Without this dedup —
+  // and the memoisation in routed-data-store that hands every caller the SAME
+  // collection — that becomes a burst of identical row requests. A local import
+  // fetches once; a live table must not hammer the instance on every render
+  // (datasette.io behind Cloudflare treats the burst as bot traffic and starts
+  // blocking it, leaving the grid empty).
+  function loadAll(): Promise<Row[]> {
+    if (inFlight) return inFlight;
+    inFlight = (async () => {
+      try {
+        const { rows } = await fetchRows(fetchFn, ref, { maxRows });
+        cache = rows.map(toRow);
+        loaded = true;
+        for (const fn of subscribers) fn(cache);
+        return cache;
+      } finally {
+        inFlight = null;
+      }
+    })();
+    return inFlight;
   }
 
   return {
     async find(query) {
-      const rows = await loadAll();
+      const rows = loaded ? cache : await loadAll();
       if (!query || Object.keys(query).length === 0) return rows;
       return rows.filter((r) => matchesQuery(r, query));
     },
 
     async findOne(id) {
-      const rows = cache.length ? cache : await loadAll();
+      const rows = loaded ? cache : await loadAll();
       return rows.find((r) => r.id === id) ?? null;
     },
 
@@ -179,7 +198,10 @@ export function createDatasetteCollection(table: Table, ctx: RowSourceCtx): Data
 
     subscribe(fn): Unsubscribe {
       subscribers.add(fn);
-      void loadAll();
+      // Deliver the cache if we already have it; only hit the network when we
+      // haven't loaded yet (find() on the same instance shares the request).
+      if (loaded) fn(cache);
+      else void loadAll();
       let timer: ReturnType<typeof setInterval> | null = null;
       if (pollIntervalMs > 0) timer = setInterval(() => void loadAll(), pollIntervalMs);
       return () => {
