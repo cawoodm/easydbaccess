@@ -178,6 +178,84 @@ test.describe('datasette live connect', () => {
     expect(writes).toEqual([]); // no write request was attempted
   });
 
+  test('closing a live table window deletes it locally and it does not reappear', async ({
+    page,
+    workspaceId,
+  }) => {
+    const writes: string[] = [];
+    await page.route('https://ds.example/**', async (route) => {
+      const req = route.request();
+      const u = new URL(req.url());
+      const json = (body: unknown) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          headers: { 'access-control-allow-origin': '*' },
+          body: JSON.stringify(body),
+        });
+      if (req.method() === 'POST') {
+        writes.push(u.pathname); // must stay empty — closing must not write to the remote
+        return json({ ok: false, error: 'Permission denied' });
+      }
+      if (u.pathname === '/-/versions.json') return json({ datasette: { version: '1.0a37' } });
+      if (u.pathname === '/-/actor.json') return json({ ok: true, actor: null });
+      if (u.pathname === '/db/people.json') {
+        if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
+        if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'name'], rows: [] });
+        return json({ ok: true, next: null, rows: [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }] });
+      }
+      return route.fulfill({ status: 404, body: '{"ok":false}' });
+    });
+
+    // Connect token-less (read-only) and grab the live table's id.
+    await page.getByTitle(/Connect a live/).click();
+    const dlg = page.locator('datasette-connect-dialog dialog');
+    await dlg.locator('input[type="text"]').fill('https://ds.example/db/people');
+    await dlg.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect(dlg).toBeHidden();
+
+    const tableId: string = await (async () => {
+      await expect
+        .poll(() =>
+          page.evaluate(async (ws) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const ts = await (window as any).__easydb.store.tables.find();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            return ts.some((x: any) => x.workspaceId === ws && x.source?.type === 'datasette');
+          }, workspaceId),
+        )
+        .toBe(true);
+      return page.evaluate(async (ws) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ts = await (window as any).__easydb.store.tables.find();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return ts.find((x: any) => x.workspaceId === ws && x.source?.type === 'datasette').id;
+      }, workspaceId);
+    })();
+
+    await page.locator(`#${panelDomId(tableId)}`).waitFor();
+
+    // Click the panel's close (X) and confirm the dialog.
+    await page.locator(`#${panelDomId(tableId)} .jsPanel-btn-close`).click();
+    await page.locator('host-dialogs').getByRole('button', { name: 'Yes' }).click();
+
+    // The local Table record is removed (the bug left it behind because the
+    // row-cascade routed to the read-only remote and threw before tables.remove).
+    await expect
+      .poll(() =>
+        page.evaluate(async (id) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (await (window as any).__easydb.store.tables.findOne(id)) == null;
+        }, tableId),
+      )
+      .toBe(true);
+
+    // The panel is gone and stays gone (no subscription-driven reappearance).
+    await expect(page.locator(`#${panelDomId(tableId)}`)).toHaveCount(0);
+    // Closing must never issue a remote write (no row DELETEs on the server).
+    expect(writes).toEqual([]);
+  });
+
   test('an instance URL lists databases (skipping _memory, honouring custom routes), then tables', async ({
     page,
     workspaceId,

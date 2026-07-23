@@ -227,8 +227,10 @@ function openPanel(t: Table, ctx: AppContext): void {
       if (confirmedClose.has(t.id)) return true;
       void (async () => {
         const yes = await ctx.api.ui.dialogs.confirm(
-          `Delete table "${t.name}" and all its rows?`,
-          'Confirm delete',
+          t.source
+            ? `Remove the live table "${t.name}"? Its data stays on the Datasette server.`
+            : `Delete table "${t.name}" and all its rows?`,
+          'Confirm',
         );
         if (yes) {
           confirmedClose.add(t.id);
@@ -360,9 +362,18 @@ async function stampFrontOrder(tableId: string, ctx: AppContext): Promise<void> 
 }
 
 async function deleteTableCascade(tableId: string, ctx: AppContext): Promise<void> {
-  const rowColl = ctx.store.rows(tableId);
-  const rows = await rowColl.find();
-  await rowColl.bulkRemove(rows.map((r) => r.id));
+  // Source-backed tables (e.g. a live Datasette connection) keep their rows on
+  // the remote, not in the local store — `rows(tableId)` routes to the remote
+  // provider. We must NOT cascade row-deletes there: it would issue remote
+  // DELETEs (or, for a read-only connection, throw SourceReadOnlyError before
+  // `tables.remove` runs — leaving the table behind so its panel reappears).
+  // Closing the window just drops the local Table record (disconnects).
+  const table = await ctx.store.tables.findOne(tableId);
+  if (!table?.source) {
+    const rowColl = ctx.store.rows(tableId);
+    const rows = await rowColl.find();
+    await rowColl.bulkRemove(rows.map((r) => r.id));
+  }
   await ctx.store.tables.remove(tableId);
 }
 
