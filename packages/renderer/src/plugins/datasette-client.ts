@@ -670,3 +670,17 @@ export async function testConnection(
     };
   }
 }
+
+/**
+ * Wrap a fetch fn so every request carries `Authorization: Bearer <token>`
+ * (merged with any existing headers). Returns the fn unchanged when there's no
+ * token, so anonymous/public instances are unaffected. Used for reads too, so
+ * private instances (auth required to read) work, not just writes.
+ */
+export function withAuthFetch(fetchFn: FetchFn, token?: string): FetchFn {
+  if (!token) return fetchFn;
+  return (url, opts) => {
+    const prev = ((opts ?? {}) as { headers?: Record<string, string> }).headers ?? {};
+    return fetchFn(url, { ...(opts ?? {}), headers: { ...prev, Authorization: `Bearer ${token}` } });
+  };
+}

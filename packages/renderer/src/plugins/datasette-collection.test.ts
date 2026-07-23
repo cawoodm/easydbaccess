@@ -129,3 +129,22 @@ describe('createDatasetteCollection — writes', () => {
     expect(call.opts.headers.Authorization).toBeUndefined();
   });
 });
+
+describe('createDatasetteCollection — authenticated reads (private instances)', () => {
+  it('sends the device-local token on read requests', async () => {
+    const { ctx, calls, setToken } = makeCtx(() => ({ ok: true, next: null, rows: [{ id: 1, name: 'a' }] }));
+    setToken(BASE, 'dstok_R');
+    const coll = createDatasetteCollection(sourcedTable(false), ctx); // reads work even read-only
+    await coll.find();
+    const read = calls.find((c) => c.url.includes('/db/t.json'))!;
+    expect(read.opts?.headers?.Authorization).toBe('Bearer dstok_R');
+  });
+
+  it('sends no auth header on reads when no token is stored', async () => {
+    const { ctx, calls } = makeCtx(() => ({ ok: true, next: null, rows: [] }));
+    const coll = createDatasetteCollection(sourcedTable(false), ctx);
+    await coll.find();
+    const read = calls.find((c) => c.url.includes('/db/t.json'))!;
+    expect(read.opts?.headers?.Authorization).toBeUndefined();
+  });
+});

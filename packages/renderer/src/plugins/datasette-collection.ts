@@ -16,6 +16,7 @@ import {
   rowPk,
   updateRowByPk,
   upsertRows,
+  withAuthFetch,
   type DatasetteRef,
 } from './datasette-client.js';
 
@@ -65,13 +66,20 @@ export function createDatasetteCollection(table: Table, ctx: RowSourceCtx): Data
   const maxRows = cfg.maxRows ?? 10_000;
   const pollIntervalMs = cfg.pollIntervalMs ?? 0;
 
-  const fetchFn = (u: string, o?: unknown) => ctx.backend.fetch(u, o as never);
+  const baseFetch = (u: string, o?: unknown) => ctx.backend.fetch(u, o as never);
 
   async function token(): Promise<string | undefined> {
     const s = await ctx.settings.findOne(tokenSettingKey(cfg.base));
     const v = s?.value;
     return typeof v === 'string' && v.length > 0 ? v : undefined;
   }
+
+  // Every request (read AND write) carries the device-local bearer token when
+  // one is stored — so private instances that require auth to read work too,
+  // not only writes. Reads on public instances are unaffected (no token → no
+  // header). Resolved per call so a freshly-entered token takes effect.
+  const fetchFn = async (u: string, o?: unknown): Promise<Response> =>
+    withAuthFetch(baseFetch, await token())(u, o);
 
   function toRow(data: Record<string, unknown>): Row {
     const id = rowPk(data, pks) ?? cryptoUUID();
@@ -114,7 +122,7 @@ export function createDatasetteCollection(table: Table, ctx: RowSourceCtx): Data
 
     async insert(doc) {
       requireWritable('insert');
-      const [saved] = await insertRows(fetchFn, ref, [doc.data], { token: await token() });
+      const [saved] = await insertRows(fetchFn, ref, [doc.data]);
       const row = toRow(saved ?? doc.data);
       ctx.events.emit('row:created', { tableId: table.id, row });
       void loadAll();
@@ -128,7 +136,6 @@ export function createDatasetteCollection(table: Table, ctx: RowSourceCtx): Data
         fetchFn,
         ref,
         docs.map((d) => d.data),
-        { token: await token() },
       );
       const rows = (saved.length ? saved : docs.map((d) => d.data)).map(toRow);
       void loadAll();
@@ -137,7 +144,7 @@ export function createDatasetteCollection(table: Table, ctx: RowSourceCtx): Data
 
     async upsert(doc) {
       requireWritable('upsert');
-      const [saved] = await upsertRows(fetchFn, ref, [doc.data], { token: await token() });
+      const [saved] = await upsertRows(fetchFn, ref, [doc.data]);
       const row = toRow(saved ?? doc.data);
       void loadAll();
       return row;
@@ -149,7 +156,7 @@ export function createDatasetteCollection(table: Table, ctx: RowSourceCtx): Data
       // changed columns (minus PKs, which address the row via the URL).
       const nextData = (patch as Partial<Row>).data;
       const changes = stripPks(nextData ?? {});
-      const updated = await updateRowByPk(fetchFn, ref, id, changes, { token: await token() });
+      const updated = await updateRowByPk(fetchFn, ref, id, changes);
       const row = toRow(updated ?? { ...(nextData ?? {}) });
       ctx.events.emit('row:updated', { tableId: table.id, row, prev: row });
       void loadAll();
@@ -158,7 +165,7 @@ export function createDatasetteCollection(table: Table, ctx: RowSourceCtx): Data
 
     async remove(id) {
       requireWritable('delete');
-      await deleteRowByPk(fetchFn, ref, id, { token: await token() });
+      await deleteRowByPk(fetchFn, ref, id);
       ctx.events.emit('row:deleted', { tableId: table.id, rowId: id });
       void loadAll();
     },
@@ -166,8 +173,7 @@ export function createDatasetteCollection(table: Table, ctx: RowSourceCtx): Data
     async bulkRemove(ids) {
       if (ids.length === 0) return;
       requireWritable('delete');
-      const tok = await token();
-      for (const id of ids) await deleteRowByPk(fetchFn, ref, id, { token: tok });
+      for (const id of ids) await deleteRowByPk(fetchFn, ref, id);
       void loadAll();
     },
 

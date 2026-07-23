@@ -380,10 +380,21 @@ export class DataTable extends LitElement {
         return;
       }
     }
-    await ctx.store.rows(this.tableId).patch(row.id, {
-      data: { ...row.data, [field]: value },
-      updatedAt: Date.now(),
-    });
+    try {
+      await ctx.store.rows(this.tableId).patch(row.id, {
+        data: { ...row.data, [field]: value },
+        updatedAt: Date.now(),
+      });
+    } catch (err) {
+      // Remote (e.g. Datasette) sources can reject a write — read-only table,
+      // expired token, server error. Surface it and revert the cell instead of
+      // leaving an unhandled rejection and a stale-looking value.
+      await ctx.api.ui.dialogs.alert(
+        (err as Error)?.message ?? 'Could not save the change.',
+        'Save failed',
+      );
+      this.requestUpdate();
+    }
   }
 
   private renderCell(row: Row, col: ColumnSpec) {
@@ -463,7 +474,14 @@ export class DataTable extends LitElement {
 
   private async deleteRow(rowId: string) {
     const ctx = await getContext();
-    await ctx.store.rows(this.tableId).remove(rowId);
+    try {
+      await ctx.store.rows(this.tableId).remove(rowId);
+    } catch (err) {
+      await ctx.api.ui.dialogs.alert(
+        (err as Error)?.message ?? 'Could not delete the row.',
+        'Delete failed',
+      );
+    }
   }
 
   /**

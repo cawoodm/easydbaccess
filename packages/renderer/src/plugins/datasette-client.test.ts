@@ -18,6 +18,7 @@ import {
   upsertRows,
   fetchPrimaryKeys,
   testConnection,
+  withAuthFetch,
 } from './datasette-client.js';
 
 describe('parseDatabaseList', () => {
@@ -546,5 +547,42 @@ describe('testConnection', () => {
     expect(status.reachable).toBe(false);
     expect(status.writable).toBe(false);
     expect(status.error).toContain('Load failed');
+  });
+});
+
+describe('withAuthFetch', () => {
+  it('injects a Bearer header and preserves existing opts/headers', async () => {
+    const seen: Array<{ url: string; opts: any }> = [];
+    const base = (url: string, opts?: any) => {
+      seen.push({ url, opts });
+      return Promise.resolve({} as Response);
+    };
+    await withAuthFetch(base, 'dstok_X')('u', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(seen[0]!.opts.method).toBe('POST');
+    expect(seen[0]!.opts.headers).toEqual({
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer dstok_X',
+    });
+  });
+
+  it('adds a headers object even when the call passed no opts (e.g. GET reads)', async () => {
+    const seen: Array<{ url: string; opts: any }> = [];
+    const base = (url: string, opts?: any) => {
+      seen.push({ url, opts });
+      return Promise.resolve({} as Response);
+    };
+    await withAuthFetch(base, 'dstok_X')('u');
+    expect(seen[0]!.opts.headers.Authorization).toBe('Bearer dstok_X');
+  });
+
+  it('returns the fn unchanged when there is no token', () => {
+    const base = ((): Promise<Response> => Promise.resolve({} as Response)) as unknown as (
+      url: string,
+      opts?: any,
+    ) => Promise<Response>;
+    expect(withAuthFetch(base, undefined)).toBe(base);
   });
 });

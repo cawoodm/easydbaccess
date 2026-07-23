@@ -18,6 +18,7 @@ import {
   inferColumnsFromRows,
   refineColumnTypes,
   testConnection,
+  withAuthFetch,
   DatasetteError,
   type DatasetteRef,
   type TableRef,
@@ -325,9 +326,11 @@ export async function connectDatasette(api: HostApi, input: string, token: strin
   if (!workspaceId) throw new Error('datasette-source: no active workspace');
 
   const ref = parseDatasetteUrl(input);
-  const fetchFn = (u: string, o?: unknown) => api.backend.fetch(u, o as never);
+  const baseFetch = (u: string, o?: unknown) => api.backend.fetch(u, o as never);
+  // Authenticated reads so discovery/metadata work on private instances too.
+  const fetchFn = withAuthFetch(baseFetch, token || undefined);
 
-  const status = await testConnection(fetchFn, ref.base, { token: token || undefined });
+  const status = await testConnection(baseFetch, ref.base, { token: token || undefined });
   if (!status.reachable) {
     throw new Error(`Couldn't reach ${ref.base}${status.error ? `: ${status.error}` : ''}.`);
   }
@@ -364,7 +367,7 @@ export async function connectDatasette(api: HostApi, input: string, token: strin
 
   let connected = 0;
   for (const c of chosen) {
-    await createLiveTable(api, workspaceId, ref.base, c, status.writable);
+    await createLiveTable(api, workspaceId, ref.base, c, status.writable, token);
     connected += 1;
   }
   const mode = status.writable ? 'read-write' : 'read-only';
@@ -381,9 +384,10 @@ async function createLiveTable(
   base: string,
   c: TableRef,
   writable: boolean,
+  token: string,
 ): Promise<string> {
   const ref: DatasetteRef = { base, db: c.db, table: c.table, query: {} };
-  const fetchFn = (u: string, o?: unknown) => api.backend.fetch(u, o as never);
+  const fetchFn = withAuthFetch((u: string, o?: unknown) => api.backend.fetch(u, o as never), token || undefined);
 
   // Columns: schema names refined from a small sample (see importOneTable).
   let metaColumns: ColumnSpec[] = [];
