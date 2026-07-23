@@ -364,12 +364,15 @@ function datasetteFetch(api: HostApi): (u: string, o?: any) => Promise<Response>
       } catch {
         /* keep raw */
       }
+      // The browser withholds the cause of a cross-origin fetch failure, so we
+      // can only report the raw error + host and list the possibilities — we
+      // must NOT assert a specific cause we didn't observe.
       throw new DatasetteError({
         error:
-          `network error reaching ${host} (${(e as Error)?.message || 'fetch failed'}) — the request was ` +
-          `likely redirected to a cross-origin challenge page (e.g. Cloudflare Turnstile) that the browser ` +
-          `blocks, or CORS refused it. The instance may be rate-limiting; try again shortly or import fewer ` +
-          `tables at once.`,
+          `could not fetch ${host} (${(e as Error)?.message || 'fetch failed'}). The browser doesn't ` +
+          `report why a cross-origin request failed; common causes are no network, a CORS restriction, or ` +
+          `the request being redirected to a login/challenge page. If only some tables fail, the instance ` +
+          `is probably rate-limiting — retry shortly or import fewer tables.`,
       });
     }
   };

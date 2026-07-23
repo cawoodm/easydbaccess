@@ -590,9 +590,12 @@ test.describe('datasette import', () => {
     await page.locator('import-dialog select').nth(1).selectOption('datasette');
     await page.locator('import-dialog button[type="submit"]').click();
 
-    // The bare "Load failed" is turned into an explained network/CORS/challenge reason.
+    // The bare "Load failed" is wrapped with the host + the raw error + the
+    // possible causes (no invented single cause).
     const toast = page.locator('toast-host');
-    await expect(toast).toContainText(/cross-origin|Turnstile|network error/i);
+    await expect(toast).toContainText('reject.example.test');
+    await expect(toast).toContainText('Load failed');
+    await expect(toast).toContainText(/CORS|rate-limit|could not fetch/i);
 
     const count = await page.evaluate(async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
