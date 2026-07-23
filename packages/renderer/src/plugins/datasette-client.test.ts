@@ -16,6 +16,8 @@ import {
   updateRowByPk,
   deleteRowByPk,
   upsertRows,
+  fetchPrimaryKeys,
+  testConnection,
 } from './datasette-client.js';
 
 describe('parseDatabaseList', () => {
@@ -38,26 +40,26 @@ describe('parseDatabaseList', () => {
 });
 
 describe('parseTableList', () => {
-  it('reads { tables: [{ name, count, hidden }] } and carries the db through', () => {
+  it('reads { tables: [{ name, count, hidden, primary_keys }] } and carries the db through', () => {
     const json = {
       database: 'fixtures',
       tables: [
-        { name: 'facetable', count: 15, hidden: false },
+        { name: 'facetable', count: 15, hidden: false, primary_keys: ['id'] },
         { name: 'searchable_fts', count: 3, hidden: true },
         { name: 'no_count' },
       ],
     };
     expect(parseTableList(json, 'fixtures')).toEqual([
-      { db: 'fixtures', table: 'facetable', count: 15, hidden: false },
-      { db: 'fixtures', table: 'searchable_fts', count: 3, hidden: true },
-      { db: 'fixtures', table: 'no_count', count: null, hidden: false },
+      { db: 'fixtures', table: 'facetable', count: 15, hidden: false, pks: ['id'] },
+      { db: 'fixtures', table: 'searchable_fts', count: 3, hidden: true, pks: [] },
+      { db: 'fixtures', table: 'no_count', count: null, hidden: false, pks: [] },
     ]);
   });
 
   it('tolerates a bare array and string entries', () => {
     expect(parseTableList(['t1', 't2'], 'db')).toEqual([
-      { db: 'db', table: 't1', count: null, hidden: false },
-      { db: 'db', table: 't2', count: null, hidden: false },
+      { db: 'db', table: 't1', count: null, hidden: false, pks: [] },
+      { db: 'db', table: 't2', count: null, hidden: false, pks: [] },
     ]);
   });
 });
@@ -70,7 +72,7 @@ describe('discoverTables', () => {
     const fetchFn = vi.fn();
     const ref = parseDatasetteUrl('https://x.datasette.io/fixtures/facetable');
     const out = await discoverTables(fetchFn, ref);
-    expect(out).toEqual([{ db: 'fixtures', table: 'facetable', count: null, hidden: false }]);
+    expect(out).toEqual([{ db: 'fixtures', table: 'facetable', count: null, hidden: false, pks: [] }]);
     expect(fetchFn).not.toHaveBeenCalled();
   });
 
@@ -86,7 +88,7 @@ describe('discoverTables', () => {
     });
     const ref = parseDatasetteUrl('https://x.datasette.io/fixtures');
     const out = await discoverTables(fetchFn, ref);
-    expect(out).toEqual([{ db: 'fixtures', table: 'facetable', count: 15, hidden: false }]);
+    expect(out).toEqual([{ db: 'fixtures', table: 'facetable', count: 15, hidden: false, pks: [] }]);
   });
 
   it('walks every database for an instance URL', async () => {
@@ -105,8 +107,8 @@ describe('discoverTables', () => {
     const ref = parseDatasetteUrl('https://x.datasette.io');
     const out = await discoverTables(fetchFn, ref);
     expect(out).toEqual([
-      { db: 'a', table: 't1', count: 2, hidden: false },
-      { db: 'b', table: 't2', count: 5, hidden: false },
+      { db: 'a', table: 't1', count: 2, hidden: false, pks: [] },
+      { db: 'b', table: 't2', count: 5, hidden: false, pks: [] },
     ]);
   });
 });
@@ -491,5 +493,58 @@ describe('write helpers', () => {
     expect(err).toBeInstanceOf(DatasetteError);
     expect((err as DatasetteError).status).toBe(403);
     expect((err as Error).message).toContain('Permission denied');
+  });
+});
+
+// --- Connection / capability ------------------------------------------------
+
+describe('fetchPrimaryKeys', () => {
+  it('reads primary_keys via ?_extra=primary_keys', async () => {
+    const seen: string[] = [];
+    const fetchFn = (url: string) => {
+      seen.push(url);
+      return jsonRes({ ok: true, primary_keys: ['id'], rows: [] });
+    };
+    const pks = await fetchPrimaryKeys(fetchFn, parseDatasetteUrl('https://x.datasette.io/db/t'));
+    expect(pks).toEqual(['id']);
+    expect(seen[0]).toContain('_extra=primary_keys');
+    expect(seen[0]).toContain('_size=0');
+  });
+});
+
+describe('testConnection', () => {
+  const respond = (url: string, bodies: Record<string, unknown>) =>
+    jsonRes(url.includes('/-/actor.json') ? bodies.actor : bodies.versions);
+
+  it('resolves writable=true when a token authenticates (actor present)', async () => {
+    const seen: Array<{ url: string; opts: any }> = [];
+    const fetchFn = (url: string, opts?: any) => {
+      seen.push({ url, opts });
+      return respond(url, {
+        versions: { datasette: { version: '1.0a37' } },
+        actor: { ok: true, actor: { id: 'root' } },
+      });
+    };
+    const status = await testConnection(fetchFn, 'https://x.datasette.io', { token: 'dstok_X' });
+    expect(status).toMatchObject({ reachable: true, version: '1.0a37', writable: true });
+    expect(status.actor).toEqual({ id: 'root' });
+    // The token rode on the Authorization header.
+    expect(seen[0]!.opts.headers.Authorization).toBe('Bearer dstok_X');
+  });
+
+  it('resolves read-only (writable=false) with no token', async () => {
+    const fetchFn = (url: string) =>
+      respond(url, { versions: { datasette: { version: '1.0a37' } }, actor: { ok: true, actor: null } });
+    const status = await testConnection(fetchFn, 'https://x.datasette.io');
+    expect(status.reachable).toBe(true);
+    expect(status.writable).toBe(false);
+  });
+
+  it('reports unreachable when the request fails', async () => {
+    const fetchFn = () => Promise.reject(new TypeError('Load failed'));
+    const status = await testConnection(fetchFn, 'https://x.datasette.io', { token: 'dstok_X' });
+    expect(status.reachable).toBe(false);
+    expect(status.writable).toBe(false);
+    expect(status.error).toContain('Load failed');
   });
 });

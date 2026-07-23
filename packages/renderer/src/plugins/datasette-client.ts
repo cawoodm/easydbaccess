@@ -286,6 +286,8 @@ export interface TableRef {
   table: string;
   count: number | null;
   hidden: boolean;
+  /** Primary-key columns (from the database listing), [] if none/unknown. */
+  pks: string[];
 }
 
 /**
@@ -313,7 +315,7 @@ export function parseTableList(json: any, db: string): TableRef[] {
   const out: TableRef[] = [];
   for (const entry of arr) {
     if (typeof entry === 'string') {
-      out.push({ db, table: entry, count: null, hidden: false });
+      out.push({ db, table: entry, count: null, hidden: false, pks: [] });
       continue;
     }
     if (entry && typeof entry === 'object' && typeof entry.name === 'string') {
@@ -322,6 +324,7 @@ export function parseTableList(json: any, db: string): TableRef[] {
         table: entry.name,
         count: typeof entry.count === 'number' ? entry.count : null,
         hidden: entry.hidden === true,
+        pks: Array.isArray(entry.primary_keys) ? entry.primary_keys : [],
       });
     }
   }
@@ -395,7 +398,7 @@ export async function fetchTablesForDb(
  */
 export async function discoverTables(fetchFn: FetchFn, ref: DatasetteRef): Promise<TableRef[]> {
   if (ref.db && ref.table) {
-    return [{ db: ref.db, table: ref.table, count: null, hidden: false }];
+    return [{ db: ref.db, table: ref.table, count: null, hidden: false, pks: [] }];
   }
   const dbs = ref.db ? [ref.db] : await fetchDatabaseNames(fetchFn, ref.base);
   const out: TableRef[] = [];
@@ -609,4 +612,61 @@ export async function upsertRows(
 ): Promise<Array<Record<string, unknown>>> {
   const json = await postWrite(fetchFn, tableWriteUrl(ref, 'upsert'), { rows, return: true }, opts.token);
   return Array.isArray(json?.rows) ? json.rows : [];
+}
+
+// -- Connection / capability -------------------------------------------------
+
+/** Fetch a table's primary-key columns (`?_extra=primary_keys`). [] if none. */
+export async function fetchPrimaryKeys(fetchFn: FetchFn, ref: DatasetteRef): Promise<string[]> {
+  const url = buildTableUrl(ref, { _size: 0, _extra: 'primary_keys' });
+  const json = await fetchJson(fetchFn, url);
+  return Array.isArray(json?.primary_keys) ? json.primary_keys : [];
+}
+
+export interface ConnectionStatus {
+  reachable: boolean;
+  version: string | null;
+  /** The authenticated actor (from `/-/actor.json`), or null if anonymous. */
+  actor: Record<string, unknown> | null;
+  /** A token that authenticates ⇒ treat the connection as writable. */
+  writable: boolean;
+  error?: string;
+}
+
+/**
+ * Probe an instance: read its version and, when a token is supplied, resolve
+ * the authenticated actor. `writable` is true only when a token authenticates
+ * (a non-null actor) — otherwise the connection opens read-only.
+ */
+export async function testConnection(
+  fetchFn: FetchFn,
+  base: string,
+  opts: WriteOpts = {},
+): Promise<ConnectionStatus> {
+  const init = opts.token ? { headers: { Authorization: `Bearer ${opts.token}` } } : undefined;
+  try {
+    const vres = await fetchFn(`${base}/-/versions.json`, init);
+    if (vres && vres.ok === false) {
+      return { reachable: false, version: null, actor: null, writable: false, error: `HTTP ${vres.status}` };
+    }
+    const vjson: any = await vres.json();
+    const version = vjson?.datasette?.version ?? vjson?.version ?? null;
+    let actor: Record<string, unknown> | null = null;
+    try {
+      const ares = await fetchFn(`${base}/-/actor.json`, init);
+      const ajson: any = await ares.json();
+      actor = ajson?.actor ?? null;
+    } catch {
+      /* actor endpoint optional */
+    }
+    return { reachable: true, version, actor, writable: !!(opts.token && actor) };
+  } catch (err) {
+    return {
+      reachable: false,
+      version: null,
+      actor: null,
+      writable: false,
+      error: (err as Error)?.message || 'unreachable',
+    };
+  }
 }

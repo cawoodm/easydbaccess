@@ -14,13 +14,22 @@ import {
   discoverTables,
   fetchTableMeta,
   fetchRows,
+  fetchPrimaryKeys,
   inferColumnsFromRows,
   refineColumnTypes,
+  testConnection,
   DatasetteError,
   type DatasetteRef,
+  type TableRef,
 } from './datasette-client.js';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
-import { createDatasetteCollection } from './datasette-collection.js';
+import { createDatasetteCollection, tokenSettingKey } from './datasette-collection.js';
+import '../dialogs/datasette-connect-dialog.js';
+import { DatasetteConnectDialog } from '../dialogs/datasette-connect-dialog.js';
+
+const CONNECT_ICON_SVG =
+  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+  '<path d="M3.9 12a3.1 3.1 0 0 1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7A3.1 3.1 0 0 1 3.9 12zM8 13h8v-2H8v2zm9-6h-4v1.9h4A3.1 3.1 0 0 1 17 15h-4v1.9h4a5 5 0 0 0 0-10z"/></svg>';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'datasette-source',
@@ -43,6 +52,16 @@ export function init(api: HostApi): void {
   // Phase-2a seam). Snapshot imports above are unaffected — they create plain
   // local tables with no `source`.
   api.registerRowSource({ type: 'datasette', create: createDatasetteCollection });
+
+  // "Connect Datasette (live)" — opens a live read-write table (vs the Import
+  // button, which snapshots rows into a plain local table).
+  api.ui.registerHeaderButton({
+    id: 'datasette:connect',
+    label: '',
+    icon: CONNECT_ICON_SVG,
+    tooltip: 'Connect a live Datasette table',
+    onClick: () => openConnectDialog(api),
+  });
 
   api.ui.registerUrlSource({
     id: 'datasette',
@@ -267,6 +286,149 @@ function summariseBatch(
     kind: 'success',
     title: 'Datasette import',
   });
+}
+
+// -- Live connect (Phase 2b) -------------------------------------------------
+
+async function openConnectDialog(api: HostApi): Promise<void> {
+  const dlg = DatasetteConnectDialog.instance ?? mountConnectDialog();
+  const fetchFn = (u: string, o?: unknown) => api.backend.fetch(u, o as never);
+  const result = await dlg.open({
+    async onTest(url, token) {
+      const ref = parseDatasetteUrl(url);
+      const status = await testConnection(fetchFn, ref.base, { token: token || undefined });
+      if (!status.reachable) return `Unreachable: ${status.error ?? 'no response'}`;
+      const v = status.version ? ` (Datasette ${status.version})` : '';
+      return status.writable
+        ? `Reachable${v} — signed in, read-write.`
+        : `Reachable${v} — read-only (no token / not authenticated).`;
+    },
+  });
+  if (!result) return;
+  try {
+    await connectDatasette(api, result.url, result.token);
+  } catch (err) {
+    const msg = err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
+    await api.ui.dialogs.alert(msg, 'Connect Datasette failed');
+  }
+}
+
+function mountConnectDialog(): DatasetteConnectDialog {
+  const el = document.createElement('datasette-connect-dialog') as DatasetteConnectDialog;
+  document.body.appendChild(el);
+  return el;
+}
+
+/** Open live read-write table(s) for a Datasette URL (table, database, or instance). */
+export async function connectDatasette(api: HostApi, input: string, token: string): Promise<void> {
+  const workspaceId = api.workspaceId();
+  if (!workspaceId) throw new Error('datasette-source: no active workspace');
+
+  const ref = parseDatasetteUrl(input);
+  const fetchFn = (u: string, o?: unknown) => api.backend.fetch(u, o as never);
+
+  const status = await testConnection(fetchFn, ref.base, { token: token || undefined });
+  if (!status.reachable) {
+    throw new Error(`Couldn't reach ${ref.base}${status.error ? `: ${status.error}` : ''}.`);
+  }
+  // Store the token device-local (per instance base). Settings are not synced,
+  // so the token never leaves this device or lands in a workspace export.
+  if (token) await api.store.settings.upsert({ key: tokenSettingKey(ref.base), value: token });
+
+  const candidates = await discoverTables(fetchFn, ref);
+  if (candidates.length === 0) {
+    await api.ui.dialogs.alert('No tables found at that URL.', 'Connect Datasette');
+    return;
+  }
+
+  let chosen: TableRef[];
+  if (ref.db && ref.table) {
+    chosen = candidates;
+  } else {
+    const multiDb = new Set(candidates.map((c) => c.db)).size > 1;
+    const picked = await chooseTables(
+      candidates.map((c) => ({
+        name: multiDb ? `${c.db}/${c.table}` : c.table,
+        size: c.count,
+        detail: multiDb ? undefined : c.db,
+      })),
+      {
+        title: 'Connect Datasette',
+        message: `Choose tables from ${ref.base.replace(/^https?:\/\//, '')} to open live.`,
+        confirmLabel: 'Connect',
+      },
+    );
+    if (!picked) return;
+    chosen = picked.map((i) => candidates[i]!);
+  }
+
+  let connected = 0;
+  for (const c of chosen) {
+    await createLiveTable(api, workspaceId, ref.base, c, status.writable);
+    connected += 1;
+  }
+  const mode = status.writable ? 'read-write' : 'read-only';
+  api.ui.dialogs.toast(
+    `Connected ${connected} live table${connected === 1 ? '' : 's'} from Datasette (${mode}).`,
+    { kind: 'success', title: 'Connect Datasette' },
+  );
+}
+
+/** Create a Table with a live `datasette` source (columns discovered; no local rows). */
+async function createLiveTable(
+  api: HostApi,
+  workspaceId: string,
+  base: string,
+  c: TableRef,
+  writable: boolean,
+): Promise<string> {
+  const ref: DatasetteRef = { base, db: c.db, table: c.table, query: {} };
+  const fetchFn = (u: string, o?: unknown) => api.backend.fetch(u, o as never);
+
+  // Columns: schema names refined from a small sample (see importOneTable).
+  let metaColumns: ColumnSpec[] = [];
+  let typed = false;
+  try {
+    const meta = await fetchTableMeta(fetchFn, ref);
+    metaColumns = meta.columns;
+    typed = meta.typed;
+  } catch {
+    /* fall back to row inference */
+  }
+  const { rows: sample } = await fetchRows(fetchFn, ref, { maxRows: 50, pageSize: 50 });
+  const baseColumns =
+    metaColumns.length === 0
+      ? inferColumnsFromRows(sample)
+      : typed
+        ? metaColumns
+        : refineColumnTypes(metaColumns, sample);
+
+  // PKs from the database listing, else a dedicated probe. Needed to address
+  // rows for update/delete.
+  let pks = c.pks;
+  if (!pks || pks.length === 0) {
+    try {
+      pks = await fetchPrimaryKeys(fetchFn, ref);
+    } catch {
+      pks = [];
+    }
+  }
+  const columns = baseColumns.map((col) =>
+    pks.includes(col.field) ? { ...col, unique: true, notnull: true } : col,
+  );
+
+  const tableId = cryptoUUID();
+  await api.store.tables.insert({
+    id: tableId,
+    workspaceId,
+    name: `${c.db}/${c.table}`,
+    code: slug(`${c.db}-${c.table}`),
+    columns,
+    view: 'table',
+    source: { type: 'datasette', writable, config: { base, db: c.db, table: c.table, pks } },
+    updatedAt: Date.now(),
+  });
+  return tableId;
 }
 
 function slug(s: string): string {
