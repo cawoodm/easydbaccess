@@ -17,6 +17,7 @@ import { customElement, state } from 'lit/decorators.js';
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { importJsonText } from './json-import.js';
 import { importDatasette } from './datasette-source.js';
+import { parseDatasetteUrl, fetchDatabaseNames } from './datasette-client.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from '../dialogs/dialog-chrome.js';
 import { makeDialogDraggable } from '../dialogs/draggable.js';
 
@@ -83,7 +84,14 @@ export function init(api: HostApi): void {
 
 async function openImport(api: HostApi): Promise<void> {
   const dlg = ImportDialog.instance ?? mountDialog();
-  const result = await dlg.open();
+  const result = await dlg.open({
+    // Lets the dialog list an instance's databases so the user can pick one
+    // before importing (a root URL otherwise defers the choice to a modal).
+    async listDatabases(url) {
+      const ref = parseDatasetteUrl(url);
+      return fetchDatabaseNames((u) => api.backend.fetch(u), ref.base);
+    },
+  });
   if (!result) return; // cancelled
 
   const { url, kind } = result;
@@ -134,6 +142,21 @@ function detectKind(url: string): ResolvedKind {
     return 'json';
   } catch {
     return 'json';
+  }
+}
+
+/**
+ * True when `url` is a bare Datasette instance root (an origin/mount with no
+ * `/db` or `/db/table` segment). Those are the URLs for which we can offer a
+ * database picker — a db or table URL already names its target.
+ */
+function isDatasetteInstanceRoot(url: string, kind: ResolvedKind): boolean {
+  if (kind !== 'datasette' || !url) return false;
+  try {
+    const ref = parseDatasetteUrl(url);
+    return !ref.db && !ref.table;
+  } catch {
+    return false;
   }
 }
 
@@ -198,15 +221,66 @@ export class ImportDialog extends LitElement {
         font-size: 0.78rem;
         margin: 0;
       }
+      .hint.error {
+        color: #b91c1c;
+      }
+      .db-row {
+        align-items: stretch;
+      }
+      .db-row select {
+        flex: 1;
+      }
+      .db-row .db-load {
+        flex: 0 0 auto;
+        white-space: nowrap;
+      }
     `,
   ];
 
   @state() private url = '';
   @state() private kind: ImportKind = 'auto';
   @state() private presetIdx = -1;
+  @state() private dbList: string[] | null = null;
+  @state() private dbLoading = false;
+  @state() private dbError = '';
+  @state() private selectedDb = '';
 
   private dialogEl: HTMLDialogElement | null = null;
   private resolveFn: ((v: ImportChoice | null) => void) | null = null;
+  private listDatabases: ((url: string) => Promise<string[]>) | null = null;
+
+  /** The concrete kind, resolving `auto` from the current URL. */
+  private get resolvedKind(): ResolvedKind {
+    return this.kind === 'auto' ? detectKind(this.url.trim()) : this.kind;
+  }
+
+  /** Reset any loaded database list (URL/kind changed → the list is stale). */
+  private resetDbList(): void {
+    this.dbList = null;
+    this.selectedDb = '';
+    this.dbError = '';
+    this.dbLoading = false;
+  }
+
+  /** Fetch the entered instance's database list into the picker. */
+  private async loadDatabases(): Promise<void> {
+    const url = this.url.trim();
+    if (!url || !this.listDatabases) return;
+    this.dbLoading = true;
+    this.dbError = '';
+    this.dbList = null;
+    this.selectedDb = '';
+    try {
+      const dbs = await this.listDatabases(url);
+      this.dbList = dbs;
+      if (dbs.length === 0) this.dbError = 'No databases found at that instance.';
+      else if (dbs.length === 1) this.selectedDb = dbs[0]!;
+    } catch (err) {
+      this.dbError = (err as Error)?.message ?? 'Could not list databases.';
+    } finally {
+      this.dbLoading = false;
+    }
+  }
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -225,10 +299,12 @@ export class ImportDialog extends LitElement {
   }
 
   /** Open the dialog. Resolves with the chosen URL + kind, or null on cancel. */
-  open(): Promise<ImportChoice | null> {
+  open(opts?: { listDatabases?: (url: string) => Promise<string[]> }): Promise<ImportChoice | null> {
     this.url = '';
     this.kind = 'auto';
     this.presetIdx = -1;
+    this.resetDbList();
+    this.listDatabases = opts?.listDatabases ?? null;
     return new Promise<ImportChoice | null>((resolve) => {
       this.resolveFn = resolve;
       void this.updateComplete.then(() => this.dialogEl?.showModal());
@@ -251,6 +327,7 @@ export class ImportDialog extends LitElement {
   private onPresetChange(e: Event): void {
     const idx = Number((e.target as HTMLSelectElement).value);
     this.presetIdx = idx;
+    this.resetDbList();
     const preset = PREDEFINED[idx];
     if (preset) {
       this.url = preset.url;
@@ -262,9 +339,61 @@ export class ImportDialog extends LitElement {
     e.preventDefault();
     const url = this.url.trim();
     if (!url) return;
-    const kind: ResolvedKind = this.kind === 'auto' ? detectKind(url) : this.kind;
-    this.finish({ url, kind });
+    const kind = this.resolvedKind;
+    // If a database was picked for an instance-root URL, narrow the URL to that
+    // database so the import goes straight to its table picker.
+    const finalUrl =
+      kind === 'datasette' && this.selectedDb && isDatasetteInstanceRoot(url, kind)
+        ? `${url.replace(/\/+$/, '')}/${encodeURIComponent(this.selectedDb)}`
+        : url;
+    this.finish({ url: finalUrl, kind });
   };
+
+  /**
+   * Database picker, shown only for a Datasette instance-root URL. "List
+   * databases" fetches the instance's databases; choosing one narrows the
+   * import to that database (its tables are picked next). Leaving it on
+   * "all databases" keeps the existing behaviour (a modal db picker on submit).
+   */
+  private renderDbPicker() {
+    if (!this.listDatabases || !isDatasetteInstanceRoot(this.url.trim(), this.resolvedKind)) {
+      return nothing;
+    }
+    return html`
+      <label>
+        Database
+        <div class="row db-row">
+          <select
+            .value=${this.selectedDb}
+            ?disabled=${!this.dbList || this.dbList.length === 0}
+            @change=${(e: Event) => {
+              this.selectedDb = (e.target as HTMLSelectElement).value;
+            }}
+          >
+            ${this.dbList
+              ? html`
+                  <option value="" ?selected=${this.selectedDb === ''}>
+                    — all databases (choose tables next) —
+                  </option>
+                  ${this.dbList.map(
+                    (d) => html`<option value=${d} ?selected=${d === this.selectedDb}>${d}</option>`,
+                  )}
+                `
+              : html`<option value="">— not loaded —</option>`}
+          </select>
+          <button
+            type="button"
+            class="ghost db-load"
+            ?disabled=${this.dbLoading}
+            @click=${() => void this.loadDatabases()}
+          >
+            ${this.dbLoading ? 'Loading…' : this.dbList ? 'Refresh' : 'List databases'}
+          </button>
+        </div>
+      </label>
+      ${this.dbError ? html`<p class="hint error">${this.dbError}</p>` : nothing}
+    `;
+  }
 
   override render() {
     return html`
@@ -303,8 +432,10 @@ export class ImportDialog extends LitElement {
                 .value=${this.url}
                 @input=${(e: Event) => {
                   this.url = (e.target as HTMLInputElement).value;
-                  // A hand-edited URL is no longer "a preset".
+                  // A hand-edited URL is no longer "a preset"; drop any stale
+                  // database list (it belonged to the previous instance).
                   this.presetIdx = -1;
+                  this.resetDbList();
                 }}
               />
             </label>
@@ -315,6 +446,7 @@ export class ImportDialog extends LitElement {
                 .value=${this.kind}
                 @change=${(e: Event) => {
                   this.kind = (e.target as HTMLSelectElement).value as ImportKind;
+                  this.resetDbList();
                 }}
               >
                 <option value="auto" ?selected=${this.kind === 'auto'}>Auto-detect</option>
@@ -325,8 +457,11 @@ export class ImportDialog extends LitElement {
               </select>
             </label>
 
+            ${this.renderDbPicker()}
+
             <p class="hint">
-              Paste any URL or pick a sample above. Multi-table sources — a JSON dump with
+              Paste any URL or pick a sample above. For a Datasette instance root, click
+              <em>List databases</em> to pick one first. Multi-table sources — a JSON dump with
               several tables, or a Datasette database/instance URL — let you choose which tables
               to import. Datasette tables import a read-only snapshot (capped at 10,000 rows each).
             </p>

@@ -183,3 +183,91 @@ test.describe('datasette import — whole database', () => {
     expect(execTerms.columns.type).toBe('string');
   });
 });
+
+/**
+ * Instance-root URL: the Import dialog lists the instance's databases inline so
+ * the user picks one BEFORE the table picker. Selecting a database narrows the
+ * import to that database's tables (no cross-database modal db picker).
+ */
+test.describe('datasette import — instance-root database picker', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route('https://inst.example/**', (route) => {
+      const url = new URL(route.request().url());
+      switch (url.pathname) {
+        case '/-/databases.json':
+          return route.fulfill(
+            json({
+              ok: true,
+              databases: [
+                { name: '_memory', route: '_memory', is_memory: true }, // skipped
+                { name: 'sales', route: 'sales' },
+                { name: 'hr', route: 'hr' },
+              ],
+            }),
+          );
+        case '/sales.json':
+          return route.fulfill(
+            json({ ok: true, tables: [{ name: 'orders', count: 2, primary_keys: ['id'] }] }),
+          );
+        case '/sales/orders.json':
+          if (url.searchParams.get('_extra') === 'columns')
+            return route.fulfill(json({ ok: true, columns: ['id', 'total'], rows: [] }));
+          return route.fulfill(
+            json({ ok: true, next: null, rows: [{ id: 1, total: 10 }, { id: 2, total: 20 }] }),
+          );
+        default:
+          return route.fulfill({ status: 404, body: '{"ok":false}' });
+      }
+    });
+  });
+
+  test('lists databases inline, and picking one imports only that database', async ({
+    page,
+    workspaceId,
+  }) => {
+    await page.getByTitle('Import data from a URL').click();
+    const dlg = page.locator('import-dialog dialog');
+    await expect(dlg).toBeVisible();
+
+    // A bare instance root. Force the Datasette kind so the picker shows even
+    // though the host isn't literally "datasette".
+    await dlg.locator('input[type="text"]').fill('https://inst.example');
+    await dlg.locator('select').last().selectOption('datasette');
+
+    // The Database row appears; load the list.
+    await dlg.getByRole('button', { name: 'List databases' }).click();
+    const dbSelect = dlg.locator('.db-row select');
+    // _memory is skipped; the two real databases are offered (plus the "all" row).
+    await expect(dbSelect.locator('option')).toHaveText([
+      /all databases/,
+      'sales',
+      'hr',
+    ]);
+
+    // Pick "sales" and import.
+    await dbSelect.selectOption('sales');
+    await dlg.getByRole('button', { name: 'Import', exact: true }).click();
+
+    // Straight to the table picker for sales (no cross-database db picker).
+    const picker = page.locator('table-select-dialog dialog');
+    await expect(picker).toBeVisible();
+    await expect(picker.locator('ul.tables li .name')).toHaveText(['orders']);
+    await picker.getByRole('button', { name: /^Import \(1\)$/ }).click();
+
+    await expect
+      .poll(() =>
+        page.evaluate(async (ws) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const store = (window as any).__easydb.store;
+          const t = (await store.tables.find()).find(
+            (x: { workspaceId: string; name: string }) =>
+              x.workspaceId === ws && x.name === 'sales/orders',
+          );
+          if (!t) return null;
+          const rows = await store.rows(t.id).find();
+          return rows.length;
+        }, workspaceId),
+      )
+      .toBe(2);
+  });
+});
