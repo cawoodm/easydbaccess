@@ -12,6 +12,10 @@ import {
   fetchTableMeta,
   fetchTablesForDb,
   DatasetteError,
+  insertRows,
+  updateRowByPk,
+  deleteRowByPk,
+  upsertRows,
 } from './datasette-client.js';
 
 describe('parseDatabaseList', () => {
@@ -408,5 +412,84 @@ describe('discovery failure diagnostics', () => {
     expect(err).toBeInstanceOf(DatasetteError);
     expect((err as DatasetteError).status).toBe(404);
     expect((err as Error).message).toContain('Database not found');
+  });
+});
+
+// --- Write API helpers ------------------------------------------------------
+// Mapping verified live against latest.datasette.io/ephemeral (datasette 1.0a37).
+
+function recordingFetch(responder: (call: { url: string; opts: any }) => unknown) {
+  const calls: Array<{ url: string; opts: any }> = [];
+  const fn = (url: string, opts?: any) => {
+    calls.push({ url, opts });
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(responder({ url, opts })),
+    } as unknown as Response);
+  };
+  return { fn, calls };
+}
+
+const WREF = parseDatasetteUrl('https://x.datasette.io/db/t');
+
+describe('write helpers', () => {
+  it('insertRows POSTs {rows,return:true} with the bearer token and returns server rows', async () => {
+    const { fn, calls } = recordingFetch(() => ({ ok: true, rows: [{ id: 1, name: 'a' }] }));
+    const out = await insertRows(fn, WREF, [{ name: 'a' }], { token: 'dstok_X' });
+    expect(out).toEqual([{ id: 1, name: 'a' }]);
+    expect(calls[0]!.url).toBe('https://x.datasette.io/db/t/-/insert');
+    expect(calls[0]!.opts.method).toBe('POST');
+    expect(calls[0]!.opts.headers.Authorization).toBe('Bearer dstok_X');
+    expect(calls[0]!.opts.headers['Content-Type']).toBe('application/json');
+    expect(JSON.parse(calls[0]!.opts.body)).toEqual({ rows: [{ name: 'a' }], return: true });
+  });
+
+  it('updateRowByPk PUTs the changed fields to /<pk>/-/update and returns the row', async () => {
+    const { fn, calls } = recordingFetch(() => ({ ok: true, rows: [{ id: 5, name: 'b', qty: 99 }] }));
+    const row = await updateRowByPk(fn, WREF, '5', { name: 'b', qty: 99 }, { token: 'dstok_Y' });
+    expect(row).toEqual({ id: 5, name: 'b', qty: 99 });
+    expect(calls[0]!.url).toBe('https://x.datasette.io/db/t/5/-/update');
+    expect(JSON.parse(calls[0]!.opts.body)).toEqual({ update: { name: 'b', qty: 99 }, return: true });
+  });
+
+  it('updateRowByPk keeps a tilde-encoded compound PK verbatim in the URL', async () => {
+    const { fn, calls } = recordingFetch(() => ({ ok: true, rows: [{}] }));
+    await updateRowByPk(fn, WREF, 'a~2Cb,c', { x: 1 });
+    expect(calls[0]!.url).toBe('https://x.datasette.io/db/t/a~2Cb,c/-/update');
+  });
+
+  it('deleteRowByPk POSTs {} to /<pk>/-/delete', async () => {
+    const { fn, calls } = recordingFetch(() => ({ ok: true }));
+    await deleteRowByPk(fn, WREF, '7', { token: 'dstok_Z' });
+    expect(calls[0]!.url).toBe('https://x.datasette.io/db/t/7/-/delete');
+    expect(calls[0]!.opts.method).toBe('POST');
+    expect(JSON.parse(calls[0]!.opts.body)).toEqual({});
+  });
+
+  it('upsertRows POSTs to /-/upsert', async () => {
+    const { fn, calls } = recordingFetch(() => ({ ok: true, rows: [{ id: 1 }] }));
+    await upsertRows(fn, WREF, [{ id: 1, name: 'a' }]);
+    expect(calls[0]!.url).toBe('https://x.datasette.io/db/t/-/upsert');
+    expect(JSON.parse(calls[0]!.opts.body)).toEqual({ rows: [{ id: 1, name: 'a' }], return: true });
+  });
+
+  it('omits Authorization when no token is given', async () => {
+    const { fn, calls } = recordingFetch(() => ({ ok: true, rows: [] }));
+    await insertRows(fn, WREF, [{ name: 'a' }]);
+    expect(calls[0]!.opts.headers.Authorization).toBeUndefined();
+  });
+
+  it('throws a DatasetteError with status + message on {ok:false}', async () => {
+    const fn = (_url: string, _opts?: any) =>
+      Promise.resolve({
+        ok: false,
+        status: 403,
+        json: () => Promise.resolve({ ok: false, error: 'Permission denied' }),
+      } as unknown as Response);
+    const err = await insertRows(fn, WREF, [{ name: 'a' }], { token: 'dstok_X' }).catch((e) => e);
+    expect(err).toBeInstanceOf(DatasetteError);
+    expect((err as DatasetteError).status).toBe(403);
+    expect((err as Error).message).toContain('Permission denied');
   });
 });

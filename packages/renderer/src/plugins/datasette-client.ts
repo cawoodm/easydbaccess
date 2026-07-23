@@ -495,3 +495,118 @@ export async function fetchRows(
   }
   return { rows, truncated, hasMore, pages };
 }
+
+// -- Write API (Datasette 1.0 JSON write endpoints) --------------------------
+// Verified live against latest.datasette.io/ephemeral and datasette 1.0a37:
+//   insert  POST {base}/{db}/{table}/-/insert          {rows,return:true}  -> {ok,rows}
+//   update  POST {base}/{db}/{table}/{pk}/-/update     {update,return:true}-> {ok,rows:[row]}
+//   delete  POST {base}/{db}/{table}/{pk}/-/delete     {}                  -> {ok:true}
+// Writes need Authorization: Bearer dstok_… and CORS (--cors) for direct
+// browser use. `<pk>` is the tilde-encoded primary key (see rowPk/tildeEncode).
+
+export interface WriteOpts {
+  /** Datasette signed token (dstok_…). Omit for anonymous (read-only) instances. */
+  token?: string | undefined;
+}
+
+function writeHeaders(token?: string): Record<string, string> {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) h['Authorization'] = `Bearer ${token}`;
+  return h;
+}
+
+function tableWriteUrl(ref: DatasetteRef, action: 'insert' | 'upsert'): string {
+  return `${ref.base}/${encodeURIComponent(ref.db!)}/${encodeURIComponent(ref.table!)}/-/${action}`;
+}
+
+function rowWriteUrl(ref: DatasetteRef, pkPath: string, action: 'update' | 'delete'): string {
+  // pkPath is already tilde-encoded (URL-safe); do not re-encode it.
+  return `${ref.base}/${encodeURIComponent(ref.db!)}/${encodeURIComponent(ref.table!)}/${pkPath}/-/${action}`;
+}
+
+/** POST a JSON write body and parse the {ok,…} / {ok:false,error} envelope. */
+async function postWrite(
+  fetchFn: FetchFn,
+  url: string,
+  body: unknown,
+  token?: string,
+): Promise<any> {
+  let res: Response;
+  try {
+    res = await fetchFn(url, {
+      method: 'POST',
+      headers: writeHeaders(token),
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    throw new DatasetteError(
+      { error: `Couldn't reach ${url} (${(err as Error)?.message || 'network error'}).` },
+      0,
+    );
+  }
+  if (res && res.ok === false) {
+    let b: unknown = null;
+    try {
+      b = await res.json();
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new DatasetteError(
+      b && typeof b === 'object' ? b : { error: `HTTP ${res.status} for ${url}` },
+      res.status,
+    );
+  }
+  const json: any = await res.json();
+  if (json && json.ok === false) throw new DatasetteError(json, res.status);
+  return json;
+}
+
+/** Insert rows; returns the server's authoritative rows (defaults, coercion). */
+export async function insertRows(
+  fetchFn: FetchFn,
+  ref: DatasetteRef,
+  rows: Array<Record<string, unknown>>,
+  opts: WriteOpts = {},
+): Promise<Array<Record<string, unknown>>> {
+  const json = await postWrite(fetchFn, tableWriteUrl(ref, 'insert'), { rows, return: true }, opts.token);
+  return Array.isArray(json?.rows) ? json.rows : [];
+}
+
+/** Update one row by tilde-encoded PK with the changed fields; returns the row. */
+export async function updateRowByPk(
+  fetchFn: FetchFn,
+  ref: DatasetteRef,
+  pkPath: string,
+  changes: Record<string, unknown>,
+  opts: WriteOpts = {},
+): Promise<Record<string, unknown> | null> {
+  const json = await postWrite(
+    fetchFn,
+    rowWriteUrl(ref, pkPath, 'update'),
+    { update: changes, return: true },
+    opts.token,
+  );
+  if (json && typeof json.row === 'object' && json.row) return json.row;
+  return Array.isArray(json?.rows) && json.rows[0] ? json.rows[0] : null;
+}
+
+/** Delete one row by tilde-encoded PK. */
+export async function deleteRowByPk(
+  fetchFn: FetchFn,
+  ref: DatasetteRef,
+  pkPath: string,
+  opts: WriteOpts = {},
+): Promise<void> {
+  await postWrite(fetchFn, rowWriteUrl(ref, pkPath, 'delete'), {}, opts.token);
+}
+
+/** Upsert rows (insert or replace by PK); returns the server's rows. */
+export async function upsertRows(
+  fetchFn: FetchFn,
+  ref: DatasetteRef,
+  rows: Array<Record<string, unknown>>,
+  opts: WriteOpts = {},
+): Promise<Array<Record<string, unknown>>> {
+  const json = await postWrite(fetchFn, tableWriteUrl(ref, 'upsert'), { rows, return: true }, opts.token);
+  return Array.isArray(json?.rows) ? json.rows : [];
+}

@@ -20,6 +20,7 @@ import {
   type DatasetteRef,
 } from './datasette-client.js';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
+import { createDatasetteCollection } from './datasette-collection.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'datasette-source',
@@ -37,6 +38,12 @@ const SETTINGS = {
 const EXAMPLE = 'https://latest.datasette.io/fixtures/facetable';
 
 export function init(api: HostApi): void {
+  // Phase 2c: tables carrying `source: { type: 'datasette', ... }` are backed
+  // by a live read-write Datasette collection instead of Dexie (routed by the
+  // Phase-2a seam). Snapshot imports above are unaffected — they create plain
+  // local tables with no `source`.
+  api.registerRowSource({ type: 'datasette', create: createDatasetteCollection });
+
   api.ui.registerUrlSource({
     id: 'datasette',
     label: 'Datasette (table or instance)…',
