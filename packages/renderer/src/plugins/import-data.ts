@@ -16,13 +16,14 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { importJsonText } from './json-import.js';
+import { importCsvText } from './csv-import.js';
 import { importDatasette } from './datasette-source.js';
 import { parseDatasetteUrl, fetchDatabaseNames } from './datasette-client.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from '../dialogs/dialog-chrome.js';
 import { makeDialogDraggable } from '../dialogs/draggable.js';
 
 /** How a URL should be imported. `auto` is resolved to a concrete kind on submit. */
-type ImportKind = 'auto' | 'json' | 'datasette';
+type ImportKind = 'auto' | 'json' | 'csv' | 'datasette';
 type ResolvedKind = Exclude<ImportKind, 'auto'>;
 
 interface PredefinedSource {
@@ -33,6 +34,12 @@ interface PredefinedSource {
 
 const NORTHWIND_URL =
   'https://raw.githubusercontent.com/cawoodm/easydbaccess/main/data/northwind.db.json';
+
+// A public CSV served with CORS (raw.githubusercontent sends
+// `access-control-allow-origin: *`), so it imports straight from the browser
+// build. GitHub "blob" pages are HTML — the raw host serves the file itself.
+const AIR_QUALITY_CSV =
+  'https://raw.githubusercontent.com/MainakRepositor/Datasets/master/Air%20Quality/real_2016_air.csv';
 
 /**
  * Inline "import" glyph (arrow descending into a tray) rendered as an SVG on
@@ -51,6 +58,7 @@ const IMPORT_ICON_SVG =
  */
 const PREDEFINED: PredefinedSource[] = [
   { label: 'Northwind — sample database (JSON dump)', url: NORTHWIND_URL, kind: 'json' },
+  { label: 'Air quality — 2016 readings (CSV)', url: AIR_QUALITY_CSV, kind: 'csv' },
   {
     label: 'Datasette — US legislators (whole database, pick tables)',
     url: 'https://datasette.io/legislators',
@@ -102,6 +110,15 @@ async function openImport(api: HostApi): Promise<void> {
       // the user already picked a database here, in which case we import that
       // database's tables directly (skipTablePicker).
       await importDatasette(api, url, { skipTablePicker: dbChosen });
+    } else if (kind === 'csv') {
+      const res = await api.backend.fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      const text = await res.text();
+      await importCsvText(api, text, filenameFromUrl(url));
+      api.ui.dialogs.toast(`Imported ${filenameFromUrl(url)}.`, {
+        kind: 'success',
+        title: 'Import',
+      });
     } else {
       const res = await api.backend.fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
@@ -138,11 +155,12 @@ function detectKind(url: string): ResolvedKind {
     const u = new URL(url);
     const host = u.hostname.toLowerCase();
     const hasDatasetteParams = [...u.searchParams.keys()].some((k) => k.startsWith('_'));
-    // A `.json`/`.csv` file path with no Datasette markers reads as a dump.
-    // Anything on a datasette host (or carrying `?_`-prefixed API params) reads
-    // as Datasette — at any depth, so instance and database URLs work too.
+    // A `.csv`/`.json` file path with no Datasette markers reads as that file
+    // kind. Anything on a datasette host (or carrying `?_`-prefixed API params)
+    // reads as Datasette — at any depth, so instance and database URLs work too.
     const looksDatasette = host.includes('datasette') || hasDatasetteParams;
-    if (/\.(json|csv)$/i.test(u.pathname) && !hasDatasetteParams) return 'json';
+    if (!hasDatasetteParams && /\.csv$/i.test(u.pathname)) return 'csv';
+    if (!hasDatasetteParams && /\.json$/i.test(u.pathname)) return 'json';
     if (looksDatasette) return 'datasette';
     return 'json';
   } catch {
@@ -447,7 +465,7 @@ export class ImportDialog extends LitElement {
               <input
                 type="text"
                 autofocus
-                placeholder="https://… (JSON dump or Datasette table)"
+                placeholder="https://… (JSON dump, .csv file, or Datasette table)"
                 .value=${this.url}
                 @input=${(e: Event) => {
                   this.url = (e.target as HTMLInputElement).value;
@@ -470,6 +488,7 @@ export class ImportDialog extends LitElement {
               >
                 <option value="auto" ?selected=${this.kind === 'auto'}>Auto-detect</option>
                 <option value="json" ?selected=${this.kind === 'json'}>JSON dump</option>
+                <option value="csv" ?selected=${this.kind === 'csv'}>CSV file</option>
                 <option value="datasette" ?selected=${this.kind === 'datasette'}>
                   Datasette (table or instance)
                 </option>
@@ -479,10 +498,11 @@ export class ImportDialog extends LitElement {
             ${this.renderDbPicker()}
 
             <p class="hint">
-              Paste any URL or pick a sample above. For a Datasette instance root, click
-              <em>List databases</em> to pick one first. Multi-table sources — a JSON dump with
-              several tables, or a Datasette database/instance URL — let you choose which tables to
-              import. Datasette tables import a read-only snapshot (capped at 10,000 rows each).
+              Paste any URL or pick a sample above — a JSON dump, a <code>.csv</code> file, or a
+              Datasette table/database/instance. For a Datasette instance root, click
+              <em>List databases</em> to pick one first. Multi-table sources let you choose which
+              tables to import; Datasette tables import a read-only snapshot (capped at 10,000 rows
+              each).
             </p>
           </div>
         </form>

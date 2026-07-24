@@ -50,11 +50,21 @@ const importerSpec: ImporterSpec = {
 // -- Core: turn one File into a Table + Rows ----------------------------------
 
 async function importCsvFile(api: HostApi, file: File): Promise<void> {
+  const baseName = file.name.replace(/\.csv$/i, '') || 'imported';
+  await importCsvText(api, await file.text(), baseName);
+}
+
+/**
+ * Create a Table (+ rows) from CSV text. Shared by the drag-and-drop file path
+ * and the Import dialog's URL path. `name` seeds the table name (a trailing
+ * `.csv` is stripped); a same-named existing table prompts append / overwrite /
+ * create-new, exactly like a dropped file.
+ */
+export async function importCsvText(api: HostApi, text: string, name: string): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('csv-import: no active workspace');
 
-  const text = await file.text();
-  const baseName = file.name.replace(/\.csv$/i, '') || 'imported';
+  const baseName = (name || 'imported').replace(/\.csv$/i, '') || 'imported';
 
   // If a table with this name already exists in the workspace, ask the user
   // what to do: append rows, overwrite (clear + insert), or create a new
