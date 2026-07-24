@@ -4,6 +4,8 @@ import type {
   HostApi,
   ImporterSpec,
   PluginModule,
+  TableOrigin,
+  TableSource,
   WindowGeometry,
 } from '@easydb/shared';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
@@ -63,6 +65,7 @@ export async function importJsonText(
   api: HostApi,
   text: string,
   filename: string,
+  opts: { originUrl?: string | undefined } = {},
 ): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('json-import: no active workspace');
@@ -143,21 +146,35 @@ export async function importJsonText(
 
   const existingByName = new Map(existing.map((t) => [t.name, t] as const));
   for (const t of tables) {
+    // Prefer backing info embedded in the dump (another device's export); else,
+    // if we fetched this dump from a URL, record a snapshot origin so the table
+    // can be refreshed/reloaded later.
+    const source = t.source;
+    const origin =
+      t.origin ??
+      (!source && opts.originUrl ? ({ type: 'json', url: opts.originUrl } as TableOrigin) : undefined);
+
     let tableId: string;
     const match = mode === 'overwrite-matching' ? existingByName.get(t.name) : undefined;
     if (match) {
       // Overwrite: keep the id (and thus its panel position) but wipe rows
-      // and replace columns + sort + geometry from the import.
+      // and replace columns + sort + geometry + backing info from the import.
       tableId = match.id;
-      const rowColl = api.store.rows(tableId);
-      const oldRows = await rowColl.find();
-      await rowColl.bulkRemove(oldRows.map((r) => r.id));
+      // Only clear LOCAL rows. A matched table that's already live (`source`)
+      // routes rows to its remote provider — we must not issue remote deletes.
+      if (!match.source) {
+        const rowColl = api.store.rows(tableId);
+        const oldRows = await rowColl.find();
+        await rowColl.bulkRemove(oldRows.map((r) => r.id));
+      }
       await api.store.tables.patch(tableId, {
         columns: t.columns,
         ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
         ...(t.sortColumn
           ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true }
           : { sortColumn: undefined, sortAsc: undefined }),
+        source: source ?? undefined,
+        origin: origin ?? undefined,
         updatedAt: Date.now(),
       });
     } else {
@@ -172,24 +189,29 @@ export async function importJsonText(
         view: 'table',
         ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
         ...(t.sortColumn ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true } : {}),
+        ...(source ? { source } : {}),
+        ...(origin ? { origin } : {}),
         updatedAt: Date.now(),
       });
     }
 
-    const rowColl = api.store.rows(tableId);
-    const docs = t.rows.map((row) => ({
-      id: cryptoUUID(),
-      tableId,
-      data: row,
-      updatedAt: Date.now(),
-    }));
-    await rowColl.bulkInsert(docs);
+    // Snapshot rows are stored locally; a live (`source`) table pulls its own
+    // rows from the provider, so we do NOT insert them here (that would write
+    // to the remote). Its routed collection loads them on render.
+    let inserted = 0;
+    if (!source) {
+      const rowColl = api.store.rows(tableId);
+      const docs = t.rows.map((row) => ({
+        id: cryptoUUID(),
+        tableId,
+        data: row,
+        updatedAt: Date.now(),
+      }));
+      await rowColl.bulkInsert(docs);
+      inserted = docs.length;
+    }
 
-    api.events.emit('import:after', {
-      source: 'json',
-      tableId,
-      rowCount: t.rows.length,
-    });
+    api.events.emit('import:after', { source: 'json', tableId, rowCount: inserted });
   }
 }
 
@@ -202,6 +224,10 @@ interface NormalizedTable {
   windowGeometry?: WindowGeometry;
   sortColumn?: string;
   sortAsc?: boolean;
+  /** Live remote backing carried in the dump (rows re-pulled from the provider). */
+  source?: TableSource;
+  /** Snapshot origin URL carried in the dump (refreshable). */
+  origin?: TableOrigin;
 }
 
 /** Recognize known shapes; fall back to single-row import for unknown objects. */
@@ -230,6 +256,17 @@ export function parsedToTables(parsed: unknown, fallbackName: string): Normalize
           : undefined;
         const sortColumn = typeof e.sortColumn === 'string' ? e.sortColumn : undefined;
         const sortAsc = typeof e.sortAsc === 'boolean' ? e.sortAsc : undefined;
+        // Carry a live `source` or snapshot `origin` if the dump recorded one.
+        const source =
+          isObject(e.source) && typeof (e.source as { type?: unknown }).type === 'string'
+            ? (e.source as unknown as TableSource)
+            : undefined;
+        const origin =
+          isObject(e.origin) &&
+          typeof (e.origin as { type?: unknown }).type === 'string' &&
+          typeof (e.origin as { url?: unknown }).url === 'string'
+            ? (e.origin as unknown as TableOrigin)
+            : undefined;
         out.push({
           name: String(entry.name),
           columns: entry.columns.map(normalizeColumn),
@@ -238,6 +275,8 @@ export function parsedToTables(parsed: unknown, fallbackName: string): Normalize
             : [],
           ...(geom ? { windowGeometry: geom } : {}),
           ...(sortColumn ? { sortColumn, sortAsc: sortAsc ?? true } : {}),
+          ...(source ? { source } : {}),
+          ...(origin ? { origin } : {}),
         });
         continue;
       }

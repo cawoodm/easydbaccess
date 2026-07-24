@@ -47,6 +47,11 @@ export async function serializeWorkspace(api: HostApi): Promise<string> {
       rows: rows.map((r) => r.data),
       ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
       ...(t.sortColumn ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true } : {}),
+      // Carry the backing info so the dump reconstructs a live/refreshable
+      // table on another device: `source` = live remote (rows re-pulled from
+      // the provider), `origin` = snapshot with a URL it can be refreshed from.
+      ...(t.source ? { source: t.source } : {}),
+      ...(t.origin ? { origin: t.origin } : {}),
     });
   }
 

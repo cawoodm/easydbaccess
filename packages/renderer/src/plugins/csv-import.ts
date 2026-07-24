@@ -4,6 +4,7 @@ import type {
   HostApi,
   ImporterSpec,
   PluginModule,
+  TableOrigin,
 } from '@easydb/shared';
 
 export const meta: NonNullable<PluginModule['meta']> = {
@@ -70,6 +71,12 @@ export interface CsvImportOpts {
    * schema.
    */
   editColumns?: ((columns: ColumnSpec[]) => Promise<ColumnSpec[] | null>) | undefined;
+  /**
+   * Snapshot origin to stamp on a newly-created table (the URL it was imported
+   * from), so it can be refreshed/reloaded later. Set by the Import dialog for
+   * URL imports; absent for dropped files.
+   */
+  origin?: TableOrigin | undefined;
 }
 
 export async function importCsvText(
@@ -142,6 +149,7 @@ export async function importCsvText(
       code: slug(uniqueName),
       columns,
       view: 'table',
+      ...(opts.origin ? { origin: opts.origin } : {}),
       updatedAt: Date.now(),
     });
     docs = rows.map((row) => ({

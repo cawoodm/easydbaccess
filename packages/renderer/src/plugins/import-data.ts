@@ -15,8 +15,8 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { HostApi, PluginModule } from '@easydb/shared';
-import { importJsonText } from './json-import.js';
-import { importCsvText } from './csv-import.js';
+import { importJsonText, parsedToTables } from './json-import.js';
+import { importCsvText, parseCsv } from './csv-import.js';
 import { editColumnNames } from '../dialogs/column-names-dialog.js';
 import { importDatasette } from './datasette-source.js';
 import { parseDatasetteUrl, fetchDatabaseNames } from './datasette-client.js';
@@ -89,6 +89,62 @@ export function init(api: HostApi): void {
     tooltip: 'Import data from a URL (snapshot into a local table)',
     onClick: () => openImport(api),
   });
+
+  // Refresh a snapshot table imported from a CSV/JSON URL by re-fetching it.
+  // (Datasette-origin tables get their own refresh from datasette-source.)
+  api.ui.registerTableButton({
+    id: 'import-data:refresh',
+    label: 'Refresh',
+    icon: 'refresh',
+    tooltip: 'Reload this table from the URL it was imported from',
+    visible: (table) => table.origin?.type === 'csv' || table.origin?.type === 'json',
+    onClick: (a, { tableId }) => refreshImported(a, tableId),
+  });
+}
+
+/** Re-fetch a CSV/JSON snapshot table from its origin URL and replace its rows. */
+async function refreshImported(api: HostApi, tableId: string): Promise<void> {
+  const t = await api.store.tables.findOne(tableId);
+  const origin = t?.origin;
+  if (!origin?.url) return;
+  try {
+    const res = await api.backend.fetch(origin.url);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    const text = await res.text();
+
+    let rows: Array<Record<string, unknown>>;
+    if (origin.type === 'csv') {
+      rows = parseCsv(text).rows;
+    } else {
+      const parsed = parsedToTables(JSON.parse(text), t!.name);
+      const match = parsed.find((x) => x.name === t!.name) ?? (parsed.length === 1 ? parsed[0] : undefined);
+      if (!match) throw new Error(`"${t!.name}" is no longer in the dump at ${origin.url}`);
+      rows = match.rows;
+    }
+
+    const coll = api.store.rows(tableId);
+    const old = await coll.find();
+    await coll.bulkRemove(old.map((r) => r.id));
+    await coll.bulkInsert(
+      rows.map((data) => ({ id: cryptoUUID(), tableId, data, updatedAt: Date.now() })),
+    );
+    api.ui.dialogs.toast(`Refreshed "${t!.name}" (${rows.length} rows).`, {
+      kind: 'success',
+      title: 'Refresh',
+    });
+  } catch (err) {
+    api.ui.dialogs.toast(`Couldn't refresh "${t?.name ?? tableId}": ${(err as Error).message}`, {
+      kind: 'error',
+      title: 'Refresh',
+    });
+  }
+}
+
+function cryptoUUID(): string {
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  );
 }
 
 async function openImport(api: HostApi): Promise<void> {
@@ -119,6 +175,8 @@ async function openImport(api: HostApi): Promise<void> {
       // the table (importCsvText returns without inserting if the user cancels).
       await importCsvText(api, text, filenameFromUrl(url), {
         editColumns: editColumns ? editColumnNames : undefined,
+        // Remember where it came from so it can be refreshed / reloaded later.
+        origin: { type: 'csv', url },
       });
       api.ui.dialogs.toast(`Imported ${filenameFromUrl(url)}.`, {
         kind: 'success',
@@ -128,7 +186,7 @@ async function openImport(api: HostApi): Promise<void> {
       const res = await api.backend.fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const text = await res.text();
-      await importJsonText(api, text, filenameFromUrl(url));
+      await importJsonText(api, text, filenameFromUrl(url), { originUrl: url });
       api.ui.dialogs.toast(`Imported ${filenameFromUrl(url)}.`, {
         kind: 'success',
         title: 'Import',
