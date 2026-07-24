@@ -56,6 +56,31 @@ export function getDexie(): EasyDb {
     viewInstances: 'id, workspaceId, tableId',
   });
 
+  // Multi-tab schema-upgrade safety. A schema bump (new object stores) can only
+  // run in an IndexedDB `versionchange` transaction, which is BLOCKED while any
+  // other tab still holds the DB open at the old version. Without handling that,
+  // the newer tab's `open()` hangs forever on a blank screen (the "completely
+  // broken after an upgrade" symptom).
+  //
+  //  - `versionchange`: another connection needs to change the DB's version.
+  //    Close ours so we stop blocking it. If it's an UPGRADE (another tab
+  //    shipped a newer schema — `newVersion` is set), also reload so this tab
+  //    comes back on the new code instead of running against a dead handle. If
+  //    it's a DELETE (`newVersion === null`, e.g. an app-driven reset), just
+  //    yield — reloading there would fight the deletion / loop.
+  //  - `blocked`: OUR open is blocked by an older tab that hasn't yielded.
+  //    Surface an actionable message instead of hanging silently.
+  raw.on('versionchange', (event) => {
+    try {
+      raw.close();
+    } catch {
+      /* ignore */
+    }
+    const upgrading = (event as IDBVersionChangeEvent)?.newVersion != null;
+    if (upgrading && typeof location !== 'undefined') location.reload();
+  });
+  raw.on('blocked', () => showUpgradeBlocked());
+
   instance = {
     raw,
     workspaces: raw.table<Workspace, string>('workspaces'),
@@ -67,4 +92,32 @@ export function getDexie(): EasyDb {
     viewInstances: raw.table<ViewInstance, string>('viewInstances'),
   };
   return instance;
+}
+
+/**
+ * Full-screen message shown when a database upgrade is blocked by another tab
+ * running an older version — turns a silent, blank hang into clear guidance.
+ * Idempotent (only injected once).
+ */
+function showUpgradeBlocked(): void {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById('easydb-upgrade-blocked')) return;
+  const el = document.createElement('div');
+  el.id = 'easydb-upgrade-blocked';
+  el.setAttribute('role', 'alertdialog');
+  el.style.cssText =
+    'position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;' +
+    'justify-content:center;background:rgba(15,23,42,0.55);' +
+    'font-family:system-ui,sans-serif;padding:1rem;';
+  el.innerHTML =
+    '<div style="max-width:26rem;background:#fff;border-radius:0.6rem;padding:1.5rem 1.75rem;' +
+    'box-shadow:0 20px 50px rgba(0,0,0,0.3);text-align:center;">' +
+    '<h2 style="margin:0 0 0.5rem;font-size:1.1rem;color:#111827;">Update in progress</h2>' +
+    '<p style="margin:0 0 1rem;color:#374151;font-size:0.9rem;line-height:1.5;">' +
+    'easyDBAccess needs to upgrade its local database, but an <strong>older version is still ' +
+    'open in another tab or window</strong>. Close the other easyDBAccess tabs, then reload.</p>' +
+    '<button id="easydb-upgrade-reload" style="font:inherit;background:#3b82f6;color:#fff;' +
+    'border:0;padding:0.5rem 1rem;border-radius:0.3rem;cursor:pointer;">Reload</button></div>';
+  document.body.appendChild(el);
+  el.querySelector('#easydb-upgrade-reload')?.addEventListener('click', () => location.reload());
 }
