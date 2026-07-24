@@ -109,13 +109,44 @@ test.describe('general', () => {
     // Only the matching row remains visible. (Cell values are rendered as
     // <input value="…"> not text nodes, so we assert via the input's value.)
     await expect(panel.locator('data-table').locator('tbody tr:visible')).toHaveCount(1);
-    await expect(
-      panel.locator('data-table').locator('tbody tr:visible input').first(),
-    ).toHaveValue('Bob');
+    await expect(panel.locator('data-table').locator('tbody tr:visible input').first()).toHaveValue(
+      'Bob',
+    );
 
     // Clear → all rows return.
     await searchInput.fill('');
     await expect(panel.locator('data-table').locator('tbody tr:visible')).toHaveCount(3);
+  });
+
+  test('per-table search focuses the input on open and collapses on click-outside', async ({
+    page,
+  }) => {
+    const id = await createTable(page, 'Focusable', [{ field: 'name' }]);
+    await waitForPanel(page, id);
+    await addRow(page, id, { name: 'Alice' });
+
+    const panel = page.locator(`#${panelDomId(id)}`);
+    const search = panel.locator('panel-search');
+
+    // Open the search: the freshly-rendered input must be focused (autofocus
+    // is unreliable for dynamically-inserted inputs, so the component focuses
+    // it explicitly).
+    await search.getByRole('button').click();
+    const input = search.locator('input');
+    await expect(input).toBeFocused();
+
+    // Type a query, then click elsewhere (a cell in the table). The box blurs
+    // and collapses back to the icon; the active filter is preserved so the
+    // icon reports it via its title.
+    await input.fill('alice');
+    await panel.locator('data-table tbody tr:visible input').first().click();
+    await expect(search.locator('input')).toHaveCount(0);
+    await expect(search.getByRole('button')).toHaveAttribute('title', /Filtering rows: alice/);
+
+    // Re-opening shows the preserved query, focused and ready to edit.
+    await search.getByRole('button').click();
+    await expect(search.locator('input')).toBeFocused();
+    await expect(search.locator('input')).toHaveValue('alice');
   });
 
   test('panel footer exposes Add row, Columns, and registered table buttons', async ({ page }) => {
