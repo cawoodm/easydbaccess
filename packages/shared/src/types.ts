@@ -151,6 +151,12 @@ export interface ViewInstance {
   /** Template token (without the leading `$`) → column field. */
   mapping: Record<string, string>;
   windowGeometry?: WindowGeometry | undefined;
+  /**
+   * Whether this view's window is currently open. Persisted so the `views`
+   * plugin can reopen open windows on boot (jsPanel itself has no cross-reload
+   * memory — table windows are likewise re-created from persisted state).
+   */
+  open?: boolean | undefined;
   updatedAt: number;
 }
 

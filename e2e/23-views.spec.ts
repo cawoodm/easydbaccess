@@ -197,4 +197,83 @@ test.describe('views', () => {
     await expect(vw.locator('table.vw-table tbody tr')).toHaveCount(2);
     await expect(vw.locator('input')).toHaveCount(0);
   });
+
+  test('an open view window reopens after a browser reload', async ({ page }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ title: 'Hello', url: 'https://example.com/1' }]);
+
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    const dlg = page.locator('views-dialog dialog');
+    await expect(dlg).toBeVisible();
+    await dlg
+      .locator('ul.list li', { hasText: 'RSS Feed' })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+    await expect(page.locator('view-window')).toBeVisible();
+
+    // Reload the browser — the view instance persists and its window should be
+    // re-created on boot (jsPanel itself has no cross-reload memory).
+    await page.reload();
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => Boolean((window as any).__easydb),
+    );
+    const vw = page.locator('view-window');
+    await expect(vw).toBeVisible();
+    await expect(vw.locator('a', { hasText: 'Hello' })).toBeVisible();
+
+    // Closing the window clears the persisted open flag → it does NOT reopen.
+    await page.locator('[id^="view-panel-"] .jsPanel-btn-close').first().click();
+    await expect(page.locator('view-window')).toHaveCount(0);
+    await page.reload();
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => Boolean((window as any).__easydb),
+    );
+    await page.waitForTimeout(300);
+    await expect(page.locator('view-window')).toHaveCount(0);
+  });
+
+  test('a maximized view window fills the area and stays filling through a pan', async ({
+    page,
+  }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ title: 'Hello', url: 'https://example.com/1' }]);
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    const dlg = page.locator('views-dialog dialog');
+    await dlg
+      .locator('ul.list li', { hasText: 'RSS Feed' })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+    const viewPanel = page.locator('[id^="view-panel-"]');
+    await expect(viewPanel).toBeVisible();
+
+    const overlay = (await page.locator('#easydb-panels').boundingBox())!;
+    await viewPanel.locator('.jsPanel-btn-maximize').click();
+    await page.waitForTimeout(120);
+
+    // Right-drag pan the canvas while maximized → the view stays pinned filling
+    // the overlay (core maximize-fill counter-transform, shared with tables).
+    await page.mouse.move(overlay.x + 300, overlay.y + 200);
+    await page.mouse.down({ button: 'right' });
+    await page.mouse.move(overlay.x + 520, overlay.y + 360, { steps: 6 });
+    await page.mouse.up({ button: 'right' });
+    await page.waitForTimeout(80);
+
+    const box = (await viewPanel.boundingBox())!;
+    expect(Math.abs(box.x - overlay.x)).toBeLessThan(4);
+    expect(Math.abs(box.y - overlay.y)).toBeLessThan(4);
+    expect(Math.abs(box.width - overlay.width)).toBeLessThan(4);
+    expect(Math.abs(box.height - overlay.height)).toBeLessThan(4);
+  });
 });

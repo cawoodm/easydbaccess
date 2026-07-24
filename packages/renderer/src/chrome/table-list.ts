@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import type { Table } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { initWindowManager } from '../window-mgr/jspanel-manager.js';
+import { initViewWindowManager } from '../window-mgr/view-window-manager.js';
 
 /**
  * Used to be a card-list renderer. Now it's a thin controller:
@@ -40,6 +41,7 @@ export class TableList extends LitElement {
     const all = await ctx.store.tables.find();
     this.tables = all.filter((t) => t.workspaceId === this.workspaceId);
     await initWindowManager();
+    await initViewWindowManager();
   }
 
   override disconnectedCallback() {
@@ -50,8 +52,8 @@ export class TableList extends LitElement {
   override render() {
     if (this.tables.length > 0) return html``;
     return html`<div class="empty">
-      No tables yet. Drop a <strong>.csv</strong> or <strong>.json</strong> file anywhere on
-      the page, or click <strong>+ New Table</strong> above.
+      No tables yet. Drop a <strong>.csv</strong> or <strong>.json</strong> file anywhere on the
+      page, or click <strong>+ New Table</strong> above.
     </div>`;
   }
 }

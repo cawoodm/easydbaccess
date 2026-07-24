@@ -88,6 +88,14 @@ export class ViewWindow extends LitElement {
     }
   }
 
+  /** Re-read the instance/template/columns/rows — e.g. after the instance is
+   * edited (rename / re-mapping) — without tearing down the window. */
+  async reload() {
+    this.rowsUnsub?.();
+    this.loaded = false;
+    await this.load();
+  }
+
   private async load() {
     if (!this.viewInstanceId) return;
     const ctx = await getContext();

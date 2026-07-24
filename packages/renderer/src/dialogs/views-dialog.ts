@@ -217,8 +217,12 @@ export class ViewsDialog extends LitElement {
 
   // -- instances --------------------------------------------------------------
 
-  private openInstance(id: string): void {
-    document.dispatchEvent(new CustomEvent('easydb:open-view', { detail: { instanceId: id } }));
+  private async openInstance(id: string): Promise<void> {
+    // Flip the persisted `open` flag; the core view-window manager reacts by
+    // opening (and later restoring) the window. The dialog owns intent, not
+    // window management.
+    const ctx = await getContext();
+    await ctx.store.viewInstances.patch(id, { open: true, updatedAt: Date.now() });
     this.close();
   }
 
@@ -245,7 +249,8 @@ export class ViewsDialog extends LitElement {
   private async deleteInstance(id: string): Promise<void> {
     const ctx = await getContext();
     await ctx.store.viewInstances.remove(id);
-    document.dispatchEvent(new CustomEvent('easydb:close-view', { detail: { instanceId: id } }));
+    // The core view-window manager closes the window when its instance vanishes
+    // from the reconcile subscription — no explicit close event needed.
     await this.refresh();
   }
 
@@ -369,7 +374,7 @@ export class ViewsDialog extends LitElement {
       updatedAt: Date.now(),
     };
     await ctx.store.viewInstances.insert(inst);
-    this.openInstance(inst.id);
+    await this.openInstance(inst.id);
   }
 
   // -- render -----------------------------------------------------------------

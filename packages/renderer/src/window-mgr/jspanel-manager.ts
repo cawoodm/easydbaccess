@@ -22,7 +22,8 @@ import 'jspanel4/es6module/jspanel.css';
 
 import type { Table, WindowGeometry } from '@easydb/shared';
 import { getContext, type AppContext } from '../app-context.js';
-import { initPanZoom, type PanZoomHandle, type PanZoomState } from './panzoom.js';
+import { initPanZoom, type PanZoomHandle } from './panzoom.js';
+import { createMaximizeFill } from './maximize-fill.js';
 import '../table/data-table.js';
 import '../chrome/panel-search.js';
 import '../chrome/panel-footer.js';
@@ -75,8 +76,14 @@ const confirmedClose = new Set<string>();
  */
 const externallyClosed = new Set<string>();
 let initialized = false;
-/** Canvas pan/zoom control — reset while a window is maximized so it fills the screen. */
+/** Canvas pan/zoom control. Exposed so view windows can share the same handle
+ * to keep a maximized view filling the screen through pan/zoom. */
 let panzoom: PanZoomHandle | null = null;
+
+/** The live canvas pan/zoom handle, or null before the window manager inits. */
+export function currentPanZoom(): PanZoomHandle | null {
+  return panzoom;
+}
 
 export async function initWindowManager(): Promise<void> {
   if (initialized) return;
@@ -239,39 +246,10 @@ function openPanel(t: Table, ctx: AppContext): void {
   // live table); it's activated when the window is expanded (see mountContent).
   (footer as HTMLElement & { active: boolean }).active = !startMinimized;
 
-  // Maximize must fill the visible area, but panels live inside the pan/zoom-
-  // transformed canvas: jsPanel sizes a maximized panel to the viewport's
-  // layout box (left:0, top:0, w/h = clientW/H) — correct in layout, but the
-  // viewport's `translate()/scale()` then offsets and scales it visually, so a
-  // panned or zoomed canvas leaves the "maximized" window adrift.
-  //
-  // Fix: give the maximized panel its own transform that exactly cancels the
-  // canvas transform, so it stays pinned filling the overlay — and keep it in
-  // sync as the canvas pans/zooms underneath. For canvas transform
-  // translate(tx,ty) scale(s), the cancelling panel transform (origin 0 0) is
-  // translate(-tx/s, -ty/s) scale(1/s): the panel's (0,0)-(W,H) box then maps
-  // back to the overlay's (0,0)-(W,H) on screen. See panzoom.ts for the math.
-  let maxUnsub: (() => void) | null = null;
-  const applyMaxCounter = (s: PanZoomState): void => {
-    const el = document.getElementById(panelId);
-    if (!el) return;
-    el.style.transformOrigin = '0 0';
-    el.style.transform = `translate(${-s.x / s.scale}px, ${-s.y / s.scale}px) scale(${1 / s.scale})`;
-  };
-  const enterMaximizedFill = (): void => {
-    if (maxUnsub || !panzoom) return;
-    applyMaxCounter(panzoom.snapshot());
-    maxUnsub = panzoom.subscribe(applyMaxCounter);
-  };
-  const exitMaximizedFill = (): void => {
-    maxUnsub?.();
-    maxUnsub = null;
-    const el = document.getElementById(panelId);
-    if (el) {
-      el.style.transform = '';
-      el.style.transformOrigin = '';
-    }
-  };
+  // A maximized panel must stay filling the visible overlay even though panels
+  // live inside the pan/zoom-transformed canvas. The shared helper counters the
+  // canvas transform on the panel and keeps it in sync on every pan/zoom.
+  const maxFill = createMaximizeFill(panelId, () => panzoom);
 
   const position = g
     ? { my: 'left-top', at: 'left-top', offsetX: g.x, offsetY: g.y }
@@ -351,8 +329,8 @@ function openPanel(t: Table, ctx: AppContext): void {
     onstatuschange: (p: Panel) => {
       if (p.status === 'minimized') unmountContent();
       else if (p.status === 'normalized' || p.status === 'maximized') mountContent();
-      if (p.status === 'maximized') enterMaximizedFill();
-      else exitMaximizedFill();
+      if (p.status === 'maximized') maxFill.enter();
+      else maxFill.exit();
       void saveGeometry(t.id, ctx);
     },
   }) as Panel;
