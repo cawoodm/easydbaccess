@@ -151,22 +151,26 @@ test.describe('datasette import — whole database', () => {
     await picker.getByRole('button', { name: /^Import \(2\)$/ }).click();
     await expect(picker).toBeHidden();
 
-    // Wait until both tables have been created locally. (expect.poll awaits the
-    // async poller; page.waitForFunction would resolve on the truthy Promise.)
+    // Windows are created up front (empty), then filled — so wait until the
+    // ROWS have actually landed, not just the table records. (expect.poll awaits
+    // the async poller; page.waitForFunction would resolve on the truthy Promise.)
     await expect
       .poll(
         () =>
           page.evaluate(async (ws) => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const tables = await (window as any).__easydb.store.tables.find();
-            return tables
-              .filter((t: { workspaceId: string }) => t.workspaceId === ws)
-              .map((t: { name: string }) => t.name)
-              .sort();
+            const store = (window as any).__easydb.store;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const tables = (await store.tables.find()).filter(
+              (t: { workspaceId: string }) => t.workspaceId === ws,
+            );
+            const counts: Record<string, number> = {};
+            for (const t of tables) counts[t.name] = (await store.rows(t.id).find()).length;
+            return counts;
           }, workspaceId),
         { timeout: 15_000 },
       )
-      .toEqual(['legislators/executive_terms', 'legislators/executives']);
+      .toEqual({ 'legislators/executive_terms': 131, 'legislators/executives': 80 });
 
     // Exactly the two chosen tables were imported — not the whole database.
     const summary = await page.evaluate(async (ws) => {

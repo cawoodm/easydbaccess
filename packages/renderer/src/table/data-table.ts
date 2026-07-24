@@ -272,7 +272,14 @@ export class DataTable extends LitElement {
   @state() private cellRenderers: Map<string, string> = new Map();
   @state() private scrollY = 0;
   @state() private viewportHeight = 0;
+  /** Loading bar driven by this grid's own row fetch (see bind()). */
   @state() private loading = false;
+  /**
+   * Loading bar driven by an EXTERNAL producer (an import filling this table's
+   * rows in the background) via the `easydb:table-loading` event, so the window
+   * can show progress before its data exists.
+   */
+  @state() private externalLoading = false;
   /** Median row height in px, measured from currently-rendered rows. */
   private rowHeight = 28;
   private resizeObs: ResizeObserver | null = null;
@@ -287,6 +294,7 @@ export class DataTable extends LitElement {
     super.connectedCallback();
     document.addEventListener('easydb:global-search', this.onGlobalSearch as EventListener);
     document.addEventListener('easydb:table-search', this.onTableSearch as EventListener);
+    document.addEventListener('easydb:table-loading', this.onTableLoading as EventListener);
     this.addEventListener('scroll', this.onScroll, { passive: true });
     this.resizeObs = new ResizeObserver(() => {
       this.viewportHeight = this.clientHeight;
@@ -299,6 +307,7 @@ export class DataTable extends LitElement {
     super.disconnectedCallback();
     document.removeEventListener('easydb:global-search', this.onGlobalSearch as EventListener);
     document.removeEventListener('easydb:table-search', this.onTableSearch as EventListener);
+    document.removeEventListener('easydb:table-loading', this.onTableLoading as EventListener);
     this.removeEventListener('scroll', this.onScroll);
     this.resizeObs?.disconnect();
     this.resizeObs = null;
@@ -320,6 +329,11 @@ export class DataTable extends LitElement {
   private onTableSearch = (e: Event) => {
     const d = (e as CustomEvent<{ tableId: string; query: string }>).detail;
     if (d.tableId === this.tableId) this.localQuery = d.query ?? '';
+  };
+
+  private onTableLoading = (e: Event) => {
+    const d = (e as CustomEvent<{ tableId: string; loading: boolean }>).detail;
+    if (d.tableId === this.tableId) this.externalLoading = d.loading;
   };
 
   override async updated(changed: Map<string, unknown>) {
@@ -833,7 +847,7 @@ export class DataTable extends LitElement {
     const { slice, topPad, bottomPad } = this.virtualSlice(rows);
     const suggestions = this.computeFilterSuggestions();
     return html`
-      ${this.loading
+      ${this.loading || this.externalLoading
         ? html`<div class="load-bar" role="progressbar" aria-label="Loading rows">
             <div class="load-bar-fill"></div>
           </div>`
@@ -1038,6 +1052,17 @@ function compareValues(a: unknown, b: unknown, type: ColumnType): number {
     default:
       return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
   }
+}
+
+/**
+ * Toggle the progress bar on the window for `tableId` from outside the grid.
+ * An importer shows the window (an empty table record) immediately, calls this
+ * with `true`, fetches rows in the background, then calls it with `false` once
+ * the rows have landed — so the user sees the window + a progress bar before
+ * any data arrives.
+ */
+export function setTableLoading(tableId: string, loading: boolean): void {
+  document.dispatchEvent(new CustomEvent('easydb:table-loading', { detail: { tableId, loading } }));
 }
 
 declare global {

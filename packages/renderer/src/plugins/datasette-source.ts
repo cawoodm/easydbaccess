@@ -102,6 +102,7 @@ async function resolveChosenTables(
   return picked.map((i) => tables[i]!);
 }
 import { chooseTables } from '../dialogs/table-select-dialog.js';
+import { setTableLoading } from '../table/data-table.js';
 import { createDatasetteCollection, tokenSettingKey } from './datasette-collection.js';
 import '../dialogs/datasette-connect-dialog.js';
 import { DatasetteConnectDialog } from '../dialogs/datasette-connect-dialog.js';
@@ -219,21 +220,6 @@ interface OneResult {
   truncated: boolean;
   pages: number;
   count: number | null;
-  /** True when the user chose to skip this table (name collision → Skip). */
-  skipped?: boolean;
-}
-
-/** A one-table skip result, so the batch loop can count it without importing. */
-function skippedResult(name: string): OneResult {
-  return {
-    name,
-    rowCount: 0,
-    hasMore: false,
-    truncated: false,
-    pages: 0,
-    count: null,
-    skipped: true,
-  };
 }
 
 /** First "name", "name (2)", "name (3)"… not already used by a table in the set. */
@@ -271,138 +257,154 @@ export async function importDatasette(
     return;
   }
 
-  // All imports funnel through here — a single summary toast covers one table
-  // or many (the generic per-table import toast is suppressed for datasette in
-  // app-context, so there's exactly one message).
-  let imported = 0;
+  // Window-first, two phases so all windows appear (with progress bars) before
+  // any rows are fetched:
+  //   1. resolve name collisions and CREATE every table record (empty shell),
+  //   2. fetch + fill each in turn, its window showing a progress bar.
+  // (The generic per-table import toast is suppressed for datasette in
+  // app-context, so summariseBatch is the single message.)
+  const plans: Array<{ tableId: string; ref: DatasetteRef; overwrite: boolean }> = [];
   let skipped = 0;
+  for (const c of chosen) {
+    const cref: DatasetteRef = { base: ref.base, db: c.db, table: c.table, query: {} };
+    const prep = await prepareImportTable(api, workspaceId, cref);
+    if (prep.skipped) {
+      skipped += 1;
+      continue;
+    }
+    plans.push({ tableId: prep.tableId, ref: cref, overwrite: prep.overwrite });
+  }
+
+  let imported = 0;
   let totalRows = 0;
   const capped: string[] = [];
   const failed: string[] = [];
-  for (const c of chosen) {
+  for (const p of plans) {
     try {
-      const r = await importOneTable(api, workspaceId, {
-        base: ref.base,
-        db: c.db,
-        table: c.table,
-        query: {},
-      });
-      if (r.skipped) {
-        skipped += 1;
-        continue;
-      }
+      const r = await fillImportTable(api, p.tableId, p.ref, p.overwrite);
       imported += 1;
       totalRows += r.rowCount;
-      if (r.hasMore || r.truncated) capped.push(`${c.db}/${c.table}`);
+      if (r.hasMore || r.truncated) capped.push(`${p.ref.db}/${p.ref.table}`);
     } catch (err) {
-      failed.push(`${c.db}/${c.table}: ${(err as Error)?.message ?? String(err)}`);
+      failed.push(`${p.ref.db}/${p.ref.table}: ${(err as Error)?.message ?? String(err)}`);
     }
   }
 
   summariseBatch(api, { imported, skipped, totalRows, capped, failed, requested: chosen.length });
 }
 
-/** Fetch schema + rows for one table and create the local eda table. No toast. */
-async function importOneTable(
+/**
+ * Phase 1 of an import: resolve a name collision (Overwrite / Rename / Skip) and
+ * create the destination table as an EMPTY shell so its window appears right
+ * away. No rows are fetched here. Returns the target table id, or `skipped`.
+ */
+async function prepareImportTable(
   api: HostApi,
   workspaceId: string,
   ref: DatasetteRef,
-): Promise<OneResult> {
+): Promise<{ tableId: string; overwrite: boolean; skipped?: boolean }> {
   const name = `${ref.db}/${ref.table}`;
-  const fetchFn = (u: string) => api.backend.fetch(u);
+  const origin = {
+    type: 'datasette',
+    url: `${ref.base}/${encodeURIComponent(ref.db!)}/${encodeURIComponent(ref.table!)}`,
+  } as const;
 
-  // Name-collision handling. When a table of the same name already exists in
-  // this workspace, tell the user and let them Overwrite (replace the existing
-  // table's columns + rows in place), Rename (import under a free name), or
-  // Skip. Cancelling the dialog counts as Skip.
   const workspaceTables = (await api.store.tables.find()).filter(
     (t) => t.workspaceId === workspaceId,
   );
   const existing = workspaceTables.find((t) => t.name === name);
   let targetName = name;
-  let overwriteId: string | undefined;
   if (existing) {
     const choice = await api.ui.dialogs.choice(
       `A table named "${name}" already exists in this workspace.`,
       ['Overwrite', 'Rename', 'Skip'],
       'Import — table already exists',
     );
-    if (!choice || choice === 'Skip') return skippedResult(name);
+    if (!choice || choice === 'Skip') return { tableId: '', overwrite: false, skipped: true };
     if (choice === 'Overwrite') {
-      overwriteId = existing.id;
-    } else {
-      targetName = uniqueTableName(new Set(workspaceTables.map((t) => t.name)), name);
+      // Reuse the existing table/window; keep its columns visible until the new
+      // rows land. Just stamp the origin now.
+      await api.store.tables.patch(existing.id, { origin, updatedAt: Date.now() });
+      return { tableId: existing.id, overwrite: true };
     }
+    targetName = uniqueTableName(new Set(workspaceTables.map((t) => t.name)), name);
   }
 
-  // Schema discovery via ?_extra=… is best-effort: instances that don't
-  // support it (older Datasette) simply give us no columns, and we infer them
-  // from the fetched rows below. A hard failure here (e.g. network) is
-  // tolerated too — the row fetch will surface any real problem.
-  let metaColumns: ColumnSpec[] = [];
-  let count: number | null = null;
-  let typed = false;
-  try {
-    const meta = await fetchTableMeta(fetchFn, ref);
-    metaColumns = meta.columns;
-    count = meta.count;
-    typed = meta.typed;
-  } catch {
-    // fall back to row inference
-  }
-
-  const { rows, truncated, hasMore, pages } = await fetchRows(fetchFn, ref, {
-    maxRows: SETTINGS.maxImportRows,
-    pageSize: SETTINGS.pageSize,
+  const tableId = cryptoUUID();
+  await api.store.tables.insert({
+    id: tableId,
+    workspaceId,
+    name: targetName,
+    code: slug(`${ref.db}-${ref.table}`),
+    columns: [], // filled by fillImportTable once rows arrive
+    view: 'table',
+    // Where this snapshot came from, for later refresh. NOT a live `source`.
+    origin,
+    updatedAt: Date.now(),
   });
+  return { tableId, overwrite: false };
+}
 
-  // Prefer the schema's columns; if it gave no columns at all, infer from rows;
-  // if it gave names but no type details (e.g. datasette.io's `?_extra=columns`
-  // returns a bare name array), keep the names but refine types from the rows.
-  const columns =
-    metaColumns.length === 0
-      ? inferColumnsFromRows(rows)
-      : typed
-        ? metaColumns
-        : refineColumnTypes(metaColumns, rows);
+/**
+ * Phase 2 of an import: fetch schema + rows for one already-created table and
+ * populate it, driving the window's progress bar for the duration.
+ */
+async function fillImportTable(
+  api: HostApi,
+  tableId: string,
+  ref: DatasetteRef,
+  overwrite: boolean,
+): Promise<OneResult> {
+  const name = `${ref.db}/${ref.table}`;
+  const fetchFn = (u: string) => api.backend.fetch(u);
+  setTableLoading(tableId, true);
+  try {
+    // Schema discovery via ?_extra=… is best-effort: older instances give no
+    // columns (inferred from rows below); a hard failure is tolerated too — the
+    // row fetch surfaces any real problem.
+    let metaColumns: ColumnSpec[] = [];
+    let count: number | null = null;
+    let typed = false;
+    try {
+      const meta = await fetchTableMeta(fetchFn, ref);
+      metaColumns = meta.columns;
+      count = meta.count;
+      typed = meta.typed;
+    } catch {
+      // fall back to row inference
+    }
 
-  const now = Date.now();
-  const tableId = overwriteId ?? cryptoUUID();
-  const origin = {
-    type: 'datasette',
-    url: `${ref.base}/${encodeURIComponent(ref.db!)}/${encodeURIComponent(ref.table!)}`,
-  } as const;
-  api.events.emit('import:before', { source: 'datasette', tableId });
-
-  if (overwriteId) {
-    // Overwrite in place: refresh columns + origin, then swap the rows. Keeps
-    // the table id (and thus its open window / geometry / sort / filters).
-    await api.store.tables.patch(overwriteId, { columns, origin, updatedAt: now });
-    const rowColl = api.store.rows(overwriteId);
-    const old = await rowColl.find();
-    await rowColl.bulkRemove(old.map((r) => r.id));
-  } else {
-    await api.store.tables.insert({
-      id: tableId,
-      workspaceId,
-      name: targetName,
-      code: slug(`${ref.db}-${ref.table}`),
-      columns,
-      view: 'table',
-      // Record where this snapshot came from so it can be refreshed later. This
-      // is NOT a live `source` — rows stay local; `origin` only says how to
-      // re-pull them.
-      origin,
-      updatedAt: now,
+    const { rows, truncated, hasMore, pages } = await fetchRows(fetchFn, ref, {
+      maxRows: SETTINGS.maxImportRows,
+      pageSize: SETTINGS.pageSize,
     });
+
+    // Prefer the schema's columns; infer from rows if none; refine types when
+    // only bare names came back (e.g. datasette.io's `?_extra=columns`).
+    const columns =
+      metaColumns.length === 0
+        ? inferColumnsFromRows(rows)
+        : typed
+          ? metaColumns
+          : refineColumnTypes(metaColumns, rows);
+
+    const now = Date.now();
+    api.events.emit('import:before', { source: 'datasette', tableId });
+    await api.store.tables.patch(tableId, { columns, updatedAt: now });
+
+    const rowColl = api.store.rows(tableId);
+    if (overwrite) {
+      const old = await rowColl.find();
+      await rowColl.bulkRemove(old.map((r) => r.id));
+    }
+    const docs: Row[] = rows.map((data) => ({ id: cryptoUUID(), tableId, data, updatedAt: now }));
+    await rowColl.bulkInsert(docs);
+
+    api.events.emit('import:after', { source: 'datasette', tableId, rowCount: rows.length });
+    return { name, rowCount: rows.length, hasMore, truncated, pages, count };
+  } finally {
+    setTableLoading(tableId, false);
   }
-
-  const docs: Row[] = rows.map((data) => ({ id: cryptoUUID(), tableId, data, updatedAt: now }));
-  await api.store.rows(tableId).bulkInsert(docs);
-
-  api.events.emit('import:after', { source: 'datasette', tableId, rowCount: rows.length });
-
-  return { name: targetName, rowCount: rows.length, hasMore, truncated, pages, count };
 }
 
 function summariseBatch(
@@ -516,20 +518,35 @@ export async function connectDatasette(api: HostApi, input: string, token: strin
     return;
   }
 
-  let connected = 0;
+  // Window-first: create every live table record up front (no data fetched
+  // yet) so all windows appear immediately. Each grid then loads its own rows
+  // via the routed collection, showing its progress bar. Columns/pks are
+  // refined in the background so the windows don't wait on a schema probe.
+  const created: Array<{ tableId: string; c: TableRef }> = [];
   for (const c of chosen) {
-    await createLiveTable(api, workspaceId, ref.base, c, status.writable, token);
-    connected += 1;
+    const tableId = await upsertLiveTable(api, workspaceId, ref.base, c, status.writable, token);
+    created.push({ tableId, c });
   }
   const mode = status.writable ? 'read-write' : 'read-only';
   api.ui.dialogs.toast(
-    `Connected ${connected} live table${connected === 1 ? '' : 's'} from Datasette (${mode}).`,
+    `Connected ${created.length} live table${created.length === 1 ? '' : 's'} from Datasette (${mode}).`,
     { kind: 'success', title: 'Connect Datasette' },
   );
+  for (const { tableId, c } of created) {
+    void refineLiveColumns(api, tableId, ref.base, c, token);
+  }
 }
 
-/** Create a Table with a live `datasette` source (columns discovered; no local rows). */
-async function createLiveTable(
+/**
+ * Insert (or reuse) a Table with a live `datasette` source. This creates the
+ * window immediately; the only fetch is a pk probe when the caller didn't
+ * already know the primary keys (a bare table URL) — needed so the `source` is
+ * FINAL here. It must never change afterwards: the routed store memoises one
+ * collection per table keyed on `source`, so a later `source` edit would strand
+ * the grid/footer on the old collection (Refresh would act on a different one).
+ * Columns are still filled in lazily by `refineLiveColumns`.
+ */
+async function upsertLiveTable(
   api: HostApi,
   workspaceId: string,
   base: string,
@@ -537,48 +554,8 @@ async function createLiveTable(
   writable: boolean,
   token: string,
 ): Promise<string> {
-  const ref: DatasetteRef = { base, db: c.db, table: c.table, query: {} };
-  const fetchFn = withAuthFetch(
-    (u: string, o?: unknown) => api.backend.fetch(u, o as never),
-    token || undefined,
-  );
-
-  // Columns: schema names refined from a small sample (see importOneTable).
-  let metaColumns: ColumnSpec[] = [];
-  let typed = false;
-  try {
-    const meta = await fetchTableMeta(fetchFn, ref);
-    metaColumns = meta.columns;
-    typed = meta.typed;
-  } catch {
-    /* fall back to row inference */
-  }
-  const { rows: sample } = await fetchRows(fetchFn, ref, { maxRows: 50, pageSize: 50 });
-  const baseColumns =
-    metaColumns.length === 0
-      ? inferColumnsFromRows(sample)
-      : typed
-        ? metaColumns
-        : refineColumnTypes(metaColumns, sample);
-
-  // PKs from the database listing, else a dedicated probe. Needed to address
-  // rows for update/delete.
-  let pks = c.pks;
-  if (!pks || pks.length === 0) {
-    try {
-      pks = await fetchPrimaryKeys(fetchFn, ref);
-    } catch {
-      pks = [];
-    }
-  }
-  const columns = baseColumns.map((col) =>
-    pks.includes(col.field) ? { ...col, unique: true, notnull: true } : col,
-  );
-
   // Reuse an existing live table for the same (base, db, table) rather than
-  // piling up duplicates on every reconnect. When found, refresh its columns +
-  // source in place (keeping window geometry, sort, filters) instead of
-  // inserting a new record.
+  // piling up duplicates on every reconnect (keeps geometry, sort, filters).
   const existing = (await api.store.tables.find()).find((t) => {
     const cfg = t.source?.config as { base?: string; db?: string; table?: string } | undefined;
     return (
@@ -590,6 +567,21 @@ async function createLiveTable(
     );
   });
 
+  // pks from the listing when available (multi-table connect → no fetch, window
+  // is instant); otherwise probe once so writes address rows correctly.
+  let pks = c.pks ?? [];
+  if (pks.length === 0) {
+    const fetchFn = withAuthFetch(
+      (u: string, o?: unknown) => api.backend.fetch(u, o as never),
+      token || undefined,
+    );
+    try {
+      pks = await fetchPrimaryKeys(fetchFn, { base, db: c.db, table: c.table, query: {} });
+    } catch {
+      pks = [];
+    }
+  }
+
   const tableId = existing?.id ?? cryptoUUID();
   const record = {
     ...(existing ?? {}),
@@ -597,7 +589,9 @@ async function createLiveTable(
     workspaceId,
     name: `${c.db}/${c.table}`,
     code: slug(`${c.db}-${c.table}`),
-    columns,
+    // Keep an existing table's columns so a reconnect shows them at once; a new
+    // one starts empty and gets them from refineLiveColumns.
+    columns: existing?.columns ?? [],
     view: existing?.view ?? 'table',
     source: { type: 'datasette', writable, config: { base, db: c.db, table: c.table, pks } },
     updatedAt: Date.now(),
@@ -605,6 +599,57 @@ async function createLiveTable(
   if (existing) await api.store.tables.upsert(record);
   else await api.store.tables.insert(record);
   return tableId;
+}
+
+/**
+ * Background COLUMN discovery for a live table: fetch the schema + a small
+ * sample and patch ONLY the table's `columns` (pk flags read from the already-
+ * final `source`). Never touches `source` — see the warning in upsertLiveTable.
+ * The grid re-renders its columns when the record updates; failures are
+ * swallowed (the grid's own row fetch surfaces real connection errors).
+ */
+async function refineLiveColumns(
+  api: HostApi,
+  tableId: string,
+  base: string,
+  c: TableRef,
+  token: string,
+): Promise<void> {
+  const ref: DatasetteRef = { base, db: c.db, table: c.table, query: {} };
+  const fetchFn = withAuthFetch(
+    (u: string, o?: unknown) => api.backend.fetch(u, o as never),
+    token || undefined,
+  );
+  try {
+    let metaColumns: ColumnSpec[] = [];
+    let typed = false;
+    try {
+      const meta = await fetchTableMeta(fetchFn, ref);
+      metaColumns = meta.columns;
+      typed = meta.typed;
+    } catch {
+      /* fall back to row inference */
+    }
+    const { rows: sample } = await fetchRows(fetchFn, ref, { maxRows: 50, pageSize: 50 });
+    const baseColumns =
+      metaColumns.length === 0
+        ? inferColumnsFromRows(sample)
+        : typed
+          ? metaColumns
+          : refineColumnTypes(metaColumns, sample);
+    if (baseColumns.length === 0) return; // learned nothing; leave placeholder
+
+    // The table may have been closed while we fetched.
+    const t = await api.store.tables.findOne(tableId);
+    if (!t) return;
+    const pks = ((t.source?.config as { pks?: string[] } | undefined)?.pks ?? []) as string[];
+    const columns = baseColumns.map((col) =>
+      pks.includes(col.field) ? { ...col, unique: true, notnull: true } : col,
+    );
+    await api.store.tables.patch(tableId, { columns, updatedAt: Date.now() });
+  } catch {
+    /* leave the placeholder; the grid's row fetch reports real failures */
+  }
 }
 
 /**

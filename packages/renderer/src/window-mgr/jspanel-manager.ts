@@ -138,17 +138,24 @@ function sanitizeGeometry(g: WindowGeometry | undefined): WindowGeometry | null 
 
 function openPanel(t: Table, ctx: AppContext): void {
   const panelId = `panel-${cssSafe(t.id)}`;
+  const container = panelContainer();
+  const g = sanitizeGeometry(t.windowGeometry);
+  const startMinimized = g?.minimized === true;
 
-  const content = document.createElement('data-table');
-  (content as HTMLElement & { tableId: string }).tableId = t.id;
-  content.style.height = '100%';
-
-  // The live <data-table> holds every row in memory and keeps a store
-  // subscription open. When the panel is minimized we detach it entirely so
-  // that memory is released (its disconnectedCallback unsubscribes); a fresh
-  // one is mounted — and re-reads the store — when the panel is restored. So a
-  // minimized table costs (almost) nothing until the user brings it back.
-  let contentEl: HTMLElement | null = content;
+  // The live <data-table> holds every row in memory, keeps a store subscription
+  // open, and (for remote/live tables) fetches rows the moment it mounts. So we
+  // mount it lazily: a window that opens minimized gets a bare placeholder and
+  // fetches NOTHING until the user expands it — then a fresh grid mounts, shows
+  // its progress bar, and loads. Minimizing later detaches the grid again
+  // (releasing memory + stopping any polling).
+  const makeGrid = (): HTMLElement => {
+    const el = document.createElement('data-table');
+    (el as HTMLElement & { tableId: string }).tableId = t.id;
+    el.style.height = '100%';
+    return el;
+  };
+  const content: HTMLElement = startMinimized ? document.createElement('div') : makeGrid();
+  let contentEl: HTMLElement | null = startMinimized ? null : content;
   const unmountContent = (): void => {
     contentEl?.remove();
     contentEl = null;
@@ -159,9 +166,8 @@ function openPanel(t: Table, ctx: AppContext): void {
       .getElementById(panelId)
       ?.querySelector('.jsPanel-content') as HTMLElement | null;
     if (!host) return;
-    const el = document.createElement('data-table');
-    (el as HTMLElement & { tableId: string }).tableId = t.id;
-    el.style.height = '100%';
+    host.replaceChildren(); // drop the minimized placeholder / any stale node
+    const el = makeGrid();
     host.appendChild(el);
     contentEl = el;
   };
@@ -171,9 +177,6 @@ function openPanel(t: Table, ctx: AppContext): void {
 
   const footer = document.createElement('panel-footer');
   (footer as HTMLElement & { tableId: string }).tableId = t.id;
-
-  const container = panelContainer();
-  const g = sanitizeGeometry(t.windowGeometry);
 
   const position = g
     ? { my: 'left-top', at: 'left-top', offsetX: g.x, offsetY: g.y }

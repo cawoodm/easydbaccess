@@ -101,6 +101,58 @@ test.describe('window manager', () => {
     ).toHaveCount(1);
   });
 
+  test('a window that restores minimized does not mount its grid until expanded', async ({
+    page,
+  }) => {
+    // Insert a table already flagged minimized, plus a row, then reload so the
+    // window manager opens it minimized from persisted geometry.
+    const id = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      const tid = crypto.randomUUID();
+      await ctx.store.tables.insert({
+        id: tid,
+        workspaceId: ctx.workspaceId,
+        name: 'Sleeper',
+        code: 'sleeper',
+        columns: [{ field: 'x', label: 'x', type: 'string' }],
+        view: 'table',
+        windowGeometry: { x: 60, y: 80, w: 400, h: 220, z: 1, minimized: true, maximized: false },
+        updatedAt: Date.now(),
+      });
+      await ctx.store.rows(tid).insert({
+        id: crypto.randomUUID(),
+        tableId: tid,
+        data: { x: 'hi' },
+        updatedAt: Date.now(),
+      });
+      return tid;
+    });
+
+    await page.reload();
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => Boolean((window as any).__easydb),
+    );
+
+    const domId = panelDomId(id);
+    await page.locator(`#${domId}`).waitFor({ state: 'attached' });
+    const grid = page.locator(`#${domId} .jsPanel-content data-table`);
+
+    // Minimized on load → no grid mounted, so nothing is fetched for it.
+    await expect(grid).toHaveCount(0);
+
+    // Expand → the grid mounts and loads its row.
+    await page.evaluate(
+      (d) => (document.getElementById(d) as HTMLElement & { normalize(): void }).normalize(),
+      domId,
+    );
+    await expect(grid).toHaveCount(1);
+    await expect(
+      page.locator(`#${domId} .jsPanel-content data-table tbody tr:not(.spacer)`),
+    ).toHaveCount(1);
+  });
+
   test('minimized dock stays below the active table window', async ({ page }) => {
     const idA = await createTable(page, 'Keep', [{ field: 'x' }]);
     await waitForPanel(page, idA);
