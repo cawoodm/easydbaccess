@@ -374,9 +374,16 @@ async function fillImportTable(
       // fall back to row inference
     }
 
+    // The row count (from the schema) gives a denominator for a proportional
+    // progress bar; without it the bar stays indeterminate. Cap the denominator
+    // at the import limit so the fraction reflects what we'll actually pull.
+    const target = count && count > 0 ? Math.min(count, SETTINGS.maxImportRows) : 0;
     const { rows, truncated, hasMore, pages } = await fetchRows(fetchFn, ref, {
       maxRows: SETTINGS.maxImportRows,
       pageSize: SETTINGS.pageSize,
+      onProgress: (n) => {
+        if (target > 0) setTableLoading(tableId, true, Math.min(1, n / target));
+      },
     });
 
     // Prefer the schema's columns; infer from rows if none; refine types when

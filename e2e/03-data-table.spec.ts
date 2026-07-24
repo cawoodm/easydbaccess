@@ -119,6 +119,46 @@ test.describe('data-table rendering', () => {
     expect(ks).toEqual(['b', 'c', 'd', 'a']); // null, blank, apple, zebra
   });
 
+  test('loading bar is thick, indeterminate without progress and proportional with it', async ({
+    page,
+  }) => {
+    const id = await createTable(page, 'Prog', [{ field: 'x' }]);
+    await waitForPanel(page, id);
+    const dt = page.locator(`#${panelDomId(id)} data-table`);
+    const fire = (detail: Record<string, unknown>) =>
+      page.evaluate(
+        (d) => document.dispatchEvent(new CustomEvent('easydb:table-loading', { detail: d })),
+        detail,
+      );
+
+    // Loading with no fraction → an indeterminate (animated) bar, and it's
+    // thicker than the old 3px.
+    await fire({ tableId: id, loading: true });
+    const bar = dt.locator('.load-bar');
+    await expect(bar).toBeVisible();
+    expect(
+      parseFloat(await bar.evaluate((el) => getComputedStyle(el).height)),
+    ).toBeGreaterThanOrEqual(6);
+    await expect(dt.locator('.load-bar-fill.determinate')).toHaveCount(0);
+
+    // A 50% fraction → determinate fill spanning ~half the bar's width.
+    await fire({ tableId: id, loading: true, progress: 0.5 });
+    await expect(dt.locator('.load-bar-fill.determinate')).toHaveCount(1);
+    await expect
+      .poll(() =>
+        dt.locator('.load-bar').evaluate((barEl) => {
+          const f = barEl.querySelector('.load-bar-fill') as HTMLElement;
+          const pct = f.getBoundingClientRect().width / barEl.getBoundingClientRect().width;
+          return Math.round(pct * 100);
+        }),
+      )
+      .toBeGreaterThan(40);
+
+    // Finishing hides the bar.
+    await fire({ tableId: id, loading: false });
+    await expect(dt.locator('.load-bar')).toHaveCount(0);
+  });
+
   test('column width persists across reload', async ({ page }) => {
     // Two columns so the persisted px width on `x` actually shows up — with a
     // single column at width:100% on the table, the column always fills the

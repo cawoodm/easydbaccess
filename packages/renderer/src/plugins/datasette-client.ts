@@ -88,7 +88,9 @@ export function buildTableUrl(
   ref: DatasetteRef,
   params: Record<string, string | number | undefined> = {},
 ): string {
-  const u = new URL(`${ref.base}/${encodeURIComponent(ref.db!)}/${encodeURIComponent(ref.table!)}.json`);
+  const u = new URL(
+    `${ref.base}/${encodeURIComponent(ref.db!)}/${encodeURIComponent(ref.table!)}.json`,
+  );
   for (const [k, v] of Object.entries({ ...ref.query, ...params })) {
     if (v != null) u.searchParams.set(k, String(v));
   }
@@ -141,7 +143,13 @@ export function sqliteTypeToEda(sqliteType: string | undefined, name = ''): Colu
     if (/^(is|has|can)_|_flag$|^enabled$|^active$/i.test(name)) return 'boolean';
     return 'number';
   }
-  if (t.includes('REAL') || t.includes('FLOA') || t.includes('DOUB') || t.includes('NUM') || t.includes('DEC')) {
+  if (
+    t.includes('REAL') ||
+    t.includes('FLOA') ||
+    t.includes('DOUB') ||
+    t.includes('NUM') ||
+    t.includes('DEC')
+  ) {
     return 'number';
   }
   if (t.includes('BLOB')) return 'string';
@@ -256,12 +264,14 @@ export function rowPk(rowData: Record<string, unknown>, pks: string[]): string |
  * params (Phase-2 server-side windowing). Filter mini-language:
  *   >n >=n <n <=n =v *v* a,b,c ; bare text ⇒ __contains.
  */
-export function translateQuery(state: {
-  sortColumn?: string;
-  sortAsc?: boolean;
-  filters?: Record<string, string>;
-  search?: string;
-} = {}): Record<string, string> {
+export function translateQuery(
+  state: {
+    sortColumn?: string;
+    sortAsc?: boolean;
+    filters?: Record<string, string>;
+    search?: string;
+  } = {},
+): Record<string, string> {
   const params: Record<string, string> = {};
   if (state.sortColumn) params[state.sortAsc === false ? '_sort_desc' : '_sort'] = state.sortColumn;
   if (state.search) params._search = state.search;
@@ -462,8 +472,19 @@ export function refineColumnTypes(
 export async function fetchRows(
   fetchFn: FetchFn,
   ref: DatasetteRef,
-  opts: { maxRows?: number; pageSize?: number | 'max'; extraParams?: Record<string, string> } = {},
-): Promise<{ rows: Array<Record<string, unknown>>; truncated: boolean; hasMore: boolean; pages: number }> {
+  opts: {
+    maxRows?: number;
+    pageSize?: number | 'max';
+    extraParams?: Record<string, string>;
+    /** Called after each page with the running row total, for progress UIs. */
+    onProgress?: (rowsSoFar: number) => void;
+  } = {},
+): Promise<{
+  rows: Array<Record<string, unknown>>;
+  truncated: boolean;
+  hasMore: boolean;
+  pages: number;
+}> {
   const maxRows = opts.maxRows ?? 10000;
   // Fixed numeric page size for predictable cursor paging. `_size=max` is also
   // valid (Datasette clamps to max_returned_rows) but a fixed size keeps page
@@ -487,6 +508,7 @@ export async function fetchRows(
     rows.push(...info.rows);
     truncated = truncated || info.truncated;
     pages += 1;
+    opts.onProgress?.(rows.length);
 
     // Follow the ready-made cursor URL if present; otherwise rebuild the table
     // URL with the `next` token (datasette.io sends only the token, no next_url).
@@ -589,7 +611,12 @@ export async function insertRows(
   rows: Array<Record<string, unknown>>,
   opts: WriteOpts = {},
 ): Promise<Array<Record<string, unknown>>> {
-  const json = await postWrite(fetchFn, tableWriteUrl(ref, 'insert'), { rows, return: true }, opts.token);
+  const json = await postWrite(
+    fetchFn,
+    tableWriteUrl(ref, 'insert'),
+    { rows, return: true },
+    opts.token,
+  );
   return Array.isArray(json?.rows) ? json.rows : [];
 }
 
@@ -628,7 +655,12 @@ export async function upsertRows(
   rows: Array<Record<string, unknown>>,
   opts: WriteOpts = {},
 ): Promise<Array<Record<string, unknown>>> {
-  const json = await postWrite(fetchFn, tableWriteUrl(ref, 'upsert'), { rows, return: true }, opts.token);
+  const json = await postWrite(
+    fetchFn,
+    tableWriteUrl(ref, 'upsert'),
+    { rows, return: true },
+    opts.token,
+  );
   return Array.isArray(json?.rows) ? json.rows : [];
 }
 
@@ -666,7 +698,13 @@ export async function testConnection(
   try {
     const vres = await fetchFn(`${base}/-/versions.json`, init);
     if (vres && vres.ok === false) {
-      return { reachable: false, version: null, actor: null, writable: false, error: `HTTP ${vres.status}` };
+      return {
+        reachable: false,
+        version: null,
+        actor: null,
+        writable: false,
+        error: `HTTP ${vres.status}`,
+      };
     }
     const vjson: any = await vres.json();
     const version = vjson?.datasette?.version ?? vjson?.version ?? null;
@@ -700,6 +738,9 @@ export function withAuthFetch(fetchFn: FetchFn, token?: string): FetchFn {
   if (!token) return fetchFn;
   return (url, opts) => {
     const prev = ((opts ?? {}) as { headers?: Record<string, string> }).headers ?? {};
-    return fetchFn(url, { ...(opts ?? {}), headers: { ...prev, Authorization: `Bearer ${token}` } });
+    return fetchFn(url, {
+      ...(opts ?? {}),
+      headers: { ...prev, Authorization: `Bearer ${token}` },
+    });
   };
 }

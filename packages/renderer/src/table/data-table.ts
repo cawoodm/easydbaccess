@@ -30,16 +30,24 @@ export class DataTable extends LitElement {
         top: 0;
         left: 0;
         z-index: 3;
-        height: 3px;
+        height: 8px;
         background: #dbeafe;
         overflow: hidden;
       }
       .load-bar-fill {
         height: 100%;
-        width: 40%;
         background: #2563eb;
-        border-radius: 2px;
+      }
+      /* Indeterminate: a moving sliver, shown before any progress is known. */
+      .load-bar-fill:not(.determinate) {
+        width: 40%;
+        border-radius: 4px;
         animation: eda-load-bar 1.1s ease-in-out infinite;
+      }
+      /* Determinate: width tracks the actual fraction loaded (set inline). */
+      .load-bar-fill.determinate {
+        width: 0;
+        transition: width 0.2s ease;
       }
       @keyframes eda-load-bar {
         0% {
@@ -280,6 +288,12 @@ export class DataTable extends LitElement {
    * can show progress before its data exists.
    */
   @state() private externalLoading = false;
+  /**
+   * Fraction (0–1) of the external load completed, or null when unknown. When
+   * a fraction is known the bar is determinate (width ∝ progress); otherwise it
+   * runs the indeterminate animation.
+   */
+  @state() private externalProgress: number | null = null;
   /** Median row height in px, measured from currently-rendered rows. */
   private rowHeight = 28;
   private resizeObs: ResizeObserver | null = null;
@@ -332,8 +346,10 @@ export class DataTable extends LitElement {
   };
 
   private onTableLoading = (e: Event) => {
-    const d = (e as CustomEvent<{ tableId: string; loading: boolean }>).detail;
-    if (d.tableId === this.tableId) this.externalLoading = d.loading;
+    const d = (e as CustomEvent<{ tableId: string; loading: boolean; progress?: number }>).detail;
+    if (d.tableId !== this.tableId) return;
+    this.externalLoading = d.loading;
+    this.externalProgress = d.loading && typeof d.progress === 'number' ? d.progress : null;
   };
 
   override async updated(changed: Map<string, unknown>) {
@@ -846,10 +862,23 @@ export class DataTable extends LitElement {
     const cols = this.visibleColumns;
     const { slice, topPad, bottomPad } = this.virtualSlice(rows);
     const suggestions = this.computeFilterSuggestions();
+    // Determinate only when an external producer reports a fraction; the
+    // grid's own fetch has no incremental signal, so it stays indeterminate.
+    const frac = this.externalLoading ? this.externalProgress : null;
     return html`
       ${this.loading || this.externalLoading
-        ? html`<div class="load-bar" role="progressbar" aria-label="Loading rows">
-            <div class="load-bar-fill"></div>
+        ? html`<div
+            class="load-bar"
+            role="progressbar"
+            aria-label="Loading rows"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow=${frac != null ? Math.round(frac * 100) : nothing}
+          >
+            <div
+              class="load-bar-fill ${frac != null ? 'determinate' : ''}"
+              style=${frac != null ? `width:${Math.max(2, Math.round(frac * 100))}%` : nothing}
+            ></div>
           </div>`
         : nothing}
       <table>
@@ -1061,8 +1090,10 @@ function compareValues(a: unknown, b: unknown, type: ColumnType): number {
  * the rows have landed — so the user sees the window + a progress bar before
  * any data arrives.
  */
-export function setTableLoading(tableId: string, loading: boolean): void {
-  document.dispatchEvent(new CustomEvent('easydb:table-loading', { detail: { tableId, loading } }));
+export function setTableLoading(tableId: string, loading: boolean, progress?: number): void {
+  document.dispatchEvent(
+    new CustomEvent('easydb:table-loading', { detail: { tableId, loading, progress } }),
+  );
 }
 
 declare global {
