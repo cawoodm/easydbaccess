@@ -90,6 +90,41 @@ test.describe('general', () => {
     expect(ws?.name).toBe(newName);
   });
 
+  test('opening the app without ?space restores the last-active workspace', async ({
+    page,
+    workspaceId,
+  }) => {
+    // The fixture booted workspace A (its id "e2e-…" sorts before "zzz-last").
+    const idA = await createTable(page, 'AlphaOnly', [{ field: 'a' }]);
+    await waitForPanel(page, idA);
+    expect(workspaceId).toBeTruthy();
+
+    // Switch to a second workspace whose id sorts AFTER A, and add a table.
+    await page.goto('/?test=1&space=zzz-last');
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => Boolean((window as any).__easydb),
+    );
+    const idB = await createTable(page, 'BetaOnly', [{ field: 'b' }]);
+    await waitForPanel(page, idB);
+
+    // Open the bare URL — like a new tab or a bookmark with no ?space=.
+    await page.goto('/?test=1');
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => Boolean((window as any).__easydb),
+    );
+
+    // It restores the last-active workspace ("zzz-last"), not the first one, so
+    // the data the user was looking at is still there.
+    const activeWs = await page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => (window as any).__easydb.workspaceId,
+    );
+    expect(activeWs).toBe('zzz-last');
+    await waitForPanel(page, idB);
+  });
+
   test('per-table search filters rows in its panel', async ({ page }) => {
     const id = await createTable(page, 'People', [{ field: 'name', renderer: 'link' }]);
     await waitForPanel(page, id);

@@ -80,8 +80,12 @@ async function init(): Promise<AppContext> {
   // Workspace resolution priority:
   //   1. ?space=NAME URL param — if a matching workspace exists, use it.
   //                              If not, create one with that id+name.
-  //   2. Otherwise, the first workspace in the store.
-  //   3. Otherwise, create a "default" workspace.
+  //   2. The last-active workspace (persisted device-local) if it still exists.
+  //      This is what makes opening the app in a NEW TAB (a bare URL with no
+  //      ?space=) show the workspace you were last using — otherwise it fell
+  //      back to the first workspace, which reads as "my data is gone".
+  //   3. Otherwise, the first workspace in the store.
+  //   4. Otherwise, create a "default" workspace.
   const requested = readWorkspaceFromUrl();
   const existing = await store.workspaces.find();
   let workspaceId: string;
@@ -99,17 +103,27 @@ async function init(): Promise<AppContext> {
       });
       workspaceId = created.id;
     }
-  } else if (existing.length === 0) {
-    const ws = await store.workspaces.insert({
-      id: 'default',
-      name: 'default',
-      createdAt: Date.now(),
-      pluginUrls: [],
-    });
-    workspaceId = ws.id;
   } else {
-    workspaceId = existing[0]!.id;
+    const last = readLastWorkspace();
+    const lastHit = last ? existing.find((w) => w.id === last) : undefined;
+    if (lastHit) {
+      workspaceId = lastHit.id;
+    } else if (existing.length > 0) {
+      workspaceId = existing[0]!.id;
+    } else {
+      const ws = await store.workspaces.insert({
+        id: 'default',
+        name: 'default',
+        createdAt: Date.now(),
+        pluginUrls: [],
+      });
+      workspaceId = ws.id;
+    }
   }
+
+  // Remember the active workspace so a fresh tab / reload without ?space= comes
+  // back to it (see resolution step 2 above).
+  persistLastWorkspace(workspaceId);
 
   const api = createHostApi({
     store,
@@ -160,6 +174,25 @@ function readWorkspaceFromUrl(): string | null {
   const sp = new URLSearchParams(location.search);
   const v = sp.get('space');
   return v && v.trim().length > 0 ? v.trim() : null;
+}
+
+/** Device-local key holding the id of the workspace last opened on this origin. */
+const LAST_WORKSPACE_KEY = 'eda:lastWorkspaceId';
+
+function readLastWorkspace(): string | null {
+  try {
+    return globalThis.localStorage?.getItem(LAST_WORKSPACE_KEY) ?? null;
+  } catch {
+    return null; // localStorage can throw (private mode / disabled) — ignore.
+  }
+}
+
+function persistLastWorkspace(id: string): void {
+  try {
+    globalThis.localStorage?.setItem(LAST_WORKSPACE_KEY, id);
+  } catch {
+    /* ignore — persistence is best-effort */
+  }
 }
 
 function slugifyWorkspace(s: string): string {
