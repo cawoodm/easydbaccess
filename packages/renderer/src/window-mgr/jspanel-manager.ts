@@ -239,22 +239,38 @@ function openPanel(t: Table, ctx: AppContext): void {
   // live table); it's activated when the window is expanded (see mountContent).
   (footer as HTMLElement & { active: boolean }).active = !startMinimized;
 
-  // Maximize must fill the real window, but panels live inside the pan/zoom-
-  // transformed canvas — a panned/zoomed canvas would leave a "maximized"
-  // window offset or scaled. Snapshot the canvas view and reset it to 1:1
-  // while this window is maximized, then restore the view on un-maximize.
-  let savedView: PanZoomState | null = null;
-  let wasMaximized = false;
-  const syncMaximizeView = (status: Panel['status']): void => {
-    const isMax = status === 'maximized';
-    if (isMax && !wasMaximized) {
-      savedView = panzoom?.snapshot() ?? null;
-      panzoom?.reset();
-    } else if (!isMax && wasMaximized) {
-      if (savedView) panzoom?.restore(savedView);
-      savedView = null;
+  // Maximize must fill the visible area, but panels live inside the pan/zoom-
+  // transformed canvas: jsPanel sizes a maximized panel to the viewport's
+  // layout box (left:0, top:0, w/h = clientW/H) — correct in layout, but the
+  // viewport's `translate()/scale()` then offsets and scales it visually, so a
+  // panned or zoomed canvas leaves the "maximized" window adrift.
+  //
+  // Fix: give the maximized panel its own transform that exactly cancels the
+  // canvas transform, so it stays pinned filling the overlay — and keep it in
+  // sync as the canvas pans/zooms underneath. For canvas transform
+  // translate(tx,ty) scale(s), the cancelling panel transform (origin 0 0) is
+  // translate(-tx/s, -ty/s) scale(1/s): the panel's (0,0)-(W,H) box then maps
+  // back to the overlay's (0,0)-(W,H) on screen. See panzoom.ts for the math.
+  let maxUnsub: (() => void) | null = null;
+  const applyMaxCounter = (s: PanZoomState): void => {
+    const el = document.getElementById(panelId);
+    if (!el) return;
+    el.style.transformOrigin = '0 0';
+    el.style.transform = `translate(${-s.x / s.scale}px, ${-s.y / s.scale}px) scale(${1 / s.scale})`;
+  };
+  const enterMaximizedFill = (): void => {
+    if (maxUnsub || !panzoom) return;
+    applyMaxCounter(panzoom.snapshot());
+    maxUnsub = panzoom.subscribe(applyMaxCounter);
+  };
+  const exitMaximizedFill = (): void => {
+    maxUnsub?.();
+    maxUnsub = null;
+    const el = document.getElementById(panelId);
+    if (el) {
+      el.style.transform = '';
+      el.style.transformOrigin = '';
     }
-    wasMaximized = isMax;
   };
 
   const position = g
@@ -335,7 +351,8 @@ function openPanel(t: Table, ctx: AppContext): void {
     onstatuschange: (p: Panel) => {
       if (p.status === 'minimized') unmountContent();
       else if (p.status === 'normalized' || p.status === 'maximized') mountContent();
-      syncMaximizeView(p.status);
+      if (p.status === 'maximized') enterMaximizedFill();
+      else exitMaximizedFill();
       void saveGeometry(t.id, ctx);
     },
   }) as Panel;

@@ -83,6 +83,12 @@ export interface PanZoomHandle {
   reset(): void;
   /** Restore a previously snapshotted transform. */
   restore(s: PanZoomState): void;
+  /**
+   * Subscribe to transform changes (fires on every pan/zoom/reset/restore with
+   * the new state). Returns an unsubscribe fn. Used so a maximized window can
+   * counter the canvas transform and stay filling the screen as it pans/zooms.
+   */
+  subscribe(cb: (s: PanZoomState) => void): () => void;
   /** Detach all listeners. */
   dispose(): void;
 }
@@ -95,8 +101,10 @@ export interface PanZoomHandle {
 export function initPanZoom(outer: HTMLElement, viewport: HTMLElement): PanZoomHandle {
   let state: PanZoomState = { ...IDENTITY };
   viewport.style.transformOrigin = '0 0';
+  const listeners = new Set<(s: PanZoomState) => void>();
   const apply = () => {
     viewport.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
+    for (const cb of listeners) cb({ ...state });
   };
 
   // Gesture bookkeeping.
@@ -258,6 +266,10 @@ export function initPanZoom(outer: HTMLElement, viewport: HTMLElement): PanZoomH
     restore: (s: PanZoomState) => {
       state = { ...s };
       apply();
+    },
+    subscribe: (cb: (s: PanZoomState) => void) => {
+      listeners.add(cb);
+      return () => listeners.delete(cb);
     },
     dispose: () => {
       outer.removeEventListener('touchstart', onTouchStart);

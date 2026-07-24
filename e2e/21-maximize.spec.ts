@@ -2,63 +2,149 @@ import { test, expect } from './fixtures.js';
 import { createTable, panelDomId, waitForPanel } from './helpers.js';
 
 /**
- * Maximizing a window must fill the whole table area even when the pan/zoom
- * canvas has been panned or zoomed. Panels live inside the transformed
- * viewport, so maximizing resets the canvas to 1:1 (restoring it on
- * un-maximize) — otherwise the "maximized" window would be offset/scaled.
+ * A maximized window must fill the whole table area (the #easydb-panels box)
+ * and STAY filling it as the pan/zoom canvas is panned or zoomed underneath.
+ *
+ * Panels live inside the transformed viewport, so jsPanel's maximize (which
+ * sizes to the viewport's layout box) would otherwise be offset/scaled by the
+ * canvas transform. The window manager counters the canvas transform on the
+ * maximized panel and keeps it in sync on every pan/zoom, so it stays pinned
+ * to the visible area.
  */
 
-test('maximize fills the window even after the canvas is panned', async ({ page }) => {
+// Dispatch a synthetic touch gesture on the canvas overlay. `moves` are the
+// per-touch end coordinates matching `starts` by index; equal deltas across two
+// touches pan (pure translate), unequal deltas pinch (zoom).
+async function gesture(
+  page: import('@playwright/test').Page,
+  starts: Array<[number, number]>,
+  moves: Array<[number, number]>,
+) {
+  await page.evaluate(
+    ([starts, moves]) => {
+      const outer = document.getElementById('easydb-panels') as HTMLElement;
+      const touch = (idn: number, x: number, y: number) =>
+        new Touch({ identifier: idn, target: outer, clientX: x, clientY: y });
+      const fire = (type: string, ts: Touch[]) =>
+        outer.dispatchEvent(
+          new TouchEvent(type, {
+            touches: ts,
+            changedTouches: ts,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      fire(
+        'touchstart',
+        starts.map(([x, y], i) => touch(i + 1, x, y)),
+      );
+      fire(
+        'touchmove',
+        moves.map(([x, y], i) => touch(i + 1, x, y)),
+      );
+      fire('touchend', []);
+    },
+    [starts, moves] as const,
+  );
+}
+
+async function fillsOverlay(page: import('@playwright/test').Page, panelSel: string) {
+  const outer = (await page.locator('#easydb-panels').boundingBox())!;
+  const panel = (await page.locator(panelSel).boundingBox())!;
+  return {
+    dx: Math.abs(panel.x - outer.x),
+    dy: Math.abs(panel.y - outer.y),
+    dw: Math.abs(panel.width - outer.width),
+    dh: Math.abs(panel.height - outer.height),
+  };
+}
+
+test('maximized window stays filling the area through pan and zoom', async ({ page }) => {
   const id = await createTable(page, 'Max', [{ field: 'a' }]);
   await waitForPanel(page, id);
-  const panel = page.locator(`#${panelDomId(id)}`);
+  const panelSel = `#${panelDomId(id)}`;
+  const panel = page.locator(panelSel);
 
-  // Pan the canvas → the viewport transform becomes non-identity. A two-finger
-  // equal-delta drag pans by a pure translate (avoids the one-finger double-tap
-  // heuristic, which misfires on synthetic events that share a 0 timeStamp).
-  await page.evaluate(() => {
-    const outer = document.getElementById('easydb-panels') as HTMLElement;
-    const touch = (idn: number, x: number, y: number) =>
-      new Touch({ identifier: idn, target: outer, clientX: x, clientY: y });
-    const fire = (type: string, touches: Touch[]) =>
-      outer.dispatchEvent(
-        new TouchEvent(type, { touches, changedTouches: touches, bubbles: true, cancelable: true }),
-      );
-    fire('touchstart', [touch(1, 100, 100), touch(2, 300, 300)]);
-    fire('touchmove', [touch(1, 150, 150), touch(2, 350, 350)]);
-    fire('touchend', []);
-  });
+  // Pan the canvas first so maximizing must account for a non-identity view.
+  await gesture(
+    page,
+    [
+      [100, 100],
+      [300, 300],
+    ],
+    [
+      [150, 150],
+      [350, 350],
+    ],
+  );
 
-  const vp = page.locator('#easydb-panels-viewport');
-  const matrix = (s: string) => (s === 'none' ? [1, 0, 0, 1, 0, 0] : s.match(/-?\d+\.?\d*/g)!.map(Number));
-  const panned = matrix(await vp.evaluate((el) => getComputedStyle(el).transform));
-  expect(Math.abs(panned[4]!) + Math.abs(panned[5]!)).toBeGreaterThan(50); // translated
-
-  // Maximize the panel.
   await panel.locator('.jsPanel-btn-maximize').click();
+  await page.waitForTimeout(120);
 
-  // The canvas reset to identity (no translate/scale) while maximized…
-  await expect
-    .poll(async () => {
-      const m = matrix(await vp.evaluate((el) => getComputedStyle(el).transform));
-      return Math.abs(m[0]! - 1) + Math.abs(m[3]! - 1) + Math.abs(m[4]!) + Math.abs(m[5]!);
-    })
-    .toBeLessThan(0.01);
+  // Fills the whole area right after maximizing.
+  {
+    const d = await fillsOverlay(page, panelSel);
+    expect(d.dx).toBeLessThan(4);
+    expect(d.dy).toBeLessThan(4);
+    expect(d.dw).toBeLessThan(4);
+    expect(d.dh).toBeLessThan(4);
+  }
 
-  // …so the maximized panel fills the whole table area (the #easydb-panels box).
-  const outerBox = (await page.locator('#easydb-panels').boundingBox())!;
-  const panelBox = (await panel.boundingBox())!;
-  expect(Math.abs(panelBox.x - outerBox.x)).toBeLessThan(4);
-  expect(Math.abs(panelBox.y - outerBox.y)).toBeLessThan(4);
-  expect(Math.abs(panelBox.width - outerBox.width)).toBeLessThan(4);
-  expect(Math.abs(panelBox.height - outerBox.height)).toBeLessThan(4);
+  // Pan the canvas again WHILE maximized (equal two-finger delta = translate) →
+  // still fills.
+  await gesture(
+    page,
+    [
+      [120, 120],
+      [320, 320],
+    ],
+    [
+      [220, 260],
+      [420, 460],
+    ],
+  );
+  await page.waitForTimeout(80);
+  {
+    const d = await fillsOverlay(page, panelSel);
+    expect(d.dx).toBeLessThan(4);
+    expect(d.dy).toBeLessThan(4);
+    expect(d.dw).toBeLessThan(4);
+    expect(d.dh).toBeLessThan(4);
+  }
 
-  // Un-maximize → the previous pan is restored.
+  // Pinch-zoom the canvas WHILE maximized (two-finger spread = scale) → still
+  // fills. This exercises the counter transform at scale ≠ 1.
+  await gesture(
+    page,
+    [
+      [200, 200],
+      [260, 260],
+    ],
+    [
+      [140, 140],
+      [360, 360],
+    ],
+  );
+  await page.waitForTimeout(80);
+  {
+    const d = await fillsOverlay(page, panelSel);
+    expect(d.dx).toBeLessThan(4);
+    expect(d.dy).toBeLessThan(4);
+    expect(d.dw).toBeLessThan(4);
+    expect(d.dh).toBeLessThan(4);
+  }
+
+  // Un-maximize → the panel returns to a normal (smaller) size, no longer
+  // covering the whole area, and its counter transform is cleared.
   await panel.locator('.jsPanel-btn-normalize').click();
-  await expect
-    .poll(async () => {
-      const m = matrix(await vp.evaluate((el) => getComputedStyle(el).transform));
-      return Math.abs(m[4]! - panned[4]!) + Math.abs(m[5]! - panned[5]!);
-    })
-    .toBeLessThan(0.01);
+  await page.waitForTimeout(120);
+  // Compare LAYOUT sizes (offsetWidth) — the visual boundingBox is inflated by
+  // the zoomed canvas transform and wouldn't reflect the panel's real size.
+  const viewportW = await page.evaluate(
+    () => document.getElementById('easydb-panels-viewport')!.clientWidth,
+  );
+  const panelW = await panel.evaluate((el) => (el as HTMLElement).offsetWidth);
+  expect(panelW).toBeLessThan(viewportW - 50);
+  // The counter transform is cleared, so the panel rides the canvas normally again.
+  expect(await panel.evaluate((el) => (el as HTMLElement).style.transform)).toBe('');
 });
