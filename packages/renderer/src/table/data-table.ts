@@ -590,13 +590,15 @@ export class DataTable extends LitElement {
     arr.sort((a, b) => {
       const av = a.data[field];
       const bv = b.data[field];
-      // Empty values (null/undefined/'') always sink to the bottom, in BOTH
-      // directions — the direction only orders present values, it must not
-      // float blanks to the top when sorting descending. So the empty test
-      // sits OUTSIDE the `* factor` flip.
-      const aEmpty = av == null || av === '';
-      const bEmpty = bv == null || bv === '';
-      if (aEmpty || bEmpty) return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
+      // Emptiness is ranked as the *smallest* value: null < blank < present.
+      // The rank rides the direction flip, so ascending floats empties to the
+      // top (nulls first, then blanks) and descending sinks them to the bottom
+      // (blanks, then nulls last). null and blank are DISTINCT — a null cell is
+      // "no value" and sorts ahead of an empty-string cell.
+      const rank = (v: unknown): number => (v == null ? 0 : v === '' ? 1 : 2);
+      const ar = rank(av);
+      const br = rank(bv);
+      if (ar !== 2 || br !== 2) return (ar - br) * factor;
       return compareValues(av, bv, type) * factor;
     });
     return arr;

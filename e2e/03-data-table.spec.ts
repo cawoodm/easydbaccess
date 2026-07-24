@@ -89,6 +89,36 @@ test.describe('data-table rendering', () => {
     expect(names).toEqual(['Alice', 'Dave', 'Carol', 'Bob']);
   });
 
+  test('ascending sort puts nulls at the top, ahead of blanks', async ({ page }) => {
+    // `k` identifies each row; `label` is the sort column. A null and a blank
+    // both render as an empty input, so we read the `k` column to tell rows
+    // apart. Expected ascending order of label: null < '' < 'apple' < 'zebra'.
+    const id = await createTable(page, 'Nulls', [{ field: 'k' }, { field: 'label' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      { k: 'a', label: 'zebra' },
+      { k: 'b', label: null }, // null → top
+      { k: 'c', label: '' }, // blank → just after null
+      { k: 'd', label: 'apple' },
+    ]);
+
+    const dt = page.locator(`#${panelDomId(id)} data-table`);
+    await expect(dt.locator('tbody tr:not(.spacer)')).toHaveCount(4);
+
+    // One click on the "label" header → ascending.
+    await dt.locator('thead th', { hasText: 'label' }).locator('.sort-icon').click();
+
+    // Read the first cell (k) of each row in render order.
+    const ks = await dt.evaluate((el) =>
+      [
+        ...(el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelectorAll(
+          'tbody tr:not(.spacer)',
+        ),
+      ].map((tr) => tr.querySelector('input')?.value ?? null),
+    );
+    expect(ks).toEqual(['b', 'c', 'd', 'a']); // null, blank, apple, zebra
+  });
+
   test('column width persists across reload', async ({ page }) => {
     // Two columns so the persisted px width on `x` actually shows up — with a
     // single column at width:100% on the table, the column always fills the
