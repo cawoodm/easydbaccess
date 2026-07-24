@@ -153,6 +153,24 @@ test.describe('window manager', () => {
     ).toHaveCount(1);
   });
 
+  test('tapping the window header blurs an open per-table search, collapsing it', async ({
+    page,
+  }) => {
+    const id = await createTable(page, 'Focusable', [{ field: 'x' }]);
+    await waitForPanel(page, id);
+    const panel = page.locator(`#${panelDomId(id)}`);
+    const search = panel.locator('panel-search');
+
+    // Open the per-table search; its input takes focus.
+    await search.getByRole('button').click();
+    await expect(search.locator('input')).toBeFocused();
+
+    // Tapping the (now focusable) titlebar pulls focus off the input, so it
+    // blurs and collapses back to the icon.
+    await panel.locator('.jsPanel-titlebar').dispatchEvent('pointerdown');
+    await expect(search.locator('input')).toHaveCount(0);
+  });
+
   test('maximizing keeps the titlebar below the header even when the header wraps', async ({
     page,
   }) => {

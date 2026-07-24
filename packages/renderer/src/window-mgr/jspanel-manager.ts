@@ -345,6 +345,17 @@ function openPanel(t: Table, ctx: AppContext): void {
   const controlbar = panelEl?.querySelector('.jsPanel-controlbar');
   if (controlbar) controlbar.prepend(search);
 
+  // Make the header/titlebar focusable so tapping it takes focus away from any
+  // open search box (per-table or the global header search) — collapsing it.
+  // jsPanel calls preventDefault on the titlebar's pointerdown (for dragging),
+  // which suppresses the default focus shift, so we focus it explicitly.
+  const titlebar = panelEl?.querySelector('.jsPanel-titlebar') as HTMLElement | null;
+  if (titlebar) {
+    titlebar.tabIndex = -1; // focusable via script/pointer, not in tab order
+    titlebar.style.outline = 'none'; // no focus ring on the drag bar
+    titlebar.addEventListener('pointerdown', () => titlebar.focus());
+  }
+
   // Restore minimized/maximized state. Defer to next tick so jsPanel's own
   // init (centering, sizing) finishes before we drive a state change.
   if (g?.maximized && typeof panel.maximize === 'function') {
