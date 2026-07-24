@@ -86,7 +86,9 @@ describe('discoverTables', () => {
     const fetchFn = vi.fn();
     const ref = parseDatasetteUrl('https://x.datasette.io/fixtures/facetable');
     const out = await discoverTables(fetchFn, ref);
-    expect(out).toEqual([{ db: 'fixtures', table: 'facetable', count: null, hidden: false, pks: [] }]);
+    expect(out).toEqual([
+      { db: 'fixtures', table: 'facetable', count: null, hidden: false, pks: [] },
+    ]);
     expect(fetchFn).not.toHaveBeenCalled();
   });
 
@@ -102,7 +104,9 @@ describe('discoverTables', () => {
     });
     const ref = parseDatasetteUrl('https://x.datasette.io/fixtures');
     const out = await discoverTables(fetchFn, ref);
-    expect(out).toEqual([{ db: 'fixtures', table: 'facetable', count: 15, hidden: false, pks: [] }]);
+    expect(out).toEqual([
+      { db: 'fixtures', table: 'facetable', count: 15, hidden: false, pks: [] },
+    ]);
   });
 
   it('walks every database for an instance URL', async () => {
@@ -312,21 +316,56 @@ describe('mapColumns / fetchTableMeta against the bare-name schema response', ()
     expect(columns.map((c) => c.field)).toEqual(GPP_META.columns);
   });
 
-  it('fetchTableMeta reports typed=false when column_details is absent', async () => {
+  it('probes column_details first, then falls back to columns when unsupported', async () => {
+    // Model datasette.io (1.0a26): it ignores `_extra=column_details` and
+    // returns neither column_details nor a columns list, so fetchTableMeta must
+    // make a SECOND single-`_`-param request for `_extra=columns`.
     const seen: string[] = [];
+    const noSchema = { ok: true, next: null, truncated: false, rows: [] };
     const fetchFn = vi.fn((url: string) => {
       seen.push(url);
-      return jsonRes(GPP_META);
+      return jsonRes(url.includes('column_details') ? noSchema : GPP_META);
     });
     const ref = parseDatasetteUrl(GPP_URL);
     const meta = await fetchTableMeta(fetchFn, ref);
     expect(meta.typed).toBe(false);
     expect(meta.count).toBeNull();
     expect(meta.columns).toHaveLength(GPP_META.columns.length);
-    // Requested the schema-probe shape: `_extra=columns` as the ONLY param
-    // (no `_size` — a second `_`-param would trip datasette.io's WAF).
-    expect(seen[0]).toContain('_extra=columns');
-    expect(seen[0]).not.toContain('_size');
+    // First probe is column_details; the fallback asks for columns. Each is a
+    // single `_`-param request (no `_size`) so neither trips datasette.io's WAF.
+    expect(seen[0]).toContain('_extra=column_details');
+    expect(seen[1]).toContain('_extra=columns');
+    expect(seen.every((u) => !u.includes('_size'))).toBe(true);
+  });
+
+  it('reads rich column_details into typed columns (types, pk, notnull, default)', async () => {
+    // Realistic ?_extra=column_details response (latest.datasette.io shape).
+    const DETAILS = {
+      ok: true,
+      column_details: {
+        id: { sqlite_type: 'INTEGER', notnull: 1, is_pk: 1, pk_position: 1, hidden: 0 },
+        name: { sqlite_type: 'TEXT', notnull: 0, is_pk: 0, hidden: 0, default: 'anon' },
+        score: { sqlite_type: 'REAL', notnull: 0, is_pk: 0, hidden: 0 },
+        created_at: { sqlite_type: 'TEXT', notnull: 0, is_pk: 0, hidden: 0 },
+      },
+    };
+    const seen: string[] = [];
+    const fetchFn = vi.fn((url: string) => {
+      seen.push(url);
+      return jsonRes(DETAILS);
+    });
+    const meta = await fetchTableMeta(fetchFn, parseDatasetteUrl(GPP_URL));
+    expect(meta.typed).toBe(true);
+    // Only one request — column_details was enough (no columns fallback).
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toContain('_extra=column_details');
+    expect(meta.pks).toEqual(['id']);
+    const byField = Object.fromEntries(meta.columns.map((c) => [c.field, c]));
+    expect(byField.id).toMatchObject({ type: 'number', unique: true, notnull: true });
+    expect(byField.name).toMatchObject({ type: 'string', default: 'anon' });
+    expect(byField.score!.type).toBe('number');
+    // created_at → datetime by the name heuristic even though SQLite stores TEXT.
+    expect(byField.created_at!.type).toBe('datetime');
   });
 });
 
@@ -366,8 +405,24 @@ const ET_EXTRA = {
   truncated: false,
   // no `columns` key
   rows: [
-    { rowid: 1, type: 'prez', start: '1789-04-30', end: '1793-03-04', party: 'no party', how: 'election', executive_id: 1 },
-    { rowid: 3, type: 'viceprez', start: '1789-04-21', end: '1793-03-04', party: 'Federalist', how: 'election', executive_id: 2 },
+    {
+      rowid: 1,
+      type: 'prez',
+      start: '1789-04-30',
+      end: '1793-03-04',
+      party: 'no party',
+      how: 'election',
+      executive_id: 1,
+    },
+    {
+      rowid: 3,
+      type: 'viceprez',
+      start: '1789-04-21',
+      end: '1793-03-04',
+      party: 'Federalist',
+      how: 'election',
+      executive_id: 2,
+    },
   ],
 };
 
@@ -390,7 +445,7 @@ describe('response carrying count + primary_keys but no columns key', () => {
     expect(meta.typed).toBe(false);
   });
 
-  it('columns then come from row inference (the importer\'s empty-schema path)', () => {
+  it("columns then come from row inference (the importer's empty-schema path)", () => {
     const byField = Object.fromEntries(
       inferColumnsFromRows(ET_EXTRA.rows).map((c) => [c.field, c.type]),
     );
@@ -410,9 +465,9 @@ describe('response carrying count + primary_keys but no columns key', () => {
 describe('discovery failure diagnostics', () => {
   it('turns a fetch rejection (CORS/offline) into an actionable message', async () => {
     const fetchFn = vi.fn(() => Promise.reject(new TypeError('Load failed')));
-    await expect(fetchTablesForDb(fetchFn, 'https://latest.datasette.io', 'fixtures')).rejects.toThrow(
-      /--cors/,
-    );
+    await expect(
+      fetchTablesForDb(fetchFn, 'https://latest.datasette.io', 'fixtures'),
+    ).rejects.toThrow(/--cors/);
     // And it names the URL it couldn't reach.
     await expect(
       fetchTablesForDb(fetchFn, 'https://latest.datasette.io', 'fixtures'),
@@ -465,11 +520,17 @@ describe('write helpers', () => {
   });
 
   it('updateRowByPk PUTs the changed fields to /<pk>/-/update and returns the row', async () => {
-    const { fn, calls } = recordingFetch(() => ({ ok: true, rows: [{ id: 5, name: 'b', qty: 99 }] }));
+    const { fn, calls } = recordingFetch(() => ({
+      ok: true,
+      rows: [{ id: 5, name: 'b', qty: 99 }],
+    }));
     const row = await updateRowByPk(fn, WREF, '5', { name: 'b', qty: 99 }, { token: 'dstok_Y' });
     expect(row).toEqual({ id: 5, name: 'b', qty: 99 });
     expect(calls[0]!.url).toBe('https://x.datasette.io/db/t/5/-/update');
-    expect(JSON.parse(calls[0]!.opts.body)).toEqual({ update: { name: 'b', qty: 99 }, return: true });
+    expect(JSON.parse(calls[0]!.opts.body)).toEqual({
+      update: { name: 'b', qty: 99 },
+      return: true,
+    });
   });
 
   it('updateRowByPk keeps a tilde-encoded compound PK verbatim in the URL', async () => {
@@ -551,7 +612,10 @@ describe('testConnection', () => {
 
   it('resolves read-only (writable=false) with no token', async () => {
     const fetchFn = (url: string) =>
-      respond(url, { versions: { datasette: { version: '1.0a37' } }, actor: { ok: true, actor: null } });
+      respond(url, {
+        versions: { datasette: { version: '1.0a37' } },
+        actor: { ok: true, actor: null },
+      });
     const status = await testConnection(fetchFn, 'https://x.datasette.io');
     expect(status.reachable).toBe(true);
     expect(status.writable).toBe(false);

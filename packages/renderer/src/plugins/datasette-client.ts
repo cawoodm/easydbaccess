@@ -176,6 +176,8 @@ export function mapColumns(meta: any): { columns: ColumnSpec[]; pks: string[] } 
   for (const n of names) if (!(n in details)) details[n] = {};
   const order = names.length ? names : Object.keys(details);
 
+  // `column_details` (PRAGMA table_info) may add these primary-key fields even
+  // when the top-level `primary_keys` list is absent, so gather them here too.
   const columns: ColumnSpec[] = order.map((field) => {
     const d = details[field] || {};
     const isPk = d.is_pk === true || d.is_pk === 1 || pks.includes(field);
@@ -186,9 +188,18 @@ export function mapColumns(meta: any): { columns: ColumnSpec[]; pks: string[] } 
     };
     if (d.notnull === true || d.notnull === 1 || isPk) spec.notnull = true;
     if (isPk) spec.unique = true;
-    if (d.hidden === true) spec.hidden = true;
+    if (d.hidden === true || d.hidden === 1) spec.hidden = true;
+    // Carry a column's SQL default (from column_details) so an added row starts
+    // with the same value the database would use.
+    if (d.default != null && d.default !== '') spec.default = d.default;
     return spec;
   });
+  // Backfill the pk list from column_details when the response didn't carry a
+  // top-level `primary_keys` array (older/newer shape differences).
+  if (pks.length === 0) {
+    const fromDetails = columns.filter((c) => c.unique).map((c) => c.field);
+    if (fromDetails.length) pks.push(...fromDetails);
+  }
   return { columns, pks };
 }
 
@@ -428,21 +439,42 @@ export async function discoverTables(fetchFn: FetchFn, ref: DatasetteRef): Promi
   return out;
 }
 
-/** Fetch a table's schema via ?_extra=columns. */
+/**
+ * Fetch a table's schema, preferring rich `column_details` (real SQLite types +
+ * pk / notnull / hidden / default) and falling back to bare `columns` names.
+ *
+ * `_extra=column_details` is the ONLY query param on the probe. Datasette.io
+ * (and other Cloudflare-fronted hosts) challenge any `.json` request carrying
+ * two or more `_`-prefixed params with a 302 → Turnstile page, which then flags
+ * the whole browser session so even plain row fetches get bounced — the
+ * "columns show but no rows" symptom. So we can neither add `_size` nor ask for
+ * `columns` in the same request (a repeated `_extra` is two `_`-params), and
+ * the comma form `_extra=columns,column_details` makes older instances drop
+ * BOTH extras. Modern Datasette (≈1.0) answers `column_details` with the full
+ * per-column schema; older ones (e.g. datasette.io on 1.0a26) don't support it
+ * and return neither it nor a `columns` list — so when the first probe yields
+ * no columns we make a SECOND single-`_`-param request for `columns` to recover
+ * the authoritative names (important for empty tables, where row inference
+ * would find nothing). Types are refined from rows when `typed` is false.
+ */
 export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promise<TableMeta> {
-  // `_extra=columns` alone returns the `columns` name list (+ a default page of
-  // rows we ignore). Deliberately the ONLY query param: some hosts front
-  // Datasette with a WAF (datasette.io sits behind Cloudflare) that challenges
-  // any `.json` request carrying two or more `_`-prefixed params. Adding
-  // `_size=0` here would turn every schema probe into a 302 → Turnstile page,
-  // which then flags the whole browser session so even plain row fetches get
-  // bounced — the "columns show but no rows" symptom. Column types are refined
-  // from the rows, and `column_details` is not a real extra (it's just omitted).
-  const url = buildTableUrl(ref, { _extra: 'columns' });
-  const json: any = await fetchJson(fetchFn, url);
-  const { columns, pks } = mapColumns(json);
-  const typed = !!json && json.column_details != null;
-  return { columns, pks, count: json?.count ?? null, typed, raw: json };
+  const detailsUrl = buildTableUrl(ref, { _extra: 'column_details' });
+  const json: any = await fetchJson(fetchFn, detailsUrl);
+  let { columns, pks } = mapColumns(json);
+  let typed = !!json && json.column_details != null;
+  let count: number | null = json?.count ?? null;
+  let raw: unknown = json;
+
+  if (columns.length === 0) {
+    // Instance doesn't support column_details — recover the names separately.
+    const colsUrl = buildTableUrl(ref, { _extra: 'columns' });
+    const cjson: any = await fetchJson(fetchFn, colsUrl);
+    ({ columns, pks } = mapColumns(cjson));
+    typed = !!cjson && cjson.column_details != null; // still false here
+    count = cjson?.count ?? count;
+    raw = cjson;
+  }
+  return { columns, pks, count, typed, raw };
 }
 
 /**
