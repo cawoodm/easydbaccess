@@ -27,9 +27,10 @@ export const meta: NonNullable<PluginModule['meta']> = {
   optional: true,
 };
 
-const VIEWS_ICON_SVG =
-  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-  '<path d="M3 3h8v8H3V3zm10 0h8v5h-8V3zM3 13h8v8H3v-8zm10 3h8v5h-8v-5z"/></svg>';
+// Footer/table buttons render their `icon` as a Material Icons ligature (see
+// panel-footer.ts) — NOT as raw SVG (that's the header-button convention). Use
+// the icon name here so it renders as a glyph instead of garbled markup.
+const VIEWS_ICON = 'grid_view';
 
 // --- Default RSS template ----------------------------------------------------
 const RSS_NAME = 'RSS Feed';
@@ -48,7 +49,7 @@ export function init(api: HostApi): void {
   api.ui.registerTableButton({
     id: 'views:open',
     label: 'Views',
-    icon: VIEWS_ICON_SVG,
+    icon: VIEWS_ICON,
     tooltip: 'Views — display this table through a template',
     onClick: (_a, { tableId }) => openViewsDialog(tableId),
   });
