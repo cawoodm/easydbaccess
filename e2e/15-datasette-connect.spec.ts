@@ -38,9 +38,18 @@ test.describe('datasette live connect', () => {
       if (u.pathname === '/-/actor.json')
         return json({ ok: true, actor: req.headers()['authorization'] ? { id: 'root' } : null });
       if (u.pathname === '/db/people.json') {
-        if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
-        if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'name'], rows: [] });
-        return json({ ok: true, next: null, rows: [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }] });
+        if (u.search.includes('_extra=primary_keys'))
+          return json({ ok: true, primary_keys: ['id'], rows: [] });
+        if (u.search.includes('_extra=columns'))
+          return json({ ok: true, columns: ['id', 'name'], rows: [] });
+        return json({
+          ok: true,
+          next: null,
+          rows: [
+            { id: 1, name: 'Alice' },
+            { id: 2, name: 'Bob' },
+          ],
+        });
       }
       return route.fulfill({ status: 404, body: '{"ok":false}' });
     });
@@ -130,9 +139,18 @@ test.describe('datasette live connect', () => {
       if (u.pathname === '/-/versions.json') return json({ datasette: { version: '1.0a37' } });
       if (u.pathname === '/-/actor.json') return json({ ok: true, actor: null }); // anonymous
       if (u.pathname === '/db/people.json') {
-        if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
-        if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'name'], rows: [] });
-        return json({ ok: true, next: null, rows: [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }] });
+        if (u.search.includes('_extra=primary_keys'))
+          return json({ ok: true, primary_keys: ['id'], rows: [] });
+        if (u.search.includes('_extra=columns'))
+          return json({ ok: true, columns: ['id', 'name'], rows: [] });
+        return json({
+          ok: true,
+          next: null,
+          rows: [
+            { id: 1, name: 'Alice' },
+            { id: 2, name: 'Bob' },
+          ],
+        });
       }
       return route.fulfill({ status: 404, body: '{"ok":false}' });
     });
@@ -200,9 +218,18 @@ test.describe('datasette live connect', () => {
       if (u.pathname === '/-/versions.json') return json({ datasette: { version: '1.0a37' } });
       if (u.pathname === '/-/actor.json') return json({ ok: true, actor: null });
       if (u.pathname === '/db/people.json') {
-        if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
-        if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'name'], rows: [] });
-        return json({ ok: true, next: null, rows: [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }] });
+        if (u.search.includes('_extra=primary_keys'))
+          return json({ ok: true, primary_keys: ['id'], rows: [] });
+        if (u.search.includes('_extra=columns'))
+          return json({ ok: true, columns: ['id', 'name'], rows: [] });
+        return json({
+          ok: true,
+          next: null,
+          rows: [
+            { id: 1, name: 'Alice' },
+            { id: 2, name: 'Bob' },
+          ],
+        });
       }
       return route.fulfill({ status: 404, body: '{"ok":false}' });
     });
@@ -260,7 +287,10 @@ test.describe('datasette live connect', () => {
     page,
     workspaceId,
   }) => {
-    let people = [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }];
+    let people = [
+      { id: 1, name: 'Alice' },
+      { id: 2, name: 'Bob' },
+    ];
     await page.route('https://ds.example/**', async (route) => {
       const u = new URL(route.request().url());
       const jm = (body: unknown) =>
@@ -273,8 +303,10 @@ test.describe('datasette live connect', () => {
       if (u.pathname === '/-/versions.json') return jm({ datasette: { version: '1.0a37' } });
       if (u.pathname === '/-/actor.json') return jm({ ok: true, actor: null });
       if (u.pathname === '/db/people.json') {
-        if (u.search.includes('_extra=primary_keys')) return jm({ ok: true, primary_keys: ['id'], rows: [] });
-        if (u.search.includes('_extra=columns')) return jm({ ok: true, columns: ['id', 'name'], rows: [] });
+        if (u.search.includes('_extra=primary_keys'))
+          return jm({ ok: true, primary_keys: ['id'], rows: [] });
+        if (u.search.includes('_extra=columns'))
+          return jm({ ok: true, columns: ['id', 'name'], rows: [] });
         return jm({ ok: true, next: null, rows: people });
       }
       return route.fulfill({ status: 404, body: '{"ok":false}' });
@@ -310,9 +342,91 @@ test.describe('datasette live connect', () => {
     await expect(footer.getByRole('button', { name: 'Refresh' })).toBeVisible();
 
     // Remote gains a row; Refresh reloads the shared collection → grid + footer update.
-    people = [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }, { id: 3, name: 'Carol' }];
+    people = [
+      { id: 1, name: 'Alice' },
+      { id: 2, name: 'Bob' },
+      { id: 3, name: 'Carol' },
+    ];
     await footer.getByRole('button', { name: 'Refresh' }).click();
     await expect(footer).toContainText('3 rows');
+  });
+
+  test('a live table restored minimized fetches nothing until expanded', async ({ page }) => {
+    let rowRequests = 0;
+    await page.route('https://ds.example/**', (route) => {
+      const u = new URL(route.request().url());
+      const jm = (body: unknown) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          headers: { 'access-control-allow-origin': '*' },
+          body: JSON.stringify(body),
+        });
+      if (u.pathname === '/db/people.json') {
+        if (u.search.includes('_extra='))
+          return jm({ ok: true, primary_keys: ['id'], columns: ['id', 'name'], rows: [] });
+        rowRequests += 1;
+        return jm({
+          ok: true,
+          next: null,
+          rows: [
+            { id: 1, name: 'Alice' },
+            { id: 2, name: 'Bob' },
+          ],
+        });
+      }
+      return route.fulfill({ status: 404, body: '{"ok":false}' });
+    });
+
+    // Insert a live table already flagged minimized, then reload so the window
+    // manager restores it minimized from persisted geometry.
+    const id = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      const tid = crypto.randomUUID();
+      await ctx.store.tables.insert({
+        id: tid,
+        workspaceId: ctx.workspaceId,
+        name: 'db/people',
+        code: 'db-people',
+        columns: [
+          { field: 'id', label: 'id', type: 'number' },
+          { field: 'name', label: 'name', type: 'string' },
+        ],
+        view: 'table',
+        source: {
+          type: 'datasette',
+          writable: false,
+          config: { base: 'https://ds.example', db: 'db', table: 'people', pks: ['id'] },
+        },
+        windowGeometry: { x: 60, y: 80, w: 420, h: 220, z: 1, minimized: true, maximized: false },
+        updatedAt: Date.now(),
+      });
+      return tid;
+    });
+
+    await page.reload();
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => Boolean((window as any).__easydb),
+    );
+    const domId = panelDomId(id);
+    await page.locator(`#${domId}`).waitFor({ state: 'attached' });
+
+    // Minimized → no grid mounted AND no row fetch happened.
+    await expect(page.locator(`#${domId} .jsPanel-content data-table`)).toHaveCount(0);
+    await page.waitForTimeout(300);
+    expect(rowRequests).toBe(0);
+
+    // Expand → the grid mounts and only NOW are the remote rows fetched.
+    await page.evaluate(
+      (d) => (document.getElementById(d) as HTMLElement & { normalize(): void }).normalize(),
+      domId,
+    );
+    await expect(
+      page.locator(`#${domId} .jsPanel-content data-table tbody tr:not(.spacer)`),
+    ).toHaveCount(2);
+    expect(rowRequests).toBeGreaterThan(0);
   });
 
   test('the connect dialog is prefilled with https://datasette.io', async ({ page }) => {
@@ -322,7 +436,7 @@ test.describe('datasette live connect', () => {
     await expect(dlg.locator('input[type="text"]')).toHaveValue('https://datasette.io');
   });
 
-  test('a database URL lists that database\'s tables (no db picker) and connects them', async ({
+  test("a database URL lists that database's tables (no db picker) and connects them", async ({
     page,
     workspaceId,
   }) => {
@@ -350,12 +464,16 @@ test.describe('datasette live connect', () => {
             ],
           });
         case '/legislators/legislators.json':
-          if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'name'], rows: [] });
-          if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
+          if (u.search.includes('_extra=columns'))
+            return json({ ok: true, columns: ['id', 'name'], rows: [] });
+          if (u.search.includes('_extra=primary_keys'))
+            return json({ ok: true, primary_keys: ['id'], rows: [] });
           return json({ ok: true, next: null, rows: [{ id: 1, name: 'A' }] });
         case '/legislators/offices.json':
-          if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'city'], rows: [] });
-          if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
+          if (u.search.includes('_extra=columns'))
+            return json({ ok: true, columns: ['id', 'city'], rows: [] });
+          if (u.search.includes('_extra=primary_keys'))
+            return json({ ok: true, primary_keys: ['id'], rows: [] });
           return json({ ok: true, next: null, rows: [{ id: 1, city: 'DC' }] });
         default:
           return route.fulfill({ status: 404, body: '{"ok":false}' });
@@ -407,14 +525,20 @@ test.describe('datasette live connect', () => {
           body: JSON.stringify(body),
         });
       if (u.pathname === '/-/versions.json' || u.pathname === '/-/actor.json') {
-        return route.fulfill({ status: 200, contentType: 'text/html', body: '<html>challenge</html>' });
+        return route.fulfill({
+          status: 200,
+          contentType: 'text/html',
+          body: '<html>challenge</html>',
+        });
       }
       if (u.pathname === '/legislators.json') {
         return json({ ok: true, tables: [{ name: 'offices', count: 1312, primary_keys: ['id'] }] });
       }
       if (u.pathname === '/legislators/offices.json') {
-        if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'city'], rows: [] });
-        if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
+        if (u.search.includes('_extra=columns'))
+          return json({ ok: true, columns: ['id', 'city'], rows: [] });
+        if (u.search.includes('_extra=primary_keys'))
+          return json({ ok: true, primary_keys: ['id'], rows: [] });
         return json({ ok: true, next: null, rows: [{ id: 1, city: 'DC' }] });
       }
       return route.fulfill({ status: 404, body: '{"ok":false}' });
@@ -476,9 +600,19 @@ test.describe('datasette live connect', () => {
         case '/alt-route.json': // reached only if the ROUTE (not name 'special') is used
           return json({ ok: true, tables: [{ name: 'widgets', count: 3, primary_keys: ['id'] }] });
         case '/alt-route/widgets.json':
-          if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'label'], rows: [] });
-          if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
-          return json({ ok: true, next: null, rows: [{ id: 1, label: 'a' }, { id: 2, label: 'b' }, { id: 3, label: 'c' }] });
+          if (u.search.includes('_extra=columns'))
+            return json({ ok: true, columns: ['id', 'label'], rows: [] });
+          if (u.search.includes('_extra=primary_keys'))
+            return json({ ok: true, primary_keys: ['id'], rows: [] });
+          return json({
+            ok: true,
+            next: null,
+            rows: [
+              { id: 1, label: 'a' },
+              { id: 2, label: 'b' },
+              { id: 3, label: 'c' },
+            ],
+          });
         default:
           return route.fulfill({ status: 404, body: '{"ok":false}' });
       }
@@ -493,7 +627,9 @@ test.describe('datasette live connect', () => {
     // listed by its route.
     const picker = page.locator('table-select-dialog dialog');
     await expect(picker.getByRole('button', { name: /Next: choose tables/ })).toBeVisible();
-    const dbNames = (await picker.locator('ul.tables li .name').allInnerTexts()).map((s) => s.trim());
+    const dbNames = (await picker.locator('ul.tables li .name').allInnerTexts()).map((s) =>
+      s.trim(),
+    );
     expect(dbNames).toEqual(['main', 'alt-route']);
 
     // Choose only the custom-route database.

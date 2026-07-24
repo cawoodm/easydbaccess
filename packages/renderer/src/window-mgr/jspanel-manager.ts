@@ -156,7 +156,29 @@ function openPanel(t: Table, ctx: AppContext): void {
   };
   const content: HTMLElement = startMinimized ? document.createElement('div') : makeGrid();
   let contentEl: HTMLElement | null = startMinimized ? null : content;
+
+  // Panel title row-count: "<name> (<count>)". Subscribing to rows triggers a
+  // fetch for live/remote tables, so it is gated on the grid being mounted —
+  // a minimized window keeps it STOPPED (fetches nothing) until it's expanded.
+  let lastName = t.name;
+  let rowCountUnsub: (() => void) | null = null;
+  const updateTitle = (count: number) => {
+    if (typeof panel.setHeaderTitle === 'function') {
+      panel.setHeaderTitle(`${lastName} (${count})`);
+    }
+  };
+  const startRowCount = (): void => {
+    if (rowCountUnsub) return;
+    rowCountUnsub = ctx.store.rows(t.id).subscribe((rows) => updateTitle(rows.length));
+  };
+  const stopRowCount = (): void => {
+    rowCountUnsub?.();
+    rowCountUnsub = null;
+  };
+
   const unmountContent = (): void => {
+    stopRowCount();
+    (footer as HTMLElement & { active: boolean }).active = false;
     contentEl?.remove();
     contentEl = null;
   };
@@ -170,6 +192,8 @@ function openPanel(t: Table, ctx: AppContext): void {
     const el = makeGrid();
     host.appendChild(el);
     contentEl = el;
+    (footer as HTMLElement & { active: boolean }).active = true;
+    startRowCount();
   };
 
   const search = document.createElement('panel-search');
@@ -177,6 +201,9 @@ function openPanel(t: Table, ctx: AppContext): void {
 
   const footer = document.createElement('panel-footer');
   (footer as HTMLElement & { tableId: string }).tableId = t.id;
+  // A minimized window's footer must not subscribe to rows (that fetches for a
+  // live table); it's activated when the window is expanded (see mountContent).
+  (footer as HTMLElement & { active: boolean }).active = !startMinimized;
 
   const position = g
     ? { my: 'left-top', at: 'left-top', offsetX: g.x, offsetY: g.y }
@@ -273,30 +300,27 @@ function openPanel(t: Table, ctx: AppContext): void {
     queueMicrotask(() => panel.minimize?.());
   }
 
-  // Live-update the panel header with "<table-name> (<rowCount>)".
-  // Subscribing here keeps the data-table component free of jsPanel knowledge.
-  let lastName = t.name;
-  let unsub: (() => void) | null = null;
-  const updateTitle = (count: number) => {
-    if (typeof panel.setHeaderTitle === 'function') {
-      panel.setHeaderTitle(`${lastName} (${count})`);
-    }
-  };
-  void ctx.store
-    .rows(t.id)
-    .find()
-    .then((rows) => updateTitle(rows.length));
-  unsub = ctx.store.rows(t.id).subscribe((rows) => updateTitle(rows.length));
+  // Track name changes for the title (cheap — this does NOT fetch rows).
   void ctx.store.tables.subscribe((all) => {
     const cur = all.find((x) => x.id === t.id);
     if (cur && cur.name !== lastName) {
       lastName = cur.name;
+      if (rowCountUnsub)
+        void ctx.store
+          .rows(t.id)
+          .find()
+          .then((r) => updateTitle(r.length));
     }
   });
+
+  // Start the live row-count only when the window opens with a grid mounted.
+  // A window restored minimized starts it later, on expand (see mountContent).
+  if (!startMinimized) startRowCount();
+
   // Clean up the row subscription on close so it doesn't leak after table delete.
   const origClose = panel.close.bind(panel);
   panel.close = () => {
-    unsub?.();
+    stopRowCount();
     return origClose();
   };
 }

@@ -19,68 +19,96 @@ export class PanelFooter extends LitElement {
   static override styles = [
     materialIconStyles,
     css`
-    :host {
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      width: 100%;
-      padding: 0.35rem 0.55rem;
-      box-sizing: border-box;
-      font-size: 0.85rem;
-    }
-    button {
-      font: inherit;
-      padding: 0.2rem 0.55rem;
-      border: 1px solid #d1d5db;
-      background: white;
-      border-radius: 0.25rem;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.3rem;
-    }
-    button:hover {
-      background: #f3f4f6;
-    }
-    .spacer {
-      flex: 1;
-    }
-    .count {
-      color: #6b7280;
-    }
-    .mi.sm {
-      font-size: 0.95rem;
-    }
-  `,
+      :host {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        width: 100%;
+        padding: 0.35rem 0.55rem;
+        box-sizing: border-box;
+        font-size: 0.85rem;
+      }
+      button {
+        font: inherit;
+        padding: 0.2rem 0.55rem;
+        border: 1px solid #d1d5db;
+        background: white;
+        border-radius: 0.25rem;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+      }
+      button:hover {
+        background: #f3f4f6;
+      }
+      .spacer {
+        flex: 1;
+      }
+      .count {
+        color: #6b7280;
+      }
+      .mi.sm {
+        font-size: 0.95rem;
+      }
+    `,
   ];
 
   @property({ type: String }) tableId = '';
+  /**
+   * When false the footer does NOT subscribe to rows (its count would trigger a
+   * fetch for a live/remote table). The window manager sets it false for a
+   * minimized window so a minimized table loads nothing until it's expanded.
+   */
+  @property({ type: Boolean }) active = true;
   @state() private rowCount = 0;
   @state() private tableButtons: TableButtonSpec[] = [];
   @state() private table: Table | null = null;
-  private unsubRows?: () => void;
+  private unsubRows?: (() => void) | undefined;
   private unsubTables?: () => void;
+  // Synchronous guard so an `active` toggle + connectedCallback can't
+  // double-subscribe across their awaits.
+  private rowsActive = false;
 
   override async connectedCallback() {
     super.connectedCallback();
     const ctx = await getContext();
     this.tableButtons = [...ctx.registries.tableButtons];
     ctx.events.on('app:ready', () => (this.tableButtons = [...ctx.registries.tableButtons]));
-    const rows = ctx.store.rows(this.tableId);
-    this.unsubRows = rows.subscribe((r) => (this.rowCount = r.length));
-    this.rowCount = (await rows.find()).length;
-    // Track this table's record so per-table button visibility (e.g. a
-    // backend Refresh button) reacts to it gaining/losing a source.
+    // Track this table's record (cheap; no row fetch) so per-table button
+    // visibility (e.g. a backend Refresh button) reacts to source changes.
     this.table = (await ctx.store.tables.findOne(this.tableId)) ?? null;
     this.unsubTables = ctx.store.tables.subscribe((all) => {
       this.table = all.find((t) => t.id === this.tableId) ?? null;
     });
+    if (this.active) void this.startRows();
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    this.unsubRows?.();
+    this.stopRows();
     this.unsubTables?.();
+  }
+
+  override updated(changed: Map<string, unknown>) {
+    if (changed.has('active')) {
+      if (this.active) void this.startRows();
+      else this.stopRows();
+    }
+  }
+
+  private async startRows() {
+    if (this.rowsActive) return;
+    this.rowsActive = true;
+    const ctx = await getContext();
+    if (!this.rowsActive) return; // stopped during the await
+    this.unsubRows = ctx.store.rows(this.tableId).subscribe((r) => (this.rowCount = r.length));
+  }
+
+  private stopRows() {
+    this.rowsActive = false;
+    this.unsubRows?.();
+    this.unsubRows = undefined;
   }
 
   private async addRow() {
@@ -126,10 +154,11 @@ export class PanelFooter extends LitElement {
       ${this.tableButtons
         .filter((b) => !b.visible || (this.table != null && b.visible(this.table)))
         .map(
-          (b) => html`<button title=${b.tooltip ?? b.label} @click=${() => this.runTableButton(b)}>
-            ${b.icon ? html`<span class="mi sm">${b.icon}</span>` : ''}
-            <span>${b.label}</span>
-          </button>`,
+          (b) =>
+            html`<button title=${b.tooltip ?? b.label} @click=${() => this.runTableButton(b)}>
+              ${b.icon ? html`<span class="mi sm">${b.icon}</span>` : ''}
+              <span>${b.label}</span>
+            </button>`,
         )}
       <span class="spacer"></span>
       <span class="count">${this.rowCount} row${this.rowCount === 1 ? '' : 's'}</span>
