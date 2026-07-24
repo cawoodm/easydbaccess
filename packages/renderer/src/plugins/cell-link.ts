@@ -38,6 +38,12 @@ class CellLink extends HTMLElement {
   }
 
   connectedCallback() {
+    // Fill the cell as a shrinkable block so the link inside can ellipsize to
+    // whatever width the column currently has (see the anchor styles below).
+    this.style.display = 'block';
+    this.style.minWidth = '0';
+    this.style.maxWidth = '100%';
+    this.style.overflow = 'hidden';
     this.render();
   }
 
@@ -54,7 +60,8 @@ class CellLink extends HTMLElement {
 
     if (url || email || tel) {
       const wrap = document.createElement('span');
-      wrap.style.cssText = 'display:inline-flex;align-items:center;gap:0.25rem;width:100%';
+      wrap.style.cssText =
+        'display:flex;align-items:center;gap:0.25rem;width:100%;min-width:0;max-width:100%';
       const a = document.createElement('a');
       a.href = url ? v : email ? `mailto:${v.trim()}` : `tel:${v.replace(/[^\d+]/g, '')}`;
       if (url) {
@@ -62,8 +69,14 @@ class CellLink extends HTMLElement {
         a.rel = 'noopener noreferrer';
       }
       a.textContent = v;
+      // Ellipsize to the space the column gives us: as a `min-width:0` flex
+      // child the anchor shrinks below its content width, so the browser
+      // truncates it with an ellipsis at whatever the current column width is —
+      // purely in CSS, and it re-flows live as the column is resized. The full
+      // value stays in the title tooltip.
       a.style.cssText =
-        'color:#2563eb;text-decoration:underline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+        'flex:1 1 auto;min-width:0;display:block;color:#2563eb;text-decoration:underline;' +
+        'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
       a.title = url ? `Open ${v}` : email ? `Email ${v}` : `Call ${v}`;
 
       const edit = document.createElement('button');
@@ -71,7 +84,7 @@ class CellLink extends HTMLElement {
       edit.title = 'Edit';
       edit.textContent = '✎';
       edit.style.cssText =
-        'background:transparent;border:0;cursor:pointer;color:#9ca3af;font-size:0.85em;padding:0 0.15rem;line-height:1';
+        'flex:none;background:transparent;border:0;cursor:pointer;color:#9ca3af;font-size:0.85em;padding:0 0.15rem;line-height:1';
       edit.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();

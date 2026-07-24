@@ -73,6 +73,18 @@ export class DataTable extends LitElement {
       th:hover {
         background: #eef2f7;
       }
+      /* Link cells chop their display length. A ~40ch cap stops a long URL
+         from blowing the column out to its full width; the anchor inside (a
+         min-width:0 flex child with text-overflow:ellipsis) truncates to the
+         cap — and shrinks *further*, to whatever the column actually offers,
+         when it's narrower (many columns, a narrow panel, mobile). Pure CSS,
+         re-flows live on resize; the full value stays in the title tooltip.
+         A concrete cap (not max-width:0) is used so a lone link column can't
+         collapse to zero width. */
+      td.r-link {
+        max-width: 40ch;
+        overflow: hidden;
+      }
       th .sort-icon {
         display: inline-block;
         width: 0.75em;
@@ -914,7 +926,12 @@ export class DataTable extends LitElement {
           ${slice.map(
             (r) => html`
               <tr>
-                ${cols.map((c) => html`<td class=${`t-${c.type}`}>${this.renderCell(r, c)}</td>`)}
+                ${cols.map(
+                  (c) =>
+                    html`<td class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}`}>
+                      ${this.renderCell(r, c)}
+                    </td>`,
+                )}
                 <td>
                   <button class="danger" title="Delete row" @click=${() => this.deleteRow(r.id)}>
                     <span class="mi sm">delete</span>
