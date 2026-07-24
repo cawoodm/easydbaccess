@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>easyDBAccess v0.0.44</title>
+    <title>easyDBAccess v0.0.45</title>
     <style>
       html,
       body {
@@ -37,21 +37,35 @@
         inset: 0;
         transform-origin: 0 0;
         pointer-events: none;
+        z-index: 2; /* above the minimized dock (z-index:1) so windows float over it */
       }
-      /* Panels themselves AND the minimized dock both need clicks. */
-      #easydb-panels-viewport > .jsPanel,
-      #easydb-panels-viewport > .jsPanel-minimized-container {
+      /* Panels need clicks; the transparent viewport itself does not. */
+      #easydb-panels-viewport > .jsPanel {
         pointer-events: auto;
       }
-      /* Make sure the minimized dock sits at the bottom of the container
-         (just above the footer) regardless of jsPanel's default. Its z-index
-         is pinned well below jsPanel's panel base (ziBase = 100) so the dock
-         of minimized tables never covers the active (normalized) table —
-         active windows always float above it. */
-      #easydb-panels-viewport > .jsPanel-minimized-container {
-        bottom: 0;
+      /* Minimized-window dock. It lives OUTSIDE the pan/zoom viewport (a child
+         of the fixed overlay), so minimized windows stay pinned to the bottom-
+         left of the table area and do NOT move when the canvas is panned or
+         zoomed. It sits below the viewport (z-index:1 < 2) so active windows
+         float above it — but shows through the viewport's empty space. The dock
+         is click-through; only the minimized bars inside it take pointer events. */
+      #easydb-minimized-dock {
+        position: absolute;
         left: 0;
-        z-index: 10 !important;
+        bottom: 0;
+        z-index: 1;
+        max-width: 100%;
+        display: flex;
+        flex-wrap: wrap-reverse;
+        align-content: flex-end;
+        gap: 4px;
+        padding: 4px;
+        pointer-events: none;
+      }
+      #easydb-minimized-dock > .jsPanel-replacement {
+        pointer-events: auto;
+        position: static;
+        margin: 0;
       }
       /* On touch devices the overlay itself becomes pointer-interactive so it
          can catch pan/zoom gestures on the empty canvas background. On desktop
@@ -65,7 +79,10 @@
   </head>
   <body>
     <app-shell></app-shell>
-    <div id="easydb-panels"><div id="easydb-panels-viewport"></div></div>
+    <div id="easydb-panels">
+      <div id="easydb-panels-viewport"></div>
+      <div id="easydb-minimized-dock"></div>
+    </div>
     <filter-popover></filter-popover>
     <script type="module" src="/src/main.ts"></script>
   </body>

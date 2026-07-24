@@ -213,21 +213,22 @@ test.describe('window manager', () => {
       panelDomId(idB),
     );
 
-    const z = await page.evaluate((activeDomId) => {
-      const dock = document.querySelector(
-        '#easydb-panels-viewport > .jsPanel-minimized-container',
-      ) as HTMLElement | null;
-      const active = document.getElementById(activeDomId) as HTMLElement;
+    const z = await page.evaluate(() => {
+      const dock = document.getElementById('easydb-minimized-dock');
+      const viewport = document.getElementById('easydb-panels-viewport');
+      const bar = document.querySelector('#easydb-minimized-dock .jsPanel-replacement');
       return {
         dockZ: dock ? Number(getComputedStyle(dock).zIndex) || 0 : -1,
-        activeZ: Number(getComputedStyle(active).zIndex) || 0,
+        viewportZ: viewport ? Number(getComputedStyle(viewport).zIndex) || 0 : -1,
+        hasBar: !!bar,
       };
-    }, panelDomId(idA));
+    });
 
-    // The dock is pinned low (10) and the active panel keeps jsPanel's base
-    // z-index (>= 100), so the dock never covers the active table.
-    expect(z.dockZ).toBe(10);
-    expect(z.activeZ).toBeGreaterThan(z.dockZ);
+    // The minimized bar docks in #easydb-minimized-dock, which sits BELOW the
+    // pan/zoom viewport that holds the live windows — so an active table always
+    // floats above the minimized dock, never the other way round.
+    expect(z.hasBar).toBe(true);
+    expect(z.dockZ).toBeLessThan(z.viewportZ);
   });
 
   test('column reorder drag adds visual-feedback classes mid-drag', async ({ page }) => {

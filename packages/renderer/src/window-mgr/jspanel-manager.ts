@@ -277,7 +277,11 @@ function openPanel(t: Table, ctx: AppContext): void {
     content,
     ...sizeOpt,
     position,
-    minimizeTo: 'parent',
+    // Dock minimized windows into our fixed bottom-left dock (a child of the
+    // untransformed overlay), NOT the pan/zoom viewport — so they stay pinned
+    // there while the canvas is panned/zoomed. jsPanel appends the minimized
+    // replacement bar into this selector.
+    minimizeTo: '#easydb-minimized-dock',
     // No containment and no per-frame drag clamp: panels drag (and resize)
     // freely to any position, including off-screen. `containment: false`
     // disables jsPanel's own boundary box; we deliberately don't re-clamp in
