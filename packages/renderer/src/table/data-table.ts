@@ -1,4 +1,4 @@
-import { LitElement, css, html } from 'lit';
+import { LitElement, css, html, nothing } from 'lit';
 import { html as staticHtml, unsafeStatic } from 'lit/static-html.js';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
@@ -9,6 +9,9 @@ import '../chrome/filter-combobox.js';
 
 type SortDir = 'asc' | 'desc' | null;
 
+/** Delay before the header loading bar appears, so fast loads don't flash it. */
+const LOAD_BAR_DELAY_MS = 200;
+
 @customElement('data-table')
 export class DataTable extends LitElement {
   static override styles = [
@@ -18,6 +21,33 @@ export class DataTable extends LitElement {
       display: block;
       overflow: auto;
       max-height: 60vh;
+    }
+    /* Indeterminate loading bar, pinned to the top of the table's header while
+       a (large / remote) table's rows are still loading. Sticky + high z-index
+       so it rides above the sticky column headers (th z-index 1–2). */
+    .load-bar {
+      position: sticky;
+      top: 0;
+      left: 0;
+      z-index: 3;
+      height: 3px;
+      background: #dbeafe;
+      overflow: hidden;
+    }
+    .load-bar-fill {
+      height: 100%;
+      width: 40%;
+      background: #2563eb;
+      border-radius: 2px;
+      animation: eda-load-bar 1.1s ease-in-out infinite;
+    }
+    @keyframes eda-load-bar {
+      0% {
+        transform: translateX(-120%);
+      }
+      100% {
+        transform: translateX(320%);
+      }
     }
     table {
       width: 100%;
@@ -230,6 +260,7 @@ export class DataTable extends LitElement {
   @state() private cellRenderers: Map<string, string> = new Map();
   @state() private scrollY = 0;
   @state() private viewportHeight = 0;
+  @state() private loading = false;
   /** Median row height in px, measured from currently-rendered rows. */
   private rowHeight = 28;
   private resizeObs: ResizeObserver | null = null;
@@ -343,6 +374,10 @@ export class DataTable extends LitElement {
     );
     const rowColl = ctx.store.rows(this.tableId);
     this.unsubscribe = rowColl.subscribe((r) => (this.rows = r));
+    // Show a loading bar in the table header, but only if the fetch is slow
+    // enough to matter (large local tables, remote sources) — fast local loads
+    // resolve before the delay so the bar never flashes.
+    const barTimer = window.setTimeout(() => (this.loading = true), LOAD_BAR_DELAY_MS);
     try {
       this.rows = await rowColl.find();
     } catch (err) {
@@ -354,6 +389,9 @@ export class DataTable extends LitElement {
         kind: 'error',
         title: 'Load failed',
       });
+    } finally {
+      window.clearTimeout(barTimer);
+      this.loading = false;
     }
   }
 
@@ -772,6 +810,11 @@ export class DataTable extends LitElement {
     const { slice, topPad, bottomPad } = this.virtualSlice(rows);
     const suggestions = this.computeFilterSuggestions();
     return html`
+      ${this.loading
+        ? html`<div class="load-bar" role="progressbar" aria-label="Loading rows">
+            <div class="load-bar-fill"></div>
+          </div>`
+        : nothing}
       <table>
         <colgroup>
           ${cols.map(
