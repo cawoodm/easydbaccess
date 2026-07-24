@@ -28,9 +28,11 @@ export class PanelFooter extends LitElement {
         box-sizing: border-box;
         font-size: 0.85rem;
       }
+      /* Icon-only footer buttons: tight, roughly square. A button that has no
+         icon (falls back to its text label) still reads fine with this padding. */
       button {
         font: inherit;
-        padding: 0.2rem 0.55rem;
+        padding: 0.2rem 0.4rem;
         border: 1px solid #d1d5db;
         background: white;
         border-radius: 0.25rem;
@@ -145,19 +147,25 @@ export class PanelFooter extends LitElement {
 
   override render() {
     return html`
-      <button title="Add a blank row" @click=${this.addRow}>
-        <span class="mi sm">add</span><span>Add row</span>
+      <button title="Add a blank row" aria-label="Add row" @click=${this.addRow}>
+        <span class="mi sm">add</span>
       </button>
-      <button title="Edit columns" @click=${this.editColumns}>
-        <span class="mi sm">view_column</span><span>Columns</span>
+      <button title="Edit columns" aria-label="Columns" @click=${this.editColumns}>
+        <span class="mi sm">view_column</span>
       </button>
       ${this.tableButtons
         .filter((b) => !b.visible || (this.table != null && b.visible(this.table)))
         .map(
           (b) =>
-            html`<button title=${b.tooltip ?? b.label} @click=${() => this.runTableButton(b)}>
-              ${b.icon ? html`<span class="mi sm">${b.icon}</span>` : ''}
-              <span>${b.label}</span>
+            // Icon-only: the icon shows, the label moves to title/aria-label so
+            // the button stays accessible (and screen-reader / test names hold).
+            // Buttons with no icon fall back to their text so they aren't blank.
+            html`<button
+              title=${b.tooltip ?? b.label}
+              aria-label=${b.label}
+              @click=${() => this.runTableButton(b)}
+            >
+              ${b.icon ? html`<span class="mi sm">${b.icon}</span>` : html`<span>${b.label}</span>`}
             </button>`,
         )}
       <span class="spacer"></span>

@@ -192,9 +192,14 @@ test.describe('general', () => {
     await expect(footer.getByRole('button', { name: /Add row/ })).toBeVisible();
     await expect(footer.getByRole('button', { name: /Columns/ })).toBeVisible();
     // csv-export plugin registers a "CSV" table button — confirms the
-    // registry → footer path works without a hand-rolled assertion harness.
-    // The accessible name includes the icon name ("file_download CSV").
+    // registry → footer path works. Footer buttons are icon-only, so the
+    // accessible name comes from aria-label (set to the button's label).
     await expect(footer.getByRole('button', { name: /CSV/ })).toBeVisible();
+
+    // Icon-only: the button shows just its icon glyph (ligature text "add"),
+    // not the "Add row" text label (which now lives on aria-label/title).
+    const addText = await footer.getByRole('button', { name: /Add row/ }).innerText();
+    expect(addText.toLowerCase()).not.toContain('row');
 
     // Row count starts at 0 → "0 rows", then "Add row" makes it 1.
     await expect(footer).toContainText('0 rows');
