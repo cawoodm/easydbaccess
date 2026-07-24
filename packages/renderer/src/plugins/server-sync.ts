@@ -20,7 +20,7 @@ export function init(api: HostApi): void {
   api.ui.registerFooterButton({
     id: 'server-sync:push',
     label: 'Sync ↑',
-    icon: 'cloud_upload',
+    icon: 'cloud_sync',
     tooltip: 'Push this workspace to the configured server',
     onClick: async () => {
       try {
@@ -36,7 +36,7 @@ export function init(api: HostApi): void {
   api.ui.registerFooterButton({
     id: 'server-sync:pull',
     label: 'Sync ↓',
-    icon: 'cloud_download',
+    icon: 'cloud_sync',
     tooltip: 'Pull this workspace from the configured server',
     onClick: async () => {
       try {
@@ -122,10 +122,10 @@ async function pull(api: HostApi): Promise<void> {
 
   const res = await fetch(`${url}/sync/${encodeURIComponent(wsId)}`);
   if (res.status === 404) {
-    api.ui.dialogs.toast(
-      `Workspace "${wsId}" doesn't exist on the server yet. Push first.`,
-      { kind: 'warning', title: 'Server sync' },
-    );
+    api.ui.dialogs.toast(`Workspace "${wsId}" doesn't exist on the server yet. Push first.`, {
+      kind: 'warning',
+      title: 'Server sync',
+    });
     return;
   }
   if (!res.ok) throw new Error(await readError(res));
@@ -135,10 +135,10 @@ async function pull(api: HostApi): Promise<void> {
   const imported = await replaceWorkspace(api, wsId, dump);
 
   if (etag) await saveEtag(api, wsId, etag);
-  api.ui.dialogs.toast(
-    `Pulled ${imported} table${imported === 1 ? '' : 's'} from ${url}.`,
-    { kind: 'success', title: 'Server sync' },
-  );
+  api.ui.dialogs.toast(`Pulled ${imported} table${imported === 1 ? '' : 's'} from ${url}.`, {
+    kind: 'success',
+    title: 'Server sync',
+  });
 }
 
 /**

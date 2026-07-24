@@ -120,6 +120,12 @@ export class AppShell extends LitElement {
       button.icon-btn:hover {
         background: #374151;
       }
+      /* Highlight the collapsed search icon while a global filter is active, so
+         a live search stays discoverable after the box collapses. */
+      button.icon-btn.active {
+        color: #93c5fd;
+        border-color: #3b82f6;
+      }
       /* Inline-SVG button icons (icon strings that start with "<svg"). The svg
          inherits the button's text colour via fill/stroke: currentColor. */
       .icon-svg {
@@ -189,12 +195,17 @@ export class AppShell extends LitElement {
   @query('new-table-dialog') private dialog!: NewTableDialog;
   @query('csv-paste-dialog') private csvPasteDialog!: CsvPasteDialog;
   @query('plugin-manager-dialog') private pluginManagerDialog!: PluginManagerDialog;
+  @query('input.search') private searchInput?: HTMLInputElement;
   @state() private footerButtons: ButtonSpec[] = [];
   @state() private headerButtons: ButtonSpec[] = [];
   @state() private searchQuery = '';
   @state() private searchOpen = false;
   private api: HostApi | null = null;
   private searchTimer: number | null = null;
+  // Set when the search box opens so `updated()` focuses the freshly-rendered
+  // input exactly once. `autofocus` is unreliable — it only fires on initial
+  // document parse, not when Lit inserts the input on click.
+  private searchFocusPending = false;
 
   override connectedCallback() {
     super.connectedCallback();
@@ -237,6 +248,25 @@ export class AppShell extends LitElement {
   private onOpenPluginManager = () => {
     void this.pluginManagerDialog?.open();
   };
+
+  private openSearch = () => {
+    this.searchOpen = true;
+    this.searchFocusPending = true;
+  };
+
+  // Clicking outside the input blurs it; collapse back to the icon. Any active
+  // query is preserved (the collapsed icon shows the highlighted state) so the
+  // global filter keeps applying.
+  private closeSearchOnBlur = () => {
+    this.searchOpen = false;
+  };
+
+  override updated() {
+    if (this.searchFocusPending && this.searchInput) {
+      this.searchInput.focus();
+      this.searchFocusPending = false;
+    }
+  }
 
   private onSearchInput = (e: Event) => {
     this.searchQuery = (e.target as HTMLInputElement).value;
@@ -326,27 +356,26 @@ export class AppShell extends LitElement {
   override render() {
     return html`
       <header>
-        <strong>easyDBAccess <span class="version">v0.0.29</span></strong>
-        ${this.searchOpen || this.searchQuery.length > 0
+        <strong>easyDBAccess <span class="version">v0.0.30</span></strong>
+        ${this.headerButtons.map((b) => this.renderSlotButton(b, 'header'))}
+        ${this.searchOpen
           ? html`<input
               class="search"
               type="search"
               placeholder="search all tables…"
-              autofocus
               .value=${this.searchQuery}
               @input=${this.onSearchInput}
-              @blur=${() => {
-                if (this.searchQuery.trim().length === 0) this.searchOpen = false;
-              }}
+              @blur=${this.closeSearchOnBlur}
             />`
           : html`<button
-              class="icon-btn"
-              title="Search across all tables in this workspace"
-              @click=${() => (this.searchOpen = true)}
+              class="icon-btn ${this.searchQuery.trim().length > 0 ? 'active' : ''}"
+              title=${this.searchQuery.trim().length > 0
+                ? `Filtering all tables: ${this.searchQuery}`
+                : 'Search across all tables in this workspace'}
+              @click=${this.openSearch}
             >
               <span class="mi">search</span>
             </button>`}
-        ${this.headerButtons.map((b) => this.renderSlotButton(b, 'header'))}
       </header>
       <main><table-list></table-list></main>
       <footer>

@@ -24,6 +24,53 @@ test.describe('ui niceties', () => {
     }
   });
 
+  test('header search focuses on open, collapses on click-outside, and sits far-right', async ({
+    page,
+  }) => {
+    const header = page.locator('app-shell header');
+    const searchBtn = header.locator('button.icon-btn');
+
+    // The collapsed search icon is the last (right-most) element in the header,
+    // to the right of the action buttons (e.g. "New Table").
+    const newTableBtn = header.getByRole('button', { name: /New Table/ });
+    const [btnBox, searchBox] = await Promise.all([
+      newTableBtn.boundingBox(),
+      searchBtn.boundingBox(),
+    ]);
+    expect(btnBox).not.toBeNull();
+    expect(searchBox).not.toBeNull();
+    expect(searchBox!.x).toBeGreaterThan(btnBox!.x);
+
+    // Opening focuses the freshly-rendered input (autofocus is unreliable here).
+    await searchBtn.click();
+    const input = header.locator('input.search');
+    await expect(input).toBeFocused();
+
+    // Type a query, then click elsewhere (the title). The box blurs and
+    // collapses back to the icon; the active filter is preserved, so the icon
+    // reports it via title + the `active` class.
+    await input.fill('widget');
+    await header.locator('strong').click();
+    await expect(header.locator('input.search')).toHaveCount(0);
+    const collapsed = header.locator('button.icon-btn');
+    await expect(collapsed).toHaveClass(/active/);
+    await expect(collapsed).toHaveAttribute('title', /Filtering all tables: widget/);
+
+    // Re-opening restores the preserved query, focused.
+    await collapsed.click();
+    await expect(header.locator('input.search')).toBeFocused();
+    await expect(header.locator('input.search')).toHaveValue('widget');
+  });
+
+  test('server-sync buttons use the cloud_sync (cloud + refresh) icon', async ({ page }) => {
+    const footer = page.locator('app-shell footer');
+    const pushBtn = footer.getByRole('button', { name: /Sync ↑/ });
+    await expect(pushBtn).toBeVisible();
+    await expect(pushBtn.locator('.mi')).toHaveText('cloud_sync');
+    const pullBtn = footer.getByRole('button', { name: /Sync ↓/ });
+    await expect(pullBtn.locator('.mi')).toHaveText('cloud_sync');
+  });
+
   test('drag-over the app-shell shows the page-level drop overlay', async ({ page }) => {
     const shell = page.locator('app-shell');
     await expect(shell).not.toHaveClass(/drag-over/);
@@ -74,8 +121,8 @@ test.describe('ui niceties', () => {
     const after = await dialog.boundingBox();
     expect(after).not.toBeNull();
     // The dialog moved by roughly the drag delta. Allow a small tolerance.
-    expect(Math.abs((after!.x - before!.x) - 80)).toBeLessThan(20);
-    expect(Math.abs((after!.y - before!.y) - 60)).toBeLessThan(20);
+    expect(Math.abs(after!.x - before!.x - 80)).toBeLessThan(20);
+    expect(Math.abs(after!.y - before!.y - 60)).toBeLessThan(20);
 
     // Tidy up: dismiss the alert so it doesn't bleed into the next test.
     await page.locator('host-dialogs').getByRole('button', { name: 'OK', exact: true }).click();
