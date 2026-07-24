@@ -280,6 +280,59 @@ test.describe('datasette import — whole database', () => {
     await footer.getByRole('button', { name: 'Refresh' }).click();
     await expect(footer).toContainText('2 rows');
   });
+
+  const importExecutives = async (page: import('@playwright/test').Page) => {
+    await page.getByTitle('Import data from a URL').click();
+    const dialog = page.locator('import-dialog dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.locator('input[type="text"]').fill('https://datasette.io/legislators/executives');
+    await dialog.getByRole('button', { name: 'Import', exact: true }).click();
+  };
+
+  const countNamed = (page: import('@playwright/test').Page, ws: string, name: string) =>
+    page.evaluate(
+      async ({ ws, name }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__easydb.store;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return (await store.tables.find()).filter(
+          (t: any) => t.workspaceId === ws && t.name === name,
+        ).length;
+      },
+      { ws, name },
+    );
+
+  test('importing a single table shows exactly one toast', async ({ page, workspaceId }) => {
+    await importExecutives(page);
+    await expect.poll(() => countNamed(page, workspaceId, 'legislators/executives')).toBe(1);
+    // Previously two toasts appeared (generic per-table + datasette summary);
+    // now datasette owns the message, so exactly one shows.
+    await expect(page.locator('toast-host .toast')).toHaveCount(1);
+  });
+
+  test('re-importing an existing table offers overwrite / rename', async ({
+    page,
+    workspaceId,
+  }) => {
+    await importExecutives(page);
+    await expect.poll(() => countNamed(page, workspaceId, 'legislators/executives')).toBe(1);
+
+    // Second import collides → the choice dialog gives feedback + the switch.
+    await importExecutives(page);
+    const choice = page.locator('host-dialogs dialog');
+    await expect(choice).toBeVisible();
+    await expect(choice).toContainText('already exists');
+
+    // Overwrite replaces in place — still exactly one table of that name.
+    await choice.getByRole('button', { name: 'Overwrite' }).click();
+    await expect.poll(() => countNamed(page, workspaceId, 'legislators/executives')).toBe(1);
+
+    // Third import → Rename → a distinct "… (2)" table is created.
+    await importExecutives(page);
+    await expect(page.locator('host-dialogs dialog')).toBeVisible();
+    await page.locator('host-dialogs dialog').getByRole('button', { name: 'Rename' }).click();
+    await expect.poll(() => countNamed(page, workspaceId, 'legislators/executives (2)')).toBe(1);
+  });
 });
 
 /**
@@ -326,7 +379,7 @@ test.describe('datasette import — instance-root database picker', () => {
     });
   });
 
-  test('lists databases inline, and picking one imports only that database', async ({
+  test('picking a database imports its tables directly, skipping the table picker', async ({
     page,
     workspaceId,
   }) => {
@@ -345,15 +398,13 @@ test.describe('datasette import — instance-root database picker', () => {
     // _memory is skipped; the two real databases are offered (plus the "all" row).
     await expect(dbSelect.locator('option')).toHaveText([/all databases/, 'sales', 'hr']);
 
-    // Pick "sales" and import.
+    // Pick "sales" and import. Because a specific db was chosen, the table
+    // checklist is skipped entirely — the db's tables import directly.
     await dbSelect.selectOption('sales');
     await dlg.getByRole('button', { name: 'Import', exact: true }).click();
 
-    // Straight to the table picker for sales (no cross-database db picker).
-    const picker = page.locator('table-select-dialog dialog');
-    await expect(picker).toBeVisible();
-    await expect(picker.locator('ul.tables li .name')).toHaveText(['orders']);
-    await picker.getByRole('button', { name: /^Import \(1\)$/ }).click();
+    // The table-select dialog must NOT appear.
+    await expect(page.locator('table-select-dialog dialog')).toHaveCount(0);
 
     await expect
       .poll(() =>

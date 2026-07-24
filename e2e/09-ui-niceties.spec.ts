@@ -62,6 +62,28 @@ test.describe('ui niceties', () => {
     await expect(header.locator('input.search')).toHaveValue('widget');
   });
 
+  test('header search has a clear (×) button that empties the query and keeps focus', async ({
+    page,
+  }) => {
+    const header = page.locator('app-shell header');
+    await header.locator('button.icon-btn').click();
+    const input = header.locator('input.search');
+    await input.fill('widget');
+
+    // A clear button appears while there's text; clicking it empties the input,
+    // keeps the box open and focused, and doesn't collapse it.
+    const clear = header.locator('.search-clear');
+    await expect(clear).toBeVisible();
+    // The handler is on mousedown (so the input never blurs); dispatch it
+    // directly to avoid racing a real click against the button detaching once
+    // the query clears.
+    await clear.dispatchEvent('mousedown');
+    await expect(header.locator('input.search')).toHaveValue('');
+    await expect(header.locator('input.search')).toBeFocused();
+    // With the query empty the clear button is gone again.
+    await expect(header.locator('.search-clear')).toHaveCount(0);
+  });
+
   test('server-sync buttons use the cloud_sync (cloud + refresh) icon', async ({ page }) => {
     const footer = page.locator('app-shell footer');
     const pushBtn = footer.getByRole('button', { name: /Sync ↑/ });

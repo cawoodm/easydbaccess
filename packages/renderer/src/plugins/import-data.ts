@@ -94,12 +94,14 @@ async function openImport(api: HostApi): Promise<void> {
   });
   if (!result) return; // cancelled
 
-  const { url, kind } = result;
+  const { url, kind, dbChosen } = result;
   try {
     if (kind === 'datasette') {
       // importDatasette emits its own toasts. A table URL imports directly; a
-      // database/instance URL opens the table picker before importing.
-      await importDatasette(api, url);
+      // database/instance URL opens the table picker before importing — unless
+      // the user already picked a database here, in which case we import that
+      // database's tables directly (skipTablePicker).
+      await importDatasette(api, url, { skipTablePicker: dbChosen });
     } else {
       const res = await api.backend.fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
@@ -176,6 +178,12 @@ function filenameFromUrl(url: string): string {
 interface ImportChoice {
   url: string;
   kind: ResolvedKind;
+  /**
+   * True when the user picked a specific database from the dialog's dropdown
+   * (an instance-root URL narrowed to `.../db`). The datasette importer then
+   * skips the table checklist and imports that database's tables directly.
+   */
+  dbChosen?: boolean;
 }
 
 /**
@@ -346,12 +354,14 @@ export class ImportDialog extends LitElement {
     if (!url) return;
     const kind = this.resolvedKind;
     // If a database was picked for an instance-root URL, narrow the URL to that
-    // database so the import goes straight to its table picker.
-    const finalUrl =
-      kind === 'datasette' && this.selectedDb && isDatasetteInstanceRoot(url, kind)
-        ? `${url.replace(/\/+$/, '')}/${encodeURIComponent(this.selectedDb)}`
-        : url;
-    this.finish({ url: finalUrl, kind });
+    // database and flag it so the importer imports that db's tables directly
+    // (no second table-select dialog — the user already committed to the db).
+    const dbChosen =
+      kind === 'datasette' && !!this.selectedDb && isDatasetteInstanceRoot(url, kind);
+    const finalUrl = dbChosen
+      ? `${url.replace(/\/+$/, '')}/${encodeURIComponent(this.selectedDb)}`
+      : url;
+    this.finish({ url: finalUrl, kind, dbChosen });
   };
 
   /**

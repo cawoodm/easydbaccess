@@ -91,11 +91,16 @@ export class AppShell extends LitElement {
       button.primary:hover {
         background: #2563eb;
       }
+      .search-wrap {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+      }
       input.search {
         background: #374151;
         color: white;
         border: 1px solid #4b5563;
-        padding: 0.3rem 0.6rem;
+        padding: 0.3rem 1.7rem 0.3rem 0.6rem;
         border-radius: 0.25rem;
         font: inherit;
         width: 14rem;
@@ -106,6 +111,28 @@ export class AppShell extends LitElement {
       input.search:focus {
         outline: 2px solid #3b82f6;
         outline-offset: -1px;
+      }
+      /* Hide the browser's native search clear glyph — we render our own × so
+         it's visible on the dark header and works in every browser. */
+      input.search::-webkit-search-cancel-button {
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .search-clear {
+        position: absolute;
+        right: 0.3rem;
+        top: 50%;
+        transform: translateY(-50%);
+        background: transparent;
+        border: 0;
+        color: #9ca3af;
+        cursor: pointer;
+        font-size: 1.1rem;
+        line-height: 1;
+        padding: 0 0.2rem;
+      }
+      .search-clear:hover {
+        color: white;
       }
       button.icon-btn {
         background: transparent;
@@ -268,19 +295,28 @@ export class AppShell extends LitElement {
     }
   }
 
+  // Broadcast to every <data-table> in any panel; they filter their own rows.
+  // We deliberately do NOT hide panels — keep the workspace layout stable so
+  // the user can scan multiple tables at once.
+  private broadcastSearch(query: string) {
+    document.dispatchEvent(new CustomEvent('easydb:global-search', { detail: { query } }));
+  }
+
   private onSearchInput = (e: Event) => {
     this.searchQuery = (e.target as HTMLInputElement).value;
     if (this.searchTimer != null) window.clearTimeout(this.searchTimer);
-    this.searchTimer = window.setTimeout(() => {
-      // Broadcast to every <data-table> in any panel; they filter their own
-      // rows. We deliberately do NOT hide panels — keep the workspace layout
-      // stable so the user can scan multiple tables at once.
-      document.dispatchEvent(
-        new CustomEvent('easydb:global-search', {
-          detail: { query: this.searchQuery },
-        }),
-      );
-    }, 200);
+    this.searchTimer = window.setTimeout(() => this.broadcastSearch(this.searchQuery), 200);
+  };
+
+  // Clear button (×) inside the search box. `mousedown` is prevented so the
+  // input doesn't blur (which would collapse the box); the query is cleared and
+  // the empty filter broadcast immediately, and focus stays in the input.
+  private clearSearch = (e: Event) => {
+    e.preventDefault();
+    if (this.searchTimer != null) window.clearTimeout(this.searchTimer);
+    this.searchQuery = '';
+    this.broadcastSearch('');
+    this.searchFocusPending = true;
   };
 
   private async bindRegistries() {
@@ -356,17 +392,29 @@ export class AppShell extends LitElement {
   override render() {
     return html`
       <header>
-        <strong>easyDBAccess <span class="version">v0.0.34</span></strong>
+        <strong>easyDBAccess <span class="version">v0.0.35</span></strong>
         ${this.headerButtons.map((b) => this.renderSlotButton(b, 'header'))}
         ${this.searchOpen
-          ? html`<input
-              class="search"
-              type="search"
-              placeholder="search all tables…"
-              .value=${this.searchQuery}
-              @input=${this.onSearchInput}
-              @blur=${this.closeSearchOnBlur}
-            />`
+          ? html`<span class="search-wrap">
+              <input
+                class="search"
+                type="search"
+                placeholder="search all tables…"
+                .value=${this.searchQuery}
+                @input=${this.onSearchInput}
+                @blur=${this.closeSearchOnBlur}
+              />
+              ${this.searchQuery.length > 0
+                ? html`<button
+                    class="search-clear"
+                    title="Clear search"
+                    aria-label="Clear search"
+                    @mousedown=${this.clearSearch}
+                  >
+                    ×
+                  </button>`
+                : ''}
+            </span>`
           : html`<button
               class="icon-btn ${this.searchQuery.trim().length > 0 ? 'active' : ''}"
               title=${this.searchQuery.trim().length > 0

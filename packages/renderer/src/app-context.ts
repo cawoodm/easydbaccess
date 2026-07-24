@@ -121,7 +121,11 @@ async function init(): Promise<AppContext> {
 
   // Centralized import-status toasts so every importer (csv, json, gist pull,
   // future ones) gets consistent UX without duplicating the toast call.
+  // datasette-source is the exception: it emits its own batch-aware summary
+  // (one toast for a whole multi-table import), so we skip the generic
+  // per-table toast here to avoid two messages for a single import.
   events.on('import:after', ({ source, tableId, rowCount }) => {
+    if (source === 'datasette') return;
     void api.store.tables.findOne(tableId).then((t) => {
       api.ui.dialogs.toast(
         `Imported ${rowCount} row${rowCount === 1 ? '' : 's'} into "${t?.name ?? tableId}".`,
@@ -130,10 +134,10 @@ async function init(): Promise<AppContext> {
     });
   });
   events.on('plugin:error', ({ url, phase, error }) => {
-    api.ui.dialogs.toast(
-      `[${phase}] ${(error as Error)?.message ?? String(error)}`,
-      { kind: 'error', title: `Plugin: ${url}` },
-    );
+    api.ui.dialogs.toast(`[${phase}] ${(error as Error)?.message ?? String(error)}`, {
+      kind: 'error',
+      title: `Plugin: ${url}`,
+    });
   });
 
   // init() built-ins synchronously, then trigger load() after we emit app:ready.

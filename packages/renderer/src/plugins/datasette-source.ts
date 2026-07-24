@@ -40,6 +40,7 @@ async function resolveChosenTables(
   fetchFn: FetchFn,
   ref: DatasetteRef,
   verb: 'Import' | 'Connect',
+  opts: { skipPicker?: boolean | undefined } = {},
 ): Promise<TableRef[] | null> {
   if (ref.db && ref.table) {
     return [{ db: ref.db, table: ref.table, count: null, hidden: false, pks: [] }];
@@ -47,7 +48,13 @@ async function resolveChosenTables(
 
   let tables: TableRef[] = [];
   if (ref.db) {
-    for (const t of await fetchTablesForDb(fetchFn, ref.base, ref.db)) if (!t.hidden) tables.push(t);
+    for (const t of await fetchTablesForDb(fetchFn, ref.base, ref.db))
+      if (!t.hidden) tables.push(t);
+    // The db was already chosen upstream (e.g. picked in the Import dialog):
+    // import all its tables directly, skipping the table checklist. An empty
+    // result (db has no tables / doesn't exist) falls through to the caller's
+    // "nothing found" handling.
+    if (opts.skipPicker) return tables;
   } else {
     // Instance URL: list databases and let the user choose which to pull from.
     const dbs = await fetchDatabaseNames(fetchFn, ref.base);
@@ -69,7 +76,8 @@ async function resolveChosenTables(
       // Skip a database we can't list (permissions, odd route) rather than
       // aborting the whole instance.
       try {
-        for (const t of await fetchTablesForDb(fetchFn, ref.base, db)) if (!t.hidden) tables.push(t);
+        for (const t of await fetchTablesForDb(fetchFn, ref.base, db))
+          if (!t.hidden) tables.push(t);
       } catch {
         /* skip */
       }
@@ -211,6 +219,30 @@ interface OneResult {
   truncated: boolean;
   pages: number;
   count: number | null;
+  /** True when the user chose to skip this table (name collision → Skip). */
+  skipped?: boolean;
+}
+
+/** A one-table skip result, so the batch loop can count it without importing. */
+function skippedResult(name: string): OneResult {
+  return {
+    name,
+    rowCount: 0,
+    hasMore: false,
+    truncated: false,
+    pages: 0,
+    count: null,
+    skipped: true,
+  };
+}
+
+/** First "name", "name (2)", "name (3)"… not already used by a table in the set. */
+function uniqueTableName(taken: Set<string>, name: string): string {
+  if (!taken.has(name)) return name;
+  for (let i = 2; ; i++) {
+    const candidate = `${name} (${i})`;
+    if (!taken.has(candidate)) return candidate;
+  }
 }
 
 /**
@@ -219,28 +251,31 @@ interface OneResult {
  * discovers its tables and opens a checklist (all pre-selected) so the user
  * chooses what to pull in.
  */
-export async function importDatasette(api: HostApi, input: string): Promise<void> {
+export async function importDatasette(
+  api: HostApi,
+  input: string,
+  opts: { skipTablePicker?: boolean | undefined } = {},
+): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('datasette-source: no active workspace');
 
   const ref = parseDatasetteUrl(input);
   const fetchFn = (u: string) => api.backend.fetch(u);
 
-  const chosen = await resolveChosenTables(fetchFn, ref, 'Import');
+  const chosen = await resolveChosenTables(fetchFn, ref, 'Import', {
+    skipPicker: opts.skipTablePicker,
+  });
   if (chosen === null) return; // cancelled
   if (chosen.length === 0) {
     await api.ui.dialogs.alert('No tables found at that Datasette URL.', 'Datasette import');
     return;
   }
 
-  // Single explicit table (from a table URL) keeps its per-table toast.
-  if (ref.db && ref.table && chosen.length === 1) {
-    const r = await importOneTable(api, workspaceId, ref);
-    if (r.hasMore || r.truncated) toastCapped(api, r);
-    return;
-  }
-
+  // All imports funnel through here — a single summary toast covers one table
+  // or many (the generic per-table import toast is suppressed for datasette in
+  // app-context, so there's exactly one message).
   let imported = 0;
+  let skipped = 0;
   let totalRows = 0;
   const capped: string[] = [];
   const failed: string[] = [];
@@ -252,6 +287,10 @@ export async function importDatasette(api: HostApi, input: string): Promise<void
         table: c.table,
         query: {},
       });
+      if (r.skipped) {
+        skipped += 1;
+        continue;
+      }
       imported += 1;
       totalRows += r.rowCount;
       if (r.hasMore || r.truncated) capped.push(`${c.db}/${c.table}`);
@@ -260,7 +299,7 @@ export async function importDatasette(api: HostApi, input: string): Promise<void
     }
   }
 
-  summariseBatch(api, { imported, totalRows, capped, failed, requested: chosen.length });
+  summariseBatch(api, { imported, skipped, totalRows, capped, failed, requested: chosen.length });
 }
 
 /** Fetch schema + rows for one table and create the local eda table. No toast. */
@@ -271,6 +310,30 @@ async function importOneTable(
 ): Promise<OneResult> {
   const name = `${ref.db}/${ref.table}`;
   const fetchFn = (u: string) => api.backend.fetch(u);
+
+  // Name-collision handling. When a table of the same name already exists in
+  // this workspace, tell the user and let them Overwrite (replace the existing
+  // table's columns + rows in place), Rename (import under a free name), or
+  // Skip. Cancelling the dialog counts as Skip.
+  const workspaceTables = (await api.store.tables.find()).filter(
+    (t) => t.workspaceId === workspaceId,
+  );
+  const existing = workspaceTables.find((t) => t.name === name);
+  let targetName = name;
+  let overwriteId: string | undefined;
+  if (existing) {
+    const choice = await api.ui.dialogs.choice(
+      `A table named "${name}" already exists in this workspace.`,
+      ['Overwrite', 'Rename', 'Skip'],
+      'Import — table already exists',
+    );
+    if (!choice || choice === 'Skip') return skippedResult(name);
+    if (choice === 'Overwrite') {
+      overwriteId = existing.id;
+    } else {
+      targetName = uniqueTableName(new Set(workspaceTables.map((t) => t.name)), name);
+    }
+  }
 
   // Schema discovery via ?_extra=… is best-effort: instances that don't
   // support it (older Datasette) simply give us no columns, and we infer them
@@ -304,65 +367,83 @@ async function importOneTable(
         : refineColumnTypes(metaColumns, rows);
 
   const now = Date.now();
-  const tableId = cryptoUUID();
+  const tableId = overwriteId ?? cryptoUUID();
+  const origin = {
+    type: 'datasette',
+    url: `${ref.base}/${encodeURIComponent(ref.db!)}/${encodeURIComponent(ref.table!)}`,
+  } as const;
   api.events.emit('import:before', { source: 'datasette', tableId });
-  await api.store.tables.insert({
-    id: tableId,
-    workspaceId,
-    name,
-    code: slug(`${ref.db}-${ref.table}`),
-    columns,
-    view: 'table',
-    // Record where this snapshot came from so it can be refreshed later. This
-    // is NOT a live `source` — rows stay local; `origin` only says how to
-    // re-pull them.
-    origin: {
-      type: 'datasette',
-      url: `${ref.base}/${encodeURIComponent(ref.db!)}/${encodeURIComponent(ref.table!)}`,
-    },
-    updatedAt: now,
-  });
+
+  if (overwriteId) {
+    // Overwrite in place: refresh columns + origin, then swap the rows. Keeps
+    // the table id (and thus its open window / geometry / sort / filters).
+    await api.store.tables.patch(overwriteId, { columns, origin, updatedAt: now });
+    const rowColl = api.store.rows(overwriteId);
+    const old = await rowColl.find();
+    await rowColl.bulkRemove(old.map((r) => r.id));
+  } else {
+    await api.store.tables.insert({
+      id: tableId,
+      workspaceId,
+      name: targetName,
+      code: slug(`${ref.db}-${ref.table}`),
+      columns,
+      view: 'table',
+      // Record where this snapshot came from so it can be refreshed later. This
+      // is NOT a live `source` — rows stay local; `origin` only says how to
+      // re-pull them.
+      origin,
+      updatedAt: now,
+    });
+  }
 
   const docs: Row[] = rows.map((data) => ({ id: cryptoUUID(), tableId, data, updatedAt: now }));
   await api.store.rows(tableId).bulkInsert(docs);
 
   api.events.emit('import:after', { source: 'datasette', tableId, rowCount: rows.length });
 
-  return { name, rowCount: rows.length, hasMore, truncated, pages, count };
-}
-
-function toastCapped(api: HostApi, r: OneResult): void {
-  const total = r.count != null ? ` of ${r.count}` : '';
-  const table = r.name.split('/').pop() ?? r.name;
-  api.ui.dialogs.toast(
-    `Imported first ${r.rowCount}${total} rows from ${table} — more available ` +
-      `(capped at ${SETTINGS.maxImportRows}). Live paging arrives with the Phase-2 connector.`,
-    { kind: 'warning', title: 'Datasette import' },
-  );
+  return { name: targetName, rowCount: rows.length, hasMore, truncated, pages, count };
 }
 
 function summariseBatch(
   api: HostApi,
-  s: { imported: number; totalRows: number; capped: string[]; failed: string[]; requested: number },
+  s: {
+    imported: number;
+    skipped: number;
+    totalRows: number;
+    capped: string[];
+    failed: string[];
+    requested: number;
+  },
 ): void {
   const rows = `${s.totalRows.toLocaleString()} row${s.totalRows === 1 ? '' : 's'}`;
   const tables = `${s.imported} table${s.imported === 1 ? '' : 's'}`;
+  const skippedNote = s.skipped > 0 ? ` ${s.skipped} skipped (already existed).` : '';
+
+  // Everything skipped and nothing imported → a plain informational message.
+  if (s.imported === 0 && s.failed.length === 0 && s.skipped > 0) {
+    api.ui.dialogs.toast(`Nothing imported — ${s.skipped} table(s) skipped (already existed).`, {
+      kind: 'info',
+      title: 'Datasette import',
+    });
+    return;
+  }
   if (s.failed.length > 0) {
     api.ui.dialogs.toast(
-      `Imported ${tables} (${rows}); ${s.failed.length} failed:\n${s.failed.join('\n')}`,
+      `Imported ${tables} (${rows});${skippedNote} ${s.failed.length} failed:\n${s.failed.join('\n')}`,
       { kind: 'error', title: 'Datasette import' },
     );
     return;
   }
   if (s.capped.length > 0) {
     api.ui.dialogs.toast(
-      `Imported ${tables} (${rows}). ${s.capped.length} capped at ${SETTINGS.maxImportRows} — ` +
+      `Imported ${tables} (${rows}).${skippedNote} ${s.capped.length} capped at ${SETTINGS.maxImportRows} — ` +
         `more available: ${s.capped.join(', ')}.`,
       { kind: 'warning', title: 'Datasette import' },
     );
     return;
   }
-  api.ui.dialogs.toast(`Imported ${tables} (${rows}) from Datasette.`, {
+  api.ui.dialogs.toast(`Imported ${tables} (${rows}) from Datasette.${skippedNote}`, {
     kind: 'success',
     title: 'Datasette import',
   });
@@ -389,7 +470,8 @@ async function openConnectDialog(api: HostApi): Promise<void> {
   try {
     await connectDatasette(api, result.url, result.token);
   } catch (err) {
-    const msg = err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
+    const msg =
+      err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
     await api.ui.dialogs.alert(msg, 'Connect Datasette failed');
   }
 }
@@ -424,7 +506,8 @@ export async function connectDatasette(api: HostApi, input: string, token: strin
   try {
     chosen = await resolveChosenTables(fetchFn, ref, 'Connect');
   } catch (err) {
-    const detail = err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
+    const detail =
+      err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
     throw new Error(`Couldn't read tables from ${host(ref.base)}: ${detail}`);
   }
   if (chosen === null) return; // cancelled
@@ -455,7 +538,10 @@ async function createLiveTable(
   token: string,
 ): Promise<string> {
   const ref: DatasetteRef = { base, db: c.db, table: c.table, query: {} };
-  const fetchFn = withAuthFetch((u: string, o?: unknown) => api.backend.fetch(u, o as never), token || undefined);
+  const fetchFn = withAuthFetch(
+    (u: string, o?: unknown) => api.backend.fetch(u, o as never),
+    token || undefined,
+  );
 
   // Columns: schema names refined from a small sample (see importOneTable).
   let metaColumns: ColumnSpec[] = [];
@@ -544,7 +630,8 @@ async function refreshDatasetteTable(api: HostApi, tableId: string): Promise<voi
       await refreshSnapshot(api, t);
     }
   } catch (err) {
-    const msg = err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
+    const msg =
+      err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
     api.ui.dialogs.toast(`Refresh failed: ${msg}`, { kind: 'error', title: 'Refresh' });
   }
 }
@@ -573,7 +660,13 @@ async function refreshSnapshot(api: HostApi, t: Table): Promise<void> {
 }
 
 function slug(s: string): string {
-  return s.toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'table';
+  return (
+    s
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'table'
+  );
 }
 
 function cryptoUUID(): string {
