@@ -1,0 +1,506 @@
+import { LitElement, css, html, nothing } from 'lit';
+import { customElement, state } from 'lit/decorators.js';
+import type { ColumnSpec, Table, ViewInstance, ViewTemplate } from '@easydb/shared';
+import { getContext } from '../app-context.js';
+import { dialogChromeStyles } from './dialog-chrome.js';
+import { makeDialogDraggable } from './draggable.js';
+import { extractTokens } from '../views/view-render.js';
+
+/** Open the Views manager for a table (mounted lazily into <body>). */
+export function openViewsDialog(tableId: string): void {
+  const dlg = ViewsDialog.instance ?? mount();
+  void dlg.open(tableId);
+}
+
+function mount(): ViewsDialog {
+  const el = document.createElement('views-dialog') as ViewsDialog;
+  document.body.appendChild(el);
+  return el;
+}
+
+function uuid(): string {
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  );
+}
+
+interface TemplateDraft {
+  id: string | null; // null ⇒ new
+  name: string;
+  headerHtml: string;
+  rowHtml: string;
+  footerHtml: string;
+}
+
+interface InstanceDraft {
+  templateId: string;
+  templateName: string;
+  name: string;
+  tokens: string[];
+  mapping: Record<string, string>;
+}
+
+@customElement('views-dialog')
+export class ViewsDialog extends LitElement {
+  static instance: ViewsDialog | null = null;
+
+  static override styles = [
+    dialogChromeStyles,
+    css`
+      dialog {
+        min-width: 520px;
+        max-width: 680px;
+      }
+      h3 {
+        margin: 0 0 0.4rem;
+        font-size: 0.9rem;
+        color: #374151;
+      }
+      .section {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+      }
+      ul.list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.35rem;
+        max-height: 30vh;
+        overflow: auto;
+      }
+      ul.list:empty::after {
+        content: 'None yet.';
+        display: block;
+        padding: 0.5rem 0.7rem;
+        color: #9ca3af;
+        font-size: 0.85rem;
+      }
+      li {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.4rem 0.6rem;
+        border-bottom: 1px solid #f1f5f9;
+      }
+      li:last-child {
+        border-bottom: 0;
+      }
+      li .name {
+        flex: 1;
+        font-weight: 500;
+        color: #111827;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .badge {
+        font-size: 0.7rem;
+        color: #6b7280;
+        border: 1px solid #d1d5db;
+        border-radius: 0.6rem;
+        padding: 0 0.4rem;
+      }
+      button.mini {
+        font: inherit;
+        font-size: 0.8rem;
+        padding: 0.15rem 0.5rem;
+        border: 1px solid #d1d5db;
+        background: white;
+        border-radius: 0.25rem;
+        cursor: pointer;
+      }
+      button.mini:hover {
+        background: #f3f4f6;
+      }
+      button.mini.danger {
+        color: #b91c1c;
+        border-color: #fecaca;
+      }
+      label.field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        font-size: 0.82rem;
+        color: #374151;
+      }
+      input[type='text'],
+      textarea,
+      select {
+        font: inherit;
+        padding: 0.4rem 0.5rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      textarea {
+        font-family: ui-monospace, SFMono-Regular, monospace;
+        font-size: 0.8rem;
+        min-height: 4.5rem;
+        resize: vertical;
+      }
+      .hint {
+        color: #6b7280;
+        font-size: 0.78rem;
+        margin: 0;
+      }
+      .map-row {
+        display: grid;
+        grid-template-columns: 8rem 1fr;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .map-row code {
+        font-family: ui-monospace, SFMono-Regular, monospace;
+        color: #2563eb;
+      }
+    `,
+  ];
+
+  @state() private mode: 'list' | 'template' | 'instance' = 'list';
+  @state() private instances: ViewInstance[] = [];
+  @state() private templates: ViewTemplate[] = [];
+  @state() private tDraft: TemplateDraft | null = null;
+  @state() private iDraft: InstanceDraft | null = null;
+
+  private tableId = '';
+  private table: Table | null = null;
+  private columns: ColumnSpec[] = [];
+  private dialogEl: HTMLDialogElement | null = null;
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    ViewsDialog.instance = this;
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    if (ViewsDialog.instance === this) ViewsDialog.instance = null;
+  }
+
+  override firstUpdated(): void {
+    this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
+    const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
+    if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
+  }
+
+  async open(tableId: string): Promise<void> {
+    this.tableId = tableId;
+    this.mode = 'list';
+    this.tDraft = null;
+    this.iDraft = null;
+    await this.refresh();
+    await this.updateComplete;
+    this.dialogEl?.showModal();
+  }
+
+  private async refresh(): Promise<void> {
+    const ctx = await getContext();
+    const wsId = ctx.workspaceId;
+    this.table = await ctx.store.tables.findOne(this.tableId);
+    this.columns = this.table?.columns ?? [];
+    this.instances = (await ctx.store.viewInstances.find({ workspaceId: wsId })).filter(
+      (v) => v.tableId === this.tableId,
+    );
+    this.templates = (await ctx.store.viewTemplates.find({ workspaceId: wsId })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+  }
+
+  private close = (): void => {
+    this.dialogEl?.close();
+  };
+
+  // -- instances --------------------------------------------------------------
+
+  private openInstance(id: string): void {
+    document.dispatchEvent(new CustomEvent('easydb:open-view', { detail: { instanceId: id } }));
+    this.close();
+  }
+
+  private async deleteInstance(id: string): Promise<void> {
+    const ctx = await getContext();
+    await ctx.store.viewInstances.remove(id);
+    document.dispatchEvent(new CustomEvent('easydb:close-view', { detail: { instanceId: id } }));
+    await this.refresh();
+  }
+
+  // -- templates --------------------------------------------------------------
+
+  private newTemplate(): void {
+    this.tDraft = { id: null, name: '', headerHtml: '', rowHtml: '', footerHtml: '' };
+    this.mode = 'template';
+  }
+
+  private editTemplate(t: ViewTemplate): void {
+    this.tDraft = {
+      id: t.id,
+      name: t.name,
+      headerHtml: t.headerHtml,
+      rowHtml: t.rowHtml,
+      footerHtml: t.footerHtml,
+    };
+    this.mode = 'template';
+  }
+
+  private copyTemplate(t: ViewTemplate): void {
+    this.tDraft = {
+      id: null,
+      name: `${t.name} copy`,
+      headerHtml: t.headerHtml,
+      rowHtml: t.rowHtml,
+      footerHtml: t.footerHtml,
+    };
+    this.mode = 'template';
+  }
+
+  private async saveTemplate(): Promise<void> {
+    if (!this.tDraft) return;
+    const d = this.tDraft;
+    if (!d.name.trim()) return;
+    const ctx = await getContext();
+    if (d.id) {
+      await ctx.store.viewTemplates.patch(d.id, {
+        name: d.name.trim(),
+        headerHtml: d.headerHtml,
+        rowHtml: d.rowHtml,
+        footerHtml: d.footerHtml,
+        updatedAt: Date.now(),
+      });
+    } else {
+      await ctx.store.viewTemplates.insert({
+        id: uuid(),
+        workspaceId: ctx.workspaceId,
+        name: d.name.trim(),
+        headerHtml: d.headerHtml,
+        rowHtml: d.rowHtml,
+        footerHtml: d.footerHtml,
+        updatedAt: Date.now(),
+      });
+    }
+    await this.refresh();
+    this.mode = 'list';
+  }
+
+  // -- instance creation ------------------------------------------------------
+
+  private useTemplate(t: ViewTemplate): void {
+    const tokens = extractTokens(t.headerHtml, t.rowHtml, t.footerHtml);
+    const mapping: Record<string, string> = {};
+    for (const tok of tokens) mapping[tok] = this.autoMap(tok);
+    this.iDraft = {
+      templateId: t.id,
+      templateName: t.name,
+      name: `${t.name} — ${this.table?.name ?? 'table'}`,
+      tokens,
+      mapping,
+    };
+    this.mode = 'instance';
+  }
+
+  /** Best-effort token→column guess: exact field/label match (case-insensitive). */
+  private autoMap(token: string): string {
+    const lc = token.toLowerCase();
+    const hit = this.columns.find(
+      (c) => c.field.toLowerCase() === lc || (c.label ?? '').toLowerCase() === lc,
+    );
+    return hit?.field ?? '';
+  }
+
+  private async createInstance(): Promise<void> {
+    if (!this.iDraft || !this.table) return;
+    const d = this.iDraft;
+    if (!d.name.trim()) return;
+    const ctx = await getContext();
+    // Snapshot the table's CURRENT sort / filter / visible columns.
+    const visibleColumns = this.columns.filter((c) => !c.hidden).map((c) => c.field);
+    const inst: ViewInstance = {
+      id: uuid(),
+      workspaceId: ctx.workspaceId,
+      tableId: this.tableId,
+      templateId: d.templateId,
+      name: d.name.trim(),
+      sortColumn: this.table.sortColumn,
+      sortAsc: this.table.sortAsc,
+      filters: { ...(this.table.filters ?? {}) },
+      visibleColumns,
+      mapping: { ...d.mapping },
+      updatedAt: Date.now(),
+    };
+    await ctx.store.viewInstances.insert(inst);
+    this.openInstance(inst.id);
+  }
+
+  // -- render -----------------------------------------------------------------
+
+  private renderList() {
+    return html`
+      <div class="section">
+        <h3>Views of “${this.table?.name ?? ''}”</h3>
+        <ul class="list">
+          ${this.instances.map(
+            (v) =>
+              html`<li>
+                <span class="name">${v.name}</span>
+                <button class="mini" @click=${() => this.openInstance(v.id)}>Open</button>
+                <button class="mini danger" @click=${() => void this.deleteInstance(v.id)}>
+                  Delete
+                </button>
+              </li>`,
+          )}
+        </ul>
+      </div>
+      <div class="section">
+        <h3>View templates (workspace)</h3>
+        <ul class="list">
+          ${this.templates.map(
+            (t) =>
+              html`<li>
+                <span class="name">${t.name}</span>
+                ${t.builtin ? html`<span class="badge">built-in</span>` : nothing}
+                <button class="mini" @click=${() => this.useTemplate(t)}>Use</button>
+                <button class="mini" @click=${() => this.editTemplate(t)}>Edit</button>
+                <button class="mini" @click=${() => this.copyTemplate(t)}>Copy</button>
+              </li>`,
+          )}
+        </ul>
+        <div>
+          <button class="mini" @click=${() => this.newTemplate()}>+ New template</button>
+        </div>
+        <p class="hint">
+          A template's row HTML uses <code>$TOKEN</code> placeholders (e.g. <code>$TITLE</code>).
+          Leave row HTML blank to show a read-only columns table with the header/footer HTML around
+          it.
+        </p>
+      </div>
+    `;
+  }
+
+  private renderTemplate() {
+    const d = this.tDraft!;
+    const set = (k: keyof TemplateDraft) => (e: Event) => {
+      this.tDraft = { ...d, [k]: (e.target as HTMLInputElement | HTMLTextAreaElement).value };
+    };
+    return html`
+      <label class="field">
+        Name
+        <input type="text" .value=${d.name} @input=${set('name')} placeholder="e.g. Cards" />
+      </label>
+      <label class="field">
+        Header HTML
+        <textarea .value=${d.headerHtml} @input=${set('headerHtml')}></textarea>
+      </label>
+      <label class="field">
+        Row HTML <span class="hint">(blank ⇒ read-only table)</span>
+        <textarea
+          .value=${d.rowHtml}
+          @input=${set('rowHtml')}
+          placeholder="&lt;div&gt;$TITLE&lt;/div&gt;"
+        ></textarea>
+      </label>
+      <label class="field">
+        Footer HTML
+        <textarea .value=${d.footerHtml} @input=${set('footerHtml')}></textarea>
+      </label>
+    `;
+  }
+
+  private renderInstance() {
+    const d = this.iDraft!;
+    return html`
+      <label class="field">
+        View name
+        <input
+          type="text"
+          .value=${d.name}
+          @input=${(e: Event) =>
+            (this.iDraft = { ...d, name: (e.target as HTMLInputElement).value })}
+        />
+      </label>
+      <div class="section">
+        <h3>Map placeholders to columns</h3>
+        ${d.tokens.length === 0
+          ? html`<p class="hint">
+              This template has no <code>$TOKEN</code> placeholders — it will show the read-only
+              table with your current sort, filter and visible columns.
+            </p>`
+          : d.tokens.map(
+              (tok) =>
+                html`<div class="map-row">
+                  <code>$${tok}</code>
+                  <select
+                    @change=${(e: Event) =>
+                      (this.iDraft = {
+                        ...d,
+                        mapping: { ...d.mapping, [tok]: (e.target as HTMLSelectElement).value },
+                      })}
+                  >
+                    <option value="" ?selected=${!d.mapping[tok]}>— none —</option>
+                    ${this.columns.map(
+                      (c) =>
+                        html`<option value=${c.field} ?selected=${d.mapping[tok] === c.field}>
+                          ${c.label || c.field}
+                        </option>`,
+                    )}
+                  </select>
+                </div>`,
+            )}
+      </div>
+      <p class="hint">The view snapshots this table's current sort, filters and visible columns.</p>
+    `;
+  }
+
+  override render() {
+    const title =
+      this.mode === 'template'
+        ? this.tDraft?.id
+          ? 'Edit template'
+          : 'New template'
+        : this.mode === 'instance'
+          ? `New view — ${this.iDraft?.templateName ?? ''}`
+          : 'Views';
+
+    const actions =
+      this.mode === 'template'
+        ? html`<button type="button" class="ghost" @click=${() => (this.mode = 'list')}>
+              Back
+            </button>
+            <button type="button" class="primary" @click=${() => void this.saveTemplate()}>
+              Save
+            </button>`
+        : this.mode === 'instance'
+          ? html`<button type="button" class="ghost" @click=${() => (this.mode = 'list')}>
+                Back
+              </button>
+              <button type="button" class="primary" @click=${() => void this.createInstance()}>
+                Create view
+              </button>`
+          : html`<button type="button" class="ghost" @click=${this.close}>Close</button>`;
+
+    return html`
+      <dialog @cancel=${this.close}>
+        <button type="button" class="close-x" title="Close" @click=${this.close}>×</button>
+        <div class="dialog-header">
+          <h2>${title}</h2>
+          <div class="header-actions">${actions}</div>
+        </div>
+        <div class="dialog-body">
+          ${this.mode === 'template'
+            ? this.renderTemplate()
+            : this.mode === 'instance'
+              ? this.renderInstance()
+              : this.renderList()}
+        </div>
+      </dialog>
+    `;
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'views-dialog': ViewsDialog;
+  }
+}

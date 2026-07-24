@@ -109,6 +109,51 @@ export interface Setting {
   value: unknown;
 }
 
+/**
+ * A workspace-global display template — three HTML fragments that decide how a
+ * table's data is shown in a read-only view window.
+ *
+ * If `rowHtml` is blank the view falls back to a read-only columns table with
+ * `headerHtml` above and `footerHtml` below. If `rowHtml` is present, no table
+ * is drawn: `rowHtml` is repeated once per row (between header and footer) with
+ * `$TOKEN` placeholders substituted from the row's mapped columns.
+ */
+export interface ViewTemplate {
+  id: string;
+  workspaceId: string;
+  name: string;
+  headerHtml: string;
+  rowHtml: string;
+  footerHtml: string;
+  /** True for templates seeded by the app (e.g. the default RSS feed). */
+  builtin?: boolean | undefined;
+  updatedAt: number;
+}
+
+/**
+ * A view of ONE table through a `ViewTemplate`, shown read-only in its own
+ * window. Snapshots the table's sort / filter / visible-columns at creation and
+ * maps the template's `$TOKEN`s to the table's column fields. Templates are
+ * global to the workspace; instances are tied to a single table.
+ */
+export interface ViewInstance {
+  id: string;
+  workspaceId: string;
+  tableId: string;
+  templateId: string;
+  name: string;
+  sortColumn?: string | undefined;
+  sortAsc?: boolean | undefined;
+  /** Column-field → filter substring, snapshotted from the table. */
+  filters: Record<string, string>;
+  /** Column fields to show, in order (snapshotted from the table). */
+  visibleColumns: string[];
+  /** Template token (without the leading `$`) → column field. */
+  mapping: Record<string, string>;
+  windowGeometry?: WindowGeometry | undefined;
+  updatedAt: number;
+}
+
 export interface PluginRecord {
   url: string;
   enabled: boolean;

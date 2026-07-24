@@ -1,5 +1,13 @@
 import Dexie, { type Table as DexieTable } from 'dexie';
-import type { PluginRecord, Row, Setting, Table, Workspace } from '@easydb/shared';
+import type {
+  PluginRecord,
+  Row,
+  Setting,
+  Table,
+  ViewInstance,
+  ViewTemplate,
+  Workspace,
+} from '@easydb/shared';
 
 /**
  * easyDB local store: one IndexedDB database, one Dexie table per logical
@@ -24,6 +32,8 @@ export interface EasyDb {
   rows: DexieTable<Row, string>;
   settings: DexieTable<Setting, string>;
   plugins: DexieTable<PluginRecord, string>;
+  viewTemplates: DexieTable<ViewTemplate, string>;
+  viewInstances: DexieTable<ViewInstance, string>;
 }
 
 let instance: EasyDb | null = null;
@@ -39,6 +49,12 @@ export function getDexie(): EasyDb {
     settings: 'key',
     plugins: 'url',
   });
+  // v2 adds the View system's two collections. Dexie carries forward the v1
+  // tables; only the added stores are declared here. No data migration needed.
+  raw.version(2).stores({
+    viewTemplates: 'id, workspaceId',
+    viewInstances: 'id, workspaceId, tableId',
+  });
 
   instance = {
     raw,
@@ -47,6 +63,8 @@ export function getDexie(): EasyDb {
     rows: raw.table<Row, string>('rows'),
     settings: raw.table<Setting, string>('settings'),
     plugins: raw.table<PluginRecord, string>('plugins'),
+    viewTemplates: raw.table<ViewTemplate, string>('viewTemplates'),
+    viewInstances: raw.table<ViewInstance, string>('viewInstances'),
   };
   return instance;
 }

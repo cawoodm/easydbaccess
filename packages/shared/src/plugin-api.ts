@@ -7,7 +7,17 @@
  * host treats it as a mutable namespace.
  */
 
-import type { ColumnSpec, PluginRecord, Row, Setting, Table, TableSource, Workspace } from './types.js';
+import type {
+  ColumnSpec,
+  PluginRecord,
+  Row,
+  Setting,
+  Table,
+  TableSource,
+  ViewInstance,
+  ViewTemplate,
+  Workspace,
+} from './types.js';
 
 // -- Plugin module shape --------------------------------------------------
 
@@ -89,6 +99,10 @@ export interface DataStore {
   rows(tableId: string): DataCollection<Row>;
   settings: DataCollection<Setting>;
   plugins: DataCollection<PluginRecord>;
+  /** Workspace-global display templates (header/row/footer HTML). */
+  viewTemplates: DataCollection<ViewTemplate>;
+  /** Per-table view instances rendered read-only in their own windows. */
+  viewInstances: DataCollection<ViewInstance>;
 }
 
 // -- Row-source providers (routing seam) ----------------------------------

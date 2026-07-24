@@ -15,6 +15,7 @@ import * as cellImage from '../plugins/cell-image.js';
 import * as cellLink from '../plugins/cell-link.js';
 import * as importData from '../plugins/import-data.js';
 import * as autoSync from '../plugins/auto-sync.js';
+import * as views from '../plugins/views.js';
 
 /**
  * Built-in plugins shipped with the renderer. They satisfy the same
@@ -42,6 +43,7 @@ const builtins: PluginModule[] = [
   cellLink,
   importData,
   autoSync,
+  views,
 ];
 
 /** Public for the Plugin Manager dialog so it can render the optional list. */

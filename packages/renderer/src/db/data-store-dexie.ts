@@ -7,6 +7,8 @@ import type {
   Setting,
   Table,
   Unsubscribe,
+  ViewInstance,
+  ViewTemplate,
   Workspace,
 } from '@easydb/shared';
 import type { EasyDb } from './dexie-db.js';
@@ -138,6 +140,8 @@ export function createDataStore(db: EasyDb): DataStore {
     tables: wrap<Table>(db.tables),
     settings: wrap<Setting>(db.settings),
     plugins: wrap<PluginRecord>(db.plugins),
+    viewTemplates: wrap<ViewTemplate>(db.viewTemplates),
+    viewInstances: wrap<ViewInstance>(db.viewInstances),
     rows: (tableId: string) => rowsView(db.rows, tableId),
   };
 }

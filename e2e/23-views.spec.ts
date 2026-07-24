@@ -1,0 +1,100 @@
+import { test, expect } from './fixtures.js';
+import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js';
+
+/**
+ * The View system: a workspace-global HTML template + per-table instances shown
+ * read-only in their own windows. Covers the seeded RSS template (row HTML →
+ * repeated cards) and the blank-row-HTML fallback (read-only columns table).
+ */
+test.describe('views', () => {
+  test('RSS template renders a table as a list of linked cards', async ({ page }) => {
+    const id = await createTable(page, 'Feed', [
+      { field: 'title' },
+      { field: 'url' },
+      { field: 'date' },
+      { field: 'description' },
+    ]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      {
+        title: 'Hello World',
+        url: 'https://example.com/1',
+        date: '2024-01-01',
+        description: 'First post',
+      },
+      {
+        title: 'Second Post',
+        url: 'https://example.com/2',
+        date: '2024-01-02',
+        description: 'Another',
+      },
+    ]);
+
+    // The footer "Views" icon opens the manager.
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    const dlg = page.locator('views-dialog dialog');
+    await expect(dlg).toBeVisible();
+
+    // The built-in RSS Feed template is listed; "Use" it.
+    const rss = dlg.locator('ul.list li', { hasText: 'RSS Feed' });
+    await expect(rss).toBeVisible();
+    await expect(rss.locator('.badge')).toHaveText('built-in');
+    await rss.getByRole('button', { name: 'Use' }).click();
+
+    // Tokens auto-mapped by name (TITLE→title, URL→url, …) → create the view.
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+
+    // A view window opens rendering one linked card per row.
+    const vw = page.locator('view-window');
+    await expect(vw).toBeVisible();
+    await expect(vw.locator('a')).toHaveCount(2);
+    const first = vw.locator('a', { hasText: 'Hello World' });
+    await expect(first).toBeVisible();
+    await expect(first).toHaveAttribute('href', 'https://example.com/1');
+    // No editable inputs — the view is read-only.
+    await expect(vw.locator('input')).toHaveCount(0);
+  });
+
+  test('a template with blank row HTML falls back to a read-only columns table', async ({
+    page,
+  }) => {
+    const id = await createTable(page, 'Plain', [{ field: 'a' }, { field: 'b' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      { a: 'one', b: 'uno' },
+      { a: 'two', b: 'dos' },
+    ]);
+
+    const footer = page.locator(`#${panelDomId(id)} panel-footer`);
+    await footer.getByRole('button', { name: /Views/ }).click();
+    const dlg = page.locator('views-dialog dialog');
+    await expect(dlg).toBeVisible();
+
+    // New template: header + footer HTML, blank row HTML.
+    await dlg.getByRole('button', { name: '+ New template' }).click();
+    await dlg.locator('input[type="text"]').fill('Bare');
+    const areas = dlg.locator('textarea');
+    await areas.nth(0).fill('<h4 class="hdr">Report</h4>'); // header
+    // row HTML left blank → table fallback
+    await areas.nth(2).fill('<p class="ftr">end</p>'); // footer
+    await dlg.getByRole('button', { name: 'Save' }).click();
+
+    // Use the new template → no tokens → create directly.
+    await dlg
+      .locator('ul.list li', { hasText: 'Bare' })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+
+    // The view shows the header/footer HTML around a read-only table (2 rows).
+    const vw = page.locator('view-window');
+    await expect(vw).toBeVisible();
+    await expect(vw.locator('h4.hdr')).toHaveText('Report');
+    await expect(vw.locator('p.ftr')).toHaveText('end');
+    await expect(vw.locator('table.vw-table tbody tr')).toHaveCount(2);
+    await expect(vw.locator('input')).toHaveCount(0);
+  });
+});
