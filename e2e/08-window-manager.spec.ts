@@ -153,6 +153,36 @@ test.describe('window manager', () => {
     ).toHaveCount(1);
   });
 
+  test('maximizing keeps the titlebar below the header even when the header wraps', async ({
+    page,
+  }) => {
+    // Narrow enough that the header wraps to two rows (taller than the old
+    // hardcoded 48px overlay offset).
+    await page.setViewportSize({ width: 560, height: 720 });
+    const id = await createTable(page, 'Big', [{ field: 'x' }]);
+    await waitForPanel(page, id);
+
+    await page.evaluate(
+      (d) => (document.getElementById(d) as HTMLElement & { maximize(): void }).maximize(),
+      panelDomId(id),
+    );
+
+    const geo = await page.evaluate((domId) => {
+      const header = document.querySelector('app-shell')!.shadowRoot!.querySelector('header')!;
+      const tb = document.getElementById(domId)!.querySelector('.jsPanel-titlebar')! as HTMLElement;
+      return {
+        headerBottom: header.getBoundingClientRect().bottom,
+        titlebarTop: tb.getBoundingClientRect().top,
+        headerHeight: header.getBoundingClientRect().height,
+      };
+    }, panelDomId(id));
+
+    // Header actually wrapped (proves the scenario), and the maximized titlebar
+    // starts at/after the header's bottom — never tucked under it.
+    expect(geo.headerHeight).toBeGreaterThan(48);
+    expect(geo.titlebarTop).toBeGreaterThanOrEqual(geo.headerBottom - 1);
+  });
+
   test('minimized dock stays below the active table window', async ({ page }) => {
     const idA = await createTable(page, 'Keep', [{ field: 'x' }]);
     await waitForPanel(page, idA);

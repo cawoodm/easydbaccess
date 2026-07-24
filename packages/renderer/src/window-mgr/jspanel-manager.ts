@@ -36,6 +36,20 @@ function panelContainer(): HTMLElement {
   );
 }
 
+/**
+ * Pin the panel overlay's top/bottom to the app-shell header/footer heights so
+ * a maximized window fills exactly the space between them. The overlay's CSS
+ * assumes a 48px chrome; this overrides it with the measured heights (which are
+ * larger when the header wraps on a narrow window, or under browser zoom).
+ */
+function syncOverlayInsets(outer: HTMLElement): void {
+  const root = document.querySelector('app-shell')?.shadowRoot;
+  const header = root?.querySelector('header') as HTMLElement | null;
+  const footer = root?.querySelector('footer') as HTMLElement | null;
+  if (header) outer.style.top = `${header.offsetHeight}px`;
+  if (footer) outer.style.bottom = `${footer.offsetHeight}px`;
+}
+
 /** jsPanel instance — typed loose since the lib ships no .d.ts. */
 type Panel = {
   id: string;
@@ -75,7 +89,25 @@ export async function initWindowManager(): Promise<void> {
   // back into view now that panel dragging is unclamped.
   const outer = document.getElementById('easydb-panels');
   const viewport = document.getElementById('easydb-panels-viewport');
-  if (outer && viewport) panzoom = initPanZoom(outer, viewport);
+  if (outer && viewport) {
+    panzoom = initPanZoom(outer, viewport);
+    // Keep the panel overlay aligned to the REAL header/footer heights instead
+    // of a hardcoded 48px. The header grows when its buttons wrap (narrow
+    // windows) or with larger fonts/zoom; a stale offset left a maximized
+    // window's titlebar tucked under the header. Re-sync on any header/footer
+    // resize (wrap, plugin buttons) and on window resize.
+    const sync = () => syncOverlayInsets(outer);
+    sync();
+    window.addEventListener('resize', sync);
+    const shellRoot = document.querySelector('app-shell')?.shadowRoot;
+    const header = shellRoot?.querySelector('header');
+    const footer = shellRoot?.querySelector('footer');
+    if (typeof ResizeObserver !== 'undefined' && (header || footer)) {
+      const ro = new ResizeObserver(sync);
+      if (header) ro.observe(header);
+      if (footer) ro.observe(footer);
+    }
+  }
 
   // Initial population. Open in ascending saved-z order so jsPanel's internal
   // zi.next() counter reproduces the user's last layering — the panel that
