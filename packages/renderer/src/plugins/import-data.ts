@@ -17,6 +17,7 @@ import { customElement, state } from 'lit/decorators.js';
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { importJsonText } from './json-import.js';
 import { importCsvText } from './csv-import.js';
+import { editColumnNames } from '../dialogs/column-names-dialog.js';
 import { importDatasette } from './datasette-source.js';
 import { parseDatasetteUrl, fetchDatabaseNames } from './datasette-client.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from '../dialogs/dialog-chrome.js';
@@ -102,7 +103,7 @@ async function openImport(api: HostApi): Promise<void> {
   });
   if (!result) return; // cancelled
 
-  const { url, kind, dbChosen } = result;
+  const { url, kind, dbChosen, editColumns } = result;
   try {
     if (kind === 'datasette') {
       // importDatasette emits its own toasts. A table URL imports directly; a
@@ -114,7 +115,11 @@ async function openImport(api: HostApi): Promise<void> {
       const res = await api.backend.fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const text = await res.text();
-      await importCsvText(api, text, filenameFromUrl(url));
+      // When "Edit columns" was checked, review/rename columns before creating
+      // the table (importCsvText returns without inserting if the user cancels).
+      await importCsvText(api, text, filenameFromUrl(url), {
+        editColumns: editColumns ? editColumnNames : undefined,
+      });
       api.ui.dialogs.toast(`Imported ${filenameFromUrl(url)}.`, {
         kind: 'success',
         title: 'Import',
@@ -202,6 +207,8 @@ interface ImportChoice {
    * skips the table checklist and imports that database's tables directly.
    */
   dbChosen?: boolean;
+  /** True when "Edit columns" was checked — open the column editor pre-import (CSV). */
+  editColumns?: boolean;
 }
 
 /**
@@ -227,6 +234,14 @@ export class ImportDialog extends LitElement {
         gap: 0.3rem;
         font-size: 0.85rem;
         color: #374151;
+      }
+      label.check {
+        flex-direction: row;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      label.check input {
+        width: auto;
       }
       input[type='text'],
       select {
@@ -273,6 +288,7 @@ export class ImportDialog extends LitElement {
   @state() private dbLoading = false;
   @state() private dbError = '';
   @state() private selectedDb = '';
+  @state() private editColumns = false;
 
   private dialogEl: HTMLDialogElement | null = null;
   private resolveFn: ((v: ImportChoice | null) => void) | null = null;
@@ -334,6 +350,7 @@ export class ImportDialog extends LitElement {
     this.url = '';
     this.kind = 'auto';
     this.presetIdx = -1;
+    this.editColumns = false;
     this.resetDbList();
     this.listDatabases = opts?.listDatabases ?? null;
     return new Promise<ImportChoice | null>((resolve) => {
@@ -379,7 +396,9 @@ export class ImportDialog extends LitElement {
     const finalUrl = dbChosen
       ? `${url.replace(/\/+$/, '')}/${encodeURIComponent(this.selectedDb)}`
       : url;
-    this.finish({ url: finalUrl, kind, dbChosen });
+    // "Edit columns" only applies to CSV (single-table, columns known up front).
+    const editColumns = kind === 'csv' && this.editColumns;
+    this.finish({ url: finalUrl, kind, dbChosen, editColumns });
   };
 
   /**
@@ -496,6 +515,18 @@ export class ImportDialog extends LitElement {
             </label>
 
             ${this.renderDbPicker()}
+
+            ${this.resolvedKind === 'csv'
+              ? html`<label class="check">
+                  <input
+                    type="checkbox"
+                    .checked=${this.editColumns}
+                    @change=${(e: Event) =>
+                      (this.editColumns = (e.target as HTMLInputElement).checked)}
+                  />
+                  Edit columns before import (rename / fix duplicate names)
+                </label>`
+              : nothing}
 
             <p class="hint">
               Paste any URL or pick a sample above — a JSON dump, a <code>.csv</code> file, or a

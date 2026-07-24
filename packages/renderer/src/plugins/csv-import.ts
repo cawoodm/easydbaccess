@@ -60,7 +60,24 @@ async function importCsvFile(api: HostApi, file: File): Promise<void> {
  * `.csv` is stripped); a same-named existing table prompts append / overwrite /
  * create-new, exactly like a dropped file.
  */
-export async function importCsvText(api: HostApi, text: string, name: string): Promise<void> {
+/** Options for {@link importCsvText}. */
+export interface CsvImportOpts {
+  /**
+   * Optional hook (used by the Import dialog's "Edit columns" checkbox) to
+   * review/rename the parsed columns before the table is created. Receives the
+   * inferred columns; returns the edited set, or `null` to cancel the import.
+   * Only consulted for a brand-new table — append/overwrite reuse the existing
+   * schema.
+   */
+  editColumns?: ((columns: ColumnSpec[]) => Promise<ColumnSpec[] | null>) | undefined;
+}
+
+export async function importCsvText(
+  api: HostApi,
+  text: string,
+  name: string,
+  opts: CsvImportOpts = {},
+): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('csv-import: no active workspace');
 
@@ -109,17 +126,25 @@ export async function importCsvText(api: HostApi, text: string, name: string): P
 
   if (mode === 'new') {
     const parsed = parseCsv(text);
+    let columns = parsed.columns;
+    let rows = parsed.rows;
+    if (opts.editColumns) {
+      const edited = await opts.editColumns(columns);
+      if (edited === null) return; // user cancelled the column editor
+      rows = remapRows(rows, columns, edited); // rekey cells old field → new field
+      columns = edited;
+    }
     const uniqueName = existing ? `${baseName} (${Date.now().toString(36)})` : baseName;
     await api.store.tables.insert({
       id: targetId,
       workspaceId,
       name: uniqueName,
       code: slug(uniqueName),
-      columns: parsed.columns,
+      columns,
       view: 'table',
       updatedAt: Date.now(),
     });
-    docs = parsed.rows.map((row) => ({
+    docs = rows.map((row) => ({
       id: cryptoUUID(),
       tableId: targetId,
       data: row,
@@ -197,7 +222,11 @@ export function parseCsv(text: string): ParseResult {
   //   - "field:label:type:default:max:flags"      — full spec
   // Flags: u=unique, n=notnull, h=hidden (any combination, any order).
   const headerSpecs = header.map((h, i) => parseHeaderCell(h, i));
-  const fields = headerSpecs.map((s) => s.field);
+  // Field names are object keys, so they must be unique. Distinct headers can
+  // slug to the same field (e.g. "TM" and "Tm" both → "tm"); without this a
+  // later column would clobber an earlier one's cells and the table would show
+  // duplicate columns. Suffix collisions "_2", "_3", … in first-seen order.
+  const fields = dedupeFields(headerSpecs.map((s) => s.field));
 
   const rawRows: Array<Record<string, string>> = dataRows.map((cells) => {
     const obj: Record<string, string> = {};
@@ -215,7 +244,7 @@ export function parseCsv(text: string): ParseResult {
 
   const columns: ColumnSpec[] = headerSpecs.map((s, i) => {
     const finalType = types[i] ?? 'string';
-    const col: ColumnSpec = { field: s.field, label: s.label, type: finalType };
+    const col: ColumnSpec = { field: fields[i]!, label: s.label, type: finalType };
     // Auto-assign a renderer when inference pinned a type with a built-in
     // renderer. CSV import is the only path where renderer auto-detection
     // is allowed — once a table exists, the user picks renderers manually.
@@ -521,6 +550,40 @@ function isCsv(file: File): boolean {
   if (/\.csv$/i.test(file.name)) return true;
   if (file.type === 'text/csv' || file.type === 'application/csv') return true;
   return false;
+}
+
+/** Make field names unique, suffixing repeats "_2", "_3", … (first-seen wins). */
+export function dedupeFields(fields: string[]): string[] {
+  const counts = new Map<string, number>();
+  const taken = new Set<string>();
+  const out: string[] = [];
+  for (const f of fields) {
+    let candidate = f;
+    let n = counts.get(f) ?? 0;
+    while (taken.has(candidate)) {
+      n += 1;
+      candidate = `${f}_${n + 1}`;
+    }
+    counts.set(f, n);
+    taken.add(candidate);
+    out.push(candidate);
+  }
+  return out;
+}
+
+/** Rekey each row's cells from old columns' fields onto new columns' fields (by index). */
+function remapRows(
+  rows: Array<Record<string, unknown>>,
+  oldCols: ColumnSpec[],
+  newCols: ColumnSpec[],
+): Array<Record<string, unknown>> {
+  return rows.map((r) => {
+    const out: Record<string, unknown> = {};
+    for (let i = 0; i < oldCols.length; i++) {
+      out[newCols[i]!.field] = r[oldCols[i]!.field];
+    }
+    return out;
+  });
 }
 
 function slug(s: string): string {
