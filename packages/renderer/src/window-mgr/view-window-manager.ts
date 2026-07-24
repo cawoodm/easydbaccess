@@ -31,6 +31,8 @@ import type { ViewWindow } from '../views/view-window.js';
 type Panel = {
   id: string;
   close(): void;
+  minimize?: () => void;
+  maximize?: () => void;
   setHeaderTitle?: (title: string) => void;
   status: 'normalized' | 'minimized' | 'maximized' | 'smallified' | 'closed';
 };
@@ -122,6 +124,9 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     onstatuschange: (p: Panel) => {
       if (p.status === 'maximized') maxFill.enter();
       else maxFill.exit();
+      // Persist the new status (minimized / maximized / normalized) so it
+      // survives a reload, exactly like table windows.
+      void saveGeometry(inst.id);
     },
     onclosed: () => {
       panels.delete(inst.id);
@@ -149,6 +154,12 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     titlebar.style.outline = 'none';
     titlebar.addEventListener('pointerdown', () => titlebar.focus());
   }
+
+  // Restore a persisted minimized/maximized state. Defer to the next tick so
+  // jsPanel finishes its own init (centering, sizing) before we drive a state
+  // change — mirrors the table window manager.
+  if (g?.maximized) queueMicrotask(() => panel.maximize?.());
+  else if (g?.minimized) queueMicrotask(() => panel.minimize?.());
 }
 
 function closePanel(instanceId: string): void {
@@ -166,20 +177,27 @@ async function saveGeometry(instanceId: string): Promise<void> {
   const el = document.getElementById(panelDomId(instanceId));
   const entry = panels.get(instanceId);
   if (!el || !entry) return;
-  // Only the normalized rect is meaningful; while maximized/minimized jsPanel
-  // parks the panel elsewhere, so keep the last-stored geometry.
-  if (entry.panel.status !== 'normalized') return;
-  const geom: WindowGeometry = {
-    x: el.offsetLeft,
-    y: el.offsetTop,
-    w: el.offsetWidth,
-    h: el.offsetHeight,
-    z: 0,
-    minimized: false,
-    maximized: false,
-  };
+  const status = entry.panel.status;
+  const minimized = status === 'minimized';
+  const maximized = status === 'maximized';
   try {
     const ctx = await getContext();
+    const prev = (await ctx.store.viewInstances.findOne(instanceId))?.windowGeometry;
+    // Only the normalized rect is meaningful; while minimized jsPanel parks the
+    // panel at left:-9999 and while maximized it fills the container, so in
+    // those states keep the last-stored normal rect and only flip the flag.
+    let x = el.offsetLeft;
+    let y = el.offsetTop;
+    let w = el.offsetWidth;
+    let h = el.offsetHeight;
+    if ((minimized || maximized) && prev) {
+      x = prev.x;
+      y = prev.y;
+      w = prev.w;
+      h = prev.h;
+    }
+    if (x <= -9000) x = prev?.x ?? 40;
+    const geom: WindowGeometry = { x, y, w, h, z: 0, minimized, maximized };
     await ctx.store.viewInstances.patch(instanceId, {
       windowGeometry: geom,
       updatedAt: Date.now(),

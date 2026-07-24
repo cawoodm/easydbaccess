@@ -239,6 +239,38 @@ test.describe('views', () => {
     await expect(page.locator('view-window')).toHaveCount(0);
   });
 
+  test('a minimized view window is still minimized after a reload', async ({ page }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ title: 'Hello', url: 'https://example.com/1' }]);
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    const dlg = page.locator('views-dialog dialog');
+    await dlg
+      .locator('ul.list li', { hasText: 'RSS Feed' })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+    const viewPanel = page.locator('[id^="view-panel-"]');
+    await expect(viewPanel).toBeVisible();
+
+    // Minimize the view → it docks bottom-left as a replacement bar.
+    await viewPanel.locator('.jsPanel-btn-minimize').click();
+    const dockBar = page.locator('#easydb-minimized-dock .jsPanel-replacement');
+    await expect(dockBar).toBeVisible();
+
+    // Reload → the view reopens AND is restored to its minimized (docked) state,
+    // not popped open normalized.
+    await page.reload();
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => Boolean((window as any).__easydb),
+    );
+    await expect(page.locator('#easydb-minimized-dock .jsPanel-replacement')).toBeVisible();
+  });
+
   test('a maximized view window fills the area and stays filling through a pan', async ({
     page,
   }) => {
