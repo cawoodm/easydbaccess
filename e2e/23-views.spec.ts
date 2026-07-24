@@ -112,6 +112,52 @@ test.describe('views', () => {
     await expect(vw.locator('a', { hasText: 'Hello World' })).toHaveCount(0);
   });
 
+  test('a stale built-in RSS template is reconciled to the shipped HTML on reload', async ({
+    page,
+  }) => {
+    // Force the RSS template to be seeded, then simulate a workspace that was
+    // provisioned by an OLD release: overwrite the built-in template's row HTML
+    // with a version that lacks the line-clamp, and set a bogus stored
+    // signature. On reload, seedDefaults must patch it back to the shipped HTML.
+    const id = await createTable(page, 'Seeded', [{ field: 'title' }]);
+    await waitForPanel(page, id);
+
+    const staleRow = '<div>$DESCRIPTION</div>';
+    await page.evaluate(
+      async ({ staleRow }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctx = (window as any).__easydb;
+        const wsId = ctx.workspaceId;
+        const tpls = await ctx.store.viewTemplates.find({ workspaceId: wsId });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rss = tpls.find((t: any) => t.builtin && t.name === 'RSS Feed');
+        await ctx.store.viewTemplates.patch(rss.id, { rowHtml: staleRow });
+        await ctx.store.settings.upsert({ key: `views:sig:rss:${wsId}`, value: 'stale' });
+      },
+      { staleRow },
+    );
+
+    await page.reload();
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => Boolean((window as any).__easydb),
+    );
+
+    // The built-in template's row HTML now carries the shipped line-clamp again.
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ctx = (window as any).__easydb;
+          const tpls = await ctx.store.viewTemplates.find({ workspaceId: ctx.workspaceId });
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const rss = tpls.find((t: any) => t.builtin && t.name === 'RSS Feed');
+          return rss?.rowHtml ?? '';
+        }),
+      )
+      .toContain('line-clamp:20');
+  });
+
   test('a template with blank row HTML falls back to a read-only columns table', async ({
     page,
   }) => {
