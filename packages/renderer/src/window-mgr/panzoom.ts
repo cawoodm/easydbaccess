@@ -75,10 +75,24 @@ function onPanel(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('.jsPanel') != null;
 }
 
+/** Live control over the canvas transform, returned by {@link initPanZoom}. */
+export interface PanZoomHandle {
+  /** Current transform state (copy). */
+  snapshot(): PanZoomState;
+  /** Snap the canvas back to 1:1 at the origin. */
+  reset(): void;
+  /** Restore a previously snapshotted transform. */
+  restore(s: PanZoomState): void;
+  /** Detach all listeners. */
+  dispose(): void;
+}
+
 /**
- * Wire touch pan/zoom on `outer`, transforming `viewport`. Returns a disposer.
+ * Wire touch pan/zoom on `outer`, transforming `viewport`. Returns a handle for
+ * reading/resetting the transform (e.g. so a maximized window can fill the real
+ * screen regardless of the current pan/zoom).
  */
-export function initPanZoom(outer: HTMLElement, viewport: HTMLElement): () => void {
+export function initPanZoom(outer: HTMLElement, viewport: HTMLElement): PanZoomHandle {
   let state: PanZoomState = { ...IDENTITY };
   viewport.style.transformOrigin = '0 0';
   const apply = () => {
@@ -235,13 +249,24 @@ export function initPanZoom(outer: HTMLElement, viewport: HTMLElement): () => vo
   window.addEventListener('mousedown', onMouseDown, true);
   window.addEventListener('contextmenu', onContextMenu, true);
 
-  return () => {
-    outer.removeEventListener('touchstart', onTouchStart);
-    outer.removeEventListener('touchmove', onTouchMove);
-    outer.removeEventListener('touchend', onTouchEnd);
-    outer.removeEventListener('touchcancel', onTouchEnd);
-    window.removeEventListener('mousedown', onMouseDown, true);
-    window.removeEventListener('contextmenu', onContextMenu, true);
-    endMousePan();
+  return {
+    snapshot: () => ({ ...state }),
+    reset: () => {
+      state = { ...IDENTITY };
+      apply();
+    },
+    restore: (s: PanZoomState) => {
+      state = { ...s };
+      apply();
+    },
+    dispose: () => {
+      outer.removeEventListener('touchstart', onTouchStart);
+      outer.removeEventListener('touchmove', onTouchMove);
+      outer.removeEventListener('touchend', onTouchEnd);
+      outer.removeEventListener('touchcancel', onTouchEnd);
+      window.removeEventListener('mousedown', onMouseDown, true);
+      window.removeEventListener('contextmenu', onContextMenu, true);
+      endMousePan();
+    },
   };
 }

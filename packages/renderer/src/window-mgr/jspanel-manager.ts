@@ -22,7 +22,7 @@ import 'jspanel4/es6module/jspanel.css';
 
 import type { Table, WindowGeometry } from '@easydb/shared';
 import { getContext, type AppContext } from '../app-context.js';
-import { initPanZoom } from './panzoom.js';
+import { initPanZoom, type PanZoomHandle, type PanZoomState } from './panzoom.js';
 import '../table/data-table.js';
 import '../chrome/panel-search.js';
 import '../chrome/panel-footer.js';
@@ -61,6 +61,8 @@ const confirmedClose = new Set<string>();
  */
 const externallyClosed = new Set<string>();
 let initialized = false;
+/** Canvas pan/zoom control — reset while a window is maximized so it fills the screen. */
+let panzoom: PanZoomHandle | null = null;
 
 export async function initWindowManager(): Promise<void> {
   if (initialized) return;
@@ -73,7 +75,7 @@ export async function initWindowManager(): Promise<void> {
   // back into view now that panel dragging is unclamped.
   const outer = document.getElementById('easydb-panels');
   const viewport = document.getElementById('easydb-panels-viewport');
-  if (outer && viewport) initPanZoom(outer, viewport);
+  if (outer && viewport) panzoom = initPanZoom(outer, viewport);
 
   // Initial population. Open in ascending saved-z order so jsPanel's internal
   // zi.next() counter reproduces the user's last layering — the panel that
@@ -205,6 +207,24 @@ function openPanel(t: Table, ctx: AppContext): void {
   // live table); it's activated when the window is expanded (see mountContent).
   (footer as HTMLElement & { active: boolean }).active = !startMinimized;
 
+  // Maximize must fill the real window, but panels live inside the pan/zoom-
+  // transformed canvas — a panned/zoomed canvas would leave a "maximized"
+  // window offset or scaled. Snapshot the canvas view and reset it to 1:1
+  // while this window is maximized, then restore the view on un-maximize.
+  let savedView: PanZoomState | null = null;
+  let wasMaximized = false;
+  const syncMaximizeView = (status: Panel['status']): void => {
+    const isMax = status === 'maximized';
+    if (isMax && !wasMaximized) {
+      savedView = panzoom?.snapshot() ?? null;
+      panzoom?.reset();
+    } else if (!isMax && wasMaximized) {
+      if (savedView) panzoom?.restore(savedView);
+      savedView = null;
+    }
+    wasMaximized = isMax;
+  };
+
   const position = g
     ? { my: 'left-top', at: 'left-top', offsetX: g.x, offsetY: g.y }
     : nextCascadePosition();
@@ -279,6 +299,7 @@ function openPanel(t: Table, ctx: AppContext): void {
     onstatuschange: (p: Panel) => {
       if (p.status === 'minimized') unmountContent();
       else if (p.status === 'normalized' || p.status === 'maximized') mountContent();
+      syncMaximizeView(p.status);
       void saveGeometry(t.id, ctx);
     },
   }) as Panel;
