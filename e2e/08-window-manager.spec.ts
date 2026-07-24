@@ -23,6 +23,56 @@ test.describe('window manager', () => {
     await expect(title).toContainText('Stocks (2)');
   });
 
+  test('panels drag freely off-screen (no boundary clamp)', async ({ page }) => {
+    const id = await createTable(page, 'Roamer', [{ field: 'x' }]);
+    await waitForPanel(page, id);
+    const panel = page.locator(`#${panelDomId(id)}`);
+    const titlebar = panel.locator('.jsPanel-titlebar');
+    const box = await titlebar.boundingBox();
+    expect(box).not.toBeNull();
+
+    // Grab the title (left of the controlbar) and drag hard to the far left,
+    // well past the container's left edge. With clamping removed the panel's
+    // left goes negative instead of snapping back to 0.
+    const grabX = box!.x + 100;
+    const grabY = box!.y + box!.height / 2;
+    await page.mouse.move(grabX, grabY);
+    await page.mouse.down();
+    await page.mouse.move(grabX - 60, grabY, { steps: 5 });
+    await page.mouse.move(2, grabY, { steps: 10 });
+    await page.mouse.up();
+
+    const left = await panel.evaluate((el) => (el as HTMLElement).offsetLeft);
+    expect(left).toBeLessThan(0);
+  });
+
+  test('right-button drag pans the canvas (desktop)', async ({ page }) => {
+    const id = await createTable(page, 'Pannable', [{ field: 'x' }]);
+    await waitForPanel(page, id);
+
+    const readTransform = () =>
+      page.evaluate(
+        () => (document.getElementById('easydb-panels-viewport') as HTMLElement).style.transform,
+      );
+    const before = await readTransform();
+
+    const outer = page.locator('#easydb-panels');
+    const box = await outer.boundingBox();
+    expect(box).not.toBeNull();
+    const cx = box!.x + box!.width / 2;
+    const cy = box!.y + box!.height / 2;
+
+    await page.mouse.move(cx, cy);
+    await page.mouse.down({ button: 'right' });
+    await page.mouse.move(cx + 120, cy + 80, { steps: 10 });
+    await page.mouse.up({ button: 'right' });
+
+    const after = await readTransform();
+    expect(after).not.toBe(before);
+    // Panned by the drag delta (canvas is at 1:1 on desktop).
+    expect(after).toContain('translate(120px, 80px)');
+  });
+
   test('column reorder drag adds visual-feedback classes mid-drag', async ({ page }) => {
     const id = await createTable(page, 'Reorder', [{ field: 'a' }, { field: 'b' }]);
     await waitForPanel(page, id);

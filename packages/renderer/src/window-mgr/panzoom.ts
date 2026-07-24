@@ -1,16 +1,26 @@
 /**
- * Touch pan/zoom for the table canvas (mobile).
+ * Pan/zoom for the table canvas.
  *
  * The jsPanel windows live in an inner viewport (`#easydb-panels-viewport`)
  * inside the fixed `#easydb-panels` overlay. This controller drives a CSS
- * `translate()/scale()` on that viewport from touch gestures:
+ * `translate()/scale()` on that viewport from two input paths:
+ *
+ * Touch (mobile):
  *   - one finger on the empty canvas background  → pan (translate);
  *   - two fingers anywhere                        → pinch-zoom the canvas;
  *   - double-tap the background                   → reset to 1:1.
  * A one-finger touch that lands on a panel is left alone, so tables still
- * scroll and cells still tap. It's touch-only — desktop mouse/drag and the
- * jsPanel window dragging are untouched (the overlay only becomes pointer-
- * interactive under `@media (pointer: coarse)`).
+ * scroll and cells still tap. The overlay only becomes pointer-interactive
+ * for touch under `@media (pointer: coarse)`.
+ *
+ * Mouse (desktop):
+ *   - right-button drag anywhere over the canvas  → pan (translate).
+ * Left-button drag is untouched, so jsPanel window dragging still works.
+ * The right-drag handlers are attached at the window level (capture) because
+ * the desktop overlay stays `pointer-events:none` so left-clicks fall through
+ * to the chrome beneath; window capture still sees the events, and activation
+ * is scoped geometrically to the canvas region. The context menu is suppressed
+ * only when a drag actually happened — a plain right-click still opens it.
  *
  * Panel geometry is stored in the viewport's own (untransformed) layout
  * coordinates, so jsPanel's drag/resize/clamp math is unaffected by the
@@ -153,15 +163,85 @@ export function initPanZoom(outer: HTMLElement, viewport: HTMLElement): () => vo
     }
   };
 
+  // --- Desktop: right-button drag pans the canvas -------------------------
+  //
+  // Attached to `window` (capture) rather than `outer`, because on desktop the
+  // overlay is `pointer-events:none` so it never receives the mousedown — but
+  // a window-capture listener sees every event. We scope activation to the
+  // canvas region geometrically (the overlay's rect) so right-clicks on the
+  // header/footer chrome are left alone.
+  let mousePanning = false;
+  let mouseBase: PanZoomState = { ...IDENTITY };
+  let mouseStartX = 0;
+  let mouseStartY = 0;
+  let mouseMoved = false;
+
+  const inCanvas = (clientX: number, clientY: number): boolean => {
+    const r = outer.getBoundingClientRect();
+    return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+  };
+
+  const onMouseMove = (e: MouseEvent) => {
+    if (!mousePanning) return;
+    const dx = e.clientX - mouseStartX;
+    const dy = e.clientY - mouseStartY;
+    // Movement threshold: a plain right-click (dx≈dy≈0) must still reach the
+    // context menu, so don't treat sub-threshold jitter as a pan.
+    if (!mouseMoved && Math.hypot(dx, dy) < 4) return;
+    mouseMoved = true;
+    document.body.style.cursor = 'grabbing';
+    state = panBy(mouseBase, dx, dy);
+    apply();
+    e.preventDefault();
+  };
+
+  const endMousePan = () => {
+    if (!mousePanning) return;
+    mousePanning = false;
+    document.body.style.cursor = '';
+    window.removeEventListener('mousemove', onMouseMove, true);
+    window.removeEventListener('mouseup', onMouseUp, true);
+  };
+
+  function onMouseUp(): void {
+    endMousePan();
+  }
+
+  const onMouseDown = (e: MouseEvent) => {
+    if (e.button !== 2) return; // right button only
+    if (!inCanvas(e.clientX, e.clientY)) return;
+    mousePanning = true;
+    mouseMoved = false;
+    mouseBase = { ...state };
+    mouseStartX = e.clientX;
+    mouseStartY = e.clientY;
+    window.addEventListener('mousemove', onMouseMove, true);
+    window.addEventListener('mouseup', onMouseUp, true);
+  };
+
+  // Suppress the context menu only after a real right-drag pan; a plain
+  // right-click (mouseMoved stayed false) still opens it.
+  const onContextMenu = (e: MouseEvent) => {
+    if (mouseMoved) {
+      e.preventDefault();
+      mouseMoved = false;
+    }
+  };
+
   outer.addEventListener('touchstart', onTouchStart, { passive: false });
   outer.addEventListener('touchmove', onTouchMove, { passive: false });
   outer.addEventListener('touchend', onTouchEnd);
   outer.addEventListener('touchcancel', onTouchEnd);
+  window.addEventListener('mousedown', onMouseDown, true);
+  window.addEventListener('contextmenu', onContextMenu, true);
 
   return () => {
     outer.removeEventListener('touchstart', onTouchStart);
     outer.removeEventListener('touchmove', onTouchMove);
     outer.removeEventListener('touchend', onTouchEnd);
     outer.removeEventListener('touchcancel', onTouchEnd);
+    window.removeEventListener('mousedown', onMouseDown, true);
+    window.removeEventListener('contextmenu', onContextMenu, true);
+    endMousePan();
   };
 }

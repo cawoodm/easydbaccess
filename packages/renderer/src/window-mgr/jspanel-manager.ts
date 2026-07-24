@@ -8,6 +8,12 @@
  * Panels mount into document.body (jsPanel's default). The app-shell chrome
  * keeps a high z-index so it stays above panels even when they're dragged
  * toward the edges.
+ *
+ * Panels are draggable anywhere with no boundary clamping — they may sit
+ * partly or wholly off-screen. That's intentional: the pan/zoom canvas
+ * (touch pan on mobile, right-button drag on desktop) always brings a
+ * stray panel back into view, so a hard containment box would only get in
+ * the way.
  */
 
 // @ts-expect-error — jspanel4 ships no types
@@ -62,8 +68,9 @@ export async function initWindowManager(): Promise<void> {
 
   const ctx = await getContext();
 
-  // Touch pan/zoom over the whole table canvas (mobile). No-op on desktop —
-  // the overlay only receives touch events under `@media (pointer: coarse)`.
+  // Pan/zoom over the whole table canvas: touch pan + pinch-zoom on mobile,
+  // right-button drag pan on desktop. Both bring a stray (off-screen) panel
+  // back into view now that panel dragging is unclamped.
   const outer = document.getElementById('easydb-panels');
   const viewport = document.getElementById('easydb-panels-viewport');
   if (outer && viewport) initPanZoom(outer, viewport);
@@ -71,9 +78,7 @@ export async function initWindowManager(): Promise<void> {
   // Initial population. Open in ascending saved-z order so jsPanel's internal
   // zi.next() counter reproduces the user's last layering — the panel that
   // was on top last session is opened last and ends up on top again.
-  const tables = (await ctx.store.tables.find()).filter(
-    (t) => t.workspaceId === ctx.workspaceId,
-  );
+  const tables = (await ctx.store.tables.find()).filter((t) => t.workspaceId === ctx.workspaceId);
   tables.sort(byAscendingZ);
   for (const t of tables) openPanel(t, ctx);
 
@@ -113,66 +118,22 @@ const MIN_H = 100;
 /** Default size for new (or sanity-reset) panels — matches contentSize below. */
 const DEFAULT_W = 720;
 const DEFAULT_H = 360;
-/**
- * Estimated title-bar height for geometry sanitization at restore time, before
- * the panel exists in the DOM. The live drag clamp measures the real
- * `.jsPanel-titlebar` element. jsPanel's default theme renders ~30–34px;
- * 34 leaves a safe margin so titlebars never restore flush against the
- * footer where they'd be hard to grab.
- */
-const TITLEBAR_HEIGHT_ESTIMATE = 34;
 
 /**
- * Validates persisted geometry against the current container bounds.
+ * Validates persisted geometry, discarding only corrupt records.
  *
- * - If `g` is unusable (missing, NaN, too small, or wider than the
- *   container), returns null so the caller falls back to defaults
- *   (cascade + 720x360). A panel taller than the container is allowed —
- *   its body legitimately extends below the footer; only the titlebar
- *   has to remain visible.
- * - If `g` fits dimensionally but its position would push the titlebar
- *   off-screen (e.g. the window was resized smaller between sessions),
- *   x/y are clamped so the titlebar stays inside the container. Size
- *   is preserved.
- *
- * Saved geometry is never overwritten here; this is render-time-only.
+ * Returns null (→ caller falls back to defaults: cascade + 720x360) when `g`
+ * is missing, has a non-finite field, or is smaller than the minimum sensible
+ * size. Otherwise the geometry is returned verbatim — position is NOT clamped:
+ * a panel may legitimately restore partly or fully off-screen, because the
+ * pan/zoom canvas (touch pan / desktop right-drag) brings it back into view.
  */
-function sanitizeGeometry(
-  g: WindowGeometry | undefined,
-  container: HTMLElement,
-): WindowGeometry | null {
+function sanitizeGeometry(g: WindowGeometry | undefined): WindowGeometry | null {
   if (!g) return null;
   if (!Number.isFinite(g.w) || !Number.isFinite(g.h)) return null;
+  if (!Number.isFinite(g.x) || !Number.isFinite(g.y)) return null;
   if (g.w < MIN_W || g.h < MIN_H) return null;
-  const rect = container.getBoundingClientRect();
-  if (g.w > rect.width) return null;
-  const x = Math.max(0, Math.min(g.x, rect.width - g.w));
-  const y = Math.max(0, Math.min(g.y, rect.height - TITLEBAR_HEIGHT_ESTIMATE));
-  return { ...g, x, y };
-}
-
-/**
- * Clamp a panel's position so the titlebar stays inside the container,
- * but allow the panel's body to extend below. Called continuously while
- * the user drags so they get immediate visual feedback at the boundary.
- *
- * Horizontal: panel stays fully inside the container width — both edges
- * of the titlebar are visible. Vertical: top edge stays inside, bottom
- * edge may exceed the container so a tall data-table's body can scroll
- * below the footer.
- */
-function clampTitlebarInside(panel: HTMLElement, container: HTMLElement): void {
-  const cw = container.clientWidth;
-  const ch = container.clientHeight;
-  const pw = panel.offsetWidth;
-  const titlebar = panel.querySelector('.jsPanel-titlebar') as HTMLElement | null;
-  const tbH = titlebar?.offsetHeight || TITLEBAR_HEIGHT_ESTIMATE;
-  const left = parseFloat(panel.style.left) || panel.offsetLeft || 0;
-  const top = parseFloat(panel.style.top) || panel.offsetTop || 0;
-  const nextLeft = Math.max(0, Math.min(left, cw - pw));
-  const nextTop = Math.max(0, Math.min(top, ch - tbH));
-  if (nextLeft !== left) panel.style.left = `${nextLeft}px`;
-  if (nextTop !== top) panel.style.top = `${nextTop}px`;
+  return { ...g };
 }
 
 function openPanel(t: Table, ctx: AppContext): void {
@@ -187,7 +148,7 @@ function openPanel(t: Table, ctx: AppContext): void {
   (footer as HTMLElement & { tableId: string }).tableId = t.id;
 
   const container = panelContainer();
-  const g = sanitizeGeometry(t.windowGeometry, container);
+  const g = sanitizeGeometry(t.windowGeometry);
   const panelId = `panel-${cssSafe(t.id)}`;
 
   const position = g
@@ -197,9 +158,7 @@ function openPanel(t: Table, ctx: AppContext): void {
   // Saved g.w/g.h come from offsetWidth/Height (total panel size including
   // chrome), so restore via panelSize. New panels use contentSize so the
   // default 720x360 describes the data area, not the chrome.
-  const sizeOpt = g
-    ? { panelSize: `${g.w} ${g.h}` }
-    : { contentSize: `${DEFAULT_W} ${DEFAULT_H}` };
+  const sizeOpt = g ? { panelSize: `${g.w} ${g.h}` } : { contentSize: `${DEFAULT_W} ${DEFAULT_H}` };
 
   const panel = jsPanel.create({
     id: panelId,
@@ -213,17 +172,13 @@ function openPanel(t: Table, ctx: AppContext): void {
     ...sizeOpt,
     position,
     minimizeTo: 'parent',
-    // Custom clamping: only the titlebar must stay visible. jsPanel's own
-    // `containment: 0` would force the entire panel rect inside the
-    // container, which makes tall panels useless once their body has more
-    // rows than fit between header and footer. With `containment: false`
-    // jsPanel does no clamping and we apply our own in `drag` (per-frame
-    // while the user drags) so the body can extend below the footer.
-    // Resize gets the same treatment so a user can grow a panel past the
-    // bottom too.
+    // No containment and no per-frame drag clamp: panels drag (and resize)
+    // freely to any position, including off-screen. `containment: false`
+    // disables jsPanel's own boundary box; we deliberately don't re-clamp in
+    // a `drag` handler. The pan/zoom canvas (touch pan / desktop right-drag)
+    // is the way to bring a stray panel back into view.
     dragit: {
       containment: false,
-      drag: (panel: HTMLElement) => clampTitlebarInside(panel, container),
       stop: () => saveGeometry(t.id, ctx),
     },
     resizeit: { containment: false, stop: () => saveGeometry(t.id, ctx) },
@@ -292,7 +247,8 @@ function openPanel(t: Table, ctx: AppContext): void {
       panel.setHeaderTitle(`${lastName} (${count})`);
     }
   };
-  void ctx.store.rows(t.id)
+  void ctx.store
+    .rows(t.id)
     .find()
     .then((rows) => updateTitle(rows.length));
   unsub = ctx.store.rows(t.id).subscribe((rows) => updateTitle(rows.length));

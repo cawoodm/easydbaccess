@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>easyDBAccess v0.0.30</title>
+    <title>easyDBAccess v0.0.31</title>
     <style>
       html,
       body {
@@ -15,8 +15,10 @@
       /*
        * Light-DOM container that jsPanels mount into. Fixed between the
        * app-shell's header and footer (their heights are pinned by their
-       * own CSS: ~48px each). Panels are constrained to this region by
-       * jsPanel's dragit.containment, so they can never overlap the chrome.
+       * own CSS: ~48px each), with overflow hidden. Panels drag freely with
+       * no containment — they may extend past this region or off-screen; the
+       * pan/zoom canvas (touch pan / desktop right-drag) brings them back.
+       * The chrome keeps a higher z-index so panels never cover it.
        */
       #easydb-panels {
         position: fixed;
