@@ -57,8 +57,8 @@ const PREDEFINED: PredefinedSource[] = [
     kind: 'datasette',
   },
   {
-    label: 'Datasette — global power plants',
-    url: 'https://global-power-plants.datasettes.com/global-power-plants/global-power-plants',
+    label: 'Datasette — datasette.io (whole instance, pick database & tables)',
+    url: 'https://datasette.io',
     kind: 'datasette',
   },
 ];
@@ -105,7 +105,10 @@ async function openImport(api: HostApi): Promise<void> {
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const text = await res.text();
       await importJsonText(api, text, filenameFromUrl(url));
-      api.ui.dialogs.toast(`Imported ${filenameFromUrl(url)}.`, { kind: 'success', title: 'Import' });
+      api.ui.dialogs.toast(`Imported ${filenameFromUrl(url)}.`, {
+        kind: 'success',
+        title: 'Import',
+      });
     }
   } catch (err) {
     api.ui.dialogs.toast(`Could not import ${url}: ${(err as Error).message}`, {
@@ -299,7 +302,9 @@ export class ImportDialog extends LitElement {
   }
 
   /** Open the dialog. Resolves with the chosen URL + kind, or null on cancel. */
-  open(opts?: { listDatabases?: (url: string) => Promise<string[]> }): Promise<ImportChoice | null> {
+  open(opts?: {
+    listDatabases?: (url: string) => Promise<string[]>;
+  }): Promise<ImportChoice | null> {
     this.url = '';
     this.kind = 'auto';
     this.presetIdx = -1;
@@ -376,7 +381,8 @@ export class ImportDialog extends LitElement {
                     — all databases (choose tables next) —
                   </option>
                   ${this.dbList.map(
-                    (d) => html`<option value=${d} ?selected=${d === this.selectedDb}>${d}</option>`,
+                    (d) =>
+                      html`<option value=${d} ?selected=${d === this.selectedDb}>${d}</option>`,
                   )}
                 `
               : html`<option value="">— not loaded —</option>`}
@@ -412,7 +418,10 @@ export class ImportDialog extends LitElement {
           <div class="dialog-body">
             <label>
               Sample source
-              <select .value=${String(this.presetIdx)} @change=${(e: Event) => this.onPresetChange(e)}>
+              <select
+                .value=${String(this.presetIdx)}
+                @change=${(e: Event) => this.onPresetChange(e)}
+              >
                 <option value="-1" ?selected=${this.presetIdx === -1}>— choose a sample —</option>
                 ${PREDEFINED.map(
                   (p, i) =>
@@ -462,8 +471,8 @@ export class ImportDialog extends LitElement {
             <p class="hint">
               Paste any URL or pick a sample above. For a Datasette instance root, click
               <em>List databases</em> to pick one first. Multi-table sources — a JSON dump with
-              several tables, or a Datasette database/instance URL — let you choose which tables
-              to import. Datasette tables import a read-only snapshot (capped at 10,000 rows each).
+              several tables, or a Datasette database/instance URL — let you choose which tables to
+              import. Datasette tables import a read-only snapshot (capped at 10,000 rows each).
             </p>
           </div>
         </form>

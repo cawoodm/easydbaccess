@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>easyDBAccess v0.0.32</title>
+    <title>easyDBAccess v0.0.33</title>
     <style>
       html,
       body {
@@ -44,10 +44,14 @@
         pointer-events: auto;
       }
       /* Make sure the minimized dock sits at the bottom of the container
-         (just above the footer) regardless of jsPanel's default. */
+         (just above the footer) regardless of jsPanel's default. Its z-index
+         is pinned well below jsPanel's panel base (ziBase = 100) so the dock
+         of minimized tables never covers the active (normalized) table —
+         active windows always float above it. */
       #easydb-panels-viewport > .jsPanel-minimized-container {
         bottom: 0;
         left: 0;
+        z-index: 10 !important;
       }
       /* On touch devices the overlay itself becomes pointer-interactive so it
          can catch pan/zoom gestures on the empty canvas background. On desktop

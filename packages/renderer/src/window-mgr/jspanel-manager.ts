@@ -137,9 +137,34 @@ function sanitizeGeometry(g: WindowGeometry | undefined): WindowGeometry | null 
 }
 
 function openPanel(t: Table, ctx: AppContext): void {
+  const panelId = `panel-${cssSafe(t.id)}`;
+
   const content = document.createElement('data-table');
   (content as HTMLElement & { tableId: string }).tableId = t.id;
   content.style.height = '100%';
+
+  // The live <data-table> holds every row in memory and keeps a store
+  // subscription open. When the panel is minimized we detach it entirely so
+  // that memory is released (its disconnectedCallback unsubscribes); a fresh
+  // one is mounted — and re-reads the store — when the panel is restored. So a
+  // minimized table costs (almost) nothing until the user brings it back.
+  let contentEl: HTMLElement | null = content;
+  const unmountContent = (): void => {
+    contentEl?.remove();
+    contentEl = null;
+  };
+  const mountContent = (): void => {
+    if (contentEl) return;
+    const host = document
+      .getElementById(panelId)
+      ?.querySelector('.jsPanel-content') as HTMLElement | null;
+    if (!host) return;
+    const el = document.createElement('data-table');
+    (el as HTMLElement & { tableId: string }).tableId = t.id;
+    el.style.height = '100%';
+    host.appendChild(el);
+    contentEl = el;
+  };
 
   const search = document.createElement('panel-search');
   (search as HTMLElement & { tableId: string }).tableId = t.id;
@@ -149,7 +174,6 @@ function openPanel(t: Table, ctx: AppContext): void {
 
   const container = panelContainer();
   const g = sanitizeGeometry(t.windowGeometry);
-  const panelId = `panel-${cssSafe(t.id)}`;
 
   const position = g
     ? { my: 'left-top', at: 'left-top', offsetX: g.x, offsetY: g.y }
@@ -218,7 +242,15 @@ function openPanel(t: Table, ctx: AppContext): void {
       if (externallyClosed.delete(t.id)) return;
       await deleteTableCascade(t.id, ctx);
     },
-    onstatuschange: () => saveGeometry(t.id, ctx),
+    // Unload the data-table when minimized; remount it (fresh, re-reading the
+    // store) when the panel returns to a normal or maximized state. jsPanel
+    // reports the new status on the panel instance it passes here (there is no
+    // `data-status` attribute to read off the DOM).
+    onstatuschange: (p: Panel) => {
+      if (p.status === 'minimized') unmountContent();
+      else if (p.status === 'normalized' || p.status === 'maximized') mountContent();
+      void saveGeometry(t.id, ctx);
+    },
   }) as Panel;
 
   panels.set(t.id, panel);
@@ -280,21 +312,39 @@ function nextCascadePosition(): { my: string; at: string; offsetX: number; offse
 async function saveGeometry(tableId: string, ctx: AppContext): Promise<void> {
   const el = document.getElementById(`panel-${cssSafe(tableId)}`);
   if (!el) return;
-  const status = (el as HTMLElement & { dataset: DOMStringMap }).dataset.status ?? 'normalized';
+  // jsPanel keeps the status on the panel instance, not a DOM attribute.
+  const status = panels.get(tableId)?.status ?? 'normalized';
   try {
     const t = await ctx.store.tables.findOne(tableId);
-    const prevZ = t?.windowGeometry?.z ?? 0;
+    const prev = t?.windowGeometry;
+    const minimized = status === 'minimized';
+    const maximized = status === 'maximized';
+    let x = el.offsetLeft;
+    let y = el.offsetTop;
+    let w = el.offsetWidth;
+    let h = el.offsetHeight;
+    // While minimized jsPanel parks the panel at left:-9999; while maximized it
+    // fills the container. In neither state does the live rect describe the
+    // panel's normal geometry, so keep the last-stored rect instead. The
+    // sentinel guard also covers the rare first-ever save while minimized.
+    if ((minimized || maximized) && prev) {
+      x = prev.x;
+      y = prev.y;
+      w = prev.w;
+      h = prev.h;
+    }
+    if (x <= -9000) x = prev?.x ?? 40;
     const geom: WindowGeometry = {
-      x: el.offsetLeft,
-      y: el.offsetTop,
-      w: el.offsetWidth,
-      h: el.offsetHeight,
+      x,
+      y,
+      w,
+      h,
       // Preserve the front-order timestamp written by stampFrontOrder.
       // We can't read DOM z meaningfully — jsPanel renormalizes it on every
       // .front() so it's not a stable per-panel identity.
-      z: prevZ,
-      minimized: status === 'minimized',
-      maximized: status === 'maximized',
+      z: prev?.z ?? 0,
+      minimized,
+      maximized,
     };
     await ctx.store.tables.patch(tableId, {
       windowGeometry: geom,

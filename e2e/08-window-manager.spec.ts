@@ -73,6 +73,63 @@ test.describe('window manager', () => {
     expect(after).toContain('translate(120px, 80px)');
   });
 
+  test('minimizing a table unloads its data-table; restoring remounts it', async ({ page }) => {
+    const id = await createTable(page, 'Heavy', [{ field: 'x' }]);
+    await waitForPanel(page, id);
+    await addRow(page, id, { x: 'a' });
+
+    const domId = panelDomId(id);
+    const content = page.locator(`#${domId} .jsPanel-content data-table`);
+    await expect(content).toHaveCount(1);
+
+    // Minimize → the data-table is detached (its subscription torn down and
+    // rows released from memory).
+    await page.evaluate(
+      (d) => (document.getElementById(d) as HTMLElement & { minimize(): void }).minimize(),
+      domId,
+    );
+    await expect(content).toHaveCount(0);
+
+    // Restore → a fresh data-table remounts and re-reads the store.
+    await page.evaluate(
+      (d) => (document.getElementById(d) as HTMLElement & { normalize(): void }).normalize(),
+      domId,
+    );
+    await expect(content).toHaveCount(1);
+    await expect(
+      page.locator(`#${domId} .jsPanel-content data-table tbody tr:not(.spacer)`),
+    ).toHaveCount(1);
+  });
+
+  test('minimized dock stays below the active table window', async ({ page }) => {
+    const idA = await createTable(page, 'Keep', [{ field: 'x' }]);
+    await waitForPanel(page, idA);
+    const idB = await createTable(page, 'Tuck', [{ field: 'y' }]);
+    await waitForPanel(page, idB);
+
+    // Minimize B → it docks at the bottom.
+    await page.evaluate(
+      (d) => (document.getElementById(d) as HTMLElement & { minimize(): void }).minimize(),
+      panelDomId(idB),
+    );
+
+    const z = await page.evaluate((activeDomId) => {
+      const dock = document.querySelector(
+        '#easydb-panels-viewport > .jsPanel-minimized-container',
+      ) as HTMLElement | null;
+      const active = document.getElementById(activeDomId) as HTMLElement;
+      return {
+        dockZ: dock ? Number(getComputedStyle(dock).zIndex) || 0 : -1,
+        activeZ: Number(getComputedStyle(active).zIndex) || 0,
+      };
+    }, panelDomId(idA));
+
+    // The dock is pinned low (10) and the active panel keeps jsPanel's base
+    // z-index (>= 100), so the dock never covers the active table.
+    expect(z.dockZ).toBe(10);
+    expect(z.activeZ).toBeGreaterThan(z.dockZ);
+  });
+
   test('column reorder drag adds visual-feedback classes mid-drag', async ({ page }) => {
     const id = await createTable(page, 'Reorder', [{ field: 'a' }, { field: 'b' }]);
     await waitForPanel(page, id);

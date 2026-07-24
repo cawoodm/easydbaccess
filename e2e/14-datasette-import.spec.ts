@@ -75,6 +75,29 @@ test.describe('datasette import — whole database', () => {
     });
   });
 
+  test('the sample dropdown offers the datasette.io instance root, not power plants', async ({
+    page,
+  }) => {
+    await page.getByTitle('Import data from a URL').click();
+    const dialog = page.locator('import-dialog dialog');
+    await expect(dialog).toBeVisible();
+
+    const presets = dialog.locator('select').first();
+    const labels = (await presets.locator('option').allTextContents()).map((s) => s.trim());
+    const joined = labels.join(' | ');
+    expect(joined).toContain('datasette.io');
+    expect(joined.toLowerCase()).not.toContain('power');
+
+    // Choosing it fills the URL box with the bare instance root.
+    const dsValue = await presets
+      .locator('option', { hasText: 'datasette.io' })
+      .getAttribute('value');
+    await presets.selectOption(dsValue!);
+    await expect(dialog.locator('input[type="text"]').first()).toHaveValue('https://datasette.io');
+
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+  });
+
   test('lists every table with sizes, then imports the chosen subset with typed columns', async ({
     page,
     workspaceId,
@@ -194,7 +217,10 @@ test.describe('datasette import — whole database', () => {
       const u = new URL(route.request().url());
       if (u.pathname === '/mini.json')
         return route.fulfill(
-          json({ ok: true, tables: [{ name: 'people', count: people.length, primary_keys: ['id'] }] }),
+          json({
+            ok: true,
+            tables: [{ name: 'people', count: people.length, primary_keys: ['id'] }],
+          }),
         );
       if (u.pathname === '/mini/people.json') {
         if ((u.searchParams.get('_extra') ?? '').includes('columns'))
@@ -208,7 +234,10 @@ test.describe('datasette import — whole database', () => {
     const importDialog = page.locator('import-dialog dialog');
     await importDialog.locator('input[type="text"]').fill('https://datasette.io/mini');
     await importDialog.getByRole('button', { name: 'Import' }).click();
-    await page.locator('table-select-dialog dialog').getByRole('button', { name: /^Import \(1\)$/ }).click();
+    await page
+      .locator('table-select-dialog dialog')
+      .getByRole('button', { name: /^Import \(1\)$/ })
+      .click();
 
     const tableId: string = await (async () => {
       await expect
@@ -244,7 +273,10 @@ test.describe('datasette import — whole database', () => {
     await expect(footer).toContainText('1 row');
 
     // Backend gains a row; Refresh re-fetches and replaces the local snapshot.
-    people = [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }];
+    people = [
+      { id: 1, name: 'Alice' },
+      { id: 2, name: 'Bob' },
+    ];
     await footer.getByRole('button', { name: 'Refresh' }).click();
     await expect(footer).toContainText('2 rows');
   });
@@ -279,7 +311,14 @@ test.describe('datasette import — instance-root database picker', () => {
           if (url.searchParams.get('_extra') === 'columns')
             return route.fulfill(json({ ok: true, columns: ['id', 'total'], rows: [] }));
           return route.fulfill(
-            json({ ok: true, next: null, rows: [{ id: 1, total: 10 }, { id: 2, total: 20 }] }),
+            json({
+              ok: true,
+              next: null,
+              rows: [
+                { id: 1, total: 10 },
+                { id: 2, total: 20 },
+              ],
+            }),
           );
         default:
           return route.fulfill({ status: 404, body: '{"ok":false}' });
@@ -304,11 +343,7 @@ test.describe('datasette import — instance-root database picker', () => {
     await dlg.getByRole('button', { name: 'List databases' }).click();
     const dbSelect = dlg.locator('.db-row select');
     // _memory is skipped; the two real databases are offered (plus the "all" row).
-    await expect(dbSelect.locator('option')).toHaveText([
-      /all databases/,
-      'sales',
-      'hr',
-    ]);
+    await expect(dbSelect.locator('option')).toHaveText([/all databases/, 'sales', 'hr']);
 
     // Pick "sales" and import.
     await dbSelect.selectOption('sales');

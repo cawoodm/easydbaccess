@@ -17,232 +17,232 @@ export class DataTable extends LitElement {
   static override styles = [
     materialIconStyles,
     css`
-    :host {
-      display: block;
-      overflow: auto;
-      max-height: 60vh;
-    }
-    /* Indeterminate loading bar, pinned to the top of the table's header while
+      :host {
+        display: block;
+        overflow: auto;
+        max-height: 60vh;
+      }
+      /* Indeterminate loading bar, pinned to the top of the table's header while
        a (large / remote) table's rows are still loading. Sticky + high z-index
        so it rides above the sticky column headers (th z-index 1–2). */
-    .load-bar {
-      position: sticky;
-      top: 0;
-      left: 0;
-      z-index: 3;
-      height: 3px;
-      background: #dbeafe;
-      overflow: hidden;
-    }
-    .load-bar-fill {
-      height: 100%;
-      width: 40%;
-      background: #2563eb;
-      border-radius: 2px;
-      animation: eda-load-bar 1.1s ease-in-out infinite;
-    }
-    @keyframes eda-load-bar {
-      0% {
-        transform: translateX(-120%);
+      .load-bar {
+        position: sticky;
+        top: 0;
+        left: 0;
+        z-index: 3;
+        height: 3px;
+        background: #dbeafe;
+        overflow: hidden;
       }
-      100% {
-        transform: translateX(320%);
+      .load-bar-fill {
+        height: 100%;
+        width: 40%;
+        background: #2563eb;
+        border-radius: 2px;
+        animation: eda-load-bar 1.1s ease-in-out infinite;
       }
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.875rem;
-    }
-    th,
-    td {
-      border: 1px solid #e5e7eb;
-      padding: 0.25rem 0.5rem;
-      text-align: left;
-      vertical-align: top;
-    }
-    th {
-      background: #f9fafb;
-      position: sticky;
-      top: 0;
-      z-index: 1;
-      cursor: pointer;
-      user-select: none;
-      white-space: nowrap;
-    }
-    th:hover {
-      background: #eef2f7;
-    }
-    th .sort-icon {
-      display: inline-block;
-      width: 0.75em;
-      color: #6b7280;
-      font-size: 0.75em;
-      margin-left: 0.25rem;
-    }
-    th.sorted .sort-icon {
-      color: #2563eb;
-    }
-    th[draggable='true'] {
-      cursor: grab;
-    }
-    /* 6px right-edge resize gutter; absolute so it doesn't push cell text. The
+      @keyframes eda-load-bar {
+        0% {
+          transform: translateX(-120%);
+        }
+        100% {
+          transform: translateX(320%);
+        }
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      th,
+      td {
+        border: 1px solid #e5e7eb;
+        padding: 0.25rem 0.5rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #f9fafb;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        cursor: pointer;
+        user-select: none;
+        white-space: nowrap;
+      }
+      th:hover {
+        background: #eef2f7;
+      }
+      th .sort-icon {
+        display: inline-block;
+        width: 0.75em;
+        color: #6b7280;
+        font-size: 0.75em;
+        margin-left: 0.25rem;
+      }
+      th.sorted .sort-icon {
+        color: #2563eb;
+      }
+      th[draggable='true'] {
+        cursor: grab;
+      }
+      /* 6px right-edge resize gutter; absolute so it doesn't push cell text. The
        th is already position: sticky (declared in the main th rule above),
        which is a containing block for absolute children. */
-    th .col-resize {
-      position: absolute;
-      top: 0;
-      right: 0;
-      width: 6px;
-      height: 100%;
-      cursor: col-resize;
-      user-select: none;
-      z-index: 2;
-    }
-    th .col-resize:hover {
-      background: #3b82f6;
-      opacity: 0.4;
-    }
-    th.drag-source {
-      opacity: 0.4;
-    }
-    th.drop-before {
-      box-shadow: inset 3px 0 0 #3b82f6;
-    }
-    th.drop-after {
-      box-shadow: inset -3px 0 0 #3b82f6;
-    }
-    tr.filter-row th {
-      cursor: default;
-      background: #f3f4f6;
-      padding: 0.15rem 0.3rem;
-      top: 1.85em; /* sits just below the header row */
-      z-index: 1;
-    }
-    tr.filter-row th:hover {
-      background: #f3f4f6;
-    }
-    th button.funnel {
-      background: transparent;
-      border: 0;
-      cursor: pointer;
-      color: #9ca3af;
-      margin-left: 0.2rem;
-      padding: 0;
-      vertical-align: middle;
-      line-height: 1;
-    }
-    th button.funnel.active {
-      color: #2563eb;
-    }
-    th button.funnel:hover {
-      color: #2563eb;
-    }
-    td input[type='text'] {
-      width: 100%;
-      box-sizing: border-box;
-      border: 0;
-      background: transparent;
-      font: inherit;
-      padding: 0;
-    }
-    td input:focus {
-      outline: 2px solid #3b82f6;
-      outline-offset: -2px;
-    }
-    td input[type='color'] {
-      width: 1.5rem;
-      height: 1.25rem;
-      padding: 0;
-      border: 1px solid #d1d5db;
-      background: transparent;
-      vertical-align: middle;
-      cursor: pointer;
-    }
-    td .color-cell {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-    }
-    td .color-cell input[type='text'] {
-      width: 6rem;
-      font-family: ui-monospace, SFMono-Regular, monospace;
-    }
-    td input[type='checkbox'] {
-      transform: translateY(1px);
-      cursor: pointer;
-    }
-    td .image-cell {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-    }
-    td .image-cell img {
-      max-height: 32px;
-      max-width: 64px;
-      border-radius: 0.15rem;
-      border: 1px solid #e5e7eb;
-    }
-    td .image-cell button {
-      padding: 0.1rem 0.4rem;
-      font-size: 0.75rem;
-    }
-    button {
-      font: inherit;
-      padding: 0.25rem 0.75rem;
-      border: 1px solid #d1d5db;
-      background: white;
-      border-radius: 0.25rem;
-      cursor: pointer;
-    }
-    button:hover {
-      background: #f3f4f6;
-    }
-    button.danger {
-      color: #9ca3af;
-      border: 0;
-      background: transparent;
-      padding: 0 0.25rem;
-      font-size: 1.1rem;
-      line-height: 1;
-      cursor: pointer;
-    }
-    button.danger:hover {
-      color: #ef4444;
-    }
-    th.t-number,
-    td.t-number {
-      text-align: right;
-    }
-    th.t-number .sort-icon {
-      margin-left: 0.25rem;
-    }
-    td.t-number input[type='text'] {
-      text-align: right;
-    }
-    /* Null / empty cell highlight — picks them out at a glance without
+      th .col-resize {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 6px;
+        height: 100%;
+        cursor: col-resize;
+        user-select: none;
+        z-index: 2;
+      }
+      th .col-resize:hover {
+        background: #3b82f6;
+        opacity: 0.4;
+      }
+      th.drag-source {
+        opacity: 0.4;
+      }
+      th.drop-before {
+        box-shadow: inset 3px 0 0 #3b82f6;
+      }
+      th.drop-after {
+        box-shadow: inset -3px 0 0 #3b82f6;
+      }
+      tr.filter-row th {
+        cursor: default;
+        background: #f3f4f6;
+        padding: 0.15rem 0.3rem;
+        top: 1.85em; /* sits just below the header row */
+        z-index: 1;
+      }
+      tr.filter-row th:hover {
+        background: #f3f4f6;
+      }
+      th button.funnel {
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        color: #9ca3af;
+        margin-left: 0.2rem;
+        padding: 0;
+        vertical-align: middle;
+        line-height: 1;
+      }
+      th button.funnel.active {
+        color: #2563eb;
+      }
+      th button.funnel:hover {
+        color: #2563eb;
+      }
+      td input[type='text'] {
+        width: 100%;
+        box-sizing: border-box;
+        border: 0;
+        background: transparent;
+        font: inherit;
+        padding: 0;
+      }
+      td input:focus {
+        outline: 2px solid #3b82f6;
+        outline-offset: -2px;
+      }
+      td input[type='color'] {
+        width: 1.5rem;
+        height: 1.25rem;
+        padding: 0;
+        border: 1px solid #d1d5db;
+        background: transparent;
+        vertical-align: middle;
+        cursor: pointer;
+      }
+      td .color-cell {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      td .color-cell input[type='text'] {
+        width: 6rem;
+        font-family: ui-monospace, SFMono-Regular, monospace;
+      }
+      td input[type='checkbox'] {
+        transform: translateY(1px);
+        cursor: pointer;
+      }
+      td .image-cell {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      td .image-cell img {
+        max-height: 32px;
+        max-width: 64px;
+        border-radius: 0.15rem;
+        border: 1px solid #e5e7eb;
+      }
+      td .image-cell button {
+        padding: 0.1rem 0.4rem;
+        font-size: 0.75rem;
+      }
+      button {
+        font: inherit;
+        padding: 0.25rem 0.75rem;
+        border: 1px solid #d1d5db;
+        background: white;
+        border-radius: 0.25rem;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #f3f4f6;
+      }
+      button.danger {
+        color: #9ca3af;
+        border: 0;
+        background: transparent;
+        padding: 0 0.25rem;
+        font-size: 1.1rem;
+        line-height: 1;
+        cursor: pointer;
+      }
+      button.danger:hover {
+        color: #ef4444;
+      }
+      th.t-number,
+      td.t-number {
+        text-align: right;
+      }
+      th.t-number .sort-icon {
+        margin-left: 0.25rem;
+      }
+      td.t-number input[type='text'] {
+        text-align: right;
+      }
+      /* Null / empty cell highlight — picks them out at a glance without
        shouting like full red. */
-    td.is-null {
-      background: #fef2f2;
-    }
-    td.is-null input[type='text'] {
-      background: transparent;
-    }
-    td input[type='date'],
-    td input[type='datetime-local'],
-    td input[type='text'],
-    td input[type='number'] {
-      font: inherit;
-      border: 0;
-      background: transparent;
-      padding: 0;
-      width: 100%;
-      box-sizing: border-box;
-    }
-    .mi.sm {
-      font-size: 1rem;
-    }
-  `,
+      td.is-null {
+        background: #fef2f2;
+      }
+      td.is-null input[type='text'] {
+        background: transparent;
+      }
+      td input[type='date'],
+      td input[type='datetime-local'],
+      td input[type='text'],
+      td input[type='number'] {
+        font: inherit;
+        border: 0;
+        background: transparent;
+        padding: 0;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .mi.sm {
+        font-size: 1rem;
+      }
+    `,
   ];
 
   @property({ type: String }) tableId = '';
@@ -318,9 +318,7 @@ export class DataTable extends LitElement {
     // Re-measure row height once we have content. Reading offsetHeight forces
     // layout, so only do it when we actually need a number (still using the
     // 28px default) — measure once, keep using the median.
-    const firstTr = this.shadowRoot?.querySelector('tbody tr:not(.spacer)') as
-      | HTMLElement
-      | null;
+    const firstTr = this.shadowRoot?.querySelector('tbody tr:not(.spacer)') as HTMLElement | null;
     if (firstTr && firstTr.offsetHeight > 0) {
       this.rowHeight = firstTr.offsetHeight;
     }
@@ -368,10 +366,7 @@ export class DataTable extends LitElement {
     // register during init/load(); we resnapshot on app:ready so anything
     // that registered late is picked up too.
     this.cellRenderers = new Map(ctx.registries.cellRenderers);
-    ctx.events.on(
-      'app:ready',
-      () => (this.cellRenderers = new Map(ctx.registries.cellRenderers)),
-    );
+    ctx.events.on('app:ready', () => (this.cellRenderers = new Map(ctx.registries.cellRenderers)));
     const rowColl = ctx.store.rows(this.tableId);
     this.unsubscribe = rowColl.subscribe((r) => (this.rows = r));
     // Show a loading bar in the table header, but only if the fetch is slow
@@ -401,7 +396,6 @@ export class DataTable extends LitElement {
     this.sortDir = table.sortColumn ? (table.sortAsc === false ? 'desc' : 'asc') : null;
     this.filters = { ...(table.filters ?? {}) };
   }
-
 
   private async setCell(row: Row, field: string, value: unknown) {
     const ctx = await getContext();
@@ -581,7 +575,18 @@ export class DataTable extends LitElement {
     const type: ColumnType = col?.type ?? 'string';
     const factor = this.sortDir === 'asc' ? 1 : -1;
     const arr = [...base];
-    arr.sort((a, b) => compareValues(a.data[field], b.data[field], type) * factor);
+    arr.sort((a, b) => {
+      const av = a.data[field];
+      const bv = b.data[field];
+      // Empty values (null/undefined/'') always sink to the bottom, in BOTH
+      // directions — the direction only orders present values, it must not
+      // float blanks to the top when sorting descending. So the empty test
+      // sits OUTSIDE the `* factor` flip.
+      const aEmpty = av == null || av === '';
+      const bEmpty = bv == null || bv === '';
+      if (aEmpty || bEmpty) return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
+      return compareValues(av, bv, type) * factor;
+    });
     return arr;
   }
 
@@ -603,7 +608,11 @@ export class DataTable extends LitElement {
     const values = [...counts.entries()]
       .map(([value, count]) => ({ value, count }))
       .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
-    const result = await popover.open(btn.getBoundingClientRect(), values, this.filters[field] ?? '');
+    const result = await popover.open(
+      btn.getBoundingClientRect(),
+      values,
+      this.filters[field] ?? '',
+    );
     if (result === null) return;
     if (typeof result === 'object' && 'clear' in result) {
       this.onFilterInput(field, '');
@@ -817,10 +826,7 @@ export class DataTable extends LitElement {
         : nothing}
       <table>
         <colgroup>
-          ${cols.map(
-            (c) =>
-              html`<col style=${c.width != null ? `width: ${c.width}px` : ''} />`,
-          )}
+          ${cols.map((c) => html`<col style=${c.width != null ? `width: ${c.width}px` : ''} />`)}
           <col style="width:2rem" />
         </colgroup>
         <thead>
@@ -867,8 +873,11 @@ export class DataTable extends LitElement {
                     title="Drag to resize column"
                     @click=${(e: Event) => e.stopPropagation()}
                     @pointerdown=${(e: PointerEvent) =>
-                      this.onResizeStart(e, c.field, (e.currentTarget as HTMLElement)
-                        .parentElement as HTMLElement)}
+                      this.onResizeStart(
+                        e,
+                        c.field,
+                        (e.currentTarget as HTMLElement).parentElement as HTMLElement,
+                      )}
                   ></span>
                 </th>
               `;
@@ -898,14 +907,14 @@ export class DataTable extends LitElement {
         </thead>
         <tbody>
           ${topPad > 0
-            ? html`<tr class="spacer" style=${`height:${topPad}px`}><td colspan=${cols.length + 1}></td></tr>`
+            ? html`<tr class="spacer" style=${`height:${topPad}px`}>
+                <td colspan=${cols.length + 1}></td>
+              </tr>`
             : ''}
           ${slice.map(
             (r) => html`
               <tr>
-                ${cols.map(
-                  (c) => html`<td class=${`t-${c.type}`}>${this.renderCell(r, c)}</td>`,
-                )}
+                ${cols.map((c) => html`<td class=${`t-${c.type}`}>${this.renderCell(r, c)}</td>`)}
                 <td>
                   <button class="danger" title="Delete row" @click=${() => this.deleteRow(r.id)}>
                     <span class="mi sm">delete</span>
@@ -915,7 +924,9 @@ export class DataTable extends LitElement {
             `,
           )}
           ${bottomPad > 0
-            ? html`<tr class="spacer" style=${`height:${bottomPad}px`}><td colspan=${cols.length + 1}></td></tr>`
+            ? html`<tr class="spacer" style=${`height:${bottomPad}px`}>
+                <td colspan=${cols.length + 1}></td>
+              </tr>`
             : ''}
         </tbody>
       </table>
@@ -986,14 +997,10 @@ function toDatetimeLocal(raw: unknown): string {
   return `${iso.slice(0, 10)}T${iso.slice(11, 16)}`;
 }
 
+// Compares two PRESENT (non-empty) values by column type. Empty handling is
+// the caller's job — `sortedRows` sinks blanks to the bottom regardless of
+// sort direction, before this runs.
 function compareValues(a: unknown, b: unknown, type: ColumnType): number {
-  // Always sort null/undefined/empty to the end.
-  const aEmpty = a == null || a === '';
-  const bEmpty = b == null || b === '';
-  if (aEmpty && bEmpty) return 0;
-  if (aEmpty) return 1;
-  if (bEmpty) return -1;
-
   switch (type) {
     case 'number': {
       const na = Number(a);

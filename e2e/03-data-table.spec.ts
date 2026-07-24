@@ -21,10 +21,7 @@ import {
 
 test.describe('data-table rendering', () => {
   test('per-column resize drag updates and persists width', async ({ page }) => {
-    const id = await createTable(page, 'Wide', [
-      { field: 'a' },
-      { field: 'b' },
-    ]);
+    const id = await createTable(page, 'Wide', [{ field: 'a' }, { field: 'b' }]);
     await waitForPanel(page, id);
     await addRow(page, id, { a: 'x', b: 'y' });
 
@@ -54,11 +51,42 @@ test.describe('data-table rendering', () => {
     await expect
       .poll(async () => {
         const t = await readTable(page, id);
-        return (
-          t?.columns.find((c: { field: string }) => c.field === 'a')?.width ?? 0
-        );
+        return t?.columns.find((c: { field: string }) => c.field === 'a')?.width ?? 0;
       })
       .toBeGreaterThan(startWidth + 80);
+  });
+
+  test('descending sort keeps empty values at the bottom', async ({ page }) => {
+    const id = await createTable(page, 'Scores', [
+      { field: 'name' },
+      { field: 'score', type: 'number' },
+    ]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      { name: 'Alice', score: 3 },
+      { name: 'Bob', score: null },
+      { name: 'Carol', score: 1 },
+      { name: 'Dave', score: 2 },
+    ]);
+
+    const dt = page.locator(`#${panelDomId(id)} data-table`);
+    await expect(dt.locator('tbody tr:not(.spacer)')).toHaveCount(4);
+
+    // Click the "score" header twice: none → asc → desc.
+    const scoreHeader = dt.locator('thead th', { hasText: 'score' }).locator('.sort-icon');
+    await scoreHeader.click();
+    await scoreHeader.click();
+
+    // Descending orders the present values 3,2,1 — and the empty score (Bob)
+    // stays at the BOTTOM rather than floating to the top.
+    const names = await dt.evaluate((el) =>
+      [
+        ...(el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelectorAll(
+          'tbody tr:not(.spacer)',
+        ),
+      ].map((tr) => tr.querySelector('input')?.value ?? null),
+    );
+    expect(names).toEqual(['Alice', 'Dave', 'Carol', 'Bob']);
   });
 
   test('column width persists across reload', async ({ page }) => {
@@ -86,9 +114,7 @@ test.describe('data-table rendering', () => {
     await expect
       .poll(async () => {
         const t = await readTable(page, id);
-        return (
-          t?.columns.find((c: { field: string }) => c.field === 'x')?.width ?? 0
-        );
+        return t?.columns.find((c: { field: string }) => c.field === 'x')?.width ?? 0;
       })
       .toBeGreaterThan(startWidth + 100);
 
@@ -99,7 +125,12 @@ test.describe('data-table rendering', () => {
     );
     await waitForPanel(page, id);
     const reloadedWidth =
-      (await page.locator(`#${panelDomId(id)} data-table th`).first().boundingBox())?.width ?? 0;
+      (
+        await page
+          .locator(`#${panelDomId(id)} data-table th`)
+          .first()
+          .boundingBox()
+      )?.width ?? 0;
     expect(reloadedWidth).toBeGreaterThan(startWidth + 100);
   });
 
@@ -117,9 +148,7 @@ test.describe('data-table rendering', () => {
     // Wait for the table to settle on a virtualized count (it polls in case
     // rendering catches up over a frame or two).
     await expect
-      .poll(async () =>
-        panel.locator('data-table tbody tr:not(.spacer)').count(),
-      )
+      .poll(async () => panel.locator('data-table tbody tr:not(.spacer)').count())
       .toBeLessThan(250);
     const rendered = await panel.locator('data-table tbody tr:not(.spacer)').count();
     expect(rendered).toBeGreaterThan(0);
@@ -133,10 +162,7 @@ test.describe('data-table rendering', () => {
   });
 
   test('null cells get the is-null highlight class', async ({ page }) => {
-    const id = await createTable(page, 'Sparse', [
-      { field: 'a' },
-      { field: 'b' },
-    ]);
+    const id = await createTable(page, 'Sparse', [{ field: 'a' }, { field: 'b' }]);
     await waitForPanel(page, id);
     await addRow(page, id, { a: 'hello', b: null });
 
@@ -212,9 +238,7 @@ test.describe('data-table rendering', () => {
     // hover state sometimes needs a frame to repaint.
     await deleteBtn.hover();
     await expect
-      .poll(async () =>
-        deleteBtn.evaluate((el) => getComputedStyle(el).color),
-      )
+      .poll(async () => deleteBtn.evaluate((el) => getComputedStyle(el).color))
       .toBe('rgb(239, 68, 68)'); // #ef4444
 
     // Click → row removed.
