@@ -58,6 +58,60 @@ test.describe('views', () => {
     await expect(vw.locator('input')).toHaveCount(0);
   });
 
+  test('an existing view instance can be renamed and re-mapped', async ({ page }) => {
+    const id = await createTable(page, 'Feed', [
+      { field: 'title' },
+      { field: 'url' },
+      { field: 'date' },
+      { field: 'description' },
+    ]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      {
+        title: 'Hello World',
+        url: 'https://example.com/1',
+        date: '2024-01-01',
+        description: 'First post',
+      },
+    ]);
+
+    const footer = page.locator(`#${panelDomId(id)} panel-footer`);
+    await footer.getByRole('button', { name: /Views/ }).click();
+    const dlg = page.locator('views-dialog dialog');
+    await expect(dlg).toBeVisible();
+
+    // Create an RSS view (auto-mapped: $TITLE → title).
+    await dlg
+      .locator('ul.list li', { hasText: 'RSS Feed' })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+
+    const vw = page.locator('view-window');
+    await expect(vw.locator('a', { hasText: 'Hello World' })).toBeVisible();
+
+    // Reopen the manager; the instance is listed with an Edit action.
+    await footer.getByRole('button', { name: /Views/ }).click();
+    await expect(dlg).toBeVisible();
+    const inst = dlg.locator('ul.list li', { hasText: 'RSS Feed — Feed' });
+    await inst.getByRole('button', { name: 'Edit' }).click();
+
+    // Rename it and re-map $TITLE from the title column to description.
+    await expect(dlg.locator('.dialog-header h2')).toContainText('Edit view');
+    await dlg.locator('input[type="text"]').fill('My Renamed Feed');
+    await dlg
+      .locator('.map-row', { hasText: '$TITLE' })
+      .locator('select')
+      .selectOption({ label: 'description' });
+    await dlg.getByRole('button', { name: 'Save' }).click();
+
+    // Back in the list, the new name shows; the open window reloaded so the
+    // card's link now renders the description value ("First post").
+    await expect(dlg.locator('ul.list li', { hasText: 'My Renamed Feed' })).toBeVisible();
+    await expect(vw.locator('a', { hasText: 'First post' })).toBeVisible();
+    await expect(vw.locator('a', { hasText: 'Hello World' })).toHaveCount(0);
+  });
+
   test('a template with blank row HTML falls back to a read-only columns table', async ({
     page,
   }) => {

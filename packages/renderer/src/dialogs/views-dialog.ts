@@ -34,6 +34,7 @@ interface TemplateDraft {
 }
 
 interface InstanceDraft {
+  id: string | null; // null ⇒ new instance
   templateId: string;
   templateName: string;
   name: string;
@@ -221,6 +222,26 @@ export class ViewsDialog extends LitElement {
     this.close();
   }
 
+  /** Edit an existing instance: rename it and/or re-map its template tokens. */
+  private async editInstance(inst: ViewInstance): Promise<void> {
+    const ctx = await getContext();
+    const tpl = await ctx.store.viewTemplates.findOne(inst.templateId);
+    // Recover the template's live tokens; fall back to whatever the instance
+    // already mapped if the template is gone.
+    const tokens = tpl
+      ? extractTokens(tpl.headerHtml, tpl.rowHtml, tpl.footerHtml)
+      : Object.keys(inst.mapping);
+    this.iDraft = {
+      id: inst.id,
+      templateId: inst.templateId,
+      templateName: tpl?.name ?? 'template',
+      name: inst.name,
+      tokens,
+      mapping: { ...inst.mapping },
+    };
+    this.mode = 'instance';
+  }
+
   private async deleteInstance(id: string): Promise<void> {
     const ctx = await getContext();
     await ctx.store.viewInstances.remove(id);
@@ -292,6 +313,7 @@ export class ViewsDialog extends LitElement {
     const mapping: Record<string, string> = {};
     for (const tok of tokens) mapping[tok] = this.autoMap(tok);
     this.iDraft = {
+      id: null,
       templateId: t.id,
       templateName: t.name,
       name: `${t.name} — ${this.table?.name ?? 'table'}`,
@@ -310,11 +332,27 @@ export class ViewsDialog extends LitElement {
     return hit?.field ?? '';
   }
 
-  private async createInstance(): Promise<void> {
+  private async saveInstance(): Promise<void> {
     if (!this.iDraft || !this.table) return;
     const d = this.iDraft;
     if (!d.name.trim()) return;
     const ctx = await getContext();
+    // Editing an existing instance: only the name and token→column mapping
+    // change. The snapshotted sort / filter / visible columns are preserved.
+    if (d.id) {
+      await ctx.store.viewInstances.patch(d.id, {
+        name: d.name.trim(),
+        mapping: { ...d.mapping },
+        updatedAt: Date.now(),
+      });
+      // Reflect the change in an already-open window.
+      document.dispatchEvent(
+        new CustomEvent('easydb:reload-view', { detail: { instanceId: d.id } }),
+      );
+      await this.refresh();
+      this.mode = 'list';
+      return;
+    }
     // Snapshot the table's CURRENT sort / filter / visible columns.
     const visibleColumns = this.columns.filter((c) => !c.hidden).map((c) => c.field);
     const inst: ViewInstance = {
@@ -346,6 +384,7 @@ export class ViewsDialog extends LitElement {
               html`<li>
                 <span class="name">${v.name}</span>
                 <button class="mini" @click=${() => this.openInstance(v.id)}>Open</button>
+                <button class="mini" @click=${() => void this.editInstance(v)}>Edit</button>
                 <button class="mini danger" @click=${() => void this.deleteInstance(v.id)}>
                   Delete
                 </button>
@@ -449,7 +488,12 @@ export class ViewsDialog extends LitElement {
                 </div>`,
             )}
       </div>
-      <p class="hint">The view snapshots this table's current sort, filters and visible columns.</p>
+      <p class="hint">
+        ${d.id
+          ? html`Editing name and column mapping. The snapshotted sort, filters and visible columns
+            are kept.`
+          : html`The view snapshots this table's current sort, filters and visible columns.`}
+      </p>
     `;
   }
 
@@ -460,7 +504,7 @@ export class ViewsDialog extends LitElement {
           ? 'Edit template'
           : 'New template'
         : this.mode === 'instance'
-          ? `New view — ${this.iDraft?.templateName ?? ''}`
+          ? `${this.iDraft?.id ? 'Edit' : 'New'} view — ${this.iDraft?.templateName ?? ''}`
           : 'Views';
 
     const actions =
@@ -475,8 +519,8 @@ export class ViewsDialog extends LitElement {
           ? html`<button type="button" class="ghost" @click=${() => (this.mode = 'list')}>
                 Back
               </button>
-              <button type="button" class="primary" @click=${() => void this.createInstance()}>
-                Create view
+              <button type="button" class="primary" @click=${() => void this.saveInstance()}>
+                ${this.iDraft?.id ? 'Save' : 'Create view'}
               </button>`
           : html`<button type="button" class="ghost" @click=${this.close}>Close</button>`;
 

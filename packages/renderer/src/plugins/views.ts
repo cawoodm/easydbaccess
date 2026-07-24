@@ -39,7 +39,7 @@ const RSS_ROW = [
   '<div style="border:1px solid #e5e7eb;border-radius:12px;padding:12px 16px;background:#ffffff;box-shadow:0 1px 2px rgba(0,0,0,0.06);">',
   '<a href="$URL" target="_blank" rel="noopener noreferrer" style="font-size:1.05rem;font-weight:600;color:#2563eb;text-decoration:none;">$TITLE</a>',
   '<div style="color:#6b7280;font-size:0.78rem;margin:4px 0;">$DATE</div>',
-  '<div style="color:#374151;font-size:0.9rem;line-height:1.45;">$DESCRIPTION</div>',
+  '<div style="color:#374151;font-size:0.9rem;line-height:1.45;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:20;line-clamp:20;overflow:hidden;">$DESCRIPTION</div>',
   '</div>',
 ].join('');
 const RSS_FOOTER = '</div>';
@@ -61,6 +61,16 @@ export function init(api: HostApi): void {
   document.addEventListener('easydb:close-view', (e) => {
     const id = (e as CustomEvent<{ instanceId: string }>).detail?.instanceId;
     if (id) closeViewWindow(id);
+  });
+  // Re-open an already-open view so edits (rename / re-mapping) take effect
+  // live. A view that isn't open is left closed — editing shouldn't pop a
+  // window the user had shut.
+  document.addEventListener('easydb:reload-view', (e) => {
+    const id = (e as CustomEvent<{ instanceId: string }>).detail?.instanceId;
+    if (id && openPanels.has(id)) {
+      closeViewWindow(id);
+      void openViewWindow(api, id);
+    }
   });
 }
 
