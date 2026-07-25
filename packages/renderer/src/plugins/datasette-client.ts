@@ -477,6 +477,134 @@ export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promi
   return { columns, pks, count, typed, raw };
 }
 
+// -- Datasette metadata (docs.datasette.io/en/stable/metadata.html) -----------
+
+/**
+ * A table's resolved Datasette metadata, normalized to eda-friendly camelCase.
+ * Everything is optional — instances may ship no metadata at all. `columns` and
+ * `units` are field→text maps; `sortableColumns` is null when explicitly none,
+ * undefined when unrestricted (all sortable).
+ */
+export interface DatasetteTableMetadata {
+  sort?: string;
+  sortDesc?: string;
+  size?: number;
+  sortableColumns?: string[] | null;
+  labelColumn?: string;
+  hidden?: boolean;
+  description?: string;
+  descriptionHtml?: string;
+  source?: string;
+  sourceUrl?: string;
+  license?: string;
+  licenseUrl?: string;
+  about?: string;
+  aboutUrl?: string;
+  columns: Record<string, string>;
+  units: Record<string, string>;
+}
+
+/**
+ * Extract a table's metadata from an instance `/-/metadata.json` document,
+ * layering top-level source/license/about defaults under the per-table block
+ * (Datasette applies attribution top-down). Pure — no I/O.
+ */
+export function extractTableMetadata(
+  metaJson: any,
+  db: string | null,
+  table: string | null,
+): DatasetteTableMetadata {
+  const root = metaJson && typeof metaJson === 'object' ? metaJson : {};
+  const t =
+    (db && table && root.databases?.[db]?.tables?.[table]) ||
+    (db && table && root.databases?.[db]?.tables?.[table.toLowerCase()]) ||
+    {};
+  // Attribution falls back to the database and then top level.
+  const dbBlock = (db && root.databases?.[db]) || {};
+  const attr = (key: string): string | undefined => t[key] ?? dbBlock[key] ?? root[key];
+
+  const out: DatasetteTableMetadata = { columns: {}, units: {} };
+  if (typeof t.sort === 'string') out.sort = t.sort;
+  if (typeof t.sort_desc === 'string') out.sortDesc = t.sort_desc;
+  if (typeof t.size === 'number') out.size = t.size;
+  if (Array.isArray(t.sortable_columns)) out.sortableColumns = t.sortable_columns.slice();
+  if (typeof t.label_column === 'string') out.labelColumn = t.label_column;
+  if (t.hidden === true) out.hidden = true;
+  if (typeof t.description === 'string') out.description = t.description;
+  if (typeof t.description_html === 'string') out.descriptionHtml = t.description_html;
+  const src = attr('source');
+  const srcUrl = attr('source_url');
+  const lic = attr('license');
+  const licUrl = attr('license_url');
+  const abt = attr('about');
+  const abtUrl = attr('about_url');
+  if (typeof src === 'string') out.source = src;
+  if (typeof srcUrl === 'string') out.sourceUrl = srcUrl;
+  if (typeof lic === 'string') out.license = lic;
+  if (typeof licUrl === 'string') out.licenseUrl = licUrl;
+  if (typeof abt === 'string') out.about = abt;
+  if (typeof abtUrl === 'string') out.aboutUrl = abtUrl;
+  if (t.columns && typeof t.columns === 'object') {
+    for (const [k, v] of Object.entries(t.columns)) if (typeof v === 'string') out.columns[k] = v;
+  }
+  if (t.units && typeof t.units === 'object') {
+    for (const [k, v] of Object.entries(t.units)) if (typeof v === 'string') out.units[k] = v;
+  }
+  return out;
+}
+
+/** Per-instance metadata cache — `/-/metadata.json` is one blob for all tables. */
+const instanceMetaCache = new Map<string, Promise<any>>();
+
+/** Fetch (and cache) an instance's `/-/metadata.json`; `{}` if unavailable. */
+export async function fetchInstanceMetadata(fetchFn: FetchFn, base: string): Promise<any> {
+  let p = instanceMetaCache.get(base);
+  if (!p) {
+    // No `_`-prefixed params, so this is safe against the datasette.io Cloudflare
+    // WAF; a missing/blocked metadata endpoint degrades to no metadata.
+    p = fetchJson(fetchFn, `${base}/-/metadata.json`).catch(() => ({}));
+    instanceMetaCache.set(base, p);
+  }
+  return p;
+}
+
+/** Fetch a table's resolved Datasette metadata (see {@link extractTableMetadata}). */
+export async function fetchTableMetadata(
+  fetchFn: FetchFn,
+  ref: DatasetteRef,
+): Promise<DatasetteTableMetadata> {
+  const json = await fetchInstanceMetadata(fetchFn, ref.base);
+  return extractTableMetadata(json, ref.db, ref.table);
+}
+
+/** Table fields a metadata block contributes (merged into the tables.patch). */
+export interface MetadataTablePatch {
+  sortColumn?: string;
+  sortAsc?: boolean;
+}
+
+/**
+ * Apply a table's Datasette metadata onto its columns + a table patch. Grows as
+ * metadata features land; today it seeds the default sort (`sort`/`sort_desc`),
+ * only when the named column actually exists. The grid sorts by column type, so
+ * a default sort on a numeric column sorts numerically.
+ */
+export function applyTableMetadata(
+  meta: DatasetteTableMetadata,
+  columns: ColumnSpec[],
+): { columns: ColumnSpec[]; patch: MetadataTablePatch } {
+  const fields = new Set(columns.map((c) => c.field));
+  const patch: MetadataTablePatch = {};
+  if (meta.sort && fields.has(meta.sort)) {
+    patch.sortColumn = meta.sort;
+    patch.sortAsc = true;
+  } else if (meta.sortDesc && fields.has(meta.sortDesc)) {
+    patch.sortColumn = meta.sortDesc;
+    patch.sortAsc = false;
+  }
+  return { columns, patch };
+}
+
 /**
  * Upgrade column types from sampled rows when the schema came back as bare
  * names (no `column_details`, so every type defaulted to 'string'). Keeps the

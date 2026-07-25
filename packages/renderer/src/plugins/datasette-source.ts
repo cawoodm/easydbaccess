@@ -16,6 +16,8 @@ import {
   fetchTableMeta,
   fetchRows,
   fetchPrimaryKeys,
+  fetchTableMetadata,
+  applyTableMetadata,
   inferColumnsFromRows,
   refineColumnTypes,
   testConnection,
@@ -23,6 +25,7 @@ import {
   DatasetteError,
   type DatasetteRef,
   type TableRef,
+  type MetadataTablePatch,
 } from './datasette-client.js';
 
 type FetchFn = (url: string, opts?: unknown) => Promise<Response>;
@@ -395,9 +398,22 @@ async function fillImportTable(
           ? metaColumns
           : refineColumnTypes(metaColumns, rows);
 
+    // Apply the table's Datasette metadata (default sort, …) onto columns +
+    // table fields. Best-effort: no metadata endpoint ⇒ no-op.
+    let cols = columns;
+    let metaPatch: MetadataTablePatch = {};
+    try {
+      const md = await fetchTableMetadata(fetchFn, ref);
+      const applied = applyTableMetadata(md, cols);
+      cols = applied.columns;
+      metaPatch = applied.patch;
+    } catch {
+      /* metadata is optional */
+    }
+
     const now = Date.now();
     api.events.emit('import:before', { source: 'datasette', tableId });
-    await api.store.tables.patch(tableId, { columns, updatedAt: now });
+    await api.store.tables.patch(tableId, { columns: cols, ...metaPatch, updatedAt: now });
 
     const rowColl = api.store.rows(tableId);
     if (overwrite) {
@@ -650,10 +666,19 @@ async function refineLiveColumns(
     const t = await api.store.tables.findOne(tableId);
     if (!t) return;
     const pks = ((t.source?.config as { pks?: string[] } | undefined)?.pks ?? []) as string[];
-    const columns = baseColumns.map((col) =>
+    let columns = baseColumns.map((col) =>
       pks.includes(col.field) ? { ...col, unique: true, notnull: true } : col,
     );
-    await api.store.tables.patch(tableId, { columns, updatedAt: Date.now() });
+    let metaPatch: MetadataTablePatch = {};
+    try {
+      const md = await fetchTableMetadata(fetchFn, ref);
+      const applied = applyTableMetadata(md, columns);
+      columns = applied.columns;
+      metaPatch = applied.patch;
+    } catch {
+      /* metadata is optional */
+    }
+    await api.store.tables.patch(tableId, { columns, ...metaPatch, updatedAt: Date.now() });
   } catch {
     /* leave the placeholder; the grid's row fetch reports real failures */
   }

@@ -10,6 +10,8 @@ import {
   refineColumnTypes,
   mapColumns,
   fetchTableMeta,
+  extractTableMetadata,
+  applyTableMetadata,
   fetchTablesForDb,
   DatasetteError,
   insertRows,
@@ -664,5 +666,67 @@ describe('withAuthFetch', () => {
       opts?: any,
     ) => Promise<Response>;
     expect(withAuthFetch(base, undefined)).toBe(base);
+  });
+});
+
+describe('extractTableMetadata + applyTableMetadata (default sort)', () => {
+  const meta = {
+    source: 'Top source',
+    databases: {
+      db: {
+        license: 'ODbL',
+        tables: {
+          t: {
+            sort_desc: 'created',
+            size: 25,
+            sortable_columns: ['created', 'name'],
+            label_column: 'name',
+            hidden: true,
+            description: 'A table',
+            columns: { name: 'The name', created: 'When made' },
+            units: { size: 'bytes' },
+          },
+        },
+      },
+    },
+  };
+
+  it('extracts per-table + inherited attribution, camelCased', () => {
+    const m = extractTableMetadata(meta, 'db', 't');
+    expect(m.sortDesc).toBe('created');
+    expect(m.sort).toBeUndefined();
+    expect(m.size).toBe(25);
+    expect(m.sortableColumns).toEqual(['created', 'name']);
+    expect(m.labelColumn).toBe('name');
+    expect(m.hidden).toBe(true);
+    expect(m.description).toBe('A table');
+    expect(m.columns.name).toBe('The name');
+    expect(m.units.size).toBe('bytes');
+    expect(m.source).toBe('Top source'); // inherited from the top level
+    expect(m.license).toBe('ODbL'); // inherited from the database
+  });
+
+  it('is a safe no-op for a missing / empty metadata document', () => {
+    const m = extractTableMetadata({}, 'db', 't');
+    expect(m.columns).toEqual({});
+    expect(m.units).toEqual({});
+    expect(m.sort).toBeUndefined();
+  });
+
+  it('applies sort_desc as a descending default sort when the column exists', () => {
+    const cols = [
+      { field: 'created', label: 'Created', type: 'number' as const },
+      { field: 'name', label: 'Name', type: 'string' as const },
+    ];
+    const { patch } = applyTableMetadata(extractTableMetadata(meta, 'db', 't'), cols);
+    expect(patch.sortColumn).toBe('created');
+    expect(patch.sortAsc).toBe(false);
+  });
+
+  it('ignores a default sort naming a column that is not present', () => {
+    const { patch } = applyTableMetadata({ columns: {}, units: {}, sort: 'ghost' }, [
+      { field: 'name', label: 'Name', type: 'string' as const },
+    ]);
+    expect(patch.sortColumn).toBeUndefined();
   });
 });
