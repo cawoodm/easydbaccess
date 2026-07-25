@@ -250,6 +250,9 @@ interface OneResult {
   truncated: boolean;
   pages: number;
   count: number | null;
+  /** Set when paging stopped early on a failure (e.g. rate limiting) but some
+   * rows were still salvaged — the table imported partially, not fully. */
+  error?: string | undefined;
 }
 
 /** First "name", "name (2)", "name (3)"… not already used by a table in the set. */
@@ -308,19 +311,31 @@ export async function importDatasette(
   let imported = 0;
   let totalRows = 0;
   const capped: string[] = [];
+  const partial: string[] = [];
   const failed: string[] = [];
   for (const p of plans) {
     try {
       const r = await fillImportTable(api, p.tableId, p.ref, p.overwrite);
       imported += 1;
       totalRows += r.rowCount;
-      if (r.hasMore || r.truncated) capped.push(`${p.ref.db}/${p.ref.table}`);
+      // A partial import (paging stopped on a failure, e.g. rate limiting) still
+      // landed its salvaged rows — report it as partial, not merely "capped".
+      if (r.error) partial.push(`${p.ref.db}/${p.ref.table} (${r.error})`);
+      else if (r.hasMore || r.truncated) capped.push(`${p.ref.db}/${p.ref.table}`);
     } catch (err) {
       failed.push(`${p.ref.db}/${p.ref.table}: ${(err as Error)?.message ?? String(err)}`);
     }
   }
 
-  summariseBatch(api, { imported, skipped, totalRows, capped, failed, requested: chosen.length });
+  summariseBatch(api, {
+    imported,
+    skipped,
+    totalRows,
+    capped,
+    partial,
+    failed,
+    requested: chosen.length,
+  });
 }
 
 /**
@@ -408,7 +423,7 @@ async function fillImportTable(
     // progress bar; without it the bar stays indeterminate. Cap the denominator
     // at the import limit so the fraction reflects what we'll actually pull.
     const target = count && count > 0 ? Math.min(count, SETTINGS.maxImportRows) : 0;
-    const { rows, truncated, hasMore, pages } = await fetchRows(fetchFn, ref, {
+    const { rows, truncated, hasMore, pages, error } = await fetchRows(fetchFn, ref, {
       maxRows: SETTINGS.maxImportRows,
       pageSize: SETTINGS.pageSize,
       onProgress: (n) => {
@@ -453,7 +468,7 @@ async function fillImportTable(
     await rowColl.bulkInsert(docs);
 
     api.events.emit('import:after', { source: 'datasette', tableId, rowCount: rows.length });
-    return { name, rowCount: rows.length, hasMore, truncated, pages, count };
+    return { name, rowCount: rows.length, hasMore, truncated, pages, count, error };
   } finally {
     setTableLoading(tableId, false);
   }
@@ -466,6 +481,7 @@ function summariseBatch(
     skipped: number;
     totalRows: number;
     capped: string[];
+    partial: string[];
     failed: string[];
     requested: number;
   },
@@ -486,6 +502,17 @@ function summariseBatch(
     api.ui.dialogs.toast(
       `Imported ${tables} (${rows});${skippedNote} ${s.failed.length} failed:\n${s.failed.join('\n')}`,
       { kind: 'error', title: 'Datasette import' },
+    );
+    return;
+  }
+  // Some tables loaded only partially (paging stopped early — e.g. rate
+  // limiting). The rows that arrived ARE imported and shown; warn about the rest.
+  if (s.partial.length > 0) {
+    api.ui.dialogs.toast(
+      `Imported ${tables} (${rows}).${skippedNote} ${s.partial.length} loaded partially ` +
+        `(stopped early — the server may have rate-limited us): ${s.partial.join(', ')}. ` +
+        `Use Refresh to fetch the rest.`,
+      { kind: 'warning', title: 'Datasette import' },
     );
     return;
   }
@@ -747,7 +774,7 @@ async function refreshDatasetteTable(api: HostApi, tableId: string): Promise<voi
 async function refreshSnapshot(api: HostApi, t: Table): Promise<void> {
   const ref = parseDatasetteUrl(t.origin!.url);
   const fetchFn = (u: string) => api.backend.fetch(u);
-  const { rows, hasMore, truncated } = await fetchRows(fetchFn, ref, {
+  const { rows, hasMore, truncated, error } = await fetchRows(fetchFn, ref, {
     maxRows: SETTINGS.maxImportRows,
     pageSize: SETTINGS.pageSize,
   });
@@ -759,9 +786,15 @@ async function refreshSnapshot(api: HostApi, t: Table): Promise<void> {
     rows.map((data) => ({ id: cryptoUUID(), tableId: t.id, data, updatedAt: now })),
   );
   await api.store.tables.patch(t.id, { updatedAt: now });
-  const capped = hasMore || truncated ? ` (capped at ${SETTINGS.maxImportRows})` : '';
-  api.ui.dialogs.toast(`Refreshed ${rows.length} rows from ${ref.db}/${ref.table}${capped}.`, {
-    kind: hasMore || truncated ? 'warning' : 'success',
+  // A partial refresh (paging stopped early — e.g. rate limiting) still replaced
+  // the rows with what loaded; note it rather than pretending it was complete.
+  const note = error
+    ? ` — partial (${error})`
+    : hasMore || truncated
+      ? ` (capped at ${SETTINGS.maxImportRows})`
+      : '';
+  api.ui.dialogs.toast(`Refreshed ${rows.length} rows from ${ref.db}/${ref.table}${note}.`, {
+    kind: error || hasMore || truncated ? 'warning' : 'success',
     title: 'Refresh',
   });
 }

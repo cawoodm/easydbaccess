@@ -251,6 +251,42 @@ describe('fetchRows follows the `next` token', () => {
     expect(out.pages).toBe(1);
     expect(out.hasMore).toBe(true); // the importer will show the honest "capped" toast
   });
+
+  it('keeps rows fetched before a mid-paging failure (rate limiting) instead of losing them', async () => {
+    // Page 1 succeeds (2 rows, more available); the page-2 hop is rate-limited.
+    const errRes = (status: number, body: unknown): Promise<Response> =>
+      Promise.resolve({
+        ok: false,
+        status,
+        json: () => Promise.resolve(body),
+      } as unknown as Response);
+    const fetchFn = vi.fn((url: string) =>
+      url.includes('_next=') ? errRes(429, { ok: false, error: 'rate limited' }) : jsonRes(GPP_PAGE1),
+    );
+    const ref = parseDatasetteUrl(GPP_URL);
+
+    const out = await fetchRows(fetchFn, ref);
+
+    // The two rows from page 1 survive — the import shows them rather than nothing.
+    expect(out.rows).toHaveLength(2);
+    expect(out.pages).toBe(1);
+    expect(out.hasMore).toBe(true); // a cursor remained → more is available
+    expect(out.error).toMatch(/429/);
+    expect(out.error).toMatch(/stopped after 2 rows/);
+  });
+
+  it('still throws when the very FIRST page fails (nothing to salvage)', async () => {
+    const fetchFn = vi.fn(() =>
+      Promise.resolve({
+        ok: false,
+        status: 429,
+        json: () => Promise.resolve({ ok: false, error: 'rate limited' }),
+      } as unknown as Response),
+    );
+    const ref = parseDatasetteUrl(GPP_URL);
+
+    await expect(fetchRows(fetchFn, ref)).rejects.toBeInstanceOf(DatasetteError);
+  });
 });
 
 describe('inferColumnsFromRows (fallback when ?_extra= gives no schema)', () => {

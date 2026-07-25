@@ -682,6 +682,14 @@ export async function fetchRows(
   truncated: boolean;
   hasMore: boolean;
   pages: number;
+  /**
+   * Set when paging stopped early because a page hop FAILED (e.g. rate
+   * limiting / HTTP 429) after at least one page had already succeeded. The
+   * rows fetched so far are still returned — the caller shows a partial result
+   * instead of nothing. Undefined on a clean read. A failure on the very first
+   * page throws instead (there is nothing to salvage).
+   */
+  error?: string | undefined;
 }> {
   const maxRows = opts.maxRows ?? 10000;
   // Fixed numeric page size for predictable cursor paging. `_size=max` is also
@@ -699,9 +707,25 @@ export async function fetchRows(
   let truncated = false;
   let hasMore = false;
   let pages = 0;
+  let error: string | undefined;
 
   while (url) {
-    const json: any = await fetchJson(fetchFn, url);
+    let json: any;
+    try {
+      json = await fetchJson(fetchFn, url);
+    } catch (err) {
+      // A page hop failed mid-import (commonly rate limiting / HTTP 429). Don't
+      // throw away the rows already fetched — return them as a partial result
+      // so the user sees what loaded. Only a failure on the FIRST page (nothing
+      // salvaged yet) propagates, so a wholly-unreachable table still errors.
+      if (rows.length === 0) throw err;
+      error =
+        err instanceof DatasetteError && err.status
+          ? `stopped after ${rows.length} rows: HTTP ${err.status}`
+          : `stopped after ${rows.length} rows: ${(err as Error)?.message ?? String(err)}`;
+      hasMore = true; // a cursor almost certainly remained — more is available
+      break;
+    }
     const info = classifyPage(json);
     rows.push(...info.rows);
     truncated = truncated || info.truncated;
@@ -734,7 +758,7 @@ export async function fetchRows(
       url = null;
     }
   }
-  return { rows, truncated, hasMore, pages };
+  return { rows, truncated, hasMore, pages, error };
 }
 
 // -- Write API (Datasette 1.0 JSON write endpoints) --------------------------
