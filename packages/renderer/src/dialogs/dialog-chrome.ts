@@ -129,13 +129,17 @@ export const dialogChromeStyles = css`
     border-color: #9ca3af;
     color: white;
   }
-  /* Phones: every dialog goes full-screen, edge to edge. The important flag
-     plus inset:0 override each dialog's own min/max-width and any inline drag
-     position (draggable.ts sets position:fixed + left/top). The dialog becomes
-     a flex column so the body fills the remaining height and scrolls, keeping
-     the header (and its actions) pinned at the top. */
+  /* Phones: every OPEN dialog goes full-screen, edge to edge. The important
+     flag plus inset:0 override each dialog's own min/max-width and any inline
+     drag position (draggable.ts sets position:fixed + left/top). The dialog
+     becomes a flex column so the body fills the remaining height and scrolls,
+     keeping the header (and its actions) pinned at the top.
+
+     CRITICAL: scope to dialog[open]. A bare dialog{display:flex !important}
+     would override the UA dialog:not([open]){display:none}, leaving a CLOSED
+     dialog visible and blocking the whole UI (it never goes away). */
   @media (max-width: 640px) {
-    dialog {
+    dialog[open] {
       position: fixed !important;
       inset: 0 !important;
       width: auto !important;
@@ -148,12 +152,12 @@ export const dialogChromeStyles = css`
       display: flex !important;
       flex-direction: column;
     }
-    form {
+    dialog[open] form {
       max-height: none;
       flex: 1;
       min-height: 0;
     }
-    .dialog-body {
+    dialog[open] .dialog-body {
       flex: 1;
       min-height: 0;
     }
