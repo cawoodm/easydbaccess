@@ -485,11 +485,20 @@ test.describe('datasette live connect', () => {
     await connect.locator('input[type="text"]').fill('https://dbc.example/legislators');
     await connect.getByRole('button', { name: 'Connect', exact: true }).click();
 
-    // Goes straight to the table picker (no database step for a single-db URL);
-    // the hidden FTS table is excluded.
+    // Goes straight to the table picker (no database step for a single-db URL).
+    // The hidden FTS table is shown too — tagged "hidden" and unchecked by
+    // default — so it can be opted in, but isn't connected unless ticked.
     const picker = page.locator('table-select-dialog dialog');
     await expect(picker.getByRole('button', { name: /^Connect \(/ })).toBeVisible();
-    await expect(picker.locator('ul.tables li .name')).toHaveText(['legislators', 'offices']);
+    await expect(picker.locator('ul.tables li .name')).toHaveText([
+      'legislators',
+      'offices',
+      'legislators_fts',
+    ]);
+    const ftsRow = picker.locator('ul.tables li').filter({ hasText: 'legislators_fts' });
+    await expect(ftsRow.locator('.tag-hidden')).toBeVisible();
+    await expect(ftsRow.locator('input[type="checkbox"]')).not.toBeChecked();
+    // Only the two visible tables are checked → "Connect (2)".
     await picker.getByRole('button', { name: /^Connect \(2\)$/ }).click();
 
     // Two live tables from the "legislators" database are connected.
