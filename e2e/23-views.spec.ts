@@ -477,4 +477,39 @@ test.describe('views', () => {
     }, workspaceId);
     expect(persisted).toMatchObject({ title: 'Alpha' });
   });
+
+  test('toggling back to the template shows the rows filtered in the grid', async ({ page }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      { title: 'Alpha', url: 'https://example.com/a' },
+      { title: 'Beta', url: 'https://example.com/b' },
+    ]);
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    const dlg = page.locator('views-dialog dialog');
+    await dlg
+      .locator('ul.list li', { hasText: 'RSS Feed' })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+
+    const vw = page.locator('view-window');
+    await expect(vw.locator('a')).toHaveCount(2); // template: 2 cards
+
+    // Turn the template off, filter to a single row in the grid…
+    await vw.getByRole('button', { name: 'Toggle template' }).click();
+    const grid = vw.locator('data-table');
+    await grid.locator('tr.filter-row filter-combobox input').first().fill('Alpha');
+    await expect(grid.locator('tbody tr')).toHaveCount(1);
+    await page.waitForTimeout(400); // let the filter persist to the instance
+
+    // …then toggle the template back on — it must show the SAME filtered row.
+    await vw.getByRole('button', { name: 'Toggle template' }).click();
+    await expect(vw.locator('data-table')).toHaveCount(0);
+    await expect(vw.locator('a')).toHaveCount(1);
+    await expect(vw.locator('a', { hasText: 'Alpha' })).toBeVisible();
+  });
 });

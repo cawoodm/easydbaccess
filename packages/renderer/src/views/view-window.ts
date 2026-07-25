@@ -162,6 +162,7 @@ export class ViewWindow extends LitElement {
   @state() private showColsMenu = false;
   private allRows: Row[] = [];
   private rowsUnsub?: () => void;
+  private instUnsub?: () => void;
   /** Free-text search from the header search box (core `panel-search`). */
   @state() private searchQuery = '';
 
@@ -180,6 +181,7 @@ export class ViewWindow extends LitElement {
     super.disconnectedCallback();
     document.removeEventListener('easydb:table-search', this.onSearch as EventListener);
     this.rowsUnsub?.();
+    this.instUnsub?.();
   }
 
   // The header search box is keyed by the view instance id (not the underlying
@@ -210,6 +212,8 @@ export class ViewWindow extends LitElement {
 
   private async load() {
     if (!this.viewInstanceId) return;
+    this.rowsUnsub?.();
+    this.instUnsub?.();
     const ctx = await getContext();
     const inst = await ctx.store.viewInstances.findOne(this.viewInstanceId);
     if (!inst) {
@@ -225,6 +229,16 @@ export class ViewWindow extends LitElement {
     this.columns = inst.visibleColumns.map(
       (f) => byField.get(f) ?? { field: f, label: f, type: 'string' as const },
     );
+    // Track instance changes so filters / sort the grid persists (template-off
+    // mode) flow straight into the template render — toggling back shows the
+    // same rows the user just filtered.
+    this.instUnsub = ctx.store.viewInstances.subscribe((all) => {
+      const me = all.find((v) => v.id === this.viewInstanceId);
+      if (me) {
+        this.instance = me;
+        this.recompute();
+      }
+    });
     const coll = ctx.store.rows(inst.tableId);
     this.rowsUnsub = coll.subscribe((all) => {
       this.allRows = all;
