@@ -17,7 +17,7 @@
 
 // @ts-expect-error — jspanel4 ships no types
 import { jsPanel } from 'jspanel4/es6module/jspanel.js';
-import type { ViewInstance, WindowGeometry } from '@easydb/shared';
+import type { Table, ViewInstance, WindowGeometry } from '@easydb/shared';
 import { getContext, type AppContext } from '../app-context.js';
 import { currentPanZoom } from './jspanel-manager.js';
 import { createMaximizeFill } from './maximize-fill.js';
@@ -78,6 +78,13 @@ export async function initViewWindowManager(): Promise<void> {
     for (const [id, inst] of want) if (!panels.has(id)) openPanel(inst, ctx);
   });
 
+  // Reconnect-by-name: a view binds to its table by `tableId`, but deleting a
+  // table and recreating it under the same name mints a fresh id, orphaning the
+  // view (its `tableId` now dangles). Whenever the set of tables changes, rebind
+  // any dangling view to a same-named table in the workspace. The view-window's
+  // own instance subscription then reloads and re-binds its rows subscription.
+  ctx.store.tables.subscribe((tables) => void reconnectDanglingViews(ctx, tables));
+
   // Apply an instance edit (rename / re-mapping) to an already-open window
   // without tearing it down.
   document.addEventListener('easydb:reload-view', (e) => {
@@ -96,6 +103,33 @@ export async function initViewWindowManager(): Promise<void> {
   document.addEventListener('easydb:reload-views', () => {
     for (const { el } of panels.values()) void el.reload();
   });
+}
+
+/**
+ * Rebind views whose `tableId` no longer resolves to a table, matching on the
+ * snapshotted `tableName` within the same workspace. A no-op unless a dangling
+ * view has a same-named table to reconnect to, so it's safe to run on every
+ * table write.
+ */
+async function reconnectDanglingViews(ctx: AppContext, tables: Table[]): Promise<void> {
+  const wsTables = tables.filter((t) => t.workspaceId === ctx.workspaceId);
+  const byId = new Set(wsTables.map((t) => t.id));
+  // First same-named table wins if duplicates exist.
+  const byName = new Map<string, Table>();
+  for (const t of wsTables) if (!byName.has(t.name)) byName.set(t.name, t);
+
+  const insts = await ctx.store.viewInstances.find();
+  for (const inst of insts) {
+    if (inst.workspaceId !== ctx.workspaceId) continue;
+    if (byId.has(inst.tableId)) continue; // still bound to a live table
+    if (!inst.tableName) continue; // no name snapshot to match on
+    const match = byName.get(inst.tableName);
+    if (!match) continue; // no same-named table to reconnect to
+    await ctx.store.viewInstances.patch(inst.id, {
+      tableId: match.id,
+      updatedAt: Date.now(),
+    });
+  }
 }
 
 function openPanel(inst: ViewInstance, ctx: AppContext): void {

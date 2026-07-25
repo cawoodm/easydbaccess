@@ -226,6 +226,12 @@ export class ViewWindow extends LitElement {
     this.template = (await ctx.store.viewTemplates.findOne(inst.templateId)) ?? null;
     const table = await ctx.store.tables.findOne(inst.tableId);
     this.tableColumns = table?.columns ?? [];
+    // Keep the table-name snapshot current while the table exists, so the
+    // reconnect-by-name path (view-window-manager) has an up-to-date value to
+    // match against after a delete + recreate.
+    if (table && inst.tableName !== table.name) {
+      void ctx.store.viewInstances.patch(inst.id, { tableName: table.name });
+    }
     const byField = new Map(this.tableColumns.map((c) => [c.field, c]));
     this.columns = inst.visibleColumns.map(
       (f) => byField.get(f) ?? { field: f, label: f, type: 'string' as const },
@@ -235,10 +241,17 @@ export class ViewWindow extends LitElement {
     // same rows the user just filtered.
     this.instUnsub = ctx.store.viewInstances.subscribe((all) => {
       const me = all.find((v) => v.id === this.viewInstanceId);
-      if (me) {
+      if (!me) return;
+      if (me.tableId !== this.instance?.tableId) {
+        // The view was rebound to a different table (reconnect-by-name after a
+        // delete + recreate). Re-read so the rows subscription re-binds to the
+        // new table id.
         this.instance = me;
-        this.recompute();
+        void this.reload();
+        return;
       }
+      this.instance = me;
+      this.recompute();
     });
     const coll = ctx.store.rows(inst.tableId);
     this.rowsUnsub = coll.subscribe((all) => {

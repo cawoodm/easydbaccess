@@ -393,6 +393,7 @@ export class ViewsDialog extends LitElement {
       id: uuid(),
       workspaceId: ctx.workspaceId,
       tableId: this.tableId,
+      tableName: this.table.name,
       templateId: d.templateId,
       name: d.name.trim(),
       sortColumn: this.table.sortColumn,

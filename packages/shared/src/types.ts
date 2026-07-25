@@ -180,6 +180,13 @@ export interface ViewInstance {
   id: string;
   workspaceId: string;
   tableId: string;
+  /**
+   * The bound table's name, snapshotted when the view was created and kept in
+   * sync while the table exists. Lets a view reconnect to a same-named table
+   * after the original is deleted and recreated (which mints a fresh
+   * `tableId`). See `window-mgr/view-window-manager.ts`.
+   */
+  tableName?: string | undefined;
   templateId: string;
   name: string;
   sortColumn?: string | undefined;
