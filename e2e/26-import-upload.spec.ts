@@ -59,6 +59,34 @@ test('Limit rows caps how many rows are imported from an upload', async ({ page,
   await expect.poll(async () => (await tableRows(page, workspaceId, 'places'))?.count ?? 0).toBe(2);
 });
 
+test('Limit rows on a multi-MB upload imports only the cap (streams a prefix)', async ({
+  page,
+  workspaceId,
+}) => {
+  // Build a CSV well over the 1 MiB streaming chunk so the capped read must span
+  // several chunks — the case that silently killed the tab when the whole file
+  // was read + parsed before the cap applied.
+  const pad = 'x'.repeat(600); // fat cell so few rows exceed 1 MiB
+  const lines = ['id,blob'];
+  for (let i = 1; i <= 4000; i++) lines.push(`${i},${pad}`);
+  const big = lines.join('\n') + '\n';
+  expect(big.length).toBeGreaterThan(2 * 1024 * 1024); // > 2 MiB
+
+  await openDialog(page);
+  const dlg = page.locator('import-dialog dialog');
+  await dlg.locator('input[type="file"]').setInputFiles({
+    name: 'big.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(big),
+  });
+  await dlg.locator('input[type="number"]').fill('50');
+  await dlg.getByRole('button', { name: 'Import', exact: true }).click();
+
+  await expect
+    .poll(async () => (await tableRows(page, workspaceId, 'big'))?.count ?? 0)
+    .toBe(50);
+});
+
 test('column editor: clicking the Hide header toggles all columns hidden', async ({
   page,
   workspaceId,

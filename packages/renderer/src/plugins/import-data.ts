@@ -16,7 +16,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { importJsonText, parsedToTables } from './json-import.js';
-import { importCsvText, parseCsv } from './csv-import.js';
+import { importCsvText, parseCsv, readCsvHead } from './csv-import.js';
 import { editColumnNames } from '../dialogs/column-names-dialog.js';
 import { importDatasette } from './datasette-source.js';
 import { parseDatasetteUrl, fetchDatabaseNames } from './datasette-client.js';
@@ -290,13 +290,19 @@ async function openImport(api: HostApi): Promise<void> {
   try {
     // Uploaded file: read its bytes locally (no network, no origin URL).
     if (file) {
-      const text = await file.text();
       if (kind === 'csv') {
+        // With a row cap, stream only the first `maxRows` rows instead of
+        // loading the whole file — a 150 MB CSV read whole + parsed whole (all
+        // before the cap applies) can silently kill a memory-limited tab, so a
+        // capped import of a big file would do nothing.
+        const text =
+          maxRows != null ? await readCsvHead(file, maxRows) : await file.text();
         await importCsvText(api, text, file.name, {
           editColumns: editColumns ? editColumnNames : undefined,
           maxRows,
         });
       } else {
+        const text = await file.text();
         await importJsonText(api, text, file.name, { maxRows });
       }
       api.ui.dialogs.toast(`Imported ${file.name}.`, { kind: 'success', title: 'Import' });

@@ -143,7 +143,7 @@ export async function importCsvText(
   }>;
 
   if (mode === 'new') {
-    const parsed = parseCsv(text);
+    const parsed = parseCsv(text, { maxRows: opts.maxRows });
     let columns = parsed.columns;
     let rows = parsed.rows;
     if (opts.editColumns) {
@@ -175,7 +175,7 @@ export async function importCsvText(
     // renderers, constraints — all of it). CSV cells map to existing
     // columns by position, then coerce through each column's declared type.
     const targetCols = existing!.columns;
-    const raw = parseCsvRaw(text);
+    const raw = parseCsvRaw(text, { maxRows: opts.maxRows });
     const rawRows = opts.maxRows != null ? raw.rows.slice(0, opts.maxRows) : raw.rows;
     docs = rawRows.map((cells) => {
       const data: Record<string, unknown> = {};
@@ -217,20 +217,68 @@ interface ParseResult {
  * Used by importers that map CSV cells onto an existing table's column
  * schema by index — the existing columns' types drive coercion instead.
  */
-export function parseCsvRaw(text: string): { header: string[]; rows: string[][] } {
+export function parseCsvRaw(
+  text: string,
+  opts: { maxRows?: number | undefined } = {},
+): { header: string[]; rows: string[][] } {
   const normalized = text.replace(/﻿/, ''); // strip BOM
   const sep = detectSeparator(normalized);
-  const all = parseLines(normalized, sep);
+  const all = parseLines(normalized, sep, lineCap(opts.maxRows));
   if (all.length === 0) return { header: [], rows: [] };
   const header = all[0]!;
   const rows = all.slice(1).filter((r) => !(r.length === 1 && r[0] === ''));
   return { header, rows };
 }
 
-export function parseCsv(text: string): ParseResult {
+/** Cap for parseLines: header + maxRows data rows. Undefined ⇒ no cap. */
+function lineCap(maxRows: number | undefined): number | undefined {
+  return maxRows != null ? maxRows + 1 : undefined;
+}
+
+/**
+ * Read only the first `maxRows` data rows (plus the header) of a possibly huge
+ * CSV file, streaming it in byte-slices so the WHOLE file is never held in
+ * memory at once. Without this, `file.text()` on a 150 MB CSV allocates a
+ * ~300 MB string (UTF-16) and the parser then builds full copies of every row
+ * before the row cap is applied — enough to silently kill a memory-limited
+ * browser tab (notably iOS Safari), so a capped import of a large file does
+ * nothing at all.
+ *
+ * Quote-aware: a `\n` inside a quoted field does not end a row. Row counting
+ * keys on `\n` (covering `\n` and `\r\n`); a `\r`-only file simply isn't capped
+ * early (it falls back to a full read) rather than being cut mid-row.
+ */
+export async function readCsvHead(file: Blob, maxRows: number): Promise<string> {
+  const CHUNK = 1 << 20; // 1 MiB per slice
+  const decoder = new TextDecoder();
+  const targetLines = maxRows + 1; // + the header row
+  let text = '';
+  let lines = 0;
+  let inQuotes = false;
+  let offset = 0;
+
+  while (offset < file.size) {
+    const buf = new Uint8Array(await file.slice(offset, offset + CHUNK).arrayBuffer());
+    offset += CHUNK;
+    const chunk = decoder.decode(buf, { stream: true });
+    for (let i = 0; i < chunk.length; i++) {
+      const ch = chunk[i];
+      if (ch === '"') {
+        inQuotes = !inQuotes; // "" toggles twice → back to the same state
+      } else if (ch === '\n' && !inQuotes) {
+        lines += 1;
+        if (lines >= targetLines) return text + chunk.slice(0, i + 1);
+      }
+    }
+    text += chunk;
+  }
+  return text; // file has fewer rows than the cap
+}
+
+export function parseCsv(text: string, opts: { maxRows?: number | undefined } = {}): ParseResult {
   const normalized = text.replace(/﻿/, ''); // strip BOM
   const sep = detectSeparator(normalized);
-  const rows = parseLines(normalized, sep);
+  const rows = parseLines(normalized, sep, lineCap(opts.maxRows));
   if (rows.length === 0) return { columns: [], rows: [] };
 
   const header = rows[0]!;
@@ -377,7 +425,7 @@ function detectSeparator(text: string): string {
 }
 
 /** RFC-4180-ish line tokenizer. Returns array of rows; each row is an array of cells. */
-function parseLines(text: string, sep: string): string[][] {
+function parseLines(text: string, sep: string, maxLines?: number): string[][] {
   const out: string[][] = [];
   let row: string[] = [];
   let cell = '';
@@ -408,6 +456,9 @@ function parseLines(text: string, sep: string): string[][] {
         out.push(row);
         row = [];
         cell = '';
+        // Stop once we've emitted the requested number of lines — the caller
+        // capped the import, so parsing the rest would only waste time/memory.
+        if (maxLines != null && out.length >= maxLines) return out;
       } else {
         cell += ch;
       }
