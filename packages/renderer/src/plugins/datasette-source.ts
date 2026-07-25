@@ -41,6 +41,18 @@ type FetchFn = (url: string, opts?: unknown) => Promise<Response>;
 
 const host = (base: string): string => base.replace(/^https?:\/\//, '');
 
+const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * How long to wait before auto-resuming a rate-limited import — 60s in
+ * production, matching the "resume delayed" prompt. A test seam
+ * (`window.__eda_resumeDelayMs`) shortens it so e2e doesn't stall a real minute.
+ */
+function resumeDelayMs(): number {
+  const o = (globalThis as { __eda_resumeDelayMs?: number }).__eda_resumeDelayMs;
+  return typeof o === 'number' && o >= 0 ? o : 60_000;
+}
+
 /** Human-facing Datasette table URL (`base/db/table`). */
 function datasetteTableUrl(base: string, db: string, table: string): string {
   return `${base}/${encodeURIComponent(db)}/${encodeURIComponent(table)}`;
@@ -478,13 +490,59 @@ async function fillImportTable(
     // it the bar stays indeterminate. Cap the denominator at the import limit so
     // the fraction reflects what we'll actually pull.
     const target = count && count > 0 ? Math.min(count, SETTINGS.maxImportRows) : 0;
-    const { rows, truncated, hasMore, pages, error, nextUrl } = await fetchRows(fetchFn, ref, {
-      maxRows: SETTINGS.maxImportRows,
-      pageSize: SETTINGS.pageSize,
-      onProgress: (n) => {
-        if (target > 0) setTableLoading(tableId, true, Math.min(1, n / target));
-      },
-    });
+
+    // Page through with an interactive resume. If a page hop fails (commonly the
+    // instance rate-limiting a large import), keep the rows fetched so far and
+    // PROMPT the user: wait 60s and resume from that exact page, or cancel and
+    // keep the partial. Cancelling leaves the `importResume` marker set below, so
+    // the footer's red "Resume import" button remains as a manual fallback. The
+    // loop lets repeated rate-limit hits each be waited out.
+    const rows: Array<Record<string, unknown>> = [];
+    let truncated = false;
+    let hasMore = false;
+    let pages = 0;
+    let error: string | undefined;
+    let nextUrl: string | undefined;
+    let startUrl: string | undefined;
+    for (;;) {
+      const seg = await fetchRows(fetchFn, ref, {
+        maxRows: Math.max(0, SETTINGS.maxImportRows - rows.length),
+        pageSize: SETTINGS.pageSize,
+        ...(startUrl ? { startUrl } : {}),
+        onProgress: (n) => {
+          if (target > 0) setTableLoading(tableId, true, Math.min(1, (rows.length + n) / target));
+        },
+      });
+      rows.push(...seg.rows);
+      truncated = truncated || seg.truncated;
+      pages += seg.pages;
+      hasMore = seg.hasMore;
+      error = seg.error;
+      nextUrl = seg.nextUrl;
+      // Stop unless we were genuinely interrupted (an error WITH a resume cursor)
+      // and still have room under the cap. A clean read or a cap-hit ends here.
+      if (!seg.error || !seg.nextUrl || rows.length >= SETTINGS.maxImportRows) break;
+
+      const choice = await api.ui.dialogs.choice(
+        `Import of "${name}" paused after ${rows.length.toLocaleString()} rows (${seg.error}). ` +
+          `Datasette may be rate-limiting a large import. Wait 60 seconds and resume from ` +
+          `where it stopped, or cancel and keep the rows imported so far (you can resume ` +
+          `later from the table's footer)?`,
+        ['Resume in 60s', 'Cancel'],
+        'Import paused — rate limited?',
+      );
+      // Cancel / dismiss → keep the partial; the importResume marker persisted
+      // below drives the footer's manual resume button.
+      if (choice !== 'Resume in 60s') break;
+
+      // Indeterminate bar + a heads-up toast during the wait, then resume.
+      setTableLoading(tableId, true);
+      api.ui.dialogs.toast(`Resuming "${name}" in 60s…`, { kind: 'info', title: 'Import paused' });
+      await delay(resumeDelayMs());
+      startUrl = seg.nextUrl;
+      error = undefined; // re-set if the resumed segment fails again
+      nextUrl = undefined;
+    }
 
     // Prefer the schema's columns; infer from rows if none; refine types when
     // only bare names came back (e.g. datasette.io's `?_extra=columns`).
