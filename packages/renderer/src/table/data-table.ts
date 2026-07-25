@@ -6,6 +6,12 @@ import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
 import '../chrome/filter-combobox.js';
+import { searchRows } from '../search/text-search.js';
+
+/** A row matches `needle` (lower-cased) when any of its field values contains it. */
+function rowContains(r: Row, needle: string): boolean {
+  return Object.values(r.data).some((v) => v != null && String(v).toLowerCase().includes(needle));
+}
 
 type SortDir = 'asc' | 'desc' | null;
 
@@ -677,20 +683,25 @@ export class DataTable extends LitElement {
 
   private filteredRows(): Row[] {
     const active = Object.entries(this.filters).filter(([, q]) => q && q.trim().length > 0);
-    const gq = this.globalQuery.trim().toLowerCase();
-    const lq = this.localQuery.trim().toLowerCase();
+    const gq = this.globalQuery.trim();
+    const lq = this.localQuery.trim();
     if (active.length === 0 && gq.length === 0 && lq.length === 0) return this.rows;
-    return this.rows.filter((r) => {
-      const matchAny = (needle: string) =>
-        Object.values(r.data).some((v) => v != null && String(v).toLowerCase().includes(needle));
-      if (gq.length > 0 && !matchAny(gq)) return false;
-      if (lq.length > 0 && !matchAny(lq)) return false;
-      return active.every(([field, query]) =>
-        String(r.data[field] ?? '')
-          .toLowerCase()
-          .includes(query.toLowerCase()),
+    // Per-column filters first (per-row substring), then the free-text searches.
+    let rows = this.rows;
+    if (active.length > 0) {
+      rows = rows.filter((r) =>
+        active.every(([field, query]) =>
+          String(r.data[field] ?? '')
+            .toLowerCase()
+            .includes(query.toLowerCase()),
+        ),
       );
-    });
+    }
+    // Free-text search supports boolean AND/OR and the phrase→AND→OR fallback.
+    // Local and global queries each narrow the set independently.
+    if (lq) rows = searchRows(rows, lq, rowContains);
+    if (gq) rows = searchRows(rows, gq, rowContains);
+    return rows;
   }
 
   private sortedRows(): Row[] {

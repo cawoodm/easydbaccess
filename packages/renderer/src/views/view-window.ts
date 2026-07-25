@@ -6,6 +6,7 @@ import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViewsDialog } from '../dialogs/views-dialog.js';
 import { hasRowHtml, substituteRow, viewRows } from './view-render.js';
+import { searchRows } from '../search/text-search.js';
 // Side-effect import: the template-off mode renders the standard interactive
 // grid, bound to this view instance for its presentation state.
 import '../table/data-table.js';
@@ -266,12 +267,12 @@ export class ViewWindow extends LitElement {
   private recompute() {
     if (!this.instance) return;
     let rows = viewRows(this.allRows, this.instance);
-    const q = this.searchQuery.trim().toLowerCase();
+    const q = this.searchQuery.trim();
     if (q) {
-      // Free-text search: case-insensitive substring across all field values,
-      // matching the table window's per-table search behaviour.
-      rows = rows.filter((r) =>
-        Object.values(r.data).some((v) => v != null && String(v).toLowerCase().includes(q)),
+      // Free-text search across all field values — supports boolean AND/OR and
+      // the phrase→AND→OR fallback, matching the table window's behaviour.
+      rows = searchRows(rows, q, (r, needle) =>
+        Object.values(r.data).some((v) => v != null && String(v).toLowerCase().includes(needle)),
       );
     }
     this.rows = rows;
