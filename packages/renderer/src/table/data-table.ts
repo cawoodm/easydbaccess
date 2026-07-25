@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { html as staticHtml, unsafeStatic } from 'lit/static-html.js';
 import { customElement, property, state } from 'lit/decorators.js';
-import type { ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, Row, Table, ViewInstance } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
@@ -266,6 +266,13 @@ export class DataTable extends LitElement {
   ];
 
   @property({ type: String }) tableId = '';
+  /**
+   * When set, the grid is "view-bound": its rows and column *definitions* still
+   * come from `tableId`, but the presentation (which columns show, their order,
+   * widths, the sort and the filters) is read from and PERSISTED TO this
+   * `ViewInstance` — not the underlying table. Empty ⇒ normal table binding.
+   */
+  @property({ type: String }) viewInstanceId = '';
   @state() private columns: ColumnSpec[] = [];
   @state() private rows: Row[] = [];
   @state() private sortColumn: string | null = null;
@@ -299,6 +306,14 @@ export class DataTable extends LitElement {
   private resizeObs: ResizeObserver | null = null;
   private unsubscribe?: () => void;
   private filterSaveTimer: number | null = null;
+  /** View-bound mode: the instance + the table's column definitions. */
+  private viewInst: ViewInstance | null = null;
+  private tableColumns: ColumnSpec[] = [];
+  private viewSubUnsub?: () => void;
+
+  private get viewMode(): boolean {
+    return !!this.viewInstanceId;
+  }
   /** Tables with fewer rows than this skip virtualization (cheap to render). */
   private readonly VIRT_THRESHOLD = 200;
   /** Extra rows rendered above/below the viewport to mask scroll jank. */
@@ -327,6 +342,7 @@ export class DataTable extends LitElement {
     this.resizeObs = null;
     this.unsubscribe?.();
     this.tableSubUnsub?.();
+    this.viewSubUnsub?.();
   }
 
   private onScroll = () => {
@@ -342,7 +358,11 @@ export class DataTable extends LitElement {
 
   private onTableSearch = (e: Event) => {
     const d = (e as CustomEvent<{ tableId: string; query: string }>).detail;
-    if (d.tableId === this.tableId) this.localQuery = d.query ?? '';
+    // In view-bound mode the header search box is keyed by the VIEW instance id,
+    // so match either — the underlying table id or the view instance id.
+    if (d.tableId === this.tableId || (this.viewMode && d.tableId === this.viewInstanceId)) {
+      this.localQuery = d.query ?? '';
+    }
   };
 
   private onTableLoading = (e: Event) => {
@@ -353,8 +373,10 @@ export class DataTable extends LitElement {
   };
 
   override async updated(changed: Map<string, unknown>) {
-    if (changed.has('tableId') && this.tableId) {
+    if ((changed.has('tableId') || changed.has('viewInstanceId')) && this.tableId) {
       this.unsubscribe?.();
+      this.tableSubUnsub?.();
+      this.viewSubUnsub?.();
       await this.bind();
     }
     // Re-measure row height once we have content. Reading offsetHeight forces
@@ -394,16 +416,42 @@ export class DataTable extends LitElement {
     const ctx = await getContext();
     const table = await ctx.store.tables.findOne(this.tableId);
     if (!table) return;
-    this.applyTable(table);
-    // Re-bind columns/sort/filters whenever this table's record changes
-    // (column editor, sort header click, filter input). Without this, the
-    // data-table would only pick up its own writes — external updates
-    // (e.g. column editor patching columns) wouldn't refresh until reload.
-    this.tableSubUnsub?.();
-    this.tableSubUnsub = ctx.store.tables.subscribe((all) => {
-      const me = all.find((t) => t.id === this.tableId);
-      if (me) this.applyTable(me);
-    });
+
+    if (this.viewMode) {
+      // View-bound: column DEFINITIONS come from the table (kept fresh), while
+      // the presentation (order / visibility / widths / sort / filters) comes
+      // from — and is persisted to — the view instance.
+      this.tableColumns = table.columns;
+      this.viewInst = (await ctx.store.viewInstances.findOne(this.viewInstanceId)) ?? null;
+      this.applyView();
+      this.tableSubUnsub?.();
+      this.tableSubUnsub = ctx.store.tables.subscribe((all) => {
+        const me = all.find((t) => t.id === this.tableId);
+        if (me) {
+          this.tableColumns = me.columns;
+          this.applyView();
+        }
+      });
+      this.viewSubUnsub?.();
+      this.viewSubUnsub = ctx.store.viewInstances.subscribe((all) => {
+        const me = all.find((v) => v.id === this.viewInstanceId);
+        if (me) {
+          this.viewInst = me;
+          this.applyView();
+        }
+      });
+    } else {
+      this.applyTable(table);
+      // Re-bind columns/sort/filters whenever this table's record changes
+      // (column editor, sort header click, filter input). Without this, the
+      // data-table would only pick up its own writes — external updates
+      // (e.g. column editor patching columns) wouldn't refresh until reload.
+      this.tableSubUnsub?.();
+      this.tableSubUnsub = ctx.store.tables.subscribe((all) => {
+        const me = all.find((t) => t.id === this.tableId);
+        if (me) this.applyTable(me);
+      });
+    }
     // Snapshot the cell-renderer registry. Built-in renderer plugins
     // register during init/load(); we resnapshot on app:ready so anything
     // that registered late is picked up too.
@@ -437,6 +485,29 @@ export class DataTable extends LitElement {
     this.sortColumn = table.sortColumn ?? null;
     this.sortDir = table.sortColumn ? (table.sortAsc === false ? 'desc' : 'asc') : null;
     this.filters = { ...(table.filters ?? {}) };
+  }
+
+  /**
+   * View-bound presentation: the effective columns are the instance's
+   * `visibleColumns` (in that order) resolved against the table's definitions,
+   * with per-column widths overlaid from the instance. Sort and filters come
+   * from the instance too. A column dropped from the table is skipped.
+   */
+  private applyView() {
+    const inst = this.viewInst;
+    if (!inst) return;
+    const byField = new Map(this.tableColumns.map((c) => [c.field, c]));
+    const widths = inst.columnWidths ?? {};
+    this.columns = inst.visibleColumns
+      .map((f) => byField.get(f))
+      .filter((c): c is ColumnSpec => !!c)
+      .map((c) => {
+        const w = widths[c.field];
+        return typeof w === 'number' ? { ...c, width: w } : c;
+      });
+    this.sortColumn = inst.sortColumn ?? null;
+    this.sortDir = inst.sortColumn ? (inst.sortAsc === false ? 'desc' : 'asc') : null;
+    this.filters = { ...(inst.filters ?? {}) };
   }
 
   private async setCell(row: Row, field: string, value: unknown) {
@@ -585,10 +656,11 @@ export class DataTable extends LitElement {
     this.sortDir = nextDir;
 
     const ctx = await getContext();
-    const patch: Partial<Table> = nextDir
+    const patch = nextDir
       ? { sortColumn: field, sortAsc: nextDir === 'asc', updatedAt: Date.now() }
       : { sortColumn: undefined, sortAsc: undefined, updatedAt: Date.now() };
-    await ctx.store.tables.patch(this.tableId, patch);
+    if (this.viewMode) await ctx.store.viewInstances.patch(this.viewInstanceId, patch);
+    else await ctx.store.tables.patch(this.tableId, patch);
   }
 
   private filteredRows(): Row[] {
@@ -765,10 +837,20 @@ export class DataTable extends LitElement {
       this.resizing = null;
       if (!fld) return;
       const ctx = await getContext();
-      await ctx.store.tables.patch(this.tableId, {
-        columns: this.columns,
-        updatedAt: Date.now(),
-      });
+      if (this.viewMode) {
+        const w = this.columns.find((c) => c.field === fld)?.width;
+        const widths = { ...(this.viewInst?.columnWidths ?? {}) };
+        if (typeof w === 'number') widths[fld] = w;
+        await ctx.store.viewInstances.patch(this.viewInstanceId, {
+          columnWidths: widths,
+          updatedAt: Date.now(),
+        });
+      } else {
+        await ctx.store.tables.patch(this.tableId, {
+          columns: this.columns,
+          updatedAt: Date.now(),
+        });
+      }
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -821,10 +903,18 @@ export class DataTable extends LitElement {
     next.splice(toIdx, 0, moved!);
 
     const ctx = await getContext();
-    await ctx.store.tables.patch(this.tableId, {
-      columns: next,
-      updatedAt: Date.now(),
-    });
+    if (this.viewMode) {
+      // Reorder is stored as the new order of the instance's visible columns.
+      await ctx.store.viewInstances.patch(this.viewInstanceId, {
+        visibleColumns: next.map((c) => c.field),
+        updatedAt: Date.now(),
+      });
+    } else {
+      await ctx.store.tables.patch(this.tableId, {
+        columns: next,
+        updatedAt: Date.now(),
+      });
+    }
   }
 
   private async saveFilters() {
@@ -832,6 +922,14 @@ export class DataTable extends LitElement {
     // Strip empty entries so the persisted shape stays tidy.
     const cleaned: Record<string, string> = {};
     for (const [k, v] of Object.entries(this.filters)) if (v && v.trim().length > 0) cleaned[k] = v;
+    if (this.viewMode) {
+      // A view instance always carries a (possibly empty) filters object.
+      await ctx.store.viewInstances.patch(this.viewInstanceId, {
+        filters: cleaned,
+        updatedAt: Date.now(),
+      });
+      return;
+    }
     const filters: Record<string, string> | undefined =
       Object.keys(cleaned).length === 0 ? undefined : cleaned;
     await ctx.store.tables.patch(this.tableId, { filters, updatedAt: Date.now() });

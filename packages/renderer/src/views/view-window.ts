@@ -3,62 +3,152 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import type { ColumnSpec, Row, ViewInstance, ViewTemplate } from '@easydb/shared';
 import { getContext } from '../app-context.js';
+import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { hasRowHtml, substituteRow, viewRows } from './view-render.js';
+// Side-effect import: the template-off mode renders the standard interactive
+// grid, bound to this view instance for its presentation state.
+import '../table/data-table.js';
 
 /**
- * Read-only render of a single {@link ViewInstance}: a table viewed through a
- * {@link ViewTemplate}. No editing, no add-row, no interactive filters — the
- * instance's snapshotted sort/filter/visible-columns are applied and the data
- * shown as the template dictates. Data stays live: if the underlying table's
- * rows change, the view re-renders.
+ * Render of a single {@link ViewInstance}. Two modes, toggled by the table icon
+ * in the footer (bottom-right):
+ *
+ *  - Template ON (default): the data is shown through the instance's
+ *    {@link ViewTemplate} (read-only cards / custom HTML, or the fallback table).
+ *  - Template OFF: the data is shown in the standard interactive `<data-table>`
+ *    grid — sort, filter, show/hide and reorder columns — with those
+ *    presentation choices stored on THIS view instance, not the underlying
+ *    table. DB-level column definitions (uniqueness, nulls, defaults, max) are
+ *    never edited from a view.
  *
  * Template HTML is injected verbatim (via `unsafeHTML`) into this component's
- * shadow root, so a template's inline styles / `<style>` scope here without
- * leaking out. Values are the user's own data rendered in the user's own
- * browser (a template author already controls the surrounding markup).
+ * shadow root, so a template's inline styles scope here without leaking out.
  */
 @customElement('view-window')
 export class ViewWindow extends LitElement {
-  static override styles = css`
-    :host {
-      display: block;
-      overflow: auto;
-      height: 100%;
-      background: #f8fafc;
-      font-family: system-ui, sans-serif;
-    }
-    .vw-root {
-      min-height: 100%;
-    }
-    .vw-loading,
-    .vw-empty {
-      padding: 1rem;
-      color: #6b7280;
-      font-size: 0.9rem;
-    }
-    /* Fallback read-only table (used when a template has no row HTML). */
-    table.vw-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.85rem;
-    }
-    table.vw-table th,
-    table.vw-table td {
-      border: 1px solid #e5e7eb;
-      padding: 0.25rem 0.5rem;
-      text-align: left;
-      vertical-align: top;
-      white-space: nowrap;
-    }
-    table.vw-table th {
-      background: #f9fafb;
-      position: sticky;
-      top: 0;
-    }
-    .vw-html {
-      padding: 0.5rem 0.75rem;
-    }
-  `;
+  static override styles = [
+    materialIconStyles,
+    css`
+      :host {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        background: #f8fafc;
+        font-family: system-ui, sans-serif;
+      }
+      .vw-body {
+        flex: 1;
+        min-height: 0;
+      }
+      .vw-body.scroll {
+        overflow: auto;
+      }
+      /* Grid mode: let the data-table fill the body and scroll internally. */
+      .vw-body.grid {
+        display: flex;
+      }
+      .vw-body.grid data-table {
+        flex: 1;
+        min-height: 0;
+        max-height: none;
+      }
+      .vw-root {
+        min-height: 100%;
+      }
+      .vw-loading,
+      .vw-empty {
+        padding: 1rem;
+        color: #6b7280;
+        font-size: 0.9rem;
+      }
+      /* Fallback read-only table (used when a template has no row HTML). */
+      table.vw-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+      }
+      table.vw-table th,
+      table.vw-table td {
+        border: 1px solid #e5e7eb;
+        padding: 0.25rem 0.5rem;
+        text-align: left;
+        vertical-align: top;
+        white-space: nowrap;
+      }
+      table.vw-table th {
+        background: #f9fafb;
+        position: sticky;
+        top: 0;
+      }
+      .vw-html {
+        padding: 0.5rem 0.75rem;
+      }
+      /* Footer toolbar: the template on/off toggle sits at the bottom-right. */
+      .vw-footer {
+        flex: 0 0 auto;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.35rem;
+        padding: 0.25rem 0.4rem;
+        border-top: 1px solid #e5e7eb;
+        background: #ffffff;
+      }
+      .vw-footer button {
+        font: inherit;
+        display: inline-flex;
+        align-items: center;
+        padding: 0.2rem 0.4rem;
+        border: 1px solid #d1d5db;
+        background: white;
+        border-radius: 0.25rem;
+        cursor: pointer;
+        color: #374151;
+      }
+      .vw-footer button:hover {
+        background: #f3f4f6;
+      }
+      /* Active = template is OFF (showing the raw table). */
+      .vw-footer button.active {
+        background: #0891b2;
+        border-color: #0891b2;
+        color: white;
+      }
+      .vw-footer .mi {
+        font-size: 1.05rem;
+      }
+      .cols-menu {
+        position: absolute;
+        right: 0.4rem;
+        bottom: 100%;
+        margin-bottom: 0.25rem;
+        max-height: 40vh;
+        overflow: auto;
+        background: white;
+        border: 1px solid #d1d5db;
+        border-radius: 0.35rem;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+        padding: 0.3rem;
+        z-index: 5;
+        min-width: 10rem;
+      }
+      .cols-menu label {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.2rem 0.3rem;
+        font-size: 0.82rem;
+        color: #374151;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .cols-menu label:hover {
+        background: #f3f4f6;
+        border-radius: 0.2rem;
+      }
+    `,
+  ];
 
   @property({ type: String }) viewInstanceId = '';
   @state() private loaded = false;
@@ -66,11 +156,19 @@ export class ViewWindow extends LitElement {
   @state() private instance: ViewInstance | null = null;
   @state() private template: ViewTemplate | null = null;
   @state() private columns: ColumnSpec[] = [];
+  /** The underlying table's full column list — powers the show/hide menu. */
+  @state() private tableColumns: ColumnSpec[] = [];
   @state() private rows: Row[] = [];
+  @state() private showColsMenu = false;
   private allRows: Row[] = [];
   private rowsUnsub?: () => void;
   /** Free-text search from the header search box (core `panel-search`). */
   @state() private searchQuery = '';
+
+  /** Template rendering is on unless the instance explicitly disabled it. */
+  private get templateOn(): boolean {
+    return this.instance?.templateEnabled !== false;
+  }
 
   override async connectedCallback() {
     super.connectedCallback();
@@ -122,7 +220,8 @@ export class ViewWindow extends LitElement {
     this.instance = inst;
     this.template = (await ctx.store.viewTemplates.findOne(inst.templateId)) ?? null;
     const table = await ctx.store.tables.findOne(inst.tableId);
-    const byField = new Map((table?.columns ?? []).map((c) => [c.field, c]));
+    this.tableColumns = table?.columns ?? [];
+    const byField = new Map(this.tableColumns.map((c) => [c.field, c]));
     this.columns = inst.visibleColumns.map(
       (f) => byField.get(f) ?? { field: f, label: f, type: 'string' as const },
     );
@@ -150,6 +249,38 @@ export class ViewWindow extends LitElement {
     this.rows = rows;
   }
 
+  // -- footer actions ---------------------------------------------------------
+
+  /** Flip the template on/off for this view and persist it to the instance. */
+  private async toggleTemplate() {
+    if (!this.instance) return;
+    const next = !this.templateOn; // true ⇒ turning template OFF
+    const ctx = await getContext();
+    await ctx.store.viewInstances.patch(this.instance.id, {
+      templateEnabled: next,
+      updatedAt: Date.now(),
+    });
+    this.instance = { ...this.instance, templateEnabled: next };
+    this.showColsMenu = false;
+  }
+
+  /** Show/hide a column in template-off mode (persisted on the instance). */
+  private async toggleColumn(field: string) {
+    if (!this.instance) return;
+    const cur = this.instance.visibleColumns;
+    const has = cur.includes(field);
+    const next = has ? cur.filter((f) => f !== field) : [...cur, field];
+    if (next.length === 0) return; // keep at least one column visible
+    const ctx = await getContext();
+    await ctx.store.viewInstances.patch(this.instance.id, {
+      visibleColumns: next,
+      updatedAt: Date.now(),
+    });
+    this.instance = { ...this.instance, visibleColumns: next };
+  }
+
+  // -- render -----------------------------------------------------------------
+
   private renderTable() {
     if (this.rows.length === 0) return html`<div class="vw-empty">No rows.</div>`;
     return html`
@@ -174,12 +305,10 @@ export class ViewWindow extends LitElement {
     `;
   }
 
-  override render() {
-    if (!this.loaded) return html`<div class="vw-loading">Loading…</div>`;
-    if (this.error) return html`<div class="vw-empty">${this.error}</div>`;
+  /** Template-on rendering: the row-fragment view or the table fallback. */
+  private renderTemplated() {
     const t = this.template;
     if (!t) return html`<div class="vw-empty">This view's template is missing.</div>`;
-
     if (hasRowHtml(t.rowHtml)) {
       // Row mode: concatenate header + repeated rows + footer into one HTML
       // block so a header that opens a wrapping tag pairs with the footer.
@@ -188,7 +317,6 @@ export class ViewWindow extends LitElement {
       const full = (t.headerHtml ?? '') + body + (t.footerHtml ?? '');
       return html`<div class="vw-root">${unsafeHTML(full)}</div>`;
     }
-
     // Table mode: header/footer HTML above and below a read-only table.
     return html`<div class="vw-root">
       ${t.headerHtml?.trim()
@@ -199,6 +327,64 @@ export class ViewWindow extends LitElement {
         ? html`<div class="vw-html">${unsafeHTML(t.footerHtml)}</div>`
         : nothing}
     </div>`;
+  }
+
+  private renderFooter() {
+    if (!this.instance) return nothing;
+    const on = this.templateOn;
+    const visible = new Set(this.instance.visibleColumns);
+    return html`<div class="vw-footer">
+      ${!on && this.showColsMenu
+        ? html`<div class="cols-menu">
+            ${this.tableColumns.map(
+              (c) =>
+                html`<label
+                  ><input
+                    type="checkbox"
+                    .checked=${visible.has(c.field)}
+                    @change=${() => void this.toggleColumn(c.field)}
+                  />${c.label || c.field}</label
+                >`,
+            )}
+          </div>`
+        : nothing}
+      ${!on
+        ? html`<button
+            title="Show / hide columns"
+            aria-label="Columns"
+            @click=${() => (this.showColsMenu = !this.showColsMenu)}
+          >
+            <span class="mi">view_column</span>
+          </button>`
+        : nothing}
+      <button
+        class=${on ? '' : 'active'}
+        title=${on ? 'Show as a table (turn the template off)' : 'Show through the template'}
+        aria-label="Toggle template"
+        aria-pressed=${on ? 'false' : 'true'}
+        @click=${() => void this.toggleTemplate()}
+      >
+        <span class="mi">table_view</span>
+      </button>
+    </div>`;
+  }
+
+  override render() {
+    if (!this.loaded)
+      return html`<div class="vw-body scroll"><div class="vw-loading">Loading…</div></div>`;
+    if (this.error)
+      return html`<div class="vw-body scroll"><div class="vw-empty">${this.error}</div></div>`;
+
+    const on = this.templateOn;
+    const body = on
+      ? html`<div class="vw-body scroll">${this.renderTemplated()}</div>`
+      : html`<div class="vw-body grid">
+          <data-table
+            .tableId=${this.instance?.tableId ?? ''}
+            .viewInstanceId=${this.viewInstanceId}
+          ></data-table>
+        </div>`;
+    return html`${body}${this.renderFooter()}`;
   }
 }
 

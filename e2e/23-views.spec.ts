@@ -352,4 +352,81 @@ test.describe('views', () => {
     await expect(vw.locator('a')).toHaveCount(1);
     await expect(vw.locator('a', { hasText: 'Alpha' })).toBeVisible();
   });
+
+  test('the footer table toggle switches the template off to an interactive grid, stored on the instance', async ({
+    page,
+    workspaceId,
+  }) => {
+    const id = await createTable(page, 'Feed', [
+      { field: 'title' },
+      { field: 'url' },
+      { field: 'date' },
+      { field: 'description' },
+    ]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      { title: 'Hello World', url: 'https://example.com/1', date: '2024-01-01', description: 'a' },
+      { title: 'Second Post', url: 'https://example.com/2', date: '2024-01-02', description: 'b' },
+    ]);
+
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    const dlg = page.locator('views-dialog dialog');
+    await dlg
+      .locator('ul.list li', { hasText: 'RSS Feed' })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+
+    const vw = page.locator('view-window');
+    // Template ON: linked cards, no grid.
+    await expect(vw.locator('a')).toHaveCount(2);
+    await expect(vw.locator('data-table')).toHaveCount(0);
+
+    // Toggle the template OFF via the footer table icon → the interactive grid.
+    await vw.getByRole('button', { name: 'Toggle template' }).click();
+    const grid = vw.locator('data-table');
+    await expect(grid).toBeVisible();
+    await expect(grid.locator('tbody tr')).toHaveCount(2);
+    await expect(vw.locator('a')).toHaveCount(0); // template anchors gone
+
+    // Sorting in the grid persists on the VIEW INSTANCE, not the table.
+    await grid.locator('thead th').first().click(); // sort by first column asc
+    await expect
+      .poll(() =>
+        page.evaluate(async (ws) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const store = (window as any).__easydb.store;
+          const inst = (await store.viewInstances.find({ workspaceId: ws }))[0];
+          return inst?.sortColumn ?? null;
+        }, workspaceId),
+      )
+      .toBe('title');
+    const tableSort = await page.evaluate(async (tid) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__easydb.store;
+      return (await store.tables.findOne(tid))?.sortColumn ?? null;
+    }, id);
+    expect(tableSort).toBeNull(); // the underlying table's sort is untouched
+
+    // Hide a column via the footer columns menu → persisted on the instance.
+    await vw.getByRole('button', { name: 'Columns' }).click();
+    await vw.locator('.cols-menu label', { hasText: 'description' }).locator('input').uncheck();
+    // Data-column headers carry a title attribute; the trailing action th does
+    // not. Started with 4 columns → 3 after hiding "description".
+    await expect(grid.locator('thead tr').first().locator('th[title]')).toHaveCount(3);
+    const visible = await page.evaluate(async (ws) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__easydb.store;
+      return (await store.viewInstances.find({ workspaceId: ws }))[0]?.visibleColumns ?? [];
+    }, workspaceId);
+    expect(visible).not.toContain('description');
+
+    // Toggle back ON → the template renders again.
+    await vw.getByRole('button', { name: 'Toggle template' }).click();
+    await expect(vw.locator('a')).toHaveCount(2);
+    await expect(vw.locator('data-table')).toHaveCount(0);
+  });
 });

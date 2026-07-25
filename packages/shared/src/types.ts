@@ -150,6 +150,16 @@ export interface ViewInstance {
   visibleColumns: string[];
   /** Template token (without the leading `$`) → column field. */
   mapping: Record<string, string>;
+  /**
+   * When false, the template is bypassed and the view shows the data in the
+   * standard interactive grid (sort / filter / show-hide / reorder columns),
+   * with those presentation choices stored on THIS instance rather than the
+   * underlying table. Absent/true ⇒ render through the template. DB-level column
+   * definitions (uniqueness, notnull, defaults, max) are never edited from a view.
+   */
+  templateEnabled?: boolean | undefined;
+  /** Per-column pixel widths for the grid (template-off mode), field → width. */
+  columnWidths?: Record<string, number> | undefined;
   windowGeometry?: WindowGeometry | undefined;
   /**
    * Whether this view's window is currently open. Persisted so the `views`
