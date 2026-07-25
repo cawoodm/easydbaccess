@@ -896,6 +896,21 @@ export async function fetchPrimaryKeys(fetchFn: FetchFn, ref: DatasetteRef): Pro
   return Array.isArray(json?.primary_keys) ? json.primary_keys : [];
 }
 
+/**
+ * Fetch a table's total row count via `?_extra=count` — a cheap `SELECT
+ * count(*)` most instances answer even when the schema response omits `count`
+ * (datasette.io does). Single `_`-param, so it's WAF-safe. `null` on failure,
+ * so a determinate import progress bar degrades to indeterminate, never errors.
+ */
+export async function fetchTableCount(fetchFn: FetchFn, ref: DatasetteRef): Promise<number | null> {
+  try {
+    const json = await fetchJson(fetchFn, buildTableUrl(ref, { _extra: 'count' }));
+    return typeof json?.count === 'number' ? json.count : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface ConnectionStatus {
   reachable: boolean;
   version: string | null;

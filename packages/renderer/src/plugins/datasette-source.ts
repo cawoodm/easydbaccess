@@ -14,6 +14,7 @@ import {
   fetchDatabaseNames,
   fetchTablesForDb,
   fetchTableMeta,
+  fetchTableCount,
   fetchRows,
   fetchPrimaryKeys,
   fetchTableMetadata,
@@ -296,7 +297,12 @@ export async function importDatasette(
   //   2. fetch + fill each in turn, its window showing a progress bar.
   // (The generic per-table import toast is suppressed for datasette in
   // app-context, so summariseBatch is the single message.)
-  const plans: Array<{ tableId: string; ref: DatasetteRef; overwrite: boolean }> = [];
+  const plans: Array<{
+    tableId: string;
+    ref: DatasetteRef;
+    overwrite: boolean;
+    knownCount: number | null;
+  }> = [];
   let skipped = 0;
   for (const c of chosen) {
     const cref: DatasetteRef = { base: ref.base, db: c.db, table: c.table, query: {} };
@@ -305,7 +311,14 @@ export async function importDatasette(
       skipped += 1;
       continue;
     }
-    plans.push({ tableId: prep.tableId, ref: cref, overwrite: prep.overwrite });
+    // Carry the row count from the table listing (whole-db imports have it) so
+    // the progress bar is proportional from the first page.
+    plans.push({
+      tableId: prep.tableId,
+      ref: cref,
+      overwrite: prep.overwrite,
+      knownCount: c.count,
+    });
   }
 
   let imported = 0;
@@ -315,7 +328,7 @@ export async function importDatasette(
   const failed: string[] = [];
   for (const p of plans) {
     try {
-      const r = await fillImportTable(api, p.tableId, p.ref, p.overwrite);
+      const r = await fillImportTable(api, p.tableId, p.ref, p.overwrite, p.knownCount);
       imported += 1;
       totalRows += r.rowCount;
       // A partial import (paging stopped on a failure, e.g. rate limiting) still
@@ -399,6 +412,7 @@ async function fillImportTable(
   tableId: string,
   ref: DatasetteRef,
   overwrite: boolean,
+  knownCount: number | null = null,
 ): Promise<OneResult> {
   const name = `${ref.db}/${ref.table}`;
   const fetchFn = (u: string) => api.backend.fetch(u);
@@ -408,20 +422,24 @@ async function fillImportTable(
     // columns (inferred from rows below); a hard failure is tolerated too — the
     // row fetch surfaces any real problem.
     let metaColumns: ColumnSpec[] = [];
-    let count: number | null = null;
+    let count: number | null = knownCount;
     let typed = false;
     try {
       const meta = await fetchTableMeta(fetchFn, ref);
       metaColumns = meta.columns;
-      count = meta.count;
+      count = count ?? meta.count;
       typed = meta.typed;
     } catch {
       // fall back to row inference
     }
+    // Datasette.io's schema responses omit `count`, so a single-table import had
+    // no denominator and only ever showed the indeterminate bar. Fetch the count
+    // directly (cheap `?_extra=count`, WAF-safe) so the bar is proportional.
+    if (count == null) count = await fetchTableCount(fetchFn, ref);
 
-    // The row count (from the schema) gives a denominator for a proportional
-    // progress bar; without it the bar stays indeterminate. Cap the denominator
-    // at the import limit so the fraction reflects what we'll actually pull.
+    // The row count gives a denominator for a proportional progress bar; without
+    // it the bar stays indeterminate. Cap the denominator at the import limit so
+    // the fraction reflects what we'll actually pull.
     const target = count && count > 0 ? Math.min(count, SETTINGS.maxImportRows) : 0;
     const { rows, truncated, hasMore, pages, error } = await fetchRows(fetchFn, ref, {
       maxRows: SETTINGS.maxImportRows,

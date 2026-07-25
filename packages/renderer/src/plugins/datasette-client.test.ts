@@ -19,6 +19,7 @@ import {
   deleteRowByPk,
   upsertRows,
   fetchPrimaryKeys,
+  fetchTableCount,
   testConnection,
   withAuthFetch,
 } from './datasette-client.js';
@@ -261,7 +262,9 @@ describe('fetchRows follows the `next` token', () => {
         json: () => Promise.resolve(body),
       } as unknown as Response);
     const fetchFn = vi.fn((url: string) =>
-      url.includes('_next=') ? errRes(429, { ok: false, error: 'rate limited' }) : jsonRes(GPP_PAGE1),
+      url.includes('_next=')
+        ? errRes(429, { ok: false, error: 'rate limited' })
+        : jsonRes(GPP_PAGE1),
     );
     const ref = parseDatasetteUrl(GPP_URL);
 
@@ -625,6 +628,26 @@ describe('fetchPrimaryKeys', () => {
     expect(pks).toEqual(['id']);
     expect(seen[0]).toContain('_extra=primary_keys');
     expect(seen[0]).not.toContain('_size'); // single `_`-param only (WAF-safe)
+  });
+});
+
+describe('fetchTableCount', () => {
+  const ref = parseDatasetteUrl('https://x.datasette.io/db/t');
+
+  it('reads the row count via a single `_extra=count` param (WAF-safe)', async () => {
+    const seen: string[] = [];
+    const fetchFn = (url: string) => {
+      seen.push(url);
+      return jsonRes({ ok: true, count: 116, next: null, rows: [] });
+    };
+    expect(await fetchTableCount(fetchFn, ref)).toBe(116);
+    expect(seen[0]).toContain('_extra=count');
+    expect(seen[0]).not.toContain('_size');
+  });
+
+  it('returns null when no count is present or the request throws', async () => {
+    expect(await fetchTableCount(() => jsonRes({ ok: true, rows: [] }), ref)).toBeNull();
+    expect(await fetchTableCount(() => Promise.reject(new Error('network')), ref)).toBeNull();
   });
 });
 

@@ -285,6 +285,92 @@ test.describe('datasette import — whole database', () => {
     await expect(footer).toContainText('2 rows');
   });
 
+  test('a single-table import shows a proportional (determinate) progress bar', async ({
+    page,
+    workspaceId,
+  }) => {
+    // datasette.io omits `count` from schema responses, so a single-table import
+    // must fetch `?_extra=count` to get a denominator. Two pages, the second
+    // delayed, so the determinate 50% bar is observable mid-import.
+    await page.route('https://datasette.io/**', async (route) => {
+      const u = new URL(route.request().url());
+      if (u.pathname !== '/mini/people.json')
+        return route.fulfill({ status: 404, body: '{"ok":false}' });
+      const extra = u.searchParams.get('_extra') ?? '';
+      if (extra === 'column_details')
+        return route.fulfill(json({ ok: true, next: null, rows: [] }));
+      if (extra === 'columns')
+        return route.fulfill(json({ ok: true, columns: ['id', 'name'], rows: [] }));
+      if (extra === 'count') return route.fulfill(json({ ok: true, count: 4, rows: [] }));
+      if (u.searchParams.get('_next') === '2') {
+        await new Promise((r) => setTimeout(r, 1200)); // delay page 2
+        return route.fulfill(
+          json({
+            ok: true,
+            next: null,
+            rows: [
+              { id: 3, name: 'C' },
+              { id: 4, name: 'D' },
+            ],
+          }),
+        );
+      }
+      return route.fulfill(
+        json({
+          ok: true,
+          next: '2',
+          rows: [
+            { id: 1, name: 'A' },
+            { id: 2, name: 'B' },
+          ],
+        }),
+      );
+    });
+
+    await page.getByTitle('Import data from a URL').click();
+    const dlg = page.locator('import-dialog dialog');
+    await dlg.locator('input[type="text"]').fill('https://datasette.io/mini/people');
+    await dlg.getByRole('button', { name: 'Import', exact: true }).click();
+
+    const tableId: string = await (async () => {
+      await expect
+        .poll(() =>
+          page.evaluate(async (ws) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const ts = await (window as any).__easydb.store.tables.find();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            return ts.some((t: any) => t.workspaceId === ws && t.name === 'mini/people');
+          }, workspaceId),
+        )
+        .toBe(true);
+      return page.evaluate(async (ws) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ts = await (window as any).__easydb.store.tables.find();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return ts.find((t: any) => t.workspaceId === ws && t.name === 'mini/people').id;
+      }, workspaceId);
+    })();
+
+    // After page 1 (2 of 4 rows) the bar is DETERMINATE at ~50% — visible while
+    // page 2 is still in flight (not the indeterminate "waiting" sliver).
+    const determinate = page.locator(`#${panelDomId(tableId)} .load-bar-fill.determinate`);
+    await expect(determinate).toBeVisible({ timeout: 4000 });
+    await expect(page.locator(`#${panelDomId(tableId)} [role="progressbar"]`)).toHaveAttribute(
+      'aria-valuenow',
+      '50',
+    );
+
+    // Import completes with all 4 rows.
+    await expect
+      .poll(() =>
+        page.evaluate(async (id) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (await (window as any).__easydb.store.rows(id).find()).length;
+        }, tableId),
+      )
+      .toBe(4);
+  });
+
   test('an imported Datasette table shows the (i) info button with its source', async ({
     page,
     workspaceId,
