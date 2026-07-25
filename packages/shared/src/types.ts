@@ -25,6 +25,16 @@ export interface ColumnSpec {
   hidden?: boolean;
   /** Persisted pixel width applied via the data-table's <colgroup>. */
   width?: number;
+  /**
+   * Human description of the column (e.g. from Datasette `columns` metadata).
+   * Shown as a header tooltip. Presentation only.
+   */
+  description?: string;
+  /**
+   * Unit of the column's values (e.g. from Datasette `units` metadata, "metres").
+   * Shown alongside the header label. Presentation only.
+   */
+  units?: string;
 }
 
 export interface WindowGeometry {

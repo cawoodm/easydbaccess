@@ -103,6 +103,10 @@ export class DataTable extends LitElement {
       th.sorted .sort-icon {
         color: #2563eb;
       }
+      th .col-units {
+        color: #9ca3af;
+        font-weight: 400;
+      }
       th[draggable='true'] {
         cursor: grab;
       }
@@ -1008,10 +1012,14 @@ export class DataTable extends LitElement {
                   : isTgt && this.dropEdge === 'after'
                     ? ' drop-after'
                     : '';
+              const tip =
+                (c.description ? `${c.description}\n` : '') +
+                (c.units ? `Units: ${c.units}\n` : '') +
+                `${c.field} — click to sort, drag to reorder`;
               return html`
                 <th
                   class=${`${typeClass}${sorted ? ' sorted' : ''}${isSrc ? ' drag-source' : ''}${edgeClass}`}
-                  title=${`${c.field} — click to sort, drag to reorder`}
+                  title=${tip}
                   draggable="true"
                   @click=${() => this.toggleSort(c.field)}
                   @dragstart=${(e: DragEvent) => this.onColDragStart(e, c.field)}
@@ -1025,7 +1033,9 @@ export class DataTable extends LitElement {
                     this.dropEdge = null;
                   }}
                 >
-                  ${c.label}<span class="sort-icon">${icon}</span>
+                  ${c.label}${c.units
+                    ? html`<span class="col-units"> (${c.units})</span>`
+                    : ''}<span class="sort-icon">${icon}</span>
                   <button
                     class=${`funnel${this.filters[c.field] ? ' active' : ''}`}
                     title="Filter by value"

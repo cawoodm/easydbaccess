@@ -593,6 +593,19 @@ export function applyTableMetadata(
   meta: DatasetteTableMetadata,
   columns: ColumnSpec[],
 ): { columns: ColumnSpec[]; patch: MetadataTablePatch } {
+  // Per-column: description (header tooltip) + units (header suffix). Only set
+  // when metadata carries them, so we never clobber an existing value.
+  const outColumns = columns.map((c) => {
+    const description = meta.columns[c.field];
+    const units = meta.units[c.field];
+    if (description == null && units == null) return c;
+    return {
+      ...c,
+      ...(description != null ? { description } : {}),
+      ...(units != null ? { units } : {}),
+    };
+  });
+
   const fields = new Set(columns.map((c) => c.field));
   const patch: MetadataTablePatch = {};
   if (meta.sort && fields.has(meta.sort)) {
@@ -602,7 +615,7 @@ export function applyTableMetadata(
     patch.sortColumn = meta.sortDesc;
     patch.sortAsc = false;
   }
-  return { columns, patch };
+  return { columns: outColumns, patch };
 }
 
 /**

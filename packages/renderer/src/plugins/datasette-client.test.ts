@@ -730,3 +730,24 @@ describe('extractTableMetadata + applyTableMetadata (default sort)', () => {
     expect(patch.sortColumn).toBeUndefined();
   });
 });
+
+describe('applyTableMetadata (column descriptions + units)', () => {
+  const cols = [
+    { field: 'height', label: 'Height', type: 'number' as const },
+    { field: 'name', label: 'Name', type: 'string' as const },
+  ];
+  it('attaches descriptions and units to the matching columns only', () => {
+    const meta = {
+      columns: { height: 'How tall', missing: 'ignored' },
+      units: { height: 'metres' },
+    };
+    const { columns } = applyTableMetadata(meta as never, cols);
+    const height = columns.find((c) => c.field === 'height')!;
+    const name = columns.find((c) => c.field === 'name')!;
+    expect(height.description).toBe('How tall');
+    expect(height.units).toBe('metres');
+    // Untouched column keeps no description/units; unknown metadata keys ignored.
+    expect(name.description).toBeUndefined();
+    expect(name.units).toBeUndefined();
+  });
+});
