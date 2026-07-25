@@ -676,6 +676,13 @@ export async function fetchRows(
     extraParams?: Record<string, string>;
     /** Called after each page with the running row total, for progress UIs. */
     onProgress?: (rowsSoFar: number) => void;
+    /**
+     * Resume paging from this exact page URL instead of building the first-page
+     * URL. Used to continue an interrupted import from its stored cursor. In
+     * resume mode a failure on the very first page does NOT throw — it returns
+     * empty rows with `error` + `nextUrl` set, so the resume point is preserved.
+     */
+    startUrl?: string;
   } = {},
 ): Promise<{
   rows: Array<Record<string, unknown>>;
@@ -687,9 +694,16 @@ export async function fetchRows(
    * limiting / HTTP 429) after at least one page had already succeeded. The
    * rows fetched so far are still returned — the caller shows a partial result
    * instead of nothing. Undefined on a clean read. A failure on the very first
-   * page throws instead (there is nothing to salvage).
+   * page throws instead (there is nothing to salvage), unless `startUrl` is set.
    */
   error?: string | undefined;
+  /**
+   * The page URL to resume from when paging stopped short of the end — set on an
+   * interruption (the failed hop) and when the row cap was hit with a live
+   * cursor. Undefined when the table was read to exhaustion. Persist it to
+   * resume later via `startUrl`.
+   */
+  nextUrl?: string | undefined;
 }> {
   const maxRows = opts.maxRows ?? 10000;
   // Fixed numeric page size for predictable cursor paging. `_size=max` is also
@@ -702,12 +716,13 @@ export async function fetchRows(
     _size: pageSize,
     ...(opts.extraParams || {}),
   };
-  let url: string | null = buildTableUrl(ref, baseParams);
+  let url: string | null = opts.startUrl ?? buildTableUrl(ref, baseParams);
   const rows: Array<Record<string, unknown>> = [];
   let truncated = false;
   let hasMore = false;
   let pages = 0;
   let error: string | undefined;
+  let resumeUrl: string | undefined;
 
   while (url) {
     let json: any;
@@ -716,14 +731,17 @@ export async function fetchRows(
     } catch (err) {
       // A page hop failed mid-import (commonly rate limiting / HTTP 429). Don't
       // throw away the rows already fetched — return them as a partial result
-      // so the user sees what loaded. Only a failure on the FIRST page (nothing
-      // salvaged yet) propagates, so a wholly-unreachable table still errors.
-      if (rows.length === 0) throw err;
+      // so the user sees what loaded, and remember where to resume. A failure on
+      // the very FIRST page normally propagates (nothing salvaged), EXCEPT in
+      // resume mode where the resume cursor itself is the thing that failed —
+      // there we return it so the import stays resumable.
+      if (rows.length === 0 && !opts.startUrl) throw err;
       error =
         err instanceof DatasetteError && err.status
           ? `stopped after ${rows.length} rows: HTTP ${err.status}`
           : `stopped after ${rows.length} rows: ${(err as Error)?.message ?? String(err)}`;
       hasMore = true; // a cursor almost certainly remained — more is available
+      resumeUrl = url; // the hop that failed — resume retries it
       break;
     }
     const info = classifyPage(json);
@@ -755,10 +773,11 @@ export async function fetchRows(
       // "More available" only when a live cursor remains after a page that had
       // rows — i.e. we stopped at the cap, not because the table was exhausted.
       hasMore = nextPage != null && info.rows.length > 0;
+      if (hasMore) resumeUrl = nextPage ?? undefined; // cap hit — resume from here
       url = null;
     }
   }
-  return { rows, truncated, hasMore, pages, error };
+  return { rows, truncated, hasMore, pages, error, nextUrl: resumeUrl };
 }
 
 // -- Write API (Datasette 1.0 JSON write endpoints) --------------------------

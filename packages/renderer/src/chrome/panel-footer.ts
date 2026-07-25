@@ -44,6 +44,26 @@ export class PanelFooter extends LitElement {
       button:hover {
         background: #f3f4f6;
       }
+      /* Danger buttons (e.g. resume an interrupted import) read as red and
+         pulse gently to draw the eye. */
+      button.danger {
+        color: #b91c1c;
+        border-color: #fca5a5;
+        background: #fef2f2;
+        animation: danger-pulse 1.6s ease-in-out infinite;
+      }
+      button.danger:hover {
+        background: #fee2e2;
+      }
+      @keyframes danger-pulse {
+        0%,
+        100% {
+          border-color: #fca5a5;
+        }
+        50% {
+          border-color: #ef4444;
+        }
+      }
       .spacer {
         flex: 1;
       }
@@ -161,6 +181,7 @@ export class PanelFooter extends LitElement {
             // the button stays accessible (and screen-reader / test names hold).
             // Buttons with no icon fall back to their text so they aren't blank.
             html`<button
+              class=${b.danger ? 'danger' : ''}
               title=${b.tooltip ?? b.label}
               aria-label=${b.label}
               @click=${() => this.runTableButton(b)}

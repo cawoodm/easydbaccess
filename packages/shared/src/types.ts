@@ -121,7 +121,24 @@ export interface Table {
    * if the user later re-adds a column with that name.
    */
   deletedColumns?: string[] | undefined;
+  /**
+   * Set when a snapshot import stopped part-way (e.g. the source rate-limited
+   * us): the cursor to resume paging from and how many rows already landed. The
+   * footer shows a red "resume" button while this is present; a completed import
+   * clears it. Absent ⇒ the import finished (or never started).
+   */
+  importResume?: ImportResume | undefined;
   updatedAt: number;
+}
+
+/** Where an interrupted snapshot import should pick back up. */
+export interface ImportResume {
+  /** The backend page URL to resume fetching from (the hop that was interrupted). */
+  nextUrl: string;
+  /** Rows already imported before the interruption — the append offset + progress base. */
+  loadedRows: number;
+  /** Known total row count, when the source reported one, for a proportional bar. */
+  totalCount?: number | undefined;
 }
 
 /** Descriptive table metadata shown in the window's info dialog. */

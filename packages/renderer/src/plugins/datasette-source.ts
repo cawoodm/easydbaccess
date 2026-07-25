@@ -8,7 +8,15 @@
 // Registers a URL source and a (table-only) drop handler. The Phase-2 live
 // read-write connector builds on the same datasette-client core.
 
-import type { ColumnSpec, HostApi, PluginModule, Row, Table, TableInfo } from '@easydb/shared';
+import type {
+  ColumnSpec,
+  HostApi,
+  ImportResume,
+  PluginModule,
+  Row,
+  Table,
+  TableInfo,
+} from '@easydb/shared';
 import {
   parseDatasetteUrl,
   fetchDatabaseNames,
@@ -57,6 +65,21 @@ function withDatasetteSourceInfo(
     info.sourceUrl = datasetteTableUrl(base, db, table);
   }
   return { ...patch, info };
+}
+
+/**
+ * The resume state to persist after a fetch. Only an INTERRUPTION (an `error`
+ * with a resume cursor) is resumable — the deliberate row cap is not. Returns
+ * `undefined` for a clean/complete fetch, which clears any prior resume marker.
+ */
+function resumeStateFor(
+  error: string | undefined,
+  nextUrl: string | undefined,
+  loadedRows: number,
+  count: number | null,
+): ImportResume | undefined {
+  if (!error || !nextUrl) return undefined;
+  return { nextUrl, loadedRows, ...(count != null ? { totalCount: count } : {}) };
 }
 
 /**
@@ -189,6 +212,18 @@ export function init(api: HostApi): void {
     tooltip: 'Reload this table from its Datasette backend',
     visible: (table) => table.source?.type === 'datasette' || table.origin?.type === 'datasette',
     onClick: (a, { tableId }) => refreshDatasetteTable(a, tableId),
+  });
+
+  // Shown (in red) only while a snapshot import was interrupted part-way — the
+  // table carries a persisted resume cursor. Clicking continues from that page.
+  api.ui.registerTableButton({
+    id: 'datasette:resume',
+    label: 'Resume import',
+    icon: 'sync_problem',
+    tooltip: 'Import was interrupted — click to resume from where it stopped',
+    danger: true,
+    visible: (table) => table.origin?.type === 'datasette' && table.importResume != null,
+    onClick: (a, { tableId }) => resumeImport(a, tableId),
   });
 
   if (typeof api.registerRowSource === 'function') {
@@ -443,7 +478,7 @@ async function fillImportTable(
     // it the bar stays indeterminate. Cap the denominator at the import limit so
     // the fraction reflects what we'll actually pull.
     const target = count && count > 0 ? Math.min(count, SETTINGS.maxImportRows) : 0;
-    const { rows, truncated, hasMore, pages, error } = await fetchRows(fetchFn, ref, {
+    const { rows, truncated, hasMore, pages, error, nextUrl } = await fetchRows(fetchFn, ref, {
       maxRows: SETTINGS.maxImportRows,
       pageSize: SETTINGS.pageSize,
       onProgress: (n) => {
@@ -487,9 +522,17 @@ async function fillImportTable(
     api.events.emit('import:before', { source: 'datasette', tableId });
     // Initial population applies the full metadata (default sort, label, info);
     // a re-import only refreshes the (i) info so the user's sort/label survive.
+    // An interruption stores a resume cursor (footer shows a red resume button);
+    // a clean import clears any prior one.
+    const resume = resumeStateFor(error, nextUrl, rows.length, count);
     const patch = isInitial
-      ? { columns: mergedCols, ...metaPatch, updatedAt: now }
-      : { columns: mergedCols, ...(metaPatch.info ? { info: metaPatch.info } : {}), updatedAt: now };
+      ? { columns: mergedCols, ...metaPatch, importResume: resume, updatedAt: now }
+      : {
+          columns: mergedCols,
+          ...(metaPatch.info ? { info: metaPatch.info } : {}),
+          importResume: resume,
+          updatedAt: now,
+        };
     await api.store.tables.patch(tableId, patch);
 
     const rowColl = api.store.rows(tableId);
@@ -843,7 +886,7 @@ async function refreshSnapshot(api: HostApi, t: Table): Promise<void> {
     if (count == null) count = await fetchTableCount(fetchFn, ref);
 
     const target = count && count > 0 ? Math.min(count, SETTINGS.maxImportRows) : 0;
-    const { rows, hasMore, truncated, error } = await fetchRows(fetchFn, ref, {
+    const { rows, hasMore, truncated, error, nextUrl } = await fetchRows(fetchFn, ref, {
       maxRows: SETTINGS.maxImportRows,
       pageSize: SETTINGS.pageSize,
       onProgress: (n) => {
@@ -877,11 +920,14 @@ async function refreshSnapshot(api: HostApi, t: Table): Promise<void> {
     const now = Date.now();
     // Recreate the whole schema (with default sort/label) when the table had no
     // columns; otherwise keep the user's arrangement and just refresh the (i) info.
+    // A partial (interrupted) refresh stores a resume cursor; a clean one clears it.
+    const resume = resumeStateFor(error, nextUrl, rows.length, count);
     const patch = isInitial
-      ? { columns: merged.columns, ...metaPatch, updatedAt: now }
+      ? { columns: merged.columns, ...metaPatch, importResume: resume, updatedAt: now }
       : {
           columns: merged.columns,
           ...(metaPatch.info ? { info: metaPatch.info } : {}),
+          importResume: resume,
           updatedAt: now,
         };
     await api.store.tables.patch(t.id, patch);
@@ -914,6 +960,72 @@ async function refreshSnapshot(api: HostApi, t: Table): Promise<void> {
 
   // Surface columns we knew nothing about so the user can arrange / hide them.
   if (newFields.length > 0) openColumnEditorForNewColumns(t.id, ref, newFields);
+}
+
+/**
+ * Resume an interrupted snapshot import from its persisted cursor: continue
+ * paging from `importResume.nextUrl`, APPENDING the new rows to those already
+ * imported, driving the progress bar over the combined total. If it reaches the
+ * end, the resume marker is cleared (the red button disappears); if it's
+ * interrupted again, the marker is updated so it can be resumed once more.
+ */
+async function resumeImport(api: HostApi, tableId: string): Promise<void> {
+  const t = await api.store.tables.findOne(tableId);
+  const resumeState = t?.importResume;
+  if (!t || !t.origin?.url || !resumeState) return;
+  const ref = parseDatasetteUrl(t.origin.url);
+  const fetchFn = (u: string) => api.backend.fetch(u);
+  const base = resumeState.loadedRows;
+  const total = resumeState.totalCount ?? null;
+  const target = total && total > 0 ? Math.min(total, SETTINGS.maxImportRows) : 0;
+
+  setTableLoading(tableId, true, target > 0 ? Math.min(1, base / target) : undefined);
+  let added = 0;
+  let outcome: { error?: string | undefined; nextUrl?: string | undefined };
+  try {
+    const res = await fetchRows(fetchFn, ref, {
+      startUrl: resumeState.nextUrl,
+      // Keep the whole import within the cap: only pull up to the remaining room.
+      maxRows: Math.max(0, SETTINGS.maxImportRows - base),
+      pageSize: SETTINGS.pageSize,
+      onProgress: (n) => {
+        if (target > 0) setTableLoading(tableId, true, Math.min(1, (base + n) / target));
+      },
+    });
+    added = res.rows.length;
+    const now = Date.now();
+    await api.store
+      .rows(tableId)
+      .bulkInsert(res.rows.map((data) => ({ id: cryptoUUID(), tableId, data, updatedAt: now })));
+    outcome = { error: res.error, nextUrl: res.nextUrl };
+    // Update or clear the resume marker for the next round.
+    const nextResume = resumeStateFor(res.error, res.nextUrl, base + added, total);
+    await api.store.tables.patch(tableId, { importResume: nextResume, updatedAt: now });
+  } catch (err) {
+    // The resume cursor itself failed hard (still unreachable) — keep the marker
+    // so the user can try again, and report why.
+    const msg = err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
+    api.ui.dialogs.toast(`Couldn't resume ${ref.db}/${ref.table}: ${msg}. Try again later.`, {
+      kind: 'error',
+      title: 'Resume import',
+    });
+    return;
+  } finally {
+    setTableLoading(tableId, false);
+  }
+
+  const totalNow = base + added;
+  if (outcome.error) {
+    api.ui.dialogs.toast(
+      `Resumed ${ref.db}/${ref.table}: +${added} rows (${totalNow} total) — interrupted again (${outcome.error}). Resume to continue.`,
+      { kind: 'warning', title: 'Resume import' },
+    );
+  } else {
+    api.ui.dialogs.toast(
+      `Finished ${ref.db}/${ref.table}: +${added} rows (${totalNow} total).`,
+      { kind: 'success', title: 'Resume import' },
+    );
+  }
 }
 
 /** Open the column editor for a table, flagging the newly-discovered columns. */

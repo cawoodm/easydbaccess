@@ -160,6 +160,8 @@ export interface TableButtonSpec {
   icon?: string;
   tooltip?: string;
   order?: number;
+  /** Render the button in a red/danger style (e.g. an interrupted-import resume). */
+  danger?: boolean;
   /**
    * Optional per-table visibility predicate. Called with the table record;
    * return false to hide the button for that table. Omitted ⇒ always shown.

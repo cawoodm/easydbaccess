@@ -290,6 +290,51 @@ describe('fetchRows follows the `next` token', () => {
 
     await expect(fetchRows(fetchFn, ref)).rejects.toBeInstanceOf(DatasetteError);
   });
+
+  it('exposes a resume cursor (nextUrl) at the hop that was interrupted', async () => {
+    const errRes = (status: number, body: unknown): Promise<Response> =>
+      Promise.resolve({ ok: false, status, json: () => Promise.resolve(body) } as unknown as Response);
+    const fetchFn = vi.fn((url: string) =>
+      url.includes('_next=') ? errRes(429, { ok: false, error: 'rl' }) : jsonRes(GPP_PAGE1),
+    );
+    const ref = parseDatasetteUrl(GPP_URL);
+
+    const out = await fetchRows(fetchFn, ref);
+    expect(out.rows).toHaveLength(2);
+    expect(out.error).toMatch(/429/);
+    // The resume URL is the page-2 cursor that failed — persisted for resume.
+    expect(out.nextUrl).toContain('_next=100');
+  });
+
+  it('resumes from a startUrl, continuing to the end and clearing the cursor', async () => {
+    const start = `${GPP_URL}.json?_next=100`;
+    const fetchFn = vi.fn(() => jsonRes(GPP_PAGE2)); // the resume page → exhausts
+    const ref = parseDatasetteUrl(GPP_URL);
+
+    const out = await fetchRows(fetchFn, ref, { startUrl: start });
+    expect(fetchFn).toHaveBeenCalledWith(start); // fetched the resume cursor first
+    expect(out.rows).toHaveLength(1); // just the continuation rows
+    expect(out.hasMore).toBe(false);
+    expect(out.error).toBeUndefined();
+    expect(out.nextUrl).toBeUndefined(); // reached the end — nothing left to resume
+  });
+
+  it('in resume mode a first-page failure returns the cursor instead of throwing', async () => {
+    const start = `${GPP_URL}.json?_next=100`;
+    const fetchFn = vi.fn(() =>
+      Promise.resolve({
+        ok: false,
+        status: 429,
+        json: () => Promise.resolve({ ok: false, error: 'rate limited' }),
+      } as unknown as Response),
+    );
+    const ref = parseDatasetteUrl(GPP_URL);
+
+    const out = await fetchRows(fetchFn, ref, { startUrl: start });
+    expect(out.rows).toHaveLength(0);
+    expect(out.error).toMatch(/429/);
+    expect(out.nextUrl).toBe(start); // still resumable from the same cursor
+  });
 });
 
 describe('inferColumnsFromRows (fallback when ?_extra= gives no schema)', () => {
