@@ -22,6 +22,8 @@ import { importDatasette } from './datasette-source.js';
 import { parseDatasetteUrl, fetchDatabaseNames } from './datasette-client.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from '../dialogs/dialog-chrome.js';
 import { makeDialogDraggable } from '../dialogs/draggable.js';
+import { TopProgress, type ProgressHandle } from '../chrome/top-progress.js';
+import { readResponseText } from './read-url.js';
 
 /** How a URL should be imported. `auto` is resolved to a concrete kind on submit. */
 type ImportKind = 'auto' | 'json' | 'csv' | 'datasette';
@@ -138,37 +140,89 @@ async function bodySnippet(res: Response): Promise<string> {
  *   - oversized payload (surfaces the actual Content-Length vs the limit),
  *   - body-read failure (huge/truncated response).
  */
-async function fetchImportText(api: HostApi, url: string): Promise<string> {
-  let res: Response;
+interface ImportProgress {
+  /** Fired once if the whole read (connect + body) exceeds `slowMs`. */
+  onSlow?: () => void;
+  /** Fired with a 0..1 fraction while the body streams (when the size is known). */
+  onProgress?: (fraction: number) => void;
+  /** Slow threshold before `onSlow` fires. Default 2000ms. */
+  slowMs?: number;
+}
+
+async function fetchImportText(
+  api: HostApi,
+  url: string,
+  progress: ImportProgress = {},
+): Promise<string> {
+  // Slow-read timer spans the whole operation (a server slow to respond, or a
+  // large body slow to transfer) so the bar can be revealed only past ~2s.
+  const slowMs = progress.slowMs ?? 2000;
+  let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+    timer = undefined;
+    progress.onSlow?.();
+  }, slowMs);
+  const stopTimer = (): void => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+  };
+
   try {
-    res = await api.backend.fetch(url);
-  } catch (err) {
-    throw new Error(
-      `Could not reach ${urlHost(url)} — no response. The server may be down, ` +
-        `blocking cross-origin (CORS) requests, or the transfer may have failed ` +
-        `(e.g. a very large file). [${(err as Error).message}]`,
-    );
+    let res: Response;
+    try {
+      res = await api.backend.fetch(url);
+    } catch (err) {
+      throw new Error(
+        `Could not reach ${urlHost(url)} — no response. The server may be down, ` +
+          `blocking cross-origin (CORS) requests, or the transfer may have failed ` +
+          `(e.g. a very large file). [${(err as Error).message}]`,
+      );
+    }
+    if (!res.ok) {
+      const snippet = await bodySnippet(res);
+      throw new Error(
+        `HTTP ${res.status} ${res.statusText || ''}`.trim() + (snippet ? ` — ${snippet}` : ''),
+      );
+    }
+    const len = Number(res.headers.get('content-length'));
+    if (Number.isFinite(len) && len > MAX_IMPORT_BYTES) {
+      throw new Error(
+        `Response is ${(len / (1024 * 1024)).toFixed(1)} MB, over the ` +
+          `${MAX_IMPORT_BYTES / (1024 * 1024)} MB browser import limit. Import a smaller ` +
+          `extract, or use a server/Datasette connection for large datasets.`,
+      );
+    }
+    try {
+      return await readResponseText(res, progress.onProgress);
+    } catch (err) {
+      throw new Error(
+        `Failed reading the response body from ${urlHost(url)}: ${(err as Error).message}`,
+      );
+    }
+  } finally {
+    stopTimer();
   }
-  if (!res.ok) {
-    const snippet = await bodySnippet(res);
-    throw new Error(
-      `HTTP ${res.status} ${res.statusText || ''}`.trim() + (snippet ? ` — ${snippet}` : ''),
-    );
-  }
-  const len = Number(res.headers.get('content-length'));
-  if (Number.isFinite(len) && len > MAX_IMPORT_BYTES) {
-    throw new Error(
-      `Response is ${(len / (1024 * 1024)).toFixed(1)} MB, over the ` +
-        `${MAX_IMPORT_BYTES / (1024 * 1024)} MB browser import limit. Import a smaller ` +
-        `extract, or use a server/Datasette connection for large datasets.`,
-    );
-  }
+}
+
+/**
+ * {@link fetchImportText} while showing the top progress bar — but only if the
+ * read is slow (exceeds ~2s). The bar is determinate when the response
+ * advertises a `Content-Length`, indeterminate otherwise, so quick imports
+ * never flash it.
+ */
+async function fetchImportTextWithBar(api: HostApi, url: string, label: string): Promise<string> {
+  // Held on an object so the closure assignment isn't narrowed away in finally.
+  const ref: { handle: ProgressHandle | null } = { handle: null };
   try {
-    return await res.text();
-  } catch (err) {
-    throw new Error(
-      `Failed reading the response body from ${urlHost(url)}: ${(err as Error).message}`,
-    );
+    return await fetchImportText(api, url, {
+      onSlow: () => {
+        ref.handle = TopProgress.begin(label);
+      },
+      onProgress: (f) => ref.handle?.fraction(f),
+    });
+  } finally {
+    ref.handle?.done();
   }
 }
 
@@ -178,7 +232,7 @@ async function refreshImported(api: HostApi, tableId: string): Promise<void> {
   const origin = t?.origin;
   if (!origin?.url) return;
   try {
-    const text = await fetchImportText(api, origin.url);
+    const text = await fetchImportTextWithBar(api, origin.url, `Reading ${t?.name ?? 'data'}…`);
 
     let rows: Array<Record<string, unknown>>;
     if (origin.type === 'csv') {
@@ -237,7 +291,8 @@ async function openImport(api: HostApi): Promise<void> {
       // database's tables directly (skipTablePicker).
       await importDatasette(api, url, { skipTablePicker: dbChosen });
     } else if (kind === 'csv') {
-      const text = await fetchImportText(api, url);
+      // Reads show a top progress bar only if they take more than ~2s.
+      const text = await fetchImportTextWithBar(api, url, `Reading ${filenameFromUrl(url)}…`);
       // When "Edit columns" was checked, review/rename columns before creating
       // the table (importCsvText returns without inserting if the user cancels).
       await importCsvText(api, text, filenameFromUrl(url), {
@@ -250,7 +305,7 @@ async function openImport(api: HostApi): Promise<void> {
         title: 'Import',
       });
     } else {
-      const text = await fetchImportText(api, url);
+      const text = await fetchImportTextWithBar(api, url, `Reading ${filenameFromUrl(url)}…`);
       await importJsonText(api, text, filenameFromUrl(url), { originUrl: url });
       api.ui.dialogs.toast(`Imported ${filenameFromUrl(url)}.`, {
         kind: 'success',

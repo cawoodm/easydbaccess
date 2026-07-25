@@ -122,3 +122,49 @@ test('a network/CORS failure surfaces a reason, not a bare "Load failed"', async
   await expect(toast).toContainText('ex.example');
   await expect(toast).toContainText(/no response|CORS|unreachable/i);
 });
+
+test('shows the top progress bar when a URL read takes more than 2s', async ({
+  page,
+  workspaceId,
+}) => {
+  // Stall the response ~3s — longer than the 2s slow-threshold — so the top
+  // progress bar is revealed while the body is still being read.
+  await page.route('https://ex.example/slow.csv', async (route) => {
+    await new Promise((r) => setTimeout(r, 3000));
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/plain; charset=utf-8',
+      headers: { 'access-control-allow-origin': '*' },
+      body: CSV,
+    });
+  });
+
+  await page.getByTitle('Import data from a URL').click();
+  const dlg = page.locator('import-dialog dialog');
+  await expect(dlg).toBeVisible();
+  await dlg.locator('input[type="text"]').fill('https://ex.example/slow.csv');
+  await dlg.locator('select').last().selectOption('csv');
+  await dlg.getByRole('button', { name: 'Import', exact: true }).click();
+
+  // The bar (role=progressbar, rendered only while visible) appears once the
+  // 2s threshold passes, then disappears once the read completes.
+  const bar = page.locator('top-progress').getByRole('progressbar');
+  await expect(bar).toBeVisible({ timeout: 8000 });
+  await expect(bar).toBeHidden({ timeout: 8000 });
+
+  // And the import still completed.
+  await expect
+    .poll(() =>
+      page.evaluate(async (ws) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__easydb.store;
+        const t = (await store.tables.find()).find(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (x: any) => x.workspaceId === ws && x.name === 'slow',
+        );
+        if (!t) return 0;
+        return (await store.rows(t.id).find()).length;
+      }, workspaceId),
+    )
+    .toBe(2);
+});
