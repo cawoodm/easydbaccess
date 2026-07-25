@@ -114,6 +114,13 @@ export interface Table {
    * designated label.
    */
   labelColumn?: string | undefined;
+  /**
+   * Fields the user explicitly removed via the column editor. A re-import or
+   * refresh must NOT re-add these, even though the source still returns them —
+   * otherwise a deleted column reappears on every refresh. Cleared for a field
+   * if the user later re-adds a column with that name.
+   */
+  deletedColumns?: string[] | undefined;
   updatedAt: number;
 }
 

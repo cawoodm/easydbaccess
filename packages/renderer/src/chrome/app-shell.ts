@@ -260,8 +260,8 @@ export class AppShell extends LitElement {
   }
 
   private onEditColumns = (e: Event) => {
-    const ce = e as CustomEvent<{ tableId: string }>;
-    void this.dialog?.open(ce.detail.tableId);
+    const ce = e as CustomEvent<{ tableId: string; notice?: string }>;
+    void this.dialog?.open(ce.detail.tableId, { notice: ce.detail.notice });
   };
 
   private onOpenNewTable = () => {
@@ -392,7 +392,7 @@ export class AppShell extends LitElement {
   override render() {
     return html`
       <header>
-        <strong>easyDBAccess <span class="version">v0.0.79</span></strong>
+        <strong>easyDBAccess <span class="version">v0.0.80</span></strong>
         ${this.headerButtons.map((b) => this.renderSlotButton(b, 'header'))}
         ${this.searchOpen
           ? html`<span class="search-wrap">

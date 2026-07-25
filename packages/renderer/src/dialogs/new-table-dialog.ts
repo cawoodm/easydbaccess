@@ -1,6 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import type { ColumnSpec, ColumnType, Row } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { makeDialogDraggable } from './draggable.js';
@@ -143,6 +143,15 @@ export class NewTableDialog extends LitElement {
       color: #ef4444;
       font-size: 0.85rem;
     }
+    .notice {
+      background: #fef9c3;
+      border: 1px solid #fde047;
+      color: #713f12;
+      border-radius: 0.35rem;
+      padding: 0.45rem 0.6rem;
+      font-size: 0.85rem;
+      margin-bottom: 0.6rem;
+    }
     .hint {
       color: #6b7280;
       font-size: 0.78rem;
@@ -206,6 +215,8 @@ export class NewTableDialog extends LitElement {
   @state() private name = '';
   @state() private columns: ColumnRow[] = [];
   @state() private errorMsg = '';
+  /** Non-error banner (e.g. "a refresh found new columns — review them"). */
+  @state() private noticeMsg = '';
   @state() private dragSrcIdx: number | null = null;
   @state() private dropTargetIdx: number | null = null;
   @state() private dropEdge: 'before' | 'after' | null = null;
@@ -232,8 +243,9 @@ export class NewTableDialog extends LitElement {
    * the form from the saved Table. Otherwise opens "new" mode with two default
    * string columns.
    */
-  async open(tableId?: string): Promise<void> {
+  async open(tableId?: string, opts?: { notice?: string | undefined }): Promise<void> {
     this.errorMsg = '';
+    this.noticeMsg = opts?.notice ?? '';
     // Snapshot the currently registered cell renderers and keep them fresh
     // while the dialog is open — a plugin install after dialog open should
     // surface its renderer too. The unsub fires on close().
@@ -445,13 +457,31 @@ export class NewTableDialog extends LitElement {
           return;
         }
       }
+      // Track columns the user removed so a later re-import / refresh doesn't
+      // re-add them. A removed column is an original field no longer kept by any
+      // row (renames keep their `origField`, so they don't count as deleted).
+      // Re-adding a column with a previously-deleted name clears it from the set.
+      const keptOrig = new Set(
+        this.columns.map((c) => c.origField).filter((f): f is string => !!f),
+      );
+      const savedFields = new Set(columns.map((c) => c.field));
+      const removedNow = (existingTable?.columns ?? [])
+        .map((c) => c.field)
+        .filter((f) => !keptOrig.has(f));
+      const prevDeleted = existingTable?.deletedColumns ?? [];
+      const deletedColumns = [...new Set([...prevDeleted, ...removedNow])].filter(
+        (f) => !savedFields.has(f),
+      );
+
       // Patch the saved table; row data isn't migrated. If a field was
       // renamed, downstream cells will read undefined and display as empty.
-      await ctx.store.tables.patch(tableId, {
-        name,
-        columns,
-        updatedAt: Date.now(),
-      });
+      const patch: Partial<Table> = { name, columns, updatedAt: Date.now() };
+      // Only persist the deleted-columns list when it carries meaning (there's
+      // something tracked, or we're clearing a previously-tracked set).
+      if (deletedColumns.length > 0 || prevDeleted.length > 0) {
+        patch.deletedColumns = deletedColumns;
+      }
+      await ctx.store.tables.patch(tableId, patch);
     } else {
       await ctx.store.tables.insert({
         id: cryptoUUID(),
@@ -538,6 +568,7 @@ export class NewTableDialog extends LitElement {
             </div>
           </div>
           <div class="dialog-body">
+          ${this.noticeMsg ? html`<div class="notice">${this.noticeMsg}</div>` : ''}
           <label>
             Name
             <input

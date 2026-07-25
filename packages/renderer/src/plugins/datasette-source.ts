@@ -134,6 +134,7 @@ async function resolveChosenTables(
 }
 import { chooseTables } from '../dialogs/table-select-dialog.js';
 import { setTableLoading } from '../table/data-table.js';
+import { reconcileColumns } from '../table/column-merge.js';
 import { createDatasetteCollection, tokenSettingKey } from './datasette-collection.js';
 import '../dialogs/datasette-connect-dialog.js';
 import { DatasetteConnectDialog } from '../dialogs/datasette-connect-dialog.js';
@@ -435,6 +436,7 @@ async function fillImportTable(
     // Datasette.io's schema responses omit `count`, so a single-table import had
     // no denominator and only ever showed the indeterminate bar. Fetch the count
     // directly (cheap `?_extra=count`, WAF-safe) so the bar is proportional.
+    // Best-effort: fetchTableCount returns null (never throws) on failure.
     if (count == null) count = await fetchTableCount(fetchFn, ref);
 
     // The row count gives a denominator for a proportional progress bar; without
@@ -473,9 +475,22 @@ async function fillImportTable(
     // Always record where the table came from so the (i) info button shows.
     metaPatch = withDatasetteSourceInfo(metaPatch, ref.base, ref.db!, ref.table!);
 
+    // Preserve the user's column arrangement on an overwrite re-import (order,
+    // hidden, widths …) and never re-add a column they deleted. A brand-new
+    // table (empty columns) takes the discovered schema wholesale.
+    const current = await api.store.tables.findOne(tableId);
+    const existingCols = current?.columns ?? [];
+    const isInitial = existingCols.length === 0;
+    const { columns: mergedCols } = reconcileColumns(existingCols, cols, current?.deletedColumns);
+
     const now = Date.now();
     api.events.emit('import:before', { source: 'datasette', tableId });
-    await api.store.tables.patch(tableId, { columns: cols, ...metaPatch, updatedAt: now });
+    // Initial population applies the full metadata (default sort, label, info);
+    // a re-import only refreshes the (i) info so the user's sort/label survive.
+    const patch = isInitial
+      ? { columns: mergedCols, ...metaPatch, updatedAt: now }
+      : { columns: mergedCols, ...(metaPatch.info ? { info: metaPatch.info } : {}), updatedAt: now };
+    await api.store.tables.patch(tableId, patch);
 
     const rowColl = api.store.rows(tableId);
     if (overwrite) {
@@ -788,33 +803,133 @@ async function refreshDatasetteTable(api: HostApi, tableId: string): Promise<voi
   }
 }
 
-/** Re-fetch a snapshot table's rows from its origin URL and replace them locally. */
+/**
+ * Re-fetch a snapshot table from its origin URL: replace the rows AND
+ * re-discover the columns. The column set is reconciled with the user's current
+ * arrangement — existing columns keep their order/hidden/width, deleted columns
+ * stay gone, and genuinely-new columns are appended. If the table had NO columns
+ * (a failed first import left an empty shell), refresh recreates them. When new
+ * columns appear, the column editor opens so the user can arrange them. Drives
+ * the window's progress bar for the duration, exactly like the initial import.
+ */
 async function refreshSnapshot(api: HostApi, t: Table): Promise<void> {
   const ref = parseDatasetteUrl(t.origin!.url);
   const fetchFn = (u: string) => api.backend.fetch(u);
-  const { rows, hasMore, truncated, error } = await fetchRows(fetchFn, ref, {
-    maxRows: SETTINGS.maxImportRows,
-    pageSize: SETTINGS.pageSize,
-  });
-  const now = Date.now();
-  const rowColl = api.store.rows(t.id);
-  const old = await rowColl.find();
-  await rowColl.bulkRemove(old.map((r) => r.id));
-  await rowColl.bulkInsert(
-    rows.map((data) => ({ id: cryptoUUID(), tableId: t.id, data, updatedAt: now })),
-  );
-  await api.store.tables.patch(t.id, { updatedAt: now });
+  setTableLoading(t.id, true);
+  let outcome: {
+    rowCount: number;
+    hasMore: boolean;
+    truncated: boolean;
+    error?: string | undefined;
+  };
+  let newFields: string[] = [];
+  try {
+    // Schema first (best-effort) — gives the progress-bar denominator and the
+    // authoritative column names/types when the instance supports `?_extra=`.
+    let metaColumns: ColumnSpec[] = [];
+    let count: number | null = null;
+    let typed = false;
+    try {
+      const meta = await fetchTableMeta(fetchFn, ref);
+      metaColumns = meta.columns;
+      count = meta.count;
+      typed = meta.typed;
+    } catch {
+      /* fall back to row inference */
+    }
+    // Datasette.io omits `count` in schema responses; fetch it directly (cheap,
+    // WAF-safe) so the refresh progress bar is proportional, not indeterminate.
+    // Best-effort: fetchTableCount returns null (never throws) on failure.
+    if (count == null) count = await fetchTableCount(fetchFn, ref);
+
+    const target = count && count > 0 ? Math.min(count, SETTINGS.maxImportRows) : 0;
+    const { rows, hasMore, truncated, error } = await fetchRows(fetchFn, ref, {
+      maxRows: SETTINGS.maxImportRows,
+      pageSize: SETTINGS.pageSize,
+      onProgress: (n) => {
+        if (target > 0) setTableLoading(t.id, true, Math.min(1, n / target));
+      },
+    });
+
+    // Build the discovered columns (schema → rows → type refinement), then layer
+    // on the Datasette metadata (descriptions, units, default sort, …).
+    let cols =
+      metaColumns.length === 0
+        ? inferColumnsFromRows(rows)
+        : typed
+          ? metaColumns
+          : refineColumnTypes(metaColumns, rows);
+    let metaPatch: MetadataTablePatch = {};
+    try {
+      const md = await fetchTableMetadata(fetchFn, ref);
+      const applied = applyTableMetadata(md, cols);
+      cols = applied.columns;
+      metaPatch = applied.patch;
+    } catch {
+      /* metadata is optional */
+    }
+    metaPatch = withDatasetteSourceInfo(metaPatch, ref.base, ref.db!, ref.table!);
+
+    const isInitial = t.columns.length === 0;
+    const merged = reconcileColumns(t.columns, cols, t.deletedColumns);
+    newFields = merged.newFields;
+
+    const now = Date.now();
+    // Recreate the whole schema (with default sort/label) when the table had no
+    // columns; otherwise keep the user's arrangement and just refresh the (i) info.
+    const patch = isInitial
+      ? { columns: merged.columns, ...metaPatch, updatedAt: now }
+      : {
+          columns: merged.columns,
+          ...(metaPatch.info ? { info: metaPatch.info } : {}),
+          updatedAt: now,
+        };
+    await api.store.tables.patch(t.id, patch);
+
+    const rowColl = api.store.rows(t.id);
+    const old = await rowColl.find();
+    await rowColl.bulkRemove(old.map((r) => r.id));
+    await rowColl.bulkInsert(
+      rows.map((data) => ({ id: cryptoUUID(), tableId: t.id, data, updatedAt: now })),
+    );
+    outcome = { rowCount: rows.length, hasMore, truncated, error };
+  } finally {
+    setTableLoading(t.id, false);
+  }
+
   // A partial refresh (paging stopped early — e.g. rate limiting) still replaced
   // the rows with what loaded; note it rather than pretending it was complete.
-  const note = error
-    ? ` — partial (${error})`
-    : hasMore || truncated
-      ? ` (capped at ${SETTINGS.maxImportRows})`
-      : '';
-  api.ui.dialogs.toast(`Refreshed ${rows.length} rows from ${ref.db}/${ref.table}${note}.`, {
-    kind: error || hasMore || truncated ? 'warning' : 'success',
+  const parts: string[] = [];
+  if (outcome.error) parts.push(`partial (${outcome.error})`);
+  else if (outcome.hasMore || outcome.truncated) parts.push(`capped at ${SETTINGS.maxImportRows}`);
+  if (newFields.length > 0)
+    parts.push(`${newFields.length} new column${newFields.length === 1 ? '' : 's'}`);
+  const note = parts.length ? ` — ${parts.join(', ')}` : '';
+  api.ui.dialogs.toast(`Refreshed ${outcome.rowCount} rows from ${ref.db}/${ref.table}${note}.`, {
+    kind: outcome.error || outcome.hasMore || outcome.truncated || newFields.length > 0
+      ? 'warning'
+      : 'success',
     title: 'Refresh',
   });
+
+  // Surface columns we knew nothing about so the user can arrange / hide them.
+  if (newFields.length > 0) openColumnEditorForNewColumns(t.id, ref, newFields);
+}
+
+/** Open the column editor for a table, flagging the newly-discovered columns. */
+function openColumnEditorForNewColumns(
+  tableId: string,
+  ref: DatasetteRef,
+  newFields: string[],
+): void {
+  const list = newFields.join(', ');
+  const many = newFields.length !== 1;
+  const notice =
+    `Refreshing ${ref.db}/${ref.table} revealed ${newFields.length} new ` +
+    `column${many ? 's' : ''}: ${list}. Review, reorder or hide ${many ? 'them' : 'it'} here.`;
+  document.dispatchEvent(
+    new CustomEvent('easydb:edit-columns', { detail: { tableId, notice } }),
+  );
 }
 
 function slug(s: string): string {
