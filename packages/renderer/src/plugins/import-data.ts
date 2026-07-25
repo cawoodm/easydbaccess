@@ -102,22 +102,91 @@ export function init(api: HostApi): void {
   });
 }
 
+/**
+ * Hard ceiling on a URL import buffered into the browser. A CSV/JSON body is
+ * read fully into a string and parsed in memory (then written row-by-row to
+ * IndexedDB), so a huge file OOMs or has the browser abort the transfer with an
+ * opaque "Load failed" TypeError. We refuse up front with the real size so the
+ * user gets an actionable reason instead of a bare failure.
+ */
+const MAX_IMPORT_BYTES = 50 * 1024 * 1024; // 50 MB
+
+/** URL host for messages, falling back to the raw URL if it doesn't parse. */
+function urlHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+/** First ~300 chars of a response body, whitespace-collapsed, for error context. */
+async function bodySnippet(res: Response): Promise<string> {
+  try {
+    const t = await res.text();
+    return t.replace(/\s+/g, ' ').trim().slice(0, 300);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Fetch a URL for import and return its text, ALWAYS throwing an informative
+ * Error on failure — never a bare "Load failed"/"Failed to fetch". Distinguishes:
+ *   - fetch rejection (no response: unreachable / CORS-blocked / transfer aborted),
+ *   - HTTP error status (surfaces the code + a response-body snippet),
+ *   - oversized payload (surfaces the actual Content-Length vs the limit),
+ *   - body-read failure (huge/truncated response).
+ */
+async function fetchImportText(api: HostApi, url: string): Promise<string> {
+  let res: Response;
+  try {
+    res = await api.backend.fetch(url);
+  } catch (err) {
+    throw new Error(
+      `Could not reach ${urlHost(url)} — no response. The server may be down, ` +
+        `blocking cross-origin (CORS) requests, or the transfer may have failed ` +
+        `(e.g. a very large file). [${(err as Error).message}]`,
+    );
+  }
+  if (!res.ok) {
+    const snippet = await bodySnippet(res);
+    throw new Error(
+      `HTTP ${res.status} ${res.statusText || ''}`.trim() + (snippet ? ` — ${snippet}` : ''),
+    );
+  }
+  const len = Number(res.headers.get('content-length'));
+  if (Number.isFinite(len) && len > MAX_IMPORT_BYTES) {
+    throw new Error(
+      `Response is ${(len / (1024 * 1024)).toFixed(1)} MB, over the ` +
+        `${MAX_IMPORT_BYTES / (1024 * 1024)} MB browser import limit. Import a smaller ` +
+        `extract, or use a server/Datasette connection for large datasets.`,
+    );
+  }
+  try {
+    return await res.text();
+  } catch (err) {
+    throw new Error(
+      `Failed reading the response body from ${urlHost(url)}: ${(err as Error).message}`,
+    );
+  }
+}
+
 /** Re-fetch a CSV/JSON snapshot table from its origin URL and replace its rows. */
 async function refreshImported(api: HostApi, tableId: string): Promise<void> {
   const t = await api.store.tables.findOne(tableId);
   const origin = t?.origin;
   if (!origin?.url) return;
   try {
-    const res = await api.backend.fetch(origin.url);
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-    const text = await res.text();
+    const text = await fetchImportText(api, origin.url);
 
     let rows: Array<Record<string, unknown>>;
     if (origin.type === 'csv') {
       rows = parseCsv(text).rows;
     } else {
       const parsed = parsedToTables(JSON.parse(text), t!.name);
-      const match = parsed.find((x) => x.name === t!.name) ?? (parsed.length === 1 ? parsed[0] : undefined);
+      const match =
+        parsed.find((x) => x.name === t!.name) ?? (parsed.length === 1 ? parsed[0] : undefined);
       if (!match) throw new Error(`"${t!.name}" is no longer in the dump at ${origin.url}`);
       rows = match.rows;
     }
@@ -168,9 +237,7 @@ async function openImport(api: HostApi): Promise<void> {
       // database's tables directly (skipTablePicker).
       await importDatasette(api, url, { skipTablePicker: dbChosen });
     } else if (kind === 'csv') {
-      const res = await api.backend.fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-      const text = await res.text();
+      const text = await fetchImportText(api, url);
       // When "Edit columns" was checked, review/rename columns before creating
       // the table (importCsvText returns without inserting if the user cancels).
       await importCsvText(api, text, filenameFromUrl(url), {
@@ -183,9 +250,7 @@ async function openImport(api: HostApi): Promise<void> {
         title: 'Import',
       });
     } else {
-      const res = await api.backend.fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-      const text = await res.text();
+      const text = await fetchImportText(api, url);
       await importJsonText(api, text, filenameFromUrl(url), { originUrl: url });
       api.ui.dialogs.toast(`Imported ${filenameFromUrl(url)}.`, {
         kind: 'success',
@@ -573,7 +638,6 @@ export class ImportDialog extends LitElement {
             </label>
 
             ${this.renderDbPicker()}
-
             ${this.resolvedKind === 'csv'
               ? html`<label class="check">
                   <input

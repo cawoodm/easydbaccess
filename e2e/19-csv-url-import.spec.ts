@@ -69,3 +69,56 @@ test('imports a CSV from a URL into a typed table', async ({ page, workspaceId }
   expect(summary.pops.every((p: unknown) => typeof p === 'number')).toBe(true);
   expect([...summary.pops].sort((a: number, b: number) => a - b)).toEqual([30000, 133000]);
 });
+
+async function attemptCsvImport(page: import('@playwright/test').Page, url: string) {
+  await page.getByTitle('Import data from a URL').click();
+  const dlg = page.locator('import-dialog dialog');
+  await expect(dlg).toBeVisible();
+  await dlg.locator('input[type="text"]').fill(url);
+  await dlg.locator('select').last().selectOption('csv');
+  await dlg.getByRole('button', { name: 'Import', exact: true }).click();
+}
+
+test('a CSV import HTTP error surfaces the status code and a body snippet', async ({ page }) => {
+  await page.route('https://ex.example/missing.csv', (route) =>
+    route.fulfill({
+      status: 404,
+      contentType: 'text/plain',
+      headers: { 'access-control-allow-origin': '*' },
+      body: 'Not Found: no such object',
+    }),
+  );
+  await attemptCsvImport(page, 'https://ex.example/missing.csv');
+  const toast = page.locator('toast-host .toast.error');
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText('404');
+  await expect(toast).toContainText('Not Found: no such object');
+});
+
+test('an oversized CSV surfaces the actual size and the limit, not "Load failed"', async ({
+  page,
+}) => {
+  // 200 OK with a huge Content-Length (like the 152 MB StackExchange LFS CSV).
+  await page.route('https://ex.example/huge.csv', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/plain',
+      headers: { 'access-control-allow-origin': '*', 'content-length': String(159525875) },
+      body: 'a,b\n1,2\n',
+    }),
+  );
+  await attemptCsvImport(page, 'https://ex.example/huge.csv');
+  const toast = page.locator('toast-host .toast.error');
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText('152.1 MB');
+  await expect(toast).toContainText(/limit/i);
+});
+
+test('a network/CORS failure surfaces a reason, not a bare "Load failed"', async ({ page }) => {
+  await page.route('https://ex.example/blocked.csv', (route) => route.abort('failed'));
+  await attemptCsvImport(page, 'https://ex.example/blocked.csv');
+  const toast = page.locator('toast-host .toast.error');
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText('ex.example');
+  await expect(toast).toContainText(/no response|CORS|unreachable/i);
+});
