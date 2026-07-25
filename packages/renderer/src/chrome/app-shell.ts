@@ -392,7 +392,7 @@ export class AppShell extends LitElement {
   override render() {
     return html`
       <header>
-        <strong>easyDBAccess <span class="version">v0.0.74</span></strong>
+        <strong>easyDBAccess <span class="version">v0.0.75</span></strong>
         ${this.headerButtons.map((b) => this.renderSlotButton(b, 'header'))}
         ${this.searchOpen
           ? html`<span class="search-wrap">

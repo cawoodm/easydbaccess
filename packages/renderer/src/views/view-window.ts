@@ -7,6 +7,7 @@ import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViewsDialog } from '../dialogs/views-dialog.js';
 import { hasRowHtml, substituteRow, viewRows } from './view-render.js';
 import { searchRows } from '../search/text-search.js';
+import { emitVisibleCount } from '../window-mgr/panel-title.js';
 // Side-effect import: the template-off mode renders the standard interactive
 // grid, bound to this view instance for its presentation state.
 import '../table/data-table.js';
@@ -276,6 +277,11 @@ export class ViewWindow extends LitElement {
       );
     }
     this.rows = rows;
+    // Template-ON: this component owns the visible set, so it reports the count
+    // for the view window's title. Template-OFF renders <data-table>, which
+    // emits its own count (keyed by the same view-instance id) — so we skip
+    // here to avoid two producers fighting over the title.
+    if (this.templateOn) emitVisibleCount(this.viewInstanceId, rows.length, this.allRows.length);
   }
 
   // -- footer actions ---------------------------------------------------------

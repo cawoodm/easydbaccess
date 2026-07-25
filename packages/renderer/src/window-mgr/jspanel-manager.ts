@@ -25,6 +25,7 @@ import { getContext, type AppContext } from '../app-context.js';
 import { openTableInfoDialog } from '../dialogs/table-info-dialog.js';
 import { initPanZoom, type PanZoomHandle } from './panzoom.js';
 import { createMaximizeFill } from './maximize-fill.js';
+import { countSuffix, VISIBLE_COUNT_EVENT, type VisibleCountDetail } from './panel-title.js';
 import '../table/data-table.js';
 import '../chrome/panel-search.js';
 import '../chrome/panel-footer.js';
@@ -199,27 +200,29 @@ function openPanel(t: Table, ctx: AppContext): void {
   const content: HTMLElement = startMinimized ? document.createElement('div') : makeGrid();
   let contentEl: HTMLElement | null = startMinimized ? null : content;
 
-  // Panel title row-count: "<name> (<count>)". Subscribing to rows triggers a
-  // fetch for live/remote tables, so it is gated on the grid being mounted —
-  // a minimized window keeps it STOPPED (fetches nothing) until it's expanded.
+  // Panel title row-count: "<name> (<count>)", or "<name> (<visible>/<total>)"
+  // while a search/filter narrows the set. The mounted <data-table> owns the
+  // visible-row computation (per-column filters + local + global search) and
+  // emits it; we mirror that into the titlebar. A minimized window has no grid
+  // and so no count events — the title shows the bare name until it's expanded.
   let lastName = t.name;
-  let rowCountUnsub: (() => void) | null = null;
-  const updateTitle = (count: number) => {
+  let lastCount = -1;
+  let lastTotal = -1;
+  const renderTitle = (): void => {
     if (typeof panel.setHeaderTitle === 'function') {
-      panel.setHeaderTitle(`${lastName} (${count})`);
+      panel.setHeaderTitle(lastName + countSuffix(lastCount, lastTotal));
     }
   };
-  const startRowCount = (): void => {
-    if (rowCountUnsub) return;
-    rowCountUnsub = ctx.store.rows(t.id).subscribe((rows) => updateTitle(rows.length));
+  const onVisibleCount = (e: Event): void => {
+    const d = (e as CustomEvent<VisibleCountDetail>).detail;
+    if (d.key !== t.id) return;
+    lastCount = d.count;
+    lastTotal = d.total;
+    renderTitle();
   };
-  const stopRowCount = (): void => {
-    rowCountUnsub?.();
-    rowCountUnsub = null;
-  };
+  document.addEventListener(VISIBLE_COUNT_EVENT, onVisibleCount as EventListener);
 
   const unmountContent = (): void => {
-    stopRowCount();
     (footer as HTMLElement & { active: boolean }).active = false;
     contentEl?.remove();
     contentEl = null;
@@ -235,7 +238,6 @@ function openPanel(t: Table, ctx: AppContext): void {
     host.appendChild(el);
     contentEl = el;
     (footer as HTMLElement & { active: boolean }).active = true;
-    startRowCount();
   };
 
   const search = document.createElement('panel-search');
@@ -396,22 +398,14 @@ function openPanel(t: Table, ctx: AppContext): void {
     updateInfoBtn(cur);
     if (cur.name !== lastName) {
       lastName = cur.name;
-      if (rowCountUnsub)
-        void ctx.store
-          .rows(t.id)
-          .find()
-          .then((r) => updateTitle(r.length));
+      renderTitle();
     }
   });
 
-  // Start the live row-count only when the window opens with a grid mounted.
-  // A window restored minimized starts it later, on expand (see mountContent).
-  if (!startMinimized) startRowCount();
-
-  // Clean up the row subscription on close so it doesn't leak after table delete.
+  // Clean up the count listener on close so it doesn't leak after table delete.
   const origClose = panel.close.bind(panel);
   panel.close = () => {
-    stopRowCount();
+    document.removeEventListener(VISIBLE_COUNT_EVENT, onVisibleCount as EventListener);
     return origClose();
   };
 }

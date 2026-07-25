@@ -7,6 +7,7 @@ import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
 import '../chrome/filter-combobox.js';
 import { searchRows } from '../search/text-search.js';
+import { emitVisibleCount } from '../window-mgr/panel-title.js';
 
 /** A row matches `needle` (lower-cased) when any of its field values contains it. */
 function rowContains(r: Row, needle: string): boolean {
@@ -328,6 +329,10 @@ export class DataTable extends LitElement {
   private get viewMode(): boolean {
     return !!this.viewInstanceId;
   }
+  /** Visible-row count from the last render, emitted for the panel title. */
+  private renderedCount = 0;
+  private lastEmittedCount = -1;
+  private lastEmittedTotal = -1;
   /** Tables with fewer rows than this skip virtualization (cheap to render). */
   private readonly VIRT_THRESHOLD = 200;
   /** Extra rows rendered above/below the viewport to mask scroll jank. */
@@ -402,6 +407,23 @@ export class DataTable extends LitElement {
     }
     if (!this.viewportHeight) this.viewportHeight = this.clientHeight;
     this.markEmptyCells();
+    this.emitCount();
+  }
+
+  /**
+   * Emit the visible/total row count for the panel title. Keyed by the view
+   * instance id in view-bound mode (so the view window's title updates) and by
+   * the table id otherwise (the table window's title). Only fires on a change.
+   */
+  private emitCount(): void {
+    const key = this.viewMode ? this.viewInstanceId : this.tableId;
+    if (!key) return;
+    const count = this.renderedCount;
+    const total = this.rows.length;
+    if (count === this.lastEmittedCount && total === this.lastEmittedTotal) return;
+    this.lastEmittedCount = count;
+    this.lastEmittedTotal = total;
+    emitVisibleCount(key, count, total);
   }
 
   /**
@@ -986,6 +1008,9 @@ export class DataTable extends LitElement {
 
   override render() {
     const rows = this.sortedRows();
+    // Captured for the panel-title row-count (emitted in updated()); render
+    // already computes the visible set, so this reuses that pass.
+    this.renderedCount = rows.length;
     const cols = this.visibleColumns;
     const { slice, topPad, bottomPad } = this.virtualSlice(rows);
     const suggestions = this.computeFilterSuggestions();

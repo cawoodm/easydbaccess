@@ -21,6 +21,7 @@ import type { Table, ViewInstance, WindowGeometry } from '@easydb/shared';
 import { getContext, type AppContext } from '../app-context.js';
 import { currentPanZoom } from './jspanel-manager.js';
 import { createMaximizeFill } from './maximize-fill.js';
+import { countSuffix, VISIBLE_COUNT_EVENT, type VisibleCountDetail } from './panel-title.js';
 // Side-effect import registers the <view-window> custom element; the type-only
 // import would otherwise be elided, leaving <view-window> an unupgraded
 // (inline, zero-size) element.
@@ -39,8 +40,24 @@ type Panel = {
   status: 'normalized' | 'minimized' | 'maximized' | 'smallified' | 'closed';
 };
 
-const panels = new Map<string, { panel: Panel; el: ViewWindow }>();
+/** Per-open-view window state: the panel, its element, and title inputs. */
+interface ViewEntry {
+  panel: Panel;
+  el: ViewWindow;
+  /** The instance name (kept fresh on rename) — the title's text part. */
+  name: string;
+  /** Last reported visible/total counts (-1 until the view emits one). */
+  count: number;
+  total: number;
+}
+
+const panels = new Map<string, ViewEntry>();
 let initialized = false;
+
+/** Render a view panel's titlebar: "<name> (<count>)" / "(<visible>/<total>)". */
+function renderViewTitle(entry: ViewEntry): void {
+  entry.panel.setHeaderTitle?.(entry.name + countSuffix(entry.count, entry.total));
+}
 
 /** Element view windows mount into — the pan/zoom-transformed canvas viewport. */
 function viewContainer(): HTMLElement {
@@ -85,6 +102,18 @@ export async function initViewWindowManager(): Promise<void> {
   // own instance subscription then reloads and re-binds its rows subscription.
   ctx.store.tables.subscribe((tables) => void reconnectDanglingViews(ctx, tables));
 
+  // The open view window (its <view-window>, or its <data-table> in
+  // template-off mode) emits its visible/total row count keyed by the view
+  // instance id — mirror it into the titlebar so it reacts to search + filters.
+  document.addEventListener(VISIBLE_COUNT_EVENT, (e) => {
+    const d = (e as CustomEvent<VisibleCountDetail>).detail;
+    const entry = panels.get(d.key);
+    if (!entry) return;
+    entry.count = d.count;
+    entry.total = d.total;
+    renderViewTitle(entry);
+  });
+
   // Apply an instance edit (rename / re-mapping) to an already-open window
   // without tearing it down.
   document.addEventListener('easydb:reload-view', (e) => {
@@ -94,7 +123,10 @@ export async function initViewWindowManager(): Promise<void> {
     if (!entry) return;
     void (async () => {
       const inst = await ctx.store.viewInstances.findOne(id);
-      if (inst) entry.panel.setHeaderTitle?.(inst.name);
+      if (inst) {
+        entry.name = inst.name;
+        renderViewTitle(entry);
+      }
       void entry.el.reload();
     })();
   });
@@ -183,7 +215,7 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     },
   }) as Panel;
 
-  panels.set(inst.id, { panel, el });
+  panels.set(inst.id, { panel, el, name: inst.name, count: -1, total: -1 });
 
   const panelEl = document.getElementById(panelId);
 
