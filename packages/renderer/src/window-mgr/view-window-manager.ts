@@ -91,6 +91,11 @@ export async function initViewWindowManager(): Promise<void> {
       void entry.el.reload();
     })();
   });
+
+  // A template edit can affect several open views at once — reload them all.
+  document.addEventListener('easydb:reload-views', () => {
+    for (const { el } of panels.values()) void el.reload();
+  });
 }
 
 function openPanel(inst: ViewInstance, ctx: AppContext): void {

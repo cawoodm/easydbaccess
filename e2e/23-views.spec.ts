@@ -112,6 +112,39 @@ test.describe('views', () => {
     await expect(vw.locator('a', { hasText: 'Hello World' })).toHaveCount(0);
   });
 
+  test('the view footer "Edit template" link opens the editor and edits apply live', async ({
+    page,
+  }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ title: 'Hello World', url: 'https://example.com/1' }]);
+
+    const footer = page.locator(`#${panelDomId(id)} panel-footer`);
+    await footer.getByRole('button', { name: /Views/ }).click();
+    const dlg = page.locator('views-dialog dialog');
+    await dlg
+      .locator('ul.list li', { hasText: 'RSS Feed' })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+
+    const vw = page.locator('view-window');
+    await expect(vw.locator('a', { hasText: 'Hello World' })).toBeVisible();
+
+    // The view's footer has an "Edit template" link → opens the template editor.
+    await vw.locator('.vw-footer .edit-template').click();
+    await expect(dlg.locator('.dialog-header h2')).toContainText('Edit template');
+    // The RSS template's fields are loaded (name populated).
+    await expect(dlg.locator('input[type="text"]')).toHaveValue('RSS Feed');
+
+    // Rewrite the row HTML with a distinctive marker, keeping the $TITLE token.
+    await dlg.locator('textarea').nth(1).fill('<div class="edited">$TITLE</div>');
+    await dlg.getByRole('button', { name: 'Save' }).click();
+
+    // The open view re-renders with the edited template (no manual reload).
+    await expect(vw.locator('div.edited', { hasText: 'Hello World' })).toBeVisible();
+  });
+
   test('a stale built-in RSS template is reconciled to the shipped HTML on reload', async ({
     page,
   }) => {
@@ -272,6 +305,22 @@ test.describe('views', () => {
     await viewPanel.locator('.jsPanel-btn-minimize').click();
     const dockBar = page.locator('#easydb-minimized-dock .jsPanel-replacement');
     await expect(dockBar).toBeVisible();
+
+    // Wait for the minimized state to persist before reloading (the geometry
+    // save on status change is async), otherwise the reload could read a stale
+    // geometry and restore the window normalized.
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ctx = (window as any).__easydb;
+          const all = await ctx.store.viewInstances.find();
+          return all.some(
+            (i: { windowGeometry?: { minimized?: boolean } }) => i.windowGeometry?.minimized,
+          );
+        }),
+      )
+      .toBe(true);
 
     // Reload → the view reopens AND is restored to its minimized (docked) state,
     // not popped open normalized.

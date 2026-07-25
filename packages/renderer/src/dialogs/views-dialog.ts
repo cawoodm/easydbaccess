@@ -6,10 +6,14 @@ import { dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 import { extractTokens } from '../views/view-render.js';
 
-/** Open the Views manager for a table (mounted lazily into <body>). */
-export function openViewsDialog(tableId: string): void {
+/**
+ * Open the Views manager for a table (mounted lazily into <body>). Pass
+ * `editTemplateId` to jump straight into editing that template — used by the
+ * "Edit template" link in a view window's footer.
+ */
+export function openViewsDialog(tableId: string, opts?: { editTemplateId?: string }): void {
   const dlg = ViewsDialog.instance ?? mount();
-  void dlg.open(tableId);
+  void dlg.open(tableId, opts);
 }
 
 function mount(): ViewsDialog {
@@ -188,12 +192,17 @@ export class ViewsDialog extends LitElement {
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
   }
 
-  async open(tableId: string): Promise<void> {
+  async open(tableId: string, opts?: { editTemplateId?: string }): Promise<void> {
     this.tableId = tableId;
     this.mode = 'list';
     this.tDraft = null;
     this.iDraft = null;
     await this.refresh();
+    // Deep-link straight into a template editor (from a view window's footer).
+    if (opts?.editTemplateId) {
+      const t = this.templates.find((x) => x.id === opts.editTemplateId);
+      if (t) this.editTemplate(t);
+    }
     await this.updateComplete;
     this.dialogEl?.showModal();
   }
@@ -307,6 +316,9 @@ export class ViewsDialog extends LitElement {
         updatedAt: Date.now(),
       });
     }
+    // A template change affects every open view using it — ask the core
+    // view-window manager to re-render all open views so edits show at once.
+    document.dispatchEvent(new CustomEvent('easydb:reload-views'));
     await this.refresh();
     this.mode = 'list';
   }
