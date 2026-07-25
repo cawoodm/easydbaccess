@@ -96,22 +96,6 @@ export class ViewWindow extends LitElement {
         border-top: 1px solid #e5e7eb;
         background: #ffffff;
       }
-      /* "Edit template" link-styled button sits at the far left; the toggles
-         stay at the right. A button (not an <a>) so it doesn't show up in
-         content-link queries alongside the template's own links. */
-      .vw-footer button.edit-template {
-        margin-right: auto;
-        border: 0;
-        background: none;
-        padding: 0;
-        font-size: 0.8rem;
-        color: #0891b2;
-        text-decoration: none;
-      }
-      .vw-footer button.edit-template:hover {
-        background: none;
-        text-decoration: underline;
-      }
       .vw-footer button {
         font: inherit;
         display: inline-flex;
@@ -301,6 +285,13 @@ export class ViewWindow extends LitElement {
     openViewsDialog(this.instance.tableId, { editTemplateId: this.template.id });
   }
 
+  /** Open the Views manager straight into this view instance's editor
+   * (rename / re-map the template tokens to columns). */
+  private editView() {
+    if (!this.instance) return;
+    openViewsDialog(this.instance.tableId, { editInstanceId: this.instance.id });
+  }
+
   /** Show/hide a column in template-off mode (persisted on the instance). */
   private async toggleColumn(field: string) {
     if (!this.instance) return;
@@ -371,16 +362,6 @@ export class ViewWindow extends LitElement {
     const on = this.templateOn;
     const visible = new Set(this.instance.visibleColumns);
     return html`<div class="vw-footer">
-      ${this.template
-        ? html`<button
-            type="button"
-            class="edit-template"
-            title=${`Edit the "${this.template.name}" template`}
-            @click=${() => this.editTemplate()}
-          >
-            Edit template
-          </button>`
-        : nothing}
       ${!on && this.showColsMenu
         ? html`<div class="cols-menu">
             ${this.tableColumns.map(
@@ -402,6 +383,23 @@ export class ViewWindow extends LitElement {
             @click=${() => (this.showColsMenu = !this.showColsMenu)}
           >
             <span class="mi">view_column</span>
+          </button>`
+        : nothing}
+      <button
+        aria-label="Edit view"
+        title="Edit this view (rename, re-map columns)"
+        @click=${() => this.editView()}
+      >
+        <span class="mi">edit</span>
+      </button>
+      ${this.template
+        ? html`<button
+            class="edit-template"
+            aria-label="Edit template"
+            title=${`Edit the "${this.template.name}" template`}
+            @click=${() => this.editTemplate()}
+          >
+            <span class="mi">code</span>
           </button>`
         : nothing}
       <button

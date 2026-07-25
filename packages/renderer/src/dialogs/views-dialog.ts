@@ -8,10 +8,14 @@ import { extractTokens } from '../views/view-render.js';
 
 /**
  * Open the Views manager for a table (mounted lazily into <body>). Pass
- * `editTemplateId` to jump straight into editing that template — used by the
- * "Edit template" link in a view window's footer.
+ * `editTemplateId` to jump straight into editing that template, or
+ * `editInstanceId` to jump into editing that view instance (rename / re-map) —
+ * both used by the icon buttons in a view window's footer.
  */
-export function openViewsDialog(tableId: string, opts?: { editTemplateId?: string }): void {
+export function openViewsDialog(
+  tableId: string,
+  opts?: { editTemplateId?: string; editInstanceId?: string },
+): void {
   const dlg = ViewsDialog.instance ?? mount();
   void dlg.open(tableId, opts);
 }
@@ -192,16 +196,23 @@ export class ViewsDialog extends LitElement {
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
   }
 
-  async open(tableId: string, opts?: { editTemplateId?: string }): Promise<void> {
+  async open(
+    tableId: string,
+    opts?: { editTemplateId?: string; editInstanceId?: string },
+  ): Promise<void> {
     this.tableId = tableId;
     this.mode = 'list';
     this.tDraft = null;
     this.iDraft = null;
     await this.refresh();
-    // Deep-link straight into a template editor (from a view window's footer).
+    // Deep-link straight into a template or instance editor (from a view
+    // window's footer icons).
     if (opts?.editTemplateId) {
       const t = this.templates.find((x) => x.id === opts.editTemplateId);
       if (t) this.editTemplate(t);
+    } else if (opts?.editInstanceId) {
+      const inst = this.instances.find((x) => x.id === opts.editInstanceId);
+      if (inst) await this.editInstance(inst);
     }
     await this.updateComplete;
     this.dialogEl?.showModal();

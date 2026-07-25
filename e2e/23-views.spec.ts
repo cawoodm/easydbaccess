@@ -145,6 +145,30 @@ test.describe('views', () => {
     await expect(vw.locator('div.edited', { hasText: 'Hello World' })).toBeVisible();
   });
 
+  test('the view footer "Edit view" icon opens the instance editor', async ({ page }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ title: 'Hello World', url: 'https://example.com/1' }]);
+
+    const footer = page.locator(`#${panelDomId(id)} panel-footer`);
+    await footer.getByRole('button', { name: /Views/ }).click();
+    const dlg = page.locator('views-dialog dialog');
+    await dlg
+      .locator('ul.list li', { hasText: 'RSS Feed' })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+
+    const vw = page.locator('view-window');
+    await expect(vw.locator('a', { hasText: 'Hello World' })).toBeVisible();
+
+    // The footer "Edit view" icon deep-links into this instance's editor
+    // (rename + token→column mapping), pre-filled with the view's name.
+    await vw.getByRole('button', { name: 'Edit view' }).click();
+    await expect(dlg.locator('.dialog-header h2')).toContainText('Edit view');
+    await expect(dlg.locator('input[type="text"]').first()).toHaveValue(/RSS Feed — Feed/);
+  });
+
   test('a stale built-in RSS template is reconciled to the shipped HTML on reload', async ({
     page,
   }) => {
