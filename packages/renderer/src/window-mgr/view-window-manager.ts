@@ -26,6 +26,8 @@ import { createMaximizeFill } from './maximize-fill.js';
 // (inline, zero-size) element.
 import '../views/view-window.js';
 import type { ViewWindow } from '../views/view-window.js';
+// Core header search box — the same component the table windows use.
+import '../chrome/panel-search.js';
 
 /** jsPanel instance — typed loose since the lib ships no .d.ts. */
 type Panel = {
@@ -144,11 +146,18 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
 
   panels.set(inst.id, { panel, el });
 
+  const panelEl = document.getElementById(panelId);
+
+  // Inject the core per-window search box into the titlebar controlbar (next to
+  // min/max/close), keyed by the view INSTANCE id so a view's search filters the
+  // view's rows independently of the underlying table window's search.
+  const search = document.createElement('panel-search');
+  (search as HTMLElement & { tableId: string }).tableId = inst.id;
+  panelEl?.querySelector('.jsPanel-controlbar')?.prepend(search);
+
   // Make the titlebar focusable so tapping it blurs (collapses) an open search
   // box — matches the table windows.
-  const titlebar = document
-    .getElementById(panelId)
-    ?.querySelector('.jsPanel-titlebar') as HTMLElement | null;
+  const titlebar = panelEl?.querySelector('.jsPanel-titlebar') as HTMLElement | null;
   if (titlebar) {
     titlebar.tabIndex = -1;
     titlebar.style.outline = 'none';

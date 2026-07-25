@@ -230,6 +230,18 @@ test.describe('views', () => {
     // Closing the window clears the persisted open flag → it does NOT reopen.
     await page.locator('[id^="view-panel-"] .jsPanel-btn-close').first().click();
     await expect(page.locator('view-window')).toHaveCount(0);
+    // Wait for the open=false patch to commit before reloading (the close-time
+    // persist is async), otherwise the reload could read a stale open flag.
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ctx = (window as any).__easydb;
+          const all = await ctx.store.viewInstances.find();
+          return all.every((i: { open?: boolean }) => !i.open);
+        }),
+      )
+      .toBe(true);
     await page.reload();
     await page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -307,5 +319,37 @@ test.describe('views', () => {
     expect(Math.abs(box.y - overlay.y)).toBeLessThan(4);
     expect(Math.abs(box.width - overlay.width)).toBeLessThan(4);
     expect(Math.abs(box.height - overlay.height)).toBeLessThan(4);
+  });
+
+  test('the view header has the core search box and it filters the view rows', async ({ page }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      { title: 'Alpha', url: 'https://example.com/a' },
+      { title: 'Beta', url: 'https://example.com/b' },
+    ]);
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    const dlg = page.locator('views-dialog dialog');
+    await dlg
+      .locator('ul.list li', { hasText: 'RSS Feed' })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+    const viewPanel = page.locator('[id^="view-panel-"]');
+    await expect(viewPanel).toBeVisible();
+    const vw = page.locator('view-window');
+    await expect(vw.locator('a')).toHaveCount(2);
+
+    // The core search box lives in the view's titlebar controlbar. Open it and
+    // type — the view's rows filter down (independently of the table window).
+    const search = viewPanel.locator('.jsPanel-controlbar panel-search');
+    await expect(search).toHaveCount(1);
+    await search.getByRole('button').click();
+    await search.locator('input').fill('Alpha');
+    await expect(vw.locator('a')).toHaveCount(1);
+    await expect(vw.locator('a', { hasText: 'Alpha' })).toBeVisible();
   });
 });

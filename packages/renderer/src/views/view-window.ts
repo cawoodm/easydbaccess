@@ -69,16 +69,30 @@ export class ViewWindow extends LitElement {
   @state() private rows: Row[] = [];
   private allRows: Row[] = [];
   private rowsUnsub?: () => void;
+  /** Free-text search from the header search box (core `panel-search`). */
+  @state() private searchQuery = '';
 
   override async connectedCallback() {
     super.connectedCallback();
+    document.addEventListener('easydb:table-search', this.onSearch as EventListener);
     await this.load();
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
+    document.removeEventListener('easydb:table-search', this.onSearch as EventListener);
     this.rowsUnsub?.();
   }
+
+  // The header search box is keyed by the view instance id (not the underlying
+  // table id), so a view's search stays independent of the table window's.
+  private onSearch = (e: Event) => {
+    const d = (e as CustomEvent<{ tableId: string; query: string }>).detail;
+    if (d.tableId === this.viewInstanceId) {
+      this.searchQuery = d.query ?? '';
+      this.recompute();
+    }
+  };
 
   override async updated(changed: Map<string, unknown>) {
     if (changed.has('viewInstanceId')) {
@@ -123,7 +137,17 @@ export class ViewWindow extends LitElement {
   }
 
   private recompute() {
-    if (this.instance) this.rows = viewRows(this.allRows, this.instance);
+    if (!this.instance) return;
+    let rows = viewRows(this.allRows, this.instance);
+    const q = this.searchQuery.trim().toLowerCase();
+    if (q) {
+      // Free-text search: case-insensitive substring across all field values,
+      // matching the table window's per-table search behaviour.
+      rows = rows.filter((r) =>
+        Object.values(r.data).some((v) => v != null && String(v).toLowerCase().includes(q)),
+      );
+    }
+    this.rows = rows;
   }
 
   private renderTable() {
