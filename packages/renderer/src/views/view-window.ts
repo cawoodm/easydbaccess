@@ -166,8 +166,10 @@ export class ViewWindow extends LitElement {
   private allRows: Row[] = [];
   private rowsUnsub?: () => void;
   private instUnsub?: () => void;
-  /** Free-text search from the header search box (core `panel-search`). */
+  /** Free-text search from this view's own header search box. */
   @state() private searchQuery = '';
+  /** The app-wide global search (header search bar), applied to every window. */
+  @state() private globalQuery = '';
 
   /** Template rendering is on unless the instance explicitly disabled it. */
   private get templateOn(): boolean {
@@ -177,12 +179,14 @@ export class ViewWindow extends LitElement {
   override async connectedCallback() {
     super.connectedCallback();
     document.addEventListener('easydb:table-search', this.onSearch as EventListener);
+    document.addEventListener('easydb:global-search', this.onGlobalSearch as EventListener);
     await this.load();
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
     document.removeEventListener('easydb:table-search', this.onSearch as EventListener);
+    document.removeEventListener('easydb:global-search', this.onGlobalSearch as EventListener);
     this.rowsUnsub?.();
     this.instUnsub?.();
   }
@@ -195,6 +199,13 @@ export class ViewWindow extends LitElement {
       this.searchQuery = d.query ?? '';
       this.recompute();
     }
+  };
+
+  // The app-wide global search applies to every open window, including views —
+  // combined with (respecting) the view's own search below.
+  private onGlobalSearch = (e: Event) => {
+    this.globalQuery = (e as CustomEvent<{ query: string }>).detail.query ?? '';
+    this.recompute();
   };
 
   override async updated(changed: Map<string, unknown>) {
@@ -268,14 +279,16 @@ export class ViewWindow extends LitElement {
   private recompute() {
     if (!this.instance) return;
     let rows = viewRows(this.allRows, this.instance);
-    const q = this.searchQuery.trim();
-    if (q) {
-      // Free-text search across all field values — supports boolean AND/OR and
-      // the phrase→AND→OR fallback, matching the table window's behaviour.
-      rows = searchRows(rows, q, (r, needle) =>
-        Object.values(r.data).some((v) => v != null && String(v).toLowerCase().includes(needle)),
-      );
-    }
+    // Free-text search across all field values — supports boolean AND/OR and
+    // the phrase→AND→OR fallback, matching the table window's behaviour. The
+    // view's own search AND the app-wide global search both apply (each
+    // narrows the set), so global search respects the view's search.
+    const contains = (r: Row, needle: string) =>
+      Object.values(r.data).some((v) => v != null && String(v).toLowerCase().includes(needle));
+    const local = this.searchQuery.trim();
+    const global = this.globalQuery.trim();
+    if (local) rows = searchRows(rows, local, contains);
+    if (global) rows = searchRows(rows, global, contains);
     this.rows = rows;
     // Template-ON: this component owns the visible set, so it reports the count
     // for the view window's title. Template-OFF renders <data-table>, which

@@ -585,4 +585,60 @@ test.describe('views', () => {
     await expect(vw.locator('a')).toHaveCount(1);
     await expect(vw.locator('a', { hasText: 'Alpha' })).toBeVisible();
   });
+
+  test('global search filters a template view and respects the view’s own search', async ({
+    page,
+  }) => {
+    const id = await createTable(page, 'Feed', [
+      { field: 'title' },
+      { field: 'url' },
+      { field: 'city' },
+    ]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      { title: 'Alice', url: 'https://example.com/a', city: 'Paris' },
+      { title: 'Bob', url: 'https://example.com/b', city: 'London' },
+      { title: 'Carol', url: 'https://example.com/c', city: 'Paris' },
+    ]);
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    const dlg = page.locator('views-dialog dialog');
+    await dlg
+      .locator('ul.list li', { hasText: 'RSS Feed' })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+
+    const vw = page.locator('view-window');
+    await expect(vw.locator('a')).toHaveCount(3); // template on: one card per row
+
+    // The app-wide global search filters the view's rows too.
+    const header = page.locator('app-shell header');
+    await header.locator('button.icon-btn').click();
+    const gsearch = header.locator('input.search');
+    await gsearch.fill('Alice');
+    await expect(vw.locator('a')).toHaveCount(1);
+    await expect(vw.locator('a', { hasText: 'Alice' })).toBeVisible();
+    await gsearch.fill('');
+    await expect(vw.locator('a')).toHaveCount(3);
+
+    // Give the view its OWN search (city "Paris" → Alice + Carol).
+    const viewPanel = page.locator('[id^="view-panel-"]');
+    const vsearch = viewPanel.locator('.jsPanel-controlbar panel-search');
+    await vsearch.getByRole('button').click();
+    await vsearch.locator('input').fill('Paris');
+    await expect(vw.locator('a')).toHaveCount(2);
+
+    // Global search now intersects with (respects) the view's search: Carol is
+    // in Paris → shown; Bob is not → global "Bob" leaves nothing.
+    await header.locator('button.icon-btn').click();
+    const gsearch2 = header.locator('input.search');
+    await gsearch2.fill('Carol');
+    await expect(vw.locator('a')).toHaveCount(1);
+    await expect(vw.locator('a', { hasText: 'Carol' })).toBeVisible();
+    await gsearch2.fill('Bob');
+    await expect(vw.locator('a')).toHaveCount(0);
+  });
 });
