@@ -51,13 +51,14 @@ async function resolveChosenTables(
 
   let tables: TableRef[] = [];
   if (ref.db) {
-    for (const t of await fetchTablesForDb(fetchFn, ref.base, ref.db))
-      if (!t.hidden) tables.push(t);
+    // Include hidden tables so the picker can show + offer them; only the
+    // no-picker fast path (db chosen upstream) auto-excludes them.
+    tables.push(...(await fetchTablesForDb(fetchFn, ref.base, ref.db)));
     // The db was already chosen upstream (e.g. picked in the Import dialog):
-    // import all its tables directly, skipping the table checklist. An empty
-    // result (db has no tables / doesn't exist) falls through to the caller's
-    // "nothing found" handling.
-    if (opts.skipPicker) return tables;
+    // import all its (non-hidden) tables directly, skipping the table checklist.
+    // An empty result (db has no tables / doesn't exist) falls through to the
+    // caller's "nothing found" handling.
+    if (opts.skipPicker) return tables.filter((t) => !t.hidden);
   } else {
     // Instance URL: list databases and let the user choose which to pull from.
     const dbs = await fetchDatabaseNames(fetchFn, ref.base);
@@ -79,8 +80,7 @@ async function resolveChosenTables(
       // Skip a database we can't list (permissions, odd route) rather than
       // aborting the whole instance.
       try {
-        for (const t of await fetchTablesForDb(fetchFn, ref.base, db))
-          if (!t.hidden) tables.push(t);
+        tables.push(...(await fetchTablesForDb(fetchFn, ref.base, db)));
       } catch {
         /* skip */
       }
@@ -94,6 +94,7 @@ async function resolveChosenTables(
       name: multiDb ? `${t.db}/${t.table}` : t.table,
       size: t.count,
       detail: multiDb ? undefined : t.db,
+      hidden: t.hidden,
     })),
     {
       title: `${verb} from Datasette`,

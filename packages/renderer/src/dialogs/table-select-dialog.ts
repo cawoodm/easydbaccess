@@ -18,6 +18,12 @@ export interface SelectableTable {
   size: number | null;
   /** Optional secondary text (e.g. the database a table belongs to). */
   detail?: string | undefined;
+  /**
+   * Whether the source marks this table hidden (Datasette `hidden` metadata /
+   * FTS/SpatiaLite tables). Shown with a "hidden" tag and unchecked by default,
+   * but still selectable.
+   */
+  hidden?: boolean | undefined;
 }
 
 export interface ChooseTablesOpts {
@@ -129,6 +135,16 @@ export class TableSelectDialog extends LitElement {
         color: #9ca3af;
         font-size: 0.78rem;
       }
+      .tag-hidden {
+        flex: 0 0 auto;
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #92400e;
+        background: #fef3c7;
+        border-radius: 0.25rem;
+        padding: 0.05rem 0.35rem;
+      }
       input[type='checkbox'] {
         width: 1rem;
         height: 1rem;
@@ -167,7 +183,8 @@ export class TableSelectDialog extends LitElement {
 
   open(items: SelectableTable[], opts: ChooseTablesOpts): Promise<number[] | null> {
     this.items = items;
-    this.selected = items.map(() => true);
+    // Hidden tables start unchecked (the user opts in); everything else is on.
+    this.selected = items.map((t) => !t.hidden);
     this.heading = opts.title ?? 'Select tables';
     this.message = opts.message ?? '';
     this.confirmLabel = opts.confirmLabel ?? 'Import';
@@ -205,9 +222,7 @@ export class TableSelectDialog extends LitElement {
 
   private submit = (e: Event): void => {
     e.preventDefault();
-    const indices = this.selected
-      .map((on, i) => (on ? i : -1))
-      .filter((i) => i >= 0);
+    const indices = this.selected.map((on, i) => (on ? i : -1)).filter((i) => i >= 0);
     if (indices.length === 0) return;
     this.finish(indices);
   };
@@ -251,6 +266,7 @@ export class TableSelectDialog extends LitElement {
                     />
                     <label for=${`tsel-${i}`}>
                       <span class="name">${t.name}</span>
+                      ${t.hidden ? html`<span class="tag-hidden">hidden</span>` : ''}
                       <span class="size">${formatSize(t.size)}</span>
                       ${t.detail ? html`<span class="detail">${t.detail}</span>` : ''}
                     </label>
