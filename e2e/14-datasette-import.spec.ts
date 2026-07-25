@@ -285,6 +285,67 @@ test.describe('datasette import — whole database', () => {
     await expect(footer).toContainText('2 rows');
   });
 
+  test('an imported Datasette table shows the (i) info button with its source', async ({
+    page,
+    workspaceId,
+  }) => {
+    // Single-table db; the metadata endpoint 404s (as on datasette.io 1.0), so
+    // there is no curated description — the (i) button must still appear,
+    // carrying where the table came from.
+    await page.route('https://datasette.io/**', (route) => {
+      const u = new URL(route.request().url());
+      if (u.pathname === '/mini.json')
+        return route.fulfill(
+          json({ ok: true, tables: [{ name: 'people', count: 1, primary_keys: ['id'] }] }),
+        );
+      if (u.pathname === '/mini/people.json') {
+        if ((u.searchParams.get('_extra') ?? '').includes('columns'))
+          return route.fulfill(json({ ok: true, columns: ['id', 'name'], rows: [] }));
+        return route.fulfill(json({ ok: true, next: null, rows: [{ id: 1, name: 'Alice' }] }));
+      }
+      return route.fulfill({ status: 404, body: '{"ok":false}' });
+    });
+
+    await page.getByTitle('Import data from a URL').click();
+    const importDialog = page.locator('import-dialog dialog');
+    await importDialog.locator('input[type="text"]').fill('https://datasette.io/mini');
+    await importDialog.getByRole('button', { name: 'Import' }).click();
+    await page
+      .locator('table-select-dialog dialog')
+      .getByRole('button', { name: /^Import \(1\)$/ })
+      .click();
+
+    // Wait for the import to stamp `info.sourceUrl` on the table.
+    const tableId: string = await (async () => {
+      await expect
+        .poll(() =>
+          page.evaluate(async (ws) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const ts = await (window as any).__easydb.store.tables.find();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const t = ts.find((x: any) => x.workspaceId === ws && x.name === 'mini/people');
+            return t?.info?.sourceUrl ?? null;
+          }, workspaceId),
+        )
+        .toBe('https://datasette.io/mini/people');
+      return page.evaluate(async (ws) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ts = await (window as any).__easydb.store.tables.find();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return ts.find((t: any) => t.workspaceId === ws && t.name === 'mini/people').id;
+      }, workspaceId);
+    })();
+
+    // The titlebar (i) button is now shown; clicking it opens the info dialog
+    // with a link to the source table.
+    const infoBtn = page.locator(`#${panelDomId(tableId)} .eda-info-btn`);
+    await expect(infoBtn).toBeVisible();
+    await infoBtn.click();
+    const infoDlg = page.locator('table-info-dialog dialog');
+    await expect(infoDlg).toBeVisible();
+    await expect(infoDlg.locator('a[href="https://datasette.io/mini/people"]')).toBeVisible();
+  });
+
   const importExecutives = async (page: import('@playwright/test').Page) => {
     await page.getByTitle('Import data from a URL').click();
     const dialog = page.locator('import-dialog dialog');

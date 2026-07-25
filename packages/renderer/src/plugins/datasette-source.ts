@@ -8,7 +8,7 @@
 // Registers a URL source and a (table-only) drop handler. The Phase-2 live
 // read-write connector builds on the same datasette-client core.
 
-import type { ColumnSpec, HostApi, PluginModule, Row, Table } from '@easydb/shared';
+import type { ColumnSpec, HostApi, PluginModule, Row, Table, TableInfo } from '@easydb/shared';
 import {
   parseDatasetteUrl,
   fetchDatabaseNames,
@@ -31,6 +31,32 @@ import {
 type FetchFn = (url: string, opts?: unknown) => Promise<Response>;
 
 const host = (base: string): string => base.replace(/^https?:\/\//, '');
+
+/** Human-facing Datasette table URL (`base/db/table`). */
+function datasetteTableUrl(base: string, db: string, table: string): string {
+  return `${base}/${encodeURIComponent(db)}/${encodeURIComponent(table)}`;
+}
+
+/**
+ * Ensure a Datasette table's metadata patch carries a `TableInfo` with at least
+ * its source URL, so the titlebar (i) info button ALWAYS appears for a
+ * Datasette-backed table — even when the instance publishes no description or
+ * license (datasette.io, for one, publishes none). A real `source`/`sourceUrl`
+ * supplied by the instance is left untouched.
+ */
+function withDatasetteSourceInfo(
+  patch: MetadataTablePatch,
+  base: string,
+  db: string,
+  table: string,
+): MetadataTablePatch {
+  const info: TableInfo = { ...(patch.info ?? {}) };
+  if (!info.source && !info.sourceUrl) {
+    info.source = `${host(base)}/${db}/${table}`;
+    info.sourceUrl = datasetteTableUrl(base, db, table);
+  }
+  return { ...patch, info };
+}
 
 /**
  * Resolve the tables the user wants to act on from a Datasette URL:
@@ -411,6 +437,8 @@ async function fillImportTable(
     } catch {
       /* metadata is optional */
     }
+    // Always record where the table came from so the (i) info button shows.
+    metaPatch = withDatasetteSourceInfo(metaPatch, ref.base, ref.db!, ref.table!);
 
     const now = Date.now();
     api.events.emit('import:before', { source: 'datasette', tableId });
@@ -679,6 +707,7 @@ async function refineLiveColumns(
     } catch {
       /* metadata is optional */
     }
+    metaPatch = withDatasetteSourceInfo(metaPatch, ref.base, c.db, c.table);
     await api.store.tables.patch(tableId, { columns, ...metaPatch, updatedAt: Date.now() });
   } catch {
     /* leave the placeholder; the grid's row fetch reports real failures */
