@@ -12,6 +12,45 @@
  * one shot with no progress. Assumes the response is already checked for
  * `res.ok` and size limits by the caller.
  */
+/**
+ * Rewrite a known non-CORS "web" URL to a CORS-enabled equivalent so a browser
+ * import can fetch it directly (no server proxy needed). Unknown URLs pass
+ * through unchanged.
+ *
+ * Currently handles GitHub blob/raw page URLs:
+ *   github.com/{owner}/{repo}/(blob|raw)/{ref}/{path…}
+ *     → raw.githubusercontent.com/{owner}/{repo}/{ref}/{path…}
+ * `raw.githubusercontent.com` sends `access-control-allow-origin: *`, whereas
+ * `github.com` does not, so the web URL a user copies from the address bar (or
+ * a "Raw" link, which points at `/raw/…`) otherwise fails CORS. A leading
+ * `refs/heads/` or `refs/tags/` in the ref is collapsed to the plain
+ * branch/tag name (both forms work on the raw host; this matches what users
+ * expect to see). Path segments keep their original percent-encoding; any query
+ * string / fragment is dropped (raw file URLs don't use them).
+ */
+export function toCorsFriendlyUrl(url: string): string {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return url;
+  }
+  const host = u.hostname.toLowerCase();
+  if (host === 'github.com' || host === 'www.github.com') {
+    const parts = u.pathname.split('/').filter(Boolean); // [owner, repo, blob|raw, ref, …path]
+    if (parts.length >= 5 && (parts[2] === 'blob' || parts[2] === 'raw')) {
+      const owner = parts[0]!;
+      const repo = parts[1]!;
+      let rest = parts.slice(3); // ref + path segments
+      if (rest.length >= 3 && rest[0] === 'refs' && (rest[1] === 'heads' || rest[1] === 'tags')) {
+        rest = rest.slice(2); // drop refs/heads | refs/tags
+      }
+      return `https://raw.githubusercontent.com/${[owner, repo, ...rest].join('/')}`;
+    }
+  }
+  return url;
+}
+
 export async function readResponseText(
   res: Response,
   onProgress?: (fraction: number) => void,

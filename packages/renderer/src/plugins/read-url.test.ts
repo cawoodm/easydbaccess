@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { readResponseText } from './read-url.js';
+import { readResponseText, toCorsFriendlyUrl } from './read-url.js';
 
 /** A Response double that streams `text` in the given chunk sizes with a
  *  Content-Length header, so readResponseText takes its progress path. */
@@ -54,5 +54,54 @@ describe('readResponseText', () => {
 
   it('works without an onProgress callback', async () => {
     expect(await readResponseText(streamRes('abcdef', [3, 3]))).toBe('abcdef');
+  });
+});
+
+describe('toCorsFriendlyUrl', () => {
+  it('rewrites a github.com /raw/refs/heads/ URL to raw.githubusercontent.com', () => {
+    expect(
+      toCorsFriendlyUrl(
+        'https://github.com/StackExchange/Survey/raw/refs/heads/main/packages/archive/2024/results.csv',
+      ),
+    ).toBe(
+      'https://raw.githubusercontent.com/StackExchange/Survey/main/packages/archive/2024/results.csv',
+    );
+  });
+
+  it('rewrites a github.com /blob/ URL and collapses refs/heads', () => {
+    expect(toCorsFriendlyUrl('https://github.com/o/r/blob/refs/heads/dev/data/x.json')).toBe(
+      'https://raw.githubusercontent.com/o/r/dev/data/x.json',
+    );
+  });
+
+  it('handles a plain branch ref (no refs/heads) and nested paths', () => {
+    expect(toCorsFriendlyUrl('https://github.com/o/r/raw/main/a/b/c.csv')).toBe(
+      'https://raw.githubusercontent.com/o/r/main/a/b/c.csv',
+    );
+  });
+
+  it('collapses refs/tags too', () => {
+    expect(toCorsFriendlyUrl('https://github.com/o/r/blob/refs/tags/v1.2/data.csv')).toBe(
+      'https://raw.githubusercontent.com/o/r/v1.2/data.csv',
+    );
+  });
+
+  it('preserves percent-encoded path segments', () => {
+    expect(toCorsFriendlyUrl('https://github.com/o/r/raw/main/Air%20Quality/x.csv')).toBe(
+      'https://raw.githubusercontent.com/o/r/main/Air%20Quality/x.csv',
+    );
+  });
+
+  it('leaves already-CORS raw.githubusercontent.com URLs unchanged', () => {
+    const u = 'https://raw.githubusercontent.com/o/r/main/x.csv';
+    expect(toCorsFriendlyUrl(u)).toBe(u);
+  });
+
+  it('leaves non-file github URLs (repo/tree pages) and unknown hosts unchanged', () => {
+    const tree = 'https://github.com/o/r/tree/main/dir';
+    expect(toCorsFriendlyUrl(tree)).toBe(tree);
+    const other = 'https://example.com/data.csv';
+    expect(toCorsFriendlyUrl(other)).toBe(other);
+    expect(toCorsFriendlyUrl('not a url')).toBe('not a url');
   });
 });

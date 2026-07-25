@@ -168,3 +168,41 @@ test('shows the top progress bar when a URL read takes more than 2s', async ({
     )
     .toBe(2);
 });
+
+test('a github.com blob/raw URL is auto-converted to the CORS raw host and imports', async ({
+  page,
+  workspaceId,
+}) => {
+  // Only the raw.githubusercontent.com URL is served (CORS-enabled). If the app
+  // fetched github.com directly it would 404 here → the import would fail.
+  await page.route(
+    'https://raw.githubusercontent.com/StackExchange/Survey/main/results.csv',
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/plain',
+        headers: { 'access-control-allow-origin': '*' },
+        body: 'a,b\n1,2\n3,4\n',
+      }),
+  );
+
+  await attemptCsvImport(
+    page,
+    'https://github.com/StackExchange/Survey/raw/refs/heads/main/results.csv',
+  );
+
+  await expect
+    .poll(() =>
+      page.evaluate(async (ws) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__easydb.store;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const t = (await store.tables.find()).find(
+          (x: any) => x.workspaceId === ws && x.name === 'results',
+        );
+        if (!t) return 0;
+        return (await store.rows(t.id).find()).length;
+      }, workspaceId),
+    )
+    .toBe(2);
+});

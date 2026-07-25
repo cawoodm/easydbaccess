@@ -23,7 +23,7 @@ import { parseDatasetteUrl, fetchDatabaseNames } from './datasette-client.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from '../dialogs/dialog-chrome.js';
 import { makeDialogDraggable } from '../dialogs/draggable.js';
 import { TopProgress, type ProgressHandle } from '../chrome/top-progress.js';
-import { readResponseText } from './read-url.js';
+import { readResponseText, toCorsFriendlyUrl } from './read-url.js';
 
 /** How a URL should be imported. `auto` is resolved to a concrete kind on submit. */
 type ImportKind = 'auto' | 'json' | 'csv' | 'datasette';
@@ -151,9 +151,12 @@ interface ImportProgress {
 
 async function fetchImportText(
   api: HostApi,
-  url: string,
+  rawUrl: string,
   progress: ImportProgress = {},
 ): Promise<string> {
+  // Rewrite known non-CORS web URLs (e.g. a github.com blob/raw link) to their
+  // CORS-enabled host so the browser can fetch them directly. No-op otherwise.
+  const url = toCorsFriendlyUrl(rawUrl);
   // Slow-read timer spans the whole operation (a server slow to respond, or a
   // large body slow to transfer) so the bar can be revealed only past ~2s.
   const slowMs = progress.slowMs ?? 2000;
