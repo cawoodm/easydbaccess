@@ -582,6 +582,7 @@ export interface MetadataTablePatch {
   sortColumn?: string;
   sortAsc?: boolean;
   info?: TableInfo;
+  labelColumn?: string;
 }
 
 /** Build a {@link TableInfo} from metadata, or undefined when nothing to show. */
@@ -638,6 +639,7 @@ export function applyTableMetadata(
   }
   const info = buildTableInfo(meta);
   if (info) patch.info = info;
+  if (meta.labelColumn && fields.has(meta.labelColumn)) patch.labelColumn = meta.labelColumn;
   return { columns: outColumns, patch };
 }
 

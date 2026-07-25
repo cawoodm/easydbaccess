@@ -357,7 +357,13 @@ export class ViewsDialog extends LitElement {
     const hit = this.columns.find(
       (c) => c.field.toLowerCase() === lc || (c.label ?? '').toLowerCase() === lc,
     );
-    return hit?.field ?? '';
+    if (hit) return hit.field;
+    // Fall back to the table's designated label column (e.g. Datasette's
+    // `label_column`) for a title/name/label token — a better "what identifies
+    // a row" default than leaving it unmapped.
+    const label = this.table?.labelColumn;
+    if (label && (lc === 'title' || lc === 'name' || lc === 'label')) return label;
+    return '';
   }
 
   private async saveInstance(): Promise<void> {

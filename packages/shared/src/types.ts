@@ -108,6 +108,12 @@ export interface Table {
    * window title. Absent ⇒ no info button shown.
    */
   info?: TableInfo | undefined;
+  /**
+   * The column that best labels a row (e.g. Datasette's `label_column`). Used
+   * as the default mapping for a view template's title/name token. Absent ⇒ no
+   * designated label.
+   */
+  labelColumn?: string | undefined;
   updatedAt: number;
 }
 

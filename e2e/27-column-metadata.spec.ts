@@ -60,3 +60,40 @@ test('a column flagged sortable:false does not sort when its header is clicked',
   }, id);
   expect(sortColumn).toBeNull();
 });
+
+test('label_column becomes the default mapping for a view $TITLE token', async ({
+  page,
+  workspaceId,
+}) => {
+  // Table has no "title" column, but designates "headline" as its label column.
+  const id = await createTable(page, 'News', [{ field: 'headline' }, { field: 'url' }]);
+  await waitForPanel(page, id);
+  await page.evaluate(
+    async ({ id }) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      await ctx.store.tables.patch(id, { labelColumn: 'headline', updatedAt: Date.now() });
+    },
+    { id },
+  );
+
+  await page
+    .locator(`#${panelDomId(id)} panel-footer`)
+    .getByRole('button', { name: /Views/ })
+    .click();
+  const dlg = page.locator('views-dialog dialog');
+  await dlg
+    .locator('ul.list li', { hasText: 'RSS Feed' })
+    .getByRole('button', { name: 'Use' })
+    .click();
+  await dlg.getByRole('button', { name: 'Create view' }).click();
+
+  // The RSS $TITLE token auto-mapped to the label column (headline), not blank.
+  const mapping = await page.evaluate(async (ws) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ctx = (window as any).__easydb;
+    const insts = await ctx.store.viewInstances.find({ workspaceId: ws });
+    return insts[0]?.mapping ?? {};
+  }, workspaceId);
+  expect(mapping.TITLE).toBe('headline');
+});

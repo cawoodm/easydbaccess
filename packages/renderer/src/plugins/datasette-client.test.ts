@@ -774,3 +774,18 @@ describe('applyTableMetadata (sortable_columns)', () => {
     expect(columns.every((c) => c.sortable === undefined)).toBe(true);
   });
 });
+
+describe('applyTableMetadata (label_column)', () => {
+  const cols = [
+    { field: 'id', label: 'Id', type: 'number' as const },
+    { field: 'title', label: 'Title', type: 'string' as const },
+  ];
+  it('records label_column when the column exists', () => {
+    const { patch } = applyTableMetadata({ columns: {}, units: {}, labelColumn: 'title' }, cols);
+    expect(patch.labelColumn).toBe('title');
+  });
+  it('ignores label_column naming a missing column', () => {
+    const { patch } = applyTableMetadata({ columns: {}, units: {}, labelColumn: 'ghost' }, cols);
+    expect(patch.labelColumn).toBeUndefined();
+  });
+});
