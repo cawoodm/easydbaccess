@@ -65,7 +65,7 @@ export async function importJsonText(
   api: HostApi,
   text: string,
   filename: string,
-  opts: { originUrl?: string | undefined } = {},
+  opts: { originUrl?: string | undefined; maxRows?: number | undefined } = {},
 ): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('json-import: no active workspace');
@@ -113,13 +113,14 @@ export async function importJsonText(
   if (collisions.length === 0 && tables.length === 1) {
     mode = 'append-new';
   } else {
-    const opts = collisions.length > 0
-      ? [
-          `Overwrite matching (${collisions.length})`,
-          'Replace entire workspace',
-          'Add as new tables',
-        ]
-      : ['Add to current workspace', 'Replace entire workspace'];
+    const opts =
+      collisions.length > 0
+        ? [
+            `Overwrite matching (${collisions.length})`,
+            'Replace entire workspace',
+            'Add as new tables',
+          ]
+        : ['Add to current workspace', 'Replace entire workspace'];
     const choice = await api.ui.dialogs.choice(
       `Importing ${tables.length} table${tables.length === 1 ? '' : 's'} from "${filename}".${
         collisions.length > 0
@@ -152,7 +153,9 @@ export async function importJsonText(
     const source = t.source;
     const origin =
       t.origin ??
-      (!source && opts.originUrl ? ({ type: 'json', url: opts.originUrl } as TableOrigin) : undefined);
+      (!source && opts.originUrl
+        ? ({ type: 'json', url: opts.originUrl } as TableOrigin)
+        : undefined);
 
     let tableId: string;
     const match = mode === 'overwrite-matching' ? existingByName.get(t.name) : undefined;
@@ -201,7 +204,9 @@ export async function importJsonText(
     let inserted = 0;
     if (!source) {
       const rowColl = api.store.rows(tableId);
-      const docs = t.rows.map((row) => ({
+      // Apply the Import dialog's "Limit rows" cap per table (undefined ⇒ all).
+      const rowsToInsert = opts.maxRows != null ? t.rows.slice(0, opts.maxRows) : t.rows;
+      const docs = rowsToInsert.map((row) => ({
         id: cryptoUUID(),
         tableId,
         data: row,
@@ -242,18 +247,13 @@ export function parsedToTables(parsed: unknown, fallbackName: string): Normalize
   // Shape: { tables: [{ name, columns, rows }, ...] }  — native dump.
   // Entries may also be v1-shaped wrappers ({ "<name>.table.json": { dataArray, columns } })
   // — happens when a v1 file was Dumped through us before v1 detection landed.
-  if (
-    isObject(parsed) &&
-    Array.isArray((parsed as { tables?: unknown }).tables)
-  ) {
+  if (isObject(parsed) && Array.isArray((parsed as { tables?: unknown }).tables)) {
     const dump = parsed as { tables: unknown[] };
     const out: NormalizedTable[] = [];
     for (const entry of dump.tables) {
       if (isNativeTable(entry)) {
         const e = entry as Record<string, unknown>;
-        const geom = isObject(e.windowGeometry)
-          ? (e.windowGeometry as WindowGeometry)
-          : undefined;
+        const geom = isObject(e.windowGeometry) ? (e.windowGeometry as WindowGeometry) : undefined;
         const sortColumn = typeof e.sortColumn === 'string' ? e.sortColumn : undefined;
         const sortAsc = typeof e.sortAsc === 'boolean' ? e.sortAsc : undefined;
         // Carry a live `source` or snapshot `origin` if the dump recorded one.
@@ -364,11 +364,23 @@ function convertV1Dump(obj: Record<string, unknown>): NormalizedTable[] {
       });
 
     const nt: NormalizedTable = { name, columns, rows };
-    if (t.elementRect && typeof t.elementRect.x === 'number' && typeof t.elementRect.y === 'number') {
+    if (
+      t.elementRect &&
+      typeof t.elementRect.x === 'number' &&
+      typeof t.elementRect.y === 'number'
+    ) {
       // Only honor the saved geometry when both x/y are present. Without an
       // actual position from the dump, leave windowGeometry unset so the
       // window manager cascades the new panel instead of stacking it at 0,0.
-      const r = t.elementRect as { x: number; y: number; width?: number; height?: number; zIndex?: number; minimized?: boolean; maximized?: boolean };
+      const r = t.elementRect as {
+        x: number;
+        y: number;
+        width?: number;
+        height?: number;
+        zIndex?: number;
+        minimized?: boolean;
+        maximized?: boolean;
+      };
       nt.windowGeometry = {
         x: r.x,
         y: r.y,

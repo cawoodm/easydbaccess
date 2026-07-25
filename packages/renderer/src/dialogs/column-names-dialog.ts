@@ -15,6 +15,7 @@ import { makeDialogDraggable } from './draggable.js';
 interface EditRow {
   field: string;
   label: string;
+  hidden: boolean;
 }
 
 /** Open the editor for `columns`; resolves with the edited columns or null. */
@@ -47,11 +48,12 @@ export class ColumnNamesDialog extends LitElement {
       }
       .grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr 1fr auto;
         gap: 0.4rem 0.75rem;
         margin-top: 0.6rem;
         max-height: 50vh;
         overflow: auto;
+        align-items: center;
       }
       .head {
         font-size: 0.72rem;
@@ -63,6 +65,20 @@ export class ColumnNamesDialog extends LitElement {
         background: white;
         padding-bottom: 0.15rem;
       }
+      /* A header for a per-row toggle column: clicking it flips all rows on/off. */
+      .head.toggle {
+        cursor: pointer;
+        user-select: none;
+        text-align: center;
+      }
+      .head.toggle:hover {
+        color: #2563eb;
+        text-decoration: underline;
+      }
+      .hidecell {
+        display: flex;
+        justify-content: center;
+      }
       input {
         font: inherit;
         padding: 0.35rem 0.45rem;
@@ -71,6 +87,11 @@ export class ColumnNamesDialog extends LitElement {
         width: 100%;
         box-sizing: border-box;
         background: white;
+      }
+      input[type='checkbox'] {
+        width: auto;
+        padding: 0;
+        cursor: pointer;
       }
       input.invalid {
         border-color: #dc2626;
@@ -108,7 +129,7 @@ export class ColumnNamesDialog extends LitElement {
 
   open(columns: ColumnSpec[]): Promise<ColumnSpec[] | null> {
     this.source = columns;
-    this.rows = columns.map((c) => ({ field: c.field, label: c.label }));
+    this.rows = columns.map((c) => ({ field: c.field, label: c.label, hidden: !!c.hidden }));
     return new Promise<ColumnSpec[] | null>((resolve) => {
       this.resolveFn = resolve;
       void this.updateComplete.then(() => this.dialogEl?.showModal());
@@ -149,16 +170,30 @@ export class ColumnNamesDialog extends LitElement {
     e.preventDefault();
     if (this.invalidIndices().size > 0) return; // blocked while invalid
     const edited: ColumnSpec[] = this.source.map((orig, i) => {
-      const field = this.rows[i]!.field.trim();
-      const label = this.rows[i]!.label.trim() || field;
-      return { ...orig, field, label };
+      const row = this.rows[i]!;
+      const field = row.field.trim();
+      const label = row.label.trim() || field;
+      return { ...orig, field, label, hidden: row.hidden };
     });
     this.finish(edited);
   };
 
-  private updateRow(i: number, key: keyof EditRow, value: string): void {
+  private updateRow(i: number, key: 'field' | 'label', value: string): void {
     this.rows = this.rows.map((r, j) => (j === i ? { ...r, [key]: value } : r));
   }
+
+  private setHidden(i: number, hidden: boolean): void {
+    this.rows = this.rows.map((r, j) => (j === i ? { ...r, hidden } : r));
+  }
+
+  /**
+   * Clicking the "Hide" header toggles all rows at once: if every column is
+   * already hidden, reveal them all; otherwise hide them all. (All/none.)
+   */
+  private toggleAllHidden = (): void => {
+    const allHidden = this.rows.length > 0 && this.rows.every((r) => r.hidden);
+    this.rows = this.rows.map((r) => ({ ...r, hidden: !allHidden }));
+  };
 
   override render() {
     const invalid = this.invalidIndices();
@@ -179,11 +214,27 @@ export class ColumnNamesDialog extends LitElement {
           <div class="dialog-body">
             <p class="intro">
               Rename columns before importing. A <strong>name</strong> is the field key; duplicate
-              or empty names are shown in red and must be fixed first.
+              or empty names are shown in red and must be fixed first. Tick <strong>Hide</strong> to
+              import a column hidden — click the <strong>Hide</strong> header to toggle all/none.
             </p>
             <div class="grid">
               <div class="head">Name</div>
               <div class="head">Label</div>
+              <div
+                class="head toggle"
+                role="button"
+                tabindex="0"
+                title="Toggle hide for all columns"
+                @click=${this.toggleAllHidden}
+                @keydown=${(e: KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    this.toggleAllHidden();
+                  }
+                }}
+              >
+                Hide
+              </div>
               ${this.rows.map(
                 (r, i) => html`
                   <input
@@ -199,6 +250,15 @@ export class ColumnNamesDialog extends LitElement {
                     @input=${(e: Event) =>
                       this.updateRow(i, 'label', (e.target as HTMLInputElement).value)}
                   />
+                  <div class="hidecell">
+                    <input
+                      type="checkbox"
+                      .checked=${r.hidden}
+                      aria-label=${`Hide column ${i + 1}`}
+                      @change=${(e: Event) =>
+                        this.setHidden(i, (e.target as HTMLInputElement).checked)}
+                    />
+                  </div>
                 `,
               )}
             </div>

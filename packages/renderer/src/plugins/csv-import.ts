@@ -77,6 +77,12 @@ export interface CsvImportOpts {
    * URL imports; absent for dropped files.
    */
   origin?: TableOrigin | undefined;
+  /**
+   * Cap the number of data rows imported (the Import dialog's "Limit rows"
+   * option). Undefined ⇒ import all rows. Applies to new, append, and
+   * overwrite modes alike.
+   */
+  maxRows?: number | undefined;
 }
 
 export async function importCsvText(
@@ -129,7 +135,12 @@ export async function importCsvText(
   // the existing column schema BY INDEX — header names are ignored, so a
   // CSV column whose header doesn't match doesn't go missing (which is what
   // happened when we keyed by `slug(header)` instead).
-  let docs: Array<{ id: string; tableId: string; data: Record<string, unknown>; updatedAt: number }>;
+  let docs: Array<{
+    id: string;
+    tableId: string;
+    data: Record<string, unknown>;
+    updatedAt: number;
+  }>;
 
   if (mode === 'new') {
     const parsed = parseCsv(text);
@@ -141,6 +152,7 @@ export async function importCsvText(
       rows = remapRows(rows, columns, edited); // rekey cells old field → new field
       columns = edited;
     }
+    if (opts.maxRows != null) rows = rows.slice(0, opts.maxRows);
     const uniqueName = existing ? `${baseName} (${Date.now().toString(36)})` : baseName;
     await api.store.tables.insert({
       id: targetId,
@@ -164,7 +176,8 @@ export async function importCsvText(
     // columns by position, then coerce through each column's declared type.
     const targetCols = existing!.columns;
     const raw = parseCsvRaw(text);
-    docs = raw.rows.map((cells) => {
+    const rawRows = opts.maxRows != null ? raw.rows.slice(0, opts.maxRows) : raw.rows;
+    docs = rawRows.map((cells) => {
       const data: Record<string, unknown> = {};
       for (let i = 0; i < targetCols.length; i++) {
         const col = targetCols[i]!;
@@ -293,13 +306,7 @@ interface HeaderSpec {
   hidden?: boolean;
 }
 
-const KNOWN_TYPES = new Set<ColumnType>([
-  'string',
-  'number',
-  'boolean',
-  'date',
-  'datetime',
-]);
+const KNOWN_TYPES = new Set<ColumnType>(['string', 'number', 'boolean', 'date', 'datetime']);
 
 /**
  * Legacy CSV header type names that map onto renderer names in the post-
@@ -595,12 +602,14 @@ function remapRows(
 }
 
 function slug(s: string): string {
-  return s
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9_]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .replace(/_+/g, '_') || 'col';
+  return (
+    s
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9_]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .replace(/_+/g, '_') || 'col'
+  );
 }
 
 function cryptoUUID(): string {

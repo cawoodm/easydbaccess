@@ -282,8 +282,24 @@ async function openImport(api: HostApi): Promise<void> {
   });
   if (!result) return; // cancelled
 
-  const { url, kind, dbChosen, editColumns } = result;
+  const { url, file, kind, dbChosen, editColumns, maxRows } = result;
+  const label = file?.name ?? url;
   try {
+    // Uploaded file: read its bytes locally (no network, no origin URL).
+    if (file) {
+      const text = await file.text();
+      if (kind === 'csv') {
+        await importCsvText(api, text, file.name, {
+          editColumns: editColumns ? editColumnNames : undefined,
+          maxRows,
+        });
+      } else {
+        await importJsonText(api, text, file.name, { maxRows });
+      }
+      api.ui.dialogs.toast(`Imported ${file.name}.`, { kind: 'success', title: 'Import' });
+      return;
+    }
+
     if (kind === 'datasette') {
       // importDatasette emits its own toasts. A table URL imports directly; a
       // database/instance URL opens the table picker before importing — unless
@@ -297,6 +313,7 @@ async function openImport(api: HostApi): Promise<void> {
       // the table (importCsvText returns without inserting if the user cancels).
       await importCsvText(api, text, filenameFromUrl(url), {
         editColumns: editColumns ? editColumnNames : undefined,
+        maxRows,
         // Remember where it came from so it can be refreshed / reloaded later.
         origin: { type: 'csv', url },
       });
@@ -306,14 +323,14 @@ async function openImport(api: HostApi): Promise<void> {
       });
     } else {
       const text = await fetchImportTextWithBar(api, url, `Reading ${filenameFromUrl(url)}…`);
-      await importJsonText(api, text, filenameFromUrl(url), { originUrl: url });
+      await importJsonText(api, text, filenameFromUrl(url), { originUrl: url, maxRows });
       api.ui.dialogs.toast(`Imported ${filenameFromUrl(url)}.`, {
         kind: 'success',
         title: 'Import',
       });
     }
   } catch (err) {
-    api.ui.dialogs.toast(`Could not import ${url}: ${(err as Error).message}`, {
+    api.ui.dialogs.toast(`Could not import ${label}: ${(err as Error).message}`, {
       kind: 'error',
       title: 'Import',
     });
@@ -377,7 +394,10 @@ function filenameFromUrl(url: string): string {
 }
 
 interface ImportChoice {
+  /** Source URL. Empty when importing an uploaded {@link ImportChoice.file}. */
   url: string;
+  /** An uploaded local file to import instead of a URL. */
+  file?: File | undefined;
   kind: ResolvedKind;
   /**
    * True when the user picked a specific database from the dialog's dropdown
@@ -387,6 +407,13 @@ interface ImportChoice {
   dbChosen?: boolean;
   /** True when "Edit columns" was checked — open the column editor pre-import (CSV). */
   editColumns?: boolean;
+  /** Cap on the number of rows imported (the "Limit rows" option); undefined ⇒ all. */
+  maxRows?: number | undefined;
+}
+
+/** Resolve a CSV/JSON kind from a filename (uploads have no URL to inspect). */
+function detectKindFromName(name: string): ResolvedKind {
+  return /\.csv$/i.test(name) ? 'csv' : 'json';
 }
 
 /**
@@ -422,6 +449,8 @@ export class ImportDialog extends LitElement {
         width: auto;
       }
       input[type='text'],
+      input[type='number'],
+      input[type='file'],
       select {
         font: inherit;
         padding: 0.45rem 0.55rem;
@@ -430,6 +459,10 @@ export class ImportDialog extends LitElement {
         width: 100%;
         box-sizing: border-box;
         background: white;
+      }
+      input:disabled {
+        background: #f3f4f6;
+        color: #9ca3af;
       }
       .row {
         display: flex;
@@ -467,14 +500,27 @@ export class ImportDialog extends LitElement {
   @state() private dbError = '';
   @state() private selectedDb = '';
   @state() private editColumns = false;
+  @state() private file: File | null = null;
+  @state() private maxRowsInput = '';
 
   private dialogEl: HTMLDialogElement | null = null;
   private resolveFn: ((v: ImportChoice | null) => void) | null = null;
   private listDatabases: ((url: string) => Promise<string[]>) | null = null;
 
-  /** The concrete kind, resolving `auto` from the current URL. */
+  /**
+   * The concrete kind, resolving `auto` from the uploaded file's name (if any)
+   * or the current URL.
+   */
   private get resolvedKind(): ResolvedKind {
-    return this.kind === 'auto' ? detectKind(this.url.trim()) : this.kind;
+    if (this.kind !== 'auto') return this.kind;
+    if (this.file) return detectKindFromName(this.file.name);
+    return detectKind(this.url.trim());
+  }
+
+  /** Parsed "Limit rows" value: a positive integer, or undefined for "all". */
+  private get maxRows(): number | undefined {
+    const n = Math.floor(Number(this.maxRowsInput));
+    return Number.isFinite(n) && n > 0 ? n : undefined;
   }
 
   /** Reset any loaded database list (URL/kind changed → the list is stale). */
@@ -529,6 +575,8 @@ export class ImportDialog extends LitElement {
     this.kind = 'auto';
     this.presetIdx = -1;
     this.editColumns = false;
+    this.file = null;
+    this.maxRowsInput = '';
     this.resetDbList();
     this.listDatabases = opts?.listDatabases ?? null;
     return new Promise<ImportChoice | null>((resolve) => {
@@ -564,8 +612,19 @@ export class ImportDialog extends LitElement {
   private submit = (e: Event): void => {
     e.preventDefault();
     const url = this.url.trim();
-    if (!url) return;
+    // Either an uploaded file OR a URL is required.
+    if (!url && !this.file) return;
     const kind = this.resolvedKind;
+    const maxRows = this.maxRows;
+    // "Edit columns" only applies to CSV (single-table, columns known up front).
+    const editColumns = kind === 'csv' && this.editColumns;
+
+    // Uploaded file: no URL/database picker applies — import its bytes directly.
+    if (this.file) {
+      this.finish({ url: '', file: this.file, kind, editColumns, maxRows });
+      return;
+    }
+
     // If a database was picked for an instance-root URL, narrow the URL to that
     // database and flag it so the importer imports that db's tables directly
     // (no second table-select dialog — the user already committed to the db).
@@ -574,10 +633,20 @@ export class ImportDialog extends LitElement {
     const finalUrl = dbChosen
       ? `${url.replace(/\/+$/, '')}/${encodeURIComponent(this.selectedDb)}`
       : url;
-    // "Edit columns" only applies to CSV (single-table, columns known up front).
-    const editColumns = kind === 'csv' && this.editColumns;
-    this.finish({ url: finalUrl, kind, dbChosen, editColumns });
+    this.finish({ url: finalUrl, kind, dbChosen, editColumns, maxRows });
   };
+
+  private onFileChange(e: Event): void {
+    const input = e.target as HTMLInputElement;
+    const f = input.files?.[0] ?? null;
+    this.file = f;
+    if (f) {
+      // A file supersedes a URL/preset; clear them so submit is unambiguous.
+      this.url = '';
+      this.presetIdx = -1;
+      this.resetDbList();
+    }
+  }
 
   /**
    * Database picker, shown only for a Datasette instance-root URL. "List
@@ -663,16 +732,33 @@ export class ImportDialog extends LitElement {
                 type="text"
                 autofocus
                 placeholder="https://… (JSON dump, .csv file, or Datasette table)"
+                ?disabled=${!!this.file}
                 .value=${this.url}
                 @input=${(e: Event) => {
                   this.url = (e.target as HTMLInputElement).value;
-                  // A hand-edited URL is no longer "a preset"; drop any stale
-                  // database list (it belonged to the previous instance).
+                  // A hand-edited URL is no longer "a preset" or an upload; drop
+                  // any stale database list (it belonged to the previous instance).
                   this.presetIdx = -1;
+                  this.file = null;
                   this.resetDbList();
                 }}
               />
             </label>
+
+            <label>
+              …or upload a file
+              <input
+                type="file"
+                accept=".csv,.json,.txt,text/csv,application/json"
+                @change=${(e: Event) => this.onFileChange(e)}
+              />
+            </label>
+            ${this.file
+              ? html`<p class="hint">
+                  Importing <strong>${this.file.name}</strong> as
+                  ${this.resolvedKind.toUpperCase()}.
+                </p>`
+              : nothing}
 
             <label>
               Import as
@@ -701,8 +787,26 @@ export class ImportDialog extends LitElement {
                     @change=${(e: Event) =>
                       (this.editColumns = (e.target as HTMLInputElement).checked)}
                   />
-                  Edit columns before import (rename / fix duplicate names)
+                  Edit columns before import (rename / hide / fix duplicate names)
                 </label>`
+              : nothing}
+
+            <label>
+              Limit rows (optional)
+              <input
+                type="number"
+                min="1"
+                step="1"
+                placeholder="import all rows"
+                .value=${this.maxRowsInput}
+                @input=${(e: Event) => (this.maxRowsInput = (e.target as HTMLInputElement).value)}
+              />
+            </label>
+            ${this.resolvedKind === 'datasette' && this.maxRows != null
+              ? html`<p class="hint">
+                  Row limit applies to CSV/JSON imports; Datasette snapshots use their own
+                  10,000-row cap.
+                </p>`
               : nothing}
 
             <p class="hint">
