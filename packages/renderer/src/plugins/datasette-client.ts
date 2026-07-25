@@ -608,16 +608,22 @@ export function applyTableMetadata(
   meta: DatasetteTableMetadata,
   columns: ColumnSpec[],
 ): { columns: ColumnSpec[]; patch: MetadataTablePatch } {
-  // Per-column: description (header tooltip) + units (header suffix). Only set
-  // when metadata carries them, so we never clobber an existing value.
+  // A `sortable_columns` allowlist (any array, including empty) restricts which
+  // columns the user may sort by; undefined ⇒ all sortable (leave unset).
+  const sortAllow = meta.sortableColumns != null ? new Set(meta.sortableColumns) : null;
+
+  // Per-column: description (header tooltip), units (header suffix), sortable
+  // flag. Only set what metadata carries, so we never clobber an existing value.
   const outColumns = columns.map((c) => {
     const description = meta.columns[c.field];
     const units = meta.units[c.field];
-    if (description == null && units == null) return c;
+    const sortable = sortAllow ? sortAllow.has(c.field) : undefined;
+    if (description == null && units == null && sortable === undefined) return c;
     return {
       ...c,
       ...(description != null ? { description } : {}),
       ...(units != null ? { units } : {}),
+      ...(sortable !== undefined ? { sortable } : {}),
     };
   });
 

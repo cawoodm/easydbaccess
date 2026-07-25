@@ -35,6 +35,12 @@ export interface ColumnSpec {
    * Shown alongside the header label. Presentation only.
    */
   units?: string;
+  /**
+   * When explicitly false, the grid does not let the user sort by this column
+   * (e.g. a column outside Datasette's `sortable_columns` allowlist). Absent ⇒
+   * sortable, preserving existing behaviour.
+   */
+  sortable?: boolean;
 }
 
 export interface WindowGeometry {

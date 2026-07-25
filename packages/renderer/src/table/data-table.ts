@@ -107,6 +107,10 @@ export class DataTable extends LitElement {
         color: #9ca3af;
         font-weight: 400;
       }
+      /* A column outside the source's sortable-columns allowlist. */
+      th.no-sort {
+        cursor: default;
+      }
       th[draggable='true'] {
         cursor: grab;
       }
@@ -1001,8 +1005,9 @@ export class DataTable extends LitElement {
         <thead>
           <tr>
             ${cols.map((c) => {
+              const canSort = c.sortable !== false;
               const sorted = this.sortColumn === c.field && this.sortDir;
-              const icon = sorted === 'asc' ? '▲' : sorted === 'desc' ? '▼' : '⇅';
+              const icon = !canSort ? '' : sorted === 'asc' ? '▲' : sorted === 'desc' ? '▼' : '⇅';
               const typeClass = `t-${c.type}`;
               const isSrc = this.dragSourceField === c.field;
               const isTgt = this.dropTargetField === c.field;
@@ -1015,13 +1020,13 @@ export class DataTable extends LitElement {
               const tip =
                 (c.description ? `${c.description}\n` : '') +
                 (c.units ? `Units: ${c.units}\n` : '') +
-                `${c.field} — click to sort, drag to reorder`;
+                `${c.field} — ${canSort ? 'click to sort, ' : 'not sortable · '}drag to reorder`;
               return html`
                 <th
-                  class=${`${typeClass}${sorted ? ' sorted' : ''}${isSrc ? ' drag-source' : ''}${edgeClass}`}
+                  class=${`${typeClass}${sorted ? ' sorted' : ''}${isSrc ? ' drag-source' : ''}${edgeClass}${canSort ? '' : ' no-sort'}`}
                   title=${tip}
                   draggable="true"
-                  @click=${() => this.toggleSort(c.field)}
+                  @click=${() => canSort && this.toggleSort(c.field)}
                   @dragstart=${(e: DragEvent) => this.onColDragStart(e, c.field)}
                   @dragover=${(e: DragEvent) =>
                     this.onColDragOver(e, c.field, e.currentTarget as HTMLElement)}

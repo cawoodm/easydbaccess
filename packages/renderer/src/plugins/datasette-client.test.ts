@@ -751,3 +751,26 @@ describe('applyTableMetadata (column descriptions + units)', () => {
     expect(name.units).toBeUndefined();
   });
 });
+
+describe('applyTableMetadata (sortable_columns)', () => {
+  const cols = [
+    { field: 'a', label: 'A', type: 'string' as const },
+    { field: 'b', label: 'B', type: 'string' as const },
+  ];
+  it('marks columns outside the allowlist as not sortable', () => {
+    const { columns } = applyTableMetadata(
+      { columns: {}, units: {}, sortableColumns: ['a'] },
+      cols,
+    );
+    expect(columns.find((c) => c.field === 'a')!.sortable).toBe(true);
+    expect(columns.find((c) => c.field === 'b')!.sortable).toBe(false);
+  });
+  it('an empty allowlist makes every column non-sortable', () => {
+    const { columns } = applyTableMetadata({ columns: {}, units: {}, sortableColumns: [] }, cols);
+    expect(columns.every((c) => c.sortable === false)).toBe(true);
+  });
+  it('leaves sortable unset when no allowlist is present', () => {
+    const { columns } = applyTableMetadata({ columns: {}, units: {} }, cols);
+    expect(columns.every((c) => c.sortable === undefined)).toBe(true);
+  });
+});
