@@ -129,6 +129,35 @@ export const dialogChromeStyles = css`
     border-color: #9ca3af;
     color: white;
   }
+  /* Phones: every dialog goes full-screen, edge to edge. The important flag
+     plus inset:0 override each dialog's own min/max-width and any inline drag
+     position (draggable.ts sets position:fixed + left/top). The dialog becomes
+     a flex column so the body fills the remaining height and scrolls, keeping
+     the header (and its actions) pinned at the top. */
+  @media (max-width: 640px) {
+    dialog {
+      position: fixed !important;
+      inset: 0 !important;
+      width: auto !important;
+      height: auto !important;
+      min-width: 0 !important;
+      max-width: none !important;
+      max-height: none !important;
+      margin: 0 !important;
+      border-radius: 0 !important;
+      display: flex !important;
+      flex-direction: column;
+    }
+    form {
+      max-height: none;
+      flex: 1;
+      min-height: 0;
+    }
+    .dialog-body {
+      flex: 1;
+      min-height: 0;
+    }
+  }
 `;
 
 /**
