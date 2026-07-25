@@ -484,7 +484,9 @@ export class DataTable extends LitElement {
     this.columns = table.columns;
     this.sortColumn = table.sortColumn ?? null;
     this.sortDir = table.sortColumn ? (table.sortAsc === false ? 'desc' : 'asc') : null;
-    this.filters = { ...(table.filters ?? {}) };
+    // Don't stomp on filters the user is mid-editing (a debounced save is
+    // pending) with the older store value — that reverts the just-typed filter.
+    if (this.filterSaveTimer == null) this.filters = { ...(table.filters ?? {}) };
   }
 
   /**
@@ -507,7 +509,9 @@ export class DataTable extends LitElement {
       });
     this.sortColumn = inst.sortColumn ?? null;
     this.sortDir = inst.sortColumn ? (inst.sortAsc === false ? 'desc' : 'asc') : null;
-    this.filters = { ...(inst.filters ?? {}) };
+    // See applyTable: never revert a filter the user is mid-editing (pending
+    // debounced save) to the older instance value.
+    if (this.filterSaveTimer == null) this.filters = { ...(inst.filters ?? {}) };
   }
 
   private async setCell(row: Row, field: string, value: unknown) {
@@ -740,8 +744,14 @@ export class DataTable extends LitElement {
   private onFilterInput(field: string, value: string) {
     this.filters = { ...this.filters, [field]: value };
     // Debounce persistence so we don't write to IndexedDB on every keystroke.
+    // The timer doubles as a "save pending" flag (see applyTable/applyView): a
+    // store emission that lands during the debounce must NOT reset the filters
+    // the user just typed back to the not-yet-saved store value.
     if (this.filterSaveTimer != null) window.clearTimeout(this.filterSaveTimer);
-    this.filterSaveTimer = window.setTimeout(() => this.saveFilters(), 250);
+    this.filterSaveTimer = window.setTimeout(() => {
+      this.filterSaveTimer = null;
+      void this.saveFilters();
+    }, 250);
   }
 
   private get visibleColumns(): ColumnSpec[] {

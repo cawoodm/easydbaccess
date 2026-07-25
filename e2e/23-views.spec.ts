@@ -429,4 +429,52 @@ test.describe('views', () => {
     await expect(vw.locator('a')).toHaveCount(2);
     await expect(vw.locator('data-table')).toHaveCount(0);
   });
+
+  test('a column filter in the grid is not reverted by a concurrent instance write', async ({
+    page,
+    workspaceId,
+  }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      { title: 'Alpha', url: 'x' },
+      { title: 'Beta', url: 'y' },
+    ]);
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    const dlg = page.locator('views-dialog dialog');
+    await dlg
+      .locator('ul.list li', { hasText: 'RSS Feed' })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+
+    const vw = page.locator('view-window');
+    await vw.getByRole('button', { name: 'Toggle template' }).click();
+    const grid = vw.locator('data-table');
+    await expect(grid.locator('tbody tr')).toHaveCount(2);
+
+    // Type a column filter, then — while the debounced save is still pending —
+    // force a viewInstances write (a geometry save / auto-sync would do this in
+    // the wild). The filter must survive rather than revert to "all rows".
+    await grid.locator('tr.filter-row filter-combobox input').first().fill('Alpha');
+    await expect(grid.locator('tbody tr')).toHaveCount(1);
+    await page.evaluate(async (ws) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__easydb.store;
+      const inst = (await store.viewInstances.find({ workspaceId: ws }))[0];
+      await store.viewInstances.patch(inst.id, { updatedAt: Date.now() });
+    }, workspaceId);
+    await page.waitForTimeout(700); // past the 250ms filter debounce
+
+    await expect(grid.locator('tbody tr')).toHaveCount(1);
+    const persisted = await page.evaluate(async (ws) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__easydb.store;
+      return (await store.viewInstances.find({ workspaceId: ws }))[0]?.filters ?? {};
+    }, workspaceId);
+    expect(persisted).toMatchObject({ title: 'Alpha' });
+  });
 });
