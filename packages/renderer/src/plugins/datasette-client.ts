@@ -7,7 +7,7 @@
 // This TypeScript build-in mirrors the runnable, unit-tested reference in
 // ../../../../eda-datasette-plugin/datasette-client.js (21 node --test cases).
 
-import type { ColumnSpec, ColumnType } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, TableInfo } from '@easydb/shared';
 
 export interface DatasetteRef {
   base: string;
@@ -581,6 +581,21 @@ export async function fetchTableMetadata(
 export interface MetadataTablePatch {
   sortColumn?: string;
   sortAsc?: boolean;
+  info?: TableInfo;
+}
+
+/** Build a {@link TableInfo} from metadata, or undefined when nothing to show. */
+function buildTableInfo(meta: DatasetteTableMetadata): TableInfo | undefined {
+  const info: TableInfo = {};
+  if (meta.description != null) info.description = meta.description;
+  if (meta.descriptionHtml != null) info.descriptionHtml = meta.descriptionHtml;
+  if (meta.source != null) info.source = meta.source;
+  if (meta.sourceUrl != null) info.sourceUrl = meta.sourceUrl;
+  if (meta.license != null) info.license = meta.license;
+  if (meta.licenseUrl != null) info.licenseUrl = meta.licenseUrl;
+  if (meta.about != null) info.about = meta.about;
+  if (meta.aboutUrl != null) info.aboutUrl = meta.aboutUrl;
+  return Object.keys(info).length > 0 ? info : undefined;
 }
 
 /**
@@ -615,6 +630,8 @@ export function applyTableMetadata(
     patch.sortColumn = meta.sortDesc;
     patch.sortAsc = false;
   }
+  const info = buildTableInfo(meta);
+  if (info) patch.info = info;
   return { columns: outColumns, patch };
 }
 

@@ -96,7 +96,25 @@ export interface Table {
    * for live (`source`) tables and hand-made local tables.
    */
   origin?: TableOrigin | undefined;
+  /**
+   * Human-facing table metadata (e.g. from Datasette's description / source /
+   * license / about). Presentation only — surfaced via the (i) button in the
+   * window title. Absent ⇒ no info button shown.
+   */
+  info?: TableInfo | undefined;
   updatedAt: number;
+}
+
+/** Descriptive table metadata shown in the window's info dialog. */
+export interface TableInfo {
+  description?: string;
+  descriptionHtml?: string;
+  source?: string;
+  sourceUrl?: string;
+  license?: string;
+  licenseUrl?: string;
+  about?: string;
+  aboutUrl?: string;
 }
 
 /** Records the backend a snapshot table was imported from, for later refresh. */

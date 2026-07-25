@@ -20,8 +20,9 @@
 import { jsPanel } from 'jspanel4/es6module/jspanel.js';
 import 'jspanel4/es6module/jspanel.css';
 
-import type { Table, WindowGeometry } from '@easydb/shared';
+import type { Table, TableInfo, WindowGeometry } from '@easydb/shared';
 import { getContext, type AppContext } from '../app-context.js';
+import { openTableInfoDialog } from '../dialogs/table-info-dialog.js';
 import { initPanZoom, type PanZoomHandle } from './panzoom.js';
 import { createMaximizeFill } from './maximize-fill.js';
 import '../table/data-table.js';
@@ -355,6 +356,30 @@ function openPanel(t: Table, ctx: AppContext): void {
     titlebar.addEventListener('pointerdown', () => titlebar.focus());
   }
 
+  // (i) info button in the titlebar — shown only when the table carries
+  // descriptive metadata (Datasette description / source / license / about),
+  // which lands asynchronously after a connect/import, so it's toggled
+  // reactively as the table record updates.
+  let curInfo: TableInfo | null = null;
+  const infoBtn = document.createElement('button');
+  infoBtn.type = 'button';
+  infoBtn.title = 'Table info';
+  infoBtn.setAttribute('aria-label', 'Table info');
+  infoBtn.className = 'eda-info-btn';
+  infoBtn.textContent = 'ⓘ';
+  infoBtn.style.cssText =
+    'display:none;background:none;border:0;color:inherit;cursor:pointer;font-size:1rem;line-height:1;padding:0 0.3rem;';
+  infoBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (curInfo) openTableInfoDialog(lastName, curInfo);
+  });
+  controlbar?.prepend(infoBtn);
+  const updateInfoBtn = (table?: Table | null): void => {
+    curInfo = table?.info ?? null;
+    infoBtn.style.display = curInfo ? 'inline-flex' : 'none';
+  };
+  updateInfoBtn(t);
+
   // Restore minimized/maximized state. Defer to next tick so jsPanel's own
   // init (centering, sizing) finishes before we drive a state change.
   if (g?.maximized && typeof panel.maximize === 'function') {
@@ -363,10 +388,13 @@ function openPanel(t: Table, ctx: AppContext): void {
     queueMicrotask(() => panel.minimize?.());
   }
 
-  // Track name changes for the title (cheap — this does NOT fetch rows).
+  // Track name changes for the title and info-metadata arrival (cheap — this
+  // does NOT fetch rows).
   void ctx.store.tables.subscribe((all) => {
     const cur = all.find((x) => x.id === t.id);
-    if (cur && cur.name !== lastName) {
+    if (!cur) return;
+    updateInfoBtn(cur);
+    if (cur.name !== lastName) {
       lastName = cur.name;
       if (rowCountUnsub)
         void ctx.store
