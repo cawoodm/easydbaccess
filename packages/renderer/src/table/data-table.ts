@@ -593,6 +593,22 @@ export class DataTable extends LitElement {
     }
   }
 
+  /**
+   * Escape-to-cancel: revert the editor's displayed value/checked state back
+   * to the original stored value, then blur so the subsequent blur sees no
+   * change and the existing `@change` commit path stays untouched — nothing
+   * is written. `stopPropagation` keeps the keypress from reaching the panel
+   * titlebar/search handlers.
+   */
+  private cancelCellEdit(e: KeyboardEvent, original: string | boolean) {
+    if (e.key !== 'Escape') return;
+    e.stopPropagation();
+    const el = e.target as HTMLInputElement;
+    if (typeof original === 'boolean') el.checked = original;
+    else el.value = original;
+    el.blur();
+  }
+
   private renderCell(row: Row, col: ColumnSpec) {
     const raw = row.data[col.field];
     // Cell rendering is dispatched by the column's `renderer` attribute, not
@@ -631,6 +647,7 @@ export class DataTable extends LitElement {
         return html`<input
           type="checkbox"
           .checked=${checked}
+          @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, checked)}
           @change=${(e: Event) =>
             this.setCell(row, col.field, (e.target as HTMLInputElement).checked)}
         />`;
@@ -639,6 +656,7 @@ export class DataTable extends LitElement {
         return html`<input
           type="date"
           .value=${toDateIso(raw)}
+          @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, toDateIso(raw))}
           @change=${(e: Event) =>
             this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
         />`;
@@ -646,6 +664,7 @@ export class DataTable extends LitElement {
         return html`<input
           type="datetime-local"
           .value=${toDatetimeLocal(raw)}
+          @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, toDatetimeLocal(raw))}
           @change=${(e: Event) =>
             this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
         />`;
@@ -653,6 +672,8 @@ export class DataTable extends LitElement {
         return html`<input
           type="number"
           .value=${raw == null ? '' : String(raw)}
+          @keydown=${(e: KeyboardEvent) =>
+            this.cancelCellEdit(e, raw == null ? '' : String(raw))}
           @change=${(e: Event) => {
             const v = (e.target as HTMLInputElement).value;
             this.setCell(row, col.field, v === '' ? null : Number(v));
@@ -662,6 +683,7 @@ export class DataTable extends LitElement {
         return html`<input
           type="text"
           .value=${String(raw ?? '')}
+          @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, String(raw ?? ''))}
           @change=${(e: Event) =>
             this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
         />`;
