@@ -3,7 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import type { RegisteredSettings, SettingScope, SettingsFieldSpec } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
-import { dialogChromeStyles } from './dialog-chrome.js';
+import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 import {
   parseSecrets,
@@ -171,6 +171,7 @@ export class SettingsDialog extends LitElement {
   /** Current layer per key, keyed `${pluginId}:${key}`. */
   @state() private placements: Record<string, SettingScope> = {};
   @state() private secretsText = '';
+  @state() private workspaceTitle = '';
   private dialogEl: HTMLDialogElement | null = null;
 
   override firstUpdated() {
@@ -183,6 +184,9 @@ export class SettingsDialog extends LitElement {
     const ctx = await getContext();
     const registered: Array<[string, RegisteredSettings]> = [...ctx.registries.settings];
     this.tabs = registered.map(([id, r]) => ({ id, name: r.name, fields: r.fields }));
+
+    const ws = await ctx.store.workspaces.findOne(ctx.workspaceId);
+    this.workspaceTitle = ws?.title ?? '';
 
     const values: Record<string, unknown> = {};
     const placements: Record<string, SettingScope> = {};
@@ -215,6 +219,12 @@ export class SettingsDialog extends LitElement {
     this.dialogEl?.close();
   }
 
+  // Fields already auto-save on change; Done/Ctrl+Enter just closes.
+  private onSubmit = (e: Event): void => {
+    e.preventDefault();
+    this.close();
+  };
+
   private async setValue(tab: Tab, f: SettingsFieldSpec, value: unknown) {
     const k = `${tab.id}:${f.key}`;
     this.values = { ...this.values, [k]: value };
@@ -235,6 +245,12 @@ export class SettingsDialog extends LitElement {
   private onSecretsInput(e: Event) {
     this.secretsText = (e.target as HTMLTextAreaElement).value;
     writeSecretsText(this.secretsText);
+  }
+
+  private async setWorkspaceTitle(value: string) {
+    this.workspaceTitle = value;
+    const ctx = await getContext();
+    await ctx.store.workspaces.patch(ctx.workspaceId, { title: value.trim() || undefined });
   }
 
   private renderControl(tab: Tab, f: SettingsFieldSpec) {
@@ -365,6 +381,18 @@ export class SettingsDialog extends LitElement {
         <em>user</em> stay on this device only.
       </p>
       <div class="field">
+        <div class="field-head"><label>Workspace title</label></div>
+        <p class="desc">
+          Shown in the header instead of "easyDBAccess". Leave blank to use the default.
+        </p>
+        <input
+          type="text"
+          placeholder="easyDBAccess"
+          .value=${this.workspaceTitle}
+          @change=${(e: Event) => this.setWorkspaceTitle((e.target as HTMLInputElement).value)}
+        />
+      </div>
+      <div class="field">
         <div class="field-head"><label>Secrets</label></div>
         <p class="desc">
           Cross-workspace, device-local. One <code>name: value</code> per line.
@@ -393,37 +421,41 @@ export class SettingsDialog extends LitElement {
 
   override render() {
     return html`
-      <dialog @cancel=${this.close}>
+      <dialog @cancel=${this.close} @keydown=${ctrlEnterSubmits}>
         <button type="button" class="close-x" title="Close" @click=${this.close}>
           <span class="mi sm">close</span>
         </button>
-        <div class="dialog-header">
-          <h2>Settings</h2>
-          <div class="header-actions">
-            <button type="button" class="primary" @click=${this.close}>Done</button>
+        <form @submit=${this.onSubmit}>
+          <div class="dialog-header">
+            <h2>Settings</h2>
+            <div class="header-actions">
+              <button type="submit" class="primary">Done</button>
+            </div>
           </div>
-        </div>
-        <div class="dialog-body">
-          <div class="layout">
-            <nav class="tabs">
-              <button
-                class=${this.active === GENERAL ? 'active' : ''}
-                @click=${() => (this.active = GENERAL)}
-              >
-                General
-              </button>
-              ${this.tabs.map(
-                (t) => html`<button
-                  class=${this.active === t.id ? 'active' : ''}
-                  @click=${() => (this.active = t.id)}
+          <div class="dialog-body">
+            <div class="layout">
+              <nav class="tabs">
+                <button
+                  type="button"
+                  class=${this.active === GENERAL ? 'active' : ''}
+                  @click=${() => (this.active = GENERAL)}
                 >
-                  ${t.name}
-                </button>`,
-              )}
-            </nav>
-            <section class="panel">${this.renderPanel()}</section>
+                  General
+                </button>
+                ${this.tabs.map(
+                  (t) => html`<button
+                    type="button"
+                    class=${this.active === t.id ? 'active' : ''}
+                    @click=${() => (this.active = t.id)}
+                  >
+                    ${t.name}
+                  </button>`,
+                )}
+              </nav>
+              <section class="panel">${this.renderPanel()}</section>
+            </div>
           </div>
-        </div>
+        </form>
       </dialog>
     `;
   }

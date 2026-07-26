@@ -58,6 +58,12 @@ export interface Workspace {
   name: string;
   createdAt: number;
   pluginUrls: string[];
+  /**
+   * Optional display title shown in the app header and workspace selector.
+   * Presentation only — `id`/`name` remain the technical identifiers used for
+   * `?space=` routing. Absent/empty ⇒ the header shows "easyDBAccess".
+   */
+  title?: string | undefined;
 }
 
 /**

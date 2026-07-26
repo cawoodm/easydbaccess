@@ -230,8 +230,10 @@ export class AppShell extends LitElement {
   @state() private headerButtons: ButtonSpec[] = [];
   @state() private searchQuery = '';
   @state() private searchOpen = false;
+  @state() private workspaceTitle = '';
   private api: HostApi | null = null;
   private searchTimer: number | null = null;
+  private workspaceUnsub?: () => void;
   // Set when the search box opens so `updated()` focuses the freshly-rendered
   // input exactly once. `autofocus` is unreliable — it only fires on initial
   // document parse, not when Lit inserts the input on click.
@@ -262,6 +264,7 @@ export class AppShell extends LitElement {
     document.removeEventListener('easydb:open-csv-paste', this.onOpenCsvPaste);
     document.removeEventListener('easydb:open-plugin-manager', this.onOpenPluginManager);
     document.removeEventListener('easydb:open-settings', this.onOpenSettings);
+    this.workspaceUnsub?.();
   }
 
   private onEditColumns = (e: Event) => {
@@ -335,6 +338,11 @@ export class AppShell extends LitElement {
     // during load(), which runs after init resolves).
     this.snapshotRegistries(ctx);
     ctx.events.on('app:ready', () => this.snapshotRegistries(ctx));
+    // Live-update the header title as the Settings dialog edits it — no reload needed.
+    this.workspaceUnsub = ctx.store.workspaces.subscribe((all) => {
+      const me = all.find((w) => w.id === ctx.workspaceId);
+      this.workspaceTitle = me?.title?.trim() ?? '';
+    });
   }
 
   private snapshotRegistries(ctx: {
@@ -411,7 +419,7 @@ export class AppShell extends LitElement {
   override render() {
     return html`
       <header>
-        <strong>easyDBAccess <span class="version">v0.0.106</span></strong>
+        <strong>${this.workspaceTitle || 'easyDBAccess'} <span class="version">v0.0.107</span></strong>
         ${this.headerButtons
           .filter((b) => b.variant !== 'secondary')
           .map((b) => this.renderSlotButton(b, 'header'))}
