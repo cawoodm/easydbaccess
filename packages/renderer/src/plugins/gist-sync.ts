@@ -1,4 +1,10 @@
 import type { HostApi, PluginModule, Row, Table } from '@easydb/shared';
+// Type-only: erased at compile time, so importing this module for its type
+// never pulls in `lit`/`top-progress.js` at runtime (that module registers a
+// custom element on import, which would blow up under Vitest's default
+// Node environment). The actual class is loaded lazily via dynamic import()
+// only inside pull(), below.
+import type { ProgressHandle } from '../chrome/top-progress.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'gist-sync',
@@ -133,22 +139,38 @@ async function push(api: HostApi): Promise<void> {
     return;
   }
 
+  // Two size tiers. HARD: Gist rejects a file over 100 MB outright. SOFT: over
+  // ~10 MB GitHub stops returning the file's inline `content` from the API (only
+  // a raw_url), and both push and pull get slow and flaky — worth a heads-up
+  // even though the pull side now reconstructs large files via raw_url.
+  const HARD_LIMIT = 100_000_000;
+  const SOFT_LIMIT = 10_000_000;
   const files: Record<string, { content: string }> = {};
   const oversize: string[] = [];
+  const large: string[] = [];
   for (const t of tables) {
     const rows = await api.store.rows(t.id).find();
     const content = JSON.stringify(tableToFile(t, rows), null, 2);
-    if (content.length > 100_000_000)
-      oversize.push(`${t.name} (${(content.length / 1_000_000).toFixed(2)} MB)`);
+    const label = `${t.name} (${(content.length / 1_000_000).toFixed(2)} MB)`;
+    if (content.length > HARD_LIMIT) oversize.push(label);
+    else if (content.length > SOFT_LIMIT) large.push(label);
     files[`${slug(t.name)}.table.json`] = { content };
   }
 
-  // Gist enforces a 100 MB per-file limit. Warn the user before they hit
-  // an obscure GitHub API rejection mid-push.
+  // Warn before an oversized/heavy push (a single dialog covers both tiers) so
+  // the user isn't surprised by a GitHub rejection or a sluggish sync.
   // https://github.com/orgs/community/discussions/147837
-  if (oversize.length > 0) {
+  if (oversize.length > 0 || large.length > 0) {
+    const parts: string[] = [];
+    if (oversize.length > 0)
+      parts.push(
+        `Over Gist's 100 MB per-file limit — GitHub will REJECT these:\n${oversize.join('\n')}`,
+      );
+    if (large.length > 0)
+      parts.push(`Large (over 10 MB) — Gist sync will be slow and less reliable:\n${large.join('\n')}`);
     const proceed = await api.ui.dialogs.confirm(
-      `These tables exceed Gist's 100 MB-per-file limit and will be rejected:\n\n${oversize.join('\n')}\n\nPush anyway?`,
+      `${parts.join('\n\n')}\n\nTo reduce size: remove unnecessary columns, limit the number of rows, ` +
+        `or mark the table no-persist/no-sync.\n\nPush anyway?`,
       'Gist size warning',
     );
     if (!proceed) return;
@@ -226,7 +248,9 @@ async function pull(api: HostApi): Promise<void> {
     },
   });
   if (!res.ok) throw new Error(await readError(res));
-  const gist = (await res.json()) as { files: Record<string, { content: string }> };
+  const gist = (await res.json()) as {
+    files: Record<string, { content: string; truncated?: boolean; raw_url?: string }>;
+  };
 
   const tableFiles = Object.entries(gist.files).filter(
     ([name]) => name.endsWith('.table.json') && !name.startsWith('_easydb'),
@@ -240,52 +264,78 @@ async function pull(api: HostApi): Promise<void> {
   const existingTables = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
   const byName = new Map(existingTables.map((t) => [t.name, t]));
 
+  const { TopProgress } = await import('../chrome/top-progress.js');
+  const progress: ProgressHandle = TopProgress.begin('Pulling from gist…');
+
   let imported = 0;
-  for (const [, file] of tableFiles) {
-    const parsed = JSON.parse(file.content) as {
-      name: string;
-      columns: Table['columns'];
-      rows: Array<Row['data']>;
-    };
-    if (!parsed.name || !Array.isArray(parsed.columns)) continue;
+  const failures: Array<{ file: string; error: string }> = [];
+  try {
+    for (const [i, [name, file]] of tableFiles.entries()) {
+      try {
+        const content = await fetchGistFileContent(file);
+        const parsed = JSON.parse(content) as {
+          name: string;
+          columns: Table['columns'];
+          rows: Array<Row['data']>;
+        };
+        if (!parsed.name || !Array.isArray(parsed.columns)) {
+          throw new Error('unexpected file shape (missing name/columns)');
+        }
 
-    let table: Table;
-    const existing = byName.get(parsed.name);
-    if (existing) {
-      table = await api.store.tables.patch(existing.id, {
-        columns: parsed.columns,
-        updatedAt: Date.now(),
-      });
-      // Wipe existing rows for clean reimport (simplest correct behavior).
-      const rowColl = api.store.rows(existing.id);
-      const oldRows = await rowColl.find();
-      await rowColl.bulkRemove(oldRows.map((r) => r.id));
-    } else {
-      table = await api.store.tables.insert({
-        id: cryptoUUID(),
-        workspaceId: wsId,
-        name: parsed.name,
-        code: slug(parsed.name),
-        columns: parsed.columns,
-        view: 'table',
-        updatedAt: Date.now(),
-      });
+        let table: Table;
+        const existing = byName.get(parsed.name);
+        if (existing) {
+          table = await api.store.tables.patch(existing.id, {
+            columns: parsed.columns,
+            updatedAt: Date.now(),
+          });
+          // Wipe existing rows for clean reimport (simplest correct behavior).
+          const rowColl = api.store.rows(existing.id);
+          const oldRows = await rowColl.find();
+          await rowColl.bulkRemove(oldRows.map((r) => r.id));
+        } else {
+          table = await api.store.tables.insert({
+            id: cryptoUUID(),
+            workspaceId: wsId,
+            name: parsed.name,
+            code: slug(parsed.name),
+            columns: parsed.columns,
+            view: 'table',
+            updatedAt: Date.now(),
+          });
+        }
+
+        const docs = (parsed.rows ?? []).map((data) => ({
+          id: cryptoUUID(),
+          tableId: table.id,
+          data,
+          updatedAt: Date.now(),
+        }));
+        await api.store.rows(table.id).bulkInsert(docs);
+
+        imported++;
+      } catch (err) {
+        failures.push({ file: name, error: (err as Error).message });
+      } finally {
+        progress.fraction((i + 1) / tableFiles.length);
+      }
     }
-
-    const docs = (parsed.rows ?? []).map((data) => ({
-      id: cryptoUUID(),
-      tableId: table.id,
-      data,
-      updatedAt: Date.now(),
-    }));
-    await api.store.rows(table.id).bulkInsert(docs);
-    imported++;
+  } finally {
+    progress.done();
   }
 
-  api.ui.dialogs.toast(
-    `Pulled ${imported} table${imported === 1 ? '' : 's'} from gist ${creds.gistId}.`,
-    { kind: 'success', title: 'Gist sync' },
-  );
+  if (failures.length > 0) {
+    const list = failures.map((f) => `• ${f.file}: ${f.error}`).join('\n');
+    api.ui.dialogs.toast(
+      `Pulled ${imported} of ${tableFiles.length} tables. ${failures.length} failed:\n${list}`,
+      { kind: 'warning', title: 'Gist sync' },
+    );
+  } else {
+    api.ui.dialogs.toast(
+      `Pulled ${imported} table${imported === 1 ? '' : 's'} from gist ${creds.gistId}.`,
+      { kind: 'success', title: 'Gist sync' },
+    );
+  }
 }
 
 // -- helpers ------------------------------------------------------------------
@@ -296,6 +346,25 @@ function tableToFile(t: Table, rows: Row[]) {
     columns: t.columns,
     rows: rows.map((r) => r.data),
   };
+}
+
+/**
+ * Resolve a gist file's FULL content. GitHub truncates the inline `content` of
+ * large gist files (setting `truncated: true` + a `raw_url` to the full body);
+ * blindly parsing the truncated string is what caused "Pull failed: Expected
+ * double-quoted property name…". When truncated, fetch the raw_url — a secret
+ * gist's raw_url is link-accessible and served with `Access-Control-Allow-Origin: *`,
+ * so a plain GET (no auth header → no CORS preflight) works from the browser.
+ */
+export async function fetchGistFileContent(
+  file: { content: string; truncated?: boolean; raw_url?: string },
+  doFetch: (url: string) => Promise<Response> = (u) => fetch(u),
+): Promise<string> {
+  if (!file.truncated) return file.content;
+  if (!file.raw_url) throw new Error('GitHub truncated this file but returned no raw_url');
+  const res = await doFetch(file.raw_url);
+  if (!res.ok) throw new Error(`raw fetch failed: ${res.status} ${res.statusText}`);
+  return res.text();
 }
 
 async function readError(res: Response): Promise<string> {

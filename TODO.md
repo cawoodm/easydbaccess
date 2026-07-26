@@ -20,13 +20,13 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 
 ## DONE
 
+- ✅ Bug: When pulling the Simon workspace the gist pull failed on a truncated file. Fixed: pull fetches GitHub-truncated files via `raw_url`, continues past a failing table and reports which file failed, and shows a progress bar. Push now warns on tables >10 MB (slow/flaky) and >100 MB (rejected) with advice to trim columns/rows or mark no-sync.
+
 - ✅ Bug: when connecting a datasette.io instance which fails with table not found, the table is still created empty. The dialog should automatically check the URL before proceeding (e.g. broken URL https://datasette.io/legislators/officers) (probe the table before creating it via `probeSingleTable`; Connect dialog validates inline + stays open on failure; Test connection probes the real table)
 - ✅ Create a concept for a settings dialog with tabs for General and then one tab for each plugin which has registered settings. Plugins should call api.registerSettings with their id, name and a JSON object containing their settings. (concept: `.claude/plans/2026-07-26-settings-dialog-concept.md`)
 
 ## Backlog
 
-- Bug: When pulling the Simon workspace (see tmp/tokens.txt for the gist connection string) the error is: Gist sync
-  Pull failed: Expected double-quoted property name in JSON at position 418295 (line 422 column 124) - are we running into size limits? Can we report back which file/table was at fault. We should continue pulling other tables even if one fails. We need a progress bar.
 - When connecting datasette add options for "virtual" and "no persist" recommended for big tables. Virtual means we don't load all data - we only load at most 2 visible pages in the UI, the sorting and filtering is done on the server and we eject the entire table from memory each time the user sorts or filters. Paging is server side. The "no persist" option means we don't save the data to our local store and we don't push/synch it either. Surface these settings in the column editor.
 
 ## Rendering
