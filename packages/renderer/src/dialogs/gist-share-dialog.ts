@@ -7,7 +7,7 @@
 
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { dialogChromeStyles } from './dialog-chrome.js';
+import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 
 let singleton: GistShareDialog | null = null;
@@ -123,13 +123,18 @@ export class GistShareDialog extends LitElement {
 
   override render() {
     return html`
-      <dialog @cancel=${this.onCancel}>
+      <dialog @cancel=${this.onCancel} @keydown=${ctrlEnterSubmits}>
         <button type="button" class="close-x" title="Close" @click=${() => this.finish()}>×</button>
-        <form @submit=${(e: Event) => e.preventDefault()}>
+        <form
+          @submit=${(e: Event) => {
+            e.preventDefault();
+            this.finish();
+          }}
+        >
           <div class="dialog-header">
             <h2>Share workspace</h2>
             <div class="header-actions">
-              <button type="button" class="primary" @click=${() => this.finish()}>Close</button>
+              <button type="submit" class="primary">Close</button>
             </div>
           </div>
           <div class="dialog-body">

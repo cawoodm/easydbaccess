@@ -2,7 +2,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { ColumnSpec, Table, ViewInstance, ViewTemplate } from '@easydb/shared';
 import { getContext } from '../app-context.js';
-import { dialogChromeStyles } from './dialog-chrome.js';
+import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 import { extractTokens } from '../views/view-render.js';
 
@@ -235,6 +235,16 @@ export class ViewsDialog extends LitElement {
     this.dialogEl?.close();
   };
 
+  // The form's one submit path: Enter/Ctrl+Enter or clicking the primary
+  // button all route here, dispatching to whichever action is primary for
+  // the current mode (mirrors the header-actions button below).
+  private onSubmit = (e: Event): void => {
+    e.preventDefault();
+    if (this.mode === 'template') void this.saveTemplate();
+    else if (this.mode === 'instance') void this.saveInstance();
+    else this.close();
+  };
+
   // -- instances --------------------------------------------------------------
 
   private async openInstance(id: string): Promise<void> {
@@ -418,9 +428,17 @@ export class ViewsDialog extends LitElement {
             (v) =>
               html`<li>
                 <span class="name">${v.name}</span>
-                <button class="mini" @click=${() => this.openInstance(v.id)}>Open</button>
-                <button class="mini" @click=${() => void this.editInstance(v)}>Edit</button>
-                <button class="mini danger" @click=${() => void this.deleteInstance(v.id)}>
+                <button type="button" class="mini" @click=${() => this.openInstance(v.id)}>
+                  Open
+                </button>
+                <button type="button" class="mini" @click=${() => void this.editInstance(v)}>
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  class="mini danger"
+                  @click=${() => void this.deleteInstance(v.id)}
+                >
                   Delete
                 </button>
               </li>`,
@@ -435,14 +453,16 @@ export class ViewsDialog extends LitElement {
               html`<li>
                 <span class="name">${t.name}</span>
                 ${t.builtin ? html`<span class="badge">built-in</span>` : nothing}
-                <button class="mini" @click=${() => this.useTemplate(t)}>Use</button>
-                <button class="mini" @click=${() => this.editTemplate(t)}>Edit</button>
-                <button class="mini" @click=${() => this.copyTemplate(t)}>Copy</button>
+                <button type="button" class="mini" @click=${() => this.useTemplate(t)}>Use</button>
+                <button type="button" class="mini" @click=${() => this.editTemplate(t)}>Edit</button>
+                <button type="button" class="mini" @click=${() => this.copyTemplate(t)}>Copy</button>
               </li>`,
           )}
         </ul>
         <div>
-          <button class="mini" @click=${() => this.newTemplate()}>+ New template</button>
+          <button type="button" class="mini" @click=${() => this.newTemplate()}>
+            + New template
+          </button>
         </div>
         <p class="hint">
           A template's row HTML uses <code>$TOKEN</code> placeholders (e.g. <code>$TITLE</code>).
@@ -547,32 +567,32 @@ export class ViewsDialog extends LitElement {
         ? html`<button type="button" class="ghost" @click=${() => (this.mode = 'list')}>
               Back
             </button>
-            <button type="button" class="primary" @click=${() => void this.saveTemplate()}>
-              Save
-            </button>`
+            <button type="submit" class="primary">Save</button>`
         : this.mode === 'instance'
           ? html`<button type="button" class="ghost" @click=${() => (this.mode = 'list')}>
                 Back
               </button>
-              <button type="button" class="primary" @click=${() => void this.saveInstance()}>
+              <button type="submit" class="primary">
                 ${this.iDraft?.id ? 'Save' : 'Create view'}
               </button>`
-          : html`<button type="button" class="ghost" @click=${this.close}>Close</button>`;
+          : html`<button type="submit" class="ghost">Close</button>`;
 
     return html`
-      <dialog @cancel=${this.close}>
+      <dialog @cancel=${this.close} @keydown=${ctrlEnterSubmits}>
         <button type="button" class="close-x" title="Close" @click=${this.close}>×</button>
-        <div class="dialog-header">
-          <h2>${title}</h2>
-          <div class="header-actions">${actions}</div>
-        </div>
-        <div class="dialog-body">
-          ${this.mode === 'template'
-            ? this.renderTemplate()
-            : this.mode === 'instance'
-              ? this.renderInstance()
-              : this.renderList()}
-        </div>
+        <form @submit=${this.onSubmit}>
+          <div class="dialog-header">
+            <h2>${title}</h2>
+            <div class="header-actions">${actions}</div>
+          </div>
+          <div class="dialog-body">
+            ${this.mode === 'template'
+              ? this.renderTemplate()
+              : this.mode === 'instance'
+                ? this.renderInstance()
+                : this.renderList()}
+          </div>
+        </form>
       </dialog>
     `;
   }

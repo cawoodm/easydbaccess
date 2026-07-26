@@ -8,7 +8,7 @@
 
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { dialogChromeStyles } from './dialog-chrome.js';
+import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 
 export interface SelectableTable {
@@ -230,7 +230,7 @@ export class TableSelectDialog extends LitElement {
   override render() {
     const count = this.selectedCount;
     return html`
-      <dialog @cancel=${this.onCancel}>
+      <dialog @cancel=${this.onCancel} @keydown=${ctrlEnterSubmits}>
         <button type="button" class="close-x" title="Close" @click=${() => this.finish(null)}>
           ×
         </button>

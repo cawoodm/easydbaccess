@@ -8,7 +8,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import type { TableInfo } from '@easydb/shared';
-import { dialogChromeStyles } from './dialog-chrome.js';
+import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 
 /** Open the info dialog for `name` with the given metadata (mounted lazily). */
@@ -89,6 +89,11 @@ export class TableInfoDialog extends LitElement {
 
   private close = (): void => this.dialogEl?.close();
 
+  private onSubmit = (e: Event): void => {
+    e.preventDefault();
+    this.close();
+  };
+
   /** One <dt>/<dd> attribution row: a link when a URL is present, else text. */
   private row(label: string, text?: string, url?: string) {
     if (!text && !url) return nothing;
@@ -110,31 +115,33 @@ export class TableInfoDialog extends LitElement {
       i?.aboutUrl
     );
     return html`
-      <dialog @cancel=${this.close}>
+      <dialog @cancel=${this.close} @keydown=${ctrlEnterSubmits}>
         <button type="button" class="close-x" title="Close" @click=${this.close}>×</button>
-        <div class="dialog-header">
-          <h2>${this.name}</h2>
-          <div class="header-actions">
-            <button type="button" class="ghost" @click=${this.close}>Close</button>
+        <form @submit=${this.onSubmit}>
+          <div class="dialog-header">
+            <h2>${this.name}</h2>
+            <div class="header-actions">
+              <button type="submit" class="ghost">Close</button>
+            </div>
           </div>
-        </div>
-        <div class="dialog-body">
-          ${i?.descriptionHtml
-            ? html`<div class="desc">${unsafeHTML(i.descriptionHtml)}</div>`
-            : i?.description
-              ? html`<div class="desc">${i.description}</div>`
+          <div class="dialog-body">
+            ${i?.descriptionHtml
+              ? html`<div class="desc">${unsafeHTML(i.descriptionHtml)}</div>`
+              : i?.description
+                ? html`<div class="desc">${i.description}</div>`
+                : nothing}
+            ${hasAttribution
+              ? html`<dl>
+                  ${this.row('Source', i?.source, i?.sourceUrl)}
+                  ${this.row('License', i?.license, i?.licenseUrl)}
+                  ${this.row('About', i?.about, i?.aboutUrl)}
+                </dl>`
               : nothing}
-          ${hasAttribution
-            ? html`<dl>
-                ${this.row('Source', i?.source, i?.sourceUrl)}
-                ${this.row('License', i?.license, i?.licenseUrl)}
-                ${this.row('About', i?.about, i?.aboutUrl)}
-              </dl>`
-            : nothing}
-          ${!i?.description && !i?.descriptionHtml && !hasAttribution
-            ? html`<p class="empty">No additional information.</p>`
-            : nothing}
-        </div>
+            ${!i?.description && !i?.descriptionHtml && !hasAttribution
+              ? html`<p class="empty">No additional information.</p>`
+              : nothing}
+          </div>
+        </form>
       </dialog>
     `;
   }
