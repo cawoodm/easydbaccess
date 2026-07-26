@@ -5,6 +5,9 @@ export const meta: NonNullable<PluginModule['meta']> = {
   id: 'settings',
   name: 'Settings',
   type: 'ui',
+  // Core UX surface — always on, never shown with a disable toggle. The Plugin
+  // Manager hides fixed plugins unless the "Fixed" filter is explicitly on.
+  fixed: true,
   version: '0.1.0',
   description:
     'Header gear button that opens the tabbed Settings dialog; imports dropped secrets.txt.',

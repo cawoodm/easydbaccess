@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 26 Jul 2026 (v0.0.125)
+
+- Settings is now a fixed (always-on) plugin; the Plugin Manager hides fixed plugins unless the "Fixed" filter is on, and the "Installed" filter now lists bundled built-ins.
+
 ## 26 Jul 2026 (v0.0.123)
 
 - JSON dump export/import now round-trips view templates & instances (re-pointed by table name) plus per-table window geometry/title/filters; windows restack on import.

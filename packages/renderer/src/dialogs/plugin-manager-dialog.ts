@@ -701,7 +701,11 @@ export class PluginManagerDialog extends LitElement {
 
     for (const { id, meta } of builtinPlugins) {
       const enabled = meta.fixed ? true : this.records.get(builtinKey(id))?.enabled !== false;
-      const categories: Category[] = meta.fixed ? ['built-in', 'fixed'] : ['built-in'];
+      // Built-ins ship with the app and are active in the workspace, so they
+      // count as "installed" too — that's what the Installed filter should show.
+      const categories: Category[] = meta.fixed
+        ? ['built-in', 'fixed', 'installed']
+        : ['built-in', 'installed'];
       rows.set(`builtin:${id}`, {
         id,
         name: meta.name,
@@ -778,6 +782,10 @@ export class PluginManagerDialog extends LitElement {
       (state === 'on' ? typeInclude : typeExclude).push(type);
     }
     const byFilter = rows.filter((r) => {
+      // Fixed plugins (core, non-disableable) are hidden by default — they'd
+      // just be noise with a lock icon. They appear only when the user turns
+      // the "Fixed" filter explicitly on.
+      if (r.fixed && this.filterStates.get('fixed') !== 'on') return false;
       // "on" filters are a union (row must be in at least one selected category);
       // "not" filters exclude (row must be in none of them).
       if (include.length && !include.some((c) => r.categories.has(c))) return false;
