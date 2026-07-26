@@ -2,6 +2,7 @@
 
 ## 26 Jul 2026 (v0.0.115)
 
+- The version number in the header is now a link to the changelog on GitHub.
 - Plugin Manager can now filter plugins by type (importer, exporter, cell-renderer, sync, source, ui); every plugin declares its type.
 
 ## 26 Jul 2026 (v0.0.109)

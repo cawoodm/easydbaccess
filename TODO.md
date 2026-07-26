@@ -22,13 +22,16 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 ## Backlog
 
 - When connecting datasette add options for "virtual" and "no persist" recommended for big tables. Virtual means we don't load all data - we only load at most 2 visible pages in the UI, the sorting and filtering is done on the server and we eject the entire table from memory each time the user sorts or filters. Paging is server side. The "no persist" option means we don't save the data to our local store and we don't push/synch it either. Surface these settings in the column editor.
+- bug: when I pull in a gist I expect the windows to have the geometry set in the gist
+- Feature: Importers are too interwoven, they should be separate plugins with separate dialogs and have the meta.type=='importer'. The core import-data plugin provides a header import button with AnchoredMenu for each of the import plugins (Dump, JSON, CSV, Datasette, SQL, Parquet). Each plugin brings it's own dialog. All importers should support URL or File upload as well as a row limit and an option to edit columns before import. Write a plan for this before implementing anything.
 
 ## In progress
 
-- 🕜 When clicking on the version in the header launch the CHANGELOG.md URL on github
 - 🕜 feature: Gist push/pull should sync the entire workspace, not just tables — include view templates, view instances, and settings (currently `gist-sync.ts` only serializes `api.store.tables` + rows; `viewTemplates`/`viewInstances`/`settings` are never pushed or pulled, so views and plugin config don't survive a Gist round-trip to another device)
 
 ## DONE
+
+- ✅ When clicking on the version in the header launch the CHANGELOG.md URL on github (version span wrapped in an `<a>` to `github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md`, opens in a new tab; inner `<span class="version">` kept so the bump script still rewrites it).
 
 - ✅✅ In every dialog, Ctrl+Enter confirms (primary action) and Esc closes — audited all 13 dialogs. `settings-dialog.ts`, `table-info-dialog.ts`, `gist-share-dialog.ts`, `views-dialog.ts` had no form/Ctrl+Enter wiring (Settings' Done button, specifically named, didn't confirm on Ctrl+Enter); `table-select-dialog.ts` had the form but not the keydown hook. Wrapped each in a `<form>` with the primary action as `type="submit"` and `@keydown=${ctrlEnterSubmits}` on the `<dialog>`; fixed several now-in-a-form `<button>`s in `views-dialog.ts`'s list mode that lacked an explicit `type="button"` and would otherwise have submitted the form on click. Esc already closes every dialog via native `<dialog>`/`cancel` handling — no change needed there.
 
