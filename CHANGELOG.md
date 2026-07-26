@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 26 Jul 2026 (v0.0.129)
+
+- Connecting a Datasette table whose name clashes with a different existing table now prompts Overwrite / Rename / Skip instead of silently duplicating; table-name checks are case-insensitive across import and connect.
+
 ## 26 Jul 2026 (v0.0.125)
 
 - Settings is now a fixed (always-on) plugin; the Plugin Manager hides fixed plugins unless the "Fixed" filter is on, and the "Installed" filter now lists bundled built-ins.

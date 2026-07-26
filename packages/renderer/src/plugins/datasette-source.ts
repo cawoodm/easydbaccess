@@ -427,7 +427,7 @@ async function prepareImportTable(
   const workspaceTables = (await api.store.tables.find()).filter(
     (t) => t.workspaceId === workspaceId,
   );
-  const existing = workspaceTables.find((t) => t.name === name);
+  const existing = workspaceTables.find((t) => t.name.toLowerCase() === name.toLowerCase());
   let targetName = name;
   if (existing) {
     const choice = await api.ui.dialogs.choice(
@@ -768,8 +768,10 @@ export async function connectDatasette(api: HostApi, input: string, token: strin
   const created: Array<{ tableId: string; c: TableRef }> = [];
   for (const c of chosen) {
     const tableId = await upsertLiveTable(api, workspaceId, ref.base, c, status.writable, token);
+    if (tableId === null) continue; // user skipped a name collision
     created.push({ tableId, c });
   }
+  if (created.length === 0) return; // every table skipped
   const mode = status.writable ? 'read-write' : 'read-only';
   api.ui.dialogs.toast(
     `Connected ${created.length} live table${created.length === 1 ? '' : 's'} from Datasette (${mode}).`,
@@ -796,19 +798,38 @@ async function upsertLiveTable(
   c: TableRef,
   writable: boolean,
   token: string,
-): Promise<string> {
-  // Reuse an existing live table for the same (base, db, table) rather than
-  // piling up duplicates on every reconnect (keeps geometry, sort, filters).
-  const existing = (await api.store.tables.find()).find((t) => {
+): Promise<string | null> {
+  // Reconnecting to the SAME live source (base/db/table) silently reuses its
+  // table so geometry/sort/filters survive — that isn't a name collision.
+  const workspaceTables = (await api.store.tables.find()).filter(
+    (t) => t.workspaceId === workspaceId,
+  );
+  let name = `${c.db}/${c.table}`;
+  let existing = workspaceTables.find((t) => {
     const cfg = t.source?.config as { base?: string; db?: string; table?: string } | undefined;
     return (
-      t.workspaceId === workspaceId &&
       t.source?.type === 'datasette' &&
       cfg?.base === base &&
       cfg?.db === c.db &&
       cfg?.table === c.table
     );
   });
+
+  // Otherwise, a DIFFERENT table sharing this name (e.g. an earlier import
+  // snapshot) is a real collision — never resolve it silently; ask the user.
+  if (!existing) {
+    const clash = workspaceTables.find((t) => t.name.toLowerCase() === name.toLowerCase());
+    if (clash) {
+      const choice = await api.ui.dialogs.choice(
+        `A table named "${name}" already exists in this workspace.`,
+        ['Overwrite', 'Rename', 'Skip'],
+        'Connect — table already exists',
+      );
+      if (!choice || choice === 'Skip') return null;
+      if (choice === 'Overwrite') existing = clash;
+      else name = uniqueTableName(new Set(workspaceTables.map((t) => t.name)), name);
+    }
+  }
 
   // pks from the listing when available (multi-table connect → no fetch, window
   // is instant); otherwise probe once so writes address rows correctly.
@@ -830,7 +851,7 @@ async function upsertLiveTable(
     ...(existing ?? {}),
     id: tableId,
     workspaceId,
-    name: `${c.db}/${c.table}`,
+    name,
     code: slug(`${c.db}-${c.table}`),
     // Keep an existing table's columns so a reconnect shows them at once; a new
     // one starts empty and gets them from refineLiveColumns.
