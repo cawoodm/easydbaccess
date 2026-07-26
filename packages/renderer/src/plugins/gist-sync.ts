@@ -21,39 +21,107 @@ interface GistCreds {
 
 const SETTING_KEY_PREFIX = 'gist:';
 
+// GitHub's mark, inline — Material Icons has no GitHub glyph. The slot/footer
+// icon renderers detect a leading `<svg` and render it as inline SVG.
+const GITHUB_ICON_SVG =
+  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.34-5.47-5.95 0-1.31.47-2.39 1.24-3.23-.12-.3-.54-1.53.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.77.84 1.24 1.92 1.24 3.23 0 4.62-2.81 5.64-5.49 5.94.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5z"/></svg>';
+
 export function init(api: HostApi): void {
   api.ui.registerFooterButton({
-    id: 'gist-sync:push',
-    label: 'Push',
-    icon: 'cloud_upload',
-    tooltip: 'Push the current workspace to a GitHub Gist',
-    onClick: async () => {
+    id: 'gist-sync:menu',
+    label: 'Gist',
+    icon: GITHUB_ICON_SVG,
+    tooltip: 'Gist sync — push, pull, share…',
+    onClick: async (api, ctx) => {
+      const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
+      const rect =
+        ctx?.anchor?.getBoundingClientRect() ??
+        new DOMRect(16, window.innerHeight - 48, 0, 0);
+      const choice = await AnchoredMenu.open(rect, [
+        { id: 'push', label: 'Push', icon: 'cloud_upload' },
+        { id: 'pull', label: 'Pull', icon: 'cloud_download' },
+        { id: 'settings', label: 'Settings', icon: 'settings' },
+        { id: 'share', label: 'Share', icon: 'share' },
+        { id: 'view', label: 'View gist', icon: 'open_in_new' },
+      ]);
+      if (!choice) return;
       try {
-        await push(api);
+        if (choice === 'push') await push(api);
+        else if (choice === 'pull') await pull(api);
+        else if (choice === 'settings') await openSettings(api);
+        else if (choice === 'share') await openShare(api);
+        else if (choice === 'view') await openViewGist(api);
       } catch (err) {
-        api.ui.dialogs.toast(`Push failed: ${(err as Error).message}`, {
+        api.ui.dialogs.toast(`Gist ${choice} failed: ${(err as Error).message}`, {
           kind: 'error',
           title: 'Gist sync',
         });
       }
     },
   });
-  api.ui.registerFooterButton({
-    id: 'gist-sync:pull',
-    label: 'Pull',
-    icon: 'cloud_download',
-    tooltip: 'Pull the latest tables from the configured Gist',
-    onClick: async () => {
+
+  api.ui.registerTableButton({
+    id: 'gist-sync:table',
+    label: 'Gist',
+    icon: GITHUB_ICON_SVG,
+    tooltip: 'Gist sync for this table — push, pull, view file',
+    onClick: async (api, ctx) => {
+      const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
+      const rect =
+        ctx.anchor?.getBoundingClientRect() ??
+        new DOMRect(16, window.innerHeight - 48, 0, 0);
+      const choice = await AnchoredMenu.open(rect, [
+        { id: 'push', label: 'Push this table', icon: 'cloud_upload' },
+        { id: 'pull', label: 'Pull this table', icon: 'cloud_download' },
+        { id: 'view', label: 'View gist file', icon: 'open_in_new' },
+      ]);
+      if (!choice) return;
       try {
-        await pull(api);
+        if (choice === 'push') await pushTable(api, ctx.tableId);
+        else if (choice === 'pull') await pullTable(api, ctx.tableId);
+        else if (choice === 'view') await viewTableGist(api, ctx.tableId);
       } catch (err) {
-        api.ui.dialogs.toast(`Pull failed: ${(err as Error).message}`, {
+        api.ui.dialogs.toast(`Gist ${choice} failed: ${(err as Error).message}`, {
           kind: 'error',
           title: 'Gist sync',
         });
       }
     },
   });
+}
+
+/**
+ * `#gist=` share-link boot loader. Runs after `app:ready` (the plugin
+ * lifecycle's `load()` phase). The link carries a base64'd connection string
+ * in the URL hash so a workspace can be shared read/write in one click.
+ */
+export async function load(api: HostApi): Promise<void> {
+  // Creds ride in the URL #hash (not ?query): a fragment is never sent to the
+  // server, keeping the embedded token out of server logs / Referer headers.
+  const raw = new URLSearchParams(location.hash.replace(/^#/, '')).get('gist');
+  if (!raw) return;
+  // Strip the hash immediately (before any await) so the token never lingers in
+  // the address bar and a refresh won't re-trigger the import.
+  history.replaceState(null, '', location.pathname + location.search);
+
+  let connectionString: string;
+  try {
+    connectionString = atob(raw);
+  } catch {
+    return;
+  }
+  const creds = parseConnectionString(connectionString);
+  if (!creds) {
+    await api.ui.dialogs.alert('The shared gist link is invalid.', 'Gist sync');
+    return;
+  }
+  const ok = await api.ui.dialogs.confirm(
+    `Load shared workspace from gist ${creds.gistId || '(new)'} (owner: ${creds.user})?\n\nThis pulls its tables into the current workspace.`,
+    'Gist sync',
+  );
+  if (!ok) return;
+  await saveCreds(api, creds);
+  await pull(api);
 }
 
 // -- Credentials --------------------------------------------------------------
@@ -119,6 +187,59 @@ async function ensureCreds(api: HostApi): Promise<GistCreds | null> {
   }
   await saveCreds(api, parsed);
   return parsed;
+}
+
+function credsToConnectionString(c: GistCreds): string {
+  return `user=${c.user};gist_id=${c.gistId};gist_token=${c.token}`;
+}
+
+async function openSettings(api: HostApi): Promise<void> {
+  const current = await loadCreds(api);
+  const prefill = current ? credsToConnectionString(current) : '';
+  const input = await api.ui.dialogs.prompt(
+    'Edit the Gist connection string:\nuser=<github-user>;gist_id=<id>;gist_token=<pat>;\n\nLeave gist_id empty to create a new gist on first Push.',
+    prefill,
+    'Gist settings',
+  );
+  if (input == null) return;
+  const parsed = parseConnectionString(input);
+  if (!parsed) {
+    await api.ui.dialogs.alert(
+      'Could not parse connection string. Make sure it contains user=… and gist_token=….',
+      'Gist settings',
+    );
+    return;
+  }
+  await saveCreds(api, parsed);
+  api.ui.dialogs.toast('Gist settings saved.', { kind: 'success', title: 'Gist sync' });
+}
+
+async function openShare(api: HostApi): Promise<void> {
+  const creds = await loadCreds(api);
+  if (!creds || !creds.gistId) {
+    await api.ui.dialogs.alert(
+      'Configure a gist and Push first — there is nothing to share yet.',
+      'Gist sync',
+    );
+    return;
+  }
+  // Use a URL #hash, not a ?query: the fragment is never sent to the server, so
+  // the token stays out of server logs / Referer headers. Percent-encode the
+  // base64 so URL-unsafe chars (+ / =) survive URLSearchParams parsing of the
+  // hash (a literal '+' would otherwise decode back to a space and corrupt it).
+  const base = location.origin + location.pathname;
+  const link = `${base}#gist=${encodeURIComponent(btoa(credsToConnectionString(creds)))}`;
+  const { GistShareDialog } = await import('../dialogs/gist-share-dialog.js');
+  await GistShareDialog.open(link);
+}
+
+async function openViewGist(api: HostApi): Promise<void> {
+  const creds = await loadCreds(api);
+  if (!creds || !creds.gistId) {
+    await api.ui.dialogs.alert('No gist configured yet — Push first.', 'Gist sync');
+    return;
+  }
+  window.open(`https://gist.github.com/${creds.user}/${creds.gistId}`, '_blank', 'noopener');
 }
 
 // -- Push ---------------------------------------------------------------------
@@ -336,6 +457,97 @@ async function pull(api: HostApi): Promise<void> {
       { kind: 'success', title: 'Gist sync' },
     );
   }
+}
+
+// -- Per-table push/pull/view --------------------------------------------------
+
+async function pushTable(api: HostApi, tableId: string): Promise<void> {
+  const creds = await ensureCreds(api);
+  if (!creds) return;
+  if (!creds.gistId) {
+    await api.ui.dialogs.alert(
+      'No gist yet — use the main Gist button to Push the whole workspace first.',
+      'Gist sync',
+    );
+    return;
+  }
+  const table = await api.store.tables.findOne(tableId);
+  if (!table) return;
+  const rows = await api.store.rows(tableId).find();
+  const content = JSON.stringify(tableToFile(table, rows), null, 2);
+  const files = { [`${slug(table.name)}.table.json`]: { content } };
+  const res = await fetch(`https://api.github.com/gists/${creds.gistId}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${creds.token}`,
+      Accept: 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ files }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  api.ui.dialogs.toast(`Pushed "${table.name}" to gist.`, { kind: 'success', title: 'Gist sync' });
+}
+
+async function pullTable(api: HostApi, tableId: string): Promise<void> {
+  const creds = await loadCreds(api);
+  if (!creds || !creds.gistId) {
+    await api.ui.dialogs.alert('No gist configured — Push first.', 'Gist sync');
+    return;
+  }
+  const table = await api.store.tables.findOne(tableId);
+  if (!table) return;
+  const filename = `${slug(table.name)}.table.json`;
+  const res = await fetch(`https://api.github.com/gists/${creds.gistId}`, {
+    headers: { Authorization: `Bearer ${creds.token}`, Accept: 'application/vnd.github+json' },
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  const gist = (await res.json()) as {
+    files: Record<string, { content: string; truncated?: boolean; raw_url?: string }>;
+  };
+  const file = gist.files[filename];
+  if (!file) {
+    await api.ui.dialogs.alert(`No file "${filename}" in the gist for this table.`, 'Gist sync');
+    return;
+  }
+  const content = await fetchGistFileContent(file);
+  const parsed = JSON.parse(content) as {
+    name: string;
+    columns: Table['columns'];
+    rows: Array<Row['data']>;
+  };
+  if (!parsed.name || !Array.isArray(parsed.columns)) {
+    throw new Error('unexpected file shape (missing name/columns)');
+  }
+  await api.store.tables.patch(tableId, { columns: parsed.columns, updatedAt: Date.now() });
+  const rowColl = api.store.rows(tableId);
+  const oldRows = await rowColl.find();
+  await rowColl.bulkRemove(oldRows.map((r) => r.id));
+  const docs = (parsed.rows ?? []).map((data) => ({
+    id: cryptoUUID(),
+    tableId,
+    data,
+    updatedAt: Date.now(),
+  }));
+  await rowColl.bulkInsert(docs);
+  api.ui.dialogs.toast(`Pulled "${table.name}" from gist.`, { kind: 'success', title: 'Gist sync' });
+}
+
+async function viewTableGist(api: HostApi, tableId: string): Promise<void> {
+  const creds = await loadCreds(api);
+  if (!creds || !creds.gistId) {
+    await api.ui.dialogs.alert('No gist configured — Push first.', 'Gist sync');
+    return;
+  }
+  const table = await api.store.tables.findOne(tableId);
+  if (!table) return;
+  // GitHub anchors a gist file as #file-<filename with non-alphanumerics as '-'>.
+  const fileAnchor = `file-${slug(table.name)}-table-json`;
+  window.open(
+    `https://gist.github.com/${creds.user}/${creds.gistId}#${fileAnchor}`,
+    '_blank',
+    'noopener',
+  );
 }
 
 // -- helpers ------------------------------------------------------------------

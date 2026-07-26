@@ -1,4 +1,5 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
+import { serializeWorkspaceAsSql } from './sql-export.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'dump-export',
@@ -9,15 +10,36 @@ export const meta: NonNullable<PluginModule['meta']> = {
 
 export function init(api: HostApi): void {
   api.ui.registerFooterButton({
-    id: 'dump-export:dump',
-    label: 'Dump',
-    icon: 'archive',
-    tooltip: 'Export the current workspace as a JSON dump file',
-    onClick: async () => {
+    id: 'export:menu',
+    label: 'Export',
+    icon: 'download',
+    tooltip: 'Export the current workspace (JSON or SQL)',
+    onClick: async (api, ctx) => {
       const wsId = api.workspaceId();
       if (!wsId) return;
-      const text = await serializeWorkspace(api);
-      await api.backend.saveFile(`workspace-${wsId}.db.json`, text, 'application/json');
+      const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
+      const rect =
+        ctx?.anchor?.getBoundingClientRect() ??
+        new DOMRect(16, window.innerHeight - 48, 0, 0);
+      const choice = await AnchoredMenu.open(rect, [
+        { id: 'json', label: 'JSON dump (.db.json)', icon: 'data_object' },
+        { id: 'sql', label: 'SQL script (.sql)', icon: 'storage' },
+      ]);
+      if (!choice) return;
+      try {
+        if (choice === 'json') {
+          const text = await serializeWorkspace(api);
+          await api.backend.saveFile(`workspace-${wsId}.db.json`, text, 'application/json');
+        } else if (choice === 'sql') {
+          const text = await serializeWorkspaceAsSql(api);
+          await api.backend.saveFile(`workspace-${wsId}.sql`, text, 'application/sql');
+        }
+      } catch (err) {
+        api.ui.dialogs.toast(`Export failed: ${(err as Error).message}`, {
+          kind: 'error',
+          title: 'Export',
+        });
+      }
     },
   });
 }

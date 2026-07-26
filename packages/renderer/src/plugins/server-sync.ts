@@ -18,34 +18,28 @@ export const meta: NonNullable<PluginModule['meta']> = {
 
 export function init(api: HostApi): void {
   api.ui.registerFooterButton({
-    id: 'server-sync:push',
-    label: 'Sync ↑',
+    id: 'server-sync:menu',
+    label: 'Sync',
     icon: 'cloud_sync',
-    tooltip: 'Push this workspace to the configured server',
-    onClick: async () => {
+    tooltip: 'Server sync — push or pull this workspace',
+    onClick: async (api, ctx) => {
+      const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
+      const rect =
+        ctx?.anchor?.getBoundingClientRect() ??
+        new DOMRect(16, window.innerHeight - 48, 0, 0);
+      const choice = await AnchoredMenu.open(rect, [
+        { id: 'push', label: 'Push (↑)', icon: 'cloud_upload' },
+        { id: 'pull', label: 'Pull (↓)', icon: 'cloud_download' },
+      ]);
+      if (!choice) return;
       try {
-        await push(api);
+        if (choice === 'push') await push(api);
+        else if (choice === 'pull') await pull(api);
       } catch (err) {
-        api.ui.dialogs.toast(`Push failed: ${(err as Error).message}`, {
-          kind: 'error',
-          title: 'Server sync',
-        });
-      }
-    },
-  });
-  api.ui.registerFooterButton({
-    id: 'server-sync:pull',
-    label: 'Sync ↓',
-    icon: 'cloud_sync',
-    tooltip: 'Pull this workspace from the configured server',
-    onClick: async () => {
-      try {
-        await pull(api);
-      } catch (err) {
-        api.ui.dialogs.toast(`Pull failed: ${(err as Error).message}`, {
-          kind: 'error',
-          title: 'Server sync',
-        });
+        api.ui.dialogs.toast(
+          `${choice === 'push' ? 'Push' : 'Pull'} failed: ${(err as Error).message}`,
+          { kind: 'error', title: 'Server sync' },
+        );
       }
     },
   });

@@ -22,6 +22,8 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 
 ## DONE
 
+- ✅ feature: The Gist Synch plugin should register a single footer button not 2 — one "Gist" button (GitHub icon) opens a menu: push / pull / settings / share / view gist. Share generates a `#hash` link with the base64 connection string (loaded on boot into the workspace). Added a per-table gist button (push/pull/view that table's file), a reusable anchored-menu, and consolidated the Export (JSON+SQL) and Sync (push/pull) footer buttons too.
+
 - ✅ Bug: When pulling the Simon workspace the gist pull failed on a truncated file. Fixed: pull fetches GitHub-truncated files via `raw_url`, continues past a failing table and reports which file failed, and shows a progress bar. Push now warns on tables >10 MB (slow/flaky) and >100 MB (rejected) with advice to trim columns/rows or mark no-sync.
 
 - ✅ Bug: when connecting a datasette.io instance which fails with table not found, the table is still created empty. The dialog should automatically check the URL before proceeding (e.g. broken URL https://datasette.io/legislators/officers) (probe the table before creating it via `probeSingleTable`; Connect dialog validates inline + stays open on failure; Test connection probes the real table)
