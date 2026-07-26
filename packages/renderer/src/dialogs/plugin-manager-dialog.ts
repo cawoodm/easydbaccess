@@ -39,6 +39,8 @@ interface CatalogResolved extends CatalogEntry {
 }
 
 type Category = 'built-in' | 'available' | 'installed' | 'fixed';
+/** Tri-state filter: off (ignore) → on (show only these) → not (hide these). */
+type FilterState = 'on' | 'not';
 
 /** Filter-toggle order + display labels, above the plugin list. */
 const FILTER_LABELS: Array<[Category, string]> = [
@@ -103,14 +105,33 @@ export class PluginManagerDialog extends LitElement {
         align-items: center;
         gap: 1rem;
       }
-      .filters .toggle-label {
+      /* Tri-state filter chip: off (neutral) → on (blue, ✓) → not (red, ≠). */
+      .filters .tri {
         display: inline-flex;
         align-items: center;
-        gap: 0.4rem;
-        font-size: 0.85rem;
-        color: #374151;
+        gap: 0.3rem;
+        font-size: 0.8rem;
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        border: 1px solid #d1d5db;
+        background: #fff;
+        color: #6b7280;
         cursor: pointer;
         user-select: none;
+      }
+      .filters .tri .tri-mark {
+        font-weight: 700;
+        line-height: 1;
+      }
+      .filters .tri.on {
+        border-color: #2563eb;
+        background: #eff6ff;
+        color: #1d4ed8;
+      }
+      .filters .tri.not {
+        border-color: #dc2626;
+        background: #fef2f2;
+        color: #b91c1c;
       }
       .search {
         flex: 1;
@@ -345,7 +366,8 @@ export class PluginManagerDialog extends LitElement {
   @state() private catalogUrls: string[] = [defaultCatalogUrl()];
   @state() private activeCatalogUrl: string = defaultCatalogUrl();
   @state() private search = '';
-  @state() private filters: Set<Category> = new Set();
+  // Absent key = off; 'on' = show only these; 'not' = hide these.
+  @state() private filterStates: Map<Category, FilterState> = new Map();
   private dialogEl: HTMLDialogElement | null = null;
 
   override firstUpdated() {
@@ -370,7 +392,7 @@ export class PluginManagerDialog extends LitElement {
 
     this.addUrl = '';
     this.search = '';
-    this.filters = new Set();
+    this.filterStates = new Map();
     await this.updateComplete;
     this.dialogEl?.showModal();
     // Catalog fetches run after the dialog is visible so a slow network
@@ -598,11 +620,14 @@ export class PluginManagerDialog extends LitElement {
     }
   }
 
-  private toggleFilter(cat: Category, on: boolean): void {
-    const next = new Set(this.filters);
-    if (on) next.add(cat);
+  /** Cycle a filter: off → on (only these) → not (hide these) → off. */
+  private cycleFilter(cat: Category): void {
+    const cur = this.filterStates.get(cat);
+    const next = new Map(this.filterStates);
+    if (cur === undefined) next.set(cat, 'on');
+    else if (cur === 'on') next.set(cat, 'not');
     else next.delete(cat);
-    this.filters = next;
+    this.filterStates = next;
   }
 
   /**
@@ -682,10 +707,18 @@ export class PluginManagerDialog extends LitElement {
   private get filteredRows(): PluginRow[] {
     const rows = this.buildRows();
     const term = this.search.trim().toLowerCase();
-    const byFilter =
-      this.filters.size === 0
-        ? rows
-        : rows.filter((r) => [...r.categories].some((c) => this.filters.has(c)));
+    const include: Category[] = [];
+    const exclude: Category[] = [];
+    for (const [cat, state] of this.filterStates) {
+      (state === 'on' ? include : exclude).push(cat);
+    }
+    const byFilter = rows.filter((r) => {
+      // "on" filters are a union (row must be in at least one selected category);
+      // "not" filters exclude (row must be in none of them).
+      if (include.length && !include.some((c) => r.categories.has(c))) return false;
+      if (exclude.some((c) => r.categories.has(c))) return false;
+      return true;
+    });
     if (!term) return byFilter;
     return byFilter.filter((r) =>
       [r.id, r.name, r.meta, r.author].some((f) => f?.toLowerCase().includes(term)),
@@ -781,22 +814,28 @@ export class PluginManagerDialog extends LitElement {
             </p>
 
             <div class="filters">
-              ${FILTER_LABELS.map(
-                ([cat, label]) => html`
-                  <label class="toggle-label">
-                    <span class="switch sm">
-                      <input
-                        type="checkbox"
-                        .checked=${this.filters.has(cat)}
-                        @change=${(e: Event) =>
-                          this.toggleFilter(cat, (e.target as HTMLInputElement).checked)}
-                      />
-                      <span class="slider"></span>
-                    </span>
-                    ${label}
-                  </label>
-                `,
-              )}
+              ${FILTER_LABELS.map(([cat, label]) => {
+                const state = this.filterStates.get(cat);
+                const title =
+                  state === 'on'
+                    ? `Showing only ${label} plugins — click to exclude`
+                    : state === 'not'
+                      ? `Hiding ${label} plugins — click to clear`
+                      : `Filter by ${label} — click: show only → exclude → off`;
+                return html`
+                  <button
+                    type="button"
+                    class=${`tri${state ? ` ${state}` : ''}`}
+                    title=${title}
+                    aria-pressed=${state !== undefined}
+                    @click=${() => this.cycleFilter(cat)}
+                  >
+                    <span class="tri-mark"
+                      >${state === 'on' ? '✓' : state === 'not' ? '≠' : ''}</span
+                    >${label}
+                  </button>
+                `;
+              })}
               <div class="search">
                 <input
                   type="text"

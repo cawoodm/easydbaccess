@@ -43,9 +43,17 @@ test.describe('plugins registry', () => {
     // The search box and the four category filter toggles are present above
     // the unified list.
     await expect(dialog.getByPlaceholder('Search plugins…')).toBeVisible();
-    const filters = dialog.locator('.filters .toggle-label');
+    const filters = dialog.locator('.filters .tri');
     await expect(filters).toHaveCount(4);
     await expect(filters).toContainText(['Installed', 'Built-in', 'Available', 'Fixed']);
+    // Tri-state: clicking a filter cycles off → on → not (adds a state class).
+    const installed = filters.filter({ hasText: 'Installed' });
+    await installed.click();
+    await expect(installed).toHaveClass(/\bon\b/);
+    await installed.click();
+    await expect(installed).toHaveClass(/\bnot\b/);
+    await installed.click();
+    await expect(installed).not.toHaveClass(/\b(on|not)\b/);
 
     // The server-registry entry shows up as a row in the same list — no
     // separate "From server" section header exists any more.
