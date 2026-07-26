@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 26 Jul 2026 (v0.0.110)
+
+- The version number in the header is now a link to the changelog on GitHub.
+
 ## 26 Jul 2026 (v0.0.107)
 
 - New views auto-map `$DATE`/`$URL`/`$DESCRIPTION` tokens to matching columns by type/renderer/name, and can cap the rows shown (TOP N) via a "Show at most" field.

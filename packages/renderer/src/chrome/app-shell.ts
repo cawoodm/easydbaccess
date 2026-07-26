@@ -70,6 +70,15 @@ export class AppShell extends LitElement {
       footer button.slot:hover {
         background: #374151;
       }
+      header .version-link {
+        color: inherit;
+        text-decoration: none;
+        cursor: pointer;
+      }
+      header .version-link:hover .version {
+        opacity: 1;
+        text-decoration: underline;
+      }
       header .version {
         opacity: 0.5;
         font-size: 0.75rem;
@@ -419,7 +428,17 @@ export class AppShell extends LitElement {
   override render() {
     return html`
       <header>
-        <strong>${this.workspaceTitle || 'easyDBAccess'} <span class="version">v0.0.109</span></strong>
+        <strong
+          >${this.workspaceTitle || 'easyDBAccess'}
+          <a
+            class="version-link"
+            href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md"
+            target="_blank"
+            rel="noopener"
+            title="View the changelog on GitHub"
+            ><span class="version">v0.0.110</span></a
+          ></strong
+        >
         ${this.headerButtons
           .filter((b) => b.variant !== 'secondary')
           .map((b) => this.renderSlotButton(b, 'header'))}
