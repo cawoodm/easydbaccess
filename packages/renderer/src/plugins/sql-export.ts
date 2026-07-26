@@ -1,11 +1,4 @@
-import type {
-  ColumnSpec,
-  ColumnType,
-  HostApi,
-  PluginModule,
-  Row,
-  Table,
-} from '@easydb/shared';
+import type { ColumnSpec, ColumnType, HostApi, PluginModule, Row, Table } from '@easydb/shared';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'sql-export',
@@ -15,19 +8,9 @@ export const meta: NonNullable<PluginModule['meta']> = {
   author: 'easyDBAccess built-ins',
 };
 
-export function init(api: HostApi): void {
-  api.ui.registerFooterButton({
-    id: 'sql-export:dump',
-    label: 'SQL',
-    icon: 'storage',
-    tooltip: 'Export the current workspace as a .sql script',
-    onClick: async () => {
-      const wsId = api.workspaceId();
-      if (!wsId) return;
-      const text = await serializeWorkspaceAsSql(api);
-      await api.backend.saveFile(`workspace-${wsId}.sql`, text, 'application/sql');
-    },
-  });
+export function init(): void {
+  // SQL export is offered through the consolidated Export menu (see
+  // dump-export.ts); this module now only provides serializeWorkspaceAsSql().
 }
 
 /**

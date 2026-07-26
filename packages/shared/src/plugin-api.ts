@@ -151,7 +151,12 @@ export interface ButtonSpec {
   order?: number;
   /** Visual prominence. `primary` is reserved for the main CTA in a slot. */
   variant?: 'primary';
-  onClick(api: HostApi): void | Promise<void>;
+  /**
+   * `ctx.anchor` is the button's own DOM element when the host can supply it
+   * (header/footer slot buttons) — use it to anchor a popover/menu under the
+   * button. Absent otherwise. Optional + additive: existing plugins ignore it.
+   */
+  onClick(api: HostApi, ctx?: { anchor?: HTMLElement | undefined }): void | Promise<void>;
 }
 
 export interface TableButtonSpec {
@@ -167,7 +172,10 @@ export interface TableButtonSpec {
    * return false to hide the button for that table. Omitted ⇒ always shown.
    */
   visible?(table: Table): boolean;
-  onClick(api: HostApi, ctx: { tableId: string }): void | Promise<void>;
+  onClick(
+    api: HostApi,
+    ctx: { tableId: string; anchor?: HTMLElement | undefined },
+  ): void | Promise<void>;
 }
 
 export interface ImporterSpec {

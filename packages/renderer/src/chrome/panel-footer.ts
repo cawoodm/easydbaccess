@@ -1,5 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
+import { unsafeSVG } from 'lit/directives/unsafe-svg.js';
 import type { ColumnSpec, Table, TableButtonSpec } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from './material-icon-css.js';
@@ -43,6 +44,17 @@ export class PanelFooter extends LitElement {
       }
       button:hover {
         background: #f3f4f6;
+      }
+      /* Inline-SVG icon (e.g. the GitHub mark) sized to match the small material
+         glyphs the other footer buttons use. */
+      .icon-svg {
+        display: inline-flex;
+        align-items: center;
+      }
+      .icon-svg svg {
+        width: 1rem;
+        height: 1rem;
+        display: block;
       }
       /* Danger buttons (e.g. resume an interrupted import) read as red and
          pulse gently to draw the eye. */
@@ -155,15 +167,17 @@ export class PanelFooter extends LitElement {
     );
   }
 
-  private async runTableButton(spec: TableButtonSpec) {
+  private runTableButton = async (spec: TableButtonSpec, e?: Event) => {
+    // Capture the clicked element NOW — currentTarget is null after the await.
+    const anchor = (e?.currentTarget as HTMLElement | undefined) ?? undefined;
     const ctx = await getContext();
     try {
-      await Promise.resolve(spec.onClick(ctx.api, { tableId: this.tableId }));
+      await Promise.resolve(spec.onClick(ctx.api, { tableId: this.tableId, anchor }));
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error(`[table-button:${spec.id}]`, err);
     }
-  }
+  };
 
   override render() {
     return html`
@@ -184,9 +198,13 @@ export class PanelFooter extends LitElement {
               class=${b.danger ? 'danger' : ''}
               title=${b.tooltip ?? b.label}
               aria-label=${b.label}
-              @click=${() => this.runTableButton(b)}
+              @click=${(e: Event) => this.runTableButton(b, e)}
             >
-              ${b.icon ? html`<span class="mi sm">${b.icon}</span>` : html`<span>${b.label}</span>`}
+              ${b.icon
+                ? b.icon.trimStart().startsWith('<svg')
+                  ? html`<span class="icon-svg">${unsafeSVG(b.icon)}</span>`
+                  : html`<span class="mi sm">${b.icon}</span>`
+                : html`<span>${b.label}</span>`}
             </button>`,
         )}
       <span class="spacer"></span>
