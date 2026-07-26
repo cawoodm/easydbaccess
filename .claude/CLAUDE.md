@@ -19,5 +19,6 @@ When done report back:
 When the user confirms
 
 - Add entry to CHANGELOG.md (short max 22 words)
+- Update docs/ if necessary
 - push
 - If on main - publish to cawoodm.github.io/easydbaccess with the `npm run publish` command

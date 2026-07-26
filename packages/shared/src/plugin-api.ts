@@ -149,8 +149,12 @@ export interface ButtonSpec {
   icon?: string;
   tooltip?: string;
   order?: number;
-  /** Visual prominence. `primary` is reserved for the main CTA in a slot. */
-  variant?: 'primary';
+  /**
+   * Visual prominence. `primary` is reserved for the main CTA in a slot.
+   * `secondary` renders as a muted icon-only button; in the header it is pinned
+   * to the far right (used for utility actions like Settings).
+   */
+  variant?: 'primary' | 'secondary';
   /**
    * `ctx.anchor` is the button's own DOM element when the host can supply it
    * (header/footer slot buttons) — use it to anchor a popover/menu under the
@@ -239,6 +243,57 @@ export interface Dialogs {
   toast(message: string, opts?: ToastOpts): void;
 }
 
+// -- Settings -------------------------------------------------------------
+
+export type SettingScope = 'workspace' | 'user';
+
+export type SettingsFieldType =
+  | 'string'
+  | 'text'
+  | 'number'
+  | 'boolean'
+  | 'date'
+  | 'secret'
+  | 'option'
+  | 'selection';
+
+/**
+ * One declarative field in a plugin's settings tab. Stored under the key
+ * `${pluginId}:${key}`. `scope` is the DEFAULT layer; the user may promote a
+ * value to the device-local `user` layer from the dialog. Omitted ⇒ workspace.
+ */
+export interface SettingsFieldSpec {
+  key: string;
+  label: string;
+  type: SettingsFieldType;
+  default?: unknown;
+  /** For 'option' (radio) and 'selection' (checkbox group). */
+  options?: string[];
+  /** Shown as field help below the control. */
+  description?: string;
+  scope?: SettingScope;
+}
+
+export interface RegisteredSettings {
+  name: string;
+  fields: SettingsFieldSpec[];
+}
+
+/**
+ * Layer-aware settings accessor. The resolver reads the user layer first,
+ * then the workspace layer, then the field default. String values may embed
+ * `${secret:name}` references, which resolve against the device-local secrets
+ * store.
+ */
+export interface SettingsApi {
+  /** Resolved value: user layer wins over workspace, else the field default. */
+  get<T = unknown>(pluginId: string, key: string): Promise<T | undefined>;
+  /** Writes to `scope` (defaults to the field's declared scope, else workspace). */
+  set(pluginId: string, key: string, value: unknown, scope?: SettingScope): Promise<void>;
+  /** Which layer currently holds the key ('user' | 'workspace' | null). */
+  placement(pluginId: string, key: string): Promise<SettingScope | null>;
+}
+
 export interface UiRegistry {
   registerHeaderButton(spec: ButtonSpec): Unregister;
   registerFooterButton(spec: ButtonSpec): Unregister;
@@ -269,6 +324,13 @@ export interface UiRegistry {
   openCsvPasteDialog(): void;
   /** Opens the Plugin Manager dialog (add/disable third-party plugin URLs). */
   openPluginManager(): void;
+  /** Opens the Settings dialog. */
+  openSettings(): void;
+  /**
+   * Registers a plugin's settings tab. The Settings dialog renders one tab per
+   * registration, in registration order. Returns an unregister fn.
+   */
+  registerSettings(pluginId: string, name: string, fields: SettingsFieldSpec[]): Unregister;
   /** Promise-based alert/prompt/choice replacements for the native window.* APIs. */
   dialogs: Dialogs;
 }
@@ -335,6 +397,8 @@ export interface HostApi {
    * rather than `ui`. Tables without a matching `source` are unaffected.
    */
   registerRowSource(provider: RowCollectionProvider): Unregister;
+  /** Layer-aware settings accessor (user layer shadows workspace layer). */
+  settings: SettingsApi;
   /** The current workspace id, when one is selected. */
   workspaceId(): string | null;
   /** Plugin's own URL — useful for relative resource loads. */

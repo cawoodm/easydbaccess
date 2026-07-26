@@ -1,4 +1,12 @@
-import type { HostApi, PluginModule, Row, Table } from '@easydb/shared';
+import type {
+  HostApi,
+  PluginModule,
+  Row,
+  Setting,
+  Table,
+  ViewInstance,
+  ViewTemplate,
+} from '@easydb/shared';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a
 // custom element on import, which would blow up under Vitest's default
@@ -20,6 +28,14 @@ interface GistCreds {
 }
 
 const SETTING_KEY_PREFIX = 'gist:';
+
+// Settings whose keys start with any of these carry secrets or device-local
+// state and must never be written into (or read back from) a gist.
+const SECRET_SETTING_PREFIXES = ['gist:', 'datasette:token:', 'server-sync:'];
+
+function isSyncableSetting(key: string): boolean {
+  return !SECRET_SETTING_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
 
 // GitHub's mark, inline — Material Icons has no GitHub glyph. The slot/footer
 // icon renderers detect a leading `<svg` and render it as inline SVG.
@@ -299,9 +315,25 @@ async function push(api: HostApi): Promise<void> {
 
   // Marker file so we can detect that a gist was produced by easyDBAccess
   // when pulling (vs. some unrelated gist the user pointed at by accident).
+  // Also carries workspace metadata (view templates/instances + non-secret
+  // settings) so a pull can restore more than just tables/rows.
+  const viewTemplates = (await api.store.viewTemplates.find()).filter(
+    (v) => v.workspaceId === wsId,
+  );
+  const viewInstances = (await api.store.viewInstances.find()).filter(
+    (v) => v.workspaceId === wsId,
+  );
+  const settings = (await api.store.settings.find()).filter((s) => isSyncableSetting(s.key));
   files['_easydb.workspace.json'] = {
     content: JSON.stringify(
-      { workspaceId: wsId, exportedAt: Date.now(), kind: 'easydb-workspace-v1' },
+      {
+        workspaceId: wsId,
+        exportedAt: Date.now(),
+        kind: 'easydb-workspace-v1',
+        viewTemplates,
+        viewInstances,
+        settings,
+      },
       null,
       2,
     ),
@@ -390,6 +422,7 @@ async function pull(api: HostApi): Promise<void> {
 
   let imported = 0;
   const failures: Array<{ file: string; error: string }> = [];
+  const nameToId = new Map<string, string>();
   try {
     for (const [i, [name, file]] of tableFiles.entries()) {
       try {
@@ -434,6 +467,7 @@ async function pull(api: HostApi): Promise<void> {
         }));
         await api.store.rows(table.id).bulkInsert(docs);
 
+        nameToId.set(parsed.name, table.id);
         imported++;
       } catch (err) {
         failures.push({ file: name, error: (err as Error).message });
@@ -445,17 +479,63 @@ async function pull(api: HostApi): Promise<void> {
     progress.done();
   }
 
+  let importedViews = 0;
+  let metadataWarning = '';
+  const markerFile = gist.files['_easydb.workspace.json'];
+  if (markerFile) {
+    try {
+      const markerContent = await fetchGistFileContent(markerFile);
+      const parsedMarker = JSON.parse(markerContent) as {
+        workspaceId?: string;
+        viewTemplates?: ViewTemplate[];
+        viewInstances?: ViewInstance[];
+        settings?: Setting[];
+      };
+      const markerViewTemplates = parsedMarker.viewTemplates ?? [];
+      const markerViewInstances = parsedMarker.viewInstances ?? [];
+      const markerSettings = parsedMarker.settings ?? [];
+
+      for (const vt of markerViewTemplates) {
+        await api.store.viewTemplates.upsert({ ...vt, workspaceId: wsId });
+      }
+
+      for (const inst of markerViewInstances) {
+        let tableId: string | undefined;
+        if (inst.tableName) {
+          tableId = nameToId.get(inst.tableName) ?? byName.get(inst.tableName)?.id;
+        }
+        tableId ??= inst.tableId;
+        if (!tableId) continue;
+        await api.store.viewInstances.upsert({ ...inst, workspaceId: wsId, tableId });
+        importedViews++;
+      }
+
+      for (const s of markerSettings) {
+        if (!isSyncableSetting(s.key)) continue;
+        await api.store.settings.upsert(s);
+      }
+    } catch (err) {
+      metadataWarning = `Workspace metadata import failed: ${(err as Error).message}`;
+    }
+  }
+
   if (failures.length > 0) {
     const list = failures.map((f) => `• ${f.file}: ${f.error}`).join('\n');
     api.ui.dialogs.toast(
-      `Pulled ${imported} of ${tableFiles.length} tables. ${failures.length} failed:\n${list}`,
+      `Pulled ${imported} of ${tableFiles.length} tables. ${failures.length} failed:\n${list}${
+        metadataWarning ? `\n${metadataWarning}` : ''
+      }`,
       { kind: 'warning', title: 'Gist sync' },
     );
   } else {
+    const viewsSuffix = importedViews > 0 ? ` (+${importedViews} views)` : '';
     api.ui.dialogs.toast(
-      `Pulled ${imported} table${imported === 1 ? '' : 's'} from gist ${creds.gistId}.`,
+      `Pulled ${imported} table${imported === 1 ? '' : 's'} from gist ${creds.gistId}.${viewsSuffix}`,
       { kind: 'success', title: 'Gist sync' },
     );
+    if (metadataWarning) {
+      api.ui.dialogs.toast(metadataWarning, { kind: 'warning', title: 'Gist sync' });
+    }
   }
 }
 
