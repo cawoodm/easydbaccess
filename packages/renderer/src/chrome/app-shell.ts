@@ -367,9 +367,13 @@ export class AppShell extends LitElement {
     }
   };
 
-  private runSlot = (spec: ButtonSpec) => {
+  private runSlot = (spec: ButtonSpec, e?: Event) => {
     if (!this.api) return;
-    void Promise.resolve(spec.onClick(this.api)).catch((err) => {
+    // Capture the clicked element NOW — currentTarget is null after the await —
+    // so anchored menus (gist/export/sync) open under the button, not the
+    // bottom-left fallback.
+    const anchor = (e?.currentTarget as HTMLElement | undefined) ?? undefined;
+    void Promise.resolve(spec.onClick(this.api, { anchor })).catch((err) => {
       // eslint-disable-next-line no-console
       console.error(`[footer-button:${spec.id}]`, err);
     });
@@ -382,7 +386,7 @@ export class AppShell extends LitElement {
     // slot for less-prominent footer actions.
     const cls = where === 'header' || b.variant === 'primary' ? 'primary' : 'slot';
     return html`
-      <button class=${cls} title=${b.tooltip ?? b.label} @click=${() => this.runSlot(b)}>
+      <button class=${cls} title=${b.tooltip ?? b.label} @click=${(e: Event) => this.runSlot(b, e)}>
         ${renderButtonIcon(b.icon)}
         <span class="btn-label">${b.label}</span>
       </button>
@@ -392,7 +396,7 @@ export class AppShell extends LitElement {
   override render() {
     return html`
       <header>
-        <strong>easyDBAccess <span class="version">v0.0.99</span></strong>
+        <strong>easyDBAccess <span class="version">v0.0.100</span></strong>
         ${this.headerButtons.map((b) => this.renderSlotButton(b, 'header'))}
         ${this.searchOpen
           ? html`<span class="search-wrap">
