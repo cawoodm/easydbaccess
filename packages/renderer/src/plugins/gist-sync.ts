@@ -43,6 +43,30 @@ const GITHUB_ICON_SVG =
   '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.34-5.47-5.95 0-1.31.47-2.39 1.24-3.23-.12-.3-.54-1.53.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.77.84 1.24 1.92 1.24 3.23 0 4.62-2.81 5.64-5.49 5.94.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5z"/></svg>';
 
 export function init(api: HostApi): void {
+  api.ui.registerSettings('gist-sync', 'Gist Sync', [
+    {
+      key: 'user',
+      label: 'GitHub user',
+      type: 'string',
+      scope: 'workspace',
+      description: 'GitHub username that owns the gist.',
+    },
+    {
+      key: 'gist_id',
+      label: 'Gist ID',
+      type: 'string',
+      scope: 'workspace',
+      description: 'Leave empty to create a new gist on the first Push.',
+    },
+    {
+      key: 'gist_token',
+      label: 'GitHub token (PAT)',
+      type: 'secret',
+      scope: 'user',
+      description: 'Personal access token with the "gist" scope. Stored on this device only (not synced).',
+    },
+  ]);
+
   api.ui.registerFooterButton({
     id: 'gist-sync:menu',
     label: 'Gist',
@@ -148,17 +172,33 @@ async function settingKey(api: HostApi): Promise<string> {
 }
 
 async function loadCreds(api: HostApi): Promise<GistCreds | null> {
-  const key = await settingKey(api);
-  const s = await api.store.settings.findOne(key);
-  if (!s) return null;
-  const v = s.value as Partial<GistCreds> | null | undefined;
-  if (!v || !v.token || !v.user) return null;
-  return { user: v.user, gistId: v.gistId ?? '', token: v.token };
+  // Primary: the flat per-field keys the Settings dialog edits.
+  const [user, gistId, token] = await Promise.all([
+    api.settings.get<string>('gist-sync', 'user'),
+    api.settings.get<string>('gist-sync', 'gist_id'),
+    api.settings.get<string>('gist-sync', 'gist_token'),
+  ]);
+  if (user && token) return { user, gistId: gistId ?? '', token };
+
+  // Legacy: the pre-Settings composite object keyed `gist:<wsId>`. Migrate it
+  // forward the first time so existing users don't have to re-enter creds.
+  const s = await api.store.settings.findOne(await settingKey(api));
+  const v = s?.value as Partial<GistCreds> | null | undefined;
+  if (v?.user && v?.token) {
+    const creds = { user: v.user, gistId: v.gistId ?? '', token: v.token };
+    await saveCreds(api, creds);
+    return creds;
+  }
+  return null;
 }
 
 async function saveCreds(api: HostApi, creds: GistCreds): Promise<void> {
-  const key = await settingKey(api);
-  await api.store.settings.upsert({ key, value: creds });
+  await api.settings.set('gist-sync', 'user', creds.user);
+  await api.settings.set('gist-sync', 'gist_id', creds.gistId);
+  await api.settings.set('gist-sync', 'gist_token', creds.token);
+  // Keep the legacy composite in sync so anything still reading `gist:<wsId>`
+  // (and the older share-link boot path) stays consistent.
+  await api.store.settings.upsert({ key: await settingKey(api), value: creds });
 }
 
 /**

@@ -3,12 +3,23 @@ import type {
   EventBus,
   HostApi,
   RowCollectionProvider,
+  SettingScope,
+  SettingsApi,
   Unregister,
   WindowHandle,
   WindowManager,
   WindowSpec,
 } from '@easydb/shared';
 import { createUiRegistry, type Registries } from './registries.js';
+import {
+  hasUserSetting,
+  interpolateSecrets,
+  parseSecrets,
+  readSecretsText,
+  readUserSetting,
+  removeUserSetting,
+  writeUserSetting,
+} from '../db/user-settings.js';
 
 export interface ApiFactoryOpts {
   store: DataStore;
@@ -33,6 +44,8 @@ export function createHostApi(opts: ApiFactoryOpts): HostApi {
     };
   };
 
+  const settings = createSettingsApi(opts.store, opts.registries);
+
   const windows: WindowManager = {
     open(spec: WindowSpec): WindowHandle {
       // Phase 5 will replace this with a real <app-window> custom element.
@@ -56,6 +69,7 @@ export function createHostApi(opts: ApiFactoryOpts): HostApi {
     ui,
     windows,
     registerRowSource,
+    settings,
     backend: {
       /**
        * Routes through the Hono `/fetch` proxy when the user has configured
@@ -106,13 +120,64 @@ export function createHostApi(opts: ApiFactoryOpts): HostApi {
 }
 
 /**
- * Reads `server-sync:url` from the settings collection — same key that
- * server-sync and auto-sync write. Inlined here so api-factory doesn't have
- * to import from `plugins/`, which would invert the dependency direction.
+ * Reads `server-sync:url` — honouring a device-local (user-layer) override —
+ * same key server-sync and auto-sync write. Inlined here so api-factory
+ * doesn't import from `plugins/`, which would invert the dependency direction.
  */
 async function readServerBaseUrl(store: DataStore): Promise<string | null> {
-  const s = await store.settings.findOne('server-sync:url');
-  const v = s?.value;
+  const key = 'server-sync:url';
+  let v: unknown = hasUserSetting(key) ? readUserSetting(key) : undefined;
+  if (v === undefined) v = (await store.settings.findOne(key))?.value;
   if (typeof v !== 'string' || v.length === 0) return null;
-  return v.replace(/\/+$/, '');
+  return interpolateSecrets(v, parseSecrets(readSecretsText())).replace(/\/+$/, '');
+}
+
+/**
+ * The layer-aware settings resolver. Read precedence: user layer, then the
+ * workspace `settings` table, then the registered field default. Writes go to
+ * a single layer and remove the other so a key never lives in both — matching
+ * the dialog's promote/demote toggle. String values interpolate secrets on read.
+ */
+function createSettingsApi(store: DataStore, registries: Registries): SettingsApi {
+  const fullKey = (pluginId: string, key: string) => `${pluginId}:${key}`;
+
+  const fieldOf = (pluginId: string, key: string) =>
+    registries.settings.get(pluginId)?.fields.find((f) => f.key === key);
+
+  const resolveSecrets = (value: unknown): unknown =>
+    typeof value === 'string'
+      ? interpolateSecrets(value, parseSecrets(readSecretsText()))
+      : value;
+
+  return {
+    async get<T = unknown>(pluginId: string, key: string): Promise<T | undefined> {
+      const k = fullKey(pluginId, key);
+      let value: unknown;
+      if (hasUserSetting(k)) {
+        value = readUserSetting(k);
+      } else {
+        const ws = await store.settings.findOne(k);
+        value = ws ? ws.value : fieldOf(pluginId, key)?.default;
+      }
+      return resolveSecrets(value) as T | undefined;
+    },
+
+    async set(pluginId, key, value, scope): Promise<void> {
+      const k = fullKey(pluginId, key);
+      const target: SettingScope = scope ?? fieldOf(pluginId, key)?.scope ?? 'workspace';
+      if (target === 'user') {
+        writeUserSetting(k, value);
+        await store.settings.remove(k).catch(() => undefined);
+      } else {
+        await store.settings.upsert({ key: k, value });
+        removeUserSetting(k);
+      }
+    },
+
+    async placement(pluginId, key): Promise<SettingScope | null> {
+      const k = fullKey(pluginId, key);
+      if (hasUserSetting(k)) return 'user';
+      return (await store.settings.findOne(k)) ? 'workspace' : null;
+    },
+  };
 }

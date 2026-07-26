@@ -10,6 +10,8 @@ import '../dialogs/new-table-dialog.js';
 import type { NewTableDialog } from '../dialogs/new-table-dialog.js';
 import '../dialogs/plugin-manager-dialog.js';
 import type { PluginManagerDialog } from '../dialogs/plugin-manager-dialog.js';
+import '../dialogs/settings-dialog.js';
+import type { SettingsDialog } from '../dialogs/settings-dialog.js';
 import '../dialogs/script-editor-dialog.js';
 import '../dialogs/toast-host.js';
 import { materialIconStyles } from './material-icon-css.js';
@@ -222,6 +224,7 @@ export class AppShell extends LitElement {
   @query('new-table-dialog') private dialog!: NewTableDialog;
   @query('csv-paste-dialog') private csvPasteDialog!: CsvPasteDialog;
   @query('plugin-manager-dialog') private pluginManagerDialog!: PluginManagerDialog;
+  @query('settings-dialog') private settingsDialog!: SettingsDialog;
   @query('input.search') private searchInput?: HTMLInputElement;
   @state() private footerButtons: ButtonSpec[] = [];
   @state() private headerButtons: ButtonSpec[] = [];
@@ -245,6 +248,7 @@ export class AppShell extends LitElement {
     document.addEventListener('easydb:open-new-table', this.onOpenNewTable);
     document.addEventListener('easydb:open-csv-paste', this.onOpenCsvPaste);
     document.addEventListener('easydb:open-plugin-manager', this.onOpenPluginManager);
+    document.addEventListener('easydb:open-settings', this.onOpenSettings);
     void this.bindRegistries();
   }
 
@@ -257,6 +261,7 @@ export class AppShell extends LitElement {
     document.removeEventListener('easydb:open-new-table', this.onOpenNewTable);
     document.removeEventListener('easydb:open-csv-paste', this.onOpenCsvPaste);
     document.removeEventListener('easydb:open-plugin-manager', this.onOpenPluginManager);
+    document.removeEventListener('easydb:open-settings', this.onOpenSettings);
   }
 
   private onEditColumns = (e: Event) => {
@@ -274,6 +279,10 @@ export class AppShell extends LitElement {
 
   private onOpenPluginManager = () => {
     void this.pluginManagerDialog?.open();
+  };
+
+  private onOpenSettings = () => {
+    void this.settingsDialog?.open();
   };
 
   private openSearch = () => {
@@ -380,10 +389,16 @@ export class AppShell extends LitElement {
   };
 
   private renderSlotButton(b: ButtonSpec, where: 'header' | 'footer') {
-    // Header buttons share one styled look — the dark header bar can't host
-    // unstyled native buttons, so everything in the header gets the primary
-    // treatment regardless of variant. Footer still distinguishes primary vs
-    // slot for less-prominent footer actions.
+    // `secondary` renders as a muted icon-only button (no label), used for
+    // utility actions like Settings. Otherwise header buttons get the primary
+    // treatment; the footer distinguishes primary vs slot.
+    if (b.variant === 'secondary') {
+      return html`
+        <button class="icon-btn" title=${b.tooltip ?? b.label} @click=${() => this.runSlot(b)}>
+          ${renderButtonIcon(b.icon)}
+        </button>
+      `;
+    }
     const cls = where === 'header' || b.variant === 'primary' ? 'primary' : 'slot';
     return html`
       <button class=${cls} title=${b.tooltip ?? b.label} @click=${(e: Event) => this.runSlot(b, e)}>
@@ -396,8 +411,10 @@ export class AppShell extends LitElement {
   override render() {
     return html`
       <header>
-        <strong>easyDBAccess <span class="version">v0.0.102</span></strong>
-        ${this.headerButtons.map((b) => this.renderSlotButton(b, 'header'))}
+        <strong>easyDBAccess <span class="version">v0.0.106</span></strong>
+        ${this.headerButtons
+          .filter((b) => b.variant !== 'secondary')
+          .map((b) => this.renderSlotButton(b, 'header'))}
         ${this.searchOpen
           ? html`<span class="search-wrap">
               <input
@@ -428,6 +445,9 @@ export class AppShell extends LitElement {
             >
               <span class="mi">search</span>
             </button>`}
+        ${this.headerButtons
+          .filter((b) => b.variant === 'secondary')
+          .map((b) => this.renderSlotButton(b, 'header'))}
       </header>
       <main><table-list></table-list></main>
       <footer>
@@ -438,6 +458,7 @@ export class AppShell extends LitElement {
       <new-table-dialog></new-table-dialog>
       <csv-paste-dialog></csv-paste-dialog>
       <plugin-manager-dialog></plugin-manager-dialog>
+      <settings-dialog></settings-dialog>
       <script-editor-dialog></script-editor-dialog>
       <host-dialogs></host-dialogs>
       <toast-host></toast-host>

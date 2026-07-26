@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 26 Jul 2026 (v0.0.106)
+
+- Settings dialog: tabbed General + per-plugin tabs, two-layer workspace/user storage, secrets store with `${secret}` refs and drag-in `secrets.txt` import.
+
 ## 26 Jul 2026 (v0.0.96)
 
 - Escape cancels an in-progress cell edit without committing.

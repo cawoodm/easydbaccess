@@ -16,6 +16,7 @@ import * as cellLink from '../plugins/cell-link.js';
 import * as importData from '../plugins/import-data.js';
 import * as autoSync from '../plugins/auto-sync.js';
 import * as views from '../plugins/views.js';
+import * as settings from '../plugins/settings.js';
 
 /**
  * Built-in plugins shipped with the renderer. They satisfy the same
@@ -27,6 +28,7 @@ import * as views from '../plugins/views.js';
  * the plugins collection under the synthetic key `builtin:<name>`.
  */
 const builtins: PluginModule[] = [
+  settings,
   newTableButton,
   csvImport,
   jsonImport,

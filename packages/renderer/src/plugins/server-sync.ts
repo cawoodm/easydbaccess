@@ -17,6 +17,18 @@ export const meta: NonNullable<PluginModule['meta']> = {
 };
 
 export function init(api: HostApi): void {
+  // Settings tab. `url` maps to the existing `server-sync:url` key, so the
+  // dialog edits the same value the manual Push/Pull and auto-sync already read.
+  api.ui.registerSettings('server-sync', 'Server Sync', [
+    {
+      key: 'url',
+      label: 'Server URL',
+      type: 'string',
+      scope: 'workspace',
+      description: 'Base URL of the sync server, e.g. http://localhost:3000',
+    },
+  ]);
+
   api.ui.registerFooterButton({
     id: 'server-sync:menu',
     label: 'Sync',

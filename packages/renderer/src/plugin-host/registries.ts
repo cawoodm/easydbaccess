@@ -4,7 +4,9 @@ import type {
   DropHandler,
   ExporterSpec,
   ImporterSpec,
+  RegisteredSettings,
   RowCollectionProvider,
+  SettingsFieldSpec,
   TableButtonSpec,
   UiRegistry,
   Unregister,
@@ -34,6 +36,8 @@ export interface Registries {
   tableRenderers: Map<string, string>;
   /** Row-collection providers keyed by `RowCollectionProvider.type`. */
   rowSources: Map<string, RowCollectionProvider>;
+  /** Plugin settings tabs keyed by pluginId, in registration (insertion) order. */
+  settings: Map<string, RegisteredSettings>;
 }
 
 export function createRegistries(): Registries {
@@ -49,6 +53,7 @@ export function createRegistries(): Registries {
     rowRenderers: new Map(),
     tableRenderers: new Map(),
     rowSources: new Map(),
+    settings: new Map(),
   };
 }
 
@@ -87,6 +92,15 @@ export function createUiRegistry(r: Registries): UiRegistry {
     },
     openPluginManager: () => {
       document.dispatchEvent(new CustomEvent('easydb:open-plugin-manager'));
+    },
+    openSettings: () => {
+      document.dispatchEvent(new CustomEvent('easydb:open-settings'));
+    },
+    registerSettings: (pluginId: string, name: string, fields: SettingsFieldSpec[]) => {
+      r.settings.set(pluginId, { name, fields });
+      return () => {
+        if (r.settings.get(pluginId)?.name === name) r.settings.delete(pluginId);
+      };
     },
     dialogs: hostDialogsProxy,
   };
