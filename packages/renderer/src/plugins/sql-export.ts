@@ -3,6 +3,7 @@ import type { ColumnSpec, ColumnType, HostApi, PluginModule, Row, Table } from '
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'sql-export',
   name: 'SQL Export',
+  type: 'exporter',
   version: '0.1.0',
   description:
     'Export the current workspace as a portable .sql script (CREATE TABLE + INSERT).',

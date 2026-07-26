@@ -411,7 +411,7 @@ export class AppShell extends LitElement {
   override render() {
     return html`
       <header>
-        <strong>easyDBAccess <span class="version">v0.0.106</span></strong>
+        <strong>easyDBAccess <span class="version">v0.0.109</span></strong>
         ${this.headerButtons
           .filter((b) => b.variant !== 'secondary')
           .map((b) => this.renderSlotButton(b, 'header'))}

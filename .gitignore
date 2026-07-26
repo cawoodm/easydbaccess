@@ -19,3 +19,4 @@ playwright-report/
 data.sqlite
 *.sqlite-journal
 tmp*
+*.stackdump

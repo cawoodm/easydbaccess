@@ -77,6 +77,7 @@ const PREDEFINED: PredefinedSource[] = [
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'import-data',
   name: 'Import Data',
+  type: 'importer',
   version: '0.2.0',
   description:
     'Header button that imports data from a URL — a JSON dump (e.g. Northwind) or a Datasette table, database, or whole instance — with a picker of sample sources.',

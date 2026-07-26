@@ -17,6 +17,7 @@ import type { ProgressHandle } from '../chrome/top-progress.js';
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'gist-sync',
   name: 'Gist Sync',
+  type: 'sync',
   version: '0.1.0',
   description: 'Push and pull the current workspace to a private GitHub Gist.',
   author: 'easyDBAccess built-ins',

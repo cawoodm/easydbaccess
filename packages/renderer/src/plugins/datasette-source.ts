@@ -187,6 +187,7 @@ const CONNECT_ICON_SVG =
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'datasette-source',
   name: 'Datasette',
+  type: 'source',
   version: '0.2.0',
   description: 'Import tables from any online Datasette instance, database, or single table by URL',
   author: 'easyDBAccess built-ins',

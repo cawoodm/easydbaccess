@@ -4,6 +4,7 @@
     {
       "id": "cell-email",
       "name": "Email Renderer",
+      "type": "cell-renderer",
       "description": "Renders email-shaped values as mailto: links. Apply by setting a column's renderer to \"email\".",
       "author": "easyDBAccess reference",
       "version": "0.1.0",
@@ -14,6 +15,7 @@
     {
       "id": "cell-image-url",
       "name": "Image URL Renderer",
+      "type": "cell-renderer",
       "description": "Renders the cell value as <img src=value>. Apply by setting a column's renderer to \"image-url\".",
       "author": "easyDBAccess reference",
       "version": "0.1.0",
@@ -24,6 +26,7 @@
     {
       "id": "header-clock",
       "name": "Header Clock",
+      "type": "ui",
       "description": "Tiny demo plugin — a header button that toasts the current time.",
       "author": "easyDBAccess reference",
       "version": "0.1.0",

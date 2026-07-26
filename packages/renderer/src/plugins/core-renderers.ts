@@ -3,6 +3,7 @@ import type { ColumnSpec, HostApi, PluginModule } from '@easydb/shared';
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'core-renderers',
   name: 'Core Renderers',
+  type: 'cell-renderer',
   version: '0.1.0',
   description: 'Built-in cell renderers: date, datetime, boolean, script.',
   author: 'easyDBAccess built-ins',

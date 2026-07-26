@@ -3,6 +3,7 @@ import type { HostApi, PluginModule } from '@easydb/shared';
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'cell-image',
   name: 'Cell Image',
+  type: 'cell-renderer',
   version: '0.1.0',
   description:
     'Renderer for image cells: thumbnail with upload/clear. Apply by setting a column\'s renderer to "image". Values are kept as data: URIs.',

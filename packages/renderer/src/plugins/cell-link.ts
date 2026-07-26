@@ -3,6 +3,7 @@ import type { HostApi, PluginModule } from '@easydb/shared';
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'cell-link',
   name: 'Cell Link',
+  type: 'cell-renderer',
   version: '0.2.0',
   description:
     'Renderer for URL/email/phone cells. Inside a single cell, http(s) URLs render as <a target=_blank>, email addresses as <a href=mailto:>, phone-like values as <a href=tel:>, anything else falls back to a text input. A pencil toggles to edit mode.',

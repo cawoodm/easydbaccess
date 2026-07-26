@@ -13,6 +13,7 @@
 export const meta = {
   id: 'header-clock',
   name: 'Header Clock',
+  type: 'ui',
   version: '0.1.0',
   description: 'Tiny demo plugin — a header button that toasts the current time.',
   author: 'easyDBAccess reference',

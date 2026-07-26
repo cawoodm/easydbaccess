@@ -4,6 +4,7 @@ import { parseSecrets, readSecretsText, writeSecretsText } from '../db/user-sett
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'settings',
   name: 'Settings',
+  type: 'ui',
   version: '0.1.0',
   description: 'Header gear button that opens the tabbed Settings dialog; imports dropped secrets.txt.',
   author: 'easyDBAccess built-ins',

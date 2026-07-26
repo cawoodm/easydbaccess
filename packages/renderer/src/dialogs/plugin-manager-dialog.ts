@@ -1,7 +1,7 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import type { PluginRecord, PluginModule } from '@easydb/shared';
+import type { PluginRecord, PluginModule, PluginType } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
@@ -25,6 +25,7 @@ function defaultCatalogUrl(): string {
 interface CatalogEntry {
   id: string;
   name: string;
+  type?: PluginType;
   description?: string;
   author?: string;
   icon?: string;
@@ -50,10 +51,23 @@ const FILTER_LABELS: Array<[Category, string]> = [
   ['fixed', 'Fixed'],
 ];
 
+/** Type-filter order + display labels — mirrors the `PluginType` union. */
+const TYPE_LABELS: Array<[PluginType, string]> = [
+  ['importer', 'Importer'],
+  ['exporter', 'Exporter'],
+  ['cell-renderer', 'Cell renderer'],
+  ['sync', 'Sync'],
+  ['source', 'Source'],
+  ['ui', 'UI'],
+];
+const TYPE_LABEL = new Map<PluginType, string>(TYPE_LABELS);
+
 /** One row of the unified plugin list, merged from built-ins / catalogs / installed URLs. */
 interface PluginRow {
   id: string;
   name: string;
+  /** Primary functional category (from `meta.type`), if declared. */
+  type?: PluginType;
   /** True when `name` is just the raw URL (no catalog metadata is known for it). */
   urlOnly?: boolean;
   icon?: string;
@@ -105,8 +119,23 @@ export class PluginManagerDialog extends LitElement {
         align-items: center;
         gap: 1rem;
       }
+      .type-filters {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .type-filters .filter-label {
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: #9ca3af;
+        margin-right: 0.1rem;
+      }
       /* Tri-state filter chip: off (neutral) → on (blue, ✓) → not (red, ≠). */
-      .filters .tri {
+      .filters .tri,
+      .type-filters .tri {
         display: inline-flex;
         align-items: center;
         gap: 0.3rem;
@@ -119,19 +148,35 @@ export class PluginManagerDialog extends LitElement {
         cursor: pointer;
         user-select: none;
       }
-      .filters .tri .tri-mark {
+      .filters .tri .tri-mark,
+      .type-filters .tri .tri-mark {
         font-weight: 700;
         line-height: 1;
       }
-      .filters .tri.on {
+      .filters .tri.on,
+      .type-filters .tri.on {
         border-color: #2563eb;
         background: #eff6ff;
         color: #1d4ed8;
       }
-      .filters .tri.not {
+      .filters .tri.not,
+      .type-filters .tri.not {
         border-color: #dc2626;
         background: #fef2f2;
         color: #b91c1c;
+      }
+      .row-type {
+        display: inline-block;
+        font-size: 0.68rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+        color: #6b7280;
+        background: #e5e7eb;
+        border-radius: 0.25rem;
+        padding: 0.05rem 0.35rem;
+        margin-left: 0.35rem;
+        vertical-align: middle;
       }
       .search {
         flex: 1;
@@ -368,6 +413,8 @@ export class PluginManagerDialog extends LitElement {
   @state() private search = '';
   // Absent key = off; 'on' = show only these; 'not' = hide these.
   @state() private filterStates: Map<Category, FilterState> = new Map();
+  // Same tri-state semantics, keyed by plugin type.
+  @state() private typeFilters: Map<PluginType, FilterState> = new Map();
   private dialogEl: HTMLDialogElement | null = null;
 
   override firstUpdated() {
@@ -393,6 +440,7 @@ export class PluginManagerDialog extends LitElement {
     this.addUrl = '';
     this.search = '';
     this.filterStates = new Map();
+    this.typeFilters = new Map();
     await this.updateComplete;
     this.dialogEl?.showModal();
     // Catalog fetches run after the dialog is visible so a slow network
@@ -620,14 +668,24 @@ export class PluginManagerDialog extends LitElement {
     }
   }
 
-  /** Cycle a filter: off → on (only these) → not (hide these) → off. */
+  /** Advance a tri-state map entry: off → on (only these) → not (hide these) → off. */
+  private cycleState<K>(map: Map<K, FilterState>, key: K): Map<K, FilterState> {
+    const cur = map.get(key);
+    const next = new Map(map);
+    if (cur === undefined) next.set(key, 'on');
+    else if (cur === 'on') next.set(key, 'not');
+    else next.delete(key);
+    return next;
+  }
+
+  /** Cycle a category filter: off → on (only these) → not (hide these) → off. */
   private cycleFilter(cat: Category): void {
-    const cur = this.filterStates.get(cat);
-    const next = new Map(this.filterStates);
-    if (cur === undefined) next.set(cat, 'on');
-    else if (cur === 'on') next.set(cat, 'not');
-    else next.delete(cat);
-    this.filterStates = next;
+    this.filterStates = this.cycleState(this.filterStates, cat);
+  }
+
+  /** Cycle a type filter: off → on (only these) → not (hide these) → off. */
+  private cycleTypeFilter(type: PluginType): void {
+    this.typeFilters = this.cycleState(this.typeFilters, type);
   }
 
   /**
@@ -647,6 +705,7 @@ export class PluginManagerDialog extends LitElement {
       rows.set(`builtin:${id}`, {
         id,
         name: meta.name,
+        ...(meta.type ? { type: meta.type } : {}),
         ...(meta.description ? { meta: meta.description } : { meta: 'Built-in plugin' }),
         ...(meta.author ? { author: meta.author } : {}),
         ...(meta.icon ? { icon: meta.icon } : {}),
@@ -666,6 +725,7 @@ export class PluginManagerDialog extends LitElement {
         id: entry.id,
         name: entry.name,
         url: entry.absUrl,
+        ...(entry.type ? { type: entry.type } : {}),
         ...(entry.icon ? { icon: entry.icon } : {}),
         ...(entry.repo ? { repo: entry.repo } : {}),
         ...(entry.author ? { author: entry.author } : {}),
@@ -712,16 +772,26 @@ export class PluginManagerDialog extends LitElement {
     for (const [cat, state] of this.filterStates) {
       (state === 'on' ? include : exclude).push(cat);
     }
+    const typeInclude: PluginType[] = [];
+    const typeExclude: PluginType[] = [];
+    for (const [type, state] of this.typeFilters) {
+      (state === 'on' ? typeInclude : typeExclude).push(type);
+    }
     const byFilter = rows.filter((r) => {
       // "on" filters are a union (row must be in at least one selected category);
       // "not" filters exclude (row must be in none of them).
       if (include.length && !include.some((c) => r.categories.has(c))) return false;
       if (exclude.some((c) => r.categories.has(c))) return false;
+      // Type filters: an "on" set requires the row's type to be among them
+      // (untyped rows are excluded when any type is required); "not" hides
+      // matching types.
+      if (typeInclude.length && !(r.type && typeInclude.includes(r.type))) return false;
+      if (r.type && typeExclude.includes(r.type)) return false;
       return true;
     });
     if (!term) return byFilter;
     return byFilter.filter((r) =>
-      [r.id, r.name, r.meta, r.author].some((f) => f?.toLowerCase().includes(term)),
+      [r.id, r.name, r.type, r.meta, r.author].some((f) => f?.toLowerCase().includes(term)),
     );
   }
 
@@ -736,6 +806,10 @@ export class PluginManagerDialog extends LitElement {
           <div class=${`row-title${row.urlOnly ? ' mono' : ''}`}>
             ${row.name}${row.id !== row.name
               ? html`<span class="row-id">${row.id}</span>`
+              : ''}${row.type
+              ? html`<span class="row-type" title="Plugin type"
+                  >${TYPE_LABEL.get(row.type) ?? row.type}</span
+                >`
               : ''}
           </div>
           ${row.meta
@@ -844,6 +918,32 @@ export class PluginManagerDialog extends LitElement {
                   @input=${(e: Event) => (this.search = (e.target as HTMLInputElement).value)}
                 />
               </div>
+            </div>
+
+            <div class="type-filters">
+              <span class="filter-label">Type</span>
+              ${TYPE_LABELS.map(([type, label]) => {
+                const state = this.typeFilters.get(type);
+                const title =
+                  state === 'on'
+                    ? `Showing only ${label} plugins — click to exclude`
+                    : state === 'not'
+                      ? `Hiding ${label} plugins — click to clear`
+                      : `Filter by ${label} — click: show only → exclude → off`;
+                return html`
+                  <button
+                    type="button"
+                    class=${`tri${state ? ` ${state}` : ''}`}
+                    title=${title}
+                    aria-pressed=${state !== undefined}
+                    @click=${() => this.cycleTypeFilter(type)}
+                  >
+                    <span class="tri-mark"
+                      >${state === 'on' ? '✓' : state === 'not' ? '≠' : ''}</span
+                    >${label}
+                  </button>
+                `;
+              })}
             </div>
 
             <div class="catalog-source">

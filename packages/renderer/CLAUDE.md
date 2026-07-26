@@ -115,10 +115,15 @@ on open. Each generated entry:
 {
   "id": "header-clock",
   "name": "Header Clock",
+  "type": "ui",                // PluginType — powers the Plugin Manager "by type" filter
   "description": "...",
   "url": "./header-clock.js"   // resolved against the catalog URL
 }
 ```
+
+Give the module a `meta.type` (`importer` | `exporter` | `cell-renderer` |
+`sync` | `source` | `ui`) so it lands in the Plugin Manager's type filter; the
+generator passes it straight through to the catalog.
 
 Vite serves `public/` at root, so the resolved absolute URL becomes
 `http://localhost:5190/plugins/header-clock.js` in dev (or the GH-pages

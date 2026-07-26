@@ -19,6 +19,7 @@ import type { ProgressHandle } from '../chrome/top-progress.js';
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'json-import',
   name: 'JSON Import',
+  type: 'importer',
   version: '0.1.0',
   description: 'Drag-and-drop JSON to create tables. Supports native dumps and arrays of objects.',
   author: 'easyDBAccess built-ins',

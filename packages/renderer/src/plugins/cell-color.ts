@@ -3,6 +3,7 @@ import type { HostApi, PluginModule } from '@easydb/shared';
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'cell-color',
   name: 'Cell Color',
+  type: 'cell-renderer',
   version: '0.1.0',
   description: 'Renderer for hex colour values: a native swatch picker. Apply by setting a column\'s renderer to "color".',
   author: 'easyDBAccess built-ins',

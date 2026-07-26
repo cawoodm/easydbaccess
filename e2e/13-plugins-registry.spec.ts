@@ -55,6 +55,25 @@ test.describe('plugins registry', () => {
     await installed.click();
     await expect(installed).not.toHaveClass(/\b(on|not)\b/);
 
+    // A separate "by type" filter row carries one tri-state chip per PluginType.
+    const typeFilters = dialog.locator('.type-filters .tri');
+    await expect(typeFilters).toHaveCount(6);
+    await expect(typeFilters).toContainText([
+      'Importer',
+      'Exporter',
+      'Cell renderer',
+      'Sync',
+      'Source',
+      'UI',
+    ]);
+    const importer = typeFilters.filter({ hasText: 'Importer' });
+    await importer.click();
+    await expect(importer).toHaveClass(/\bon\b/);
+    await importer.click();
+    await expect(importer).toHaveClass(/\bnot\b/);
+    await importer.click();
+    await expect(importer).not.toHaveClass(/\b(on|not)\b/);
+
     // The server-registry entry shows up as a row in the same list — no
     // separate "From server" section header exists any more.
     await expect(dialog.getByText('Server Demo')).toBeVisible();

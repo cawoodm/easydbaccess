@@ -3,6 +3,7 @@ import type { HostApi, PluginModule } from '@easydb/shared';
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'plugin-manager-button',
   name: 'Plugin Manager',
+  type: 'ui',
   version: '0.1.0',
   description: 'Registers a footer button that opens the Plugin Manager dialog.',
   author: 'easyDBAccess built-ins',

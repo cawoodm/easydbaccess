@@ -21,6 +21,12 @@ import type {
 
 // -- Plugin module shape --------------------------------------------------
 
+/**
+ * Broad functional category a plugin belongs to. Drives the Plugin Manager's
+ * "by type" filter. A plugin declares its single primary type via `meta.type`.
+ */
+export type PluginType = 'importer' | 'exporter' | 'cell-renderer' | 'sync' | 'source' | 'ui';
+
 export interface PluginModule {
   init?(api: HostApi): void | Promise<void>;
   load?(api: HostApi): void | Promise<void>;
@@ -29,6 +35,8 @@ export interface PluginModule {
     id: string;
     /** Human-readable display name. */
     name: string;
+    /** Primary functional category — powers the "by type" filter in the Plugin Manager. */
+    type?: PluginType;
     version?: string;
     description?: string;
     author?: string;

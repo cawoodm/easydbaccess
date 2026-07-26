@@ -3,6 +3,7 @@ import type { ExporterSpec, HostApi, PluginModule, Row, Table } from '@easydb/sh
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'csv-export',
   name: 'CSV Export',
+  type: 'exporter',
   version: '0.1.0',
   description: 'Export a single table as a .csv file via a per-table button.',
   author: 'easyDBAccess built-ins',

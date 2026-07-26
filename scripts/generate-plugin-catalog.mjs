@@ -61,6 +61,7 @@ export async function generatePluginCatalog() {
     const base = basename(file, '.js');
     const id = meta.id ?? meta.name ?? base;
     const entry = { id, name: meta.name ?? titleCase(id) };
+    if (meta.type !== undefined) entry.type = meta.type;
     if (meta.description !== undefined) entry.description = meta.description;
     if (meta.author !== undefined) entry.author = meta.author;
     if (meta.version !== undefined) entry.version = meta.version;

@@ -12,6 +12,7 @@ import {
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'server-sync',
   name: 'Server Sync',
+  type: 'sync',
   version: '0.1.0',
   description: 'Push and pull the current workspace to an easyDBAccess Hono backend.',
   author: 'easyDBAccess built-ins',

@@ -3,6 +3,7 @@ import type { HostApi, PluginModule } from '@easydb/shared';
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'new-table',
   name: 'New Table',
+  type: 'ui',
   version: '0.1.0',
   description: 'Registers the "+ New Table" header button.',
   author: 'easyDBAccess built-ins',

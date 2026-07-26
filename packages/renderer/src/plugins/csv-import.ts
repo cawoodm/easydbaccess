@@ -10,6 +10,7 @@ import type {
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'csv-import',
   name: 'CSV Import',
+  type: 'importer',
   version: '0.1.0',
   description: 'Drag-and-drop CSV files to create typed tables.',
   author: 'easyDBAccess built-ins',

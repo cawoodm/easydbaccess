@@ -12,6 +12,7 @@ import {
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'auto-sync',
   name: 'Auto Sync',
+  type: 'sync',
   version: '0.1.0',
   description:
     'Pushes the workspace to the server every minute; prompts to pull when the server changes.',

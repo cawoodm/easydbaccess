@@ -4,6 +4,7 @@ import { serializeWorkspaceAsSql } from './sql-export.js';
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'dump-export',
   name: 'Dump Export',
+  type: 'exporter',
   version: '0.1.0',
   description: 'Export the current workspace as a single .db.json dump file.',
   author: 'easyDBAccess built-ins',
