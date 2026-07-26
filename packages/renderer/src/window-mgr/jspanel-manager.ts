@@ -63,6 +63,7 @@ function syncOverlayInsets(outer: HTMLElement): void {
 type Panel = {
   id: string;
   close(): void;
+  front?: () => void;
   minimize?: () => void;
   maximize?: () => void;
   setHeaderTitle?: (title: string) => void;
@@ -154,6 +155,34 @@ export async function initWindowManager(): Promise<void> {
     }
     const toOpen = inWs.filter((t) => !panels.has(t.id)).sort(byAscendingZ);
     for (const t of toOpen) openPanel(t, ctx);
+  });
+
+  // A bulk pull (gist / server-sync) inserts tables one at a time, so the
+  // reactive `subscribe` above opens each panel in insertion order, not saved-z
+  // order (liveQuery fires per write, defeating its sort). After such a pull the
+  // gist plugin dispatches `easydb:restack-windows`; re-front every open,
+  // non-minimized panel in ascending-z order to restore the layering. liveQuery
+  // opens panels asynchronously, so retry until all expected panels exist.
+  document.addEventListener('easydb:restack-windows', () => {
+    let attempts = 0;
+    const restack = async (): Promise<void> => {
+      const ordered = (await ctx.store.tables.find())
+        .filter((t) => t.workspaceId === ctx.workspaceId && !t.windowGeometry?.minimized)
+        .sort(byAscendingZ);
+      if (attempts < 12 && !ordered.every((t) => panels.has(t.id))) {
+        attempts++;
+        setTimeout(() => void restack(), 80);
+        return;
+      }
+      for (const t of ordered) {
+        try {
+          panels.get(t.id)?.front?.();
+        } catch {
+          /* panel closed mid-restack */
+        }
+      }
+    };
+    void restack();
   });
 }
 
@@ -454,10 +483,24 @@ async function saveGeometry(tableId: string, ctx: AppContext): Promise<void> {
 }
 
 /**
- * Save a "front rank" — Date.now() — into windowGeometry.z. We don't read the
- * DOM zIndex (jsPanel renormalizes it on every front() so all panels would
- * show the same max), and we don't try to save all panels in a batch — each
- * front fires once and the relative ordering follows from timestamps.
+ * Monotonic front-rank source. `Date.now()` alone COLLIDES when several panels
+ * are fronted within the same millisecond (a bulk restack, or panels opened
+ * back-to-back), tying their `z` — and a tie loses the stacking order on the
+ * next reload/pull (the sort can't tell them apart). This counter only ever
+ * increases, so every stamp is unique and strictly ordered while still tracking
+ * wall-clock time for cross-session comparisons.
+ */
+let lastFrontZ = 0;
+function nextFrontZ(): number {
+  lastFrontZ = Math.max(Date.now(), lastFrontZ + 1);
+  return lastFrontZ;
+}
+
+/**
+ * Save a "front rank" into windowGeometry.z. We don't read the DOM zIndex
+ * (jsPanel renormalizes it on every front() so all panels would show the same
+ * max), and we don't try to save all panels in a batch — each front fires once
+ * and the relative ordering follows from the strictly-increasing rank.
  */
 async function stampFrontOrder(tableId: string, ctx: AppContext): Promise<void> {
   try {
@@ -473,7 +516,7 @@ async function stampFrontOrder(tableId: string, ctx: AppContext): Promise<void> 
       maximized: false,
     };
     await ctx.store.tables.patch(tableId, {
-      windowGeometry: { ...geom, z: Date.now() },
+      windowGeometry: { ...geom, z: nextFrontZ() },
       updatedAt: Date.now(),
     });
   } catch {

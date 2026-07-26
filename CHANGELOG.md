@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 26 Jul 2026 (v0.0.117)
+
+- Gist pull restores full per-table state (window position/size/stacking, sort, filters, view, label column) and window z-order; front-rank z is now unique so layering survives round-trips.
+
 ## 26 Jul 2026 (v0.0.115)
 
 - The version number in the header is now a link to the changelog on GitHub.

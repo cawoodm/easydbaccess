@@ -477,7 +477,7 @@ async function pull(api: HostApi): Promise<void> {
           title?: string;
           columns: Table['columns'];
           rows: Array<Row['data']>;
-        };
+        } & TableFileMeta;
         if (!parsed.name || !Array.isArray(parsed.columns)) {
           throw new Error('unexpected file shape (missing name/columns)');
         }
@@ -488,6 +488,7 @@ async function pull(api: HostApi): Promise<void> {
           table = await api.store.tables.patch(existing.id, {
             title: parsed.title,
             columns: parsed.columns,
+            ...syncedTableFields(parsed),
             updatedAt: Date.now(),
           });
           // Wipe existing rows for clean reimport (simplest correct behavior).
@@ -502,7 +503,8 @@ async function pull(api: HostApi): Promise<void> {
             title: parsed.title,
             code: slug(parsed.name),
             columns: parsed.columns,
-            view: 'table',
+            view: parsed.view ?? 'table',
+            ...syncedTableFields(parsed),
             updatedAt: Date.now(),
           });
         }
@@ -578,13 +580,18 @@ async function pull(api: HostApi): Promise<void> {
   } else {
     const viewsSuffix = importedViews > 0 ? ` (+${importedViews} views)` : '';
     api.ui.dialogs.toast(
-      `Pulled ${imported} table${imported === 1 ? '' : 's'} from gist ${creds.gistId}.${viewsSuffix}`,
+      `Pulled ${imported} table${imported === 1 ? '' : 's'}.${viewsSuffix}`,
       { kind: 'success', title: 'Gist sync' },
     );
     if (metadataWarning) {
       api.ui.dialogs.toast(metadataWarning, { kind: 'warning', title: 'Gist sync' });
     }
   }
+
+  // The incremental inserts above opened panels in file order, not saved-z order
+  // (liveQuery fires per write, so the window manager's z-sort never sees them
+  // as a batch). Ask the window manager to restack the panels by saved z.
+  document.dispatchEvent(new CustomEvent('easydb:restack-windows'));
 }
 
 // -- Per-table push/pull/view --------------------------------------------------
@@ -644,13 +651,14 @@ async function pullTable(api: HostApi, tableId: string): Promise<void> {
     title?: string;
     columns: Table['columns'];
     rows: Array<Row['data']>;
-  };
+  } & TableFileMeta;
   if (!parsed.name || !Array.isArray(parsed.columns)) {
     throw new Error('unexpected file shape (missing name/columns)');
   }
   await api.store.tables.patch(tableId, {
     title: parsed.title,
     columns: parsed.columns,
+    ...syncedTableFields(parsed),
     updatedAt: Date.now(),
   });
   const rowColl = api.store.rows(tableId);
@@ -700,12 +708,54 @@ function tableToFile(t: Table, rows: Row[]) {
     name: t.name,
     title: t.title,
     columns: t.columns,
+    // Full display/query state so a pull restores the table exactly, not just
+    // its data: view mode, window layout, sort, filters, label column, deleted
+    // columns, and info. (Routing fields `source`/`origin` are handled elsewhere.)
+    view: t.view,
+    windowGeometry: t.windowGeometry,
+    sortColumn: t.sortColumn,
+    sortAsc: t.sortAsc,
+    filters: t.filters,
+    labelColumn: t.labelColumn,
+    deletedColumns: t.deletedColumns,
+    info: t.info,
     rows: rows.map((r) => {
       const projected: Record<string, unknown> = {};
       for (const f of fields) projected[f] = r.data[f];
       return projected;
     }),
   };
+}
+
+/** The per-table display/query fields a gist file may carry (beyond name/columns/rows). */
+type TableFileMeta = {
+  view?: string;
+  windowGeometry?: Table['windowGeometry'];
+  sortColumn?: string;
+  sortAsc?: boolean;
+  filters?: Table['filters'];
+  labelColumn?: string;
+  deletedColumns?: string[];
+  info?: Table['info'];
+};
+
+/**
+ * Extract the display/query fields present in a parsed gist file into a table
+ * patch. Only fields the file actually carries are returned, so pulling an
+ * older gist never clears newer local state (and `everything should be synced`
+ * stays additive as new fields are added to the file above).
+ */
+function syncedTableFields(p: TableFileMeta): Partial<Table> {
+  const out: Partial<Table> = {};
+  if (p.view !== undefined) out.view = p.view;
+  if (p.windowGeometry) out.windowGeometry = p.windowGeometry;
+  if (p.sortColumn !== undefined) out.sortColumn = p.sortColumn;
+  if (p.sortAsc !== undefined) out.sortAsc = p.sortAsc;
+  if (p.filters !== undefined) out.filters = p.filters;
+  if (p.labelColumn !== undefined) out.labelColumn = p.labelColumn;
+  if (p.deletedColumns !== undefined) out.deletedColumns = p.deletedColumns;
+  if (p.info !== undefined) out.info = p.info;
+  return out;
 }
 
 /**
