@@ -18,28 +18,22 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 
 ## In progress
 
-- 🕜 feature: The Gist Synch plugin should register a single footer button not 2. The button pops up a menu with push, pull, settings, share and view gist. The share option generates a dialog with a link which can be shared and contains the base64 encoded connection string so other users can see the same workspace. The "view gist" option opens the exact gist file URL in a new tab.
+- 🕜 feature: Gist push/pull should sync the entire workspace, not just tables — include view templates, view instances, and settings (currently `gist-sync.ts` only serializes `api.store.tables` + rows; `viewTemplates`/`viewInstances`/`settings` are never pushed or pulled, so views and plugin config don't survive a Gist round-trip to another device)
 
 ## DONE
 
 - ✅ feature: The Gist Synch plugin should register a single footer button not 2 — one "Gist" button (GitHub icon) opens a menu: push / pull / settings / share / view gist. Share generates a `#hash` link with the base64 connection string (loaded on boot into the workspace). Added a per-table gist button (push/pull/view that table's file), a reusable anchored-menu, and consolidated the Export (JSON+SQL) and Sync (push/pull) footer buttons too.
 
+- ✅ feature: plugins registry (`.json`) so users can browse and install plugins. `public/plugins/catalog.json` is now auto-generated from each plugin `.js` module's exported `meta` by `scripts/generate-plugin-catalog.mjs`, wired into `vite.config.ts` (`buildStart`) so it regenerates on every dev-start/build/publish — no more hand-maintenance. (Base-URL fetch fix landed earlier.)
 - ✅ Bug: When pulling the Simon workspace the gist pull failed on a truncated file. Fixed: pull fetches GitHub-truncated files via `raw_url`, continues past a failing table and reports which file failed, and shows a progress bar. Push now warns on tables >10 MB (slow/flaky) and >100 MB (rejected) with advice to trim columns/rows or mark no-sync.
 
 - ✅ Bug: when connecting a datasette.io instance which fails with table not found, the table is still created empty. The dialog should automatically check the URL before proceeding (e.g. broken URL https://datasette.io/legislators/officers) (probe the table before creating it via `probeSingleTable`; Connect dialog validates inline + stays open on failure; Test connection probes the real table)
 - ✅ Create a concept for a settings dialog with tabs for General and then one tab for each plugin which has registered settings. Plugins should call api.registerSettings with their id, name and a JSON object containing their settings. (concept: `.claude/plans/2026-07-26-settings-dialog-concept.md`)
 
 ## Backlog
+
 - Implement settings dialog: .claude\plans\2026-07-26-settings-dialog-concept.md
-- feature: plugins registry (`.json`) so users can browse and install plugins.
-  The registry already exists as the hand-maintained `packages/renderer/public/plugins/catalog.json`
-  (schema `easydb-plugin-catalog-v1`, entries with `id`/`name`/`description`/`author`/`url`),
-  fetched by `plugin-manager-dialog.ts`. Remaining work:
-  - ✅ the fetch URL now resolves against the app deploy base (`import.meta.env.BASE_URL`)
-    so it loads both in dev (`:5190`) and on GitHub Pages (`/easydbaccess/plugins/catalog.json`);
-    previously it hit `location.origin` and 404'd on the published site.
-  - keep the catalog in sync as plugins are added (it is NOT auto-generated today —
-    each new plugin `.js` in `public/plugins/` must be hand-added to `catalog.json`).
+- When creating a new view, auto map fields (URL-like fields to URL, date-like fields to date, long fields to DESCRIPTION) - also allow a view to specify TOP N rows
 - When connecting datasette add options for "virtual" and "no persist" recommended for big tables. Virtual means we don't load all data - we only load at most 2 visible pages in the UI, the sorting and filtering is done on the server and we eject the entire table from memory each time the user sorts or filters. Paging is server side. The "no persist" option means we don't save the data to our local store and we don't push/synch it either. Surface these settings in the column editor.
 
 ## Rendering
