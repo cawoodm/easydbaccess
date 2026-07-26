@@ -213,6 +213,7 @@ export class NewTableDialog extends LitElement {
   @state() private mode: 'new' | 'edit' = 'new';
   @state() private editTableId: string | null = null;
   @state() private name = '';
+  @state() private tableTitle = '';
   @state() private columns: ColumnRow[] = [];
   @state() private errorMsg = '';
   /** Non-error banner (e.g. "a refresh found new columns — review them"). */
@@ -262,6 +263,7 @@ export class NewTableDialog extends LitElement {
       this.mode = 'edit';
       this.editTableId = tableId;
       this.name = t.name;
+      this.tableTitle = t.title ?? '';
       this.columns = t.columns.map((c) => ({
         field: c.field,
         label: c.label,
@@ -283,6 +285,7 @@ export class NewTableDialog extends LitElement {
       this.mode = 'new';
       this.editTableId = null;
       this.name = '';
+      this.tableTitle = '';
       this.columns = [
         { field: 'name', label: 'Name', type: 'string' },
         { field: 'note', label: 'Note', type: 'string' },
@@ -396,6 +399,18 @@ export class NewTableDialog extends LitElement {
       this.errorMsg = 'Table name is required.';
       return;
     }
+    const ctx = await getContext();
+    const workspaceTables = (await ctx.store.tables.find()).filter(
+      (t) => t.workspaceId === ctx.workspaceId,
+    );
+    const lowerName = name.toLowerCase();
+    const clash = workspaceTables.find(
+      (t) => t.name.toLowerCase() === lowerName && t.id !== this.editTableId,
+    );
+    if (clash) {
+      this.errorMsg = `A table named "${clash.name}" already exists — names must be unique.`;
+      return;
+    }
     if (this.columns.length === 0) {
       this.errorMsg = 'At least one column is required.';
       return;
@@ -414,7 +429,7 @@ export class NewTableDialog extends LitElement {
       seen.add(f);
     }
 
-    const ctx = await getContext();
+    const title = this.tableTitle.trim();
     const columns: ColumnSpec[] = this.columns.map((c) => {
       const spec: ColumnSpec = {
         field: c.field.trim(),
@@ -475,18 +490,33 @@ export class NewTableDialog extends LitElement {
 
       // Patch the saved table; row data isn't migrated. If a field was
       // renamed, downstream cells will read undefined and display as empty.
-      const patch: Partial<Table> = { name, columns, updatedAt: Date.now() };
+      const patch: Partial<Table> = { name, title, columns, updatedAt: Date.now() };
       // Only persist the deleted-columns list when it carries meaning (there's
       // something tracked, or we're clearing a previously-tracked set).
       if (deletedColumns.length > 0 || prevDeleted.length > 0) {
         patch.deletedColumns = deletedColumns;
       }
+      const oldName = existingTable?.name;
       await ctx.store.tables.patch(tableId, patch);
+      // Keep dependent view instances connected: a closed view snapshot its
+      // source table's name at creation time, so a rename must propagate or
+      // the view would silently point at a stale name.
+      if (oldName !== undefined && oldName !== name) {
+        const insts = (await ctx.store.viewInstances.find()).filter(
+          (vi) => vi.tableId === tableId,
+        );
+        for (const vi of insts) {
+          if (vi.tableName !== name) {
+            await ctx.store.viewInstances.patch(vi.id, { tableName: name, updatedAt: Date.now() });
+          }
+        }
+      }
     } else {
       await ctx.store.tables.insert({
         id: cryptoUUID(),
         workspaceId: ctx.workspaceId,
         name,
+        title,
         code: slug(name),
         columns,
         view: 'table',
@@ -576,6 +606,14 @@ export class NewTableDialog extends LitElement {
               autofocus
               .value=${this.name}
               @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)}
+            />
+          </label>
+          <label>
+            Title <span style="color:#9ca3af">(optional — shown in the window title)</span>
+            <input
+              type="text"
+              .value=${this.tableTitle}
+              @input=${(e: Event) => (this.tableTitle = (e.target as HTMLInputElement).value)}
             />
           </label>
 
