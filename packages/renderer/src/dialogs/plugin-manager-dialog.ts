@@ -215,7 +215,14 @@ export class PluginManagerDialog extends LitElement {
    * relative paths (./foo.js) work for sibling plugin files.
    */
   private async refreshCatalog(): Promise<void> {
-    const catalogUrl = new URL('/plugins/catalog.json', location.origin).toString();
+    // Resolve against the app's deploy base, not the origin root: on GitHub
+    // Pages the app is served under /easydbaccess/, so an origin-root
+    // /plugins/catalog.json 404s. BASE_URL is '/' in dev and '/easydbaccess/'
+    // in the published build, and always ends with a slash.
+    const catalogUrl = new URL(
+      `${import.meta.env.BASE_URL}plugins/catalog.json`,
+      location.origin,
+    ).toString();
     try {
       const res = await fetch(catalogUrl, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
