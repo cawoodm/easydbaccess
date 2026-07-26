@@ -1,5 +1,6 @@
 import { defineConfig, searchForWorkspaceRoot } from 'vite';
 import { createRequire } from 'node:module';
+import { generatePluginCatalog } from '../../scripts/generate-plugin-catalog.mjs';
 
 const require = createRequire(import.meta.url);
 // Deps hoist to the primary checkout's node_modules. When the renderer runs
@@ -42,6 +43,14 @@ export default defineConfig({
           };
         }
         return null;
+      },
+    },
+    // Keep public/plugins/catalog.json in sync with the plugin .js files'
+    // exported meta on every build/dev start.
+    {
+      name: 'gen-plugin-catalog',
+      async buildStart() {
+        await generatePluginCatalog();
       },
     },
   ],

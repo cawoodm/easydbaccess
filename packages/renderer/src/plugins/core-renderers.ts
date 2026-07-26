@@ -1,10 +1,15 @@
 import type { ColumnSpec, HostApi, PluginModule } from '@easydb/shared';
 
 export const meta: NonNullable<PluginModule['meta']> = {
-  name: 'core-renderers',
+  id: 'core-renderers',
+  name: 'Core Renderers',
+  type: 'cell-renderer',
   version: '0.1.0',
   description: 'Built-in cell renderers: date, datetime, boolean, script.',
   author: 'easyDBAccess built-ins',
+  icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+  repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/core-renderers.ts',
+  fixed: true,
 };
 
 /**

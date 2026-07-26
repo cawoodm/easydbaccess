@@ -1,10 +1,14 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 
 export const meta: NonNullable<PluginModule['meta']> = {
-  name: 'cell-color',
+  id: 'cell-color',
+  name: 'Cell Color',
+  type: 'cell-renderer',
   version: '0.1.0',
   description: 'Renderer for hex colour values: a native swatch picker. Apply by setting a column\'s renderer to "color".',
   author: 'easyDBAccess built-ins',
+  icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 2-.9 2-2 0-.5-.2-1-.6-1.4-.4-.4-.6-.9-.6-1.4 0-1.1.9-2 2-2h2.3c2 0 3.6-1.6 3.6-3.6C20.7 6 16.9 3 12 3z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="11" cy="7" r="1"/><circle cx="15" cy="7.5" r="1"/></svg>',
+  repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/cell-color.ts',
 };
 
 /**

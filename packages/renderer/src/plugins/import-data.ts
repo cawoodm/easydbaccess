@@ -75,12 +75,15 @@ const PREDEFINED: PredefinedSource[] = [
 ];
 
 export const meta: NonNullable<PluginModule['meta']> = {
-  name: 'import-data',
+  id: 'import-data',
+  name: 'Import Data',
+  type: 'importer',
   version: '0.2.0',
   description:
     'Header button that imports data from a URL — a JSON dump (e.g. Northwind) or a Datasette table, database, or whole instance — with a picker of sample sources.',
   author: 'easyDBAccess built-ins',
-  optional: true,
+  icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>',
+  repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/import-data.ts',
 };
 
 export function init(api: HostApi): void {

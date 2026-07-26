@@ -1,25 +1,35 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import type { PluginModule, PluginRecord } from '@easydb/shared';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
+import type { PluginRecord, PluginModule, PluginType } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 import { builtinKey, builtinPlugins } from '../plugin-host/loader.js';
 
-interface OptionalBuiltin {
-  name: string;
-  description?: string;
-  author?: string;
-  /** From the synthetic `builtin:<name>` plugin record. Defaults to true. */
-  enabled: boolean;
+/** Small GitHub mark used for the "view source" link on rows with a `repo`. */
+const GITHUB_ICON_SVG =
+  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.34-5.47-5.95 0-1.31.47-2.39 1.24-3.23-.12-.3-.54-1.53.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.77.84 1.24 1.92 1.24 3.23 0 4.62-2.81 5.64-5.49 5.94.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.22.7.83.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5z"/></svg>';
+
+/** Fallback icon (Material Icons "extension") for rows without a `meta.icon`. */
+const FALLBACK_ICON = html`<span class="mi sm">extension</span>`;
+
+/** Settings key persisting the list of catalog source URLs the user has used. */
+const CATALOG_URLS_SETTING = 'plugin:catalogUrls';
+
+function defaultCatalogUrl(): string {
+  return new URL(`${import.meta.env.BASE_URL}plugins/catalog.json`, location.origin).toString();
 }
 
 interface CatalogEntry {
   id: string;
   name: string;
+  type?: PluginType;
   description?: string;
   author?: string;
+  icon?: string;
+  repo?: string;
   /** Resolved against the catalog URL — may be relative (./foo.js) or absolute. */
   url: string;
 }
@@ -29,15 +39,63 @@ interface CatalogResolved extends CatalogEntry {
   absUrl: string;
 }
 
+type Category = 'built-in' | 'available' | 'installed' | 'fixed';
+/** Tri-state filter: off (ignore) → on (show only these) → not (hide these). */
+type FilterState = 'on' | 'not';
+
+/** Filter-toggle order + display labels, above the plugin list. */
+const FILTER_LABELS: Array<[Category, string]> = [
+  ['installed', 'Installed'],
+  ['built-in', 'Built-in'],
+  ['available', 'Available'],
+  ['fixed', 'Fixed'],
+];
+
+/** Type-filter order + display labels — mirrors the `PluginType` union. */
+const TYPE_LABELS: Array<[PluginType, string]> = [
+  ['importer', 'Importer'],
+  ['exporter', 'Exporter'],
+  ['cell-renderer', 'Cell renderer'],
+  ['sync', 'Sync'],
+  ['source', 'Source'],
+  ['ui', 'UI'],
+];
+const TYPE_LABEL = new Map<PluginType, string>(TYPE_LABELS);
+
+/** One row of the unified plugin list, merged from built-ins / catalogs / installed URLs. */
+interface PluginRow {
+  id: string;
+  name: string;
+  /** Primary functional category (from `meta.type`), if declared. */
+  type?: PluginType;
+  /** True when `name` is just the raw URL (no catalog metadata is known for it). */
+  urlOnly?: boolean;
+  icon?: string;
+  repo?: string;
+  author?: string;
+  /** Absolute install URL — present for anything that is (or could be) installed by URL. */
+  url?: string;
+  categories: Set<Category>;
+  enabled: boolean;
+  fixed?: boolean;
+  installing?: boolean;
+  /** Secondary line under the name — description, raw URL, fetch status, or an error. */
+  meta?: string;
+  metaIsError?: boolean;
+}
+
 /**
- * Lists plugins installed for the current workspace and lets the user add,
- * enable/disable, or remove them by URL. Plugin URLs live on
- * Workspace.pluginUrls so they sync across devices; per-URL state (cached
- * body, enabled flag, last error) lives on the `plugins` Dexie table.
+ * Lists every plugin the workspace knows about — built-in, available from a
+ * catalog, and installed by URL — as one filterable, searchable list. Plugin
+ * URLs live on Workspace.pluginUrls so they sync across devices; per-URL
+ * state (cached body, enabled flag, last error) lives on the `plugins` Dexie
+ * table; built-in enable state lives under the synthetic `builtin:<id>` key
+ * in the same table.
  *
- * Changes apply on the next reload — see Apply button copy. Hot-loading
- * a plugin would require unregistering its slot registrations and
- * re-instantiating, which the registry contract doesn't yet support.
+ * Toggling enable/disable applies on the next reload — hot-loading a plugin
+ * would require unregistering its slot registrations and re-instantiating,
+ * which the registry contract doesn't yet support. Installing a catalog
+ * entry, however, hot-loads immediately (see `installFromCatalog`).
  */
 @customElement('plugin-manager-dialog')
 export class PluginManagerDialog extends LitElement {
@@ -46,53 +104,255 @@ export class PluginManagerDialog extends LitElement {
     dialogChromeStyles,
     css`
       dialog {
-        width: 640px;
-        max-width: 92vw;
+        width: 720px;
+        max-width: 94vw;
       }
       p.hint {
         margin: 0;
         color: #6b7280;
         font-size: 0.85rem;
       }
+
+      .filters {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 1rem;
+      }
+      .type-filters {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .type-filters .filter-label {
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: #9ca3af;
+        margin-right: 0.1rem;
+      }
+      /* Tri-state filter chip: off (neutral) → on (blue, ✓) → not (red, ≠). */
+      .filters .tri,
+      .type-filters .tri {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        font-size: 0.8rem;
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        border: 1px solid #d1d5db;
+        background: #fff;
+        color: #6b7280;
+        cursor: pointer;
+        user-select: none;
+      }
+      .filters .tri .tri-mark,
+      .type-filters .tri .tri-mark {
+        font-weight: 700;
+        line-height: 1;
+      }
+      .filters .tri.on,
+      .type-filters .tri.on {
+        border-color: #2563eb;
+        background: #eff6ff;
+        color: #1d4ed8;
+      }
+      .filters .tri.not,
+      .type-filters .tri.not {
+        border-color: #dc2626;
+        background: #fef2f2;
+        color: #b91c1c;
+      }
+      .row-type {
+        display: inline-block;
+        font-size: 0.68rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+        color: #6b7280;
+        background: #e5e7eb;
+        border-radius: 0.25rem;
+        padding: 0.05rem 0.35rem;
+        margin-left: 0.35rem;
+        vertical-align: middle;
+      }
+      .search {
+        flex: 1;
+        min-width: 160px;
+      }
+      .search input {
+        width: 100%;
+        font: inherit;
+        padding: 0.4rem 0.6rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+        box-sizing: border-box;
+      }
+
+      .catalog-source {
+        display: flex;
+        gap: 0.4rem;
+        align-items: center;
+      }
+      .catalog-source input {
+        flex: 1;
+        font: inherit;
+        font-size: 0.85rem;
+        padding: 0.35rem 0.5rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+      }
+
       .plugin-list {
         display: flex;
         flex-direction: column;
-        gap: 0.4rem;
-        max-height: 50vh;
+        gap: 0.35rem;
+        max-height: 42vh;
         overflow: auto;
       }
       .row {
         display: grid;
-        grid-template-columns: auto 1fr auto;
-        gap: 0.5rem;
+        grid-template-columns: 22px 1fr auto 22px 44px auto;
+        gap: 0.6rem;
         align-items: center;
-        padding: 0.5rem 0.6rem;
+        padding: 0.45rem 0.6rem;
         border: 1px solid #e5e7eb;
         border-radius: 0.3rem;
         background: #f9fafb;
       }
       .row.builtin {
         background: #f3f4f6;
-        color: #6b7280;
       }
       .row.error {
         background: #fef2f2;
         border-color: #fecaca;
       }
-      .row.available {
-        background: #eff6ff;
-        border-color: #bfdbfe;
-      }
-      .section-h {
-        margin: 0.4rem 0 0.1rem;
-        font-size: 0.78rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+      .row-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
         color: #6b7280;
       }
-      button.install {
-        background: #10b981;
-        color: white;
+      .row-icon svg {
+        width: 100%;
+        height: 100%;
+      }
+      .row-main {
+        min-width: 0;
+      }
+      .row-title {
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .row-title.mono {
+        font-family: ui-monospace, SFMono-Regular, monospace;
+        font-weight: 400;
+        font-size: 0.8rem;
+      }
+      .row-id {
+        font-weight: 400;
+        color: #9ca3af;
+        font-size: 0.75rem;
+        margin-left: 0.35rem;
+      }
+      .row-author {
+        font-size: 0.78rem;
+        color: #6b7280;
+        max-width: 110px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .row-repo {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        color: #6b7280;
+      }
+      .row-repo svg {
+        width: 100%;
+        height: 100%;
+      }
+      .row-repo:hover {
+        color: #111;
+      }
+      .lock-icon {
+        color: #9ca3af;
+        text-align: center;
+      }
+      .meta {
+        font-size: 0.75rem;
+        color: #6b7280;
+      }
+      .meta.err {
+        color: #b91c1c;
+      }
+
+      /* iOS-style toggle switch. */
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: 36px;
+        height: 20px;
+        flex: none;
+      }
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .switch .slider {
+        position: absolute;
+        inset: 0;
+        background-color: #d1d5db;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background-color 0.15s ease;
+      }
+      .switch .slider::before {
+        content: '';
+        position: absolute;
+        height: 16px;
+        width: 16px;
+        left: 2px;
+        bottom: 2px;
+        background-color: white;
+        border-radius: 50%;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+        transition: transform 0.15s ease;
+      }
+      .switch input:checked + .slider {
+        background-color: #3b82f6;
+      }
+      .switch input:checked + .slider::before {
+        transform: translateX(16px);
+      }
+      .switch input:disabled + .slider {
+        background-color: #e5e7eb;
+        cursor: default;
+      }
+      .switch.sm {
+        width: 30px;
+        height: 17px;
+      }
+      .switch.sm .slider::before {
+        height: 13px;
+        width: 13px;
+      }
+      .switch.sm input:checked + .slider::before {
+        transform: translateX(13px);
+      }
+
+      button.install,
+      button.uninstall {
         border: 0;
         padding: 0.3rem 0.7rem;
         border-radius: 0.25rem;
@@ -102,6 +362,11 @@ export class PluginManagerDialog extends LitElement {
         display: inline-flex;
         align-items: center;
         gap: 0.25rem;
+        white-space: nowrap;
+      }
+      button.install {
+        background: #10b981;
+        color: white;
       }
       button.install:hover {
         background: #059669;
@@ -110,18 +375,17 @@ export class PluginManagerDialog extends LitElement {
         background: #d1d5db;
         cursor: default;
       }
-      .url {
-        font-family: ui-monospace, SFMono-Regular, monospace;
-        font-size: 0.8rem;
-        word-break: break-all;
-      }
-      .meta {
-        font-size: 0.75rem;
+      button.uninstall {
+        background: transparent;
+        border: 1px solid #d1d5db;
         color: #6b7280;
       }
-      .meta.err {
+      button.uninstall:hover {
+        background: #fef2f2;
+        border-color: #fecaca;
         color: #b91c1c;
       }
+
       .add {
         display: flex;
         gap: 0.4rem;
@@ -133,30 +397,24 @@ export class PluginManagerDialog extends LitElement {
         border: 1px solid #d1d5db;
         border-radius: 0.25rem;
       }
-      button.icon-only {
-        background: transparent;
-        border: 0;
-        cursor: pointer;
-        color: #6b7280;
-        padding: 0 0.2rem;
-      }
-      button.icon-only:hover {
-        color: #111;
-      }
     `,
   ];
 
   @state() private urls: string[] = [];
   @state() private records: Map<string, PluginRecord> = new Map();
   @state() private addUrl = '';
-  @state() private builtinNames: string[] = [];
-  @state() private optionalBuiltins: OptionalBuiltin[] = [];
-  @state() private dirtyBuiltins = false;
   @state() private catalog: CatalogResolved[] = [];
   @state() private catalogError: string | null = null;
   @state() private serverCatalog: CatalogResolved[] = [];
   @state() private serverCatalogError: string | null = null;
   @state() private installing: Set<string> = new Set();
+  @state() private catalogUrls: string[] = [defaultCatalogUrl()];
+  @state() private activeCatalogUrl: string = defaultCatalogUrl();
+  @state() private search = '';
+  // Absent key = off; 'on' = show only these; 'not' = hide these.
+  @state() private filterStates: Map<Category, FilterState> = new Map();
+  // Same tri-state semantics, keyed by plugin type.
+  @state() private typeFilters: Map<PluginType, FilterState> = new Map();
   private dialogEl: HTMLDialogElement | null = null;
 
   override firstUpdated() {
@@ -171,58 +429,34 @@ export class PluginManagerDialog extends LitElement {
     this.urls = ws?.pluginUrls ?? [];
     const recs = await ctx.store.plugins.find();
     this.records = new Map(recs.map((r) => [r.url, r]));
-    // Built-in plugin names from the loader's module exports. We can't reach
-    // the loader's list here without coupling, so use a hardcoded preview —
-    // the dialog purely informs the user; built-ins always load.
-    // Built-ins split into always-on and optional. Optional ones are listed
-    // separately with an enable toggle; always-on are informational only.
-    const alwaysOn: string[] = [];
-    const optional: OptionalBuiltin[] = [];
-    for (const p of builtinPlugins) {
-      const name = p.meta?.name;
-      if (!name) continue;
-      if (p.meta?.optional) {
-        const rec = this.records.get(builtinKey(name));
-        optional.push({
-          name,
-          ...(p.meta?.description ? { description: p.meta.description } : {}),
-          ...(p.meta?.author ? { author: p.meta.author } : {}),
-          enabled: rec?.enabled !== false,
-        });
-      } else {
-        alwaysOn.push(name);
-      }
-    }
-    this.builtinNames = alwaysOn;
-    this.optionalBuiltins = optional;
-    this.dirtyBuiltins = false;
+
+    const saved = await ctx.store.settings.findOne(CATALOG_URLS_SETTING);
+    const savedList = Array.isArray(saved?.value)
+      ? (saved.value as unknown[]).filter((v): v is string => typeof v === 'string')
+      : [];
+    this.catalogUrls = savedList.length > 0 ? savedList : [defaultCatalogUrl()];
+    this.activeCatalogUrl = this.catalogUrls[0] ?? defaultCatalogUrl();
+
     this.addUrl = '';
+    this.search = '';
+    this.filterStates = new Map();
+    this.typeFilters = new Map();
     await this.updateComplete;
     this.dialogEl?.showModal();
     // Catalog fetches run after the dialog is visible so a slow network
-    // doesn't block opening; the sections just appear once the responses
-    // land. The server registry is independent of the host catalog — both
-    // run in parallel.
-    void this.refreshCatalog();
+    // doesn't block opening; rows just appear once the responses land. The
+    // server registry is independent of the host catalog — both run in
+    // parallel.
+    void this.refreshCatalog(this.activeCatalogUrl);
     void this.refreshServerRegistry();
   }
 
   /**
-   * Fetches the plugin catalog from the host this app was loaded from.
-   * The catalog is a JSON file listing demo/optional plugins the host ships;
-   * it proves the host can act as a registry without hard-coding URLs into
-   * the client. Each entry's `url` is resolved against the catalog URL so
-   * relative paths (./foo.js) work for sibling plugin files.
+   * Fetches a plugin catalog from the given URL. Each entry's `url` is
+   * resolved against the catalog URL so relative paths (./foo.js) work for
+   * sibling plugin files.
    */
-  private async refreshCatalog(): Promise<void> {
-    // Resolve against the app's deploy base, not the origin root: on GitHub
-    // Pages the app is served under /easydbaccess/, so an origin-root
-    // /plugins/catalog.json 404s. BASE_URL is '/' in dev and '/easydbaccess/'
-    // in the published build, and always ends with a slash.
-    const catalogUrl = new URL(
-      `${import.meta.env.BASE_URL}plugins/catalog.json`,
-      location.origin,
-    ).toString();
+  private async refreshCatalog(catalogUrl: string): Promise<void> {
     try {
       const res = await fetch(catalogUrl, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -242,9 +476,8 @@ export class PluginManagerDialog extends LitElement {
   /**
    * Fetches an operator-curated plugin list from the configured server
    * (`${server-sync:url}/plugins/registry`). Silently no-ops when no server
-   * URL is set — the "From server" section just doesn't appear. Network /
-   * parse errors surface inline so misconfiguration is visible without
-   * breaking the rest of the dialog.
+   * URL is set. Network / parse errors surface inline so misconfiguration is
+   * visible without breaking the rest of the dialog.
    */
   private async refreshServerRegistry(): Promise<void> {
     const ctx = await getContext();
@@ -271,6 +504,18 @@ export class PluginManagerDialog extends LitElement {
       this.serverCatalog = [];
       this.serverCatalogError = (err as Error).message;
     }
+  }
+
+  /** Re-fetches the currently-selected catalog source, remembering it in the dropdown. */
+  private async reloadCatalogSource(): Promise<void> {
+    const url = this.activeCatalogUrl.trim();
+    if (!url) return;
+    if (!this.catalogUrls.includes(url)) {
+      this.catalogUrls = [...this.catalogUrls, url];
+      const ctx = await getContext();
+      await ctx.store.settings.upsert({ key: CATALOG_URLS_SETTING, value: this.catalogUrls });
+    }
+    await this.refreshCatalog(url);
   }
 
   private close() {
@@ -309,7 +554,9 @@ export class PluginManagerDialog extends LitElement {
       ...(rec ?? { url, lastFetched: 0 }),
       enabled,
     });
-    this.records = new Map(this.records.set(url, { ...rec!, url, enabled, lastFetched: rec?.lastFetched ?? 0 }));
+    this.records = new Map(
+      this.records.set(url, { ...rec!, url, enabled, lastFetched: rec?.lastFetched ?? 0 }),
+    );
   }
 
   private async removePlugin(url: string) {
@@ -325,9 +572,9 @@ export class PluginManagerDialog extends LitElement {
     location.reload();
   }
 
-  private async toggleBuiltin(name: string, enabled: boolean): Promise<void> {
+  private async toggleBuiltin(id: string, enabled: boolean): Promise<void> {
     const ctx = await getContext();
-    const key = builtinKey(name);
+    const key = builtinKey(id);
     const rec = this.records.get(key);
     await ctx.store.plugins.upsert({
       ...(rec ?? { url: key, lastFetched: 0 }),
@@ -335,10 +582,25 @@ export class PluginManagerDialog extends LitElement {
       enabled,
       lastFetched: rec?.lastFetched ?? 0,
     });
-    this.optionalBuiltins = this.optionalBuiltins.map((b) =>
-      b.name === name ? { ...b, enabled } : b,
+    this.records = new Map(
+      this.records.set(key, { ...rec!, url: key, enabled, lastFetched: rec?.lastFetched ?? 0 }),
     );
-    this.dirtyBuiltins = true;
+  }
+
+  /** Dispatches an enable/disable toggle to the right store slot and hints that a reload is needed. */
+  private async onRowToggle(row: PluginRow, enabled: boolean): Promise<void> {
+    if (row.categories.has('built-in')) {
+      await this.toggleBuiltin(row.id, enabled);
+    } else if (row.url) {
+      await this.toggleEnabled(row.url, enabled);
+    } else {
+      return;
+    }
+    const ctx = await getContext();
+    ctx.api.ui.dialogs.toast('Reload to apply this change.', {
+      kind: 'info',
+      title: 'Plugin updated',
+    });
   }
 
   /**
@@ -347,7 +609,7 @@ export class PluginManagerDialog extends LitElement {
    * load flow, then re-emits `app:ready` so the shell's registry snapshots
    * pick up any new header/footer buttons immediately.
    */
-  private async installFromCatalog(entry: CatalogResolved): Promise<void> {
+  private async installFromCatalog(entry: { absUrl: string; name: string }): Promise<void> {
     if (this.urls.includes(entry.absUrl)) return;
     if (this.installing.has(entry.absUrl)) return;
     this.installing = new Set(this.installing).add(entry.absUrl);
@@ -406,7 +668,203 @@ export class PluginManagerDialog extends LitElement {
     }
   }
 
+  /** Advance a tri-state map entry: off → on (only these) → not (hide these) → off. */
+  private cycleState<K>(map: Map<K, FilterState>, key: K): Map<K, FilterState> {
+    const cur = map.get(key);
+    const next = new Map(map);
+    if (cur === undefined) next.set(key, 'on');
+    else if (cur === 'on') next.set(key, 'not');
+    else next.delete(key);
+    return next;
+  }
+
+  /** Cycle a category filter: off → on (only these) → not (hide these) → off. */
+  private cycleFilter(cat: Category): void {
+    this.filterStates = this.cycleState(this.filterStates, cat);
+  }
+
+  /** Cycle a type filter: off → on (only these) → not (hide these) → off. */
+  private cycleTypeFilter(type: PluginType): void {
+    this.typeFilters = this.cycleState(this.typeFilters, type);
+  }
+
+  /**
+   * Merges built-ins, catalog/server entries, and installed-by-URL plugins
+   * into one row per plugin. Catalog entries and installed-by-URL entries
+   * that share a URL are merged into a single row (both "available" and
+   * "installed" categories); anything installed by URL with no matching
+   * catalog metadata gets its own row keyed by the raw URL.
+   */
+  private buildRows(): PluginRow[] {
+    const rows = new Map<string, PluginRow>();
+    const urlToKey = new Map<string, string>();
+
+    for (const { id, meta } of builtinPlugins) {
+      const enabled = meta.fixed ? true : this.records.get(builtinKey(id))?.enabled !== false;
+      const categories: Category[] = meta.fixed ? ['built-in', 'fixed'] : ['built-in'];
+      rows.set(`builtin:${id}`, {
+        id,
+        name: meta.name,
+        ...(meta.type ? { type: meta.type } : {}),
+        ...(meta.description ? { meta: meta.description } : { meta: 'Built-in plugin' }),
+        ...(meta.author ? { author: meta.author } : {}),
+        ...(meta.icon ? { icon: meta.icon } : {}),
+        ...(meta.repo ? { repo: meta.repo } : {}),
+        categories: new Set(categories),
+        enabled,
+        fixed: !!meta.fixed,
+      });
+    }
+
+    for (const entry of [...this.catalog, ...this.serverCatalog]) {
+      const installedByUrl = this.urls.includes(entry.absUrl);
+      const rec = this.records.get(entry.absUrl);
+      const categories: Category[] = installedByUrl ? ['available', 'installed'] : ['available'];
+      const existing = rows.get(entry.id);
+      rows.set(entry.id, {
+        id: entry.id,
+        name: entry.name,
+        url: entry.absUrl,
+        ...(entry.type ? { type: entry.type } : {}),
+        ...(entry.icon ? { icon: entry.icon } : {}),
+        ...(entry.repo ? { repo: entry.repo } : {}),
+        ...(entry.author ? { author: entry.author } : {}),
+        meta: entry.description ?? entry.absUrl,
+        categories: existing
+          ? new Set([...existing.categories, ...categories])
+          : new Set(categories),
+        enabled: rec?.enabled !== false,
+        installing: this.installing.has(entry.absUrl),
+      });
+      urlToKey.set(entry.absUrl, entry.id);
+    }
+
+    for (const url of this.urls) {
+      const existingKey = urlToKey.get(url);
+      if (existingKey) {
+        rows.get(existingKey)!.categories.add('installed');
+        continue;
+      }
+      const rec = this.records.get(url);
+      const lastFetched = rec?.lastFetched
+        ? new Date(rec.lastFetched).toLocaleString()
+        : 'never';
+      rows.set(`url:${url}`, {
+        id: url,
+        name: url,
+        urlOnly: true,
+        url,
+        meta: rec?.lastError ?? `Last fetched: ${lastFetched}`,
+        metaIsError: !!rec?.lastError,
+        categories: new Set(['installed']),
+        enabled: rec?.enabled !== false,
+      });
+    }
+
+    return [...rows.values()];
+  }
+
+  private get filteredRows(): PluginRow[] {
+    const rows = this.buildRows();
+    const term = this.search.trim().toLowerCase();
+    const include: Category[] = [];
+    const exclude: Category[] = [];
+    for (const [cat, state] of this.filterStates) {
+      (state === 'on' ? include : exclude).push(cat);
+    }
+    const typeInclude: PluginType[] = [];
+    const typeExclude: PluginType[] = [];
+    for (const [type, state] of this.typeFilters) {
+      (state === 'on' ? typeInclude : typeExclude).push(type);
+    }
+    const byFilter = rows.filter((r) => {
+      // "on" filters are a union (row must be in at least one selected category);
+      // "not" filters exclude (row must be in none of them).
+      if (include.length && !include.some((c) => r.categories.has(c))) return false;
+      if (exclude.some((c) => r.categories.has(c))) return false;
+      // Type filters: an "on" set requires the row's type to be among them
+      // (untyped rows are excluded when any type is required); "not" hides
+      // matching types.
+      if (typeInclude.length && !(r.type && typeInclude.includes(r.type))) return false;
+      if (r.type && typeExclude.includes(r.type)) return false;
+      return true;
+    });
+    if (!term) return byFilter;
+    return byFilter.filter((r) =>
+      [r.id, r.name, r.type, r.meta, r.author].some((f) => f?.toLowerCase().includes(term)),
+    );
+  }
+
+  private renderRow(row: PluginRow) {
+    const showToggle = row.categories.has('built-in') || row.categories.has('installed');
+    const canUninstall = !!row.url && row.categories.has('installed');
+    const canInstall = !!row.url && !row.categories.has('installed');
+    return html`
+      <div class=${`row${row.categories.has('built-in') ? ' builtin' : ''}${row.metaIsError ? ' error' : ''}`}>
+        <span class="row-icon">${row.icon ? unsafeHTML(row.icon) : FALLBACK_ICON}</span>
+        <div class="row-main">
+          <div class=${`row-title${row.urlOnly ? ' mono' : ''}`}>
+            ${row.name}${row.id !== row.name
+              ? html`<span class="row-id">${row.id}</span>`
+              : ''}${row.type
+              ? html`<span class="row-type" title="Plugin type"
+                  >${TYPE_LABEL.get(row.type) ?? row.type}</span
+                >`
+              : ''}
+          </div>
+          ${row.meta
+            ? html`<div class=${`meta${row.metaIsError ? ' err' : ''}`}>${row.meta}</div>`
+            : ''}
+        </div>
+        <div class="row-author">${row.author ?? ''}</div>
+        ${row.repo
+          ? html`<a
+              class="row-repo"
+              href=${row.repo}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="View source on GitHub"
+              >${unsafeHTML(GITHUB_ICON_SVG)}</a
+            >`
+          : html`<span></span>`}
+        ${row.fixed
+          ? html`<span class="mi sm lock-icon" title="Always on — cannot be disabled">lock</span>`
+          : showToggle
+            ? html`<label class="switch" title="Enable / disable">
+                <input
+                  type="checkbox"
+                  .checked=${row.enabled}
+                  @change=${(e: Event) =>
+                    this.onRowToggle(row, (e.target as HTMLInputElement).checked)}
+                />
+                <span class="slider"></span>
+              </label>`
+            : html`<span></span>`}
+        ${canInstall
+          ? html`<button
+              type="button"
+              class="install"
+              ?disabled=${row.installing}
+              @click=${() => this.installFromCatalog({ absUrl: row.url!, name: row.name })}
+            >
+              <span class="mi sm">${row.installing ? 'hourglass_empty' : 'download'}</span>
+              ${row.installing ? 'Installing…' : 'Install'}
+            </button>`
+          : canUninstall
+            ? html`<button
+                type="button"
+                class="uninstall"
+                @click=${() => this.removePlugin(row.url!)}
+              >
+                <span class="mi sm">delete</span> Uninstall
+              </button>`
+            : html`<span></span>`}
+      </div>
+    `;
+  }
+
   override render() {
+    const rows = this.filteredRows;
     return html`
       <dialog @cancel=${this.close} @keydown=${ctrlEnterSubmits}>
         <button type="button" class="close-x" title="Close" @click=${this.close}>
@@ -423,168 +881,111 @@ export class PluginManagerDialog extends LitElement {
             </div>
           </div>
           <div class="dialog-body">
-          <p class="hint">
-            Plugins are JavaScript modules loaded by URL into this workspace.
-            Changes take effect after reload.
-          </p>
+            <p class="hint">
+              Plugins are JavaScript modules loaded by URL into this workspace.
+              Enable/disable changes take effect after reload; installing a
+              plugin activates it immediately.
+            </p>
 
-          <div class="plugin-list">
-            ${this.catalog.length > 0
-              ? html`<div class="section-h">Available from this host</div>`
-              : ''}
-            ${this.catalog.map((entry) => {
-              const installed = this.urls.includes(entry.absUrl);
-              const busy = this.installing.has(entry.absUrl);
-              return html`
-                <div class="row available">
-                  <span class="mi sm">extension</span>
-                  <div>
-                    <div>${entry.name}</div>
-                    <div class="meta">
-                      ${entry.description ?? entry.absUrl}
-                    </div>
-                  </div>
+            <div class="filters">
+              ${FILTER_LABELS.map(([cat, label]) => {
+                const state = this.filterStates.get(cat);
+                const title =
+                  state === 'on'
+                    ? `Showing only ${label} plugins — click to exclude`
+                    : state === 'not'
+                      ? `Hiding ${label} plugins — click to clear`
+                      : `Filter by ${label} — click: show only → exclude → off`;
+                return html`
                   <button
                     type="button"
-                    class="install"
-                    ?disabled=${installed || busy}
-                    @click=${() => this.installFromCatalog(entry)}
+                    class=${`tri${state ? ` ${state}` : ''}`}
+                    title=${title}
+                    aria-pressed=${state !== undefined}
+                    @click=${() => this.cycleFilter(cat)}
                   >
-                    <span class="mi sm">
-                      ${installed ? 'check' : busy ? 'hourglass_empty' : 'download'}
-                    </span>
-                    ${installed ? 'Installed' : busy ? 'Installing…' : 'Install'}
+                    <span class="tri-mark"
+                      >${state === 'on' ? '✓' : state === 'not' ? '≠' : ''}</span
+                    >${label}
                   </button>
-                </div>
-              `;
-            })}
+                `;
+              })}
+              <div class="search">
+                <input
+                  type="text"
+                  placeholder="Search plugins…"
+                  .value=${this.search}
+                  @input=${(e: Event) => (this.search = (e.target as HTMLInputElement).value)}
+                />
+              </div>
+            </div>
+
+            <div class="type-filters">
+              <span class="filter-label">Type</span>
+              ${TYPE_LABELS.map(([type, label]) => {
+                const state = this.typeFilters.get(type);
+                const title =
+                  state === 'on'
+                    ? `Showing only ${label} plugins — click to exclude`
+                    : state === 'not'
+                      ? `Hiding ${label} plugins — click to clear`
+                      : `Filter by ${label} — click: show only → exclude → off`;
+                return html`
+                  <button
+                    type="button"
+                    class=${`tri${state ? ` ${state}` : ''}`}
+                    title=${title}
+                    aria-pressed=${state !== undefined}
+                    @click=${() => this.cycleTypeFilter(type)}
+                  >
+                    <span class="tri-mark"
+                      >${state === 'on' ? '✓' : state === 'not' ? '≠' : ''}</span
+                    >${label}
+                  </button>
+                `;
+              })}
+            </div>
+
+            <div class="catalog-source">
+              <input
+                type="text"
+                list="catalog-url-options"
+                .value=${this.activeCatalogUrl}
+                @input=${(e: Event) => (this.activeCatalogUrl = (e.target as HTMLInputElement).value)}
+                placeholder="Catalog source URL"
+              />
+              <datalist id="catalog-url-options">
+                ${this.catalogUrls.map((u) => html`<option value=${u}></option>`)}
+              </datalist>
+              <button type="button" class="ghost" @click=${this.reloadCatalogSource}>
+                <span class="mi sm">refresh</span> Reload
+              </button>
+            </div>
             ${this.catalogError
-              ? html`<div class="meta err">
-                  Host catalog unavailable: ${this.catalogError}
-                </div>`
+              ? html`<div class="meta err">Catalog unavailable: ${this.catalogError}</div>`
               : ''}
-
-            ${this.serverCatalog.length > 0 || this.serverCatalogError
-              ? html`<div class="section-h">From server</div>`
-              : ''}
-            ${this.serverCatalog.map((entry) => {
-              const installed = this.urls.includes(entry.absUrl);
-              const busy = this.installing.has(entry.absUrl);
-              return html`
-                <div class="row available">
-                  <span class="mi sm">extension</span>
-                  <div>
-                    <div>${entry.name}</div>
-                    <div class="meta">
-                      ${entry.description ?? entry.absUrl}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    class="install"
-                    ?disabled=${installed || busy}
-                    @click=${() => this.installFromCatalog(entry)}
-                  >
-                    <span class="mi sm">
-                      ${installed ? 'check' : busy ? 'hourglass_empty' : 'download'}
-                    </span>
-                    ${installed ? 'Installed' : busy ? 'Installing…' : 'Install'}
-                  </button>
-                </div>
-              `;
-            })}
             ${this.serverCatalogError
-              ? html`<div class="meta err">
-                  Server registry unavailable: ${this.serverCatalogError}
-                </div>`
+              ? html`<div class="meta err">Server registry unavailable: ${this.serverCatalogError}</div>`
               : ''}
 
-            ${this.optionalBuiltins.length > 0
-              ? html`<div class="section-h">Optional built-ins</div>`
-              : ''}
-            ${this.optionalBuiltins.map(
-              (b) => html`
-                <div class="row">
-                  <input
-                    type="checkbox"
-                    title="Enable / disable"
-                    .checked=${b.enabled}
-                    @change=${(e: Event) =>
-                      this.toggleBuiltin(b.name, (e.target as HTMLInputElement).checked)}
-                  />
-                  <div>
-                    <div>${b.name}</div>
-                    <div class="meta">
-                      ${b.description ?? 'Built-in (optional)'}
-                    </div>
-                  </div>
-                  <span class="meta">${b.enabled ? 'enabled' : 'disabled'}</span>
-                </div>
-              `,
-            )}
+            <div class="plugin-list">
+              ${rows.length === 0
+                ? html`<p class="hint">No plugins match the current filters/search.</p>`
+                : ''}
+              ${rows.map((row) => this.renderRow(row))}
+            </div>
 
-            <div class="section-h">Built-in</div>
-            ${this.builtinNames.map(
-              (name) => html`
-                <div class="row builtin">
-                  <span class="mi sm">extension</span>
-                  <div>
-                    <div>${name}</div>
-                    <div class="meta">Built-in</div>
-                  </div>
-                  <span class="meta">always on</span>
-                </div>
-              `,
-            )}
-
-            ${this.urls.length > 0
-              ? html`<div class="section-h">Installed (by URL)</div>`
-              : ''}
-            ${this.urls.map((url) => {
-              const rec = this.records.get(url);
-              const errClass = rec?.lastError ? ' error' : '';
-              const lastFetched = rec?.lastFetched
-                ? new Date(rec.lastFetched).toLocaleString()
-                : 'never';
-              return html`
-                <div class=${`row${errClass}`}>
-                  <input
-                    type="checkbox"
-                    title="Enable / disable"
-                    .checked=${rec?.enabled !== false}
-                    @change=${(e: Event) =>
-                      this.toggleEnabled(url, (e.target as HTMLInputElement).checked)}
-                  />
-                  <div>
-                    <div class="url">${url}</div>
-                    <div class=${`meta${rec?.lastError ? ' err' : ''}`}>
-                      ${rec?.lastError ?? `Last fetched: ${lastFetched}`}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    class="icon-only"
-                    title="Remove plugin"
-                    @click=${() => this.removePlugin(url)}
-                  >
-                    <span class="mi sm">delete</span>
-                  </button>
-                </div>
-              `;
-            })}
-          </div>
-
-          <div class="add">
-            <input
-              type="text"
-              placeholder="https://example.com/my-plugin.js"
-              .value=${this.addUrl}
-              @input=${(e: Event) => (this.addUrl = (e.target as HTMLInputElement).value)}
-            />
-            <button type="submit" class="primary">
-              <span class="mi sm">add</span> Add
-            </button>
-          </div>
+            <div class="add">
+              <input
+                type="text"
+                placeholder="https://example.com/my-plugin.js"
+                .value=${this.addUrl}
+                @input=${(e: Event) => (this.addUrl = (e.target as HTMLInputElement).value)}
+              />
+              <button type="submit" class="primary">
+                <span class="mi sm">add</span> Add
+              </button>
+            </div>
           </div>
         </form>
       </dialog>

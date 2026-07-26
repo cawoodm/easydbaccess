@@ -11,11 +11,15 @@
  */
 
 export const meta = {
-  name: 'cell-image-url',
+  id: 'cell-image-url',
+  name: 'Image URL Renderer',
+  type: 'cell-renderer',
   version: '0.1.0',
   description:
     'Renders the cell value as <img src=value>. Apply by setting a column\'s renderer to "image-url".',
   author: 'easyDBAccess reference',
+  icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
+  repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/public/plugins/cell-image-url.js',
 };
 
 export function init(api) {
