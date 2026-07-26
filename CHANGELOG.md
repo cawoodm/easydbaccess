@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 26 Jul 2026 (v0.0.130)
+
+- Removed the Gist plugin's own credentials dialog — configure Gist in Settings → Gist Sync; push/pull with no credentials now points you there.
+
 ## 26 Jul 2026 (v0.0.129)
 
 - Connecting a Datasette table whose name clashes with a different existing table now prompts Overwrite / Rename / Skip instead of silently duplicating; table-name checks are case-insensitive across import and connect.

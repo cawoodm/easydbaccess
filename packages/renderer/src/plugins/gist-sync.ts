@@ -84,7 +84,6 @@ export function init(api: HostApi): void {
       const choice = await AnchoredMenu.open(rect, [
         { id: 'push', label: 'Push', icon: 'cloud_upload' },
         { id: 'pull', label: 'Pull', icon: 'cloud_download' },
-        { id: 'settings', label: 'Settings', icon: 'settings' },
         { id: 'share', label: 'Share', icon: 'share' },
         { id: 'view', label: 'View gist', icon: 'open_in_new' },
       ]);
@@ -92,7 +91,6 @@ export function init(api: HostApi): void {
       try {
         if (choice === 'push') await push(api);
         else if (choice === 'pull') await pull(api);
-        else if (choice === 'settings') await openSettings(api);
         else if (choice === 'share') await openShare(api);
         else if (choice === 'view') await openViewGist(api);
       } catch (err) {
@@ -230,47 +228,18 @@ function parseConnectionString(raw: string): GistCreds | null {
 async function ensureCreds(api: HostApi): Promise<GistCreds | null> {
   const existing = await loadCreds(api);
   if (existing) return existing;
-  const input = await api.ui.dialogs.prompt(
-    'Connection string format:\nuser=<github-user>;gist_id=<id>;gist_token=<pat>;\n\nLeave gist_id empty to create a new gist on first Push.',
-    '',
-    'Gist credentials',
-  );
-  if (!input) return null;
-  const parsed = parseConnectionString(input);
-  if (!parsed) {
-    await api.ui.dialogs.alert(
-      'Could not parse connection string. Make sure it contains user=… and gist_token=….',
-      'Gist credentials',
-    );
-    return null;
-  }
-  await saveCreds(api, parsed);
-  return parsed;
+  // Gist credentials are configured in the global Settings dialog (→ Gist Sync
+  // tab) now — there is no per-plugin credentials dialog. Point the user there.
+  api.ui.dialogs.toast('Add your GitHub user and token in Settings → Gist Sync, then try again.', {
+    kind: 'warning',
+    title: 'Gist sync',
+  });
+  api.ui.openSettings();
+  return null;
 }
 
 function credsToConnectionString(c: GistCreds): string {
   return `user=${c.user};gist_id=${c.gistId};gist_token=${c.token}`;
-}
-
-async function openSettings(api: HostApi): Promise<void> {
-  const current = await loadCreds(api);
-  const prefill = current ? credsToConnectionString(current) : '';
-  const input = await api.ui.dialogs.prompt(
-    'Edit the Gist connection string:\nuser=<github-user>;gist_id=<id>;gist_token=<pat>;\n\nLeave gist_id empty to create a new gist on first Push.',
-    prefill,
-    'Gist settings',
-  );
-  if (input == null) return;
-  const parsed = parseConnectionString(input);
-  if (!parsed) {
-    await api.ui.dialogs.alert(
-      'Could not parse connection string. Make sure it contains user=… and gist_token=….',
-      'Gist settings',
-    );
-    return;
-  }
-  await saveCreds(api, parsed);
-  api.ui.dialogs.toast('Gist settings saved.', { kind: 'success', title: 'Gist sync' });
 }
 
 async function openShare(api: HostApi): Promise<void> {
