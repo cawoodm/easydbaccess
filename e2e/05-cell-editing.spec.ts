@@ -172,4 +172,25 @@ test.describe('cell editing constraints', () => {
     );
     expect(tcheck?.columns[0]?.unique).toBeUndefined();
   });
+
+  test('Escape cancels an in-progress cell edit without committing', async ({ page }) => {
+    const id = await createTable(page, 'Escapable', [{ field: 'name' }]);
+    await waitForPanel(page, id);
+    await addRow(page, id, { name: 'Original' });
+
+    const panel = page.locator(`#${panelDomId(id)}`);
+    const input = panel.locator('data-table tbody tr td input').first();
+    await expect(input).toHaveValue('Original');
+
+    await input.fill('Changed');
+    await expect(input).toHaveValue('Changed');
+    await input.press('Escape');
+
+    // The input reverts immediately, before any blur/change commit.
+    await expect(input).toHaveValue('Original');
+
+    // Nothing was persisted — re-read confirms the stored value is untouched.
+    const rows = await readRows(page, id);
+    expect(rows[0]?.data.name).toBe('Original');
+  });
 });
