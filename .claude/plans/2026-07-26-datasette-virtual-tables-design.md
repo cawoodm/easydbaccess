@@ -1,48 +1,40 @@
-# Datasette "Virtual" + "No Persist" — Design
+# Datasette "Virtual" Tables — Design
 
 **Status:** design (approved in brainstorming; no code yet)
 **Date:** 2026-07-26
-**Scope:** Two per-table options for Datasette (and, via a general contract,
-any future live source): **virtual** (lazy, server-side, windowed loading for
-big tables) and **no persist / no sync** (exclude the table from gist + server
-sync). Surfaced in the Connect dialog and the column editor.
+**Scope:** A per-table **virtual** option for Datasette (via a general provider
+contract any future live source can implement): lazy, server-side, windowed
+loading for big tables. Surfaced in the Connect dialog and the column editor.
 
 ## Goal
 
 Big remote tables (100k+ rows) are unusable today: connecting a live Datasette
 table materialises **up to 10,000 rows into memory** and the grid sorts/filters
-that whole snapshot client-side. Two options fix this:
+that whole snapshot client-side.
 
-- **Virtual** — load only what's needed: fetch the first page, lazily append
-  the next page as the user scrolls toward the bottom, and push sort/filter to
-  the server. Fetched pages are **kept in memory** for fast scrolling; changing
-  the sort/filter (or pressing **Refresh**) clears the cache and re-fetches from
-  page 0.
-- **No persist (no sync)** — exclude the table from gist/server sync. The table
-  definition still persists locally across reloads; live rows already never
-  sync. Useful so a huge live table's definition doesn't bloat a gist.
+**Virtual** loads only what's needed: fetch the first page, lazily append the
+next page as the user scrolls toward the bottom, and push sort/filter to the
+server. Fetched pages are **kept in memory** for fast scrolling; changing the
+sort/filter (or pressing **Refresh**) clears the cache and re-fetches from
+page 0.
 
 ## Decisions locked in brainstorming
 
-1. **No persist** = a per-table flag that excludes the table from **gist and
-   server sync only**. Definition still persists locally; reload keeps it.
-2. **Virtual** = full lazy paging with **accumulation** (fetched pages stay
+1. **Virtual** = full lazy paging with **accumulation** (fetched pages stay
    resident — no eviction/scrollback refetch). Cache clears on sort/filter
    change or explicit Refresh.
-3. `queryWindow` is a **general `DataCollection` capability**, feature-detected
+2. `queryWindow` is a **general `DataCollection` capability**, feature-detected
    by the grid. Datasette is the only implementer for now.
 
 ## Data model (`packages/shared/src/types.ts`)
 
 - **Virtual** reuses the existing `TableSource.serverQuery?: boolean` (already
   documented as "provider applies sort/filter server-side; snapshot is only the
-  current window"). Add two optional tuning fields:
+  current window"). Add one optional tuning field:
   - `TableSource.pageSize?: number` — rows per fetch (default 100).
-- **No sync** — new `Table.noSync?: boolean`. Absent/false ⇒ current behaviour
-  (synced). This is additive; no Dexie index change, no schema-version bump
-  (non-indexed JSON field).
 
-No other domain-type changes.
+No other domain-type changes. Additive; no Dexie index change, no
+schema-version bump.
 
 ## Provider contract (`packages/shared/src/plugin-api.ts`)
 
@@ -114,26 +106,16 @@ and behave exactly as today.
 - Non-virtual tables are completely untouched (the branch only activates on
   `serverQuery` + `queryWindow`).
 
-## No-sync enforcement
-
-- **Gist** (`gist-sync.ts` / `dump-export.ts` serializer): skip tables with
-  `noSync === true` from the pushed dump (both whole-workspace push and the
-  per-table gist button should refuse/skip a no-sync table with a toast).
-- **Server sync** (`server-sync-core.ts serializeWorkspace`): same — omit
-  no-sync tables from the workspace blob.
-- Pull/import is unaffected (nothing to exclude on the way in).
-
 ## UI surfacing
 
-- **Connect dialog** (`plugins/datasette-source.ts`): two checkboxes below the
-  connection fields — **"Virtual (windowed, server-side — for big tables)"** and
-  **"Exclude from sync"**. Virtual sets `source.serverQuery = true`; Exclude sets
-  `table.noSync = true`. Both default **off**. A one-line hint explains virtual
-  is recommended for very large tables.
-- **Column editor** (`dialogs/new-table-dialog.ts` edit mode): the same two
-  toggles in a table-level settings row, so an existing table can be switched
-  after the fact. Toggling virtual on/off patches `source.serverQuery`; the grid
-  re-inits its data path on the table update.
+- **Connect dialog** (`plugins/datasette-source.ts`): a checkbox below the
+  connection fields — **"Virtual (windowed, server-side — for big tables)"** —
+  which sets `source.serverQuery = true`. Defaults **off**, with a one-line hint
+  that it's recommended for very large tables.
+- **Column editor** (`dialogs/new-table-dialog.ts` edit mode): the same toggle
+  in a table-level settings row, so an existing table can be switched after the
+  fact. Toggling patches `source.serverQuery`; the grid re-inits its data path
+  on the table update.
 
 ## Edge cases
 
@@ -154,6 +136,8 @@ and behave exactly as today.
 - Random-access "jump to row 50,000" (Datasette cursors are forward-only).
 - Virtual for the **snapshot Import** path (this is the live Connect flow).
 - A generic non-Datasette virtual provider implementation (contract only).
+- **"No persist / no sync"** — explicitly out of scope for this task; may return
+  as a separate item later.
 
 ## Testing
 
@@ -162,19 +146,17 @@ and behave exactly as today.
   advances via `next`, `total` parsed from `filtered_table_rows_count`,
   `queryWindow` shape. All via a fake fetch (no network).
 - **e2e**: connect a table as virtual → only the first page loads → scroll to
-  append a second page → sort a column (cache resets, server re-orders) → mark a
-  table no-sync and confirm the gist/server dump omits it.
+  append a second page → sort a column (cache resets, server re-orders).
 
 ## Lockstep checklist (for the implementation plan)
 
-1. `shared/types.ts` — `TableSource.pageSize?`, `Table.noSync?`.
+1. `shared/types.ts` — `TableSource.pageSize?`.
 2. `shared/plugin-api.ts` — `QueryWindowArgs`, `QueryWindowResult`,
    `DataCollection.queryWindow?`.
 3. `datasette-client.ts` — server-side sort/filter params + cursor paging +
    total.
 4. `datasette-collection.ts` — `queryWindow` in virtual mode.
 5. `table/data-table.ts` — virtual render/paging path (feature-detected).
-6. `plugins/datasette-source.ts` — Connect-dialog checkboxes.
-7. `dialogs/new-table-dialog.ts` — column-editor toggles.
-8. `gist-sync.ts` / `dump-export.ts` / `server-sync-core.ts` — honour `noSync`.
-9. Unit + e2e tests.
+6. `plugins/datasette-source.ts` — Connect-dialog checkbox.
+7. `dialogs/new-table-dialog.ts` — column-editor toggle.
+8. Unit + e2e tests.
