@@ -22,6 +22,7 @@ import {
   fetchDatabaseNames,
   fetchTablesForDb,
   fetchTableMeta,
+  probeSingleTable,
   fetchTableCount,
   fetchRows,
   fetchPrimaryKeys,
@@ -108,7 +109,12 @@ async function resolveChosenTables(
   opts: { skipPicker?: boolean | undefined } = {},
 ): Promise<TableRef[] | null> {
   if (ref.db && ref.table) {
-    return [{ db: ref.db, table: ref.table, count: null, hidden: false, pks: [] }];
+    // Probe the named table so a missing/typo'd table surfaces as an error
+    // BEFORE any window/record is created (otherwise connect silently makes an
+    // empty local table). Throws DatasetteError on 404 → connectDatasette wraps
+    // it and openConnectDialog shows the alert. Bonus: real pks/count so
+    // upsertLiveTable skips its own pk probe.
+    return [await probeSingleTable(fetchFn, ref)];
   }
 
   let tables: TableRef[] = [];
@@ -674,11 +680,32 @@ async function openConnectDialog(api: HostApi): Promise<void> {
     async onTest(url, token) {
       const ref = parseDatasetteUrl(url);
       const status = await testConnection(fetchFn, ref.base, { token: token || undefined });
+      if (ref.db && ref.table) {
+        // Probe the ACTUAL table — instance reachability alone would wrongly
+        // pass a missing/typo'd table, and datasette.io challenges /-/versions
+        // anyway. Throws DatasetteError if the table isn't there → runTest shows
+        // it in red.
+        await probeSingleTable(withAuthFetch(fetchFn, token || undefined), ref);
+        const v = status.version ? ` (Datasette ${status.version})` : '';
+        return status.writable
+          ? `Reachable${v} — table found, signed in, read-write.`
+          : `Reachable${v} — table found, read-only (no token / not authenticated).`;
+      }
       if (!status.reachable) return `Unreachable: ${status.error ?? 'no response'}`;
       const v = status.version ? ` (Datasette ${status.version})` : '';
       return status.writable
         ? `Reachable${v} — signed in, read-write.`
         : `Reachable${v} — read-only (no token / not authenticated).`;
+    },
+    async onConnect(url, token) {
+      // Pre-flight gate: for a single-table URL, confirm the table exists BEFORE
+      // the dialog closes, so a "Table not found" stays inline in the dialog
+      // rather than closing and alerting. db/instance URLs aren't gated here —
+      // their discovery + table picker runs in connectDatasette after close.
+      const ref = parseDatasetteUrl(url);
+      if (ref.db && ref.table) {
+        await probeSingleTable(withAuthFetch(fetchFn, token || undefined), ref);
+      }
     },
   });
   if (!result) return;

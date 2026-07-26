@@ -22,6 +22,7 @@ import {
   fetchTableCount,
   testConnection,
   withAuthFetch,
+  probeSingleTable,
 } from './datasette-client.js';
 
 describe('parseDatabaseList', () => {
@@ -891,5 +892,49 @@ describe('applyTableMetadata (label_column)', () => {
   it('ignores label_column naming a missing column', () => {
     const { patch } = applyTableMetadata({ columns: {}, units: {}, labelColumn: 'ghost' }, cols);
     expect(patch.labelColumn).toBeUndefined();
+  });
+});
+
+describe('probeSingleTable', () => {
+  it('throws DatasetteError when the table does not exist (404)', async () => {
+    const errRes = (status: number, body: unknown): Promise<Response> =>
+      Promise.resolve({
+        ok: false,
+        status,
+        json: () => Promise.resolve(body),
+      } as unknown as Response);
+    const fetchFn = vi.fn(() => errRes(404, { ok: false, error: 'Table not found: officers' }));
+    const ref = parseDatasetteUrl('https://datasette.io/legislators/officers');
+    await expect(probeSingleTable(fetchFn, ref)).rejects.toBeInstanceOf(DatasetteError);
+  });
+
+  it('returns a TableRef with pks and count for a real table', async () => {
+    // Reuses the rich column_details shape from the fetchTableMeta tests above,
+    // with a `count` added so both fields are exercised together.
+    const DETAILS = {
+      ok: true,
+      count: 42,
+      column_details: {
+        id: { sqlite_type: 'INTEGER', notnull: 1, is_pk: 1, pk_position: 1, hidden: 0 },
+        name: { sqlite_type: 'TEXT', notnull: 0, is_pk: 0, hidden: 0, default: 'anon' },
+      },
+    };
+    const fetchFn = vi.fn(() => jsonRes(DETAILS));
+    const ref = parseDatasetteUrl(GPP_URL);
+    const result = await probeSingleTable(fetchFn, ref);
+    expect(result).toEqual({
+      db: 'global-power-plants',
+      table: 'global-power-plants',
+      count: 42,
+      hidden: false,
+      pks: ['id'],
+    });
+  });
+
+  it('rejects a URL that is missing a table, without making any fetch', async () => {
+    const fetchFn = vi.fn(() => Promise.reject(new Error('should not be called')));
+    const ref = parseDatasetteUrl('https://x.datasette.io/mydb');
+    await expect(probeSingleTable(fetchFn, ref)).rejects.toThrow();
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 });

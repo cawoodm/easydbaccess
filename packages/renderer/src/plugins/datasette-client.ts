@@ -477,6 +477,23 @@ export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promi
   return { columns, pks, count, typed, raw };
 }
 
+/**
+ * Confirm a single-table URL actually points at a real table, returning its
+ * TableRef. A directly-named table has no listing to fetch, so nothing else in
+ * the connect/import flow verifies it exists — without this a typo'd or missing
+ * table (e.g. datasette.io/legislators/officers → "Table not found") would
+ * silently create an empty local table. Uses fetchTableMeta, whose single
+ * `_`-param probe stays clear of datasette.io's Cloudflare challenge and throws
+ * DatasetteError on a 404, which the caller surfaces to the user.
+ */
+export async function probeSingleTable(fetchFn: FetchFn, ref: DatasetteRef): Promise<TableRef> {
+  if (!ref.db || !ref.table) {
+    throw new Error('probeSingleTable: URL must name a database and a table');
+  }
+  const meta = await fetchTableMeta(fetchFn, ref);
+  return { db: ref.db, table: ref.table, count: meta.count, hidden: false, pks: meta.pks };
+}
+
 // -- Datasette metadata (docs.datasette.io/en/stable/metadata.html) -----------
 
 /**

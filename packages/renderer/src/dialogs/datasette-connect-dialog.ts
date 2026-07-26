@@ -22,6 +22,10 @@ export interface ConnectDialogOpts {
   initialToken?: string;
   /** Runs the "Test connection" probe; returns a human-readable status line. */
   onTest?: (url: string, token: string) => Promise<string>;
+  /** Pre-flight gate run on submit; if it throws, the dialog stays open and
+   *  shows the error inline instead of closing. Resolves ⇒ the dialog closes
+   *  and the caller proceeds with the real connect. */
+  onConnect?: (url: string, token: string) => Promise<void>;
 }
 
 const EXAMPLE = 'https://latest.datasette.io/ephemeral';
@@ -96,6 +100,7 @@ export class DatasetteConnectDialog extends LitElement {
   private dialogEl: HTMLDialogElement | null = null;
   private resolveFn: ((v: ConnectChoice | null) => void) | null = null;
   private onTest?: ((url: string, token: string) => Promise<string>) | undefined;
+  private onConnect?: ((url: string, token: string) => Promise<void>) | undefined;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -119,6 +124,7 @@ export class DatasetteConnectDialog extends LitElement {
     this.status = '';
     this.statusKind = '';
     this.onTest = opts.onTest;
+    this.onConnect = opts.onConnect;
     return new Promise<ConnectChoice | null>((resolve) => {
       this.resolveFn = resolve;
       void this.updateComplete.then(() => this.dialogEl?.showModal());
@@ -151,11 +157,25 @@ export class DatasetteConnectDialog extends LitElement {
     }
   }
 
-  private submit = (e: Event): void => {
+  private submit = async (e: Event): Promise<void> => {
     e.preventDefault();
     const url = this.url.trim();
     if (!url) return;
-    this.finish({ url, token: this.token.trim() });
+    const token = this.token.trim();
+    if (this.onConnect) {
+      this.status = 'Checking…';
+      this.statusKind = 'busy';
+      try {
+        await this.onConnect(url, token);
+      } catch (err) {
+        // Keep the dialog open so the user can fix the URL — show the failure
+        // inline instead of closing and firing a separate alert.
+        this.status = (err as Error)?.message ?? String(err);
+        this.statusKind = 'err';
+        return;
+      }
+    }
+    this.finish({ url, token });
   };
 
   override render() {
