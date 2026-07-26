@@ -12,6 +12,7 @@
 
 export const meta = {
   name: 'cell-image-url',
+  title: 'Image URL Renderer',
   version: '0.1.0',
   description:
     'Renders the cell value as <img src=value>. Apply by setting a column\'s renderer to "image-url".',

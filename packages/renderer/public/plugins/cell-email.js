@@ -13,6 +13,7 @@
 
 export const meta = {
   name: 'cell-email',
+  title: 'Email Renderer',
   version: '0.1.0',
   description:
     'Renders email-shaped values as mailto: links. Apply by setting a column\'s renderer to "email".',

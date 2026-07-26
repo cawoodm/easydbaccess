@@ -2,25 +2,28 @@
   "$schema": "easydb-plugin-catalog-v1",
   "plugins": [
     {
-      "id": "header-clock",
-      "name": "Header Clock",
-      "description": "Adds a 'Now' button to the header that toasts the current time. Useful as a minimal reference for registerHeaderButton.",
-      "author": "easyDBAccess reference",
-      "url": "./header-clock.js"
-    },
-    {
-      "id": "cell-image-url",
-      "name": "Image URL Renderer",
-      "description": "Renders cells whose value is an image URL as an inline <img>. Apply by setting a column's renderer to \"image-url\".",
-      "author": "easyDBAccess reference",
-      "url": "./cell-image-url.js"
-    },
-    {
       "id": "cell-email",
       "name": "Email Renderer",
       "description": "Renders email-shaped values as mailto: links. Apply by setting a column's renderer to \"email\".",
       "author": "easyDBAccess reference",
+      "version": "0.1.0",
       "url": "./cell-email.js"
+    },
+    {
+      "id": "cell-image-url",
+      "name": "Image URL Renderer",
+      "description": "Renders the cell value as <img src=value>. Apply by setting a column's renderer to \"image-url\".",
+      "author": "easyDBAccess reference",
+      "version": "0.1.0",
+      "url": "./cell-image-url.js"
+    },
+    {
+      "id": "header-clock",
+      "name": "Header Clock",
+      "description": "Tiny demo plugin — a header button that toasts the current time.",
+      "author": "easyDBAccess reference",
+      "version": "0.1.0",
+      "url": "./header-clock.js"
     }
   ]
 }

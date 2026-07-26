@@ -12,6 +12,7 @@
 
 export const meta = {
   name: 'header-clock',
+  title: 'Header Clock',
   version: '0.1.0',
   description: 'Tiny demo plugin — a header button that toasts the current time.',
   author: 'easyDBAccess reference',
