@@ -1,6 +1,6 @@
 {
   "name": "easydbaccess",
-  "version": "0.0.108",
+  "version": "0.0.109",
   "private": true,
   "description": "Local-first, plugin-extensible, multi-table database app — runs in the browser and as an Electron desktop app.",
   "type": "module",

@@ -48,6 +48,7 @@ interface InstanceDraft {
   name: string;
   tokens: string[];
   mapping: Record<string, string>;
+  limit: number; // 0 = all
 }
 
 @customElement('views-dialog')
@@ -272,6 +273,7 @@ export class ViewsDialog extends LitElement {
       name: inst.name,
       tokens,
       mapping: { ...inst.mapping },
+      limit: inst.limit ?? 0,
     };
     this.mode = 'instance';
   }
@@ -357,11 +359,21 @@ export class ViewsDialog extends LitElement {
       name: `${t.name} — ${this.table?.name ?? 'table'}`,
       tokens,
       mapping,
+      limit: 0,
     };
     this.mode = 'instance';
   }
 
-  /** Best-effort token→column guess: exact field/label match (case-insensitive). */
+  private firstColumn(pred: (c: ColumnSpec) => boolean): string {
+    const hit = this.columns.find(pred);
+    return hit ? hit.field : '';
+  }
+
+  /**
+   * Best-effort token→column guess: exact field/label match (case-insensitive),
+   * then the labelColumn fallback, then a handful of name-based heuristics for
+   * common date / URL / description tokens.
+   */
   private autoMap(token: string): string {
     const lc = token.toLowerCase();
     const hit = this.columns.find(
@@ -373,6 +385,66 @@ export class ViewsDialog extends LitElement {
     // a row" default than leaving it unmapped.
     const label = this.table?.labelColumn;
     if (label && (lc === 'title' || lc === 'name' || lc === 'label')) return label;
+
+    const dateWords = [
+      'date',
+      'datetime',
+      'time',
+      'created',
+      'updated',
+      'modified',
+      'timestamp',
+      'day',
+      'when',
+    ];
+    if (dateWords.includes(lc)) {
+      return this.firstColumn((c) => c.type === 'date' || c.type === 'datetime');
+    }
+
+    const urlWords = ['url', 'link', 'href', 'website', 'homepage', 'uri', 'site', 'web'];
+    if (urlWords.includes(lc)) {
+      const linkCol = this.firstColumn((c) => c.renderer === 'link');
+      if (linkCol) return linkCol;
+      return this.firstColumn((c) => {
+        const f = c.field.toLowerCase();
+        const l = (c.label ?? '').toLowerCase();
+        return urlWords.some((w) => f.includes(w) || l.includes(w));
+      });
+    }
+
+    const descWords = [
+      'description',
+      'desc',
+      'notes',
+      'note',
+      'body',
+      'text',
+      'summary',
+      'about',
+      'comment',
+      'comments',
+      'details',
+      'detail',
+      'remarks',
+    ];
+    if (descWords.includes(lc)) {
+      const named = this.firstColumn((c) => {
+        if (c.type !== 'string') return false;
+        const f = c.field.toLowerCase();
+        const l = (c.label ?? '').toLowerCase();
+        return descWords.some((w) => f.includes(w) || l.includes(w));
+      });
+      if (named) return named;
+      const stringCols = this.columns.filter((c) => c.type === 'string');
+      const first = stringCols[0];
+      if (!first) return '';
+      let best = first;
+      for (const c of stringCols) {
+        if ((c.max ?? 0) > (best.max ?? 0)) best = c;
+      }
+      return best.field;
+    }
+
     return '';
   }
 
@@ -387,6 +459,7 @@ export class ViewsDialog extends LitElement {
       await ctx.store.viewInstances.patch(d.id, {
         name: d.name.trim(),
         mapping: { ...d.mapping },
+        limit: d.limit > 0 ? d.limit : undefined,
         updatedAt: Date.now(),
       });
       // Reflect the change in an already-open window.
@@ -412,6 +485,7 @@ export class ViewsDialog extends LitElement {
       visibleColumns,
       mapping: { ...d.mapping },
       updatedAt: Date.now(),
+      ...(d.limit > 0 ? { limit: d.limit } : {}),
     };
     await ctx.store.viewInstances.insert(inst);
     await this.openInstance(inst.id);
@@ -512,6 +586,19 @@ export class ViewsDialog extends LitElement {
           .value=${d.name}
           @input=${(e: Event) =>
             (this.iDraft = { ...d, name: (e.target as HTMLInputElement).value })}
+        />
+      </label>
+      <label class="field">
+        Show at most (rows, 0 = all)
+        <input
+          type="number"
+          min="0"
+          .value=${String(d.limit)}
+          @input=${(e: Event) =>
+            (this.iDraft = {
+              ...d,
+              limit: Math.max(0, Number((e.target as HTMLInputElement).value) || 0),
+            })}
         />
       </label>
       <div class="section">

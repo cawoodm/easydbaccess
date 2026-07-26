@@ -21,8 +21,7 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 
 ## Backlog
 
-- When creating a new view, auto map fields (URL-like fields to URL, date-like fields to date, long fields to DESCRIPTION) - also allow a view to specify TOP N rows
-- Allow user to edit title of the workspace in settings and display this in the header instead of easyDBAccess
+- When clicking on the version in the header launch the CHANGELOG.md URL on github
 - When connecting datasette add options for "virtual" and "no persist" recommended for big tables. Virtual means we don't load all data - we only load at most 2 visible pages in the UI, the sorting and filtering is done on the server and we eject the entire table from memory each time the user sorts or filters. Paging is server side. The "no persist" option means we don't save the data to our local store and we don't push/synch it either. Surface these settings in the column editor.
 
 ## In progress
@@ -31,7 +30,13 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 
 ## DONE
 
-- ✅ Implement settings dialog (concept `.claude/plans/2026-07-26-settings-dialog-concept.md`): tabbed dialog (General + one tab per plugin) via `api.ui.registerSettings`; `api.settings` two-layer store (workspace-synced / user device-local) with per-field promote/demote; secrets store with `${secret:name}` interpolation + drag-in `secrets.txt` import (overwrite prompt + toast); header gear button (secondary, icon-only, top-right); server-sync + gist-sync migrated. Rebased onto main's groundwork/anchor commits.
+- ✅✅ In every dialog, Ctrl+Enter confirms (primary action) and Esc closes — audited all 13 dialogs. `settings-dialog.ts`, `table-info-dialog.ts`, `gist-share-dialog.ts`, `views-dialog.ts` had no form/Ctrl+Enter wiring (Settings' Done button, specifically named, didn't confirm on Ctrl+Enter); `table-select-dialog.ts` had the form but not the keydown hook. Wrapped each in a `<form>` with the primary action as `type="submit"` and `@keydown=${ctrlEnterSubmits}` on the `<dialog>`; fixed several now-in-a-form `<button>`s in `views-dialog.ts`'s list mode that lacked an explicit `type="button"` and would otherwise have submitted the form on click. Esc already closes every dialog via native `<dialog>`/`cancel` handling — no change needed there.
+
+- ✅✅ Allow user to edit title of the workspace in settings and display this in the header instead of easyDBAccess — `Workspace.title` (optional, display-only; `id`/`name` stay technical), a "Workspace title" field on the Settings → General tab, header shows `title || 'easyDBAccess'` live via a `workspaces.subscribe()`. Covered by `e2e/35-workspace-title.spec.ts` (2 tests).
+
+- ✅ When creating a new view, auto map fields (URL-like fields to URL, date-like fields to date, long fields to DESCRIPTION) - also allow a view to specify TOP N rows. (`autoMap` now guesses date/url/description tokens by column type/renderer/name; new optional `ViewInstance.limit` + "Show at most (rows)" input in the view dialog, applied in `recompute()`. Also covers the "limit rows in view" backlog item.)
+
+- ✅ Implement settings dialog (v0.0.106): tabbed dialog (General + one tab per plugin) via `api.ui.registerSettings`; `api.settings` two-layer store (workspace-synced / user device-local) with per-field promote/demote; secrets store with `${secret:name}` interpolation + drag-in `secrets.txt` import (overwrite prompt + toast); header gear button (secondary, icon-only, top-right); server-sync + gist-sync migrated. Merged to main + published.
 
 - ✅ feature: The Gist Synch plugin should register a single footer button not 2 — one "Gist" button (GitHub icon) opens a menu: push / pull / settings / share / view gist. Share generates a `#hash` link with the base64 connection string (loaded on boot into the workspace). Added a per-table gist button (push/pull/view that table's file), a reusable anchored-menu, and consolidated the Export (JSON+SQL) and Sync (push/pull) footer buttons too.
 
