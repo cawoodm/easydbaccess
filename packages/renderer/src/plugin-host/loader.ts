@@ -8,7 +8,6 @@ import * as sqlExport from '../plugins/sql-export.js';
 import * as gistSync from '../plugins/gist-sync.js';
 import * as serverSync from '../plugins/server-sync.js';
 import * as newTableButton from '../plugins/new-table-button.js';
-import * as pluginManagerButton from '../plugins/plugin-manager-button.js';
 import * as coreRenderers from '../plugins/core-renderers.js';
 import * as cellColor from '../plugins/cell-color.js';
 import * as cellImage from '../plugins/cell-image.js';
@@ -31,10 +30,12 @@ export interface BuiltinEntry {
  * delivery mechanism (static import vs. dynamic import of a Blob URL).
  *
  * Only plugins flagged `meta.fixed = true` are always-on and non-disableable
- * (currently `core-renderers` and `plugin-manager-button`). Every other
- * built-in is user-toggleable from the Plugin Manager and defaults to
- * enabled. Disabled state is stored in the plugins collection under the
- * synthetic key `builtin:<id>`.
+ * (currently `core-renderers`). Every other built-in is user-toggleable from
+ * the Plugin Manager and defaults to enabled. Disabled state is stored in the
+ * plugins collection under the synthetic key `builtin:<id>`.
+ *
+ * The Plugin Manager itself is opened from a core header button (see
+ * `app-shell.ts`) — it is not a plugin.
  */
 const modules: PluginModule[] = [
   settings,
@@ -47,7 +48,6 @@ const modules: PluginModule[] = [
   sqlExport,
   gistSync,
   serverSync,
-  pluginManagerButton,
   coreRenderers,
   cellColor,
   cellImage,

@@ -436,7 +436,7 @@ export class AppShell extends LitElement {
             target="_blank"
             rel="noopener"
             title="View the changelog on GitHub"
-            ><span class="version">v0.0.118</span></a
+            ><span class="version">v0.0.119</span></a
           ></strong
         >
         ${this.headerButtons
@@ -472,6 +472,13 @@ export class AppShell extends LitElement {
             >
               <span class="mi">search</span>
             </button>`}
+        <button
+          class="icon-btn"
+          title="Add, disable, or remove plugins"
+          @click=${() => this.api?.ui.openPluginManager()}
+        >
+          <span class="mi">extension</span>
+        </button>
         ${this.headerButtons
           .filter((b) => b.variant === 'secondary')
           .map((b) => this.renderSlotButton(b, 'header'))}

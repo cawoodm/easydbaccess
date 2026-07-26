@@ -40,11 +40,12 @@ export function init(api: HostApi): void {
   every built-in declares one.
 - **Every built-in defaults to user-toggleable from the Plugin Manager.**
   Only `meta.fixed = true` opts a plugin *out* of that — it becomes
-  always-on and never shows a toggle. Today only `core-renderers` and
-  `plugin-manager-button` are fixed; everything else (including things you
-  might assume are load-bearing, like `new-table-button` or `csv-import`)
-  can be disabled by the user. Toggle state is stored under the synthetic
-  key `builtin:<id>` in the `plugins` collection.
+  always-on and never shows a toggle. Today only `core-renderers` is fixed;
+  everything else (including things you might assume are load-bearing, like
+  `new-table-button` or `csv-import`) can be disabled by the user. Toggle
+  state is stored under the synthetic key `builtin:<id>` in the `plugins`
+  collection. (The Plugin Manager button itself is **core**, not a plugin —
+  a header button in `app-shell.ts`.)
 
 **Built-in vs. third-party** is purely a delivery mechanism. Built-ins
 (`packages/renderer/src/plugins/*.ts`) are static-imported and listed in
@@ -104,7 +105,6 @@ defaults to enabled but **can** be turned off by the user.
 | `sql-export` | exporter | | No UI of its own — exports `serializeWorkspaceAsSql()`, called from `dump-export`'s "Export" menu. Still a standalone catalog entry (its own `meta.type`) for the Plugin Manager's type filter. | none (library only) |
 | `gist-sync` | sync | | Footer "Gist" menu button (Push/Pull/Settings/Share/View gist) plus a per-table "Gist" menu (push/pull/view just that table's file) that store the workspace as a private GitHub Gist. Credentials are Settings-dialog fields (`user`/`gist_id` workspace-scope, `gist_token` a user-scope secret). | `registerFooterButton`, `registerTableButton`, `registerSettings` |
 | `server-sync` | sync | | Footer "Sync" menu button (Push/Pull) against a configured easyDBAccess Hono server, with ETag-based conflict detection. | `registerFooterButton`, `registerSettings` |
-| `plugin-manager-button` | ui | ✓ | Footer "Plugins" button that opens the redesigned Plugin Manager dialog (unified built-in/catalog/installed list, category + by-type filters). | `registerFooterButton` |
 | `core-renderers` | cell-renderer | ✓ | Ships the `date`, `datetime`, `boolean`, and power-user `script` cell renderers (the last runs a user-authored `render(row)` JS body and injects the returned HTML). | `registerCellRenderer` |
 | `cell-color` | cell-renderer | | `color` renderer: a native `<input type=color>` swatch picker for hex values. | `registerCellRenderer` |
 | `cell-image` | cell-renderer | | `image` renderer: thumbnail + upload button; stores images as `data:` URIs. | `registerCellRenderer` |
@@ -352,7 +352,7 @@ their secrets between devices without typing them again. The Settings
 *dialog* itself — tabs, per-field promote/demote, the secrets editor — is
 core chrome documented in `DIALOGS.md`; this plugin only owns the entry
 point and the drag-and-drop convenience, the same "dogfood the registration
-path" pattern `new-table-button`/`plugin-manager-button` follow.
+path" pattern `new-table-button` follows.
 
 Any other plugin participates in this system by calling
 `api.ui.registerSettings(pluginId, name, fields)` once in `init()` — see
@@ -403,17 +403,19 @@ Header "+ New Table" button; its `onClick` is just
 `api.ui.openNewTableDialog()`. The dialog itself is core chrome — this
 plugin only supplies the entry point.
 
-### plugin-manager-button
+### Plugin Manager button (core, not a plugin)
 
-Footer "Plugins" button; `onClick` is `api.ui.openPluginManager()`, which
-opens the redesigned Plugin Manager dialog: one unified list merging
-built-ins, catalog entries, and installed URL plugins (rather than three
-separate sections), with two independent tri-state filter-chip rows —
-by category (Installed / Built-in / Available / Fixed) and by `meta.type`
-(Importer / Exporter / Cell renderer / Sync / Source / UI) — plus a search
-box. Each chip cycles off → show-only-these → hide-these → off. A row shows
-its `meta.icon` (falling back to a generic "extension" glyph), name, and a
-GitHub link when `meta.repo` is set.
+An icon-only secondary header button (top-right, left of Settings) in
+`app-shell.ts` whose `onClick` is `api.ui.openPluginManager()`. It opens the
+Plugin Manager dialog: one unified list merging built-ins, catalog entries,
+and installed URL plugins (rather than three separate sections), with two
+independent tri-state filter-chip rows — by category (Installed / Built-in /
+Available / Fixed) and by `meta.type` (Importer / Exporter / Cell renderer /
+Sync / Source / UI) — plus a search box. Each chip cycles off →
+show-only-these → hide-these → off. A row shows its `meta.icon` (falling back
+to a generic "extension" glyph), name, and a GitHub link when `meta.repo` is
+set. (The button used to be the `plugin-manager-button` plugin; it was
+promoted to core chrome.)
 
 ## Adding a built-in plugin
 

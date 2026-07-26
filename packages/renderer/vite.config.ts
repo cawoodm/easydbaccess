@@ -18,6 +18,11 @@ export default defineConfig({
   server: {
     port: 5190,
     strictPort: false,
+    // Bind all interfaces (not just whichever localhost resolves to first —
+    // on some machines that's IPv6-only, so a plain 127.0.0.1 client can't
+    // connect even though the server is up). Also what makes ngrok exposure
+    // (see allowedHosts below) reachable.
+    host: true,
     fs: { allow: [searchForWorkspaceRoot(process.cwd()), sharedNodeModules] },
     // Allow ngrok tunnels (random *.ngrok-free.app subdomain per session) so the
     // dev server can be exposed for external verification. Dev-only; Vite's

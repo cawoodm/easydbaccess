@@ -21,11 +21,13 @@ Status keys: `bug` = broken, `feature` = missing, Leading `✅` = done.
 ## Backlog
 
 - bug: when I pull in a json dump I expect the windows to have the geometry and also the views
-- plugin-manager-button.ts should not be a plugin but a core feature and a small icon-only secondary button in the top-right (left of settings)
+- bug: I was able to import simon-blog/entries from datasette.io AND connect it, table names should be unique
+- share workspace link should be presented as an html link we can click on in addition to the copy/input
 - Feature: Importers are too interwoven, they should be separate plugins with separate dialogs and have the meta.type=='importer'. The core import-data plugin provides a header import button with AnchoredMenu for each of the import plugins (Dump, JSON, CSV, Datasette, SQL, Parquet). Each plugin brings it's own dialog. All importers should support URL or File upload as well as a row limit and an option to edit columns before import. Write a plan for this before implementing anything.
 
 ## In progress
 
+- 🕜 plugin-manager-button.ts should not be a plugin but a core feature and a small icon-only secondary button in the top-right (left of settings)
 - 🕜 bug: when I pull in a gist I expect the windows to have the geometry set in the gist
 - 🕜 When connecting datasette add options for "virtual" and "no persist" recommended for big tables. Virtual means we don't load all data - we only load at most 2 visible pages in the UI, the sorting and filtering is done on the server and we eject the entire table from memory each time the user sorts or filters. Paging is server side. The "no persist" option means we don't save the data to our local store and we don't push/synch it either. Surface these settings in the column editor.
 
