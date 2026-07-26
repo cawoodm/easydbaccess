@@ -9,6 +9,12 @@ import type {
   WindowGeometry,
 } from '@easydb/shared';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
+// Type-only: erased at compile time, so importing this module for its type
+// never pulls in `lit`/`top-progress.js` at runtime (that module registers a
+// custom element on import, which would blow up under Vitest's default
+// Node environment). The actual class is loaded lazily via dynamic import()
+// only on the large-import path below, once we're past unit-test territory.
+import type { ProgressHandle } from '../chrome/top-progress.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   name: 'json-import',
@@ -136,87 +142,114 @@ export async function importJsonText(
     else mode = 'append-new';
   }
 
-  if (mode === 'replace-workspace') {
-    for (const t of existing) {
-      const rowColl = api.store.rows(t.id);
-      const rs = await rowColl.find();
-      await rowColl.bulkRemove(rs.map((r) => r.id));
-      await api.store.tables.remove(t.id);
-    }
+  // The slow phase for large dumps (e.g. Northwind's ~10s) is what's left:
+  // optional replace-workspace cleanup, then the per-table bulkInsert loop.
+  // Gate the top progress bar on total row count rather than a timer — unlike
+  // a network fetch we have no "in progress, taking a while" signal to hook a
+  // slow-threshold off before the work is already done, but we do know the
+  // row counts up front, and they're a fair proxy for how long bulkInsert
+  // will take. Small imports skip the bar entirely rather than flashing it.
+  const ROW_THRESHOLD = 2000;
+  const totalRows = tables.reduce(
+    (sum, t) => sum + (t.source ? 0 : Math.min(t.rows.length, opts.maxRows ?? Infinity)),
+    0,
+  );
+  let handle: ProgressHandle | null = null;
+  if (totalRows >= ROW_THRESHOLD) {
+    const { TopProgress } = await import('../chrome/top-progress.js');
+    handle = TopProgress.begin(`Importing ${filename}…`);
   }
 
-  const existingByName = new Map(existing.map((t) => [t.name, t] as const));
-  for (const t of tables) {
-    // Prefer backing info embedded in the dump (another device's export); else,
-    // if we fetched this dump from a URL, record a snapshot origin so the table
-    // can be refreshed/reloaded later.
-    const source = t.source;
-    const origin =
-      t.origin ??
-      (!source && opts.originUrl
-        ? ({ type: 'json', url: opts.originUrl } as TableOrigin)
-        : undefined);
-
-    let tableId: string;
-    const match = mode === 'overwrite-matching' ? existingByName.get(t.name) : undefined;
-    if (match) {
-      // Overwrite: keep the id (and thus its panel position) but wipe rows
-      // and replace columns + sort + geometry + backing info from the import.
-      tableId = match.id;
-      // Only clear LOCAL rows. A matched table that's already live (`source`)
-      // routes rows to its remote provider — we must not issue remote deletes.
-      if (!match.source) {
-        const rowColl = api.store.rows(tableId);
-        const oldRows = await rowColl.find();
-        await rowColl.bulkRemove(oldRows.map((r) => r.id));
+  try {
+    if (mode === 'replace-workspace') {
+      for (const t of existing) {
+        const rowColl = api.store.rows(t.id);
+        const rs = await rowColl.find();
+        await rowColl.bulkRemove(rs.map((r) => r.id));
+        await api.store.tables.remove(t.id);
       }
-      await api.store.tables.patch(tableId, {
-        columns: t.columns,
-        ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
-        ...(t.sortColumn
-          ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true }
-          : { sortColumn: undefined, sortAsc: undefined }),
-        source: source ?? undefined,
-        origin: origin ?? undefined,
-        updatedAt: Date.now(),
-      });
-    } else {
-      tableId = cryptoUUID();
-      api.events.emit('import:before', { source: 'json', tableId });
-      await api.store.tables.insert({
-        id: tableId,
-        workspaceId,
-        name: t.name,
-        code: slug(t.name),
-        columns: t.columns,
-        view: 'table',
-        ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
-        ...(t.sortColumn ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true } : {}),
-        ...(source ? { source } : {}),
-        ...(origin ? { origin } : {}),
-        updatedAt: Date.now(),
-      });
     }
 
-    // Snapshot rows are stored locally; a live (`source`) table pulls its own
-    // rows from the provider, so we do NOT insert them here (that would write
-    // to the remote). Its routed collection loads them on render.
-    let inserted = 0;
-    if (!source) {
-      const rowColl = api.store.rows(tableId);
-      // Apply the Import dialog's "Limit rows" cap per table (undefined ⇒ all).
-      const rowsToInsert = opts.maxRows != null ? t.rows.slice(0, opts.maxRows) : t.rows;
-      const docs = rowsToInsert.map((row) => ({
-        id: cryptoUUID(),
-        tableId,
-        data: row,
-        updatedAt: Date.now(),
-      }));
-      await rowColl.bulkInsert(docs);
-      inserted = docs.length;
-    }
+    const existingByName = new Map(existing.map((t) => [t.name, t] as const));
+    let rowsDone = 0;
+    for (const t of tables) {
+      // Prefer backing info embedded in the dump (another device's export); else,
+      // if we fetched this dump from a URL, record a snapshot origin so the table
+      // can be refreshed/reloaded later.
+      const source = t.source;
+      const origin =
+        t.origin ??
+        (!source && opts.originUrl
+          ? ({ type: 'json', url: opts.originUrl } as TableOrigin)
+          : undefined);
 
-    api.events.emit('import:after', { source: 'json', tableId, rowCount: inserted });
+      let tableId: string;
+      const match = mode === 'overwrite-matching' ? existingByName.get(t.name) : undefined;
+      if (match) {
+        // Overwrite: keep the id (and thus its panel position) but wipe rows
+        // and replace columns + sort + geometry + backing info from the import.
+        tableId = match.id;
+        // Only clear LOCAL rows. A matched table that's already live (`source`)
+        // routes rows to its remote provider — we must not issue remote deletes.
+        if (!match.source) {
+          const rowColl = api.store.rows(tableId);
+          const oldRows = await rowColl.find();
+          await rowColl.bulkRemove(oldRows.map((r) => r.id));
+        }
+        await api.store.tables.patch(tableId, {
+          columns: t.columns,
+          ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
+          ...(t.sortColumn
+            ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true }
+            : { sortColumn: undefined, sortAsc: undefined }),
+          source: source ?? undefined,
+          origin: origin ?? undefined,
+          updatedAt: Date.now(),
+        });
+      } else {
+        tableId = cryptoUUID();
+        api.events.emit('import:before', { source: 'json', tableId });
+        await api.store.tables.insert({
+          id: tableId,
+          workspaceId,
+          name: t.name,
+          code: slug(t.name),
+          columns: t.columns,
+          view: 'table',
+          ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
+          ...(t.sortColumn ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true } : {}),
+          ...(source ? { source } : {}),
+          ...(origin ? { origin } : {}),
+          updatedAt: Date.now(),
+        });
+      }
+
+      // Snapshot rows are stored locally; a live (`source`) table pulls its own
+      // rows from the provider, so we do NOT insert them here (that would write
+      // to the remote). Its routed collection loads them on render.
+      let inserted = 0;
+      if (!source) {
+        const rowColl = api.store.rows(tableId);
+        // Apply the Import dialog's "Limit rows" cap per table (undefined ⇒ all).
+        const rowsToInsert = opts.maxRows != null ? t.rows.slice(0, opts.maxRows) : t.rows;
+        const docs = rowsToInsert.map((row) => ({
+          id: cryptoUUID(),
+          tableId,
+          data: row,
+          updatedAt: Date.now(),
+        }));
+        await rowColl.bulkInsert(docs);
+        inserted = docs.length;
+        rowsDone += inserted;
+        // Weight progress by row count rather than table count, so a dump with
+        // one huge table and several tiny ones doesn't jump straight to 90%.
+        handle?.fraction(totalRows > 0 ? rowsDone / totalRows : 1);
+      }
+
+      api.events.emit('import:after', { source: 'json', tableId, rowCount: inserted });
+    }
+  } finally {
+    handle?.done();
   }
 }
 

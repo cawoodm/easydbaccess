@@ -1,233 +1,257 @@
-# TODO
+# Instructions
 
-Feature-parity gap against `minniDBMax v0.0.29`, plus known bugs in
-`easyDBAccess`. Existing bullets first, then grouped additions.
+- Read instructions in .claude\CLAUDE.md
+- Run a loop to process one task at a time:
+  - Read an unmarked TODO from the Backlog below, don't take a task marked 🕜
+  - Move it to in-progress and mark it with 🕜
+  - If you are not already on a worktree, create a todos branch and worktree and switch to that
+  - Begin implementing and ask questions if anything is unclear
+  - Once a task is implemented, show the user the full dev URL link (with http://), ask the user if they are happy explaining what was done and how to test it
+  - Once the user accepts it, mark as done ✅ and move to DONE
+  - Commit (Don't put TODO or claim in the commit message, just the original task text)
+  - Always update your worktrees TODO and the file C:\projects\Marc\easyDBAccess\TODO.md so I can watch live changes
 
 Status keys: `bug` = broken, `feature` = missing, `polish` = works but UX
 gap, `perf` = correctness OK but slow. Leading `✅` = done.
 `✅✅` = done with e2e test coverage.
 
+## Backlog
+
+- Create a concept for a settings dialog with tabs for General and then one tab for each plugin which has registered settings. Plugins should call api.registerSettings with their id, name and a JSON object containing their settings. See C:\projects\Marc\twikki\src\packages\base\SettingsDialogPlugin\SettingsDialog.js for how to make a dynamic dialog based on JSON Workspace settings are saved in the settings table for the workspace while user settings are saved in a single easydbaccess.json key in localStorage so the user can easily move this between devices.
+- Bug: when connecting a datasette.io instance which fails with table not found, the table is still created empty. The dialog should automatically check the URL before proceeding (e.g. broken URL https://datasette.io/legislators/officers)
+- Bug: When pulling the Simon workspace (see tmp/tokens.txt for the gist connection string) the error is: Gist sync
+  Pull failed: Expected double-quoted property name in JSON at position 418295 (line 422 column 124) - are we running into size limits? Can we report back which file/table was at fault. We should continue pulling other tables even if one fails. We need a progress bar.
+
 ## Rendering
-* ✅ Create an html renderer which outputs the value of a cell without encoding
+
+- ✅ Create an html renderer which outputs the value of a cell without encoding
 
 ## Dialogs
-* ✅✅ Create an all-purpose choice() dialog which accepts an array of string options (e.g. OK, Ignore, Cancel) and displays them as a vertical list of buttons and returns the string of the button the user clicked
-* ✅✅ `window.prompt`; needs a proper dialog) - make an all-purpose prompt which can be used by plugins via the api 
-* ✅✅ `window.alert`; needs a proper dialog - make an all-purpose alert which can be used by plugins via the api
+
+- ✅✅ Create an all-purpose choice() dialog which accepts an array of string options (e.g. OK, Ignore, Cancel) and displays them as a vertical list of buttons and returns the string of the button the user clicked
+- ✅✅ `window.prompt`; needs a proper dialog) - make an all-purpose prompt which can be used by plugins via the api
+- ✅✅ `window.alert`; needs a proper dialog - make an all-purpose alert which can be used by plugins via the api
 
 ## General
-* ✅✅ bug: z-order of windows is not persisted, it should be saved with the geometry
-* ✅✅ feature: create new workspace is not implemented (the `+` button opens
-* ✅✅ feature: search in table not implemented (per-table local search), search bars should appear as icon and expand into input on focus
-* ✅✅ polish: proper jsPanel footer is missing from tables with icon buttons:
-  * Export csv (download icon)
-  * Import csv (upload icon)
-  * Column editor (column icon)
+
+- ✅✅ bug: z-order of windows is not persisted, it should be saved with the geometry
+- ✅✅ feature: create new workspace is not implemented (the `+` button opens
+- ✅✅ feature: search in table not implemented (per-table local search), search bars should appear as icon and expand into input on focus
+- ✅✅ polish: proper jsPanel footer is missing from tables with icon buttons:
+  - Export csv (download icon)
+  - Import csv (upload icon)
+  - Column editor (column icon)
 
 ## Data table rendering
 
-* ✅✅ feature: per-column resize handles (drag the right edge of `th`)
-* ✅✅ perf: row virtualization for >1000 rows (currently renders the entire `tbody`)
-* ✅✅ feature: column width persistence (`Column.width` field on resize stop)
-* ✅✅ feature: null-value cell highlighting (light red background) so empties stand out
-* ✅✅ polish: number cells right-aligned (header and cell)
-* ✅✅ feature: date cells render in user locale short format when read-only,
+- ✅✅ feature: per-column resize handles (drag the right edge of `th`)
+- ✅✅ perf: row virtualization for >1000 rows (currently renders the entire `tbody`)
+- ✅✅ feature: column width persistence (`Column.width` field on resize stop)
+- ✅✅ feature: null-value cell highlighting (light red background) so empties stand out
+- ✅✅ polish: number cells right-aligned (header and cell)
+- ✅✅ feature: date cells render in user locale short format when read-only,
   use `<input type=date>` when editing and datetime respectively
-* ✅✅ feature: separate `datetime` type (date + time of day); current `date` type
+- ✅✅ feature: separate `datetime` type (date + time of day); current `date` type
   is date-only
-* ✅✅ feature: Change the `×` delete button to a subtle gray icon which darkens on hover
+- ✅✅ feature: Change the `×` delete button to a subtle gray icon which darkens on hover
   re-render
 
 ## Columns Editor
 
-* ✅✅ feature: drag-to-reorder columns by dragging the `th` itself (currently
+- ✅✅ feature: drag-to-reorder columns by dragging the `th` itself (currently
   only `▲`/`▼` buttons inside the column editor dialog)
-* ✅✅ feature: hide/show columns (`Column.hidden` flag + eye toggle in editor)
-* ✅✅ Add max length to column editor
-* ✅ Column editor should preview a copy of the top 100 rows of existing data marking red what doesn't validate or parse according to live changes in the editor
+- ✅✅ feature: hide/show columns (`Column.hidden` flag + eye toggle in editor)
+- ✅✅ Add max length to column editor
+- ✅ Column editor should preview a copy of the top 100 rows of existing data marking red what doesn't validate or parse according to live changes in the editor
   (edit mode in `new-table-dialog.ts`: `renderPreview()` +
   `validateAgainstSpec`, red `violation` class, re-runs live on every edit)
 
 ## Cell Editing
-* ✅✅ feature: constraint pre-flight scan — when enabling `unique`/`notnull` on
+
+- ✅✅ feature: constraint pre-flight scan — when enabling `unique`/`notnull` on
   an existing column, scan rows for violations and block save with details
-* ✅✅ feature: enforce `Column.max` on edit and insert (field exists in schema, never read)
-* ✅✅ feature: enforce `Column.unique` (field exists, not validated)
-* ✅✅ feature: enforce `Column.notnull` (field exists, not validated)
-* ✅✅ feature: apply `Column.default` when inserting a row (field exists, currently we just `?? ''`)
+- ✅✅ feature: enforce `Column.max` on edit and insert (field exists in schema, never read)
+- ✅✅ feature: enforce `Column.unique` (field exists, not validated)
+- ✅✅ feature: enforce `Column.notnull` (field exists, not validated)
+- ✅✅ feature: apply `Column.default` when inserting a row (field exists, currently we just `?? ''`)
 
 ## Import / export
 
-* ✅✅ feature: CSV paste textarea (currently only file drop)
-* ✅✅ feature: CSV import-mode dialog for existing tables — use common api's choice() dialog for: `Append` /
+- ✅✅ feature: CSV paste textarea (currently only file drop)
+- ✅✅ feature: CSV import-mode dialog for existing tables — use common api's choice() dialog for: `Append` /
   `Overwrite rows` / `Cancel` / `Create new table`
-* ✅✅ feature: CSV header colon mini-language parser
+- ✅✅ feature: CSV header colon mini-language parser
   `field:label:type:default:max:flags` (the type-from-data inference still
   applies as fallback)
-* ✅✅ feature: JSON import-mode dialog — `Overwrite matching tables` / `Replace
-  entire workspace` / `Cancel` (currently always inserts new tables next to
+- ✅✅ feature: JSON import-mode dialog — `Overwrite matching tables` / `Replace
+entire workspace` / `Cancel` (currently always inserts new tables next to
   existing ones)
-* ✅✅ feature: cascade window positions for imported tables that have no
+- ✅✅ feature: cascade window positions for imported tables that have no
   `elementRect.x/y` (today the v1 importer honors saved positions; tables
   without coords stack)
-* ✅✅ feature: validate dump-export shape covers everything the JSON-import
+- ✅✅ feature: validate dump-export shape covers everything the JSON-import
   reader expects, so round-trips are lossless
 
 ## Sync (Gist)
 
-* ✅ feature: Gist credentials dialog (proper Lit `<dialog>` replacing `window.prompt`),
+- ✅ feature: Gist credentials dialog (proper Lit `<dialog>` replacing `window.prompt`),
   with help text + link to GitHub PAT settings
-* ✅ feature: Toast notifications on Push / Pull success and error
+- ✅ feature: Toast notifications on Push / Pull success and error
   (replace `window.alert`)
-* ✅ feature: Pre-push 1 MB-per-file size check + warning before the request
-* ✅ polish: surface the gist URL after a successful Push so user can open it
+- ✅ feature: Pre-push 1 MB-per-file size check + warning before the request
+- ✅ polish: surface the gist URL after a successful Push so user can open it
   (the Push toast includes the URL, which `toast-host.ts` linkifies into a
   clickable `<a target=_blank>`)
 
 ## Filters
 
-* ✅✅ feature: per-column filter as a dropdown with unique-value picker capped at
+- ✅✅ feature: per-column filter as a dropdown with unique-value picker capped at
   ~500 values (currently substring text input only)
-* ✅✅ feature: funnel icon on the column header, active state highlights it blue
-* ✅✅ feature: faceted options — the dropdown's value list respects other active
+- ✅✅ feature: funnel icon on the column header, active state highlights it blue
+- ✅✅ feature: faceted options — the dropdown's value list respects other active
   per-column filters
-* ✅✅ polish: filter dropdown anchored under the column header, escapes panel
+- ✅✅ polish: filter dropdown anchored under the column header, escapes panel
   clip boundaries (use `document.body` portal pattern)
 
 ## Search
 
-* ✅ feature: per-table local search input inside each `<data-table>` (toggle
+- ✅ feature: per-table local search input inside each `<data-table>` (toggle
   icon → expand)
-* ✅ feature: global header search should be collapsible (icon → input on focus,
+- ✅ feature: global header search should be collapsible (icon → input on focus,
   collapse on blur if empty)
-* ✅ polish: clarify precedence — global search AND per-column filters AND
+- ✅ polish: clarify precedence — global search AND per-column filters AND
   per-table search ANDed together (`data-table.ts` `filteredRows()` narrows
   sequentially: per-column filters → local search → global search, so a row
   must pass all three)
 
 ## Validation & data integrity
 
-* feature: type detection on import — DMY-vs-MDY date inference remembered per
+- feature: type detection on import — DMY-vs-MDY date inference remembered per
   column; handle `/`, `-`, `.` separators
-* feature: datetime parsing with space-or-`T` separator and 24-hour HH:MM:SS
-* ✅ feature: inline cell-edit validation — reject and revert on type mismatch
+- feature: datetime parsing with space-or-`T` separator and 24-hour HH:MM:SS
+- ✅ feature: inline cell-edit validation — reject and revert on type mismatch
   or constraint violation
-* feature: explicit Null distinguishable from empty string in storage
+- feature: explicit Null distinguishable from empty string in storage
 
 ## Window manager (jsPanel)
 
-* ✅✅ bug: z-order of windows is not persisting (above)
-* ✅ feature: restore `maximized` and `minimized` status on reload
+- ✅✅ bug: z-order of windows is not persisting (above)
+- ✅ feature: restore `maximized` and `minimized` status on reload
   (`saveGeometry` persists both flags; `openPanel` re-applies them on boot —
   `jspanel-manager.ts`. Minimized panels mount lazily.)
-* ✅✅ feature: panel title shows row count after table name, e.g. `inventory (3)`
-* ✅✅ feature: header-drag visual feedback (opacity + drop-target borders) when
+- ✅✅ feature: panel title shows row count after table name, e.g. `inventory (3)`
+- ✅✅ feature: header-drag visual feedback (opacity + drop-target borders) when
   doing column reorder via the table header
-* ✅ polish: smallify control re-enabled (the `headerControls` override that
+- ✅ polish: smallify control re-enabled (the `headerControls` override that
   removed it is gone; `jsPanel.create` uses the default control set)
 
 ## UI niceties
 
-* ✅✅ feature: toast notification system (replace `alert()` in plugin flows —
+- ✅✅ feature: toast notification system (replace `alert()` in plugin flows —
   gist sync, import errors, etc.)
-* ✅✅ feature: confirm dialog (replace native `confirm` for row/table delete)
-* ✅✅ feature: Material Icons in buttons everywhere (currently text labels —
+- ✅✅ feature: confirm dialog (replace native `confirm` for row/table delete)
+- ✅✅ feature: Material Icons in buttons everywhere (currently text labels —
   `+ New Table`, `Push`, `Pull`, `Dump`, `CSV`, etc.)
-* feature: keyboard shortcuts — Enter to import, Esc to cancel cell edit,
+- feature: keyboard shortcuts — Enter to import, Esc to cancel cell edit,
   Esc to close dialogs
-  * ✅ Esc closes dialogs (native `<dialog>` `cancel` event, wired everywhere)
-  * ✅ Enter to import (Ctrl/Cmd+Enter via `ctrlEnterSubmits`, works from any
+  - ✅ Esc closes dialogs (native `<dialog>` `cancel` event, wired everywhere)
+  - ✅ Enter to import (Ctrl/Cmd+Enter via `ctrlEnterSubmits`, works from any
     field incl. textareas; plain Enter also submits single-line inputs natively)
-  * ✅✅ Esc to cancel cell edit (`cancelCellEdit` in `data-table.ts` reverts the
+  - ✅✅ Esc to cancel cell edit (`cancelCellEdit` in `data-table.ts` reverts the
     editor to the stored value + blurs without committing; e2e covered)
-* ✅✅ polish: more prominent page-level drag-drop overlay during a drag (today
+- ✅✅ polish: more prominent page-level drag-drop overlay during a drag (today
   the dashed border only appears via CSS; reliable visual cue would help)
-* ✅✅ feature: draggable modal dialogs (column editor, new-table dialog) — they
+- ✅✅ feature: draggable modal dialogs (column editor, new-table dialog) — they
   are currently centered modals, not draggable
-* feature: progress indicator during large imports (Northwind takes ~10s)
+- ✅ feature: progress indicator during large imports (Northwind takes ~10s)
+  (`json-import.ts` drives the `TopProgress` bar through the parse+insert
+  phase, row-weighted, gated at ≥2000 rows so small imports don't flash it;
+  the network-fetch bar already covered the download phase)
 
 ## Plugin system
 
-* ✅ feature: URL-fetched plugins — Plugin Manager dialog, dynamic `import()` of
+- ✅ feature: URL-fetched plugins — Plugin Manager dialog, dynamic `import()` of
   a `Blob` URL built from the cached JS body
-* ✅ feature: `cachedBody` field on the `plugin` collection actually used for
+- ✅ feature: `cachedBody` field on the `plugin` collection actually used for
   offline-first plugin load
-* ✅ feature: `Workspace.pluginUrls` list rendered and editable in the Plugin
+- ✅ feature: `Workspace.pluginUrls` list rendered and editable in the Plugin
   Manager (fields already exist in schema)
-* ✅ feature: plugin error UI — surface `plugin:error` events as a panel/toast
+- ✅ feature: plugin error UI — surface `plugin:error` events as a panel/toast
   with stack trace and "disable plugin" affordance
 
 ## Backend / server
-* ✅ feature: removed rxdb entirely; renderer now talks to Dexie directly via
+
+- ✅ feature: removed rxdb entirely; renderer now talks to Dexie directly via
   `dexie-db.ts` + `data-store-dexie.ts`. Plugin API surface is unchanged.
   Subscriptions use `liveQuery`. Local v1 data isn't migrated — users on the
   upgrade path should Dump first.
-* ✅✅ feature: `/replicate/:collection/pull` and `/push` actually implement the
+- ✅✅ feature: `/replicate/:collection/pull` and `/push` actually implement the
   RxDB replication protocol (today both return 501)
-* ✅ feature: renderer wires `RxReplicationState` to the server endpoints so
+- ✅ feature: renderer wires `RxReplicationState` to the server endpoints so
   multi-device sync works end-to-end
-* ✅✅ feature: `/fetch` URL proxy actually used by plugins
+- ✅✅ feature: `/fetch` URL proxy actually used by plugins
   (`api.backend.fetch` routes through `${server-sync:url}/fetch` when the
   setting is configured; direct fetch otherwise)
-* ✅✅ feature: `/plugins/registry` returns a curated list
+- ✅✅ feature: `/plugins/registry` returns a curated list
   (`PLUGINS_REGISTRY_PATH` env var → JSON file; Plugin Manager dialog
   shows them in a "From server" section)
 
 ## Electron
 
-* feature: bundle Hono into the Electron main process (today just opens a
+- feature: bundle Hono into the Electron main process (today just opens a
   `BrowserWindow` pointing at the Vite dev URL — renderer still uses Dexie)
-* feature: IPC bridge in preload exposes a Dexie-over-IPC storage adapter
+- feature: IPC bridge in preload exposes a Dexie-over-IPC storage adapter
   proxying to main-process better-sqlite3
-* feature: `better-sqlite3` storage in main process (data goes to a real file
+- feature: `better-sqlite3` storage in main process (data goes to a real file
   instead of IndexedDB inside Electron's renderer)
-* feature: `electron-builder` packaging exercised end-to-end (config exists,
+- feature: `electron-builder` packaging exercised end-to-end (config exists,
   never run)
-* polish: `window.easydb.platform === 'electron'` branch in the renderer so
+- polish: `window.easydb.platform === 'electron'` branch in the renderer so
   features can light up only on desktop (e.g. native save dialog)
 
 ## Tests
 
-* feature: Vitest unit suite — CSV parser (incl. RFC-4180 edge cases), JSON
+- feature: Vitest unit suite — CSV parser (incl. RFC-4180 edge cases), JSON
   parser shape detection (v1 + v2 + nested + array-of-objects), type
   inference, geometry sanitizer, column-editor validation
-  * ✅ CSV RFC-4180 edge cases (`csv-import.test.ts`: doubled-quote escaping,
+  - ✅ CSV RFC-4180 edge cases (`csv-import.test.ts`: doubled-quote escaping,
     embedded commas, CRLF, embedded newlines in quoted fields)
-  * ✅ JSON shape detection (`json-import.test.ts`: v1/native dump, array-of-
+  - ✅ JSON shape detection (`json-import.test.ts`: v1/native dump, array-of-
     objects, single-object, nested, invalid inputs)
-  * ✅ type inference (exercised via `parseCsv`/`parsedToTables` since the
+  - ✅ type inference (exercised via `parseCsv`/`parsedToTables` since the
     inference fns aren't exported)
-  * ✅ geometry sanitizer — extracted the pure `sanitizeGeometry` (+ MIN_W/H)
+  - ✅ geometry sanitizer — extracted the pure `sanitizeGeometry` (+ MIN_W/H)
     to `window-mgr/geometry.ts`; `geometry.test.ts` covers null/non-finite/
     below-min/valid-copy/off-screen cases
-  * ⬜ column-editor validation unit tests still to add
-* feature: Playwright e2e — both `browser` and `electron` projects, covering
+  - ⬜ column-editor validation unit tests still to add
+- feature: Playwright e2e — both `browser` and `electron` projects, covering
   drop-import → sort → filter → export → re-import (full round-trip)
-* feature: schema migration test — open a DB written by an older Dexie
+- feature: schema migration test — open a DB written by an older Dexie
   version and confirm the .version(N).upgrade() chain runs cleanly
-* feature: lint pipeline (`eslint` config + npm script + CI)
+- feature: lint pipeline (`eslint` config + npm script + CI)
 
 ## Architectural follow-ups (not parity, but worth doing)
 
-* ✅ perf: `bulkInsert` already in importers; do a pass for any other tight
+- ✅ perf: `bulkInsert` already in importers; do a pass for any other tight
   loops calling single `insert` in plugins
-* ✅ feature: schema versioning — Dexie `.version(N).stores({...}).upgrade(...)`
+- ✅ feature: schema versioning — Dexie `.version(N).stores({...}).upgrade(...)`
   in `dexie-db.ts` (used to be RxDB schema bumps with migrationStrategies)
-* feature: undo/redo — needs a revision-history primitive on top of Dexie
+- feature: undo/redo — needs a revision-history primitive on top of Dexie
   (no longer free now that RxDB is gone)
-* ✅ feature: a `header-clock` reference plugin to prove `registerHeaderButton`
+- ✅ feature: a `header-clock` reference plugin to prove `registerHeaderButton`
   end-to-end and document the trivial-plugin shape
-* ✅ feature: a `color-cell` / `image-cell` plugin demonstrating
+- ✅ feature: a `color-cell` / `image-cell` plugin demonstrating
   `registerCellRenderer` (today these types are rendered in core
   `<data-table>`; move them out to dogfood the API)
-* ✅✅ feature: `auto-sync` plugin — silent push + prompted pull every minute
+- ✅✅ feature: `auto-sync` plugin — silent push + prompted pull every minute
   (optional built-in; reuses server-sync's URL + ETag, drives ticks on a
   60s interval; shared helpers live in `server-sync-core.ts`)
-* ✅✅ feature: `sql-export` emits `date` columns as `'YYYYMMDD'` string
+- ✅✅ feature: `sql-export` emits `date` columns as `'YYYYMMDD'` string
   literals (CHAR(8)); `datetime` stays on ISO/TIMESTAMP
 
 ## Bugs
-* ✅ bug: When importing a .db.json file and choosing the replace option it should delete all existing data first
+
+- ✅ bug: When importing a .db.json file and choosing the replace option it should delete all existing data first
   (data was being deleted but old jsPanel windows stayed open with stale content
   because the subscription-driven close tripped the user-confirm `onbeforeclose`
   guard — fixed in `jspanel-manager.ts` with an `externallyClosed` flag)
