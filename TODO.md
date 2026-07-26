@@ -18,15 +18,16 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 
 ## In progress
 
-- 🕜 Bug: When pulling the Simon workspace (see tmp/tokens.txt for the gist connection string) the error is: Gist sync Pull failed: Expected double-quoted property name in JSON at position 418295 (line 422 column 124) - are we running into size limits? Can we report back which file/table was at fault. We should continue pulling other tables even if one fails. We need a progress bar.
+- 🕜 feature: The Gist Synch plugin should register a single footer button not 2. The button pops up a menu with push, pull, settings, share and view gist. The share option generates a dialog with a link which can be shared and contains the base64 encoded connection string so other users can see the same workspace. The "view gist" option opens the exact gist file URL in a new tab.
 
 ## DONE
+
+- ✅ Bug: When pulling the Simon workspace the gist pull failed on a truncated file. Fixed: pull fetches GitHub-truncated files via `raw_url`, continues past a failing table and reports which file failed, and shows a progress bar. Push now warns on tables >10 MB (slow/flaky) and >100 MB (rejected) with advice to trim columns/rows or mark no-sync.
 
 - ✅ Bug: when connecting a datasette.io instance which fails with table not found, the table is still created empty. The dialog should automatically check the URL before proceeding (e.g. broken URL https://datasette.io/legislators/officers) (probe the table before creating it via `probeSingleTable`; Connect dialog validates inline + stays open on failure; Test connection probes the real table)
 - ✅ Create a concept for a settings dialog with tabs for General and then one tab for each plugin which has registered settings. Plugins should call api.registerSettings with their id, name and a JSON object containing their settings. (concept: `.claude/plans/2026-07-26-settings-dialog-concept.md`)
 
 ## Backlog
-- feature: The Gist Synch plugin should register a single footer button not 2. The button pops up a menu with push, pull, settings and share. The share option generates a dialog with a link which can be shared and contains the base64 encoded connection string so other users can see the same workspace.
 - Implement settings dialog: .claude\plans\2026-07-26-settings-dialog-concept.md
 - feature: plugins registry (`.json`) so users can browse and install plugins.
   The registry already exists as the hand-maintained `packages/renderer/public/plugins/catalog.json`
