@@ -144,28 +144,75 @@ afterward.
 ## Non-row collections
 
 - **`workspaces`** — one record per workspace (`id`, `name`, `createdAt`,
-  `pluginUrls: string[]`). `pluginUrls` is what makes an installed
-  third-party plugin follow the workspace across devices via sync.
-- **`tables`** — one record per user-facing table: name, `columns`
+  `pluginUrls: string[]`, optional `title`). `pluginUrls` is what makes an
+  installed third-party plugin follow the workspace across devices via
+  sync. `title` is an optional display name shown in the header instead of
+  "easyDBAccess" (Settings → General) — presentation only; `id`/`name` stay
+  the technical identifiers `?space=` routing uses.
+- **`tables`** — one record per user-facing table: name, optional display
+  `title` (shown in the panel titlebar; exports/references still use the
+  technical `name` — same split as `Workspace.title`/`name`), `columns`
   (`ColumnSpec[]` — field/label/type/renderer/width/etc.), sort/filter
-  state, `windowGeometry`, and the optional `source`/`origin`/`info`
-  descriptors above.
-- **`settings`** — a flat `key → value` bag for plugin and app
-  configuration. No namespacing enforced beyond convention (plugins key
-  their own settings, e.g. `gist:<workspaceId>`, `server-sync:url`,
-  `server-sync:etag:<workspaceId>`) — **anything stored here is plaintext**;
-  there is no encryption layer, so credentials like the `gist-sync` GitHub
-  token sit in IndexedDB exactly as entered (see `PLUGINS.md`'s Sync
-  section).
+  state, `windowGeometry`, `deletedColumns` (fields the user explicitly
+  removed via the column editor, so a refresh/re-import doesn't resurrect
+  them), and the optional `source`/`origin`/`info` descriptors above.
+- **`settings`** — the **workspace layer** of a two-layer settings model
+  (see below): a flat `key → value` bag, keyed by convention as
+  `${pluginId}:${key}` for anything going through `api.settings`, or a
+  bespoke key for older direct `store.settings` writes (`server-sync:url`,
+  `server-sync:etag:<workspaceId>`). This layer syncs with the workspace
+  (dump-export, gist-sync). **Anything written here directly is still
+  plaintext** — there is no encryption layer — but the settings system now
+  steers actual secrets away from this collection entirely (see below).
 - **`plugins`** — one record per installed third-party plugin URL, keyed by
   the URL itself: `enabled`, `lastFetched`, `cachedBody` (the fetched module
   source, so boot never blocks on a network fetch — see below), and
-  `lastError`. Disabled state for an *optional built-in* is also stored here
-  under the synthetic key `builtin:<name>`, reusing the same collection
-  rather than adding a new one.
+  `lastError`. Disabled state for a user-toggleable built-in is also stored
+  here under the synthetic key `builtin:<id>`, reusing the same collection
+  rather than adding a new one (see `PLUGINS.md`'s plugin lifecycle for
+  which built-ins are toggleable vs. `fixed`).
 - **`viewTemplates`** / **`viewInstances`** — the View system's
-  workspace-global HTML templates and their per-table bindings (see
-  `PLUGINS.md`'s Views section).
+  workspace-global HTML templates and their per-table bindings, including
+  each instance's optional `limit` (cap on rows shown) — see `PLUGINS.md`'s
+  Views section.
+
+## The settings system: two layers + a separate secrets store
+
+`api.settings` (`SettingsApi` — `get`/`set`/`placement`) is a layered
+resolver plugins use instead of touching `store.settings` directly for
+anything a user might configure. A plugin declares its fields once via
+`api.ui.registerSettings(pluginId, name, fields)` (surfaced as a tab in the
+Settings dialog — see `DIALOGS.md`); each field carries a default `scope`
+(`'workspace'` or `'user'`), and the user can promote/demote a field between
+layers from the dialog. Every key lives in **exactly one layer at a time** —
+writing to one layer removes it from the other:
+
+- **Workspace layer** — the Dexie `settings` collection above, keyed
+  `${pluginId}:${key}`. Syncs with the workspace.
+- **User layer** — a single JSON blob in `localStorage`
+  (`/easydbaccess/settings.json`, via `db/user-settings.ts`), device-local
+  and **never synced**. `api.settings.get()` checks this layer first,
+  falling through to the workspace layer, then the field's declared
+  default.
+
+A **separate, cross-workspace secrets store** (`/easydbaccess/secrets.txt`
+in `localStorage`, a `name: value` text blob the user edits directly, or
+drops in as a `secrets.txt` file) backs a third mechanism: any string
+setting value may embed a `${secret:name}` reference, which
+`api.settings.get()` resolves against this store on read. A `'secret'`-typed
+field in the Settings dialog defaults to the **user** scope and gets a
+"insert secret reference" picker, so a token can be entered once, kept out
+of the synced workspace layer entirely, and referenced by name elsewhere.
+
+This is why `gist-sync`'s GitHub token no longer sits in the workspace
+`settings` blob the way it once did (see `PLUGINS.md`'s Sync section) — its
+`gist_token` field is registered as `scope: 'user'` + `type: 'secret'`, so a
+default install keeps it device-local. Nothing stops a plugin from writing
+a real secret straight into the workspace layer instead (`scope: 'workspace'`
+on a `'string'` field, or a raw `store.settings.upsert`), so this is a
+convention the settings system makes easy to follow, not a hard guarantee —
+still worth checking before assuming a given plugin's credentials never
+leave the device.
 
 ## Boot sequence and workspace resolution
 

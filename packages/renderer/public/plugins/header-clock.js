@@ -16,7 +16,7 @@ export const meta = {
   type: 'ui',
   version: '0.1.0',
   description: 'Tiny demo plugin — a header button that toasts the current time.',
-  author: 'easyDBAccess reference',
+  author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/public/plugins/header-clock.js',
 };

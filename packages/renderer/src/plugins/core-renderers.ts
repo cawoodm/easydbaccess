@@ -6,7 +6,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   type: 'cell-renderer',
   version: '0.1.0',
   description: 'Built-in cell renderers: date, datetime, boolean, script.',
-  author: 'easyDBAccess built-ins',
+  author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/core-renderers.ts',
   fixed: true,
@@ -52,14 +52,17 @@ class CellDate extends HTMLElement {
     const input = document.createElement('input');
     input.type = 'date';
     input.value = toDateIso(this._value);
-    input.style.cssText = 'font:inherit;border:0;background:transparent;padding:0;width:100%;box-sizing:border-box';
+    input.style.cssText =
+      'font:inherit;border:0;background:transparent;padding:0;width:100%;box-sizing:border-box';
     input.addEventListener('change', () => this.commit(input.value || null));
     this.append(input);
   }
 
   private commit(v: string | null) {
     this._value = v;
-    this.dispatchEvent(new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }));
+    this.dispatchEvent(
+      new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }),
+    );
   }
 }
 
@@ -84,14 +87,17 @@ class CellDatetime extends HTMLElement {
     const input = document.createElement('input');
     input.type = 'datetime-local';
     input.value = toDatetimeLocal(this._value);
-    input.style.cssText = 'font:inherit;border:0;background:transparent;padding:0;width:100%;box-sizing:border-box';
+    input.style.cssText =
+      'font:inherit;border:0;background:transparent;padding:0;width:100%;box-sizing:border-box';
     input.addEventListener('change', () => this.commit(input.value || null));
     this.append(input);
   }
 
   private commit(v: string | null) {
     this._value = v;
-    this.dispatchEvent(new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }));
+    this.dispatchEvent(
+      new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }),
+    );
   }
 }
 
@@ -123,7 +129,9 @@ class CellBoolean extends HTMLElement {
 
   private commit(v: boolean) {
     this._value = v;
-    this.dispatchEvent(new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }));
+    this.dispatchEvent(
+      new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }),
+    );
   }
 }
 
@@ -231,7 +239,8 @@ function compileScript(src: string): (row: unknown) => unknown {
 function makeErrorChip(label: string, err: unknown): HTMLElement {
   const chip = document.createElement('span');
   chip.textContent = `⚠ ${label}`;
-  chip.style.cssText = 'color:#b91c1c;font-size:0.8em;font-family:ui-monospace,SFMono-Regular,monospace';
+  chip.style.cssText =
+    'color:#b91c1c;font-size:0.8em;font-family:ui-monospace,SFMono-Regular,monospace';
   if (err) {
     const msg = err instanceof Error ? err.message : String(err);
     chip.title = msg;

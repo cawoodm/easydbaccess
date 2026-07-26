@@ -9,10 +9,12 @@ and the Hono backend.
   server. Etag-based optimistic concurrency is the only guarantee.
 - The client serialises the whole workspace (the `dump-export` shape) and
   PUTs it. Pull GETs that JSON back and rebuilds local state from scratch.
-- All sync is **manual** today — the `server-sync` plugin exposes two
-  footer buttons (`Sync ↑` push, `Sync ↓` pull). No background poller, no
-  automatic merge, no per-row replication. Simpler than RxDB replication;
-  smaller surface to maintain while we figure out what we actually need.
+- All sync is **manual** today — the `server-sync` plugin exposes a single
+  footer "Sync" menu button (Push / Pull, via the shared `AnchoredMenu` —
+  see `DIALOGS.md`). No background poller (see `auto-sync` in `PLUGINS.md`
+  for the opt-in exception), no automatic merge, no per-row replication.
+  Simpler than a full replication protocol; smaller surface to maintain
+  while we figure out what we actually need.
 
 ## Roles
 
@@ -20,14 +22,14 @@ and the Hono backend.
 ┌─────────────────────────────────┐         ┌──────────────────────────────┐
 │ Renderer (browser / Electron)   │         │ Hono server                  │
 │                                 │  PUT    │                              │
-│ RxDB (Dexie)                    │ ──────► │ /sync/:workspaceId           │
+│ Dexie                           │ ──────► │ /sync/:workspaceId           │
 │   tables, rows, settings        │         │   (JSON body, If-Match etag) │
 │                                 │  GET    │                              │
 │ serializeWorkspace() (plugin)   │ ◄────── │ /sync/:workspaceId           │
 │ parsedToTables()      (plugin)  │  SSE    │ /sync/:workspaceId/stream    │
 │                                 │ ◄────── │   (init + change events)     │
 │ server-sync plugin              │         │                              │
-│   Sync ↑  Sync ↓  buttons       │         │ StoreAdapter (fs / sqlite)   │
+│   "Sync" menu → Push / Pull     │         │ StoreAdapter (fs / sqlite)   │
 └─────────────────────────────────┘         └──────────────────────────────┘
 ```
 
@@ -67,7 +69,7 @@ client                                   server
 ```
 
 - The server computes `sha1(canonical body bytes)` and returns it as `ETag`.
-- The client remembers the etag in RxDB `settings`:
+- The client remembers the etag in Dexie `settings`:
   `server-sync:etag:<workspaceId>`.
 - On the next push, the client sends `If-Match: "<last-known-etag>"`. The
   server only writes if the current etag matches.
@@ -87,8 +89,8 @@ Only manual today.
 
 | Action | Client side | Server side |
 |---|---|---|
-| User clicks **Sync ↑** | Serialise workspace, PUT with If-Match | Validate JSON, etag-check, store, emit SSE `change` |
-| User clicks **Sync ↓** | GET, parse, replace local workspace | Read from store, return body + ETag |
+| User picks **Push** from the Sync menu | Serialise workspace, PUT with If-Match | Validate JSON, etag-check, store, emit SSE `change` |
+| User picks **Pull** from the Sync menu | GET, parse, replace local workspace | Read from store, return body + ETag |
 
 No auto-push on edit. No periodic poll. No SSE subscription from the
 renderer yet (the server's `/sync/:workspaceId/stream` endpoint is built
@@ -148,13 +150,13 @@ live (see "Open questions" below).
 | Adapter selection from env | `packages/server/src/storage/factory.ts` |
 | CORS configuration | `packages/server/src/index.ts` |
 | Server e2e tests | `packages/server/test/sync.e2e.test.ts` |
-| Push/Pull buttons | `packages/renderer/src/plugins/server-sync.ts` |
+| Sync menu (Push/Pull) | `packages/renderer/src/plugins/server-sync.ts` |
 | Outgoing serialisation | `packages/renderer/src/plugins/dump-export.ts` (`serializeWorkspace`) |
 | Incoming parser | `packages/renderer/src/plugins/json-import.ts` (`parsedToTables`) |
 
 ## Configuration
 
-Renderer (stored in RxDB `settings`):
+Renderer (stored in Dexie `settings`):
 
 | Key | Value |
 |---|---|
@@ -182,9 +184,10 @@ STORAGE_KIND=fs STORAGE_PATH=./.easydb-store npm run dev:server
 npm run dev:renderer
 ```
 
-Open `http://localhost:5190`, click **Sync ↑** in the footer, enter
-`http://localhost:3000` when prompted. Inspect `./.easydb-store/<workspaceId>.db.json`
-to see the body the server stored. Click **Sync ↓** to pull it back.
+Open `http://localhost:5190`, click the footer **Sync** button → **Push**,
+enter `http://localhost:3000` when prompted. Inspect
+`./.easydb-store/<workspaceId>.db.json` to see the body the server stored.
+Click **Sync** → **Pull** to pull it back.
 
 ## Open questions / not done yet
 
@@ -196,7 +199,7 @@ These are deliberately left open until we hit a concrete need.
 - **Live updates.** The server's SSE stream is implemented and tested.
   No renderer client subscribes yet. Adding "auto-pull on `change` event"
   is a small follow-up.
-- **Auto-push on edit.** A debounced push after each RxDB write would
+- **Auto-push on edit.** A debounced push after each Dexie write would
   feel magical but complicates the conflict story. Deferred.
 - **Auth.** Every request currently accepts any `workspaceId`. A
   `ServerDeps.authorize?(ctx)` hook can be added without changing route

@@ -5,9 +5,8 @@ export const meta: NonNullable<PluginModule['meta']> = {
   name: 'SQL Export',
   type: 'exporter',
   version: '0.1.0',
-  description:
-    'Export the current workspace as a portable .sql script (CREATE TABLE + INSERT).',
-  author: 'easyDBAccess built-ins',
+  description: 'Export the current workspace as a portable .sql script (CREATE TABLE + INSERT).',
+  author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/sql-export.ts',
 };

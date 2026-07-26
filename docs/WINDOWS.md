@@ -93,6 +93,12 @@ is tracked in a separate `externallyClosed` set so the reconciling
 subscription's forced close skips that redundant cascade — the data is
 already gone.
 
+**Titlebar text is `Table.title || Table.name`**, via a small `displayName()`
+helper — a table may carry an optional display `title` (edited in the
+column editor) shown in the panel instead of its technical `name`; exports,
+filenames, and every other reference still use `name`. Same split as
+`Workspace.title`/`name` in the header (see `STORAGE.md`, `DIALOGS.md`).
+
 **Chrome additions beyond jsPanel's defaults:** a per-table `<panel-search>`
 box and an info (`ⓘ`) button are prepended into jsPanel's own controlbar
 (next to minimize/maximize/close); a `<panel-footer>` (icon toolbar — CSV

@@ -120,11 +120,20 @@ button styling, and spacing without each one re-implementing it. Two
 behaviors are baked into the shared styles/helper rather than left to each
 dialog to reimplement:
 
-- **Ctrl+Enter / Cmd+Enter submits.** `ctrlEnterSubmits(e)`, wired as
-  `@keydown` on the `<dialog>`, calls `form.requestSubmit()` regardless of
-  which input/textarea/select inside currently has focus — so the shortcut
-  works everywhere in the dialog, not just when a specific field is
-  focused.
+- **Ctrl+Enter / Cmd+Enter confirms; Esc closes.** `ctrlEnterSubmits(e)`,
+  wired as `@keydown` on the `<dialog>`, calls `form.requestSubmit()`
+  regardless of which input/textarea/select inside currently has focus — so
+  the shortcut works everywhere in the dialog, not just when a specific
+  field is focused. Esc closing is native `<dialog>`/`cancel` behavior and
+  needs no explicit wiring beyond a `@cancel` handler that resolves the
+  dialog's promise. **Every dialog in the app follows this convention** —
+  it was audited and retrofitted onto the few that didn't (Settings, Table
+  Info, Share Workspace, the Views manager, the multi-table picker). The
+  retrofit's one sharp edge: wrapping previously-formless dialog content in
+  a `<form>` turns any bare `<button>` inside it into an implicit
+  `type="submit"` — the Views manager's list-mode row buttons (Open / Edit
+  / Delete / Use / Copy) all needed an explicit `type="button"` added so
+  clicking them didn't also submit (and close) the dialog.
 - **Mobile goes full-screen.** A `@media (max-width: 640px)` block forces
   every *open* dialog to `position: fixed; inset: 0` edge-to-edge,
   overriding each dialog's own width/position (including an in-progress
@@ -153,12 +162,70 @@ label`) inside the handle is excluded from starting a drag, so e.g. a
 Cancel button living inside the header bar still receives its click instead
 of the drag capturing the pointer first.
 
+## Anchored menus (`anchored-menu.ts`)
+
+Not a modal `<dialog>` at all — a small dropdown menu, used when a footer
+button's job is "pick one of a few actions" rather than "do the one thing
+this button does." `AnchoredMenu.open(rect, items)` self-mounts a singleton
+`<anchored-menu>` (same lazy-singleton pattern as `<toast-host>` and the
+filter popover), positions it just under the given viewport-space `rect`
+(flipping to open *above* the rect if it would overflow the bottom of the
+screen — useful since these are mostly opened from the footer), and
+resolves to the clicked item's `id` or `null` on outside-click/Escape. A
+button's `onClick(api, ctx)` gets `ctx.anchor` — its own DOM element — from
+the host precisely so it can hand `anchor.getBoundingClientRect()` to
+`AnchoredMenu.open()` and have the menu appear right under itself rather
+than at a guessed fixed position.
+
+This is what replaced several plugins' one-button-per-action footer
+buttons with a single button opening a menu: `gist-sync` (Push / Pull /
+Settings / Share / View gist, plus a per-table variant), `server-sync`
+(Push / Pull), and `dump-export` (JSON dump / SQL script) — see
+`PLUGINS.md`'s Sync and Exporters sections. Reach for `AnchoredMenu` instead
+of a full dialog whenever a footer/table button's job is picking one of a
+short, static list of actions.
+
+## The Settings dialog (`settings-dialog.ts`)
+
+One dialog, two kinds of content: a fixed **General** tab (workspace title,
+the cross-workspace secrets editor) and one tab per plugin that called
+`api.ui.registerSettings(pluginId, name, fields)` — see `PLUGINS.md`'s
+Settings section and `STORAGE.md`'s settings-model writeup for the layered
+storage this dialog edits. A left-hand `<nav>` lists the tabs; the active
+one renders its fields via a `renderControl()` switch keyed on each field's
+declared `type` (`string`/`text`/`number`/`boolean`/`date`/`secret`/
+`option`/`selection`).
+
+Two things are specific to this dialog, not the shared chrome:
+
+- **No Save button — fields save on `change`.** Every control's change
+  handler calls `ctx.api.settings.set(...)` immediately; "Done" (and
+  Ctrl+Enter) just closes the already-saved dialog. `type="secret"` gets an
+  extra `<select>` next to its input listing every name currently in the
+  secrets store, letting the user insert a `${secret:name}` reference
+  without typing the token.
+- **Per-field promote/demote.** Every field row carries a small "user"
+  checkbox — checked means the value lives in the device-local user layer,
+  unchecked means the synced workspace layer (see `STORAGE.md`). Toggling
+  it calls `ctx.api.settings.set(..., scope)`, which the resolver treats as
+  a move: the value is written to the new layer and removed from the old
+  one, so a key is never split across both.
+
+Like every other dialog since the Ctrl+Enter audit, its `<dialog>` wraps a
+real `<form>` (header + body inside it, "Done" as `type="submit"`) with
+`@keydown=${ctrlEnterSubmits}` — and the two tab-nav `<button>`s needed an
+explicit `type="button"` for the same reason called out above.
+
 ## `<app-shell>` — the mount point and the header/footer slot host
 
 `<app-shell>` is where all of this converges. It mounts `<host-dialogs>`
 and `<toast-host>` exactly once, alongside the handful of dialogs that are
 always-present chrome rather than plugin-registered (`new-table-dialog`,
-`csv-paste-dialog`, `plugin-manager-dialog`, `script-editor-dialog`).
+`csv-paste-dialog`, `plugin-manager-dialog`, `settings-dialog`,
+`script-editor-dialog`). A few more (`views-dialog`, `gist-share-dialog`,
+`table-info-dialog`, `table-select-dialog`) mount themselves lazily on
+first use instead, via the singleton-`instance` + `mount()`-into-`body`
+pattern.
 
 Opening one of those built-in dialogs from plugin code goes through a
 **document-level custom event**, not a direct method call —
@@ -172,6 +239,14 @@ event is the one channel both sides can reach.
 
 `<app-shell>` also owns:
 
+- **The header title** — subscribes to the current `Workspace` record and
+  renders `title || 'easyDBAccess'` (see `STORAGE.md`'s `Workspace.title`),
+  live-updating the instant the Settings dialog's "Workspace title" field
+  changes, no reload needed. The version number next to it is wrapped in an
+  `<a>` to the `CHANGELOG.md` file on GitHub (`target=_blank`) — the inner
+  `<span class="version">` is kept exactly as-is so `scripts/bump-version.mjs`
+  can keep rewriting it on every commit without caring about the link
+  around it.
 - **The header/footer button slots** — `headerButtons`/`footerButtons`
   snapshotted from the registries (see `PLUGINS.md`) and re-snapshotted on
   `app:ready` so late-registering plugins' buttons appear without a reload.

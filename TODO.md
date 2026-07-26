@@ -15,21 +15,23 @@
   - merge into main
   - Always update your worktrees TODO and the file C:\projects\Marc\easyDBAccess\TODO.md so I can watch live changes
 
-Status keys: `bug` = broken, `feature` = missing, `polish` = works but UX
-gap, `perf` = correctness OK but slow. Leading `✅` = done.
+Status keys: `bug` = broken, `feature` = missing, Leading `✅` = done.
 `✅✅` = done with e2e test coverage.
 
 ## Backlog
 
-- When connecting datasette add options for "virtual" and "no persist" recommended for big tables. Virtual means we don't load all data - we only load at most 2 visible pages in the UI, the sorting and filtering is done on the server and we eject the entire table from memory each time the user sorts or filters. Paging is server side. The "no persist" option means we don't save the data to our local store and we don't push/synch it either. Surface these settings in the column editor.
-- bug: when I pull in a gist I expect the windows to have the geometry set in the gist
+- bug: when I pull in a json dump I expect the windows to have the geometry and also the views
+- plugin-manager-button.ts should not be a plugin but a core feature and a small icon-only secondary button in the top-right (left of settings)
 - Feature: Importers are too interwoven, they should be separate plugins with separate dialogs and have the meta.type=='importer'. The core import-data plugin provides a header import button with AnchoredMenu for each of the import plugins (Dump, JSON, CSV, Datasette, SQL, Parquet). Each plugin brings it's own dialog. All importers should support URL or File upload as well as a row limit and an option to edit columns before import. Write a plan for this before implementing anything.
 
 ## In progress
 
-- 🕜 feature: Gist push/pull should sync the entire workspace, not just tables — include view templates, view instances, and settings (currently `gist-sync.ts` only serializes `api.store.tables` + rows; `viewTemplates`/`viewInstances`/`settings` are never pushed or pulled, so views and plugin config don't survive a Gist round-trip to another device)
+- 🕜 bug: when I pull in a gist I expect the windows to have the geometry set in the gist
+- 🕜 When connecting datasette add options for "virtual" and "no persist" recommended for big tables. Virtual means we don't load all data - we only load at most 2 visible pages in the UI, the sorting and filtering is done on the server and we eject the entire table from memory each time the user sorts or filters. Paging is server side. The "no persist" option means we don't save the data to our local store and we don't push/synch it either. Surface these settings in the column editor.
 
 ## DONE
+
+- ✅ feature: Gist push/pull should sync the entire workspace, not just tables — include view templates, view instances, and settings (currently `gist-sync.ts` only serializes `api.store.tables` + rows; `viewTemplates`/`viewInstances`/`settings` are never pushed or pulled, so views and plugin config don't survive a Gist round-trip to another device)
 
 - ✅ When clicking on the version in the header launch the CHANGELOG.md URL on github (version span wrapped in an `<a>` to `github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md`, opens in a new tab; inner `<span class="version">` kept so the bump script still rewrites it).
 

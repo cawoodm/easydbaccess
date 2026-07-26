@@ -7,7 +7,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   type: 'exporter',
   version: '0.1.0',
   description: 'Export the current workspace as a single .db.json dump file.',
-  author: 'easyDBAccess built-ins',
+  author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/dump-export.ts',
 };
@@ -23,8 +23,7 @@ export function init(api: HostApi): void {
       if (!wsId) return;
       const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
       const rect =
-        ctx?.anchor?.getBoundingClientRect() ??
-        new DOMRect(16, window.innerHeight - 48, 0, 0);
+        ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
       const choice = await AnchoredMenu.open(rect, [
         { id: 'json', label: 'JSON dump (.db.json)', icon: 'data_object' },
         { id: 'sql', label: 'SQL script (.sql)', icon: 'storage' },

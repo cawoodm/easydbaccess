@@ -20,7 +20,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   type: 'sync',
   version: '0.1.0',
   description: 'Push and pull the current workspace to a private GitHub Gist.',
-  author: 'easyDBAccess built-ins',
+  author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/gist-sync.ts',
 };
@@ -67,7 +67,8 @@ export function init(api: HostApi): void {
       label: 'GitHub token (PAT)',
       type: 'secret',
       scope: 'user',
-      description: 'Personal access token with the "gist" scope. Stored on this device only (not synced).',
+      description:
+        'Personal access token with the "gist" scope. Stored on this device only (not synced).',
     },
   ]);
 
@@ -79,8 +80,7 @@ export function init(api: HostApi): void {
     onClick: async (api, ctx) => {
       const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
       const rect =
-        ctx?.anchor?.getBoundingClientRect() ??
-        new DOMRect(16, window.innerHeight - 48, 0, 0);
+        ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
       const choice = await AnchoredMenu.open(rect, [
         { id: 'push', label: 'Push', icon: 'cloud_upload' },
         { id: 'pull', label: 'Pull', icon: 'cloud_download' },
@@ -112,8 +112,7 @@ export function init(api: HostApi): void {
     onClick: async (api, ctx) => {
       const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
       const rect =
-        ctx.anchor?.getBoundingClientRect() ??
-        new DOMRect(16, window.innerHeight - 48, 0, 0);
+        ctx.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
       const choice = await AnchoredMenu.open(rect, [
         { id: 'push', label: 'Push this table', icon: 'cloud_upload' },
         { id: 'pull', label: 'Pull this table', icon: 'cloud_download' },
@@ -348,7 +347,9 @@ async function push(api: HostApi): Promise<void> {
         `Over Gist's 100 MB per-file limit — GitHub will REJECT these:\n${oversize.join('\n')}`,
       );
     if (large.length > 0)
-      parts.push(`Large (over 10 MB) — Gist sync will be slow and less reliable:\n${large.join('\n')}`);
+      parts.push(
+        `Large (over 10 MB) — Gist sync will be slow and less reliable:\n${large.join('\n')}`,
+      );
     const proceed = await api.ui.dialogs.confirm(
       `${parts.join('\n\n')}\n\nTo reduce size: remove unnecessary columns, limit the number of rows, ` +
         `or mark the table no-persist/no-sync.\n\nPush anyway?`,
@@ -662,7 +663,10 @@ async function pullTable(api: HostApi, tableId: string): Promise<void> {
     updatedAt: Date.now(),
   }));
   await rowColl.bulkInsert(docs);
-  api.ui.dialogs.toast(`Pulled "${table.name}" from gist.`, { kind: 'success', title: 'Gist sync' });
+  api.ui.dialogs.toast(`Pulled "${table.name}" from gist.`, {
+    kind: 'success',
+    title: 'Gist sync',
+  });
 }
 
 async function viewTableGist(api: HostApi, tableId: string): Promise<void> {

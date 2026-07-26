@@ -17,26 +17,32 @@ import type {
   Table,
   TableInfo,
 } from '@easydb/shared';
+import '../dialogs/datasette-connect-dialog.js';
+import { DatasetteConnectDialog } from '../dialogs/datasette-connect-dialog.js';
+import { chooseTables } from '../dialogs/table-select-dialog.js';
+import { reconcileColumns } from '../table/column-merge.js';
+import { setTableLoading } from '../table/data-table.js';
 import {
-  parseDatasetteUrl,
-  fetchDatabaseNames,
-  fetchTablesForDb,
-  fetchTableMeta,
-  probeSingleTable,
-  fetchTableCount,
-  fetchRows,
-  fetchPrimaryKeys,
-  fetchTableMetadata,
   applyTableMetadata,
+  DatasetteError,
+  fetchDatabaseNames,
+  fetchPrimaryKeys,
+  fetchRows,
+  fetchTableCount,
+  fetchTableMeta,
+  fetchTableMetadata,
+  fetchTablesForDb,
   inferColumnsFromRows,
+  parseDatasetteUrl,
+  probeSingleTable,
   refineColumnTypes,
   testConnection,
   withAuthFetch,
-  DatasetteError,
   type DatasetteRef,
-  type TableRef,
   type MetadataTablePatch,
+  type TableRef,
 } from './datasette-client.js';
+import { createDatasetteCollection, tokenSettingKey } from './datasette-collection.js';
 
 type FetchFn = (url: string, opts?: unknown) => Promise<Response>;
 
@@ -173,12 +179,6 @@ async function resolveChosenTables(
   if (!picked) return null;
   return picked.map((i) => tables[i]!);
 }
-import { chooseTables } from '../dialogs/table-select-dialog.js';
-import { setTableLoading } from '../table/data-table.js';
-import { reconcileColumns } from '../table/column-merge.js';
-import { createDatasetteCollection, tokenSettingKey } from './datasette-collection.js';
-import '../dialogs/datasette-connect-dialog.js';
-import { DatasetteConnectDialog } from '../dialogs/datasette-connect-dialog.js';
 
 const CONNECT_ICON_SVG =
   '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
@@ -190,7 +190,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   type: 'source',
   version: '0.2.0',
   description: 'Import tables from any online Datasette instance, database, or single table by URL',
-  author: 'easyDBAccess built-ins',
+  author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/datasette-source.ts',
 };
@@ -1040,9 +1040,10 @@ async function refreshSnapshot(api: HostApi, t: Table): Promise<void> {
     parts.push(`${newFields.length} new column${newFields.length === 1 ? '' : 's'}`);
   const note = parts.length ? ` — ${parts.join(', ')}` : '';
   api.ui.dialogs.toast(`Refreshed ${outcome.rowCount} rows from ${ref.db}/${ref.table}${note}.`, {
-    kind: outcome.error || outcome.hasMore || outcome.truncated || newFields.length > 0
-      ? 'warning'
-      : 'success',
+    kind:
+      outcome.error || outcome.hasMore || outcome.truncated || newFields.length > 0
+        ? 'warning'
+        : 'success',
     title: 'Refresh',
   });
 
@@ -1092,7 +1093,8 @@ async function resumeImport(api: HostApi, tableId: string): Promise<void> {
   } catch (err) {
     // The resume cursor itself failed hard (still unreachable) — keep the marker
     // so the user can try again, and report why.
-    const msg = err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
+    const msg =
+      err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
     api.ui.dialogs.toast(`Couldn't resume ${ref.db}/${ref.table}: ${msg}. Try again later.`, {
       kind: 'error',
       title: 'Resume import',
@@ -1109,10 +1111,10 @@ async function resumeImport(api: HostApi, tableId: string): Promise<void> {
       { kind: 'warning', title: 'Resume import' },
     );
   } else {
-    api.ui.dialogs.toast(
-      `Finished ${ref.db}/${ref.table}: +${added} rows (${totalNow} total).`,
-      { kind: 'success', title: 'Resume import' },
-    );
+    api.ui.dialogs.toast(`Finished ${ref.db}/${ref.table}: +${added} rows (${totalNow} total).`, {
+      kind: 'success',
+      title: 'Resume import',
+    });
   }
 }
 
@@ -1127,9 +1129,7 @@ function openColumnEditorForNewColumns(
   const notice =
     `Refreshing ${ref.db}/${ref.table} revealed ${newFields.length} new ` +
     `column${many ? 's' : ''}: ${list}. Review, reorder or hide ${many ? 'them' : 'it'} here.`;
-  document.dispatchEvent(
-    new CustomEvent('easydb:edit-columns', { detail: { tableId, notice } }),
-  );
+  document.dispatchEvent(new CustomEvent('easydb:edit-columns', { detail: { tableId, notice } }));
 }
 
 function slug(s: string): string {

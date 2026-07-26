@@ -12,17 +12,17 @@
 // the UI too (the datasette-source plugin only registered an unsurfaced URL
 // source and a file-only drop handler, so there was no clickable way in).
 
+import type { HostApi, PluginModule } from '@easydb/shared';
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import type { HostApi, PluginModule } from '@easydb/shared';
-import { importJsonText, parsedToTables } from './json-import.js';
-import { importCsvText, parseCsv, readCsvHead } from './csv-import.js';
+import { TopProgress, type ProgressHandle } from '../chrome/top-progress.js';
 import { editColumnNames } from '../dialogs/column-names-dialog.js';
-import { importDatasette } from './datasette-source.js';
-import { parseDatasetteUrl, fetchDatabaseNames } from './datasette-client.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from '../dialogs/dialog-chrome.js';
 import { makeDialogDraggable } from '../dialogs/draggable.js';
-import { TopProgress, type ProgressHandle } from '../chrome/top-progress.js';
+import { importCsvText, parseCsv, readCsvHead } from './csv-import.js';
+import { fetchDatabaseNames, parseDatasetteUrl } from './datasette-client.js';
+import { importDatasette } from './datasette-source.js';
+import { importJsonText, parsedToTables } from './json-import.js';
 import { readResponseText, toCorsFriendlyUrl } from './read-url.js';
 
 /** How a URL should be imported. `auto` is resolved to a concrete kind on submit. */
@@ -81,7 +81,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   version: '0.2.0',
   description:
     'Header button that imports data from a URL — a JSON dump (e.g. Northwind) or a Datasette table, database, or whole instance — with a picker of sample sources.',
-  author: 'easyDBAccess built-ins',
+  author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/import-data.ts',
 };
@@ -298,8 +298,7 @@ async function openImport(api: HostApi): Promise<void> {
         // loading the whole file — a 150 MB CSV read whole + parsed whole (all
         // before the cap applies) can silently kill a memory-limited tab, so a
         // capped import of a big file would do nothing.
-        const text =
-          maxRows != null ? await readCsvHead(file, maxRows) : await file.text();
+        const text = maxRows != null ? await readCsvHead(file, maxRows) : await file.text();
         await importCsvText(api, text, file.name, {
           editColumns: editColumns ? editColumnNames : undefined,
           maxRows,

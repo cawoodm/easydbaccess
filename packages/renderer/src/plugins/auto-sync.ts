@@ -16,7 +16,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   version: '0.1.0',
   description:
     'Pushes the workspace to the server every minute; prompts to pull when the server changes.',
-  author: 'easyDBAccess built-ins',
+  author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/auto-sync.ts',
 };
@@ -41,10 +41,7 @@ export function load(api: HostApi): void {
   if (intervalId !== null) return;
   // E2E tests drive tick() manually via window.__autoSyncTick — let them
   // own the scheduling so a stray timer doesn't fire a confirm() mid-test.
-  if (
-    typeof location !== 'undefined' &&
-    new URLSearchParams(location.search).get('test') === '1'
-  ) {
+  if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('test') === '1') {
     return;
   }
   intervalId = setInterval(() => {

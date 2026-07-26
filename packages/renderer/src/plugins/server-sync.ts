@@ -15,7 +15,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   type: 'sync',
   version: '0.1.0',
   description: 'Push and pull the current workspace to an easyDBAccess Hono backend.',
-  author: 'easyDBAccess built-ins',
+  author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/server-sync.ts',
 };
@@ -41,8 +41,7 @@ export function init(api: HostApi): void {
     onClick: async (api, ctx) => {
       const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
       const rect =
-        ctx?.anchor?.getBoundingClientRect() ??
-        new DOMRect(16, window.innerHeight - 48, 0, 0);
+        ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
       const choice = await AnchoredMenu.open(rect, [
         { id: 'push', label: 'Push (↑)', icon: 'cloud_upload' },
         { id: 'pull', label: 'Pull (↓)', icon: 'cloud_download' },

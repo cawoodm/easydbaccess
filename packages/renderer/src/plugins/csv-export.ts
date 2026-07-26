@@ -6,7 +6,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   type: 'exporter',
   version: '0.1.0',
   description: 'Export a single table as a .csv file via a per-table button.',
-  author: 'easyDBAccess built-ins',
+  author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/csv-export.ts',
 };
@@ -45,9 +45,7 @@ export function init(api: HostApi): void {
 export function serializeCsv(table: Table, rows: Row[]): string {
   const fields = table.columns.map((c) => c.field);
   const header = table.columns.map((c) => quoteIfNeeded(c.label ?? c.field));
-  const body = rows.map((r) =>
-    fields.map((f) => quoteIfNeeded(stringify(r.data[f]))).join(','),
-  );
+  const body = rows.map((r) => fields.map((f) => quoteIfNeeded(stringify(r.data[f]))).join(','));
   return [header.join(','), ...body].join('\r\n');
 }
 
