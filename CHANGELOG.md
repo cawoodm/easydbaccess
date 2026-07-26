@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 26 Jul 2026 (v0.0.109)
+
+- Workspace title is now editable in Settings → General and shown in the header instead of "easyDBAccess".
+
+## 26 Jul 2026 (v0.0.108)
+
+- Every dialog now confirms its primary action on Ctrl+Enter; Esc still closes. Fixed 5 dialogs missing the wiring, including Settings.
+
 ## 26 Jul 2026 (v0.0.107)
 
 - New views auto-map `$DATE`/`$URL`/`$DESCRIPTION` tokens to matching columns by type/renderer/name, and can cap the rows shown (TOP N) via a "Show at most" field.

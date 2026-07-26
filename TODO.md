@@ -21,11 +21,11 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 
 ## Backlog
 
-- When clicking on the version in the header launch the CHANGELOG.md URL on github
 - When connecting datasette add options for "virtual" and "no persist" recommended for big tables. Virtual means we don't load all data - we only load at most 2 visible pages in the UI, the sorting and filtering is done on the server and we eject the entire table from memory each time the user sorts or filters. Paging is server side. The "no persist" option means we don't save the data to our local store and we don't push/synch it either. Surface these settings in the column editor.
 
 ## In progress
 
+- 🕜 When clicking on the version in the header launch the CHANGELOG.md URL on github
 - 🕜 feature: Gist push/pull should sync the entire workspace, not just tables — include view templates, view instances, and settings (currently `gist-sync.ts` only serializes `api.store.tables` + rows; `viewTemplates`/`viewInstances`/`settings` are never pushed or pulled, so views and plugin config don't survive a Gist round-trip to another device)
 
 ## DONE
