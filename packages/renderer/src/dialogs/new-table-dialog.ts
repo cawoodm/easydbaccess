@@ -498,6 +498,29 @@ export class NewTableDialog extends LitElement {
       }
       const oldName = existingTable?.name;
       await ctx.store.tables.patch(tableId, patch);
+
+      // Scrub the data of genuinely-deleted columns from every row: deleted
+      // columns must not be stored, synced, or persisted — only their name is
+      // remembered (in `deletedColumns`) so a refresh/re-import won't re-add
+      // them. Renamed columns keep their `origField`, so they're excluded here;
+      // only true deletions are purged. Skip rows that carry none of the fields.
+      const purgeFields = removedNow.filter((f) => !savedFields.has(f));
+      if (purgeFields.length > 0) {
+        const rows = await ctx.store.rows(tableId).find();
+        for (const r of rows) {
+          let touched = false;
+          const data = { ...r.data };
+          for (const f of purgeFields) {
+            if (f in data) {
+              delete data[f];
+              touched = true;
+            }
+          }
+          if (touched) {
+            await ctx.store.rows(tableId).patch(r.id, { data, updatedAt: Date.now() });
+          }
+        }
+      }
       // Keep dependent view instances connected: a closed view snapshot its
       // source table's name at creation time, so a rename must propagate or
       // the view would silently point at a stale name.

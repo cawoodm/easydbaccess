@@ -1,4 +1,4 @@
-import type { HostApi, PluginModule, Row, Table } from '@easydb/shared';
+import type { HostApi, PluginModule, Row, Table, ViewInstance } from '@easydb/shared';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a
 // custom element on import, which would blow up under Vitest's default
@@ -307,6 +307,52 @@ async function push(api: HostApi): Promise<void> {
     ),
   };
 
+  // --- Stage B: also sync view templates, view instances, and settings ---
+  // Instances reference their table + template BY NAME so they survive the id
+  // changes a pull creates on another device.
+  const allTemplates = await api.store.viewTemplates.find();
+  const templateNameById = new Map(allTemplates.map((t) => [t.id, t.name]));
+  const wsTemplates = allTemplates.filter((t) => t.workspaceId === wsId && !t.builtin);
+  const tableNameById = new Map(tables.map((t) => [t.id, t.name]));
+  const wsInstances = (await api.store.viewInstances.find()).filter((vi) => vi.workspaceId === wsId);
+
+  files['_easydb.views.json'] = {
+    content: JSON.stringify(
+      {
+        templates: wsTemplates.map((t) => ({
+          name: t.name,
+          headerHtml: t.headerHtml,
+          rowHtml: t.rowHtml,
+          footerHtml: t.footerHtml,
+        })),
+        instances: wsInstances
+          .map((vi) => ({
+            tableName: vi.tableName ?? tableNameById.get(vi.tableId) ?? '',
+            templateName: templateNameById.get(vi.templateId) ?? '',
+            name: vi.name,
+            sortColumn: vi.sortColumn,
+            sortAsc: vi.sortAsc,
+            filters: vi.filters,
+            visibleColumns: vi.visibleColumns,
+            mapping: vi.mapping,
+            templateEnabled: vi.templateEnabled,
+            columnWidths: vi.columnWidths,
+            windowGeometry: vi.windowGeometry,
+            open: vi.open,
+          }))
+          // Drop any instance we can't reference by name (orphaned template/table).
+          .filter((vi) => vi.tableName && vi.templateName),
+      },
+      null,
+      2,
+    ),
+  };
+
+  // All settings (per the product decision to sync everything for now; a future
+  // secrets-to-local-file feature will separate device-local secrets).
+  const allSettings = await api.store.settings.find();
+  files['_easydb.settings.json'] = { content: JSON.stringify({ settings: allSettings }, null, 2) };
+
   let updated: { id: string; html_url?: string };
   if (creds.gistId) {
     const res = await fetch(`https://api.github.com/gists/${creds.gistId}`, {
@@ -383,7 +429,7 @@ async function pull(api: HostApi): Promise<void> {
 
   // Index existing tables by name so we upsert instead of duplicating.
   const existingTables = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
-  const byName = new Map(existingTables.map((t) => [t.name, t]));
+  const byName = new Map(existingTables.map((t) => [t.name.toLowerCase(), t]));
 
   const { TopProgress } = await import('../chrome/top-progress.js');
   const progress: ProgressHandle = TopProgress.begin('Pulling from gist…');
@@ -396,6 +442,7 @@ async function pull(api: HostApi): Promise<void> {
         const content = await fetchGistFileContent(file);
         const parsed = JSON.parse(content) as {
           name: string;
+          title?: string;
           columns: Table['columns'];
           rows: Array<Row['data']>;
         };
@@ -404,9 +451,10 @@ async function pull(api: HostApi): Promise<void> {
         }
 
         let table: Table;
-        const existing = byName.get(parsed.name);
+        const existing = byName.get(parsed.name.toLowerCase());
         if (existing) {
           table = await api.store.tables.patch(existing.id, {
+            title: parsed.title,
             columns: parsed.columns,
             updatedAt: Date.now(),
           });
@@ -419,6 +467,7 @@ async function pull(api: HostApi): Promise<void> {
             id: cryptoUUID(),
             workspaceId: wsId,
             name: parsed.name,
+            title: parsed.title,
             code: slug(parsed.name),
             columns: parsed.columns,
             view: 'table',
@@ -443,6 +492,101 @@ async function pull(api: HostApi): Promise<void> {
     }
   } finally {
     progress.done();
+  }
+
+  // --- Stage B restore: settings, then view templates, then view instances ---
+  const settingsFile = gist.files['_easydb.settings.json'];
+  if (settingsFile) {
+    try {
+      const { settings } = JSON.parse(await fetchGistFileContent(settingsFile)) as {
+        settings: Array<{ key: string; value: unknown }>;
+      };
+      for (const s of settings ?? []) await api.store.settings.upsert({ key: s.key, value: s.value });
+    } catch (err) {
+      failures.push({ file: '_easydb.settings.json', error: (err as Error).message });
+    }
+  }
+
+  const viewsFile = gist.files['_easydb.views.json'];
+  if (viewsFile) {
+    try {
+      const parsed = JSON.parse(await fetchGistFileContent(viewsFile)) as {
+        templates: Array<{ name: string; headerHtml: string; rowHtml: string; footerHtml: string }>;
+        instances: Array<{
+          tableName: string;
+          templateName: string;
+          name: string;
+          sortColumn?: string;
+          sortAsc?: boolean;
+          filters?: Record<string, string>;
+          visibleColumns?: string[];
+          mapping?: Record<string, string>;
+          templateEnabled?: boolean;
+          columnWidths?: Record<string, number>;
+          windowGeometry?: ViewInstance['windowGeometry'];
+          open?: boolean;
+        }>;
+      };
+
+      // Templates: upsert by name within this workspace (skip built-ins — seeded locally).
+      const wsTemplates = (await api.store.viewTemplates.find()).filter((t) => t.workspaceId === wsId);
+      const tmplByName = new Map(wsTemplates.map((t) => [t.name, t]));
+      for (const t of parsed.templates ?? []) {
+        const existing = tmplByName.get(t.name);
+        if (existing) {
+          await api.store.viewTemplates.patch(existing.id, {
+            headerHtml: t.headerHtml,
+            rowHtml: t.rowHtml,
+            footerHtml: t.footerHtml,
+            updatedAt: Date.now(),
+          });
+        } else {
+          const created = await api.store.viewTemplates.insert({
+            id: cryptoUUID(),
+            workspaceId: wsId,
+            name: t.name,
+            headerHtml: t.headerHtml,
+            rowHtml: t.rowHtml,
+            footerHtml: t.footerHtml,
+            updatedAt: Date.now(),
+          });
+          tmplByName.set(created.name, created);
+        }
+      }
+
+      // Instances: remap tableName + templateName → local ids; upsert (match existing by table+name).
+      const tablesNow = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
+      const tableIdByName = new Map(tablesNow.map((t) => [t.name.toLowerCase(), t.id]));
+      const allTemplatesNow = (await api.store.viewTemplates.find()).filter((t) => t.workspaceId === wsId);
+      const tmplIdByName = new Map(allTemplatesNow.map((t) => [t.name, t.id]));
+      const existingInstances = (await api.store.viewInstances.find()).filter((vi) => vi.workspaceId === wsId);
+
+      for (const inst of parsed.instances ?? []) {
+        const tableId = tableIdByName.get((inst.tableName ?? '').toLowerCase());
+        const templateId = tmplIdByName.get(inst.templateName ?? '');
+        if (!tableId || !templateId) continue; // can't place it — skip
+        const match = existingInstances.find((vi) => vi.tableId === tableId && vi.name === inst.name);
+        await api.store.viewInstances.upsert({
+          id: match?.id ?? cryptoUUID(),
+          workspaceId: wsId,
+          tableId,
+          tableName: inst.tableName,
+          templateId,
+          name: inst.name,
+          filters: inst.filters ?? {},
+          visibleColumns: inst.visibleColumns ?? [],
+          mapping: inst.mapping ?? {},
+          ...(inst.sortColumn != null ? { sortColumn: inst.sortColumn, sortAsc: inst.sortAsc ?? true } : {}),
+          ...(inst.templateEnabled != null ? { templateEnabled: inst.templateEnabled } : {}),
+          ...(inst.columnWidths ? { columnWidths: inst.columnWidths } : {}),
+          ...(inst.windowGeometry ? { windowGeometry: inst.windowGeometry } : {}),
+          ...(inst.open != null ? { open: inst.open } : {}),
+          updatedAt: Date.now(),
+        });
+      }
+    } catch (err) {
+      failures.push({ file: '_easydb.views.json', error: (err as Error).message });
+    }
   }
 
   if (failures.length > 0) {
@@ -513,13 +657,18 @@ async function pullTable(api: HostApi, tableId: string): Promise<void> {
   const content = await fetchGistFileContent(file);
   const parsed = JSON.parse(content) as {
     name: string;
+    title?: string;
     columns: Table['columns'];
     rows: Array<Row['data']>;
   };
   if (!parsed.name || !Array.isArray(parsed.columns)) {
     throw new Error('unexpected file shape (missing name/columns)');
   }
-  await api.store.tables.patch(tableId, { columns: parsed.columns, updatedAt: Date.now() });
+  await api.store.tables.patch(tableId, {
+    title: parsed.title,
+    columns: parsed.columns,
+    updatedAt: Date.now(),
+  });
   const rowColl = api.store.rows(tableId);
   const oldRows = await rowColl.find();
   await rowColl.bulkRemove(oldRows.map((r) => r.id));
@@ -553,10 +702,22 @@ async function viewTableGist(api: HostApi, tableId: string): Promise<void> {
 // -- helpers ------------------------------------------------------------------
 
 function tableToFile(t: Table, rows: Row[]) {
+  // Project each row onto the table's CURRENT columns — exactly like CSV export
+  // and the data-table do (`r.data[c.field]`). Deleting a column removes it from
+  // `t.columns` but does NOT purge its (potentially large) value from each row's
+  // `data` blob (see new-table-dialog: "row data isn't migrated"). Dumping raw
+  // `r.data` would therefore sync — and size-count — long-deleted columns, which
+  // is why a 2 MB table (per its CSV) was warning as 32 MB on push.
+  const fields = t.columns.map((c) => c.field);
   return {
     name: t.name,
+    title: t.title,
     columns: t.columns,
-    rows: rows.map((r) => r.data),
+    rows: rows.map((r) => {
+      const projected: Record<string, unknown> = {};
+      for (const f of fields) projected[f] = r.data[f];
+      return projected;
+    }),
   };
 }
 
