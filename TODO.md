@@ -37,6 +37,7 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
     previously it hit `location.origin` and 404'd on the published site.
   - keep the catalog in sync as plugins are added (it is NOT auto-generated today —
     each new plugin `.js` in `public/plugins/` must be hand-added to `catalog.json`).
+- When connecting datasette add options for "virtual" and "no persist" recommended for big tables. Virtual means we don't load all data - we only load at most 2 visible pages in the UI, the sorting and filtering is done on the server and we eject the entire table from memory each time the user sorts or filters. Paging is server side. The "no persist" option means we don't save the data to our local store and we don't push/synch it either. Surface these settings in the column editor.
 
 ## Rendering
 
