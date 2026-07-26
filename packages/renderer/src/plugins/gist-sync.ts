@@ -15,10 +15,13 @@ import type {
 import type { ProgressHandle } from '../chrome/top-progress.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
-  name: 'gist-sync',
+  id: 'gist-sync',
+  name: 'Gist Sync',
   version: '0.1.0',
   description: 'Push and pull the current workspace to a private GitHub Gist.',
   author: 'easyDBAccess built-ins',
+  icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>',
+  repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/gist-sync.ts',
 };
 
 interface GistCreds {

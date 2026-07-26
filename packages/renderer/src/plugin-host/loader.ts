@@ -18,16 +18,25 @@ import * as autoSync from '../plugins/auto-sync.js';
 import * as views from '../plugins/views.js';
 import * as settings from '../plugins/settings.js';
 
+/** A built-in plugin paired with its id (mirrors `meta.id`, cheaply reachable without importing every module). */
+export interface BuiltinEntry {
+  id: string;
+  meta: NonNullable<PluginModule['meta']>;
+  module: PluginModule;
+}
+
 /**
  * Built-in plugins shipped with the renderer. They satisfy the same
  * PluginModule contract as URL-loaded plugins; the only difference is the
  * delivery mechanism (static import vs. dynamic import of a Blob URL).
  *
- * Plugins flagged `meta.optional = true` are still loaded by default, but the
- * user can disable them from the Plugin Manager. Disabled state is stored in
- * the plugins collection under the synthetic key `builtin:<name>`.
+ * Only plugins flagged `meta.fixed = true` are always-on and non-disableable
+ * (currently `core-renderers` and `plugin-manager-button`). Every other
+ * built-in is user-toggleable from the Plugin Manager and defaults to
+ * enabled. Disabled state is stored in the plugins collection under the
+ * synthetic key `builtin:<id>`.
  */
-const builtins: PluginModule[] = [
+const modules: PluginModule[] = [
   settings,
   newTableButton,
   csvImport,
@@ -48,29 +57,39 @@ const builtins: PluginModule[] = [
   views,
 ];
 
-/** Public for the Plugin Manager dialog so it can render the optional list. */
+function requireMeta(p: PluginModule): NonNullable<PluginModule['meta']> {
+  if (!p.meta) throw new Error('Built-in plugin is missing meta');
+  return p.meta;
+}
+
+const builtins: BuiltinEntry[] = modules.map((module) => {
+  const meta = requireMeta(module);
+  return { id: meta.id, meta, module };
+});
+
+/** Public for the Plugin Manager dialog so it can render icon/name/id/author/repo. */
 export const builtinPlugins = builtins;
 
 /** Synthetic URL used to key built-in disable state in the plugins collection. */
-export function builtinKey(name: string): string {
-  return `builtin:${name}`;
+export function builtinKey(id: string): string {
+  return `builtin:${id}`;
 }
 
 /**
- * Runs init() on every built-in plugin (skipping optional ones the user
+ * Runs init() on every built-in plugin (skipping non-fixed ones the user
  * disabled). Returns a function that runs load() on the same set once the
  * app shell is ready.
  */
 export async function loadBuiltinPlugins(api: HostApi): Promise<() => Promise<void>> {
-  const active: PluginModule[] = [];
-  for (const p of builtins) {
-    if (await isDisabled(api, p)) continue;
-    active.push(p);
+  const active: BuiltinEntry[] = [];
+  for (const entry of builtins) {
+    if (await isDisabled(api, entry)) continue;
+    active.push(entry);
     try {
-      await p.init?.(api);
+      await entry.module.init?.(api);
     } catch (err) {
       api.events.emit('plugin:error', {
-        url: p.meta?.name ?? '(builtin)',
+        url: entry.id,
         phase: 'init',
         error: err,
       });
@@ -78,12 +97,12 @@ export async function loadBuiltinPlugins(api: HostApi): Promise<() => Promise<vo
   }
 
   return async () => {
-    for (const p of active) {
+    for (const entry of active) {
       try {
-        await p.load?.(api);
+        await entry.module.load?.(api);
       } catch (err) {
         api.events.emit('plugin:error', {
-          url: p.meta?.name ?? '(builtin)',
+          url: entry.id,
           phase: 'load',
           error: err,
         });
@@ -92,10 +111,8 @@ export async function loadBuiltinPlugins(api: HostApi): Promise<() => Promise<vo
   };
 }
 
-async function isDisabled(api: HostApi, p: PluginModule): Promise<boolean> {
-  if (!p.meta?.optional) return false;
-  const name = p.meta.name;
-  if (!name) return false;
-  const rec = await api.store.plugins.findOne(builtinKey(name));
+async function isDisabled(api: HostApi, entry: BuiltinEntry): Promise<boolean> {
+  if (entry.meta.fixed) return false;
+  const rec = await api.store.plugins.findOne(builtinKey(entry.id));
   return rec?.enabled === false;
 }

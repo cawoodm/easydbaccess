@@ -185,11 +185,13 @@ const CONNECT_ICON_SVG =
   '<path d="M3.9 12a3.1 3.1 0 0 1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7A3.1 3.1 0 0 1 3.9 12zM8 13h8v-2H8v2zm9-6h-4v1.9h4A3.1 3.1 0 0 1 17 15h-4v1.9h4a5 5 0 0 0 0-10z"/></svg>';
 
 export const meta: NonNullable<PluginModule['meta']> = {
-  name: 'datasette-source',
+  id: 'datasette-source',
+  name: 'Datasette',
   version: '0.2.0',
   description: 'Import tables from any online Datasette instance, database, or single table by URL',
   author: 'easyDBAccess built-ins',
-  optional: true,
+  icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
+  repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/datasette-source.ts',
 };
 
 const SETTINGS = {

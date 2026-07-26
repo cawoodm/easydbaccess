@@ -25,16 +25,25 @@ export interface PluginModule {
   init?(api: HostApi): void | Promise<void>;
   load?(api: HostApi): void | Promise<void>;
   meta?: {
-    name?: string;
+    /** Kebab-case technical id. Stable — used as the `builtin:<id>` disabled-state key. */
+    id: string;
+    /** Human-readable display name. */
+    name: string;
     version?: string;
     description?: string;
     author?: string;
+    /** Inline `<svg>` markup shown next to the plugin in the manager UI. */
+    icon?: string;
+    /** GitHub URL to this plugin's source file. */
+    repo?: string;
     /**
-     * Built-in plugins flagged optional are loaded by default but can be
-     * disabled from the Plugin Manager. The host stores the disabled state
-     * under the synthetic key `builtin:<name>` in the plugins collection.
+     * Always-on & non-disableable. Fixed plugins are never shown with a
+     * toggle in the Plugin Manager and the loader never skips them. Every
+     * other built-in is user-toggleable and defaults to enabled; the host
+     * stores the disabled state under the synthetic key `builtin:<id>` in
+     * the plugins collection.
      */
-    optional?: boolean;
+    fixed?: boolean;
   };
 }
 

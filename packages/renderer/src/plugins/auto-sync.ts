@@ -10,12 +10,14 @@ import {
 } from './server-sync-core.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
-  name: 'auto-sync',
+  id: 'auto-sync',
+  name: 'Auto Sync',
   version: '0.1.0',
   description:
     'Pushes the workspace to the server every minute; prompts to pull when the server changes.',
   author: 'easyDBAccess built-ins',
-  optional: true,
+  icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
+  repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/auto-sync.ts',
 };
 
 /** Interval between ticks. Real product value — tests drive tick() directly. */

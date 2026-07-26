@@ -17,10 +17,13 @@ import { chooseTables } from '../dialogs/table-select-dialog.js';
 import type { ProgressHandle } from '../chrome/top-progress.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
-  name: 'json-import',
+  id: 'json-import',
+  name: 'JSON Import',
   version: '0.1.0',
   description: 'Drag-and-drop JSON to create tables. Supports native dumps and arrays of objects.',
   author: 'easyDBAccess built-ins',
+  icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2"/><path d="M16 3a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2"/></svg>',
+  repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/json-import.ts',
 };
 
 export function init(api: HostApi): void {

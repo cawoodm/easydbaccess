@@ -2,9 +2,10 @@ import { test, expect } from './fixtures.js';
 
 /**
  * GET /plugins/registry returns the file at PLUGINS_REGISTRY_PATH (set in
- * playwright.config.ts webServer env). The Plugin Manager dialog surfaces
- * those entries in a "From server" section when `server-sync:url` is
- * configured for the current workspace.
+ * playwright.config.ts webServer env). The Plugin Manager dialog merges
+ * those entries into its single unified, filterable/searchable plugin list
+ * when `server-sync:url` is configured for the current workspace — there is
+ * no separate "From server" section any more (see plugin-manager-dialog.ts).
  */
 
 const SERVER_URL = 'http://localhost:3998';
@@ -21,7 +22,7 @@ test.describe('plugins registry', () => {
     });
   });
 
-  test('Plugin Manager dialog shows the "From server" section when configured', async ({
+  test('Plugin Manager dialog shows the server-registry plugin in the unified list when configured', async ({
     page,
   }) => {
     await page.evaluate(async (url) => {
@@ -39,12 +40,21 @@ test.describe('plugins registry', () => {
     const dialog = page.locator('plugin-manager-dialog dialog');
     await expect(dialog).toBeVisible();
 
-    // Both section headers exist: the host catalog and the server registry.
-    await expect(dialog.getByText('From server', { exact: true })).toBeVisible();
+    // The search box and the four category filter toggles are present above
+    // the unified list.
+    await expect(dialog.getByPlaceholder('Search plugins…')).toBeVisible();
+    const filters = dialog.locator('.filters .toggle-label');
+    await expect(filters).toHaveCount(4);
+    await expect(filters).toContainText(['Installed', 'Built-in', 'Available', 'Fixed']);
+
+    // The server-registry entry shows up as a row in the same list — no
+    // separate "From server" section header exists any more.
     await expect(dialog.getByText('Server Demo')).toBeVisible();
   });
 
-  test('"From server" section is absent when no URL is configured', async ({ page }) => {
+  test('Server-registry plugin is absent from the list when no URL is configured', async ({
+    page,
+  }) => {
     // Fresh workspace fixture — no server-sync:url has been set.
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,7 +67,6 @@ test.describe('plugins registry', () => {
     // see no URL and bail.
     await page.waitForTimeout(200);
 
-    await expect(dialog.getByText('From server', { exact: true })).toHaveCount(0);
     await expect(dialog.getByText('Server Demo')).toHaveCount(0);
   });
 });

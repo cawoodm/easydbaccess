@@ -7,6 +7,8 @@
       "description": "Renders email-shaped values as mailto: links. Apply by setting a column's renderer to \"email\".",
       "author": "easyDBAccess reference",
       "version": "0.1.0",
+      "icon": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z\"/><polyline points=\"22 6 12 13 2 6\"/></svg>",
+      "repo": "https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/public/plugins/cell-email.js",
       "url": "./cell-email.js"
     },
     {
@@ -15,6 +17,8 @@
       "description": "Renders the cell value as <img src=value>. Apply by setting a column's renderer to \"image-url\".",
       "author": "easyDBAccess reference",
       "version": "0.1.0",
+      "icon": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"/><circle cx=\"8.5\" cy=\"8.5\" r=\"1.5\"/><polyline points=\"21 15 16 10 5 21\"/></svg>",
+      "repo": "https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/public/plugins/cell-image-url.js",
       "url": "./cell-image-url.js"
     },
     {
@@ -23,6 +27,8 @@
       "description": "Tiny demo plugin — a header button that toasts the current time.",
       "author": "easyDBAccess reference",
       "version": "0.1.0",
+      "icon": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><polyline points=\"12 6 12 12 16 14\"/></svg>",
+      "repo": "https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/public/plugins/header-clock.js",
       "url": "./header-clock.js"
     }
   ]

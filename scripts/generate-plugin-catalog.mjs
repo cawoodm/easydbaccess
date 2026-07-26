@@ -1,8 +1,8 @@
 // Regenerate packages/renderer/public/plugins/catalog.json from the meta
 // exported by each plugin .js file in that directory.
 //
-// Each plugin exports `export const meta = { name, version, description,
-// author }` at its top level. Importing the module in Node only runs that
+// Each plugin exports `export const meta = { id, name, version, description,
+// author, icon, repo }` at its top level. Importing the module in Node only runs that
 // top-level code (defines meta + a function) — it never touches browser
 // APIs — so a plain dynamic import is safe here. If import fails for any
 // reason, we fall back to regex-extracting the meta object literal from the
@@ -60,10 +60,12 @@ export async function generatePluginCatalog() {
 
     const base = basename(file, '.js');
     const id = meta.id ?? meta.name ?? base;
-    const entry = { id, name: meta.title ?? titleCase(meta.name ?? id) };
+    const entry = { id, name: meta.name ?? titleCase(id) };
     if (meta.description !== undefined) entry.description = meta.description;
     if (meta.author !== undefined) entry.author = meta.author;
     if (meta.version !== undefined) entry.version = meta.version;
+    if (meta.icon !== undefined) entry.icon = meta.icon;
+    if (meta.repo !== undefined) entry.repo = meta.repo;
     entry.url = `./${file}`;
     entries.push(entry);
   }

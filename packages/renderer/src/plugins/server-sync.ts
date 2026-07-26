@@ -10,10 +10,13 @@ import {
 } from './server-sync-core.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
-  name: 'server-sync',
+  id: 'server-sync',
+  name: 'Server Sync',
   version: '0.1.0',
   description: 'Push and pull the current workspace to an easyDBAccess Hono backend.',
   author: 'easyDBAccess built-ins',
+  icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+  repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/server-sync.ts',
 };
 
 export function init(api: HostApi): void {
