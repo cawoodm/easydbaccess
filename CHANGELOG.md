@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 26 Jul 2026 (v0.0.115)
+
+- Plugin Manager can now filter plugins by type (importer, exporter, cell-renderer, sync, source, ui); every plugin declares its type.
+
 ## 26 Jul 2026 (v0.0.109)
 
 - Workspace title is now editable in Settings → General and shown in the header instead of "easyDBAccess".
