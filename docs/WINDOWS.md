@@ -61,9 +61,20 @@ only the `minimized`/`maximized` flags flip.
 **Z-order.** jsPanel has no stable, readable z-index: `front()` calls
 `resetZi()` internally, renormalizing every panel to a contiguous range each
 time, so the just-fronted panel always reads back the same "max" value.
-Instead, `onfronted` stamps `windowGeometry.z` with `Date.now()` — a wall
-clock timestamp, not a DOM value — and boot restore just sorts ascending by
-that timestamp. Higher (more recent) = fronted later = ends up on top.
+Instead, `onfronted` stamps `windowGeometry.z` with a monotonic front-rank
+counter (`lastFrontZ = Math.max(Date.now(), lastFrontZ + 1)`) — not a DOM
+value — and boot restore just sorts ascending by that number. Higher (more
+recent) = fronted later = ends up on top. It's *not* plain `Date.now()`:
+two panels fronted within the same millisecond used to tie and lose their
+relative order; the `+ 1` fallback guarantees every stamp is strictly
+greater than the last regardless of wall-clock resolution.
+
+A bulk restore can also need to re-establish z-order **after** boot: a
+gist Pull inserts tables one at a time (each a separate `liveQuery` write),
+so panels open in file order, not saved-z order. `gist-sync` (see
+`PLUGINS.md`) dispatches an `easydb:restack-windows` document event once
+the pull finishes; `jspanel-manager.ts` listens for it and re-fronts every
+currently-open panel by its saved `z`, same sort as boot restore uses.
 
 **Minimize unmounts the grid.** A `<data-table>` holds every row in memory,
 keeps a live store subscription open, and — for a source-routed table (see

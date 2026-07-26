@@ -308,11 +308,24 @@ also carries the workspace's `viewTemplates`, `viewInstances`, and every
 **non-secret** `settings` entry — `isSyncableSetting()` excludes any key
 starting with `gist:`, `datasette:token:`, or `server-sync:` before
 including it, so a pull can restore views and plugin config too, without
-ever round-tripping a credential through the gist itself. Warns (with a
-Push-anyway confirm) when any table's serialized JSON exceeds 10 MB (slow)
-or GitHub's 100 MB-per-file limit (rejected outright). Pull fetches
-GitHub-truncated files via `raw_url` and continues past a single failing
-table, reporting which file failed rather than aborting the whole pull.
+ever round-tripping a credential through the gist itself. Each table's own
+file is likewise more than rows: `tableToFile()` also carries `title`,
+`view`, `windowGeometry`, `sortColumn`/`sortAsc`, `filters`, `labelColumn`,
+`deletedColumns`, and `info`, so a pull restores a table's window
+position/size, sort, and filters exactly as pushed, not just its data
+(row values are projected onto the table's *current* columns, so a
+long-deleted column's leftover data never inflates the push size or gets
+re-synced). `syncedTableFields()` only overwrites the fields a given gist
+file actually carries, so pulling an older gist can never clear newer local
+state. After a pull, the incremental per-table inserts open windows in file
+order rather than saved z-order (each insert fires its own `liveQuery`), so
+gist-sync dispatches `easydb:restack-windows` at the end — the core window
+manager (see `WINDOWS.md`) listens for that event and re-fronts every open
+panel by its saved `z`. Warns (with a Push-anyway confirm) when any table's
+serialized JSON exceeds 10 MB (slow) or GitHub's 100 MB-per-file limit
+(rejected outright). Pull fetches GitHub-truncated files via `raw_url` and
+continues past a single failing table, reporting which file failed rather
+than aborting the whole pull.
 
 ### server-sync
 

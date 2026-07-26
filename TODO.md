@@ -3,11 +3,12 @@
 - Read instructions in .claude\CLAUDE.md
 - Read and write only to this central TODO.md at C:\projects\Marc\easyDBAccess\TODO.md (not your worktree version)
 - Run a loop to process one task at a time:
+  - Merge in main
   - Read an unmarked TODO from the Backlog below, don't take a task marked 🕜
   - Move it to in-progress and mark it with 🕜
-  - If you are not already on a worktree, create a todos branch and worktree and switch to that
+  - If you are not already on a worktree, create a todos[1..9] branch and worktree and switch to that
   - Begin implementing and ask questions if anything is unclear
-  - Once a task is implemented, show the user the full dev URL link (with http://), ask the user if they are happy explaining what was done and how to test it
+  - Once a task is implemented, show the user the full dev URL link (with http://), ask the user if they are happy explaining what was done and how to test it in a short summary of one paragraph and 60 words or less
   - Once the user accepts it, mark as done ✅ and move to DONE
   - Commit (Don't put TODO or claim in the commit message, just the original task text)
   - Bump version using scripts/
@@ -20,19 +21,26 @@ Status keys: `bug` = broken, `feature` = missing, Leading `✅` = done.
 
 ## Backlog
 
-- bug: when I pull in a json dump I expect the windows to have the geometry and also the views
-- bug: I was able to import simon-blog/entries from datasette.io AND connect it, table names should be unique
-- share workspace link should be presented as an html link we can click on in addition to the copy/input
+- Remove gist settings own dialog, we have this in global settings now
+- Gist-Synch: Add option to push/pull data only and settings only
+- Feature: Command palette launches when I press Ctrl+K for doing things like managing windows (close all, minimize all etc.) navigating to a table, importing, creating, exporting etc. Plugins should register commands.
 - Feature: Importers are too interwoven, they should be separate plugins with separate dialogs and have the meta.type=='importer'. The core import-data plugin provides a header import button with AnchoredMenu for each of the import plugins (Dump, JSON, CSV, Datasette, SQL, Parquet). Each plugin brings it's own dialog. All importers should support URL or File upload as well as a row limit and an option to edit columns before import. Write a plan for this before implementing anything.
+- ⏸️ (parked) When connecting datasette add "virtual" tables for big tables (lazy server-side windowed paging). Design written + approved-in-progress: `.claude/plans/2026-07-26-datasette-virtual-tables-design.md` (scoped to virtual only; no-persist dropped).
 
 ## In progress
 
-- 🕜 plugin-manager-button.ts should not be a plugin but a core feature and a small icon-only secondary button in the top-right (left of settings)
-- 🕜 bug: when I pull in a gist I expect the windows to have the geometry set in the gist
-- 🕜 When connecting datasette add options for "virtual" and "no persist" recommended for big tables. Virtual means we don't load all data - we only load at most 2 visible pages in the UI, the sorting and filtering is done on the server and we eject the entire table from memory each time the user sorts or filters. Paging is server side. The "no persist" option means we don't save the data to our local store and we don't push/synch it either. Surface these settings in the column editor.
+- 🕜 bug: I was able to import simon-blog/entries from datasette.io AND connect it, table names should be unique
+- 🕜 settings should be a fixed plugin, plugin manager should hide fixed plugins by default, installed filter shows nothing it should show installed plugins
 
 ## DONE
 
+- ✅ bug: when I pull in a json dump I expect the windows to have the geometry and also the views — JSON dump (`serializeWorkspace`) now carries `viewTemplates` + `viewInstances` and richer per-table state (title/filters/labelColumn/info/deletedColumns alongside geometry/sort); `json-import` restores them (instances re-pointed to the freshly-imported table id by name) and dispatches `easydb:restack-windows` so z-order/geometry apply as a batch — matching the gist pull path. Unit-covered (native-dump enrichment) + browser round-trip verified.
+
+- ✅ bug: when I pull in a gist I expect the windows to have the geometry set in the gist — `tableToFile` now syncs full per-table state (view/window geometry/sort/filters/label/deleted-columns/info), restored on pull; z-order restored via an `easydb:restack-windows` event (re-fronts panels by saved z after a bulk pull); made front-rank `z` a monotonic unique counter (Date.now() collisions were tying z and losing stacking order); pull toast no longer shows the gist id. (Minimized restores correctly in a headless 4-table repro of the reported gist; couldn't reproduce the reported minimized swap.)
+
+- ✅ share workspace link should be presented as an html link we can click on in addition to the copy/input — `gist-share-dialog.ts` now renders the link as a clickable, ellipsized `<a target="_blank">` above the existing readonly input + Copy button.
+
+- ✅ plugin-manager-button.ts should not be a plugin but a core feature and a small icon-only secondary button in the top-right (left of settings)
 - ✅ feature: Gist push/pull should sync the entire workspace, not just tables — include view templates, view instances, and settings (currently `gist-sync.ts` only serializes `api.store.tables` + rows; `viewTemplates`/`viewInstances`/`settings` are never pushed or pulled, so views and plugin config don't survive a Gist round-trip to another device)
 
 - ✅ When clicking on the version in the header launch the CHANGELOG.md URL on github (version span wrapped in an `<a>` to `github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md`, opens in a new tab; inner `<span class="version">` kept so the bump script still rewrites it).
