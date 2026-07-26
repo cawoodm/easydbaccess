@@ -44,7 +44,9 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
   only `▲`/`▼` buttons inside the column editor dialog)
 * ✅✅ feature: hide/show columns (`Column.hidden` flag + eye toggle in editor)
 * ✅✅ Add max length to column editor
-* Column editor should preview a copy of the top 100 rows of existing data marking red what doesn't validate or parse according to live changes in the editor
+* ✅ Column editor should preview a copy of the top 100 rows of existing data marking red what doesn't validate or parse according to live changes in the editor
+  (edit mode in `new-table-dialog.ts`: `renderPreview()` +
+  `validateAgainstSpec`, red `violation` class, re-runs live on every edit)
 
 ## Cell Editing
 * ✅✅ feature: constraint pre-flight scan — when enabling `unique`/`notnull` on
@@ -78,7 +80,9 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 * ✅ feature: Toast notifications on Push / Pull success and error
   (replace `window.alert`)
 * ✅ feature: Pre-push 1 MB-per-file size check + warning before the request
-* polish: surface the gist URL after a successful Push so user can open it
+* ✅ polish: surface the gist URL after a successful Push so user can open it
+  (the Push toast includes the URL, which `toast-host.ts` linkifies into a
+  clickable `<a target=_blank>`)
 
 ## Filters
 
@@ -96,8 +100,10 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
   icon → expand)
 * ✅ feature: global header search should be collapsible (icon → input on focus,
   collapse on blur if empty)
-* polish: clarify precedence — global search AND per-column filters AND
-  per-table search ANDed together
+* ✅ polish: clarify precedence — global search AND per-column filters AND
+  per-table search ANDed together (`data-table.ts` `filteredRows()` narrows
+  sequentially: per-column filters → local search → global search, so a row
+  must pass all three)
 
 ## Validation & data integrity
 
@@ -111,12 +117,14 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 ## Window manager (jsPanel)
 
 * ✅✅ bug: z-order of windows is not persisting (above)
-* feature: restore `maximized` and `minimized` status on reload (today the
-  geometry restores but the panel always opens "normalized")
+* ✅ feature: restore `maximized` and `minimized` status on reload
+  (`saveGeometry` persists both flags; `openPanel` re-applies them on boot —
+  `jspanel-manager.ts`. Minimized panels mount lazily.)
 * ✅✅ feature: panel title shows row count after table name, e.g. `inventory (3)`
 * ✅✅ feature: header-drag visual feedback (opacity + drop-target borders) when
   doing column reorder via the table header
-* polish: smallify control is currently removed; consider re-enabling
+* ✅ polish: smallify control re-enabled (the `headerControls` override that
+  removed it is gone; `jsPanel.create` uses the default control set)
 
 ## UI niceties
 
@@ -127,6 +135,11 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
   `+ New Table`, `Push`, `Pull`, `Dump`, `CSV`, etc.)
 * feature: keyboard shortcuts — Enter to import, Esc to cancel cell edit,
   Esc to close dialogs
+  * ✅ Esc closes dialogs (native `<dialog>` `cancel` event, wired everywhere)
+  * ✅ Enter to import (Ctrl/Cmd+Enter via `ctrlEnterSubmits`, works from any
+    field incl. textareas; plain Enter also submits single-line inputs natively)
+  * ✅✅ Esc to cancel cell edit (`cancelCellEdit` in `data-table.ts` reverts the
+    editor to the stored value + blurs without committing; e2e covered)
 * ✅✅ polish: more prominent page-level drag-drop overlay during a drag (today
   the dashed border only appears via CSS; reliable visual cue would help)
 * ✅✅ feature: draggable modal dialogs (column editor, new-table dialog) — they
@@ -178,6 +191,16 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 * feature: Vitest unit suite — CSV parser (incl. RFC-4180 edge cases), JSON
   parser shape detection (v1 + v2 + nested + array-of-objects), type
   inference, geometry sanitizer, column-editor validation
+  * ✅ CSV RFC-4180 edge cases (`csv-import.test.ts`: doubled-quote escaping,
+    embedded commas, CRLF, embedded newlines in quoted fields)
+  * ✅ JSON shape detection (`json-import.test.ts`: v1/native dump, array-of-
+    objects, single-object, nested, invalid inputs)
+  * ✅ type inference (exercised via `parseCsv`/`parsedToTables` since the
+    inference fns aren't exported)
+  * ⬜ geometry sanitizer — needs a small refactor first (`sanitizeGeometry`
+    isn't importable in isolation; its module pulls jsPanel/DOM at import).
+    Extract the pure fn to its own module, then test.
+  * ⬜ column-editor validation unit tests still to add
 * feature: Playwright e2e — both `browser` and `electron` projects, covering
   drop-import → sort → filter → export → re-import (full round-trip)
 * feature: schema migration test — open a DB written by an older Dexie
