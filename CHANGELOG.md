@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 26 Jul 2026 (v0.0.107)
+
+- New views auto-map `$DATE`/`$URL`/`$DESCRIPTION` tokens to matching columns by type/renderer/name, and can cap the rows shown (TOP N) via a "Show at most" field.
+
 ## 26 Jul 2026 (v0.0.106)
 
 - Settings dialog: tabbed General + per-plugin tabs, two-layer workspace/user storage, secrets store with `${secret}` refs and drag-in `secrets.txt` import.

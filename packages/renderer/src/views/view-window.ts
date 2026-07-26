@@ -289,6 +289,8 @@ export class ViewWindow extends LitElement {
     const global = this.globalQuery.trim();
     if (local) rows = searchRows(rows, local, contains);
     if (global) rows = searchRows(rows, global, contains);
+    const lim = this.instance.limit ?? 0;
+    if (lim > 0 && rows.length > lim) rows = rows.slice(0, lim);
     this.rows = rows;
     // Template-ON: this component owns the visible set, so it reports the count
     // for the view window's title. Template-OFF renders <data-table>, which

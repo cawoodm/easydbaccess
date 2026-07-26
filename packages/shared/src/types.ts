@@ -244,6 +244,8 @@ export interface ViewInstance {
    * memory — table windows are likewise re-created from persisted state).
    */
   open?: boolean | undefined;
+  /** Max rows to show (TOP N). Absent or ≤0 ⇒ show all. */
+  limit?: number | undefined;
   updatedAt: number;
 }
 
