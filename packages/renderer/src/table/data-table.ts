@@ -94,6 +94,22 @@ export class DataTable extends LitElement {
       th:hover {
         background: #eef2f7;
       }
+      /* Header cell layout: grip on the left, label taking the free space, then
+         the sort + filter icons pinned to the right edge of the column. The
+         flex lives on an inner wrapper — display:flex on the th itself would
+         drop it out of table-cell layout and the columns would stack. */
+      th .col-head {
+        display: flex;
+        align-items: center;
+        gap: 0.15rem;
+      }
+      th .col-head .col-label {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
       /* Link cells chop their display length. A ~40ch cap stops a long URL
          from blowing the column out to its full width; the anchor inside (a
          min-width:0 flex child with text-overflow:ellipsis) truncates to the
@@ -1122,28 +1138,32 @@ export class DataTable extends LitElement {
                   @dragleave=${() => this.onColDragLeave(c.field)}
                   @drop=${(e: DragEvent) => this.onColDrop(e, c.field)}
                 >
-                  <span
-                    class="col-grip mi sm"
-                    title="Drag to reorder column"
-                    draggable="true"
-                    @click=${(e: Event) => e.stopPropagation()}
-                    @dragstart=${(e: DragEvent) => this.onColDragStart(e, c.field)}
-                    @dragend=${() => {
-                      this.dragSourceField = null;
-                      this.dropTargetField = null;
-                      this.dropEdge = null;
-                    }}
-                    >drag_indicator</span
-                  >${c.label}${c.units
-                    ? html`<span class="col-units"> (${c.units})</span>`
-                    : ''}<span class="sort-icon">${icon}</span>
-                  <button
-                    class=${`funnel${this.filters[c.field] ? ' active' : ''}`}
-                    title="Filter by value"
-                    @click=${(e: Event) => this.openFilterPicker(e, c.field)}
-                  >
-                    <span class="mi sm">filter_list</span>
-                  </button>
+                  <div class="col-head">
+                    <span
+                      class="col-grip mi sm"
+                      title="Drag to reorder column"
+                      draggable="true"
+                      @click=${(e: Event) => e.stopPropagation()}
+                      @dragstart=${(e: DragEvent) => this.onColDragStart(e, c.field)}
+                      @dragend=${() => {
+                        this.dragSourceField = null;
+                        this.dropTargetField = null;
+                        this.dropEdge = null;
+                      }}
+                      >drag_indicator</span
+                    ><span class="col-label"
+                      >${c.label}${c.units
+                        ? html`<span class="col-units"> (${c.units})</span>`
+                        : ''}</span
+                    ><span class="sort-icon">${icon}</span>
+                    <button
+                      class=${`funnel${this.filters[c.field] ? ' active' : ''}`}
+                      title="Filter by value"
+                      @click=${(e: Event) => this.openFilterPicker(e, c.field)}
+                    >
+                      <span class="mi sm">filter_list</span>
+                    </button>
+                  </div>
                   <span
                     class="col-resize"
                     title="Drag to resize column"

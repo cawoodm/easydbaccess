@@ -64,6 +64,8 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 - ✅✅ feature: column width persistence (`Column.width` field on resize stop)
 - ✅✅ feature: null-value cell highlighting (light red background) so empties stand out
 - ✅✅ polish: number cells right-aligned (cell only — headers stay left-aligned like every column)
+- ✅✅ polish: sort + filter icons pinned to the right edge of each column header
+  (flex layout on an inner wrapper; label truncates with ellipsis)
 - ✅✅ feature: date cells render in user locale short format when read-only,
   use `<input type=date>` when editing and datetime respectively
 - ✅✅ feature: separate `datetime` type (date + time of day); current `date` type
