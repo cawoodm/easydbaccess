@@ -197,9 +197,9 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
     objects, single-object, nested, invalid inputs)
   * ✅ type inference (exercised via `parseCsv`/`parsedToTables` since the
     inference fns aren't exported)
-  * ⬜ geometry sanitizer — needs a small refactor first (`sanitizeGeometry`
-    isn't importable in isolation; its module pulls jsPanel/DOM at import).
-    Extract the pure fn to its own module, then test.
+  * ✅ geometry sanitizer — extracted the pure `sanitizeGeometry` (+ MIN_W/H)
+    to `window-mgr/geometry.ts`; `geometry.test.ts` covers null/non-finite/
+    below-min/valid-copy/off-screen cases
   * ⬜ column-editor validation unit tests still to add
 * feature: Playwright e2e — both `browser` and `electron` projects, covering
   drop-import → sort → filter → export → re-import (full round-trip)
