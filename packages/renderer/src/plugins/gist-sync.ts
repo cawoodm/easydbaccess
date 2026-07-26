@@ -415,7 +415,7 @@ async function pull(api: HostApi): Promise<void> {
 
   // Index existing tables by name so we upsert instead of duplicating.
   const existingTables = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
-  const byName = new Map(existingTables.map((t) => [t.name, t]));
+  const byName = new Map(existingTables.map((t) => [t.name.toLowerCase(), t]));
 
   const { TopProgress } = await import('../chrome/top-progress.js');
   const progress: ProgressHandle = TopProgress.begin('Pulling from gist…');
@@ -429,6 +429,7 @@ async function pull(api: HostApi): Promise<void> {
         const content = await fetchGistFileContent(file);
         const parsed = JSON.parse(content) as {
           name: string;
+          title?: string;
           columns: Table['columns'];
           rows: Array<Row['data']>;
         };
@@ -437,9 +438,10 @@ async function pull(api: HostApi): Promise<void> {
         }
 
         let table: Table;
-        const existing = byName.get(parsed.name);
+        const existing = byName.get(parsed.name.toLowerCase());
         if (existing) {
           table = await api.store.tables.patch(existing.id, {
+            title: parsed.title,
             columns: parsed.columns,
             updatedAt: Date.now(),
           });
@@ -452,6 +454,7 @@ async function pull(api: HostApi): Promise<void> {
             id: cryptoUUID(),
             workspaceId: wsId,
             name: parsed.name,
+            title: parsed.title,
             code: slug(parsed.name),
             columns: parsed.columns,
             view: 'table',
@@ -593,13 +596,18 @@ async function pullTable(api: HostApi, tableId: string): Promise<void> {
   const content = await fetchGistFileContent(file);
   const parsed = JSON.parse(content) as {
     name: string;
+    title?: string;
     columns: Table['columns'];
     rows: Array<Row['data']>;
   };
   if (!parsed.name || !Array.isArray(parsed.columns)) {
     throw new Error('unexpected file shape (missing name/columns)');
   }
-  await api.store.tables.patch(tableId, { columns: parsed.columns, updatedAt: Date.now() });
+  await api.store.tables.patch(tableId, {
+    title: parsed.title,
+    columns: parsed.columns,
+    updatedAt: Date.now(),
+  });
   const rowColl = api.store.rows(tableId);
   const oldRows = await rowColl.find();
   await rowColl.bulkRemove(oldRows.map((r) => r.id));
@@ -633,10 +641,22 @@ async function viewTableGist(api: HostApi, tableId: string): Promise<void> {
 // -- helpers ------------------------------------------------------------------
 
 function tableToFile(t: Table, rows: Row[]) {
+  // Project each row onto the table's CURRENT columns — exactly like CSV export
+  // and the data-table do (`r.data[c.field]`). Deleting a column removes it from
+  // `t.columns` but does NOT purge its (potentially large) value from each row's
+  // `data` blob (see new-table-dialog: "row data isn't migrated"). Dumping raw
+  // `r.data` would therefore sync — and size-count — long-deleted columns, which
+  // is why a 2 MB table (per its CSV) was warning as 32 MB on push.
+  const fields = t.columns.map((c) => c.field);
   return {
     name: t.name,
+    title: t.title,
     columns: t.columns,
-    rows: rows.map((r) => r.data),
+    rows: rows.map((r) => {
+      const projected: Record<string, unknown> = {};
+      for (const f of fields) projected[f] = r.data[f];
+      return projected;
+    }),
   };
 }
 

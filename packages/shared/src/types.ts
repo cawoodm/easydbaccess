@@ -87,6 +87,12 @@ export interface Table {
   workspaceId: string;
   name: string;
   code: string;
+  /**
+   * Optional display title shown in the panel window title. Presentation only —
+   * references (views, exports, filenames) always use the technical `name`.
+   * Absent/empty ⇒ the panel shows `name`.
+   */
+  title?: string | undefined;
   columns: ColumnSpec[];
   view: string;
   windowGeometry?: WindowGeometry | undefined;

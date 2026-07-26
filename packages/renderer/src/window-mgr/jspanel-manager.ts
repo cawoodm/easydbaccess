@@ -31,6 +31,11 @@ import '../table/data-table.js';
 import '../chrome/panel-search.js';
 import '../chrome/panel-footer.js';
 
+/** The panel window title: the optional display `title`, else the technical `name`. */
+function displayName(t: Table): string {
+  return t.title?.trim() ? t.title.trim() : t.name;
+}
+
 /** The element jsPanels mount into — the pan/zoom-transformed viewport. */
 function panelContainer(): HTMLElement {
   return (
@@ -186,12 +191,12 @@ function openPanel(t: Table, ctx: AppContext): void {
   // visible-row computation (per-column filters + local + global search) and
   // emits it; we mirror that into the titlebar. A minimized window has no grid
   // and so no count events — the title shows the bare name until it's expanded.
-  let lastName = t.name;
+  let lastTitle = displayName(t);
   let lastCount = -1;
   let lastTotal = -1;
   const renderTitle = (): void => {
     if (typeof panel.setHeaderTitle === 'function') {
-      panel.setHeaderTitle(lastName + countSuffix(lastCount, lastTotal));
+      panel.setHeaderTitle(lastTitle + countSuffix(lastCount, lastTotal));
     }
   };
   const onVisibleCount = (e: Event): void => {
@@ -247,7 +252,7 @@ function openPanel(t: Table, ctx: AppContext): void {
   const panel = jsPanel.create({
     id: panelId,
     container,
-    headerTitle: t.name,
+    headerTitle: lastTitle,
     footerToolbar: footer,
     // Default jsPanel controls; smallify (compact-header mode) is useful so
     // we keep it enabled. min/max/normalize/close are all on by default.
@@ -354,7 +359,7 @@ function openPanel(t: Table, ctx: AppContext): void {
     'display:none;background:none;border:0;color:inherit;cursor:pointer;font-size:1rem;line-height:1;padding:0 0.3rem;';
   infoBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (curInfo) openTableInfoDialog(lastName, curInfo);
+    if (curInfo) openTableInfoDialog(lastTitle, curInfo);
   });
   controlbar?.prepend(infoBtn);
   const updateInfoBtn = (table?: Table | null): void => {
@@ -377,8 +382,8 @@ function openPanel(t: Table, ctx: AppContext): void {
     const cur = all.find((x) => x.id === t.id);
     if (!cur) return;
     updateInfoBtn(cur);
-    if (cur.name !== lastName) {
-      lastName = cur.name;
+    if (displayName(cur) !== lastTitle) {
+      lastTitle = displayName(cur);
       renderTitle();
     }
   });

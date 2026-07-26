@@ -27,10 +27,11 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 
 ## In progress
 
-- 🕜 Implement settings dialog: .claude\plans\2026-07-26-settings-dialog-concept.md
 - 🕜 feature: Gist push/pull should sync the entire workspace, not just tables — include view templates, view instances, and settings (currently `gist-sync.ts` only serializes `api.store.tables` + rows; `viewTemplates`/`viewInstances`/`settings` are never pushed or pulled, so views and plugin config don't survive a Gist round-trip to another device)
 
 ## DONE
+
+- ✅ Implement settings dialog (concept `.claude/plans/2026-07-26-settings-dialog-concept.md`): tabbed dialog (General + one tab per plugin) via `api.ui.registerSettings`; `api.settings` two-layer store (workspace-synced / user device-local) with per-field promote/demote; secrets store with `${secret:name}` interpolation + drag-in `secrets.txt` import (overwrite prompt + toast); header gear button (secondary, icon-only, top-right); server-sync + gist-sync migrated. Rebased onto main's groundwork/anchor commits.
 
 - ✅ feature: The Gist Synch plugin should register a single footer button not 2 — one "Gist" button (GitHub icon) opens a menu: push / pull / settings / share / view gist. Share generates a `#hash` link with the base64 connection string (loaded on boot into the workspace). Added a per-table gist button (push/pull/view that table's file), a reusable anchored-menu, and consolidated the Export (JSON+SQL) and Sync (push/pull) footer buttons too.
 
