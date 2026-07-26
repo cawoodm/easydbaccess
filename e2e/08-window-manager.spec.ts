@@ -253,7 +253,8 @@ test.describe('window manager', () => {
       const midY = aRect.top + aRect.height / 2;
       const dataTransfer = new DataTransfer();
 
-      (ths[1] as HTMLElement).dispatchEvent(
+      // Reorder now starts from the small `.col-grip` handle, not the th.
+      (ths[1] as HTMLElement).querySelector('.col-grip')!.dispatchEvent(
         new DragEvent('dragstart', { bubbles: true, dataTransfer }),
       );
       await dt.updateComplete;
@@ -276,7 +277,7 @@ test.describe('window manager', () => {
         targetClasses: (ths[0] as HTMLElement).className,
       };
 
-      (ths[1] as HTMLElement).dispatchEvent(
+      (ths[1] as HTMLElement).querySelector('.col-grip')!.dispatchEvent(
         new DragEvent('dragend', { bubbles: true, dataTransfer }),
       );
       return snapshot;

@@ -65,7 +65,13 @@ export class DataTable extends LitElement {
         }
       }
       table {
-        width: 100%;
+        /* min-width keeps a narrow table filling the panel; max-content lets a
+           wide one grow past it (the host scrolls). Under table-layout:fixed
+           (set inline once a column is resized) the sum of the <col> widths is
+           authoritative, which is what makes per-column resize actually stick —
+           auto layout silently ignores <col> widths on content-heavy tables. */
+        width: max-content;
+        min-width: 100%;
         border-collapse: collapse;
         font-size: 0.875rem;
       }
@@ -118,8 +124,22 @@ export class DataTable extends LitElement {
       th.no-sort {
         cursor: default;
       }
-      th[draggable='true'] {
+      /* Only this small grip drags-to-reorder — NOT the whole th. A draggable
+         th would (a) make the entire cell a grab surface that swallows the sort
+         click and (b) start a native HTML5 drag on the resize gutter, which
+         hijacks the pointer and breaks column resizing. */
+      th .col-grip {
         cursor: grab;
+        color: #cbd5e1;
+        vertical-align: middle;
+        margin-right: 0.15rem;
+        line-height: 1;
+      }
+      th .col-grip:hover {
+        color: #6b7280;
+      }
+      th .col-grip:active {
+        cursor: grabbing;
       }
       /* 6px right-edge resize gutter; absolute so it doesn't push cell text. The
        th is already position: sticky (declared in the main th rule above),
@@ -245,12 +265,10 @@ export class DataTable extends LitElement {
       button.danger:hover {
         color: #ef4444;
       }
-      th.t-number,
+      /* Number CELLS are right-aligned so digits line up; the HEADER stays
+         left-aligned like every other column header. */
       td.t-number {
         text-align: right;
-      }
-      th.t-number .sort-icon {
-        margin-left: 0.25rem;
       }
       td.t-number input[type='text'] {
         text-align: right;
@@ -867,10 +885,40 @@ export class DataTable extends LitElement {
     return out;
   }
 
+  /**
+   * Snapshot the current on-screen width of every visible column into
+   * `this.columns`, so the table can flip to `table-layout: fixed` and honour
+   * per-column resizing exactly. A no-op for columns that already have a width.
+   */
+  private freezeColumnWidths() {
+    const headerRow = this.renderRoot.querySelector('thead tr');
+    if (!headerRow) return;
+    const cells = Array.from(headerRow.querySelectorAll(':scope > th'));
+    const vis = this.visibleColumns;
+    const measured = new Map<string, number>();
+    vis.forEach((c, i) => {
+      if (c.width != null) return; // keep an already-set width
+      const cell = cells[i] as HTMLElement | undefined;
+      if (cell) measured.set(c.field, Math.round(cell.getBoundingClientRect().width));
+    });
+    if (measured.size === 0) return;
+    this.columns = this.columns.map((c) =>
+      measured.has(c.field) ? { ...c, width: measured.get(c.field)! } : c,
+    );
+  }
+
   private onResizeStart(e: PointerEvent, field: string, th: HTMLElement) {
     e.preventDefault();
     e.stopPropagation();
     const startW = th.offsetWidth;
+    // Freeze the CURRENT rendered width of every visible column before we start
+    // dragging. `table-layout: auto` ignores <col> widths whenever content
+    // demands more room (wide/multi-column tables), so setting one column's
+    // width does nothing. Snapshotting all widths lets us switch to
+    // `table-layout: fixed` (see render), under which <col> widths are exact —
+    // so the drag moves the column 1:1. Columns that already carry a width keep
+    // it; unset ones inherit whatever the browser is showing right now.
+    this.freezeColumnWidths();
     this.resizing = { field, startX: e.clientX, startW };
     const onMove = (ev: PointerEvent) => {
       if (!this.resizing) return;
@@ -889,9 +937,13 @@ export class DataTable extends LitElement {
       if (!fld) return;
       const ctx = await getContext();
       if (this.viewMode) {
-        const w = this.columns.find((c) => c.field === fld)?.width;
+        // Persist ALL frozen widths, not just the dragged one — the freeze
+        // snapshot gave every visible column a width and the fixed layout needs
+        // them all to render identically after a reload.
         const widths = { ...(this.viewInst?.columnWidths ?? {}) };
-        if (typeof w === 'number') widths[fld] = w;
+        for (const c of this.columns) {
+          if (typeof c.width === 'number') widths[c.field] = c.width;
+        }
         await ctx.store.viewInstances.patch(this.viewInstanceId, {
           columnWidths: widths,
           updatedAt: Date.now(),
@@ -908,6 +960,9 @@ export class DataTable extends LitElement {
   }
 
   private onColDragStart(e: DragEvent, field: string) {
+    // Reorder drags start ONLY from the small `.col-grip` handle, never the
+    // whole th — see the col-grip CSS note for why (a draggable th would
+    // hijack the resize gutter's pointer drag and cover the sort click).
     this.dragSourceField = field;
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = 'move';
@@ -1033,7 +1088,7 @@ export class DataTable extends LitElement {
             ></div>
           </div>`
         : nothing}
-      <table>
+      <table style=${cols.some((c) => c.width != null) ? 'table-layout: fixed' : nothing}>
         <colgroup>
           ${cols.map((c) => html`<col style=${c.width != null ? `width: ${c.width}px` : ''} />`)}
           <col style="width:2rem" />
@@ -1061,20 +1116,25 @@ export class DataTable extends LitElement {
                 <th
                   class=${`${typeClass}${sorted ? ' sorted' : ''}${isSrc ? ' drag-source' : ''}${edgeClass}${canSort ? '' : ' no-sort'}`}
                   title=${tip}
-                  draggable="true"
                   @click=${() => canSort && this.toggleSort(c.field)}
-                  @dragstart=${(e: DragEvent) => this.onColDragStart(e, c.field)}
                   @dragover=${(e: DragEvent) =>
                     this.onColDragOver(e, c.field, e.currentTarget as HTMLElement)}
                   @dragleave=${() => this.onColDragLeave(c.field)}
                   @drop=${(e: DragEvent) => this.onColDrop(e, c.field)}
-                  @dragend=${() => {
-                    this.dragSourceField = null;
-                    this.dropTargetField = null;
-                    this.dropEdge = null;
-                  }}
                 >
-                  ${c.label}${c.units
+                  <span
+                    class="col-grip mi sm"
+                    title="Drag to reorder column"
+                    draggable="true"
+                    @click=${(e: Event) => e.stopPropagation()}
+                    @dragstart=${(e: DragEvent) => this.onColDragStart(e, c.field)}
+                    @dragend=${() => {
+                      this.dragSourceField = null;
+                      this.dropTargetField = null;
+                      this.dropEdge = null;
+                    }}
+                    >drag_indicator</span
+                  >${c.label}${c.units
                     ? html`<span class="col-units"> (${c.units})</span>`
                     : ''}<span class="sort-icon">${icon}</span>
                   <button

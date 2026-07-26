@@ -32,7 +32,9 @@ test.describe('columns editor', () => {
       const beforeX = aRect.left + aRect.width / 4;
       const midY = aRect.top + aRect.height / 2;
 
-      bTh.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }));
+      // Reorder now starts from the small `.col-grip` handle, not the th.
+      const bGrip = bTh.querySelector('.col-grip') as HTMLElement;
+      bGrip.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }));
       aTh.dispatchEvent(
         new DragEvent('dragover', {
           bubbles: true,
@@ -51,7 +53,7 @@ test.describe('columns editor', () => {
           clientY: midY,
         }),
       );
-      bTh.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer }));
+      bGrip.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer }));
     }, panelDomId(id));
 
     // The drop handler persists asynchronously — poll until columns flipped.

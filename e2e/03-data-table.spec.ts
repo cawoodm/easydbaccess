@@ -56,6 +56,91 @@ test.describe('data-table rendering', () => {
       .toBeGreaterThan(startWidth + 80);
   });
 
+  test('resize is exact on a wide many-column table (table-layout: fixed)', async ({ page }) => {
+    // Regression: on a content-heavy table wider than its panel, `table-layout:
+    // auto` silently ignores <col> widths, so dragging a column "barely moved"
+    // it. The first resize now freezes every column's current width and flips
+    // the table to `table-layout: fixed`, making the drag exact (1:1).
+    const fields = Array.from({ length: 12 }, (_, i) => ({ field: `col${i}` }));
+    const id = await createTable(page, 'Wide12', fields);
+    await waitForPanel(page, id);
+    await bulkAddRows(
+      page,
+      id,
+      Array.from({ length: 15 }, () =>
+        Object.fromEntries(fields.map((f) => [f.field, 'a fairly long cell value here'])),
+      ),
+    );
+
+    const panel = page.locator(`#${panelDomId(id)}`);
+    const th = panel.locator('data-table th').first(); // leftmost — always visible
+    await expect(th).toBeVisible();
+    const startWidth = (await th.boundingBox())?.width ?? 0;
+
+    const handle = th.locator('.col-resize');
+    const box = await handle.boundingBox();
+    const x = box!.x + box!.width / 2;
+    const y = box!.y + box!.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 150, y, { steps: 15 });
+    await page.mouse.up();
+
+    // The column grew by ~150px (not a token few pixels) and the table switched
+    // to fixed layout.
+    const endWidth = (await th.boundingBox())?.width ?? 0;
+    expect(endWidth).toBeGreaterThan(startWidth + 120);
+
+    const layout = await panel
+      .locator('data-table')
+      .evaluate(
+        (el) =>
+          getComputedStyle(
+            (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelector('table')!,
+          ).tableLayout,
+      );
+    expect(layout).toBe('fixed');
+
+    // Every column was frozen with a width, and the dragged one persisted.
+    await expect
+      .poll(async () => {
+        const t = await readTable(page, id);
+        return t?.columns.filter((c: { width?: number }) => typeof c.width === 'number').length ?? 0;
+      })
+      .toBe(12);
+  });
+
+  test('the th is not draggable — only the grip handle reorders columns', async ({ page }) => {
+    // Regression: making the whole <th> draggable (a) turned the entire header
+    // cell into a grab surface that covered the sort icon and (b) started a
+    // native HTML5 drag on the resize gutter, which hijacks the pointer so the
+    // resize silently does nothing. Reorder now lives on a small `.col-grip`
+    // handle instead, leaving the rest of the th free for sort + resize.
+    const id = await createTable(page, 'Wide', [{ field: 'a' }, { field: 'b' }]);
+    await waitForPanel(page, id);
+    await addRow(page, id, { a: 'x', b: 'y' });
+
+    const dt = page.locator(`#${panelDomId(id)} data-table`);
+    await expect(dt.locator('th').first()).toBeVisible();
+
+    const structure = await dt.evaluate((el) => {
+      const root = (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot;
+      const th = root.querySelector('thead th') as HTMLElement;
+      const grip = th.querySelector('.col-grip') as HTMLElement | null;
+      return {
+        thDraggable: th.getAttribute('draggable'),
+        hasGrip: !!grip,
+        gripDraggable: grip?.getAttribute('draggable') ?? null,
+      };
+    });
+
+    // The th must NOT be draggable (no native drag to hijack the gutter)...
+    expect(structure.thDraggable).toBeNull();
+    // ...and the dedicated grip carries the reorder drag instead.
+    expect(structure.hasGrip).toBe(true);
+    expect(structure.gripDraggable).toBe('true');
+  });
+
   test('descending sort keeps empty values at the bottom', async ({ page }) => {
     const id = await createTable(page, 'Scores', [
       { field: 'name' },
@@ -244,7 +329,7 @@ test.describe('data-table rendering', () => {
     await expect(cellB).toHaveClass(/is-null/);
   });
 
-  test('number columns are right-aligned (header + cell)', async ({ page }) => {
+  test('number cells are right-aligned but the header stays left-aligned', async ({ page }) => {
     const id = await createTable(page, 'Prices', [
       { field: 'name' },
       { field: 'price', type: 'number' },
@@ -257,9 +342,11 @@ test.describe('data-table rendering', () => {
     const priceTd = panel.locator('data-table tbody tr td').nth(1);
     await expect(priceTh).toHaveClass(/t-number/);
     await expect(priceTd).toHaveClass(/t-number/);
-    // CSS text-align: right resolves at runtime.
-    const align = await priceTd.evaluate((el) => getComputedStyle(el).textAlign);
-    expect(align).toBe('right');
+    // Digits line up (cell right-aligned) but every column header reads left.
+    const cellAlign = await priceTd.evaluate((el) => getComputedStyle(el).textAlign);
+    const headerAlign = await priceTh.evaluate((el) => getComputedStyle(el).textAlign);
+    expect(cellAlign).toBe('right');
+    expect(headerAlign).toBe('left');
   });
 
   test('date column edits use <input type="date">', async ({ page }) => {
