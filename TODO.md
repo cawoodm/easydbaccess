@@ -211,6 +211,11 @@ entire workspace` / `Cancel` (currently always inserts new tables next to
   Manager (fields already exist in schema)
 - ✅ feature: plugin error UI — surface `plugin:error` events as a panel/toast
   with stack trace and "disable plugin" affordance
+- 🕜 feature: Plugin Manager "by type" filter (branch `plugin-registry`, v0.0.107) —
+  new `PluginType` in `plugin-api.ts` (`importer` | `exporter` | `cell-renderer` |
+  `sync` | `source` | `ui`); all 18 built-ins + 3 demo plugins declare `meta.type`;
+  the generator passes it into `catalog.json`. Dialog gains a tri-state "TYPE" chip
+  row and a per-row type badge. e2e updated; awaiting merge to main.
 
 ## Backend / server
 
