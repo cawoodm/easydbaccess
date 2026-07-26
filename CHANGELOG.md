@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 26 Jul 2026 (v0.0.123)
+
+- JSON dump export/import now round-trips view templates & instances (re-pointed by table name) plus per-table window geometry/title/filters; windows restack on import.
+
 ## 26 Jul 2026 (v0.0.117)
 
 - Gist pull restores full per-table state (window position/size/stacking, sort, filters, view, label column) and window z-order; front-rank z is now unique so layering survives round-trips.

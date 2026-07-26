@@ -178,6 +178,36 @@ describe('parsedToTables: native dump shape ({ tables: [...] })', () => {
     const dump = { tables: [{ nonsense: true }] };
     expect(parsedToTables(dump, 'fallback')).toEqual([]);
   });
+
+  it('carries per-table window/display state (title, geometry, filters, labelColumn, info, deletedColumns)', () => {
+    const geom = { x: 10, y: 20, w: 300, h: 200, z: 5, minimized: false, maximized: false };
+    const dump = {
+      tables: [
+        {
+          name: 'Rich',
+          columns: [{ field: 'a' }],
+          rows: [],
+          title: 'Rich Display',
+          windowGeometry: geom,
+          sortColumn: 'a',
+          sortAsc: false,
+          filters: { a: 'x' },
+          labelColumn: 'a',
+          info: { description: 'about' },
+          deletedColumns: ['gone'],
+        },
+      ],
+    };
+    const [t] = parsedToTables(dump, 'fallback');
+    expect(t?.title).toBe('Rich Display');
+    expect(t?.windowGeometry).toEqual(geom);
+    expect(t?.sortColumn).toBe('a');
+    expect(t?.sortAsc).toBe(false);
+    expect(t?.filters).toEqual({ a: 'x' });
+    expect(t?.labelColumn).toBe('a');
+    expect(t?.info).toEqual({ description: 'about' });
+    expect(t?.deletedColumns).toEqual(['gone']);
+  });
 });
 
 describe('parsedToTables: bare array-of-objects', () => {

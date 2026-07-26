@@ -4,8 +4,11 @@ import type {
   HostApi,
   ImporterSpec,
   PluginModule,
+  TableInfo,
   TableOrigin,
   TableSource,
+  ViewInstance,
+  ViewTemplate,
   WindowGeometry,
 } from '@easydb/shared';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
@@ -175,6 +178,9 @@ export async function importJsonText(
     }
 
     const existingByName = new Map(existing.map((t) => [t.name, t] as const));
+    // Maps each imported table's name → its (new or matched) id, so view
+    // instances in the dump can be re-pointed at the freshly-minted table ids.
+    const nameToId = new Map<string, string>();
     let rowsDone = 0;
     for (const t of tables) {
       // Prefer backing info embedded in the dump (another device's export); else,
@@ -202,10 +208,15 @@ export async function importJsonText(
         }
         await api.store.tables.patch(tableId, {
           columns: t.columns,
+          ...(t.title ? { title: t.title } : {}),
           ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
           ...(t.sortColumn
             ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true }
             : { sortColumn: undefined, sortAsc: undefined }),
+          ...(t.filters ? { filters: t.filters } : {}),
+          ...(t.labelColumn ? { labelColumn: t.labelColumn } : {}),
+          ...(t.info ? { info: t.info } : {}),
+          ...(t.deletedColumns ? { deletedColumns: t.deletedColumns } : {}),
           source: source ?? undefined,
           origin: origin ?? undefined,
           updatedAt: Date.now(),
@@ -220,13 +231,19 @@ export async function importJsonText(
           code: slug(t.name),
           columns: t.columns,
           view: 'table',
+          ...(t.title ? { title: t.title } : {}),
           ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
           ...(t.sortColumn ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true } : {}),
+          ...(t.filters ? { filters: t.filters } : {}),
+          ...(t.labelColumn ? { labelColumn: t.labelColumn } : {}),
+          ...(t.info ? { info: t.info } : {}),
+          ...(t.deletedColumns ? { deletedColumns: t.deletedColumns } : {}),
           ...(source ? { source } : {}),
           ...(origin ? { origin } : {}),
           updatedAt: Date.now(),
         });
       }
+      nameToId.set(t.name, tableId);
 
       // Snapshot rows are stored locally; a live (`source`) table pulls its own
       // rows from the provider, so we do NOT insert them here (that would write
@@ -252,8 +269,60 @@ export async function importJsonText(
 
       api.events.emit('import:after', { source: 'json', tableId, rowCount: inserted });
     }
+
+    // Restore view templates (workspace-global) and view instances (per-table),
+    // re-pointing each instance at the freshly-imported table id by name. Only
+    // native dumps carry these; other JSON shapes leave them undefined.
+    await restoreViews(api, parsed, workspaceId, nameToId, mode === 'replace-workspace');
   } finally {
     handle?.done();
+  }
+
+  // Windows were opened one-per-insert (liveQuery fires per write), so their
+  // saved z-order / geometry wasn't applied as a batch. Ask the window manager
+  // to restack by saved z — mirrors the gist pull path.
+  document.dispatchEvent(new CustomEvent('easydb:restack-windows'));
+}
+
+/**
+ * Re-creates `ViewTemplate`s and `ViewInstance`s carried in a native dump.
+ * Templates are upserted (merged, never cleared — that would drop built-ins the
+ * dump omits). In replace-workspace mode the old instances are cleared first
+ * (their tables were just wiped); otherwise instances are upserted. Each
+ * instance's `tableId` is remapped via `nameToId` (falling back to its stored
+ * id) so it binds to the table that was actually imported.
+ */
+async function restoreViews(
+  api: HostApi,
+  parsed: unknown,
+  workspaceId: string,
+  nameToId: Map<string, string>,
+  replaceWorkspace: boolean,
+): Promise<void> {
+  if (!isObject(parsed)) return;
+  const p = parsed as { viewTemplates?: unknown; viewInstances?: unknown };
+  const templates = Array.isArray(p.viewTemplates) ? (p.viewTemplates as ViewTemplate[]) : [];
+  const instances = Array.isArray(p.viewInstances) ? (p.viewInstances as ViewInstance[]) : [];
+  if (templates.length === 0 && instances.length === 0) return;
+
+  if (replaceWorkspace) {
+    const stale = (await api.store.viewInstances.find()).filter(
+      (v) => v.workspaceId === workspaceId,
+    );
+    await api.store.viewInstances.bulkRemove(stale.map((v) => v.id));
+  }
+
+  for (const vt of templates) {
+    if (!isObject(vt) || typeof vt.id !== 'string') continue;
+    await api.store.viewTemplates.upsert({ ...vt, workspaceId });
+  }
+
+  for (const inst of instances) {
+    if (!isObject(inst) || typeof inst.id !== 'string') continue;
+    const tableId =
+      (inst.tableName ? nameToId.get(inst.tableName) : undefined) ?? inst.tableId;
+    if (!tableId) continue;
+    await api.store.viewInstances.upsert({ ...inst, workspaceId, tableId });
   }
 }
 
@@ -263,9 +332,14 @@ interface NormalizedTable {
   name: string;
   columns: ColumnSpec[];
   rows: Array<Record<string, unknown>>;
+  title?: string;
   windowGeometry?: WindowGeometry;
   sortColumn?: string;
   sortAsc?: boolean;
+  filters?: Record<string, string>;
+  labelColumn?: string;
+  info?: TableInfo;
+  deletedColumns?: string[];
   /** Live remote backing carried in the dump (rows re-pulled from the provider). */
   source?: TableSource;
   /** Snapshot origin URL carried in the dump (refreshable). */
@@ -293,6 +367,13 @@ export function parsedToTables(parsed: unknown, fallbackName: string): Normalize
         const geom = isObject(e.windowGeometry) ? (e.windowGeometry as WindowGeometry) : undefined;
         const sortColumn = typeof e.sortColumn === 'string' ? e.sortColumn : undefined;
         const sortAsc = typeof e.sortAsc === 'boolean' ? e.sortAsc : undefined;
+        const title = typeof e.title === 'string' ? e.title : undefined;
+        const filters = isObject(e.filters) ? (e.filters as Record<string, string>) : undefined;
+        const labelColumn = typeof e.labelColumn === 'string' ? e.labelColumn : undefined;
+        const info = isObject(e.info) ? (e.info as TableInfo) : undefined;
+        const deletedColumns = Array.isArray(e.deletedColumns)
+          ? (e.deletedColumns.filter((c) => typeof c === 'string') as string[])
+          : undefined;
         // Carry a live `source` or snapshot `origin` if the dump recorded one.
         const source =
           isObject(e.source) && typeof (e.source as { type?: unknown }).type === 'string'
@@ -310,8 +391,13 @@ export function parsedToTables(parsed: unknown, fallbackName: string): Normalize
           rows: Array.isArray(entry.rows)
             ? (entry.rows.filter(isObject) as Array<Record<string, unknown>>)
             : [],
+          ...(title ? { title } : {}),
           ...(geom ? { windowGeometry: geom } : {}),
           ...(sortColumn ? { sortColumn, sortAsc: sortAsc ?? true } : {}),
+          ...(filters ? { filters } : {}),
+          ...(labelColumn ? { labelColumn } : {}),
+          ...(info ? { info } : {}),
+          ...(deletedColumns ? { deletedColumns } : {}),
           ...(source ? { source } : {}),
           ...(origin ? { origin } : {}),
         });

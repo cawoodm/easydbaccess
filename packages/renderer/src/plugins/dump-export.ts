@@ -58,10 +58,27 @@ export async function serializeWorkspace(api: HostApi): Promise<string> {
   if (!wsId) throw new Error('dump-export: no active workspace');
 
   const tables = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
-  const out: { workspaceId: string; exportedAt: number; tables: unknown[] } = {
+  // View templates are workspace-global; instances are per-table. Both travel
+  // with the dump so a re-import restores the view windows (not just tables) —
+  // matching what the gist sync already carries.
+  const viewTemplates = (await api.store.viewTemplates.find()).filter(
+    (v) => v.workspaceId === wsId,
+  );
+  const viewInstances = (await api.store.viewInstances.find()).filter(
+    (v) => v.workspaceId === wsId,
+  );
+  const out: {
+    workspaceId: string;
+    exportedAt: number;
+    tables: unknown[];
+    viewTemplates: unknown[];
+    viewInstances: unknown[];
+  } = {
     workspaceId: wsId,
     exportedAt: Date.now(),
     tables: [],
+    viewTemplates,
+    viewInstances,
   };
 
   for (const t of tables) {
@@ -70,8 +87,13 @@ export async function serializeWorkspace(api: HostApi): Promise<string> {
       name: t.name,
       columns: t.columns,
       rows: rows.map((r) => r.data),
+      ...(t.title ? { title: t.title } : {}),
       ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
       ...(t.sortColumn ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true } : {}),
+      ...(t.filters ? { filters: t.filters } : {}),
+      ...(t.labelColumn ? { labelColumn: t.labelColumn } : {}),
+      ...(t.info ? { info: t.info } : {}),
+      ...(t.deletedColumns ? { deletedColumns: t.deletedColumns } : {}),
       // Carry the backing info so the dump reconstructs a live/refreshable
       // table on another device: `source` = live remote (rows re-pulled from
       // the provider), `origin` = snapshot with a URL it can be refreshed from.
