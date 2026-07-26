@@ -33,6 +33,18 @@ export class GistShareDialog extends LitElement {
         min-width: 420px;
         max-width: 560px;
       }
+      a.link-preview {
+        display: block;
+        max-width: 100%;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.8rem;
+        color: #2563eb;
+        text-decoration: underline;
+        margin-bottom: 0.4rem;
+      }
       .link-row {
         display: flex;
         gap: 0.5rem;
@@ -138,6 +150,14 @@ export class GistShareDialog extends LitElement {
             </div>
           </div>
           <div class="dialog-body">
+            <a
+              class="link-preview"
+              href=${this.link}
+              target="_blank"
+              rel="noopener noreferrer"
+              title=${this.link}
+              >${this.link}</a
+            >
             <div class="link-row">
               <input
                 class="link"
