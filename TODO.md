@@ -9,15 +9,21 @@
   - Once a task is implemented, show the user the full dev URL link (with http://), ask the user if they are happy explaining what was done and how to test it
   - Once the user accepts it, mark as done ✅ and move to DONE
   - Commit (Don't put TODO or claim in the commit message, just the original task text)
+  - merge into main
   - Always update your worktrees TODO and the file C:\projects\Marc\easyDBAccess\TODO.md so I can watch live changes
 
 Status keys: `bug` = broken, `feature` = missing, `polish` = works but UX
 gap, `perf` = correctness OK but slow. Leading `✅` = done.
 `✅✅` = done with e2e test coverage.
 
+## In progress
+
+## DONE
+
+- ✅ Create a concept for a settings dialog with tabs for General and then one tab for each plugin which has registered settings. Plugins should call api.registerSettings with their id, name and a JSON object containing their settings. (concept: `.claude/plans/2026-07-26-settings-dialog-concept.md`)
+
 ## Backlog
 
-- Create a concept for a settings dialog with tabs for General and then one tab for each plugin which has registered settings. Plugins should call api.registerSettings with their id, name and a JSON object containing their settings. See C:\projects\Marc\twikki\src\packages\base\SettingsDialogPlugin\SettingsDialog.js for how to make a dynamic dialog based on JSON Workspace settings are saved in the settings table for the workspace while user settings are saved in a single easydbaccess.json key in localStorage so the user can easily move this between devices.
 - Bug: when connecting a datasette.io instance which fails with table not found, the table is still created empty. The dialog should automatically check the URL before proceeding (e.g. broken URL https://datasette.io/legislators/officers)
 - Bug: When pulling the Simon workspace (see tmp/tokens.txt for the gist connection string) the error is: Gist sync
   Pull failed: Expected double-quoted property name in JSON at position 418295 (line 422 column 124) - are we running into size limits? Can we report back which file/table was at fault. We should continue pulling other tables even if one fails. We need a progress bar.
