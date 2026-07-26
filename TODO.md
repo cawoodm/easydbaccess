@@ -1,6 +1,7 @@
 # Instructions
 
 - Read instructions in .claude\CLAUDE.md
+- Read and write only to this central TODO.md at C:\projects\Marc\easyDBAccess\TODO.md (not your worktree version)
 - Run a loop to process one task at a time:
   - Read an unmarked TODO from the Backlog below, don't take a task marked 🕜
   - Move it to in-progress and mark it with 🕜
@@ -9,6 +10,8 @@
   - Once a task is implemented, show the user the full dev URL link (with http://), ask the user if they are happy explaining what was done and how to test it
   - Once the user accepts it, mark as done ✅ and move to DONE
   - Commit (Don't put TODO or claim in the commit message, just the original task text)
+  - Bump version using scripts/
+  - Write a CHANGELOG.md entry
   - merge into main
   - Always update your worktrees TODO and the file C:\projects\Marc\easyDBAccess\TODO.md so I can watch live changes
 
@@ -17,6 +20,8 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 `✅✅` = done with e2e test coverage.
 
 ## In progress
+
+- 🕜 feature: Gist push/pull should sync the entire workspace, not just tables — include view templates, view instances, and settings (currently `gist-sync.ts` only serializes `api.store.tables` + rows; `viewTemplates`/`viewInstances`/`settings` are never pushed or pulled, so views and plugin config don't survive a Gist round-trip to another device)
 
 ## DONE
 
@@ -29,6 +34,8 @@ gap, `perf` = correctness OK but slow. Leading `✅` = done.
 
 ## Backlog
 
+- Implement settings dialog: .claude\plans\2026-07-26-settings-dialog-concept.md
+- When creating a new view, auto map fields (URL-like fields to URL, date-like fields to date, long fields to DESCRIPTION) - also allow a view to specify TOP N rows
 - When connecting datasette add options for "virtual" and "no persist" recommended for big tables. Virtual means we don't load all data - we only load at most 2 visible pages in the UI, the sorting and filtering is done on the server and we eject the entire table from memory each time the user sorts or filters. Paging is server side. The "no persist" option means we don't save the data to our local store and we don't push/synch it either. Surface these settings in the column editor.
 
 ## Rendering
