@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 27 Jul 2026 (v0.0.143)
+
+- Two HTML cell renderers: `html-preview` shows a truncated plain-text preview (edit in a dialog, popup icon to view rendered HTML), and `html` renders full HTML in-cell with inline editing. Both editable.
+
 ## 27 Jul 2026 (v0.0.142)
 
 - The column editor's live preview now hides columns marked hidden, matching the actual table.

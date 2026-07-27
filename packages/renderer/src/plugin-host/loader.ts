@@ -11,7 +11,8 @@ import * as newTableButton from '../plugins/new-table-button.js';
 import * as coreRenderers from '../plugins/core-renderers.js';
 import * as cellColor from '../plugins/cell-color.js';
 import * as cellImage from '../plugins/cell-image.js';
-import * as cellHtml from '../plugins/cell-html.js';
+import * as htmlPreview from '../plugins/html-preview.js';
+import * as htmlRender from '../plugins/html-render.js';
 import * as cellLink from '../plugins/cell-link.js';
 import * as deleteTable from '../plugins/delete-table.js';
 import * as importData from '../plugins/import-data.js';
@@ -53,7 +54,8 @@ const modules: PluginModule[] = [
   coreRenderers,
   cellColor,
   cellImage,
-  cellHtml,
+  htmlPreview,
+  htmlRender,
   cellLink,
   deleteTable,
   importData,
