@@ -255,3 +255,30 @@ plugin's original URL later goes offline.
   in lockstep — the type, the Dexie schema + typed accessor in
   `dexie-db.ts`, and the `DataStore` wrapper in `data-store-dexie.ts` — see
   `packages/shared/CLAUDE.md`.
+
+## Where each piece of data lives today
+
+A map from "thing" to its actual storage location on one device — useful when
+reasoning about what `gist-sync` (see `SYNCH.md`) does and doesn't carry
+across devices, since it only ever reads from a subset of this list.
+
+| Data | Where stored today |
+|---|---|
+| Table fields (`name`, `title`, `columns`, `view`, `windowGeometry`, `sortColumn`/`sortAsc`, `filters`, `labelColumn`, `deletedColumns`, `info`, `source`, `origin`) | IndexedDB (`easydb`) → `tables` |
+| Row data (`row.data`) | IndexedDB → `rows` |
+| View templates | IndexedDB → `viewTemplates` |
+| View instances (incl. their own `windowGeometry`) | IndexedDB → `viewInstances` |
+| Workspace record (`title`, `pluginUrls`, `id`, `name`) | IndexedDB → `workspaces` |
+| Workspace-layer settings (`${pluginId}:${key}`, e.g. `user`/`gist_id`, `server-sync:url`, non-token `datasette:*`) | IndexedDB → `settings` |
+| Installed third-party plugin state + cached module body, and toggled built-ins (`builtin:<id>`) | IndexedDB → `plugins` |
+| User-layer settings (any field promoted to `scope: 'user'`, e.g. `gist_token`) | `localStorage` blob `/easydbaccess/settings.json` |
+| Secrets referenced via `${secret:name}` | `localStorage` blob `/easydbaccess/secrets.txt` |
+| Last-active workspace id | `localStorage` key `eda:lastWorkspaceId` |
+
+Cross-reference with `SYNCH.md`: `gist-sync` only ever touches the `tables`,
+`rows`, `viewTemplates`, `viewInstances` collections and the workspace-layer
+`settings` (filtered to exclude `gist:`/`datasette:token:`/`server-sync:`
+keys). Everything in the `workspaces` and `plugins` tables, all user-layer
+settings, and the secrets store are never read or written by gist-sync — a
+pulled workspace never gets the pusher's title, installed plugin list, or
+credentials.
