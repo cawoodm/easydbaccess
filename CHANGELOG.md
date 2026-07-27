@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 27 Jul 2026 (v0.0.148)
+
+- The Settings dialog won't close while a secret field holds a raw value — it must be empty or a `${secret:name}` reference, so secrets are never saved or synced in plain text.
+
 ## 27 Jul 2026 (v0.0.147)
 
 - Views gained a Readonly option (default off): a readonly grid view shows values without editors — no date picker, disabled checkboxes — while normal views stay editable.

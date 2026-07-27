@@ -155,6 +155,19 @@ export class SettingsDialog extends LitElement {
         width: auto;
         flex: 0 0 auto;
       }
+      .secret-row input.invalid {
+        border-color: #dc2626;
+        background: #fef2f2;
+      }
+      .secret-error {
+        margin: 0.5rem 1rem 0;
+        padding: 0.5rem 0.7rem;
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        border-radius: 0.35rem;
+        color: #b91c1c;
+        font-size: 0.82rem;
+      }
       .radios,
       .checks {
         display: flex;
@@ -197,6 +210,8 @@ export class SettingsDialog extends LitElement {
   @state() private placements: Record<string, SettingScope> = {};
   @state() private secretsText = '';
   @state() private workspaceTitle = '';
+  /** Set when a close was blocked because a secret field held a raw value. */
+  @state() private secretError = '';
   private dialogEl: HTMLDialogElement | null = null;
 
   override firstUpdated() {
@@ -240,19 +255,54 @@ export class SettingsDialog extends LitElement {
     this.dialogEl?.showModal();
   }
 
-  private close() {
-    this.dialogEl?.close();
+  /** A secret value that is neither empty nor a `${secret:name}` reference —
+   *  i.e. a raw secret that would otherwise be stored/synced in plain text. */
+  private static rawSecret(v: unknown): v is string {
+    return typeof v === 'string' && v !== '' && !v.includes('${secret:');
   }
 
-  // Fields already auto-save on change; Done/Ctrl+Enter just closes.
+  /** Secret-typed fields currently holding a raw value, across every tab. */
+  private invalidSecrets(): Array<{ tab: Tab; field: SettingsFieldSpec }> {
+    const bad: Array<{ tab: Tab; field: SettingsFieldSpec }> = [];
+    for (const tab of this.tabs) {
+      for (const f of tab.fields) {
+        if (f.type !== 'secret') continue;
+        if (SettingsDialog.rawSecret(this.values[`${tab.id}:${f.key}`])) bad.push({ tab, field: f });
+      }
+    }
+    return bad;
+  }
+
+  /** Close unless a secret field holds a raw value — then block and point at it. */
+  private attemptClose = (e?: Event): void => {
+    const bad = this.invalidSecrets();
+    if (bad.length > 0) {
+      // On the native `cancel` (Esc) event, preventDefault keeps the dialog open.
+      e?.preventDefault();
+      const first = bad[0]!;
+      this.active = first.tab.id;
+      this.secretError =
+        `“${first.field.label}” must be empty or a \${secret:name} reference. ` +
+        `Move the value into the secrets store (General tab) and reference it, ` +
+        `so the raw secret is never saved or synced.`;
+      return;
+    }
+    this.secretError = '';
+    this.dialogEl?.close();
+  };
+
+  // Fields already auto-save on change; Done/Ctrl+Enter just closes — unless a
+  // secret field still holds a raw value (see attemptClose).
   private onSubmit = (e: Event): void => {
     e.preventDefault();
-    this.close();
+    this.attemptClose();
   };
 
   private async setValue(tab: Tab, f: SettingsFieldSpec, value: unknown) {
     const k = `${tab.id}:${f.key}`;
     this.values = { ...this.values, [k]: value };
+    // Clear a pending secret-validation error once nothing raw remains.
+    if (this.secretError && this.invalidSecrets().length === 0) this.secretError = '';
     const ctx = await getContext();
     await ctx.api.settings.set(tab.id, f.key, value, this.placements[k]);
   }
@@ -368,9 +418,11 @@ export class SettingsDialog extends LitElement {
 
   private renderSecretControl(tab: Tab, f: SettingsFieldSpec, v: unknown) {
     const names = Object.keys(parseSecrets(this.secretsText));
+    const invalid = SettingsDialog.rawSecret(v);
     return html`<div class="secret-row">
       <input
         type="text"
+        class=${invalid ? 'invalid' : ''}
         placeholder="value or \${secret:name}"
         .value=${String(v ?? '')}
         @change=${(e: Event) => this.setValue(tab, f, (e.target as HTMLInputElement).value)}
@@ -469,8 +521,8 @@ export class SettingsDialog extends LitElement {
 
   override render() {
     return html`
-      <dialog @cancel=${this.close} @keydown=${ctrlEnterSubmits}>
-        <button type="button" class="close-x" title="Close" @click=${this.close}>
+      <dialog @cancel=${this.attemptClose} @keydown=${ctrlEnterSubmits}>
+        <button type="button" class="close-x" title="Close" @click=${() => this.attemptClose()}>
           <span class="mi sm">close</span>
         </button>
         <form @submit=${this.onSubmit}>
@@ -480,6 +532,9 @@ export class SettingsDialog extends LitElement {
               <button type="submit" class="primary">Done</button>
             </div>
           </div>
+          ${this.secretError
+            ? html`<div class="secret-error" role="alert">${this.secretError}</div>`
+            : nothing}
           <div class="dialog-body">
             <div class="layout">
               <nav class="tabs">
