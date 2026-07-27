@@ -19,8 +19,12 @@ The palette composes its list fresh each time it opens, from three sources:
    reachable from the palette without any extra registration.
 3. **Go to <table>** — one entry per table in the current workspace (the
    **Tables** group). Running it focuses that table's window (restoring it
-   first if minimized), via `focusTableWindow(tableId)` in
-   `window-mgr/jspanel-manager.ts`.
+   first if minimized, or un-hiding it if closed), via `focusTableWindow(tableId)`
+   in `window-mgr/jspanel-manager.ts`.
+4. **Go to view <name>** — one entry per view instance (the **Views** group).
+   Running it opens the view's window if closed (by flipping the instance's
+   `open` flag, which the view-window manager reacts to) and fronts it via
+   `focusViewWindow(instanceId)` in `window-mgr/view-window-manager.ts`.
 
 Entries are grouped by `CommandSpec.group` and ordered **Windows → Actions →
 Tables → (other groups)**; within a group, registration order is preserved.

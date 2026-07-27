@@ -5,6 +5,7 @@ import type { CommandSpec, HostApi } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { focusTableWindow } from '../window-mgr/jspanel-manager.js';
+import { focusViewWindow } from '../window-mgr/view-window-manager.js';
 
 /** One selectable entry in the palette (flattened from commands/buttons/tables). */
 interface PaletteItem {
@@ -18,7 +19,7 @@ interface PaletteItem {
 }
 
 /** Group display order; unknown groups sort last (alphabetically). */
-const GROUP_RANK: Record<string, number> = { Windows: 0, Actions: 1, App: 2, Tables: 3 };
+const GROUP_RANK: Record<string, number> = { Windows: 0, Actions: 1, App: 2, Tables: 3, Views: 4 };
 function groupRank(g: string): number {
   return GROUP_RANK[g] ?? 3;
 }
@@ -185,6 +186,24 @@ export class CommandPaletteDialog extends LitElement {
         haystack: `${t.name} go to table`.toLowerCase(),
         run: () => {
           focusTableWindow(t.id);
+        },
+      });
+    }
+
+    const views = await api.store.viewInstances.find({ workspaceId: ctx.workspaceId });
+    views.sort((a, b) => a.name.localeCompare(b.name));
+    for (const v of views) {
+      items.push({
+        id: `goto-view:${v.id}`,
+        title: `Go to view: ${v.name}`,
+        group: 'Views',
+        icon: 'view_quilt',
+        haystack: `${v.name} go to view`.toLowerCase(),
+        run: async () => {
+          // Open it if it's closed (the view-window manager reacts to `open`),
+          // then front it if it was already open.
+          await api.store.viewInstances.patch(v.id, { open: true, updatedAt: Date.now() });
+          focusViewWindow(v.id);
         },
       });
     }

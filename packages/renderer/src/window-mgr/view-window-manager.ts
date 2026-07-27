@@ -52,6 +52,21 @@ interface ViewEntry {
 }
 
 const panels = new Map<string, ViewEntry>();
+
+/**
+ * Brings an already-open view window to the front (restoring it if minimized).
+ * The command palette's "Go to view" command patches `open: true` first (which
+ * opens a closed view via the reactive reconcile below); this fronts one that
+ * is already open. Returns false if no window is currently open for that id.
+ */
+export function focusViewWindow(instanceId: string): boolean {
+  const entry = panels.get(instanceId);
+  if (!entry) return false;
+  const panel = entry.panel as Panel & { front?: () => void; normalize?: () => void };
+  if (panel.status === 'minimized') panel.normalize?.();
+  panel.front?.();
+  return true;
+}
 let initialized = false;
 
 /** Render a view panel's titlebar: "<name> (<count>)" / "(<visible>/<total>)". */
