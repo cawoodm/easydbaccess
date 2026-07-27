@@ -89,9 +89,20 @@ export function init(api: HostApi): void {
       ]);
       if (!choice) return;
       try {
-        if (choice === 'push') await push(api);
-        else if (choice === 'pull') await pull(api);
-        else if (choice === 'share') await openShare(api);
+        if (choice === 'push' || choice === 'pull') {
+          // Second step: which slice of the workspace to sync. "Data" = the
+          // per-table .table.json files; "Settings" = the workspace marker
+          // (view templates/instances + synced settings).
+          const scopeChoice = await AnchoredMenu.open(rect, [
+            { id: 'all', label: 'Everything', icon: 'sync' },
+            { id: 'data', label: 'Data only (tables + rows)', icon: 'table_rows' },
+            { id: 'settings', label: 'Settings only (views + settings)', icon: 'tune' },
+          ]);
+          if (!scopeChoice) return;
+          const scope = scopeChoice as SyncScope;
+          if (choice === 'push') await push(api, scope);
+          else await pull(api, scope);
+        } else if (choice === 'share') await openShare(api);
         else if (choice === 'view') await openViewGist(api);
       } catch (err) {
         api.ui.dialogs.toast(`Gist ${choice} failed: ${(err as Error).message}`, {
@@ -272,15 +283,21 @@ async function openViewGist(api: HostApi): Promise<void> {
 
 // -- Push ---------------------------------------------------------------------
 
-async function push(api: HostApi): Promise<void> {
+/** Which slice of the workspace a push/pull touches. */
+type SyncScope = 'all' | 'data' | 'settings';
+
+async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
   const creds = await ensureCreds(api);
   if (!creds) return;
 
   const wsId = api.workspaceId();
   if (!wsId) throw new Error('no active workspace');
 
+  const includeData = scope !== 'settings';
+  const includeSettings = scope !== 'data';
+
   const tables = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
-  if (tables.length === 0) {
+  if (includeData && tables.length === 0) {
     await api.ui.dialogs.alert(
       'Nothing to push: the current workspace has no tables.',
       'Gist sync',
@@ -297,7 +314,8 @@ async function push(api: HostApi): Promise<void> {
   const files: Record<string, { content: string }> = {};
   const oversize: string[] = [];
   const large: string[] = [];
-  for (const t of tables) {
+  if (includeData)
+    for (const t of tables) {
     const rows = await api.store.rows(t.id).find();
     const content = JSON.stringify(tableToFile(t, rows), null, 2);
     const label = `${t.name} (${(content.length / 1_000_000).toFixed(2)} MB)`;
@@ -331,27 +349,29 @@ async function push(api: HostApi): Promise<void> {
   // when pulling (vs. some unrelated gist the user pointed at by accident).
   // Also carries workspace metadata (view templates/instances + non-secret
   // settings) so a pull can restore more than just tables/rows.
-  const viewTemplates = (await api.store.viewTemplates.find()).filter(
-    (v) => v.workspaceId === wsId,
-  );
-  const viewInstances = (await api.store.viewInstances.find()).filter(
-    (v) => v.workspaceId === wsId,
-  );
-  const settings = (await api.store.settings.find()).filter((s) => isSyncableSetting(s.key));
-  files['_easydb.workspace.json'] = {
-    content: JSON.stringify(
-      {
-        workspaceId: wsId,
-        exportedAt: Date.now(),
-        kind: 'easydb-workspace-v1',
-        viewTemplates,
-        viewInstances,
-        settings,
-      },
-      null,
-      2,
-    ),
-  };
+  if (includeSettings) {
+    const viewTemplates = (await api.store.viewTemplates.find()).filter(
+      (v) => v.workspaceId === wsId,
+    );
+    const viewInstances = (await api.store.viewInstances.find()).filter(
+      (v) => v.workspaceId === wsId,
+    );
+    const settings = (await api.store.settings.find()).filter((s) => isSyncableSetting(s.key));
+    files['_easydb.workspace.json'] = {
+      content: JSON.stringify(
+        {
+          workspaceId: wsId,
+          exportedAt: Date.now(),
+          kind: 'easydb-workspace-v1',
+          viewTemplates,
+          viewInstances,
+          settings,
+        },
+        null,
+        2,
+      ),
+    };
+  }
 
   let updated: { id: string; html_url?: string };
   if (creds.gistId) {
@@ -387,7 +407,13 @@ async function push(api: HostApi): Promise<void> {
   }
 
   const url = updated.html_url ?? `https://gist.github.com/${creds.user}/${updated.id}`;
-  api.ui.dialogs.toast(`Pushed ${tables.length} table${tables.length === 1 ? '' : 's'}.  ${url}`, {
+  const what =
+    scope === 'settings'
+      ? 'settings'
+      : scope === 'data'
+        ? `${tables.length} table${tables.length === 1 ? '' : 's'} (data only)`
+        : `${tables.length} table${tables.length === 1 ? '' : 's'}`;
+  api.ui.dialogs.toast(`Pushed ${what}.  ${url}`, {
     kind: 'success',
     title: 'Gist sync',
   });
@@ -395,7 +421,9 @@ async function push(api: HostApi): Promise<void> {
 
 // -- Pull ---------------------------------------------------------------------
 
-async function pull(api: HostApi): Promise<void> {
+async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
+  const includeData = scope !== 'settings';
+  const includeSettings = scope !== 'data';
   const creds = await ensureCreds(api);
   if (!creds || !creds.gistId) {
     await api.ui.dialogs.alert(
@@ -422,22 +450,23 @@ async function pull(api: HostApi): Promise<void> {
   const tableFiles = Object.entries(gist.files).filter(
     ([name]) => name.endsWith('.table.json') && !name.startsWith('_easydb'),
   );
-  if (tableFiles.length === 0) {
+  if (includeData && tableFiles.length === 0) {
     await api.ui.dialogs.alert('Gist contains no .table.json files.', 'Gist sync');
     return;
   }
 
-  // Index existing tables by name so we upsert instead of duplicating.
+  // Index existing tables by name so we upsert instead of duplicating (and so
+  // a settings-only pull can re-point view instances at already-local tables).
   const existingTables = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
   const byName = new Map(existingTables.map((t) => [t.name.toLowerCase(), t]));
-
-  const { TopProgress } = await import('../chrome/top-progress.js');
-  const progress: ProgressHandle = TopProgress.begin('Pulling from gist…');
 
   let imported = 0;
   const failures: Array<{ file: string; error: string }> = [];
   const nameToId = new Map<string, string>();
-  try {
+  if (includeData) {
+    const { TopProgress } = await import('../chrome/top-progress.js');
+    const progress: ProgressHandle = TopProgress.begin('Pulling from gist…');
+    try {
     for (const [i, [name, file]] of tableFiles.entries()) {
       try {
         const content = await fetchGistFileContent(file);
@@ -494,13 +523,14 @@ async function pull(api: HostApi): Promise<void> {
         progress.fraction((i + 1) / tableFiles.length);
       }
     }
-  } finally {
-    progress.done();
+    } finally {
+      progress.done();
+    }
   }
 
   let importedViews = 0;
   let metadataWarning = '';
-  const markerFile = gist.files['_easydb.workspace.json'];
+  const markerFile = includeSettings ? gist.files['_easydb.workspace.json'] : undefined;
   if (markerFile) {
     try {
       const markerContent = await fetchGistFileContent(markerFile);
@@ -548,10 +578,11 @@ async function pull(api: HostApi): Promise<void> {
     );
   } else {
     const viewsSuffix = importedViews > 0 ? ` (+${importedViews} views)` : '';
-    api.ui.dialogs.toast(
-      `Pulled ${imported} table${imported === 1 ? '' : 's'}.${viewsSuffix}`,
-      { kind: 'success', title: 'Gist sync' },
-    );
+    const msg =
+      scope === 'settings'
+        ? `Pulled settings${viewsSuffix}.`
+        : `Pulled ${imported} table${imported === 1 ? '' : 's'}.${viewsSuffix}`;
+    api.ui.dialogs.toast(msg, { kind: 'success', title: 'Gist sync' });
     if (metadataWarning) {
       api.ui.dialogs.toast(metadataWarning, { kind: 'warning', title: 'Gist sync' });
     }

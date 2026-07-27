@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 27 Jul 2026 (v0.0.131)
+
+- Gist Push and Pull now offer a scope choice — Everything, Data only (tables + rows), or Settings only (views + settings).
+
 ## 26 Jul 2026 (v0.0.130)
 
 - Removed the Gist plugin's own credentials dialog — configure Gist in Settings → Gist Sync; push/pull with no credentials now points you there.
