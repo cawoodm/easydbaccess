@@ -567,20 +567,22 @@ export class NewTableDialog extends LitElement {
       }
       duplicateSets.set(c.field, dups);
     }
+    // Mirror the real grid: hidden columns are excluded from the preview.
+    const visible = this.columns.filter((c) => !c.hidden);
     return html`
       <div class="preview">
         <h3>Live preview — first ${this.previewRows.length} row${this.previewRows.length === 1 ? '' : 's'}</h3>
         <table>
           <thead>
             <tr>
-              ${this.columns.map((c) => html`<th title=${c.field}>${c.label || c.field}</th>`)}
+              ${visible.map((c) => html`<th title=${c.field}>${c.label || c.field}</th>`)}
             </tr>
           </thead>
           <tbody>
             ${this.previewRows.map(
               (r) => html`
                 <tr>
-                  ${this.columns.map((c) => {
+                  ${visible.map((c) => {
                     const v = r.data[c.field];
                     const reason = validateAgainstSpec(c, v, duplicateSets.get(c.field));
                     return html`<td
