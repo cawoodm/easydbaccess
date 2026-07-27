@@ -316,7 +316,8 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
   const large: string[] = [];
   if (includeData)
     for (const t of tables) {
-    const rows = await api.store.rows(t.id).find();
+    // Remote tables emit definition only — don't fetch their live rows to discard them.
+    const rows = t.source != null ? [] : await api.store.rows(t.id).find();
     const content = JSON.stringify(tableToFile(t, rows), null, 2);
     const label = `${t.name} (${(content.length / 1_000_000).toFixed(2)} MB)`;
     if (content.length > HARD_LIMIT) oversize.push(label);
@@ -489,10 +490,14 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
             ...syncedTableFields(parsed),
             updatedAt: Date.now(),
           });
-          // Wipe existing rows for clean reimport (simplest correct behavior).
-          const rowColl = api.store.rows(existing.id);
-          const oldRows = await rowColl.find();
-          await rowColl.bulkRemove(oldRows.map((r) => r.id));
+          // Wipe existing rows for clean reimport (simplest correct behavior) —
+          // but only for LOCAL tables. A remote table's rows are re-fetched live
+          // through its routed collection, so we must never touch them here.
+          if (table.source == null) {
+            const rowColl = api.store.rows(existing.id);
+            const oldRows = await rowColl.find();
+            await rowColl.bulkRemove(oldRows.map((r) => r.id));
+          }
         } else {
           table = await api.store.tables.insert({
             id: cryptoUUID(),
@@ -507,13 +512,17 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
           });
         }
 
-        const docs = (parsed.rows ?? []).map((data) => ({
-          id: cryptoUUID(),
-          tableId: table.id,
-          data,
-          updatedAt: Date.now(),
-        }));
-        await api.store.rows(table.id).bulkInsert(docs);
+        // Remote tables get no local rows — the definition alone reconnects
+        // them to their backend, which serves the live data.
+        if (table.source == null) {
+          const docs = (parsed.rows ?? []).map((data) => ({
+            id: cryptoUUID(),
+            tableId: table.id,
+            data,
+            updatedAt: Date.now(),
+          }));
+          await api.store.rows(table.id).bulkInsert(docs);
+        }
 
         nameToId.set(parsed.name, table.id);
         imported++;
@@ -608,7 +617,8 @@ async function pushTable(api: HostApi, tableId: string): Promise<void> {
   }
   const table = await api.store.tables.findOne(tableId);
   if (!table) return;
-  const rows = await api.store.rows(tableId).find();
+  // Remote tables push their definition only; their rows live in the backend.
+  const rows = table.source != null ? [] : await api.store.rows(tableId).find();
   const content = JSON.stringify(tableToFile(table, rows), null, 2);
   const files = { [`${slug(table.name)}.table.json`]: { content } };
   const res = await fetch(`https://api.github.com/gists/${creds.gistId}`, {
@@ -655,22 +665,26 @@ async function pullTable(api: HostApi, tableId: string): Promise<void> {
   if (!parsed.name || !Array.isArray(parsed.columns)) {
     throw new Error('unexpected file shape (missing name/columns)');
   }
-  await api.store.tables.patch(tableId, {
+  const patched = await api.store.tables.patch(tableId, {
     title: parsed.title,
     columns: parsed.columns,
     ...syncedTableFields(parsed),
     updatedAt: Date.now(),
   });
-  const rowColl = api.store.rows(tableId);
-  const oldRows = await rowColl.find();
-  await rowColl.bulkRemove(oldRows.map((r) => r.id));
-  const docs = (parsed.rows ?? []).map((data) => ({
-    id: cryptoUUID(),
-    tableId,
-    data,
-    updatedAt: Date.now(),
-  }));
-  await rowColl.bulkInsert(docs);
+  // Local tables replace their rows from the file; a remote table keeps its
+  // live-fetched rows — its restored definition reconnects it to the backend.
+  if (patched.source == null) {
+    const rowColl = api.store.rows(tableId);
+    const oldRows = await rowColl.find();
+    await rowColl.bulkRemove(oldRows.map((r) => r.id));
+    const docs = (parsed.rows ?? []).map((data) => ({
+      id: cryptoUUID(),
+      tableId,
+      data,
+      updatedAt: Date.now(),
+    }));
+    await rowColl.bulkInsert(docs);
+  }
   api.ui.dialogs.toast(`Pulled "${table.name}" from gist.`, {
     kind: 'success',
     title: 'Gist sync',
@@ -704,13 +718,17 @@ function tableToFile(t: Table, rows: Row[]) {
   // `r.data` would therefore sync — and size-count — long-deleted columns, which
   // is why a 2 MB table (per its CSV) was warning as 32 MB on push.
   const fields = t.columns.map((c) => c.field);
+  // A table backed by a live source (Datasette, or any registered backend) is
+  // "remote": its rows live in the backend, not locally. Such tables sync their
+  // DEFINITION only — never the (possibly huge, possibly stale) row data.
+  const isRemote = t.source != null;
   return {
     name: t.name,
     title: t.title,
     columns: t.columns,
     // Full display/query state so a pull restores the table exactly, not just
     // its data: view mode, window layout, sort, filters, label column, deleted
-    // columns, and info. (Routing fields `source`/`origin` are handled elsewhere.)
+    // columns, and info.
     view: t.view,
     windowGeometry: t.windowGeometry,
     sortColumn: t.sortColumn,
@@ -719,11 +737,20 @@ function tableToFile(t: Table, rows: Row[]) {
     labelColumn: t.labelColumn,
     deletedColumns: t.deletedColumns,
     info: t.info,
-    rows: rows.map((r) => {
-      const projected: Record<string, unknown> = {};
-      for (const f of fields) projected[f] = r.data[f];
-      return projected;
-    }),
+    // Routing descriptors so a pulled remote/snapshot table reconnects to its
+    // backend (or remembers where a snapshot came from) instead of returning as
+    // a dead, source-less local table. No secrets live here — backend tokens are
+    // kept in settings, not in `source.config`.
+    source: t.source,
+    origin: t.origin,
+    // Remote tables carry no rows; their data is re-fetched live on pull.
+    rows: isRemote
+      ? []
+      : rows.map((r) => {
+          const projected: Record<string, unknown> = {};
+          for (const f of fields) projected[f] = r.data[f];
+          return projected;
+        }),
   };
 }
 
@@ -737,6 +764,8 @@ type TableFileMeta = {
   labelColumn?: string;
   deletedColumns?: string[];
   info?: Table['info'];
+  source?: Table['source'];
+  origin?: Table['origin'];
 };
 
 /**
@@ -755,6 +784,9 @@ function syncedTableFields(p: TableFileMeta): Partial<Table> {
   if (p.labelColumn !== undefined) out.labelColumn = p.labelColumn;
   if (p.deletedColumns !== undefined) out.deletedColumns = p.deletedColumns;
   if (p.info !== undefined) out.info = p.info;
+  // Restore routing so a remote table reconnects to its backend on pull.
+  if (p.source !== undefined) out.source = p.source;
+  if (p.origin !== undefined) out.origin = p.origin;
   return out;
 }
 

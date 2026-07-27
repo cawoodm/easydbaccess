@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 27 Jul 2026 (v0.0.133)
+
+- Gist sync now syncs remote (backend-backed, e.g. Datasette) tables by definition only — their live rows are never pushed, and a pulled remote table reconnects to its backend instead of importing stale rows.
+
 ## 27 Jul 2026 (v0.0.132)
 
 - New `html` cell renderer: set a column's renderer to "html" to show its value as unescaped HTML inline; click the cell to open the full HTML in its own window.
