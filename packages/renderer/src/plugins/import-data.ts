@@ -12,7 +12,7 @@
 // the UI too (the datasette-source plugin only registered an unsurfaced URL
 // source and a file-only drop handler, so there was no clickable way in).
 
-import type { HostApi, PluginModule } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, HostApi, PluginModule, Table } from '@easydb/shared';
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { TopProgress, type ProgressHandle } from '../chrome/top-progress.js';
@@ -20,8 +20,9 @@ import { editColumnNames } from '../dialogs/column-names-dialog.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from '../dialogs/dialog-chrome.js';
 import { makeDialogDraggable } from '../dialogs/draggable.js';
 import { importCsvText, parseCsv, readCsvHead } from './csv-import.js';
-import { fetchDatabaseNames, parseDatasetteUrl } from './datasette-client.js';
+import { fetchDatabaseNames, fetchTablesForDb, parseDatasetteUrl } from './datasette-client.js';
 import { importDatasette } from './datasette-source.js';
+import { slug } from './server-sync-core.js';
 import { importJsonText, parsedToTables } from './json-import.js';
 import { readResponseText, toCorsFriendlyUrl } from './read-url.js';
 
@@ -288,9 +289,23 @@ async function openImport(api: HostApi): Promise<void> {
   });
   if (!result) return; // cancelled
 
-  const { url, file, kind, dbChosen, editColumns, maxRows } = result;
+  const { url, file, kind, dbChosen, editColumns, maxRows, mode } = result;
   const label = file?.name ?? url;
   try {
+    // Reference mode: create a live, read-only table whose rows are fetched from
+    // the source on demand and never persisted or synced — all sources go
+    // through the generic `url` provider, no connect dialog. A Datasette table
+    // is just its `.json?_shape=array` endpoint (an array of row objects), so we
+    // save that URL and treat it exactly like any other JSON reference.
+    if (mode === 'reference' && !file) {
+      if (kind === 'datasette') {
+        await referenceDatasette(api, url);
+      } else {
+        await createUrlReference(api, url, kind);
+      }
+      return;
+    }
+
     // Uploaded file: read its bytes locally (no network, no origin URL).
     if (file) {
       if (kind === 'csv') {
@@ -344,6 +359,143 @@ async function openImport(api: HostApi): Promise<void> {
     api.ui.dialogs.toast(`Could not import ${label}: ${(err as Error).message}`, {
       kind: 'error',
       title: 'Import',
+    });
+  }
+}
+
+/** Pull the row records out of a parsed JSON body: a top-level array of objects,
+ * or the first array-of-objects property (preferring `rows`/`records`/`data`). */
+function jsonRecords(text: string): Array<Record<string, unknown>> {
+  const parsed: unknown = JSON.parse(text);
+  const isRecordArray = (v: unknown): v is Array<Record<string, unknown>> =>
+    Array.isArray(v) && v.every((x) => x != null && typeof x === 'object' && !Array.isArray(x));
+  if (isRecordArray(parsed)) return parsed;
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    for (const key of ['rows', 'records', 'data']) {
+      if (isRecordArray(obj[key])) return obj[key] as Array<Record<string, unknown>>;
+    }
+    for (const v of Object.values(obj)) if (isRecordArray(v)) return v;
+  }
+  return [];
+}
+
+/** Infer columns from the union of keys across the first rows of a JSON body. */
+function inferJsonColumns(text: string): ColumnSpec[] {
+  const records = jsonRecords(text).slice(0, 50);
+  const typeOf = (v: unknown): ColumnType =>
+    typeof v === 'number' ? 'number' : typeof v === 'boolean' ? 'boolean' : 'string';
+  const cols = new Map<string, ColumnType>();
+  for (const rec of records) {
+    for (const [k, v] of Object.entries(rec)) {
+      if (!cols.has(k) && v != null) cols.set(k, typeOf(v));
+      else if (!cols.has(k)) cols.set(k, 'string');
+    }
+  }
+  return [...cols.entries()].map(([field, type]) => ({ field, label: field, type }));
+}
+
+/**
+ * Create a "reference" table for a plain CSV/JSON URL: a live, read-only table
+ * whose rows are fetched on demand by the `url` row-source provider and never
+ * persisted or synced. We fetch once here only to infer the columns; the rows
+ * are served live by the provider (and re-fetched on Refresh).
+ */
+/**
+ * Build the JSON rows endpoint for a Datasette table. We use the DEFAULT shape
+ * (`{ ok, next, rows: [objects], truncated }`) — `?_shape=array` fails CORS on
+ * datasette.io — with `_size=max` to pull the largest page the instance allows.
+ * `jsonRecords` (and the url provider) read the `rows` array out of it.
+ */
+function datasetteJsonUrl(base: string, db: string, table: string): string {
+  return `${base}/${encodeURIComponent(db)}/${encodeURIComponent(table)}.json?_size=max`;
+}
+
+/**
+ * Reference one or many Datasette tables. A single-table URL references just
+ * that table; a database URL references every (non-hidden) table in it; an
+ * instance root references every table across every database. Each becomes a
+ * live `url` reference (its `.json?_shape=array` endpoint), with one summary
+ * toast for the batch.
+ */
+async function referenceDatasette(api: HostApi, url: string): Promise<void> {
+  const ref = parseDatasetteUrl(url);
+  const fetchFn = (u: string) => api.backend.fetch(u);
+
+  const targets: Array<{ db: string; table: string }> = [];
+  if (ref.db && ref.table) {
+    targets.push({ db: ref.db, table: ref.table });
+  } else if (ref.db) {
+    for (const t of await fetchTablesForDb(fetchFn, ref.base, ref.db)) {
+      if (!t.hidden) targets.push({ db: t.db, table: t.table });
+    }
+  } else {
+    for (const db of await fetchDatabaseNames(fetchFn, ref.base)) {
+      for (const t of await fetchTablesForDb(fetchFn, ref.base, db)) {
+        if (!t.hidden) targets.push({ db: t.db, table: t.table });
+      }
+    }
+  }
+  if (targets.length === 0) throw new Error('No tables found to reference at that URL.');
+
+  let ok = 0;
+  const failed: string[] = [];
+  for (const t of targets) {
+    try {
+      await createUrlReference(api, datasetteJsonUrl(ref.base, t.db, t.table), 'json', {
+        nameHint: `${t.db}/${t.table}`,
+        silent: true,
+      });
+      ok++;
+    } catch (err) {
+      failed.push(`${t.table}: ${(err as Error).message}`);
+    }
+  }
+  api.ui.dialogs.toast(
+    `Referenced ${ok} table${ok === 1 ? '' : 's'}${failed.length ? ` — ${failed.length} failed` : ''}.`,
+    { kind: failed.length ? 'warning' : 'success', title: 'Reference' },
+  );
+}
+
+async function createUrlReference(
+  api: HostApi,
+  url: string,
+  format: 'csv' | 'json',
+  opts: { nameHint?: string; silent?: boolean } = {},
+): Promise<void> {
+  const workspaceId = api.workspaceId();
+  if (!workspaceId) throw new Error('No active workspace.');
+  const baseName = opts.nameHint ?? filenameFromUrl(url);
+  const text = await fetchImportTextWithBar(api, url, `Reading ${baseName}…`);
+  const columns = format === 'csv' ? parseCsv(text).columns : inferJsonColumns(text);
+  if (columns.length === 0) throw new Error('No columns found in the referenced data.');
+
+  // Keep the name unique in the workspace (references don't overwrite).
+  const taken = new Set(
+    (await api.store.tables.find())
+      .filter((t) => t.workspaceId === workspaceId)
+      .map((t) => t.name.toLowerCase()),
+  );
+  let name = baseName;
+  for (let i = 2; taken.has(name.toLowerCase()); i++) name = `${baseName}-${i}`;
+
+  const table: Table = {
+    id: cryptoUUID(),
+    workspaceId,
+    name,
+    code: slug(name),
+    columns,
+    view: 'table',
+    // A live source: the routed data store serves rows via the `url` provider,
+    // so nothing is stored locally and gist sync carries the definition only.
+    source: { type: 'url', config: { url, format } },
+    updatedAt: Date.now(),
+  };
+  await api.store.tables.insert(table);
+  if (!opts.silent) {
+    api.ui.dialogs.toast(`Referenced ${name} — live, read-only.`, {
+      kind: 'success',
+      title: 'Reference',
     });
   }
 }
@@ -410,6 +562,14 @@ interface ImportChoice {
   /** An uploaded local file to import instead of a URL. */
   file?: File | undefined;
   kind: ResolvedKind;
+  /**
+   * `copy` (default) imports a local snapshot: rows are persisted + synced and
+   * the schema is editable + refreshable. `reference` creates a live, read-only
+   * table whose rows are fetched from the source on demand and never persisted
+   * or synced. Reference needs a re-fetchable URL, so it's unavailable for
+   * uploaded files.
+   */
+  mode: 'copy' | 'reference';
   /**
    * True when the user picked a specific database from the dialog's dropdown
    * (an instance-root URL narrowed to `.../db`). The datasette importer then
@@ -482,6 +642,10 @@ export class ImportDialog extends LitElement {
       .row > * {
         flex: 1;
       }
+      .mode-row {
+        flex-direction: column;
+        gap: 0.35rem;
+      }
       .hint {
         color: #6b7280;
         font-size: 0.78rem;
@@ -513,6 +677,7 @@ export class ImportDialog extends LitElement {
   @state() private editColumns = false;
   @state() private file: File | null = null;
   @state() private maxRowsInput = '';
+  @state() private mode: 'copy' | 'reference' = 'copy';
 
   private dialogEl: HTMLDialogElement | null = null;
   private resolveFn: ((v: ImportChoice | null) => void) | null = null;
@@ -588,6 +753,7 @@ export class ImportDialog extends LitElement {
     this.editColumns = false;
     this.file = null;
     this.maxRowsInput = '';
+    this.mode = 'copy';
     this.resetDbList();
     this.listDatabases = opts?.listDatabases ?? null;
     return new Promise<ImportChoice | null>((resolve) => {
@@ -630,9 +796,12 @@ export class ImportDialog extends LitElement {
     // "Edit columns" only applies to CSV (single-table, columns known up front).
     const editColumns = kind === 'csv' && this.editColumns;
 
+    // A file can't be a live reference (nothing to re-fetch), so force copy.
+    const mode: 'copy' | 'reference' = this.file ? 'copy' : this.mode;
+
     // Uploaded file: no URL/database picker applies — import its bytes directly.
     if (this.file) {
-      this.finish({ url: '', file: this.file, kind, editColumns, maxRows });
+      this.finish({ url: '', file: this.file, kind, editColumns, maxRows, mode });
       return;
     }
 
@@ -644,7 +813,7 @@ export class ImportDialog extends LitElement {
     const finalUrl = dbChosen
       ? `${url.replace(/\/+$/, '')}/${encodeURIComponent(this.selectedDb)}`
       : url;
-    this.finish({ url: finalUrl, kind, dbChosen, editColumns, maxRows });
+    this.finish({ url: finalUrl, kind, dbChosen, editColumns, maxRows, mode });
   };
 
   private onFileChange(e: Event): void {
@@ -789,6 +958,33 @@ export class ImportDialog extends LitElement {
               </select>
             </label>
 
+            <label>
+              Import mode
+              <div class="row mode-row">
+                <label class="check">
+                  <input
+                    type="radio"
+                    name="import-mode"
+                    .checked=${this.mode === 'copy'}
+                    @change=${() => (this.mode = 'copy')}
+                  />
+                  Copy — a local, editable, synced snapshot you can refresh
+                </label>
+                <label class="check">
+                  <input
+                    type="radio"
+                    name="import-mode"
+                    ?disabled=${!!this.file}
+                    .checked=${this.mode === 'reference'}
+                    @change=${() => (this.mode = 'reference')}
+                  />
+                  Reference — live, read-only; rows never stored or synced
+                </label>
+              </div>
+            </label>
+            ${this.file
+              ? html`<p class="hint">Uploaded files can only be imported as a Copy.</p>`
+              : nothing}
             ${this.renderDbPicker()}
             ${this.resolvedKind === 'csv'
               ? html`<label class="check">

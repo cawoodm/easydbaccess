@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 27 Jul 2026 (v0.0.146)
+
+- Import now offers Copy vs Reference. A Reference is a live, read-only table (Datasette table/database or CSV/JSON URL) that's never stored or synced. A Copy's Refresh keeps columns you added while refreshing the rest.
+
 ## 27 Jul 2026 (v0.0.143)
 
 - Two HTML cell renderers: `html-preview` shows a truncated plain-text preview (edit in a dialog, popup icon to view rendered HTML), and `html` renders full HTML in-cell with inline editing. Both editable.

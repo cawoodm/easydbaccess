@@ -3,6 +3,7 @@ import * as csvImport from '../plugins/csv-import.js';
 import * as csvExport from '../plugins/csv-export.js';
 import * as jsonImport from '../plugins/json-import.js';
 import * as datasetteSource from '../plugins/datasette-source.js';
+import * as urlSource from '../plugins/url-source.js';
 import * as dumpExport from '../plugins/dump-export.js';
 import * as sqlExport from '../plugins/sql-export.js';
 import * as gistSync from '../plugins/gist-sync.js';
@@ -46,6 +47,7 @@ const modules: PluginModule[] = [
   csvImport,
   jsonImport,
   datasetteSource,
+  urlSource,
   csvExport,
   dumpExport,
   sqlExport,
