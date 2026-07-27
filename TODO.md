@@ -21,18 +21,38 @@ Status keys: `bug` = broken, `feature` = missing, Leading `✅` = done.
 
 ## Backlog
 
-- Remove gist settings own dialog, we have this in global settings now
-- Gist-Synch: Add option to push/pull data only and settings only
-- Feature: Command palette launches when I press Ctrl+K for doing things like managing windows (close all, minimize all etc.) navigating to a table, importing, creating, exporting etc. Plugins should register commands.
+- Close window should no longer delete the table/view but just hide it, it can be recalled from the command palette. Add a delete icon to the table header via a delete-table plugin.
+- bug: When I add a field to an imported table and push/pull the dest should have this new field - remember the schema the user adapted, deleted columns, order etc and restore it when refreshing
+- Dialogs with choices should make the first choice the default, primary color button and respond to enter
+- Desktop client should offer load and save to Sqlite .db file in the File menu
 - Feature: Importers are too interwoven, they should be separate plugins with separate dialogs and have the meta.type=='importer'. The core import-data plugin provides a header import button with AnchoredMenu for each of the import plugins (Dump, JSON, CSV, Datasette, SQL, Parquet). Each plugin brings it's own dialog. All importers should support URL or File upload as well as a row limit and an option to edit columns before import. Write a plan for this before implementing anything.
+
+## Parked
+
 - ⏸️ (parked) When connecting datasette add "virtual" tables for big tables (lazy server-side windowed paging). Design written + approved-in-progress: `.claude/plans/2026-07-26-datasette-virtual-tables-design.md` (scoped to virtual only; no-persist dropped).
 
 ## In progress
 
-- 🕜 bug: I was able to import simon-blog/entries from datasette.io AND connect it, table names should be unique
-- 🕜 settings should be a fixed plugin, plugin manager should hide fixed plugins by default, installed filter shows nothing it should show installed plugins
+- 🕜 Gist synch should not exclude any settings (today, gist: prefix explicitly excluded) because we have moved secrets to the secrets.txt file, also allow a download of this file from the settings dialog
+- 🕜 Add info to the table info dialog about whether the table was imported or connected and what this means
 
 ## DONE
+
+- ✅ Feature: Command palette launches when I press Ctrl+K for doing things like managing windows (close all, minimize all etc.) navigating to a table, importing, creating, exporting etc. Plugins should register commands. — core Ctrl+K palette (`command-palette-dialog.ts`) aggregating registered commands + header/footer buttons + per-table "Go to"; built-in Windows commands (min/restore/max/cascade/tile/close all via `window-commands.ts`) and App commands (Search/Plugins/Changelog/Docs); new `api.ui.registerCommand`. Docs in `docs/COMMANDS.md`.
+
+- ✅ Adding a ! prefix to a filter does a NOT (in particular a NULL/empty boolean should appear when I filter !true), the special character NULL filters nulls and !NULL — new pure `matchesColumnFilter` helper (unit-tested) wired into the grid, faceted dropdowns and view windows: `!text` negates a substring match (so `!true` also surfaces null/empty cells), `NULL` matches blank/empty/whitespace cells, `!NULL` matches cells with any value. Filter dropdown gained an italicized *(Blanks)* entry (folds null/empty/whitespace into one row with its count) and a top **hide** checkbox that negates the picked value (pre-checks when the active filter is a `!` negation); a hover tooltip documents the syntax. Browser-verified the dropdown resolves `NULL`/`!NULL`/`!value` correctly.
+
+- ✅ Gist-Synch: Should not push-pull data of remote (e.g. datasette) tables - only the definition (columns) — Gist now treats any table with a live `source` (Datasette or any registered backend, not datasette-specific) as "remote": push writes its columns/layout/`source` but `"rows": []` (never fetches or uploads the live rows), and pull restores the definition + `source` so the table reconnects to its backend instead of wiping/replacing rows. Local tables and `origin`-only import snapshots keep syncing rows as before. No credentials travel (tokens stay in settings). Typecheck + clean-load verified; full round-trip needs a live gist token (user-side).
+
+- ✅ Create a new html cell-renderer which pops up the html in a new window — new built-in `cell-html` plugin registers an `html` cell renderer: a column set to renderer `html` shows its value as real (unescaped) HTML inline, clipped to one line; clicking the cell opens the full HTML in its own draggable/resizable jsPanel window titled with the column label. Read-only, mirrors `cell-link`. Headless-verified (inline render + click-to-popup).
+
+- ✅ Gist-Synch: Add option to push/pull data only and settings only — the Gist footer menu's Push and Pull items now open a scope sub-menu (Everything / Data only (tables + rows) / Settings only (views + settings)). "Data only" writes/reads just the per-table `.table.json` files and leaves the `_easydb.workspace.json` marker untouched; "Settings only" writes/reads just the marker (viewTemplates/viewInstances/settings). Scope-aware toasts on both paths. Browser-verified the two-step menu wiring.
+
+- ✅ Remove gist settings own dialog, we have this in global settings now — dropped the "Settings" item from the Gist footer menu and deleted the connection-string `openSettings`/prompt; gist credentials live only in Settings → Gist Sync now. Push/pull with no credentials toasts and opens the global Settings dialog instead of prompting. (`parseConnectionString` kept for the `#gist=` share-link boot path.)
+
+- ✅ bug: I was able to import simon-blog/entries from datasette.io AND connect it, table names should be unique — Datasette connect now detects a name clash with a different table (e.g. an earlier import snapshot) and prompts Overwrite / Rename / Skip instead of silently creating a duplicate; reconnecting to the same live source still reuses its window silently. Both connect and import name checks are case-insensitive, so names stay unique across every creation path.
+
+- ✅ settings should be a fixed plugin, plugin manager should hide fixed plugins by default, installed filter shows nothing it should show installed plugins — `settings` plugin now `meta.fixed = true` (always-on, no toggle); the Plugin Manager hides `fixed` rows unless the "Fixed" filter is explicitly on; built-ins now carry the `installed` category so the "Installed" filter lists them instead of showing nothing. Browser-verified.
 
 - ✅ bug: when I pull in a json dump I expect the windows to have the geometry and also the views — JSON dump (`serializeWorkspace`) now carries `viewTemplates` + `viewInstances` and richer per-table state (title/filters/labelColumn/info/deletedColumns alongside geometry/sort); `json-import` restores them (instances re-pointed to the freshly-imported table id by name) and dispatches `easydb:restack-windows` so z-order/geometry apply as a batch — matching the gist pull path. Unit-covered (native-dump enrichment) + browser round-trip verified.
 

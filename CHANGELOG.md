@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 27 Jul 2026 (v0.0.136)
+
+- Command palette (Ctrl+K): manage windows (minimize/restore/maximize/cascade/tile/close all), go to a table, run any action, plus Search/Plugins/Changelog/Docs. Plugins can register commands.
+
 ## 27 Jul 2026 (v0.0.134)
 
 - Column filters gained operators: `!text` (does not contain), `NULL` (blank cells), `!NULL` (has a value); `!true` now also shows empty cells. The filter dropdown adds a *(Blanks)* entry and a **hide** checkbox to negate your pick.
