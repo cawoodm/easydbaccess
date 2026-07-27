@@ -91,6 +91,23 @@ export class FilterPopover extends LitElement {
         overflow: hidden;
         text-overflow: ellipsis;
       }
+      li.blanks .label {
+        color: #6b7280;
+      }
+      .hide-row {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.3rem 0.55rem;
+        border-bottom: 1px solid #e5e7eb;
+        color: #374151;
+        cursor: pointer;
+        user-select: none;
+      }
+      .hide-row input {
+        margin: 0;
+        cursor: pointer;
+      }
       .empty {
         padding: 0.6rem;
         color: #9ca3af;
@@ -123,21 +140,38 @@ export class FilterPopover extends LitElement {
   ];
 
   @property({ type: Array }) values: Array<{ value: string; count: number }> = [];
+  /** Number of blank (null / empty / whitespace) cells in the faceted set. */
+  @property({ type: Number }) blanks = 0;
+  /** The bare (un-negated) term of the current filter, for selection highlight. */
   @property({ type: String }) current = '';
   @state() private search = '';
+  /** When checked, the picked value is negated (`!value`) — "hide these rows". */
+  @state() private hide = false;
   private resolveFn: ((v: string | null | { clear: true }) => void) | null = null;
 
   /**
-   * Opens the popover anchored to a DOM rect. Resolves with the picked value
-   * (string), null on dismiss, or { clear: true } on Clear-filter click.
+   * Opens the popover anchored to a DOM rect. Resolves with the picked filter
+   * string (with a leading `!` when "hide" is checked, or `NULL`/`!NULL` for
+   * the Blanks entry), null on dismiss, or { clear: true } on Clear-filter.
    */
   open(
     anchor: DOMRect,
     values: Array<{ value: string; count: number }>,
     current: string,
+    blanks = 0,
   ): Promise<string | null | { clear: true }> {
     this.values = values;
-    this.current = current;
+    this.blanks = blanks;
+    // Split the current filter into its negation flag + bare term so the
+    // "hide" checkbox and the selected row reflect the active filter.
+    let term = current ?? '';
+    let negate = false;
+    if (term.startsWith('!')) {
+      negate = true;
+      term = term.slice(1).trim();
+    }
+    this.hide = negate;
+    this.current = term;
     this.search = '';
     this.style.top = `${Math.round(anchor.bottom + 4)}px`;
     this.style.left = `${Math.round(anchor.left)}px`;
@@ -147,6 +181,11 @@ export class FilterPopover extends LitElement {
       // Click outside to dismiss
       setTimeout(() => document.addEventListener('mousedown', this.onOutside, true), 0);
     });
+  }
+
+  /** Resolve with `term`, prefixing `!` when the "hide" box is checked. */
+  private pick(term: string) {
+    this.close((this.hide ? '!' : '') + term);
   }
 
   private close(v: string | null | { clear: true }) {
@@ -176,6 +215,8 @@ export class FilterPopover extends LitElement {
   override render() {
     const q = this.search.toLowerCase();
     const filtered = this.values.filter((v) => v.value.toLowerCase().includes(q));
+    const showBlanks = this.blanks > 0 && '(blanks)'.includes(q);
+    const blanksSelected = this.current.toUpperCase() === 'NULL';
     return html`
       <header>
         <span class="mi sm">search</span>
@@ -194,16 +235,35 @@ export class FilterPopover extends LitElement {
           <span class="mi sm">close</span>
         </button>
       </header>
-      ${filtered.length === 0
+      <label class="hide-row" title="Show rows that do NOT match the value you pick">
+        <input
+          type="checkbox"
+          .checked=${this.hide}
+          @change=${(e: Event) => (this.hide = (e.target as HTMLInputElement).checked)}
+        />
+        hide
+      </label>
+      ${filtered.length === 0 && !showBlanks
         ? html`<div class="empty">No matching values.</div>`
         : html`<ul>
+            ${showBlanks
+              ? html`
+                  <li
+                    class=${`blanks${blanksSelected ? ' selected' : ''}`}
+                    @click=${() => this.pick('NULL')}
+                  >
+                    <span class="label"><em>(Blanks)</em></span>
+                    <span class="count">${this.blanks}</span>
+                  </li>
+                `
+              : ''}
             ${filtered.slice(0, 500).map(
               (v) => html`
                 <li
                   class=${v.value === this.current ? 'selected' : ''}
-                  @click=${() => this.close(v.value)}
+                  @click=${() => this.pick(v.value)}
                 >
-                  <span class="label">${v.value || html`<em>(empty)</em>`}</span>
+                  <span class="label">${v.value}</span>
                   <span class="count">${v.count}</span>
                 </li>
               `,

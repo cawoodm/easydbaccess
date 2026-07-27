@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 27 Jul 2026 (v0.0.134)
+
+- Column filters gained operators: `!text` (does not contain), `NULL` (blank cells), `!NULL` (has a value); `!true` now also shows empty cells. The filter dropdown adds a *(Blanks)* entry and a **hide** checkbox to negate your pick.
+
 ## 27 Jul 2026 (v0.0.133)
 
 - Gist sync now syncs remote (backend-backed, e.g. Datasette) tables by definition only — their live rows are never pushed, and a pulled remote table reconnects to its backend instead of importing stale rows.

@@ -7,6 +7,7 @@
 // and the snapshotted filter/sort a view instance applies.
 
 import type { Row, ViewInstance } from '@easydb/shared';
+import { matchesColumnFilter } from '../search/column-filter.js';
 
 /** Matches a `$TOKEN` placeholder: `$` then a word (letters/digits/underscore, not starting with a digit). */
 const TOKEN_RE = /\$([A-Za-z_][A-Za-z0-9_]*)/g;
@@ -39,17 +40,11 @@ function isEmpty(v: unknown): boolean {
   return v == null || v === '';
 }
 
-/** Apply an instance's snapshotted substring filters (case-insensitive, AND). */
+/** Apply an instance's snapshotted per-column filters (case-insensitive, AND). */
 export function filterRows(rows: Row[], filters: Record<string, string>): Row[] {
   const active = Object.entries(filters).filter(([, v]) => v != null && String(v).trim() !== '');
   if (active.length === 0) return rows;
-  return rows.filter((r) =>
-    active.every(([field, needle]) =>
-      String(r.data[field] ?? '')
-        .toLowerCase()
-        .includes(String(needle).toLowerCase()),
-    ),
-  );
+  return rows.filter((r) => active.every(([field, needle]) => matchesColumnFilter(r.data[field], needle)));
 }
 
 /**

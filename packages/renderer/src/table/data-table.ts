@@ -7,6 +7,7 @@ import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
 import '../chrome/filter-combobox.js';
 import { searchRows } from '../search/text-search.js';
+import { matchesColumnFilter } from '../search/column-filter.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 
 /** A row matches `needle` (lower-cased) when any of its field values contains it. */
@@ -768,11 +769,7 @@ export class DataTable extends LitElement {
     let rows = this.rows;
     if (active.length > 0) {
       rows = rows.filter((r) =>
-        active.every(([field, query]) =>
-          String(r.data[field] ?? '')
-            .toLowerCase()
-            .includes(query.toLowerCase()),
-        ),
+        active.every(([field, query]) => matchesColumnFilter(r.data[field], query)),
       );
     }
     // Free-text search supports boolean AND/OR and the phrase→AND→OR fallback.
@@ -816,9 +813,14 @@ export class DataTable extends LitElement {
     // filter — so a column's own dropdown isn't pre-narrowed by what's
     // already typed in that column's filter, but other filters do narrow it.
     const counts = new Map<string, number>();
+    let blanks = 0;
     for (const r of this.rowsFacetedFor(field)) {
       const v = r.data[field];
-      if (v == null) continue;
+      // Null / empty / whitespace cells collapse into the single "(Blanks)" entry.
+      if (v == null || String(v).trim() === '') {
+        blanks++;
+        continue;
+      }
       const s = String(v);
       counts.set(s, (counts.get(s) ?? 0) + 1);
     }
@@ -829,6 +831,7 @@ export class DataTable extends LitElement {
       btn.getBoundingClientRect(),
       values,
       this.filters[field] ?? '',
+      blanks,
     );
     if (result === null) return;
     if (typeof result === 'object' && 'clear' in result) {
@@ -866,16 +869,12 @@ export class DataTable extends LitElement {
    * Pass `null` to evaluate against ALL per-column filters.
    */
   private rowsFacetedFor(focusField: string | null): Row[] {
-    const active = Object.entries(this.filters)
-      .filter(([f, q]) => q && q.trim().length > 0 && f !== focusField)
-      .map(([f, q]) => [f, q.trim().toLowerCase()] as const);
+    const active = Object.entries(this.filters).filter(
+      ([f, q]) => q && q.trim().length > 0 && f !== focusField,
+    );
     if (active.length === 0) return this.rows;
     return this.rows.filter((r) =>
-      active.every(([f, q]) =>
-        String(r.data[f] ?? '')
-          .toLowerCase()
-          .includes(q),
-      ),
+      active.every(([f, q]) => matchesColumnFilter(r.data[f], q)),
     );
   }
 
@@ -1211,6 +1210,7 @@ export class DataTable extends LitElement {
                     .value=${this.filters[c.field] ?? ''}
                     .options=${opts}
                     placeholder="filter…"
+                    title="Filter: text = contains, !text = does not contain, NULL = empty, !NULL = has a value"
                     @filter-change=${(e: Event) =>
                       this.onFilterInput(
                         c.field,
