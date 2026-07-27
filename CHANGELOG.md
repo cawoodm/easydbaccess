@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 27 Jul 2026 (v0.0.149)
+
+- Editing a built-in view template now turns it into a normal template (no more duplicate "built-in" clones), and every template has a Delete button.
+
 ## 27 Jul 2026 (v0.0.148)
 
 - The Settings dialog won't close while a secret field holds a raw value — it must be empty or a `${secret:name}` reference, so secrets are never saved or synced in plain text.

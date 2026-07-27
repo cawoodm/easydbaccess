@@ -325,17 +325,37 @@ export class ViewsDialog extends LitElement {
     this.mode = 'template';
   }
 
+  private async deleteTemplate(t: ViewTemplate): Promise<void> {
+    const ctx = await getContext();
+    const ok = await ctx.api.ui.dialogs.confirm(
+      `Delete the template "${t.name}"? Views already created from it keep working.`,
+      'Delete template',
+    );
+    if (!ok) return;
+    await ctx.store.viewTemplates.remove(t.id);
+    // A deleted built-in stays deleted: the seeder only re-inserts into a
+    // workspace it has never seeded, and this one's "seeded" flag is already set.
+    document.dispatchEvent(new CustomEvent('easydb:reload-views'));
+    await this.refresh();
+  }
+
   private async saveTemplate(): Promise<void> {
     if (!this.tDraft) return;
     const d = this.tDraft;
     if (!d.name.trim()) return;
     const ctx = await getContext();
     if (d.id) {
+      // Editing a built-in template turns it into a plain user template: it keeps
+      // the SAME id (so there's no duplicate) but drops the `builtin` flag, so the
+      // seeder never resets it or re-creates a second copy, and later edits just
+      // patch this same row.
+      const wasBuiltin = this.templates.find((t) => t.id === d.id)?.builtin;
       await ctx.store.viewTemplates.patch(d.id, {
         name: d.name.trim(),
         headerHtml: d.headerHtml,
         rowHtml: d.rowHtml,
         footerHtml: d.footerHtml,
+        ...(wasBuiltin ? { builtin: false } : {}),
         updatedAt: Date.now(),
       });
     } else {
@@ -543,6 +563,14 @@ export class ViewsDialog extends LitElement {
                 <button type="button" class="mini" @click=${() => this.useTemplate(t)}>Use</button>
                 <button type="button" class="mini" @click=${() => this.editTemplate(t)}>Edit</button>
                 <button type="button" class="mini" @click=${() => this.copyTemplate(t)}>Copy</button>
+                <button
+                  type="button"
+                  class="mini danger"
+                  title="Delete this template"
+                  @click=${() => void this.deleteTemplate(t)}
+                >
+                  Delete
+                </button>
               </li>`,
           )}
         </ul>
