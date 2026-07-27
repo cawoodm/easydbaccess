@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 27 Jul 2026 (v0.0.132)
+
+- New `html` cell renderer: set a column's renderer to "html" to show its value as unescaped HTML inline; click the cell to open the full HTML in its own window.
+
 ## 27 Jul 2026 (v0.0.131)
 
 - Gist Push and Pull now offer a scope choice — Everything, Data only (tables + rows), or Settings only (views + settings).
