@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 27 Jul 2026 (v0.0.137)
+
+- The table info (ⓘ) dialog now explains whether a table is Connected (live backend — rows fetched on demand) or Imported (a local snapshot, with a link to its origin); the ⓘ button also shows for such tables even without other metadata.
+
 ## 27 Jul 2026 (v0.0.136)
 
 - Command palette (Ctrl+K): manage windows (minimize/restore/maximize/cascade/tile/close all), go to a table, run any action, plus Search/Plugins/Changelog/Docs. Plugins can register commands.

@@ -20,7 +20,7 @@
 import { jsPanel } from 'jspanel4/es6module/jspanel.js';
 import 'jspanel4/es6module/jspanel.css';
 
-import type { Table, TableInfo, WindowGeometry } from '@easydb/shared';
+import type { Table, WindowGeometry } from '@easydb/shared';
 import { getContext, type AppContext } from '../app-context.js';
 import { openTableInfoDialog } from '../dialogs/table-info-dialog.js';
 import { initPanZoom, type PanZoomHandle } from './panzoom.js';
@@ -390,7 +390,7 @@ function openPanel(t: Table, ctx: AppContext): void {
   // descriptive metadata (Datasette description / source / license / about),
   // which lands asynchronously after a connect/import, so it's toggled
   // reactively as the table record updates.
-  let curInfo: TableInfo | null = null;
+  let curTable: Table | null = null;
   const infoBtn = document.createElement('button');
   infoBtn.type = 'button';
   infoBtn.title = 'Table info';
@@ -401,12 +401,19 @@ function openPanel(t: Table, ctx: AppContext): void {
     'display:none;background:none;border:0;color:inherit;cursor:pointer;font-size:1rem;line-height:1;padding:0 0.3rem;';
   infoBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (curInfo) openTableInfoDialog(lastTitle, curInfo);
+    if (!curTable) return;
+    openTableInfoDialog(lastTitle, curTable.info ?? {}, {
+      source: curTable.source,
+      origin: curTable.origin,
+    });
   });
   controlbar?.prepend(infoBtn);
   const updateInfoBtn = (table?: Table | null): void => {
-    curInfo = table?.info ?? null;
-    infoBtn.style.display = curInfo ? 'inline-flex' : 'none';
+    curTable = table ?? null;
+    // Show the button when there's descriptive metadata OR a provenance worth
+    // explaining (imported snapshot / live connection).
+    const has = !!(table?.info || table?.source || table?.origin);
+    infoBtn.style.display = has ? 'inline-flex' : 'none';
   };
   updateInfoBtn(t);
 
