@@ -311,6 +311,27 @@ export interface SettingsApi {
   placement(pluginId: string, key: string): Promise<SettingScope | null>;
 }
 
+/**
+ * A command surfaced in the Ctrl+K command palette. Plugins register these via
+ * `UiRegistry.registerCommand`; the palette also auto-aggregates existing
+ * header/footer buttons and a "Go to <table>" entry per table, so registering a
+ * command is only needed for actions that aren't already a button.
+ */
+export interface CommandSpec {
+  /** Stable unique id (e.g. 'windows:close-all'). */
+  id: string;
+  /** Text shown (and matched) in the palette. */
+  title: string;
+  /** Optional group heading the palette buckets this under (e.g. 'Windows'). */
+  group?: string;
+  /** Material Icons ligature name, or inline `<svg>` markup. */
+  icon?: string;
+  /** Extra search terms that match this command but aren't shown. */
+  keywords?: string[];
+  /** Invoked when the user picks the command. */
+  run(api: HostApi): void | Promise<void>;
+}
+
 export interface UiRegistry {
   registerHeaderButton(spec: ButtonSpec): Unregister;
   registerFooterButton(spec: ButtonSpec): Unregister;
@@ -343,6 +364,10 @@ export interface UiRegistry {
   openPluginManager(): void;
   /** Opens the Settings dialog. */
   openSettings(): void;
+  /** Registers a command for the Ctrl+K command palette. Returns an unregister fn. */
+  registerCommand(spec: CommandSpec): Unregister;
+  /** Opens the command palette (also bound to Ctrl+K / Cmd+K). */
+  openCommandPalette(): void;
   /**
    * Registers a plugin's settings tab. The Settings dialog renders one tab per
    * registration, in registration order. Returns an unregister fn.

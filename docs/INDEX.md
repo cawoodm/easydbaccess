@@ -2,6 +2,7 @@
 
 - [Storage](STORAGE.md)
 - [Plugins](PLUGINS.md)
+- [Commands](COMMANDS.md)
 - [Cloud Synch](SYNCH.md)
 - [Server](SERVER.md)
 - [Windows](WINDOWS.md)

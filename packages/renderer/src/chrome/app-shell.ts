@@ -12,6 +12,8 @@ import '../dialogs/plugin-manager-dialog.js';
 import type { PluginManagerDialog } from '../dialogs/plugin-manager-dialog.js';
 import '../dialogs/settings-dialog.js';
 import type { SettingsDialog } from '../dialogs/settings-dialog.js';
+import '../dialogs/command-palette-dialog.js';
+import type { CommandPaletteDialog } from '../dialogs/command-palette-dialog.js';
 import '../dialogs/script-editor-dialog.js';
 import '../dialogs/toast-host.js';
 import { materialIconStyles } from './material-icon-css.js';
@@ -234,6 +236,7 @@ export class AppShell extends LitElement {
   @query('csv-paste-dialog') private csvPasteDialog!: CsvPasteDialog;
   @query('plugin-manager-dialog') private pluginManagerDialog!: PluginManagerDialog;
   @query('settings-dialog') private settingsDialog!: SettingsDialog;
+  @query('command-palette-dialog') private commandPaletteDialog!: CommandPaletteDialog;
   @query('input.search') private searchInput?: HTMLInputElement;
   @state() private footerButtons: ButtonSpec[] = [];
   @state() private headerButtons: ButtonSpec[] = [];
@@ -260,6 +263,9 @@ export class AppShell extends LitElement {
     document.addEventListener('easydb:open-csv-paste', this.onOpenCsvPaste);
     document.addEventListener('easydb:open-plugin-manager', this.onOpenPluginManager);
     document.addEventListener('easydb:open-settings', this.onOpenSettings);
+    document.addEventListener('easydb:open-command-palette', this.onOpenCommandPalette);
+    document.addEventListener('easydb:focus-search', this.openSearch);
+    document.addEventListener('keydown', this.onGlobalKeydown);
     void this.bindRegistries();
   }
 
@@ -273,6 +279,9 @@ export class AppShell extends LitElement {
     document.removeEventListener('easydb:open-csv-paste', this.onOpenCsvPaste);
     document.removeEventListener('easydb:open-plugin-manager', this.onOpenPluginManager);
     document.removeEventListener('easydb:open-settings', this.onOpenSettings);
+    document.removeEventListener('easydb:open-command-palette', this.onOpenCommandPalette);
+    document.removeEventListener('easydb:focus-search', this.openSearch);
+    document.removeEventListener('keydown', this.onGlobalKeydown);
     this.workspaceUnsub?.();
   }
 
@@ -295,6 +304,18 @@ export class AppShell extends LitElement {
 
   private onOpenSettings = () => {
     void this.settingsDialog?.open();
+  };
+
+  private onOpenCommandPalette = () => {
+    void this.commandPaletteDialog?.open();
+  };
+
+  // Global Ctrl+K / Cmd+K opens the command palette.
+  private onGlobalKeydown = (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      void this.commandPaletteDialog?.open();
+    }
   };
 
   private openSearch = () => {
@@ -436,7 +457,7 @@ export class AppShell extends LitElement {
             target="_blank"
             rel="noopener"
             title="View the changelog on GitHub"
-            ><span class="version">v0.0.124</span></a
+            ><span class="version">v0.0.125</span></a
           ></strong
         >
         ${this.headerButtons
@@ -493,6 +514,7 @@ export class AppShell extends LitElement {
       <csv-paste-dialog></csv-paste-dialog>
       <plugin-manager-dialog></plugin-manager-dialog>
       <settings-dialog></settings-dialog>
+      <command-palette-dialog></command-palette-dialog>
       <script-editor-dialog></script-editor-dialog>
       <host-dialogs></host-dialogs>
       <toast-host></toast-host>

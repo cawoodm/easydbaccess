@@ -1,5 +1,6 @@
 import type {
   ButtonSpec,
+  CommandSpec,
   Dialogs,
   DropHandler,
   ExporterSpec,
@@ -38,6 +39,8 @@ export interface Registries {
   rowSources: Map<string, RowCollectionProvider>;
   /** Plugin settings tabs keyed by pluginId, in registration (insertion) order. */
   settings: Map<string, RegisteredSettings>;
+  /** Commands surfaced in the Ctrl+K command palette, in registration order. */
+  commands: CommandSpec[];
 }
 
 export function createRegistries(): Registries {
@@ -54,6 +57,7 @@ export function createRegistries(): Registries {
     tableRenderers: new Map(),
     rowSources: new Map(),
     settings: new Map(),
+    commands: [],
   };
 }
 
@@ -95,6 +99,10 @@ export function createUiRegistry(r: Registries): UiRegistry {
     },
     openSettings: () => {
       document.dispatchEvent(new CustomEvent('easydb:open-settings'));
+    },
+    registerCommand: (spec) => pushReg(r.commands, spec),
+    openCommandPalette: () => {
+      document.dispatchEvent(new CustomEvent('easydb:open-command-palette'));
     },
     registerSettings: (pluginId: string, name: string, fields: SettingsFieldSpec[]) => {
       r.settings.set(pluginId, { name, fields });

@@ -94,6 +94,19 @@ export function currentPanZoom(): PanZoomHandle | null {
   return panzoom;
 }
 
+/**
+ * Brings a table's window to the front (restoring it first if minimized).
+ * Used by the command palette's "Go to <table>" commands. Returns false when
+ * no panel exists for that table id.
+ */
+export function focusTableWindow(tableId: string): boolean {
+  const p = panels.get(tableId) as (Panel & { normalize?: () => void }) | undefined;
+  if (!p) return false;
+  if (p.status === 'minimized') p.normalize?.();
+  p.front?.();
+  return true;
+}
+
 export async function initWindowManager(): Promise<void> {
   if (initialized) return;
   initialized = true;
