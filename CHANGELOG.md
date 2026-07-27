@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 27 Jul 2026 (v0.0.145)
+
+- Views gained a Readonly option (default off): a readonly grid view shows values without editors — no date picker, disabled checkboxes — while normal views stay editable.
+
 ## 27 Jul 2026 (v0.0.143)
 
 - Two HTML cell renderers: `html-preview` shows a truncated plain-text preview (edit in a dialog, popup icon to view rendered HTML), and `html` renders full HTML in-cell with inline editing. Both editable.

@@ -49,6 +49,7 @@ interface InstanceDraft {
   tokens: string[];
   mapping: Record<string, string>;
   limit: number; // 0 = all
+  readonly: boolean; // grid (template-off) view shows values with no editors
 }
 
 @customElement('views-dialog')
@@ -133,6 +134,14 @@ export class ViewsDialog extends LitElement {
         display: flex;
         flex-direction: column;
         gap: 0.25rem;
+        font-size: 0.82rem;
+        color: #374151;
+      }
+      label.field-inline {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 0.4rem;
         font-size: 0.82rem;
         color: #374151;
       }
@@ -274,6 +283,7 @@ export class ViewsDialog extends LitElement {
       tokens,
       mapping: { ...inst.mapping },
       limit: inst.limit ?? 0,
+      readonly: inst.readonly ?? false,
     };
     this.mode = 'instance';
   }
@@ -360,6 +370,7 @@ export class ViewsDialog extends LitElement {
       tokens,
       mapping,
       limit: 0,
+      readonly: false,
     };
     this.mode = 'instance';
   }
@@ -460,6 +471,7 @@ export class ViewsDialog extends LitElement {
         name: d.name.trim(),
         mapping: { ...d.mapping },
         limit: d.limit > 0 ? d.limit : undefined,
+        readonly: d.readonly,
         updatedAt: Date.now(),
       });
       // Reflect the change in an already-open window.
@@ -486,6 +498,7 @@ export class ViewsDialog extends LitElement {
       mapping: { ...d.mapping },
       updatedAt: Date.now(),
       ...(d.limit > 0 ? { limit: d.limit } : {}),
+      ...(d.readonly ? { readonly: true } : {}),
     };
     await ctx.store.viewInstances.insert(inst);
     await this.openInstance(inst.id);
@@ -600,6 +613,15 @@ export class ViewsDialog extends LitElement {
               limit: Math.max(0, Number((e.target as HTMLInputElement).value) || 0),
             })}
         />
+      </label>
+      <label class="field-inline">
+        <input
+          type="checkbox"
+          .checked=${d.readonly}
+          @change=${(e: Event) =>
+            (this.iDraft = { ...d, readonly: (e.target as HTMLInputElement).checked })}
+        />
+        Readonly (show values without editors in the table view)
       </label>
       <div class="section">
         <h3>Map placeholders to columns</h3>

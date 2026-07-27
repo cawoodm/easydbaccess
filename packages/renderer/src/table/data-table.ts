@@ -364,6 +364,10 @@ export class DataTable extends LitElement {
   private get viewMode(): boolean {
     return !!this.viewInstanceId;
   }
+  /** A view whose instance opted into read-only: show values, offer no editors. */
+  private get readOnlyView(): boolean {
+    return this.viewMode && !!this.viewInst?.readonly;
+  }
   /** Visible-row count from the last render, emitted for the panel title. */
   private renderedCount = 0;
   private lastEmittedCount = -1;
@@ -644,6 +648,18 @@ export class DataTable extends LitElement {
     el.blur();
   }
 
+  /** Plain-text (non-editable) rendering of a cell for read-only view mode. */
+  private renderReadonlyCell(col: ColumnSpec, raw: unknown) {
+    if (col.type === 'boolean') {
+      const checked = raw === true || raw === 'true' || raw === 1 || raw === '1';
+      return html`<input type="checkbox" .checked=${checked} disabled />`;
+    }
+    if (raw == null || raw === '') return html``;
+    if (col.type === 'date') return html`${toDateIso(raw)}`;
+    if (col.type === 'datetime') return html`${toDatetimeLocal(raw).replace('T', ' ')}`;
+    return html`${String(raw)}`;
+  }
+
   private renderCell(row: Row, col: ColumnSpec) {
     const raw = row.data[col.field];
     // Cell rendering is dispatched by the column's `renderer` attribute, not
@@ -664,14 +680,22 @@ export class DataTable extends LitElement {
       const tag = unsafeStatic(customTag);
       // `.row` is the full row data object — most renderers ignore it; the
       // `script` renderer needs it so user-authored render(row) functions
-      // can pull from neighbouring fields.
+      // can pull from neighbouring fields. `.readonly` tells editor renderers
+      // (date/datetime/boolean) to display, not edit, in a read-only view;
+      // display-only renderers (link/image/html/…) just ignore it.
       return staticHtml`<${tag}
         .value=${raw ?? ''}
         .column=${col}
         .row=${row.data}
+        .readonly=${this.readOnlyView}
         @change=${(e: Event) =>
           this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
       ></${tag}>`;
+    }
+    // A read-only view never offers an editor: show the value as plain text
+    // (dates/booleans formatted) instead of the native <input>.
+    if (this.readOnlyView) {
+      return this.renderReadonlyCell(col, raw);
     }
     // No renderer set or unknown name — fall back to a native editor chosen
     // by the column's data type. Renderers are a display concern; editing

@@ -259,6 +259,13 @@ export interface ViewInstance {
   open?: boolean | undefined;
   /** Max rows to show (TOP N). Absent or ≤0 ⇒ show all. */
   limit?: number | undefined;
+  /**
+   * When true, the grid (template-off) view is read-only: cells display their
+   * values with no editors (no date picker, disabled checkboxes). Absent/false
+   * ⇒ the grid is editable, as normal. Set from the "Readonly" option when
+   * creating/editing the view.
+   */
+  readonly?: boolean | undefined;
   updatedAt: number;
 }
 

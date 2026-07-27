@@ -33,6 +33,7 @@ export function init(api: HostApi): void {
 
 class CellDate extends HTMLElement {
   private _value: unknown = '';
+  private _readonly = false;
 
   set value(v: unknown) {
     if (this._value === v) return;
@@ -43,12 +44,27 @@ class CellDate extends HTMLElement {
     return this._value;
   }
 
+  // Set by data-table in a read-only view: display the date, don't edit it.
+  set readonly(v: boolean) {
+    const n = !!v;
+    if (this._readonly === n) return;
+    this._readonly = n;
+    this.render();
+  }
+  get readonly(): boolean {
+    return this._readonly;
+  }
+
   connectedCallback() {
     this.render();
   }
 
   private render() {
     this.innerHTML = '';
+    if (this._readonly) {
+      this.textContent = toDateIso(this._value);
+      return;
+    }
     const input = document.createElement('input');
     input.type = 'date';
     input.value = toDateIso(this._value);
@@ -68,6 +84,7 @@ class CellDate extends HTMLElement {
 
 class CellDatetime extends HTMLElement {
   private _value: unknown = '';
+  private _readonly = false;
 
   set value(v: unknown) {
     if (this._value === v) return;
@@ -78,12 +95,26 @@ class CellDatetime extends HTMLElement {
     return this._value;
   }
 
+  set readonly(v: boolean) {
+    const n = !!v;
+    if (this._readonly === n) return;
+    this._readonly = n;
+    this.render();
+  }
+  get readonly(): boolean {
+    return this._readonly;
+  }
+
   connectedCallback() {
     this.render();
   }
 
   private render() {
     this.innerHTML = '';
+    if (this._readonly) {
+      this.textContent = toDatetimeLocal(this._value).replace('T', ' ');
+      return;
+    }
     const input = document.createElement('input');
     input.type = 'datetime-local';
     input.value = toDatetimeLocal(this._value);
@@ -103,6 +134,7 @@ class CellDatetime extends HTMLElement {
 
 class CellBoolean extends HTMLElement {
   private _value: unknown = false;
+  private _readonly = false;
 
   set value(v: unknown) {
     if (this._value === v) return;
@@ -111,6 +143,16 @@ class CellBoolean extends HTMLElement {
   }
   get value(): unknown {
     return this._value;
+  }
+
+  set readonly(v: boolean) {
+    const n = !!v;
+    if (this._readonly === n) return;
+    this._readonly = n;
+    this.render();
+  }
+  get readonly(): boolean {
+    return this._readonly;
   }
 
   connectedCallback() {
@@ -122,6 +164,13 @@ class CellBoolean extends HTMLElement {
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.checked = coerceBool(this._value);
+    if (this._readonly) {
+      // Read-only view: show the state but don't allow toggling.
+      input.disabled = true;
+      input.style.cssText = 'transform:translateY(1px)';
+      this.append(input);
+      return;
+    }
     input.style.cssText = 'transform:translateY(1px);cursor:pointer';
     input.addEventListener('change', () => this.commit(input.checked));
     this.append(input);
