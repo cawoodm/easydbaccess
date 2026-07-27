@@ -21,6 +21,7 @@ import '../dialogs/datasette-connect-dialog.js';
 import { DatasetteConnectDialog } from '../dialogs/datasette-connect-dialog.js';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
 import { reconcileColumns } from '../table/column-merge.js';
+import { mergeRefreshedRows } from '../table/refresh-merge.js';
 import { setTableLoading } from '../table/data-table.js';
 import {
   applyTableMetadata,
@@ -481,11 +482,13 @@ async function fillImportTable(
     let metaColumns: ColumnSpec[] = [];
     let count: number | null = knownCount;
     let typed = false;
+    let pks: string[] = [];
     try {
       const meta = await fetchTableMeta(fetchFn, ref);
       metaColumns = meta.columns;
       count = count ?? meta.count;
       typed = meta.typed;
+      pks = meta.pks ?? [];
     } catch {
       // fall back to row inference
     }
@@ -592,11 +595,16 @@ async function fillImportTable(
     // An interruption stores a resume cursor (footer shows a red resume button);
     // a clean import clears any prior one.
     const resume = resumeStateFor(error, nextUrl, rows.length, count);
+    // Remember the remote primary key(s) on the snapshot's origin so a later
+    // refresh can match rows and preserve user-added columns (see refreshSnapshot).
+    const originPatch =
+      pks.length > 0 && current?.origin ? { origin: { ...current.origin, pks } } : {};
     const patch = isInitial
-      ? { columns: mergedCols, ...metaPatch, importResume: resume, updatedAt: now }
+      ? { columns: mergedCols, ...metaPatch, ...originPatch, importResume: resume, updatedAt: now }
       : {
           columns: mergedCols,
           ...(metaPatch.info ? { info: metaPatch.info } : {}),
+          ...originPatch,
           importResume: resume,
           updatedAt: now,
         };
@@ -1041,13 +1049,32 @@ async function refreshSnapshot(api: HostApi, t: Table): Promise<void> {
         };
     await api.store.tables.patch(t.id, patch);
 
+    // Merge the freshly-fetched remote rows with the current local rows: remote
+    // columns are clobbered with fresh values, but columns the USER added locally
+    // (not part of the remote schema, and not a primary key) are carried over by
+    // matching on the remote primary key. Locally-deleted rows return (they're in
+    // the fresh set); data for user-deleted remote columns is dropped. With no
+    // known pks this falls back to a plain replace (no per-row preservation).
+    const pks = t.origin?.pks ?? [];
+    const remoteFields = new Set(cols.map((c) => c.field));
+    const userAddedFields = t.columns
+      .map((c) => c.field)
+      .filter((f) => !remoteFields.has(f) && !pks.includes(f));
+    const deletedRemoteFields = (t.deletedColumns ?? []).filter((f) => remoteFields.has(f));
     const rowColl = api.store.rows(t.id);
     const old = await rowColl.find();
+    const { data: mergedData } = mergeRefreshedRows({
+      oldRows: old.map((r) => ({ data: r.data })),
+      freshRows: rows,
+      pks,
+      userAddedFields,
+      deletedRemoteFields,
+    });
     await rowColl.bulkRemove(old.map((r) => r.id));
     await rowColl.bulkInsert(
-      rows.map((data) => ({ id: cryptoUUID(), tableId: t.id, data, updatedAt: now })),
+      mergedData.map((data) => ({ id: cryptoUUID(), tableId: t.id, data, updatedAt: now })),
     );
-    outcome = { rowCount: rows.length, hasMore, truncated, error };
+    outcome = { rowCount: mergedData.length, hasMore, truncated, error };
   } finally {
     setTableLoading(t.id, false);
   }

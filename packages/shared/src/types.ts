@@ -178,6 +178,14 @@ export interface TableOrigin {
   type: string;
   /** Canonical source URL to re-import from (e.g. a Datasette table URL). */
   url: string;
+  /**
+   * Remote primary-key column field name(s), when the source reported them. A
+   * "copy" refresh matches its current local rows to the freshly-fetched remote
+   * rows by these keys, so values in columns the user ADDED locally survive the
+   * refresh (and rows deleted locally return). Absent ⇒ refresh falls back to
+   * wipe-and-replace, with no per-row preservation.
+   */
+  pks?: string[] | undefined;
 }
 
 export interface Row {
