@@ -33,13 +33,11 @@ interface GistCreds {
 
 const SETTING_KEY_PREFIX = 'gist:';
 
-// Settings whose keys start with any of these carry secrets or device-local
-// state and must never be written into (or read back from) a gist.
-const SECRET_SETTING_PREFIXES = ['gist:', 'datasette:token:', 'server-sync:'];
-
-function isSyncableSetting(key: string): boolean {
-  return !SECRET_SETTING_PREFIXES.some((prefix) => key.startsWith(prefix));
-}
+// Every workspace setting is synced. Actual secrets now live in the device-local
+// secrets store (secrets.txt) and are referenced from settings via `${...}`, so
+// there is nothing sensitive left to withhold — settings that hold a raw token
+// travel with the gist by the user's explicit choice. Keep gists you push
+// private if any credential still lives directly in a setting value.
 
 // GitHub's mark, inline — Material Icons has no GitHub glyph. The slot/footer
 // icon renderers detect a leading `<svg` and render it as inline SVG.
@@ -348,8 +346,8 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
 
   // Marker file so we can detect that a gist was produced by easyDBAccess
   // when pulling (vs. some unrelated gist the user pointed at by accident).
-  // Also carries workspace metadata (view templates/instances + non-secret
-  // settings) so a pull can restore more than just tables/rows.
+  // Also carries workspace metadata (view templates/instances + all settings)
+  // so a pull can restore more than just tables/rows.
   if (includeSettings) {
     const viewTemplates = (await api.store.viewTemplates.find()).filter(
       (v) => v.workspaceId === wsId,
@@ -357,7 +355,7 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
     const viewInstances = (await api.store.viewInstances.find()).filter(
       (v) => v.workspaceId === wsId,
     );
-    const settings = (await api.store.settings.find()).filter((s) => isSyncableSetting(s.key));
+    const settings = await api.store.settings.find();
     files['_easydb.workspace.json'] = {
       content: JSON.stringify(
         {
@@ -569,7 +567,6 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
       }
 
       for (const s of markerSettings) {
-        if (!isSyncableSetting(s.key)) continue;
         await api.store.settings.upsert(s);
       }
     } catch (err) {

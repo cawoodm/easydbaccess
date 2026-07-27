@@ -121,6 +121,31 @@ export class SettingsDialog extends LitElement {
         font-family: ui-monospace, SFMono-Regular, monospace;
         font-size: 0.85rem;
       }
+      .secrets-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 0.4rem;
+      }
+      button.ghost {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        font: inherit;
+        font-size: 0.85rem;
+        background: #f3f4f6;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+        padding: 0.3rem 0.6rem;
+        color: #374151;
+        cursor: pointer;
+      }
+      button.ghost:hover:not(:disabled) {
+        background: #e5e7eb;
+      }
+      button.ghost:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
       .secret-row {
         display: flex;
         gap: 0.4rem;
@@ -245,6 +270,18 @@ export class SettingsDialog extends LitElement {
   private onSecretsInput(e: Event) {
     this.secretsText = (e.target as HTMLTextAreaElement).value;
     writeSecretsText(this.secretsText);
+  }
+
+  /** Save the current secrets store to a `secrets.txt` file the user can back
+   * up or carry to another device (drag it back in to re-import). */
+  private downloadSecrets() {
+    const blob = new Blob([this.secretsText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'secrets.txt';
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   private async setWorkspaceTitle(value: string) {
@@ -397,12 +434,23 @@ export class SettingsDialog extends LitElement {
         <p class="desc">
           Cross-workspace, device-local. One <code>name: value</code> per line.
           Reference a secret from any field with <code>\${secret:name}</code>.
+          Drag a <code>secrets.txt</code> onto the app to re-import.
         </p>
         <textarea
           placeholder="githubPAT: ghp_…"
           .value=${this.secretsText}
           @input=${this.onSecretsInput}
         ></textarea>
+        <div class="secrets-actions">
+          <button
+            type="button"
+            class="ghost"
+            ?disabled=${this.secretsText.trim().length === 0}
+            @click=${this.downloadSecrets}
+          >
+            <span class="mi sm">download</span> Download secrets.txt
+          </button>
+        </div>
       </div>
     `;
   }

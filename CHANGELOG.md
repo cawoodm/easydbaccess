@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 27 Jul 2026 (v0.0.138)
+
+- Gist sync now carries every workspace setting (no more excluded prefixes); keep pushed gists private if a setting still holds a raw token. Settings → General gained a Download secrets.txt button.
+
 ## 27 Jul 2026 (v0.0.137)
 
 - The table info (ⓘ) dialog now explains whether a table is Connected (live backend — rows fetched on demand) or Imported (a local snapshot, with a link to its origin); the ⓘ button also shows for such tables even without other metadata.
