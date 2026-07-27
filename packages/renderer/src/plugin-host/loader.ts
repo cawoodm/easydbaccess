@@ -13,6 +13,7 @@ import * as cellColor from '../plugins/cell-color.js';
 import * as cellImage from '../plugins/cell-image.js';
 import * as cellHtml from '../plugins/cell-html.js';
 import * as cellLink from '../plugins/cell-link.js';
+import * as deleteTable from '../plugins/delete-table.js';
 import * as importData from '../plugins/import-data.js';
 import * as autoSync from '../plugins/auto-sync.js';
 import * as views from '../plugins/views.js';
@@ -54,6 +55,7 @@ const modules: PluginModule[] = [
   cellImage,
   cellHtml,
   cellLink,
+  deleteTable,
   importData,
   autoSync,
   views,

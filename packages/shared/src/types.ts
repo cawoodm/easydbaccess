@@ -51,6 +51,13 @@ export interface WindowGeometry {
   z: number;
   minimized: boolean;
   maximized: boolean;
+  /**
+   * The window was closed by the user, hiding the table without deleting it.
+   * A closed table keeps all its data and is reopened from the command palette
+   * ("Go to <table>"); permanent deletion is a separate, explicit action.
+   * Absent/false ⇒ the window is shown.
+   */
+  closed?: boolean;
 }
 
 export interface Workspace {

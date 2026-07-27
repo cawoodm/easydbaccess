@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 27 Jul 2026 (v0.0.139)
+
+- Closing a table window now hides it (keeping its data) instead of deleting — reopen it from the Ctrl+K palette ("Go to <table>"). A new trash button in each table's button bar permanently deletes the table and its rows (with confirmation).
+
 ## 27 Jul 2026 (v0.0.138)
 
 - Gist sync now carries every workspace setting (no more excluded prefixes); keep pushed gists private if a setting still holds a raw token. Settings → General gained a Download secrets.txt button.

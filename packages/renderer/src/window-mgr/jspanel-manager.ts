@@ -72,16 +72,10 @@ type Panel = {
 
 const panels = new Map<string, Panel>();
 /**
- * Set of table ids whose close-confirmation has been resolved positively.
- * onbeforeclose short-circuits on a match so the user isn't asked twice.
- */
-const confirmedClose = new Set<string>();
-/**
- * Set of table ids whose panels are being closed because the table was
- * removed externally (json-import "Replace entire workspace", server/gist
- * pull). onclosed reads this to skip the cascade delete — the data is
- * already gone, and re-running deleteTableCascade is a redundant no-op
- * that also briefly logs storage-layer "not found" noise.
+ * Set of table ids whose panels are being closed programmatically — because the
+ * table was removed (delete / json-import "Replace entire workspace" / server/
+ * gist pull) or hidden from another tab. onclosed reads this to skip its
+ * default hide-on-close side-effect: the store already reflects the intent.
  */
 const externallyClosed = new Set<string>();
 let initialized = false;
@@ -101,10 +95,36 @@ export function currentPanZoom(): PanZoomHandle | null {
  */
 export function focusTableWindow(tableId: string): boolean {
   const p = panels.get(tableId) as (Panel & { normalize?: () => void }) | undefined;
-  if (!p) return false;
-  if (p.status === 'minimized') p.normalize?.();
-  p.front?.();
+  if (p) {
+    if (p.status === 'minimized') p.normalize?.();
+    p.front?.();
+    return true;
+  }
+  // No panel — the table is hidden (windowGeometry.closed). Un-hide it; the
+  // store subscription then opens (and fronts) its panel.
+  void unhideTable(tableId);
   return true;
+}
+
+/** Clear a table's `closed` flag so the subscription reopens its window. */
+async function unhideTable(tableId: string): Promise<void> {
+  const ctx = await getContext();
+  const t = await ctx.store.tables.findOne(tableId);
+  if (!t?.windowGeometry?.closed) return;
+  await ctx.store.tables.patch(tableId, {
+    windowGeometry: { ...t.windowGeometry, closed: false },
+    updatedAt: Date.now(),
+  });
+}
+
+/**
+ * Permanently delete a table and its local rows (source-backed tables keep
+ * their rows on the remote). Exposed for the delete-table plugin's trash
+ * action; the store subscription closes the panel when the record vanishes.
+ */
+export async function deleteTable(tableId: string): Promise<void> {
+  const ctx = await getContext();
+  await deleteTableCascade(tableId, ctx);
 }
 
 export async function initWindowManager(): Promise<void> {
@@ -143,21 +163,23 @@ export async function initWindowManager(): Promise<void> {
   // was on top last session is opened last and ends up on top again.
   const tables = (await ctx.store.tables.find()).filter((t) => t.workspaceId === ctx.workspaceId);
   tables.sort(byAscendingZ);
-  for (const t of tables) openPanel(t, ctx);
+  for (const t of tables) if (!t.windowGeometry?.closed) openPanel(t, ctx);
 
-  // Reactive sync: open new tables' panels, close panels whose tables vanished.
+  // Reactive sync: open new/reopened tables' panels; close panels whose tables
+  // vanished (deleted) OR were hidden (windowGeometry.closed set here or in
+  // another tab).
   ctx.store.tables.subscribe((all) => {
     const inWs = all.filter((t) => t.workspaceId === ctx.workspaceId);
-    const liveIds = new Set(inWs.map((t) => t.id));
+    const byId = new Map(inWs.map((t) => [t.id, t]));
 
     for (const [id, panel] of panels) {
-      if (!liveIds.has(id)) {
+      const t = byId.get(id);
+      if (!t || t.windowGeometry?.closed) {
         panels.delete(id);
-        // The table was removed externally (e.g. json-import "Replace entire
-        // workspace", server/gist pull). Mark the close as confirmed so
-        // onbeforeclose doesn't pop a "Delete table?" prompt for data that's
-        // already gone — and tell onclosed to skip its cascade delete.
-        confirmedClose.add(id);
+        // Programmatic close: the table was removed (delete / json-import
+        // "Replace entire workspace" / server/gist pull) or hidden elsewhere.
+        // Tell onclosed to skip its default hide-on-close side-effect — the
+        // store already reflects the intended state.
         externallyClosed.add(id);
         try {
           if (panel.status !== 'closed') panel.close();
@@ -166,7 +188,9 @@ export async function initWindowManager(): Promise<void> {
         }
       }
     }
-    const toOpen = inWs.filter((t) => !panels.has(t.id)).sort(byAscendingZ);
+    const toOpen = inWs
+      .filter((t) => !panels.has(t.id) && !t.windowGeometry?.closed)
+      .sort(byAscendingZ);
     for (const t of toOpen) openPanel(t, ctx);
   });
 
@@ -325,33 +349,32 @@ function openPanel(t: Table, ctx: AppContext): void {
     // Use a wall-clock timestamp as the saved z instead: higher = more
     // recently fronted, and boot sorts by ascending z to restore the order.
     onfronted: () => stampFrontOrder(t.id, ctx),
-    // jsPanel onbeforeclose can't await, so we use a two-step pattern: first
-    // close attempt opens our async confirm dialog and returns false to cancel
-    // the close. If the user confirms, we set a flag and re-call panel.close,
-    // which short-circuits this guard and lets jsPanel proceed to onclosed.
-    onbeforeclose: () => {
-      if (confirmedClose.has(t.id)) return true;
-      void (async () => {
-        const yes = await ctx.api.ui.dialogs.confirm(
-          t.source
-            ? `Remove the live table "${t.name}"? Its data stays on the Datasette server.`
-            : `Delete table "${t.name}" and all its rows?`,
-          'Confirm',
-        );
-        if (yes) {
-          confirmedClose.add(t.id);
-          panels.get(t.id)?.close();
-        }
-      })();
-      return false;
-    },
+    // Closing the window HIDES the table (keeps its data) rather than deleting
+    // it — no confirm needed. It's reopened from the command palette
+    // ("Go to <table>"); the delete-table button is the only path that removes
+    // data. Hiding happens in onclosed so it also covers jsPanel's own controls.
     onclosed: async () => {
       panels.delete(t.id);
-      confirmedClose.delete(t.id);
-      // Skip the cascade delete when the table was removed externally
-      // (subscription-driven close) — the deletion has already been done.
+      // Programmatic close (table deleted/replaced/pulled, or hidden from
+      // another tab) — the store already reflects the intended state, so don't
+      // re-hide it.
       if (externallyClosed.delete(t.id)) return;
-      await deleteTableCascade(t.id, ctx);
+      // User closed the window: persist it as hidden, preserving geometry.
+      const cur = await ctx.store.tables.findOne(t.id);
+      if (!cur) return;
+      const geom = cur.windowGeometry ?? {
+        x: 60,
+        y: 60,
+        w: 720,
+        h: 360,
+        z: 1,
+        minimized: false,
+        maximized: false,
+      };
+      await ctx.store.tables.patch(t.id, {
+        windowGeometry: { ...geom, closed: true },
+        updatedAt: Date.now(),
+      });
     },
     // Unload the data-table when minimized; remount it (fresh, re-reading the
     // store) when the panel returns to a normal or maximized state. jsPanel
