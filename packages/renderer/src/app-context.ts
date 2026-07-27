@@ -4,6 +4,7 @@ import { createEventBus } from './events/bus.js';
 import { createRegistries, type Registries } from './plugin-host/registries.js';
 import { createHostApi } from './plugin-host/api-factory.js';
 import { loadBuiltinPlugins } from './plugin-host/loader.js';
+import { registerCoreCommands } from './plugin-host/core-commands.js';
 import { loadUrlPlugins } from './plugin-host/url-loader.js';
 
 export interface AppContext {
@@ -132,6 +133,10 @@ async function init(): Promise<AppContext> {
     workspaceId: () => workspaceId,
   });
   apiRef = api;
+
+  // Core (non-plugin) commands for the Ctrl+K palette — registered before
+  // plugins so the window-management commands are always present.
+  registerCoreCommands(api);
 
   // Centralized import-status toasts so every importer (csv, json, gist pull,
   // future ones) gets consistent UX without duplicating the toast call.
