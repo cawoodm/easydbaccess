@@ -266,6 +266,18 @@ export interface ImportCtx {
    * can kill a memory-limited tab, which is why the cap is visible here at all.
    */
   maxRows?: number | undefined;
+  /**
+   * The columns of the table being appended to or overwritten. Absent when
+   * importing into a NEW table, where the source defines the schema.
+   *
+   * Present so an importer can map its values onto an existing schema in the
+   * way that is correct FOR ITS FORMAT — the kernel cannot do this generically.
+   * A CSV maps cells by POSITION, because its header names need not match the
+   * target's fields (`Person Name,Years` into `[name, age]` must still land in
+   * `name` and `age`, not create `person_name`/`years` and drop the data). A
+   * JSON dump, whose rows are already objects, maps by field NAME instead.
+   */
+  targetColumns?: ColumnSpec[] | undefined;
 }
 
 /** A curated starting point this importer contributes to the dialog's picker. */

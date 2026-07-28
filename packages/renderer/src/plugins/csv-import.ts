@@ -96,13 +96,36 @@ const importerSpec: ImporterSpec = {
     } else {
       text = input.text ?? '';
     }
-    const parsed = parseCsv(text, {
+    const sep = separatorForName(candidate.name);
+    const parseOpts = {
       ...(ctx.maxRows != null ? { maxRows: ctx.maxRows } : {}),
-      ...(() => {
-        const sep = separatorForName(candidate.name);
-        return sep ? { separator: sep } : {};
-      })(),
-    });
+      ...(sep ? { separator: sep } : {}),
+    };
+
+    // Appending to (or overwriting) an existing table: map cells onto its
+    // columns BY POSITION and coerce through each declared type. A CSV header
+    // need not match the target's field names — `Person Name,Years` into
+    // `[name, age]` must land in `name`/`age`, not invent `person_name`/`years`
+    // and drop the data. This is why the kernel hands over `targetColumns`
+    // rather than trying to match a generic row object itself.
+    const target = ctx.targetColumns;
+    if (target && target.length > 0) {
+      const raw = parseCsvRaw(text, parseOpts);
+      const rows = raw.rows.map((cells) => {
+        const data: Record<string, unknown> = {};
+        for (let i = 0; i < target.length; i++) {
+          const col = target[i]!;
+          data[col.field] = coerce(cells[i] ?? '', col.type);
+        }
+        return data;
+      });
+      // No `columns` on the batch: the target's schema wins, so the kernel must
+      // not reconcile our inferred names into it.
+      yield { rows };
+      return;
+    }
+
+    const parsed = parseCsv(text, parseOpts);
     yield { columns: parsed.columns, rows: parsed.rows };
   },
 
