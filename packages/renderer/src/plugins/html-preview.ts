@@ -1,6 +1,7 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 // @ts-expect-error — jspanel4 ships no types
 import { jsPanel } from 'jspanel4/es6module/jspanel.js';
+import { looksLikeHtml, htmlToPreviewText } from '../util/html-text.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'html-preview',
@@ -54,13 +55,6 @@ function popupContainer(): HTMLElement {
 
 let popupSeq = 0;
 
-/** Strip tags → collapsed one-line plain text (never rendered as HTML in-cell). */
-function htmlToText(html: string): string {
-  const tmp = document.createElement('div');
-  tmp.innerHTML = html;
-  return (tmp.textContent ?? '').replace(/\s+/g, ' ').trim();
-}
-
 /**
  * Cell renderer for HTML-valued columns: shows the value's PLAIN TEXT (tags
  * stripped) truncated to `maxChars`, with a small gray popup icon on the right
@@ -112,7 +106,7 @@ class HtmlPreviewCell extends HTMLElement {
     // HTML in a grid cell is unpredictable and can be huge. Take the first
     // `maxChars` characters and ellipsize the rest. Clicking edits the raw HTML
     // in a dialog; the popup icon (right) views the full rendered HTML.
-    const text = htmlToText(this._value);
+    const text = htmlToPreviewText(this._value);
     view.textContent = text.length > maxChars ? text.slice(0, maxChars) + '…' : text;
     view.title = 'Click to edit the HTML';
     view.style.cssText =
@@ -149,7 +143,19 @@ class HtmlPreviewCell extends HTMLElement {
   private openWindow() {
     const content = document.createElement('div');
     content.style.cssText = 'padding:0.75rem;overflow:auto;height:100%;box-sizing:border-box';
-    content.innerHTML = this._value;
+    if (looksLikeHtml(this._value)) {
+      content.innerHTML = this._value;
+    } else {
+      // Plain text: render inside a <pre> using textContent — this preserves
+      // newlines/indentation and safely escapes any `<`/`&` in the value,
+      // instead of letting innerHTML collapse whitespace and parse them as
+      // markup.
+      const pre = document.createElement('pre');
+      pre.style.cssText =
+        'white-space:pre-wrap;word-break:break-word;margin:0;font-family:ui-monospace, monospace;';
+      pre.textContent = this._value;
+      content.append(pre);
+    }
     jsPanel.create({
       id: `easydb-html-popup-${++popupSeq}`,
       container: popupContainer(),

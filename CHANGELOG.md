@@ -2,6 +2,7 @@
 
 ## 28 Jul 2026
 
+- v0.0.166 The HTML preview popup now keeps line breaks and literal `<` characters when the value is plain text, instead of mangling them as markup.
 - v0.0.165 Each table's Export button now offers CSV, JSON (`.table.json`) or SQL, and asks whether to export the visible data or everything.
 - v0.0.163 Docs split in two: `docs/help/` is a screenshot-illustrated user guide, `docs/tech/` holds the existing developer/architecture notes.
 - v0.0.162 Safe mode: `?safemode` boots with no plugins, `?safemode1` without URL plugins. Plugin Manager now filters by enabled/disabled.
