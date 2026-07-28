@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { ColumnSpec, Row, Table } from '@easydb/shared';
 import { scopedColumns, scopedRows, scopedTable, tableToFile } from './table-file.js';
+import { serializeCsv } from '../plugins/csv-export.js';
+import { serializeTableAsSql } from '../plugins/sql-export.js';
 
 function col(field: string, extra: Partial<ColumnSpec> = {}): ColumnSpec {
   return { field, label: field, type: 'string', ...extra };
@@ -58,13 +60,13 @@ describe('scopedRows', () => {
     expect(scopedRows(table(), rows, 'raw')).toEqual(rows);
   });
 
-  it('visible scope applies the table\'s filters', () => {
+  it("visible scope applies the table's filters", () => {
     const t = table({ filters: { name: 'an' } }); // substring "an" -> only "Anchor"
     const out = scopedRows(t, rows, 'visible');
     expect(out.map((r) => r.data.name)).toEqual(['Anchor']);
   });
 
-  it('visible scope applies the table\'s sort', () => {
+  it("visible scope applies the table's sort", () => {
     const t = table({ sortColumn: 'qty', sortAsc: true });
     const out = scopedRows(t, rows, 'visible');
     expect(out.map((r) => r.data.qty)).toEqual([1, 5, 20]);
@@ -80,7 +82,12 @@ describe('scopedRows', () => {
 
 describe('tableToFile', () => {
   it('projects rows onto the given columns and carries display/query state', () => {
-    const t = table({ sortColumn: 'qty', sortAsc: true, filters: { name: 'a' }, title: 'Widgets!' });
+    const t = table({
+      sortColumn: 'qty',
+      sortAsc: true,
+      filters: { name: 'a' },
+      title: 'Widgets!',
+    });
     const rows = [row({ name: 'Bolt', qty: 5, secret: 'x' })];
     const file = tableToFile(t, rows);
     expect(file.name).toBe('Widgets');
@@ -106,5 +113,41 @@ describe('tableToFile', () => {
     // Definition still travels — this is a reconnect descriptor, not data loss.
     expect(file.columns).toEqual(t.columns);
     expect(file.source).toEqual(t.source);
+  });
+});
+
+describe('structure scope', () => {
+  const rows = [row({ name: 'Bolt', qty: 5, secret: 'x' })];
+
+  it('scopedRows returns no rows', () => {
+    expect(scopedRows(table(), rows, 'structure')).toEqual([]);
+  });
+
+  it('scopedColumns / scopedTable keep every column, including hidden ones', () => {
+    const t = table();
+    expect(scopedColumns(t, 'structure')).toEqual(t.columns);
+    expect(scopedTable(t, 'structure')).toBe(t); // no copy needed, like 'raw'
+  });
+
+  it('CSV serialization is exactly the header line — no data rows', () => {
+    const t = table();
+    const text = serializeCsv(scopedTable(t, 'structure'), scopedRows(t, rows, 'structure'));
+    expect(text).toBe('name,secret,qty');
+  });
+
+  it('SQL serialization has the CREATE TABLE but no INSERT INTO', () => {
+    const t = table();
+    const text = serializeTableAsSql(scopedTable(t, 'structure'), scopedRows(t, rows, 'structure'));
+    expect(text).toContain('CREATE TABLE');
+    expect(text).not.toContain('INSERT INTO');
+  });
+
+  it('tableToFile carries the full definition + settings but rows: []', () => {
+    const t = table({ sortColumn: 'qty', sortAsc: true, filters: { name: 'a' } });
+    const file = tableToFile(scopedTable(t, 'structure'), scopedRows(t, rows, 'structure'));
+    expect(file.rows).toEqual([]);
+    expect(file.columns).toEqual(t.columns);
+    expect(file.sortColumn).toBe('qty');
+    expect(file.filters).toEqual({ name: 'a' });
   });
 });

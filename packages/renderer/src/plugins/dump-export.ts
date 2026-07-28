@@ -10,7 +10,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   type: 'exporter',
   version: '0.1.0',
   description:
-    'Export the current workspace as a single .db.json dump file, and — per table — CSV/JSON/SQL with a Raw vs. Visible Data choice.',
+    'Export the current workspace as a single .db.json dump file, and — per table — CSV/JSON/SQL with a Raw vs. Visible vs. Structure Only choice.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/dump-export.ts',
@@ -71,20 +71,31 @@ export function init(api: HostApi): void {
 
       // 'Visible Data' is listed FIRST and is therefore the dialog's default
       // (primary/focused/Enter-activated) choice — it's the more common intent.
+      // 'Structure Only' is listed last: the definition-only export, same full
+      // column set as 'Raw Data' but zero rows.
       const scopeChoice = await api.ui.dialogs.choice(
         `Export "${table.name}" as ${format.toUpperCase()} — which rows/columns?`,
-        ['Visible Data', 'Raw Data'],
+        ['Visible Data', 'Raw Data', 'Structure Only'],
         'Export table',
       );
       if (!scopeChoice) return;
-      const scope: ExportScope = scopeChoice === 'Visible Data' ? 'visible' : 'raw';
+      const scope: ExportScope =
+        scopeChoice === 'Visible Data'
+          ? 'visible'
+          : scopeChoice === 'Raw Data'
+            ? 'raw'
+            : 'structure';
 
       try {
         const allRows = await api.store.rows(table.id).find();
         const t = scopedTable(table, scope);
         const rows = scopedRows(table, allRows, scope);
         const base = slug(table.code || table.name || 'table');
-        const isEmptyLiveTable = table.source != null && allRows.length === 0;
+        // The "no local rows" warning is about a live table's data not being
+        // available locally — misleading noise when the user asked for the
+        // structure only, since zero rows is then the intended outcome.
+        const isEmptyLiveTable =
+          scope !== 'structure' && table.source != null && allRows.length === 0;
 
         if (format === 'csv') {
           if (isEmptyLiveTable) {
@@ -97,7 +108,8 @@ export function init(api: HostApi): void {
         } else if (format === 'json') {
           // tableToFile itself forces rows:[] for a remote table (source != null)
           // — the file is a portable DEFINITION that reconnects/re-fetches live
-          // data on pull, never a stale snapshot of it.
+          // data on pull, never a stale snapshot of it. The 'structure' scope
+          // gets the same rows:[] result via scopedRows, for any table.
           const text = JSON.stringify(tableToFile(t, rows), null, 2);
           await api.backend.saveFile(`${base}.table.json`, text, 'application/json');
         } else if (format === 'sql') {
@@ -107,7 +119,11 @@ export function init(api: HostApi): void {
               { kind: 'warning', title: 'Export' },
             );
           }
-          await api.backend.saveFile(`${base}.sql`, serializeTableAsSql(t, rows), 'application/sql');
+          await api.backend.saveFile(
+            `${base}.sql`,
+            serializeTableAsSql(t, rows),
+            'application/sql',
+          );
         }
       } catch (err) {
         api.ui.dialogs.toast(`Export failed: ${(err as Error).message}`, {

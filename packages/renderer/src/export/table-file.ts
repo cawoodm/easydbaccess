@@ -4,22 +4,27 @@
 //    the Gist push/pull path and the per-table export menu share ONE
 //    definition instead of two copies drifting apart).
 // 2. The "scope" helpers (`scopedTable` / `scopedRows`) that back the
-//    Raw Data vs. Visible Data choice offered by the table-footer export
-//    menu (see plugins/dump-export.ts). CSV, JSON, and SQL exports all call
-//    these first, then feed the (possibly narrowed) table + rows into their
-//    own serializer — the scoping logic itself lives in exactly one place.
+//    Raw Data vs. Visible Data vs. Structure Only choice offered by the
+//    table-footer export menu (see plugins/dump-export.ts). CSV, JSON, and
+//    SQL exports all call these first, then feed the (possibly narrowed)
+//    table + rows into their own serializer — the scoping logic itself
+//    lives in exactly one place.
 
 import type { Row, Table } from '@easydb/shared';
 import { viewRows } from '../views/view-render.js';
 
 /** `raw` = every column (including hidden) and every row, unsorted/unfiltered.
  * `visible` = only non-hidden columns, in their current order, and rows
- * filtered + sorted exactly like a view window (`viewRows`). */
-export type ExportScope = 'raw' | 'visible';
+ * filtered + sorted exactly like a view window (`viewRows`).
+ * `structure` = the table's DEFINITION only — every column (same full set as
+ * `raw`, since "structure" means the complete schema, not what happens to be
+ * on screen) and zero rows. */
+export type ExportScope = 'raw' | 'visible' | 'structure';
 
-/** Column list for the given scope — 'visible' drops `hidden === true` columns. */
+/** Column list for the given scope — 'visible' drops `hidden === true` columns;
+ * 'structure' keeps every column, same as 'raw'. */
 export function scopedColumns(table: Table, scope: ExportScope): Table['columns'] {
-  if (scope === 'raw') return table.columns;
+  if (scope === 'raw' || scope === 'structure') return table.columns;
   return table.columns.filter((c) => c.hidden !== true);
 }
 
@@ -30,14 +35,16 @@ export function scopedColumns(table: Table, scope: ExportScope): Table['columns'
  * given scope — none of them need to know about scoping themselves.
  */
 export function scopedTable(table: Table, scope: ExportScope): Table {
-  if (scope === 'raw') return table;
+  if (scope === 'raw' || scope === 'structure') return table;
   return { ...table, columns: scopedColumns(table, scope) };
 }
 
 /** Row list for the given scope — 'visible' applies the table's snapshotted
  * filters + sort (the same rows a view window derived from this table would
- * show); 'raw' returns every row untouched. */
+ * show); 'raw' returns every row untouched; 'structure' returns none (the
+ * serializers already emit a header/CREATE-only output when given `[]`). */
 export function scopedRows(table: Table, rows: Row[], scope: ExportScope): Row[] {
+  if (scope === 'structure') return [];
   if (scope === 'raw') return rows;
   return viewRows(rows, {
     filters: table.filters ?? {},

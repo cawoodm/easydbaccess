@@ -4,8 +4,8 @@ import { addRow, createTable, panelDomId, readTable, waitForPanel } from './help
 
 /**
  * Per-table footer "Export" button: AnchoredMenu offering CSV / JSON / SQL,
- * each followed by a Raw Data vs. Visible Data prompt (Visible Data first —
- * it's the dialog's default/primary/Enter choice).
+ * each followed by a Visible Data / Raw Data / Structure Only prompt
+ * (Visible Data first — it's the dialog's default/primary/Enter choice).
  */
 
 /** Replaces `api.backend.saveFile` with an in-memory recorder so the test can
@@ -97,6 +97,31 @@ test.describe('table export menu', () => {
     // Only Zurich + Zug rows pass the "Z" filter on city; Bern is excluded.
     const dataLines = lines.slice(1).sort();
     expect(dataLines).toEqual(['Alice,Zurich', 'Carol,Zug']);
+  });
+
+  test('CSV + Structure Only writes just the header line, no data rows', async ({ page }) => {
+    const id = await createTable(page, 'Structure', [{ field: 'name' }, { field: 'qty' }]);
+    await waitForPanel(page, id);
+    await addRow(page, id, { name: 'Alice', qty: 1 });
+    await addRow(page, id, { name: 'Bob', qty: 2 });
+
+    await stubSaveFile(page);
+
+    const footer = page.locator(`#${panelDomId(id)} panel-footer`);
+    await footer.getByRole('button', { name: 'Export' }).click();
+    await page.locator('anchored-menu').getByRole('menuitem', { name: 'CSV (.csv)' }).click();
+
+    const dialog = page.locator('host-dialogs');
+    await expect(dialog.getByRole('button', { name: 'Structure Only' })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Structure Only' }).click();
+    await expect(dialog).toBeHidden();
+
+    await expect.poll(async () => (await savedFiles(page)).length).toBe(1);
+    const [file] = await savedFiles(page);
+    expect(file?.filename).toBe('structure.csv');
+
+    // Header only — the "no data rows" outcome the user asked for.
+    expect(file!.body.trim()).toBe('name,qty');
   });
 
   test('cancelling the scope prompt writes nothing', async ({ page }) => {
