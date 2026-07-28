@@ -25,12 +25,24 @@ function main() {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
-      git archive main --format=tar -o "$tmp.tar"
-      tar -xf "$tmp.tar" -C $tmp
+      # zip + Expand-Archive rather than tar: the `tar` on PATH here is GNU tar
+      # (Git for Windows), which reads the "C:" in an absolute -f path as a
+      # remote host spec and dies with "Cannot connect to C:". Expand-Archive is
+      # built into PowerShell, so there's no PATH ambiguity either way.
+      git archive main --format=zip -o "$tmp.zip"
+      if ($LASTEXITCODE -ne 0) { throw "git archive main failed!" }
+      Expand-Archive -Path "$tmp.zip" -DestinationPath $tmp -Force
+
+      # Fail loudly on an empty/partial export: `docker build` on a context with
+      # no Dockerfile reports a confusing "failed to read dockerfile" instead.
+      if (-not (Test-Path (Join-Path $tmp 'Dockerfile'))) {
+        throw "git archive of main produced no Dockerfile in $tmp"
+      }
+
       Build-Image $ver $tmp
     } finally {
       Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
-      Remove-Item "$tmp.tar" -Force -ErrorAction SilentlyContinue
+      Remove-Item "$tmp.zip" -Force -ErrorAction SilentlyContinue
     }
   }
 }
