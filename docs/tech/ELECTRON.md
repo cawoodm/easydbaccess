@@ -7,14 +7,14 @@ still backed by Dexie/IndexedDB inside the renderer process (see
 in-process sync server, a SQLite-backed storage adapter, native file
 dialogs) planned but not yet wired. This page covers what exists today and
 exactly what's still ahead; see
-[`packages/electron/CLAUDE.md`](../packages/electron/CLAUDE.md) for the
+[`packages/electron/CLAUDE.md`](../../packages/electron/CLAUDE.md) for the
 terse contributor-facing version and the
-[rewrite plan](../.claude/plans/2026-05-21-rewrite-architecture.md) (Phase 8)
+[rewrite plan](../../.claude/plans/2026-05-21-rewrite-architecture.md) (Phase 8)
 for the original design rationale.
 
 ## What's actually running today
 
-[`src/main.ts`](../packages/electron/src/main.ts) creates one
+[`src/main.ts`](../../packages/electron/src/main.ts) creates one
 `BrowserWindow` and loads either the Vite dev server or a built renderer,
 switching on whether `EASYDB_RENDERER_URL` is set:
 
@@ -40,7 +40,7 @@ needs to expose to the renderer goes through `preload.ts`'s
 
 ## The preload bridge — currently a version stamp
 
-[`src/preload.ts`](../packages/electron/src/preload.ts) exposes exactly one
+[`src/preload.ts`](../../packages/electron/src/preload.ts) exposes exactly one
 thing today: `window.easydb = { platform: 'electron', version }`. That's
 enough for the renderer to *detect* it's running inside Electron (useful
 once there's an Electron-specific code path to branch into — see Phase 8
@@ -59,7 +59,7 @@ Don't switch this to `"module"` without separately verifying
 
 ## Dev workflow
 
-`npm run dev:electron` runs [`scripts/dev.cjs`](../packages/electron/scripts/dev.cjs),
+`npm run dev:electron` runs [`scripts/dev.cjs`](../../packages/electron/scripts/dev.cjs),
 which:
 
 1. Probes `EASYDB_RENDERER_URL` (default `http://localhost:5190`); if
@@ -94,7 +94,7 @@ both as workspace dependencies, `@easydb/server` in anticipation of Phase 8
 even though nothing imports it yet), then the renderer is built via the
 Electron-specific `build:electron` script (→ `packages/electron/frontend/`,
 `base=./`), then `packages/electron` itself (`tsc`).
-[`electron-builder.json`](../packages/electron/electron-builder.json)
+[`electron-builder.json`](../../packages/electron/electron-builder.json)
 bundles `dist/**/*` (compiled main/preload), `frontend/**/*` (the renderer
 build), and `../server/dist/**/*` (again, pre-staged for Phase 8) into
 platform installers — NSIS on Windows, a `.dmg` on macOS, an AppImage on

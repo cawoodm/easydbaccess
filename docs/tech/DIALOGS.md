@@ -147,7 +147,7 @@ dialog to reimplement:
 
 `<dialog>` centers itself on `showModal()` and has no built-in way to be
 repositioned. `makeDialogDraggable(dialog, handle)`
-([`dialogs/draggable.ts`](../packages/renderer/src/dialogs/draggable.ts))
+([`dialogs/draggable.ts`](../../packages/renderer/src/dialogs/draggable.ts))
 wires pointer-capture dragging on a handle (in practice, the `.dialog-header`
 bar) — `pointerdown` records the dialog's current rect, `pointermove`
 translates it via inline `left`/`top` (which overrides the browser's

@@ -1,6 +1,6 @@
 # The Data Table
 
-`<data-table>` ([`packages/renderer/src/table/data-table.ts`](../packages/renderer/src/table/data-table.ts))
+`<data-table>` ([`packages/renderer/src/table/data-table.ts`](../../packages/renderer/src/table/data-table.ts))
 is the single Lit element that renders every table window's grid and — in a
 different binding mode — every View window's read-only grid fallback. One
 ~1,300-line component owns cell editing, sort, per-column filters with
@@ -102,7 +102,7 @@ Two independent layers narrow the row set, applied together in
 - **Free-text search** — a *local* per-table query (from the window's own
   search box) and a *global* query (from the app-wide header search) are
   each applied through `searchRows()` from
-  [`search/text-search.ts`](../packages/renderer/src/search/text-search.ts),
+  [`search/text-search.ts`](../../packages/renderer/src/search/text-search.ts),
   a pure, DOM-free helper shared with the view window. Its rules: an
   uppercase standalone `AND`/`OR` in the query builds a boolean expression
   (`OR` binds loosest — `a AND b OR c` means `(a AND b) OR c`, no
@@ -183,7 +183,7 @@ interfere:
 After every render, `emitCount()` compares the just-rendered visible row
 count and the underlying total against what was last emitted, and — only on
 a change — dispatches the shared `easydb:visible-count` event (from
-[`window-mgr/panel-title.ts`](../packages/renderer/src/window-mgr/panel-title.ts),
+[`window-mgr/panel-title.ts`](../../packages/renderer/src/window-mgr/panel-title.ts),
 see `WINDOWS.md`) keyed by either the view instance id (view-bound mode) or
 the table id, so the enclosing jsPanel's title bar can show
 `"Name (12)"` or `"Name (3/12)"` when a filter/search has narrowed the set.

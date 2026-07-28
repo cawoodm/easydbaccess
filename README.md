@@ -12,7 +12,7 @@ rebuilt to be faster, larger-capacity, and extensible through plugins.
 
 > Try it now: <https://cawoodm.github.io/easydbaccess/>
 
-![Overview](./docs/screenshots/overview.png)
+![Overview](./docs/help/screenshots/overview.png)
 
 ---
 
@@ -45,7 +45,7 @@ rebuilt to be faster, larger-capacity, and extensible through plugins.
 Drop a file on the window. The first row becomes columns; types are inferred
 from the data (number, date, boolean, string).
 
-![Import CSV](./docs/screenshots/import-csv.png)
+![Import CSV](./docs/help/screenshots/import-csv.png)
 
 You can also start with just a header line to define your columns up front,
 using a tiny inline mini-language for labels, types, defaults, and
@@ -59,7 +59,7 @@ joined:Joined On:date::
 active:Active:boolean::
 ```
 
-![Header types](./docs/screenshots/column-types.png)
+![Header types](./docs/help/screenshots/column-types.png)
 
 ### Sort and filter
 
@@ -67,14 +67,14 @@ Click a column header to sort. Numbers stay numbers (so `10` comes after
 `2`), dates stay dates. Click the filter icon to filter by value with
 autocomplete, or type a substring.
 
-![Sorting](./docs/screenshots/sorting.png)
-![Filtering](./docs/screenshots/filter.png)
+![Sorting](./docs/help/screenshots/sorting.png)
+![Filtering](./docs/help/screenshots/filter.png)
 
 ## Rendering
 Plugins can change the way data is rendered, for example as a hyperlink:
-![Rendering](./docs/screenshots/plugin-renderer.png)
+![Rendering](./docs/help/screenshots/plugin-renderer.png)
 Or with a custom script:
-![alt text](./docs/screenshots/renderer-script.png)
+![alt text](./docs/help/screenshots/renderer-script.png)
 
 ### Export anywhere
 
@@ -88,8 +88,11 @@ Two flavours, pick one — or neither:
 
 - **Your own tiny server.** Run the bundled Hono server on a Raspberry Pi,
   Render, Fly, anywhere. Click **Sync ↑** to push, **Sync ↓** to pull.
-  See [`docs/SYNCH.md`](./docs/SYNCH.md) for the details.
 - **A private GitHub  Gist.** No server needed — your workspace is the gist.
+
+See [`docs/help/sharing-and-sync.md`](./docs/help/sharing-and-sync.md) for
+the full walkthrough, or [`docs/tech/SYNCH.md`](./docs/tech/SYNCH.md) for
+the wire protocol.
 
 ---
 
@@ -160,6 +163,15 @@ for the full design.
 
 ---
 
+## Documentation
+
+- [`docs/help/`](./docs/help/INDEX.md) — the user guide (this README's
+  Highlights section, in more depth, with screenshots).
+- [`docs/tech/`](./docs/tech/INDEX.md) — architecture and internals for
+  anyone changing code.
+
+---
+
 ## Status
 
 Active rewrite. The browser app and sync server are working today; the
@@ -174,7 +186,8 @@ packages/renderer/  the Lit-based UI (browser + Electron renderer)
 packages/server/    the Hono sync server (also embedded in Electron)
 packages/electron/  the desktop shell
 plugins-examples/   reference plugins
-docs/               architecture notes (incl. SYNCH.md)
+docs/help/          user guide + screenshots
+docs/tech/          architecture notes (incl. SYNCH.md)
 ```
 
 ## Credits

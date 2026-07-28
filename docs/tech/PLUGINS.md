@@ -5,7 +5,7 @@ folder of plugins that ship enabled by default. New Table, CSV import, cell
 renderers, Gist sync: all of it is a plugin, loaded through the exact same
 mechanism a third-party URL-loaded plugin would use. If a feature can be a
 plugin, it is one. The contract lives in
-[`packages/shared/src/plugin-api.ts`](../packages/shared/src/plugin-api.ts) —
+[`packages/shared/src/plugin-api.ts`](../../packages/shared/src/plugin-api.ts) —
 read that file before changing plugin-host code.
 
 ## What a plugin is
@@ -49,7 +49,7 @@ export function init(api: HostApi): void {
 
 **Built-in vs. third-party** is purely a delivery mechanism. Built-ins
 (`packages/renderer/src/plugins/*.ts`) are static-imported and listed in
-[`plugin-host/loader.ts`](../packages/renderer/src/plugin-host/loader.ts).
+[`plugin-host/loader.ts`](../../packages/renderer/src/plugin-host/loader.ts).
 Third-party plugins are a `.js` URL (added via the Plugin Manager or listed in
 `public/plugins/catalog.json`), fetched, wrapped in a Blob URL, and
 dynamic-`import()`ed — so unlike built-ins they must be fully self-contained
@@ -438,7 +438,7 @@ promoted to core chrome.)
 3. Only set `meta.fixed = true` if it must be permanently non-disableable —
    the default for every other built-in is already user-toggleable.
 
-See [`packages/renderer/CLAUDE.md`](../packages/renderer/CLAUDE.md) for the
+See [`packages/renderer/CLAUDE.md`](../../packages/renderer/CLAUDE.md) for the
 full plugin-host lifecycle and hot-loading details, and
-[`packages/shared/CLAUDE.md`](../packages/shared/CLAUDE.md) for the rules
+[`packages/shared/CLAUDE.md`](../../packages/shared/CLAUDE.md) for the rules
 around changing the `HostApi` contract itself.

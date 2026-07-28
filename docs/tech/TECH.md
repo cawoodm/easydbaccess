@@ -1,9 +1,10 @@
 # Technologies & Architecture
 
 A top-level tour of what easyDBAccess is built from and how the pieces fit
-together. For the user-facing pitch see [`../README.md`](../README.md); for
-the full design rationale and phased roadmap see
-[`../.claude/plans/2026-05-21-rewrite-architecture.md`](../.claude/plans/2026-05-21-rewrite-architecture.md).
+together. For the user-facing pitch see [`../../README.md`](../../README.md);
+for the user guide see [`../help/INDEX.md`](../help/INDEX.md); for the full
+design rationale and phased roadmap see
+[`../../.claude/plans/2026-05-21-rewrite-architecture.md`](../../.claude/plans/2026-05-21-rewrite-architecture.md).
 
 ## What it is
 
@@ -50,7 +51,9 @@ easyDBAccess/
 │   ├── server/      Hono app, sync routes, storage adapters   (standalone + in-process)
 │   └── electron/    desktop shell (BrowserWindow + preload)
 ├── plugins-examples/  reference plugins loaded by URL
-├── docs/              architecture notes (this file, SYNCH.md, screenshots)
+├── docs/
+│   ├── tech/          architecture notes (this file, SYNCH.md, etc.)
+│   └── help/          user guide + screenshots
 ├── e2e/               Playwright suites
 └── .claude/plans/     authoritative design docs
 ```
@@ -68,7 +71,7 @@ adapter and sync target change.
 | **Electron** | Same Lit bundle in renderer process | RxDB-IPC → main-process RxDB-SQLite *(Phase 8)* | Hono **in-process** in main | optional remote Hono |
 | **Hosted Hono** | n/a | filesystem (one JSON per workspace) or SQLite | Hono | central peer for multi-device |
 
-The **same** Hono code in [`packages/server`](../packages/server) runs both
+The **same** Hono code in [`packages/server`](../../packages/server) runs both
 inside Electron's main process and as a remote peer — `createServer({ store,
 fetchFn, ... })` is the single entry point, parameterized by a
 `StoreAdapter`.
@@ -92,7 +95,7 @@ Browser                Electron renderer        Electron main / Node server
 
 ## The plugin model (the load-bearing decision)
 
-[`packages/shared/src/plugin-api.ts`](../packages/shared/src/plugin-api.ts)
+[`packages/shared/src/plugin-api.ts`](../../packages/shared/src/plugin-api.ts)
 is the single source of truth for what plugins can do.
 
 - A plugin is a **single ES module `.js` file**.
@@ -113,7 +116,7 @@ is the single source of truth for what plugins can do.
   is contractual, not a bug.
 - **Built-in features ARE plugins** (CSV import, default table renderer,
   cell renderers, sync UI). They live under
-  [`packages/renderer/src/plugins/`](../packages/renderer/src/plugins/) and
+  [`packages/renderer/src/plugins/`](../../packages/renderer/src/plugins/) and
   are static-imported by the loader; URL-loaded plugins follow the exact
   same contract. This dogfoods the API so it cannot rot.
 
@@ -123,7 +126,7 @@ The renderer hot-installs catalog plugins without a reload by re-emitting
 ## The data layer
 
 RxDB collections, defined in
-[`packages/shared/src/schemas.ts`](../packages/shared/src/schemas.ts):
+[`packages/shared/src/schemas.ts`](../../packages/shared/src/schemas.ts):
 
 | Collection | Shape |
 |---|---|
@@ -134,9 +137,9 @@ RxDB collections, defined in
 | `plugin` | `{ url, enabled, lastFetched, cachedBody }` |
 
 The renderer talks to RxDB directly in
-[`packages/renderer/src/db/rx-db.ts`](../packages/renderer/src/db/rx-db.ts),
+[`packages/renderer/src/db/rx-db.ts`](../../packages/renderer/src/db/rx-db.ts),
 but plugins never see RxDB — they get the
-[`DataStore`](../packages/renderer/src/db/data-store.ts) wrapper, which
+[`DataStore`](../../packages/renderer/src/db/data-store.ts) wrapper, which
 exposes the minimal `DataCollection<T>` shape from `plugin-api.ts`. That
 indirection is what makes the storage layer swappable (Dexie → IPC →
 SQLite).
@@ -201,7 +204,7 @@ A handful of rules that touch every layer:
 - **`useDefineForClassFields: false` + `experimentalDecorators: true`** in
   the renderer's tsconfig — required by Lit's `@property` / `@state`. Other
   packages keep TypeScript defaults.
-- **No `rxdb` import outside [`packages/renderer/src/db/`](../packages/renderer/src/db/)**.
+- **No `rxdb` import outside [`packages/renderer/src/db/`](../../packages/renderer/src/db/)**.
   Plugins use `DataStore`; bypassing it breaks the IPC/SQLite swap path.
 - **Indexed numeric fields** in RxDB schemas need `multipleOf`, `minimum`,
   `maximum` — `updatedAt` uses `{ multipleOf: 1, minimum: 0, maximum:
@@ -218,5 +221,5 @@ A handful of rules that touch every layer:
 Phases 1–2 (skeleton, shared types, RxDB + Dexie, basic `<data-table>`) are
 complete. Browser app + standalone Hono sync server are working today.
 Electron with native SQLite storage and the URL-loaded plugin manager are
-the next milestones. Progress lives in [`../TODO.md`](../TODO.md) and the
-phase-tracking section of the architecture plan.
+the next milestones. Progress lives in [`../../TODO.md`](../../TODO.md) and
+the phase-tracking section of the architecture plan.

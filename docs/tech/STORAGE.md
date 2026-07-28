@@ -32,7 +32,7 @@ IndexedDB (browser) — persists across reloads, scoped to the origin
 
 Electron today reuses this exact path (the renderer is the same bundle
 running inside Electron's renderer process, IndexedDB and all). Phase 8 of
-the [rewrite plan](../.claude/plans/2026-05-21-rewrite-architecture.md) will
+the [rewrite plan](../../.claude/plans/2026-05-21-rewrite-architecture.md) will
 swap Electron's storage to an IPC bridge into a main-process
 `better-sqlite3` file — the point of the `DataStore` abstraction below is
 that this swap touches nothing above it.
@@ -50,7 +50,7 @@ bringing along conventions of its own.
 ## The Dexie schema
 
 Declared once in
-[`packages/renderer/src/db/dexie-db.ts`](../packages/renderer/src/db/dexie-db.ts),
+[`packages/renderer/src/db/dexie-db.ts`](../../packages/renderer/src/db/dexie-db.ts),
 one IndexedDB database named `easydb`:
 
 | Dexie table | Schema string | Primary key | Indexed fields |
@@ -106,9 +106,9 @@ more documents in the shared `rows` store carrying that table's `id`.
 
 ## `DataStore` — what plugins actually see
 
-[`data-store-dexie.ts`](../packages/renderer/src/db/data-store-dexie.ts)
+[`data-store-dexie.ts`](../../packages/renderer/src/db/data-store-dexie.ts)
 wraps every Dexie table in the minimal `DataCollection<T>` shape from
-[`plugin-api.ts`](../packages/shared/src/plugin-api.ts):
+[`plugin-api.ts`](../../packages/shared/src/plugin-api.ts):
 `find`/`findOne`/`insert`/`bulkInsert`/`upsert`/`patch`/`remove`/
 `bulkRemove`/`subscribe` (+ optional `refresh`). Plugins receive this
 wrapper, never raw Dexie — the storage engine can change without a plugin

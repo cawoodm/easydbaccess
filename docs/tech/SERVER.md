@@ -13,19 +13,19 @@ other routes (`/fetch`, `/plugins/registry`) that `SYNCH.md` doesn't cover.
 ## One app, two runtimes
 
 `createServer(deps: ServerDeps)` in
-[`packages/server/src/index.ts`](../packages/server/src/index.ts) is the
+[`packages/server/src/index.ts`](../../packages/server/src/index.ts) is the
 **only** entry point — everything environment-specific is injected as a
 dependency rather than imported directly, so the identical `Hono` app can be
 mounted in two places:
 
-- **Standalone** — [`src/standalone.ts`](../packages/server/src/standalone.ts)
+- **Standalone** — [`src/standalone.ts`](../../packages/server/src/standalone.ts)
   wraps it with `@hono/node-server` and binds a port. This is what
   `npm run dev:server` and `npm start` boot.
 - **In-process (Electron, Phase 8)** — Electron's main process will call
   `createServer(...)` directly and mount it on a localhost port instead of
   spawning a separate Node process, reusing `globalThis.fetch` for the fetch
   proxy instead of going through the network at all. Not wired yet; see the
-  [rewrite plan](../.claude/plans/2026-05-21-rewrite-architecture.md).
+  [rewrite plan](../../.claude/plans/2026-05-21-rewrite-architecture.md).
 
 ```ts
 export interface ServerDeps {
@@ -117,7 +117,7 @@ rows or inspects columns; the client decides the document's shape
 `STORAGE.md`) and all merge semantics. The server's only job is storing that
 blob and enforcing ETag-based optimistic concurrency on writes. That
 narrow interface is `StoreAdapter`
-([`storage/types.ts`](../packages/server/src/storage/types.ts)):
+([`storage/types.ts`](../../packages/server/src/storage/types.ts)):
 
 ```ts
 interface StoreAdapter {
@@ -132,7 +132,7 @@ interface StoreAdapter {
 Selected via `STORAGE_KIND` (`fs` default, or `sqlite`), both pointed at the
 same `STORAGE_PATH` directory:
 
-- **`fs`** ([`storage/fs-store.ts`](../packages/server/src/storage/fs-store.ts))
+- **`fs`** ([`storage/fs-store.ts`](../../packages/server/src/storage/fs-store.ts))
   — one file per workspace, `${id}.db.json`, written atomically (temp file +
   rename) so a crash mid-write can never leave a corrupt/partial document.
   The ETag is `sha1` of the serialized JSON. Deliberately the same
@@ -140,7 +140,7 @@ same `STORAGE_PATH` directory:
   the storage directory by hand is a valid workspace, and a pulled workspace
   is a valid dump. `watch()` uses `fs.watch` with a 50ms per-workspace
   debounce (a single logical write can fire multiple raw fs events).
-- **`sqlite`** ([`storage/sqlite-store.ts`](../packages/server/src/storage/sqlite-store.ts))
+- **`sqlite`** ([`storage/sqlite-store.ts`](../../packages/server/src/storage/sqlite-store.ts))
   — one **real SQLite file** per workspace (`${id}.db`, via Node's built-in
   `node:sqlite`, loaded through `createRequire` so Vite/Vitest's bundler
   doesn't need to recognize it as a builtin), with the JSON blob
@@ -161,7 +161,7 @@ same `STORAGE_PATH` directory:
 
 Adding a third backend (Postgres, S3, …) means implementing this one
 interface — `createStore(kind, path)` in
-[`storage/factory.ts`](../packages/server/src/storage/factory.ts) is a
+[`storage/factory.ts`](../../packages/server/src/storage/factory.ts) is a
 one-`case` switch.
 
 ## Environment variables

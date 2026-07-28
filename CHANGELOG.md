@@ -2,6 +2,7 @@
 
 ## 28 Jul 2026
 
+- v0.0.163 Docs split in two: `docs/help/` is a screenshot-illustrated user guide, `docs/tech/` holds the existing developer/architecture notes.
 - v0.0.162 Safe mode: `?safemode` boots with no plugins, `?safemode1` without URL plugins. Plugin Manager now filters by enabled/disabled.
 - v0.0.159 New favicon, and the workspace title now shows in the browser tab.
 - v0.0.158 Typing a URL into a cell now turns it into a link as soon as you click away. Script-rendered and image cells gained a pencil on the right to edit their stored value.
