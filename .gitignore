@@ -1,5 +1,4 @@
 node_modules/
-.claude/settings.local.json
 dist/
 build/
 out/
@@ -21,3 +20,4 @@ data.sqlite
 tmp*
 *.stackdump
 TODO.md
+.claude
