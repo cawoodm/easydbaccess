@@ -1,4 +1,5 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
+import { SAFE_MODE } from './safe-mode.js';
 
 /**
  * Loads third-party plugins by URL.
@@ -32,6 +33,13 @@ import type { HostApi, PluginModule } from '@easydb/shared';
  * never aborts boot because of a single plugin failure.
  */
 export async function loadUrlPlugins(api: HostApi): Promise<() => Promise<void>> {
+  // ?safemode / ?safemode1: skip URL plugins entirely for this boot. Transient
+  // only — no plugins-collection writes, so nothing is persisted. See
+  // safe-mode.ts.
+  if (SAFE_MODE === 'url-plugins' || SAFE_MODE === 'all-optional') {
+    return async () => undefined;
+  }
+
   const workspaceId = api.workspaceId();
   if (!workspaceId) return async () => undefined;
   const ws = await api.store.workspaces.findOne(workspaceId);

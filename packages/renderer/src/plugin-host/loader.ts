@@ -1,4 +1,5 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
+import { SAFE_MODE } from './safe-mode.js';
 import * as csvImport from '../plugins/csv-import.js';
 import * as csvExport from '../plugins/csv-export.js';
 import * as jsonImport from '../plugins/json-import.js';
@@ -121,6 +122,10 @@ export async function loadBuiltinPlugins(api: HostApi): Promise<() => Promise<vo
 
 async function isDisabled(api: HostApi, entry: BuiltinEntry): Promise<boolean> {
   if (entry.meta.fixed) return false;
+  // ?safemode ('all-optional'): skip every non-fixed built-in for this boot
+  // only — never persisted, never touches the plugins collection. See
+  // safe-mode.ts for why this must stay transient.
+  if (SAFE_MODE === 'all-optional') return true;
   const rec = await api.store.plugins.findOne(builtinKey(entry.id));
   return rec?.enabled === false;
 }

@@ -6,6 +6,7 @@ import { createHostApi } from './plugin-host/api-factory.js';
 import { loadBuiltinPlugins } from './plugin-host/loader.js';
 import { registerCoreCommands } from './plugin-host/core-commands.js';
 import { loadUrlPlugins } from './plugin-host/url-loader.js';
+import { SAFE_MODE } from './plugin-host/safe-mode.js';
 
 export interface AppContext {
   store: DataStore;
@@ -169,6 +170,27 @@ async function init(): Promise<AppContext> {
     events.emit('app:ready', { workspaceId });
     await runLoadBuiltins();
     await runLoadUrls();
+
+    // Safe mode is transient (see plugin-host/safe-mode.ts) — it never
+    // touches persisted state, so the user could otherwise have no idea why
+    // plugins/features are missing. Fire the warning after the load passes
+    // above so `toast-host` (mounted in app-shell's initial render, long
+    // before this microtask runs) is definitely ready.
+    if (SAFE_MODE === 'all-optional') {
+      api.ui.dialogs.toast(
+        'Safe mode is ON: only fixed built-ins (Settings, core rendering) loaded. ' +
+          'All other built-in plugins and URL-installed plugins are disabled for this ' +
+          'session only — nothing was changed. Use the Plugin Manager to disable the ' +
+          'culprit, then reload without ?safemode.',
+        { kind: 'warning', title: 'Safe mode' },
+      );
+    } else if (SAFE_MODE === 'url-plugins') {
+      api.ui.dialogs.toast(
+        'Safe mode (URL plugins) is ON: URL-installed plugins were not loaded this ' +
+          'session. Built-in plugins are unaffected. Reload without ?safemode1 to restore them.',
+        { kind: 'warning', title: 'Safe mode' },
+      );
+    }
   });
 
   return { store, events, workspaceId, registries, api };

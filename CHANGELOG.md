@@ -2,6 +2,7 @@
 
 ## 28 Jul 2026
 
+- v0.0.162 Safe mode: `?safemode` boots with no plugins, `?safemode1` without URL plugins. Plugin Manager now filters by enabled/disabled.
 - v0.0.159 New favicon, and the workspace title now shows in the browser tab.
 - v0.0.158 Typing a URL into a cell now turns it into a link as soon as you click away. Script-rendered and image cells gained a pencil on the right to edit their stored value.
 - v0.0.157 Choice dialogs now show the first option as the blue default button, focus it on open, and accept Enter to pick it.
