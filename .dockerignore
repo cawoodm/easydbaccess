@@ -1,0 +1,23 @@
+node_modules
+**/node_modules
+**/dist
+.git
+.github
+.claude
+e2e
+docs
+test-results
+playwright-report
+# Excluded via /* (not a bare dir match) so the tree stays walkable and the
+# Dockerfile can still explicitly re-include just the package.json it needs
+# for npm workspaces resolution (a bare "packages/electron" pattern would
+# make Docker skip the whole subtree, and the "!" negation below would not
+# be able to bring package.json back).
+packages/electron/*
+!packages/electron/package.json
+packages/server/*
+!packages/server/package.json
+*.log
+.vscode
+Dockerfile
+.dockerignore
