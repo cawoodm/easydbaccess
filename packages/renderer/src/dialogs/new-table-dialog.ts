@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import type { ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
+import { cryptoUUID, slugTable } from '../util/ids.js';
 import { makeDialogDraggable } from './draggable.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
@@ -540,7 +541,7 @@ export class NewTableDialog extends LitElement {
         workspaceId: ctx.workspaceId,
         name,
         title,
-        code: slug(name),
+        code: slugTable(name),
         columns,
         view: 'table',
         updatedAt: Date.now(),
@@ -900,22 +901,7 @@ function scanConstraintViolations(specs: ColumnSpec[], rows: Row[]): string[] {
   return out;
 }
 
-function slug(s: string): string {
-  return (
-    s
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'table'
-  );
-}
 
-function cryptoUUID(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  );
-}
 
 declare global {
   interface HTMLElementTagNameMap {

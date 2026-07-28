@@ -44,6 +44,7 @@ import {
   type TableRef,
 } from './datasette-client.js';
 import { createDatasetteCollection, tokenSettingKey } from './datasette-collection.js';
+import { cryptoUUID, slugTable } from '../util/ids.js';
 
 type FetchFn = (url: string, opts?: unknown) => Promise<Response>;
 
@@ -451,7 +452,7 @@ async function prepareImportTable(
     id: tableId,
     workspaceId,
     name: targetName,
-    code: slug(`${ref.db}-${ref.table}`),
+    code: slugTable(`${ref.db}-${ref.table}`),
     columns: [], // filled by fillImportTable once rows arrive
     view: 'table',
     // Where this snapshot came from, for later refresh. NOT a live `source`.
@@ -860,7 +861,7 @@ async function upsertLiveTable(
     id: tableId,
     workspaceId,
     name,
-    code: slug(`${c.db}-${c.table}`),
+    code: slugTable(`${c.db}-${c.table}`),
     // Keep an existing table's columns so a reconnect shows them at once; a new
     // one starts empty and gets them from refineLiveColumns.
     columns: existing?.columns ?? [],
@@ -1178,21 +1179,4 @@ function openColumnEditorForNewColumns(
     `Refreshing ${ref.db}/${ref.table} revealed ${newFields.length} new ` +
     `column${many ? 's' : ''}: ${list}. Review, reorder or hide ${many ? 'them' : 'it'} here.`;
   document.dispatchEvent(new CustomEvent('easydb:edit-columns', { detail: { tableId, notice } }));
-}
-
-function slug(s: string): string {
-  return (
-    s
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'table'
-  );
-}
-
-function cryptoUUID(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  );
 }

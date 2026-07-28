@@ -12,6 +12,7 @@ import type {
   WindowGeometry,
 } from '@easydb/shared';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
+import { cryptoUUID, slugTable } from '../util/ids.js';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a
 // custom element on import, which would blow up under Vitest's default
@@ -228,7 +229,7 @@ export async function importJsonText(
           id: tableId,
           workspaceId,
           name: t.name,
-          code: slug(t.name),
+          code: slugTable(t.name),
           columns: t.columns,
           view: 'table',
           ...(t.title ? { title: t.title } : {}),
@@ -627,19 +628,3 @@ function isJson(file: File): boolean {
   return false;
 }
 
-function slug(s: string): string {
-  return (
-    s
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'table'
-  );
-}
-
-function cryptoUUID(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  );
-}

@@ -9,6 +9,7 @@
 // the URL segment used to update/delete it and stays stable across refetches.
 
 import type { DataCollection, Row, RowSourceCtx, Table, Unsubscribe } from '@easydb/shared';
+import { cryptoUUID } from '../util/ids.js';
 import {
   deleteRowByPk,
   fetchRows,
@@ -216,11 +217,4 @@ export function createDatasetteCollection(table: Table, ctx: RowSourceCtx): Data
       await loadAll();
     },
   };
-}
-
-function cryptoUUID(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  );
 }

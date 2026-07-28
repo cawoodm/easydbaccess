@@ -6,6 +6,7 @@ import type {
   PluginModule,
   TableOrigin,
 } from '@easydb/shared';
+import { cryptoUUID, slugField } from '../util/ids.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'csv-import',
@@ -167,7 +168,11 @@ export async function importCsvText(
       id: targetId,
       workspaceId,
       name: uniqueName,
-      code: slug(uniqueName),
+      // NOTE: csv-import derives the table `code` with the FIELD slug
+      // (underscores), unlike every other importer, which uses the TABLE slug
+      // (dashes). Kept as-is here so this extraction changes no behavior.
+      // Unify in Phase C — see .claude/plans/2026-07-28-importer-architecture.md.
+      code: slugField(uniqueName),
       columns,
       view: 'table',
       ...(opts.origin ? { origin: opts.origin } : {}),
@@ -388,10 +393,10 @@ function parseHeaderCell(h: string, idx: number): HeaderSpec {
   const trimmed = h.trim();
   if (!trimmed.includes(':')) {
     // Plain label; everything inferred.
-    return { field: slug(trimmed || `col_${idx + 1}`), label: trimmed || `Column ${idx + 1}` };
+    return { field: slugField(trimmed || `col_${idx + 1}`), label: trimmed || `Column ${idx + 1}` };
   }
   const parts = trimmed.split(':');
-  const field = slug(parts[0] || `col_${idx + 1}`);
+  const field = slugField(parts[0] || `col_${idx + 1}`);
   const label = (parts[1] ?? parts[0] ?? '').trim() || field;
   const spec: HeaderSpec = { field, label };
   const typeStr = (parts[2] ?? '').trim();
@@ -682,20 +687,3 @@ function remapRows(
   });
 }
 
-function slug(s: string): string {
-  return (
-    s
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9_]+/g, '_')
-      .replace(/^_+|_+$/g, '')
-      .replace(/_+/g, '_') || 'col'
-  );
-}
-
-function cryptoUUID(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  );
-}
