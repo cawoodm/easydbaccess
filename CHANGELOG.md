@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 28 Jul 2026 (v0.0.152)
+
+- A `^` prefix in a column filter matches only from the start of the cell (`^S`). The suggestion list no longer covers the rows: it hides when nothing matches and closes on blur.
+
 ## 28 Jul 2026 (v0.0.151)
 
 - Drag-and-drop and Import now read `.tsv` and `.tab` files. A tab-separated file keeps its tabs even when its cells contain commas.

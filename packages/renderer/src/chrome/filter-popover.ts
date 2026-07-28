@@ -10,6 +10,11 @@ import { materialIconStyles } from './material-icon-css.js';
 /** Tri-state of one value in the picker: included, excluded, or unset. */
 type ValueState = 'on' | 'not';
 
+/** Map key for a token: its positive rendering, so modifiers stay distinct. */
+function keyOf(token: FilterToken): string {
+  return composeColumnFilter([{ ...token, negate: false }]);
+}
+
 /**
  * Portal-positioned dropdown for picking column-filter values from the set of
  * values actually present in the column. Mounted into document.body so it
@@ -180,10 +185,13 @@ export class FilterPopover extends LitElement {
   @property({ type: String }) current = '';
   @state() private search = '';
   /**
-   * Tri-state per term. Insertion order is preserved so the composed filter
-   * string stays stable as the user toggles values.
+   * Tri-state per token, keyed by the token's POSITIVE rendering (`Sweden`,
+   * `^S`, `"Berlin, DE"`). Keying on the rendering — not the bare term — keeps
+   * a hand-typed `^S` distinct from a literal value `S`, and carries modifiers
+   * like `^` through a toggle instead of silently dropping them. Insertion
+   * order is preserved so the composed filter string stays stable.
    */
-  @state() private states = new Map<string, ValueState>();
+  @state() private states = new Map<string, { state: ValueState; token: FilterToken }>();
   private resolveFn: ((v: string | null | { clear: true }) => void) | null = null;
   private onChange: ((filter: string) => void) | null = null;
 
@@ -204,9 +212,10 @@ export class FilterPopover extends LitElement {
     this.onChange = onChange ?? null;
     // Seed the tri-states from the active filter so re-opening shows what's on.
     this.states = new Map(
-      parseColumnFilter(current ?? '').map(
-        (t) => [t.term, t.negate ? 'not' : 'on'] as [string, ValueState],
-      ),
+      parseColumnFilter(current ?? '').map((t) => [
+        keyOf(t),
+        { state: t.negate ? ('not' as const) : ('on' as const), token: t },
+      ]),
     );
     this.current = current ?? '';
     this.search = '';
@@ -220,17 +229,19 @@ export class FilterPopover extends LitElement {
     });
   }
 
-  /** Cycle one term off → on → not → off and apply the recomposed filter. */
-  private cycle(term: string) {
+  /** Cycle one value off → on → not → off and apply the recomposed filter. */
+  private cycle(value: string) {
+    const token: FilterToken = { term: value, negate: false };
+    const key = keyOf(token);
     const next = new Map(this.states);
-    const state = next.get(term);
-    if (state === undefined) next.set(term, 'on');
-    else if (state === 'on') next.set(term, 'not');
-    else next.delete(term);
+    const entry = next.get(key);
+    if (entry === undefined) next.set(key, { state: 'on', token });
+    else if (entry.state === 'on') next.set(key, { state: 'not', token: entry.token });
+    else next.delete(key);
     this.states = next;
-    const tokens: FilterToken[] = [...next.entries()].map(([t, s]) => ({
-      term: t,
-      negate: s === 'not',
+    const tokens: FilterToken[] = [...next.values()].map((e) => ({
+      ...e.token,
+      negate: e.state === 'not',
     }));
     this.current = composeColumnFilter(tokens);
     this.onChange?.(this.current);
@@ -265,6 +276,8 @@ export class FilterPopover extends LitElement {
     const q = this.search.toLowerCase();
     const filtered = this.values.filter((v) => v.value.toLowerCase().includes(q));
     const showBlanks = this.blanks > 0 && '(blanks)'.includes(q);
+    const stateOf = (value: string): ValueState | undefined =>
+      this.states.get(keyOf({ term: value, negate: false }))?.state;
     const box = (state: ValueState | undefined) => html`
       <span class=${`cb${state ? ` ${state}` : ''}`}
         >${state === 'on' ? '✓' : state === 'not' ? '✕' : ''}</span
@@ -302,11 +315,11 @@ export class FilterPopover extends LitElement {
               ? html`
                   <li
                     class="blanks"
-                    title=${rowTitle(this.states.get('NULL'))}
+                    title=${rowTitle(stateOf('NULL'))}
                     @click=${() => this.cycle('NULL')}
                   >
                     <span class="left">
-                      ${box(this.states.get('NULL'))}
+                      ${box(stateOf('NULL'))}
                       <span class="label"><em>(Blanks)</em></span>
                     </span>
                     <span class="count">${this.blanks}</span>
@@ -314,7 +327,7 @@ export class FilterPopover extends LitElement {
                 `
               : ''}
             ${filtered.slice(0, 500).map((v) => {
-              const state = this.states.get(v.value);
+              const state = stateOf(v.value);
               return html`
                 <li title=${rowTitle(state)} @click=${() => this.cycle(v.value)}>
                   <span class="left">

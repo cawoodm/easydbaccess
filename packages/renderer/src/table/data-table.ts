@@ -1237,7 +1237,7 @@ export class DataTable extends LitElement {
                     .value=${this.filters[c.field] ?? ''}
                     .options=${opts}
                     placeholder="filter…"
-                    title="Filter: text = contains, !text = does not contain, NULL = empty, !NULL = has a value. Comma-separate for several values (a,b = a OR b; !a,!b excludes both); quote a value containing a comma."
+                    title="Filter: text = contains, ^text = starts with, !text = does not contain, NULL = empty, !NULL = has a value. Comma-separate for several values (a,b = a OR b; !a,!b excludes both); quote a value containing a comma."
                     @filter-change=${(e: Event) =>
                       this.onFilterInput(
                         c.field,

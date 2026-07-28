@@ -75,6 +75,47 @@ describe('matchesColumnFilter', () => {
     expect(matchesColumnFilter('Berlin', '"Berlin, DE",Zurich')).toBe(false);
   });
 
+  it('^ anchors the match to the start of the cell', () => {
+    expect(matchesColumnFilter('Sweden', '^S')).toBe(true);
+    expect(matchesColumnFilter('Sweden', '^s')).toBe(true); // case-insensitive
+    expect(matchesColumnFilter('Denmark', '^S')).toBe(false);
+    // "S" is IN "Austria"? no — but the point is the anchor rejects mid-string.
+    expect(matchesColumnFilter('Austria', '^t')).toBe(false);
+    expect(matchesColumnFilter('Austria', 't')).toBe(true);
+    expect(matchesColumnFilter(null, '^S')).toBe(false);
+  });
+
+  it('!^ excludes the rows that start with the term', () => {
+    expect(matchesColumnFilter('Sweden', '!^S')).toBe(false);
+    expect(matchesColumnFilter('Denmark', '!^S')).toBe(true);
+    // A blank cell does not start with "S", so it survives the exclusion.
+    expect(matchesColumnFilter(null, '!^S')).toBe(true);
+  });
+
+  it('^ combines with other tokens', () => {
+    expect(matchesColumnFilter('Sweden', '^S,Norway')).toBe(true);
+    expect(matchesColumnFilter('Norway', '^S,Norway')).toBe(true);
+    expect(matchesColumnFilter('Denmark', '^S,Norway')).toBe(false);
+    expect(matchesColumnFilter('Spain', '^S,!Spain')).toBe(false);
+  });
+
+  it('^NULL looks for the literal text, not for blanks', () => {
+    expect(matchesColumnFilter(null, '^NULL')).toBe(false);
+    expect(matchesColumnFilter('null pointer', '^NULL')).toBe(true);
+    expect(matchesColumnFilter(null, 'NULL')).toBe(true);
+  });
+
+  it('a quoted term keeps a leading ^ or ! as literal text', () => {
+    expect(matchesColumnFilter('^caret', '"^caret"')).toBe(true);
+    expect(matchesColumnFilter('caret', '"^caret"')).toBe(false);
+    expect(matchesColumnFilter('!bang', '"!bang"')).toBe(true);
+  });
+
+  it('a mid-token ^ or ! is ordinary text', () => {
+    expect(matchesColumnFilter('a^b', 'a^b')).toBe(true);
+    expect(matchesColumnFilter('a!b', 'a!b')).toBe(true);
+  });
+
   it('ignores empty tokens', () => {
     expect(matchesColumnFilter('Sweden', 'Sweden,,')).toBe(true);
     expect(matchesColumnFilter('Norway', ' , ')).toBe(true);
@@ -95,6 +136,15 @@ describe('parseColumnFilter / composeColumnFilter', () => {
     expect(parseColumnFilter('!')).toEqual([{ term: '', negate: true }]);
   });
 
+  it('parses the ^ starts-with modifier, alone and after !', () => {
+    expect(parseColumnFilter('^S')).toEqual([{ term: 'S', negate: false, prefix: true }]);
+    expect(parseColumnFilter('!^S')).toEqual([{ term: 'S', negate: true, prefix: true }]);
+    // A second ^ is literal text, not a repeated modifier.
+    expect(parseColumnFilter('^^S')).toEqual([{ term: '^S', negate: false, prefix: true }]);
+    // Quoting turns it back into an ordinary character.
+    expect(parseColumnFilter('"^S"')).toEqual([{ term: '^S', negate: false }]);
+  });
+
   it('round-trips through compose', () => {
     for (const raw of [
       'Sweden,!Norway',
@@ -103,6 +153,11 @@ describe('parseColumnFilter / composeColumnFilter', () => {
       '!',
       '"a""b"',
       '" padded "',
+      '^S',
+      '!^S',
+      '^S,Norway',
+      '"^caret"',
+      '"!bang"',
     ]) {
       expect(composeColumnFilter(parseColumnFilter(raw))).toBe(raw);
     }

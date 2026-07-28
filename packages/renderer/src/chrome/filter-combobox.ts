@@ -15,6 +15,12 @@ import { customElement, property, query, state } from 'lit/decorators.js';
  * document.body portal. Only one combobox can be focused at a time, so we
  * don't have to coordinate with other instances.
  *
+ * The dropdown closes when the input loses focus, and when nothing matches it
+ * is not rendered at all — either way it never sits over the filtered rows.
+ * Both the list and its items swallow `mousedown`, so clicking an option (or
+ * dragging the list's scrollbar) keeps the input focused instead of dismissing
+ * the list before the click lands.
+ *
  * Emits `filter-change` (CustomEvent<{ value: string }>) on every keystroke
  * AND on option pick — callers treat both identically.
  */
@@ -96,14 +102,6 @@ export class FilterCombobox extends LitElement {
     .dropdown li:hover,
     .dropdown li.highlighted {
       background: #eff6ff;
-    }
-    .dropdown li.empty {
-      color: #9ca3af;
-      font-style: italic;
-      cursor: default;
-    }
-    .dropdown li.empty:hover {
-      background: transparent;
     }
   `;
 
@@ -275,6 +273,10 @@ export class FilterCombobox extends LitElement {
 
   override render() {
     const opts = this.open ? this.filtered() : [];
+    // No suggestions ⇒ no dropdown at all. An empty "No matching values." box
+    // is pure obstruction: it sits over the rows the typed filter just found.
+    // `open` stays true, so the list reappears as soon as something matches.
+    const showDropdown = this.open && opts.length > 0;
     const style = `top:${this.dropTop}px;left:${this.dropLeft}px;min-width:${this.dropMinWidth}px;`;
     return html`
       <div class="wrap">
@@ -284,6 +286,7 @@ export class FilterCombobox extends LitElement {
           .value=${this.value}
           @focus=${() => this.openDropdown()}
           @click=${() => this.openDropdown()}
+          @blur=${() => this.closeDropdown()}
           @input=${this.onInput}
           @keydown=${this.onKeyDown}
         />
@@ -300,21 +303,23 @@ export class FilterCombobox extends LitElement {
             </button>`
           : nothing}
       </div>
-      ${this.open
-        ? html`<ul class="dropdown" style=${style}>
-            ${opts.length === 0
-              ? html`<li class="empty">No matching values.</li>`
-              : opts.map(
-                  (v, i) => html`
-                    <li
-                      class=${i === this.highlightIdx ? 'highlighted' : ''}
-                      @mousedown=${(e: Event) => e.preventDefault()}
-                      @click=${() => this.onPick(v)}
-                    >
-                      ${v}
-                    </li>
-                  `,
-                )}
+      ${showDropdown
+        ? html`<ul
+            class="dropdown"
+            style=${style}
+            @mousedown=${(e: Event) => e.preventDefault()}
+          >
+            ${opts.map(
+              (v, i) => html`
+                <li
+                  class=${i === this.highlightIdx ? 'highlighted' : ''}
+                  @mousedown=${(e: Event) => e.preventDefault()}
+                  @click=${() => this.onPick(v)}
+                >
+                  ${v}
+                </li>
+              `,
+            )}
           </ul>`
         : nothing}
     `;

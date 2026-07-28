@@ -275,7 +275,7 @@ export function rowPk(rowData: Record<string, unknown>, pks: string[]): string |
 /**
  * Translate an eda table's persisted sort + column filters into Datasette query
  * params (Phase-2 server-side windowing). Filter mini-language:
- *   >n >=n <n <=n =v *v* ; bare text ⇒ __contains.
+ *   >n >=n <n <=n =v *v* ^v ; bare text ⇒ __contains.
  * A comma-separated multi-token filter (see `search/column-filter.ts`) maps its
  * included values to `__in` and its `!`-negated ones to `__notin`.
  */
@@ -297,6 +297,10 @@ export function translateQuery(
     // A single plain (un-negated) token keeps the comparison-operator ladder.
     if (tokens.length === 1 && !tokens[0]!.negate) {
       const one = tokens[0]!.term;
+      if (tokens[0]!.prefix) {
+        params[`${col}__startswith`] = one;
+        continue;
+      }
       let m: RegExpMatchArray | null;
       if ((m = one.match(/^>=\s*(.+)$/))) params[`${col}__gte`] = m[1]!.trim();
       else if ((m = one.match(/^<=\s*(.+)$/))) params[`${col}__lte`] = m[1]!.trim();
@@ -307,6 +311,11 @@ export function translateQuery(
       else params[`${col}__contains`] = one;
       continue;
     }
+    // Datasette has one operator per column, so a `^`-anchored token mixed into
+    // a multi-token set cannot be expressed: an `__in` over the OTHER included
+    // values would drop the rows the anchored token was meant to add. Send no
+    // param for this column and let the client-side filter narrow the page.
+    if (tokens.some((t) => t.prefix)) continue;
     // Multi-value / negated: include set → __in, exclude set → __notin.
     const include = tokens.filter((t) => !t.negate).map((t) => t.term);
     const exclude = tokens.filter((t) => t.negate).map((t) => t.term);
