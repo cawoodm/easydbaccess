@@ -1,13 +1,15 @@
 // packages/renderer/src/plugins/datasette-client.ts
 //
 // Pure, DOM-free client core for talking to a Datasette instance. No eda imports
-// beyond shared types; every function is unit-testable in isolation and reused by
-// both the Phase-1 importer and the Phase-2 live DataCollection.
+// beyond shared types and the equally pure column-filter grammar; every function
+// is unit-testable in isolation and reused by both the Phase-1 importer and the
+// Phase-2 live DataCollection.
 //
 // This TypeScript build-in mirrors the runnable, unit-tested reference in
 // ../../../../eda-datasette-plugin/datasette-client.js (21 node --test cases).
 
 import type { ColumnSpec, ColumnType, TableInfo } from '@easydb/shared';
+import { parseColumnFilter } from '../search/column-filter.js';
 
 export interface DatasetteRef {
   base: string;
@@ -273,7 +275,9 @@ export function rowPk(rowData: Record<string, unknown>, pks: string[]): string |
 /**
  * Translate an eda table's persisted sort + column filters into Datasette query
  * params (Phase-2 server-side windowing). Filter mini-language:
- *   >n >=n <n <=n =v *v* a,b,c ; bare text ⇒ __contains.
+ *   >n >=n <n <=n =v *v* ; bare text ⇒ __contains.
+ * A comma-separated multi-token filter (see `search/column-filter.ts`) maps its
+ * included values to `__in` and its `!`-negated ones to `__notin`.
  */
 export function translateQuery(
   state: {
@@ -289,15 +293,25 @@ export function translateQuery(
   for (const [col, raw] of Object.entries(state.filters || {})) {
     const val = String(raw).trim();
     if (val === '') continue;
-    let m: RegExpMatchArray | null;
-    if ((m = val.match(/^>=\s*(.+)$/))) params[`${col}__gte`] = m[1]!.trim();
-    else if ((m = val.match(/^<=\s*(.+)$/))) params[`${col}__lte`] = m[1]!.trim();
-    else if ((m = val.match(/^>\s*(.+)$/))) params[`${col}__gt`] = m[1]!.trim();
-    else if ((m = val.match(/^<\s*(.+)$/))) params[`${col}__lt`] = m[1]!.trim();
-    else if ((m = val.match(/^=\s*(.+)$/))) params[`${col}__exact`] = m[1]!.trim();
-    else if ((m = val.match(/^\*(.+)\*$/))) params[`${col}__contains`] = m[1]!;
-    else if (val.includes(',')) params[`${col}__in`] = val;
-    else params[`${col}__contains`] = val;
+    const tokens = parseColumnFilter(val);
+    // A single plain (un-negated) token keeps the comparison-operator ladder.
+    if (tokens.length === 1 && !tokens[0]!.negate) {
+      const one = tokens[0]!.term;
+      let m: RegExpMatchArray | null;
+      if ((m = one.match(/^>=\s*(.+)$/))) params[`${col}__gte`] = m[1]!.trim();
+      else if ((m = one.match(/^<=\s*(.+)$/))) params[`${col}__lte`] = m[1]!.trim();
+      else if ((m = one.match(/^>\s*(.+)$/))) params[`${col}__gt`] = m[1]!.trim();
+      else if ((m = one.match(/^<\s*(.+)$/))) params[`${col}__lt`] = m[1]!.trim();
+      else if ((m = one.match(/^=\s*(.+)$/))) params[`${col}__exact`] = m[1]!.trim();
+      else if ((m = one.match(/^\*(.+)\*$/))) params[`${col}__contains`] = m[1]!;
+      else params[`${col}__contains`] = one;
+      continue;
+    }
+    // Multi-value / negated: include set → __in, exclude set → __notin.
+    const include = tokens.filter((t) => !t.negate).map((t) => t.term);
+    const exclude = tokens.filter((t) => t.negate).map((t) => t.term);
+    if (include.length) params[`${col}__in`] = include.join(',');
+    if (exclude.length) params[`${col}__notin`] = exclude.join(',');
   }
   return params;
 }

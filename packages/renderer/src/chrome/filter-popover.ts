@@ -1,14 +1,26 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
+import {
+  composeColumnFilter,
+  parseColumnFilter,
+  type FilterToken,
+} from '../search/column-filter.js';
 import { materialIconStyles } from './material-icon-css.js';
 
+/** Tri-state of one value in the picker: included, excluded, or unset. */
+type ValueState = 'on' | 'not';
+
 /**
- * Portal-positioned dropdown for picking a column-filter value from the set
- * of values actually present in the column. Mounted into document.body so it
- * escapes the data-table's overflow:auto clip boundary; the manager
- * positions it under the anchoring funnel button.
+ * Portal-positioned dropdown for picking column-filter values from the set of
+ * values actually present in the column. Mounted into document.body so it
+ * escapes the data-table's overflow:auto clip boundary; the manager positions
+ * it under the anchoring funnel button.
  *
- * Resolves the user's choice via a callback set when opened.
+ * Each value carries a tri-state checkbox — off (empty gray) → on (green ✓,
+ * include) → not (red ✕, exclude) — and any number of values may be on or
+ * negated at once. Toggling applies the composed filter LIVE through the
+ * `onChange` callback and leaves the popover open; the promise resolves on
+ * dismiss (null) or Clear filter ({ clear: true }).
  */
 @customElement('filter-popover')
 export class FilterPopover extends LitElement {
@@ -78,9 +90,6 @@ export class FilterPopover extends LitElement {
       li:hover {
         background: #eff6ff;
       }
-      li.selected {
-        background: #dbeafe;
-      }
       li .count {
         color: #6b7280;
         font-variant-numeric: tabular-nums;
@@ -94,19 +103,44 @@ export class FilterPopover extends LitElement {
       li.blanks .label {
         color: #6b7280;
       }
-      .hide-row {
+      li .left {
         display: flex;
         align-items: center;
-        gap: 0.35rem;
-        padding: 0.3rem 0.55rem;
-        border-bottom: 1px solid #e5e7eb;
-        color: #374151;
-        cursor: pointer;
+        gap: 0.4rem;
+        min-width: 0;
+      }
+      /* Tri-state checkbox: off (empty gray) → on (green ✓) → not (red ✕). */
+      .cb {
+        flex: 0 0 auto;
+        width: 14px;
+        height: 14px;
+        border: 1px solid #9ca3af;
+        border-radius: 0.15rem;
+        background: #fff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        line-height: 1;
+        font-weight: 700;
+        color: transparent;
         user-select: none;
       }
-      .hide-row input {
-        margin: 0;
-        cursor: pointer;
+      .cb.on {
+        border-color: #16a34a;
+        background: #dcfce7;
+        color: #15803d;
+      }
+      .cb.not {
+        border-color: #dc2626;
+        background: #fee2e2;
+        color: #b91c1c;
+      }
+      .hint {
+        padding: 0.3rem 0.55rem;
+        border-bottom: 1px solid #e5e7eb;
+        color: #6b7280;
+        font-size: 0.75rem;
       }
       .empty {
         padding: 0.6rem;
@@ -145,33 +179,36 @@ export class FilterPopover extends LitElement {
   /** The bare (un-negated) term of the current filter, for selection highlight. */
   @property({ type: String }) current = '';
   @state() private search = '';
-  /** When checked, the picked value is negated (`!value`) — "hide these rows". */
-  @state() private hide = false;
+  /**
+   * Tri-state per term. Insertion order is preserved so the composed filter
+   * string stays stable as the user toggles values.
+   */
+  @state() private states = new Map<string, ValueState>();
   private resolveFn: ((v: string | null | { clear: true }) => void) | null = null;
+  private onChange: ((filter: string) => void) | null = null;
 
   /**
-   * Opens the popover anchored to a DOM rect. Resolves with the picked filter
-   * string (with a leading `!` when "hide" is checked, or `NULL`/`!NULL` for
-   * the Blanks entry), null on dismiss, or { clear: true } on Clear-filter.
+   * Opens the popover anchored to a DOM rect. Toggling a value applies the
+   * recomposed filter immediately via `onChange` and keeps the popover open;
+   * the promise resolves null on dismiss or { clear: true } on Clear-filter.
    */
   open(
     anchor: DOMRect,
     values: Array<{ value: string; count: number }>,
     current: string,
     blanks = 0,
+    onChange?: (filter: string) => void,
   ): Promise<string | null | { clear: true }> {
     this.values = values;
     this.blanks = blanks;
-    // Split the current filter into its negation flag + bare term so the
-    // "hide" checkbox and the selected row reflect the active filter.
-    let term = current ?? '';
-    let negate = false;
-    if (term.startsWith('!')) {
-      negate = true;
-      term = term.slice(1).trim();
-    }
-    this.hide = negate;
-    this.current = term;
+    this.onChange = onChange ?? null;
+    // Seed the tri-states from the active filter so re-opening shows what's on.
+    this.states = new Map(
+      parseColumnFilter(current ?? '').map(
+        (t) => [t.term, t.negate ? 'not' : 'on'] as [string, ValueState],
+      ),
+    );
+    this.current = current ?? '';
     this.search = '';
     this.style.top = `${Math.round(anchor.bottom + 4)}px`;
     this.style.left = `${Math.round(anchor.left)}px`;
@@ -183,12 +220,24 @@ export class FilterPopover extends LitElement {
     });
   }
 
-  /** Resolve with `term`, prefixing `!` when the "hide" box is checked. */
-  private pick(term: string) {
-    this.close((this.hide ? '!' : '') + term);
+  /** Cycle one term off → on → not → off and apply the recomposed filter. */
+  private cycle(term: string) {
+    const next = new Map(this.states);
+    const state = next.get(term);
+    if (state === undefined) next.set(term, 'on');
+    else if (state === 'on') next.set(term, 'not');
+    else next.delete(term);
+    this.states = next;
+    const tokens: FilterToken[] = [...next.entries()].map(([t, s]) => ({
+      term: t,
+      negate: s === 'not',
+    }));
+    this.current = composeColumnFilter(tokens);
+    this.onChange?.(this.current);
   }
 
   private close(v: string | null | { clear: true }) {
+    this.onChange = null;
     document.removeEventListener('mousedown', this.onOutside, true);
     this.setAttribute('hidden', '');
     const fn = this.resolveFn;
@@ -216,7 +265,17 @@ export class FilterPopover extends LitElement {
     const q = this.search.toLowerCase();
     const filtered = this.values.filter((v) => v.value.toLowerCase().includes(q));
     const showBlanks = this.blanks > 0 && '(blanks)'.includes(q);
-    const blanksSelected = this.current.toUpperCase() === 'NULL';
+    const box = (state: ValueState | undefined) => html`
+      <span class=${`cb${state ? ` ${state}` : ''}`}
+        >${state === 'on' ? '✓' : state === 'not' ? '✕' : ''}</span
+      >
+    `;
+    const rowTitle = (state: ValueState | undefined) =>
+      state === 'on'
+        ? 'Included — click to exclude'
+        : state === 'not'
+          ? 'Excluded — click to clear'
+          : 'Click to include → exclude → off';
     return html`
       <header>
         <span class="mi sm">search</span>
@@ -235,45 +294,51 @@ export class FilterPopover extends LitElement {
           <span class="mi sm">close</span>
         </button>
       </header>
-      <label class="hide-row" title="Show rows that do NOT match the value you pick">
-        <input
-          type="checkbox"
-          .checked=${this.hide}
-          @change=${(e: Event) => (this.hide = (e.target as HTMLInputElement).checked)}
-        />
-        hide
-      </label>
+      <div class="hint">Click a value: include (✓) → exclude (✕) → off.</div>
       ${filtered.length === 0 && !showBlanks
         ? html`<div class="empty">No matching values.</div>`
         : html`<ul>
             ${showBlanks
               ? html`
                   <li
-                    class=${`blanks${blanksSelected ? ' selected' : ''}`}
-                    @click=${() => this.pick('NULL')}
+                    class="blanks"
+                    title=${rowTitle(this.states.get('NULL'))}
+                    @click=${() => this.cycle('NULL')}
                   >
-                    <span class="label"><em>(Blanks)</em></span>
+                    <span class="left">
+                      ${box(this.states.get('NULL'))}
+                      <span class="label"><em>(Blanks)</em></span>
+                    </span>
                     <span class="count">${this.blanks}</span>
                   </li>
                 `
               : ''}
-            ${filtered.slice(0, 500).map(
-              (v) => html`
-                <li
-                  class=${v.value === this.current ? 'selected' : ''}
-                  @click=${() => this.pick(v.value)}
-                >
-                  <span class="label">${v.value}</span>
+            ${filtered.slice(0, 500).map((v) => {
+              const state = this.states.get(v.value);
+              return html`
+                <li title=${rowTitle(state)} @click=${() => this.cycle(v.value)}>
+                  <span class="left">
+                    ${box(state)}
+                    <span class="label">${v.value}</span>
+                  </span>
                   <span class="count">${v.count}</span>
                 </li>
-              `,
-            )}
+              `;
+            })}
           </ul>`}
       ${this.values.length > 500
         ? html`<div class="cap" style="padding:0 .55rem">Showing first 500 of ${this.values.length}.</div>`
         : ''}
       <div class="actions">
-        <button class="text" @click=${() => this.close({ clear: true })}>Clear filter</button>
+        <button
+          class="text"
+          @click=${() => {
+            this.states = new Map();
+            this.close({ clear: true });
+          }}
+        >
+          Clear filter
+        </button>
         <span style="color:#6b7280">${filtered.length} value${filtered.length === 1 ? '' : 's'}</span>
       </div>
     `;

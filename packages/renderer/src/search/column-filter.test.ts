@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchesColumnFilter } from './column-filter.js';
+import { composeColumnFilter, matchesColumnFilter, parseColumnFilter } from './column-filter.js';
 
 describe('matchesColumnFilter', () => {
   it('empty query matches everything', () => {
@@ -39,5 +39,72 @@ describe('matchesColumnFilter', () => {
     expect(matchesColumnFilter(null, '!NULL')).toBe(false);
     expect(matchesColumnFilter('value', '!')).toBe(true);
     expect(matchesColumnFilter('', '!')).toBe(false);
+  });
+
+  it('several included values are ORed', () => {
+    expect(matchesColumnFilter('Sweden', 'Sweden,Norway')).toBe(true);
+    expect(matchesColumnFilter('Norway', 'Sweden,Norway')).toBe(true);
+    expect(matchesColumnFilter('Denmark', 'Sweden,Norway')).toBe(false);
+    expect(matchesColumnFilter(null, 'Sweden,Norway')).toBe(false);
+  });
+
+  it('several negated values exclude all of them', () => {
+    expect(matchesColumnFilter('Closed', '!Closed,!Cancelled')).toBe(false);
+    expect(matchesColumnFilter('Cancelled', '!Closed,!Cancelled')).toBe(false);
+    expect(matchesColumnFilter('Open', '!Closed,!Cancelled')).toBe(true);
+    // No positive term ⇒ everything that isn't excluded passes, blanks included.
+    expect(matchesColumnFilter(null, '!Closed,!Cancelled')).toBe(true);
+  });
+
+  it('mixes included and negated terms', () => {
+    // In the Open set, but not the urgent ones.
+    expect(matchesColumnFilter('Open', 'Open,!urgent')).toBe(true);
+    expect(matchesColumnFilter('Open urgent', 'Open,!urgent')).toBe(false);
+    expect(matchesColumnFilter('Closed', 'Open,!urgent')).toBe(false);
+  });
+
+  it('NULL combines with a value', () => {
+    expect(matchesColumnFilter(null, 'NULL,Sweden')).toBe(true);
+    expect(matchesColumnFilter('Sweden', 'NULL,Sweden')).toBe(true);
+    expect(matchesColumnFilter('Norway', 'NULL,Sweden')).toBe(false);
+  });
+
+  it('a quoted value keeps its comma', () => {
+    expect(matchesColumnFilter('Berlin, DE', '"Berlin, DE",Zurich')).toBe(true);
+    expect(matchesColumnFilter('Zurich', '"Berlin, DE",Zurich')).toBe(true);
+    expect(matchesColumnFilter('Berlin', '"Berlin, DE",Zurich')).toBe(false);
+  });
+
+  it('ignores empty tokens', () => {
+    expect(matchesColumnFilter('Sweden', 'Sweden,,')).toBe(true);
+    expect(matchesColumnFilter('Norway', ' , ')).toBe(true);
+  });
+});
+
+describe('parseColumnFilter / composeColumnFilter', () => {
+  it('parses tokens, negation and quoting', () => {
+    expect(parseColumnFilter('Sweden, !Norway')).toEqual([
+      { term: 'Sweden', negate: false },
+      { term: 'Norway', negate: true },
+    ]);
+    expect(parseColumnFilter('"Berlin, DE"')).toEqual([{ term: 'Berlin, DE', negate: false }]);
+    expect(parseColumnFilter('!"a,b"')).toEqual([{ term: 'a,b', negate: true }]);
+    // A doubled quote is a literal only INSIDE a quoted run.
+    expect(parseColumnFilter('"a""b"')).toEqual([{ term: 'a"b', negate: false }]);
+    expect(parseColumnFilter('')).toEqual([]);
+    expect(parseColumnFilter('!')).toEqual([{ term: '', negate: true }]);
+  });
+
+  it('round-trips through compose', () => {
+    for (const raw of [
+      'Sweden,!Norway',
+      '"Berlin, DE",Zurich',
+      'NULL,Sweden',
+      '!',
+      '"a""b"',
+      '" padded "',
+    ]) {
+      expect(composeColumnFilter(parseColumnFilter(raw))).toBe(raw);
+    }
   });
 });

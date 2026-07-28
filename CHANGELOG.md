@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 28 Jul 2026 (v0.0.150)
+
+- Column filters got a tri-state checkbox per value: gray off, green include, red exclude. Pick as many values as you like.
+
 ## 27 Jul 2026 (v0.0.149)
 
 - Editing a built-in view template now turns it into a normal template (no more duplicate "built-in" clones), and every template has a Delete button.
