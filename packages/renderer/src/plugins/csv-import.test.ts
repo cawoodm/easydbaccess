@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { parseCsv, parseCsvRaw, dedupeFields, readCsvHead } from './csv-import.js';
+import {
+  parseCsv,
+  parseCsvRaw,
+  dedupeFields,
+  readCsvHead,
+  separatorForName,
+  stripDelimitedExt,
+} from './csv-import.js';
 
 describe('dedupeFields', () => {
   it('suffixes repeats in first-seen order, leaving the first untouched', () => {
@@ -200,5 +207,48 @@ describe('parseCsv: RFC-4180 quoting edge cases', () => {
     const { header, rows } = parseCsvRaw(text);
     expect(header).toEqual(['a', 'b']);
     expect(rows).toEqual([['x,"y"', '2']]);
+  });
+});
+
+describe('TSV support', () => {
+  it('auto-detects tabs when they outnumber other separators', () => {
+    const text = 'name\tage\nAda\t36\nGrace\t45\n';
+    const { columns, rows } = parseCsv(text);
+    expect(columns.map((c) => c.field)).toEqual(['name', 'age']);
+    expect(rows).toEqual([
+      { name: 'Ada', age: 36 },
+      { name: 'Grace', age: 45 },
+    ]);
+  });
+
+  it('an explicit tab separator wins over a comma-heavy sample', () => {
+    // A real TSV risk: the cells hold more commas than the row holds tabs, so
+    // auto-detection picks the comma and the whole row collapses into one cell.
+    const text = 'name\tnote\nAda\tone, two, three\nGrace\tfour, five, six\n';
+    expect(parseCsv(text).columns).toHaveLength(1); // auto-detect gets it wrong
+    const { columns, rows } = parseCsv(text, { separator: '\t' });
+    expect(columns.map((c) => c.field)).toEqual(['name', 'note']);
+    expect(rows[0]).toEqual({ name: 'Ada', note: 'one, two, three' });
+  });
+
+  it('parseCsvRaw honors an explicit separator too', () => {
+    const { header, rows } = parseCsvRaw('a\tb\n1\t2,3\n', { separator: '\t' });
+    expect(header).toEqual(['a', 'b']);
+    expect(rows).toEqual([['1', '2,3']]);
+  });
+
+  it('separatorForName pins TAB only for .tsv/.tab names', () => {
+    expect(separatorForName('data.tsv')).toBe('\t');
+    expect(separatorForName('DATA.TAB')).toBe('\t');
+    expect(separatorForName('data.csv')).toBeUndefined();
+    expect(separatorForName('data.txt')).toBeUndefined();
+  });
+
+  it('stripDelimitedExt drops a csv/tsv/tab extension only', () => {
+    expect(stripDelimitedExt('sales.tsv')).toBe('sales');
+    expect(stripDelimitedExt('sales.CSV')).toBe('sales');
+    expect(stripDelimitedExt('sales.tab')).toBe('sales');
+    expect(stripDelimitedExt('sales.json')).toBe('sales.json');
+    expect(stripDelimitedExt('my.data.tsv')).toBe('my.data');
   });
 });

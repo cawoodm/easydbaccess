@@ -12,7 +12,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   name: 'CSV Import',
   type: 'importer',
   version: '0.1.0',
-  description: 'Drag-and-drop CSV files to create typed tables.',
+  description: 'Drag-and-drop CSV or TSV files to create typed tables.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/csv-import.ts',
@@ -44,8 +44,8 @@ export function init(api: HostApi): void {
 
 const importerSpec: ImporterSpec = {
   id: 'csv',
-  label: 'CSV',
-  accept: ['.csv', 'text/csv'],
+  label: 'CSV / TSV',
+  accept: ['.csv', '.tsv', '.tab', 'text/csv', 'text/tab-separated-values'],
   async parse(input) {
     const text = typeof input === 'string' ? input : await input.text();
     return parseCsv(text);
@@ -55,14 +55,18 @@ const importerSpec: ImporterSpec = {
 // -- Core: turn one File into a Table + Rows ----------------------------------
 
 async function importCsvFile(api: HostApi, file: File): Promise<void> {
-  const baseName = file.name.replace(/\.csv$/i, '') || 'imported';
-  await importCsvText(api, await file.text(), baseName);
+  // Keep the extension on the name we pass down: importCsvText strips it and
+  // reads it to pin the separator for a .tsv file.
+  await importCsvText(api, await file.text(), file.name);
 }
 
 /**
- * Create a Table (+ rows) from CSV text. Shared by the drag-and-drop file path
- * and the Import dialog's URL path. `name` seeds the table name (a trailing
- * `.csv` is stripped); a same-named existing table prompts append / overwrite /
+ * Create a Table (+ rows) from CSV or TSV text. Shared by the drag-and-drop
+ * file path and the Import dialog's URL path. `name` seeds the table name (a
+ * trailing `.csv` / `.tsv` / `.tab` is stripped) and also pins the separator:
+ * a `.tsv`/`.tab` name forces TAB, because a TSV whose cells contain commas
+ * can out-count its own tabs and fool the auto-detector. Anything else
+ * auto-detects. A same-named existing table prompts append / overwrite /
  * create-new, exactly like a dropped file.
  */
 /** Options for {@link importCsvText}. */
@@ -98,7 +102,8 @@ export async function importCsvText(
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('csv-import: no active workspace');
 
-  const baseName = (name || 'imported').replace(/\.csv$/i, '') || 'imported';
+  const baseName = stripDelimitedExt(name || 'imported') || 'imported';
+  const separator = separatorForName(name);
 
   // If a table with this name already exists in the workspace, ask the user
   // what to do: append rows, overwrite (clear + insert), or create a new
@@ -147,7 +152,7 @@ export async function importCsvText(
   }>;
 
   if (mode === 'new') {
-    const parsed = parseCsv(text, { maxRows: opts.maxRows });
+    const parsed = parseCsv(text, { maxRows: opts.maxRows, separator });
     let columns = parsed.columns;
     let rows = parsed.rows;
     if (opts.editColumns) {
@@ -179,7 +184,7 @@ export async function importCsvText(
     // renderers, constraints — all of it). CSV cells map to existing
     // columns by position, then coerce through each column's declared type.
     const targetCols = existing!.columns;
-    const raw = parseCsvRaw(text, { maxRows: opts.maxRows });
+    const raw = parseCsvRaw(text, { maxRows: opts.maxRows, separator });
     const rawRows = opts.maxRows != null ? raw.rows.slice(0, opts.maxRows) : raw.rows;
     docs = rawRows.map((cells) => {
       const data: Record<string, unknown> = {};
@@ -223,10 +228,10 @@ interface ParseResult {
  */
 export function parseCsvRaw(
   text: string,
-  opts: { maxRows?: number | undefined } = {},
+  opts: { maxRows?: number | undefined; separator?: string | undefined } = {},
 ): { header: string[]; rows: string[][] } {
   const normalized = text.replace(/﻿/, ''); // strip BOM
-  const sep = detectSeparator(normalized);
+  const sep = opts.separator ?? detectSeparator(normalized);
   const all = parseLines(normalized, sep, lineCap(opts.maxRows));
   if (all.length === 0) return { header: [], rows: [] };
   const header = all[0]!;
@@ -279,9 +284,12 @@ export async function readCsvHead(file: Blob, maxRows: number): Promise<string> 
   return text; // file has fewer rows than the cap
 }
 
-export function parseCsv(text: string, opts: { maxRows?: number | undefined } = {}): ParseResult {
+export function parseCsv(
+  text: string,
+  opts: { maxRows?: number | undefined; separator?: string | undefined } = {},
+): ParseResult {
   const normalized = text.replace(/﻿/, ''); // strip BOM
-  const sep = detectSeparator(normalized);
+  const sep = opts.separator ?? detectSeparator(normalized);
   const rows = parseLines(normalized, sep, lineCap(opts.maxRows));
   if (rows.length === 0) return { columns: [], rows: [] };
 
@@ -616,9 +624,27 @@ function filesFrom(event: DragEvent): File[] {
   return [];
 }
 
+/** Extensions this importer reads. `.tab` is the other common TSV extension. */
+const DELIMITED_EXT_RE = /\.(csv|tsv|tab)$/i;
+
+/** Strip a trailing `.csv` / `.tsv` / `.tab` from a file name. */
+export function stripDelimitedExt(name: string): string {
+  return name.replace(DELIMITED_EXT_RE, '');
+}
+
+/**
+ * TAB for a `.tsv`/`.tab` name, otherwise undefined (let the parser auto-detect).
+ * A tab-separated file whose cells contain commas can show more commas than
+ * tabs, so the extension must win over the sample count.
+ */
+export function separatorForName(name: string): string | undefined {
+  return /\.(tsv|tab)$/i.test(name) ? '\t' : undefined;
+}
+
 function isCsv(file: File): boolean {
-  if (/\.csv$/i.test(file.name)) return true;
+  if (DELIMITED_EXT_RE.test(file.name)) return true;
   if (file.type === 'text/csv' || file.type === 'application/csv') return true;
+  if (file.type === 'text/tab-separated-values') return true;
   return false;
 }
 

@@ -522,7 +522,7 @@ function detectKind(url: string): ResolvedKind {
     // kind. Anything on a datasette host (or carrying `?_`-prefixed API params)
     // reads as Datasette — at any depth, so instance and database URLs work too.
     const looksDatasette = host.includes('datasette') || hasDatasetteParams;
-    if (!hasDatasetteParams && /\.csv$/i.test(u.pathname)) return 'csv';
+    if (!hasDatasetteParams && /\.(csv|tsv|tab)$/i.test(u.pathname)) return 'csv';
     if (!hasDatasetteParams && /\.json$/i.test(u.pathname)) return 'json';
     if (looksDatasette) return 'datasette';
     return 'json';
@@ -584,7 +584,7 @@ interface ImportChoice {
 
 /** Resolve a CSV/JSON kind from a filename (uploads have no URL to inspect). */
 function detectKindFromName(name: string): ResolvedKind {
-  return /\.csv$/i.test(name) ? 'csv' : 'json';
+  return /\.(csv|tsv|tab)$/i.test(name) ? 'csv' : 'json';
 }
 
 /**
@@ -911,7 +911,7 @@ export class ImportDialog extends LitElement {
               <input
                 type="text"
                 autofocus
-                placeholder="https://… (JSON dump, .csv file, or Datasette table)"
+                placeholder="https://… (JSON dump, .csv/.tsv file, or Datasette table)"
                 ?disabled=${!!this.file}
                 .value=${this.url}
                 @input=${(e: Event) => {
@@ -929,7 +929,7 @@ export class ImportDialog extends LitElement {
               …or upload a file
               <input
                 type="file"
-                accept=".csv,.json,.txt,text/csv,application/json"
+                accept=".csv,.tsv,.tab,.json,.txt,text/csv,text/tab-separated-values,application/json"
                 @change=${(e: Event) => this.onFileChange(e)}
               />
             </label>
@@ -951,7 +951,7 @@ export class ImportDialog extends LitElement {
               >
                 <option value="auto" ?selected=${this.kind === 'auto'}>Auto-detect</option>
                 <option value="json" ?selected=${this.kind === 'json'}>JSON dump</option>
-                <option value="csv" ?selected=${this.kind === 'csv'}>CSV file</option>
+                <option value="csv" ?selected=${this.kind === 'csv'}>CSV / TSV file</option>
                 <option value="datasette" ?selected=${this.kind === 'datasette'}>
                   Datasette (table or instance)
                 </option>
@@ -1017,7 +1017,7 @@ export class ImportDialog extends LitElement {
               : nothing}
 
             <p class="hint">
-              Paste any URL or pick a sample above — a JSON dump, a <code>.csv</code> file, or a
+              Paste any URL or pick a sample above — a JSON dump, a <code>.csv</code> or <code>.tsv</code> file, or a
               Datasette table/database/instance. For a Datasette instance root, click
               <em>List databases</em> to pick one first. Multi-table sources let you choose which
               tables to import; Datasette tables import a read-only snapshot (capped at 10,000 rows

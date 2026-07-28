@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 28 Jul 2026 (v0.0.151)
+
+- Drag-and-drop and Import now read `.tsv` and `.tab` files. A tab-separated file keeps its tabs even when its cells contain commas.
+
 ## 28 Jul 2026 (v0.0.150)
 
 - Column filters got a tri-state checkbox per value: gray off, green include, red exclude. Pick as many values as you like.
