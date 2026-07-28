@@ -2,6 +2,7 @@
 
 ## 28 Jul 2026
 
+- 🪲 A minimized view window no longer loads or holds its data. It loads when you expand it (v0.0.169)
 - ✨ Table export gained a third choice, Structure Only: CSV writes just the headers, JSON the definition and settings, SQL only the CREATE (v0.0.168)
 - ✨ The HTML preview popup keeps line breaks and literal `<` characters when the value is plain text, instead of mangling them as markup (v0.0.168)
 - ✨ Each table's Export button offers CSV, JSON (`.table.json`) or SQL, then asks whether to export the visible data or everything (v0.0.168)

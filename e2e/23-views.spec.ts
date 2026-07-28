@@ -642,3 +642,89 @@ test.describe('views', () => {
     await expect(vw.locator('a')).toHaveCount(0);
   });
 });
+
+/**
+ * A live <view-window> subscribes to the underlying table's rows as soon as it
+ * connects — which, for a remote table, fetches. So a minimized view must not be
+ * mounted at all: it holds no rows and runs no subscription until it's expanded.
+ * Mirrors the table windows' lazy grid.
+ */
+test.describe('minimized views load nothing until expanded', () => {
+  /**
+   * Creates a table + an RSS view over it through the real UI. Returns the view
+   * PANEL's dom id — the panel outlives its content, so it stays a valid handle
+   * once the view is detached (a `.jsPanel` that *has* a view-window would not).
+   */
+  async function makeView(page: import('@playwright/test').Page): Promise<string> {
+    const id = await createTable(page, 'Feed', [
+      { field: 'title' },
+      { field: 'url' },
+      { field: 'date' },
+      { field: 'description' },
+    ]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      { title: 'One', url: 'https://example.com/1', date: '2024-01-01', description: 'a' },
+      { title: 'Two', url: 'https://example.com/2', date: '2024-01-02', description: 'b' },
+    ]);
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    const dlg = page.locator('views-dialog dialog');
+    await dlg
+      .locator('ul.list li', { hasText: 'RSS Feed' })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+    await expect(page.locator('view-window')).toBeVisible();
+    return page.evaluate(
+      () => document.querySelector('view-window')!.closest('.jsPanel')!.id,
+    );
+  }
+
+  const minimize = (page: import('@playwright/test').Page, panelId: string) =>
+    page.locator(`#${panelId}`).evaluate((el) => (el as HTMLElement & { minimize(): void }).minimize());
+  const restore = (page: import('@playwright/test').Page, panelId: string) =>
+    page.locator(`#${panelId}`).evaluate((el) => (el as HTMLElement & { normalize(): void }).normalize());
+
+  test('minimizing detaches the view; restoring mounts a fresh one', async ({ page }) => {
+    const panelId = await makeView(page);
+    const title = page.locator(`#${panelId} .jsPanel-title`);
+
+    // Mounted, with a row count in the title.
+    await expect(page.locator('view-window')).toHaveCount(1);
+    await expect(title).toContainText('(2)');
+
+    await minimize(page, panelId);
+    // Detached entirely — no element, so no rows held and no subscription.
+    await expect(page.locator('view-window')).toHaveCount(0);
+    // And the stale count is dropped rather than left lying in the title.
+    await expect(title).not.toContainText('(2)');
+
+    // Restoring mounts a fresh view that loads and counts again.
+    await restore(page, panelId);
+    await expect(page.locator('view-window')).toHaveCount(1);
+    await expect(title).toContainText('(2)');
+  });
+
+  test('a view that boots minimized is never mounted', async ({ page }) => {
+    const panelId = await makeView(page);
+    await minimize(page, panelId);
+    await expect(page.locator('view-window')).toHaveCount(0);
+
+    // The minimized state is persisted, so a reload must restore it WITHOUT
+    // ever mounting the view — this is the case that used to load eagerly.
+    await page.reload();
+    await page.waitForFunction(() =>
+      Boolean((window as unknown as { __easydb?: unknown }).__easydb),
+    );
+    await expect(page.locator(`#${panelId}`)).toHaveCount(1);
+    await expect(page.locator('view-window')).toHaveCount(0);
+
+    // Expanding it loads for the first time.
+    await restore(page, panelId);
+    await expect(page.locator('view-window')).toHaveCount(1);
+    await expect(page.locator('view-window a')).toHaveCount(2);
+  });
+});

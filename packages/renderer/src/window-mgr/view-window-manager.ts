@@ -43,7 +43,11 @@ type Panel = {
 /** Per-open-view window state: the panel, its element, and title inputs. */
 interface ViewEntry {
   panel: Panel;
-  el: ViewWindow;
+  /**
+   * The mounted <view-window>, or null while the panel is minimized — a
+   * minimized view is detached so it holds no rows and no subscription.
+   */
+  el: ViewWindow | null;
   /** The instance name (kept fresh on rename) — the title's text part. */
   name: string;
   /** Last reported visible/total counts (-1 until the view emits one). */
@@ -124,6 +128,10 @@ export async function initViewWindowManager(): Promise<void> {
     const d = (e as CustomEvent<VisibleCountDetail>).detail;
     const entry = panels.get(d.key);
     if (!entry) return;
+    // A detached (minimized) view has no meaningful count, and tearing one down
+    // emits a final event — which would otherwise restore the "(n)" suffix that
+    // unmountContent just cleared.
+    if (!entry.el) return;
     entry.count = d.count;
     entry.total = d.total;
     renderViewTitle(entry);
@@ -142,13 +150,15 @@ export async function initViewWindowManager(): Promise<void> {
         entry.name = inst.name;
         renderViewTitle(entry);
       }
-      void entry.el.reload();
+      // Nothing to reload while minimized — expanding mounts a fresh view that
+      // reads the current instance anyway.
+      void entry.el?.reload();
     })();
   });
 
   // A template edit can affect several open views at once — reload them all.
   document.addEventListener('easydb:reload-views', () => {
-    for (const { el } of panels.values()) void el.reload();
+    for (const { el } of panels.values()) void el?.reload();
   });
 }
 
@@ -183,11 +193,49 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
   if (panels.has(inst.id)) return;
   const panelId = panelDomId(inst.id);
 
-  const el = document.createElement('view-window') as ViewWindow;
-  el.viewInstanceId = inst.id;
-  el.style.height = '100%';
-
   const g = inst.windowGeometry;
+  const startMinimized = g?.minimized === true;
+
+  // A live <view-window> subscribes to the underlying table's rows the moment it
+  // connects — which, for a remote/live table, FETCHES. So mount it lazily: a
+  // view that opens minimized gets a bare placeholder and loads nothing until
+  // it's expanded. Minimizing later detaches it again, dropping its rows and
+  // unsubscribing (see the element's disconnectedCallback).
+  const makeView = (): ViewWindow => {
+    const el = document.createElement('view-window') as ViewWindow;
+    el.viewInstanceId = inst.id;
+    el.style.height = '100%';
+    return el;
+  };
+  const content: HTMLElement = startMinimized ? document.createElement('div') : makeView();
+
+  // Declared before jsPanel.create because the create options close over them.
+  // `entry` can only be filled in after create returns (it holds the panel), so
+  // the mount helpers tolerate its absence — during create there is nothing
+  // mounted to change anyway.
+  let entry: ViewEntry | undefined;
+
+  const unmountContent = (): void => {
+    if (!entry) return;
+    entry.el?.remove();
+    entry.el = null;
+    // A detached view emits no row counts, so drop the stale "(n/m)" suffix.
+    entry.count = -1;
+    entry.total = -1;
+    renderViewTitle(entry);
+  };
+
+  const mountContent = (): void => {
+    if (!entry || entry.el) return;
+    const host = document
+      .getElementById(panelId)
+      ?.querySelector('.jsPanel-content') as HTMLElement | null;
+    if (!host) return;
+    host.replaceChildren(); // drop the minimized placeholder / any stale node
+    const el = makeView();
+    host.appendChild(el);
+    entry.el = el;
+  };
   const sizeOpt = g ? { panelSize: `${g.w} ${g.h}` } : { contentSize: '480 520' };
   const position = g
     ? { my: 'left-top', at: 'left-top', offsetX: g.x, offsetY: g.y }
@@ -203,7 +251,7 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     headerTitle: inst.name,
     // A distinct cyan chrome so view windows read as different from tables.
     theme: '#0891b2',
-    content: el,
+    content,
     ...sizeOpt,
     position,
     minimizeTo: '#easydb-minimized-dock',
@@ -212,6 +260,10 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     onstatuschange: (p: Panel) => {
       if (p.status === 'maximized') maxFill.enter();
       else maxFill.exit();
+      // Detach the view while minimized; remount it fresh (re-reading the store)
+      // when it comes back. Mirrors the table windows.
+      if (p.status === 'minimized') unmountContent();
+      else if (p.status === 'normalized' || p.status === 'maximized') mountContent();
       // Persist the new status (minimized / maximized / normalized) so it
       // survives a reload, exactly like table windows.
       void saveGeometry(inst.id);
@@ -230,7 +282,14 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     },
   }) as Panel;
 
-  panels.set(inst.id, { panel, el, name: inst.name, count: -1, total: -1 });
+  entry = {
+    panel,
+    el: startMinimized ? null : (content as ViewWindow),
+    name: inst.name,
+    count: -1,
+    total: -1,
+  };
+  panels.set(inst.id, entry);
 
   const panelEl = document.getElementById(panelId);
 
