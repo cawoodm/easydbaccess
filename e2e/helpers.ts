@@ -18,6 +18,8 @@ export interface TestColumn {
    * `'boolean'` for the matching native inputs).
    */
   renderer?: string;
+  /** JS body for the `script` renderer — must define `function render(row) {…}`. */
+  script?: string;
 }
 
 /** Creates a table via the data-store. Returns the new table id. */
@@ -42,12 +44,14 @@ export async function createTable(
             label: string;
             type: string;
             renderer?: string;
+            script?: string;
           } = {
             field: c.field,
             label: c.label ?? c.field,
             type: c.type ?? 'string',
           };
           if (c.renderer) col.renderer = c.renderer;
+          if (c.script) col.script = c.script;
           return col;
         }),
         view: 'table',

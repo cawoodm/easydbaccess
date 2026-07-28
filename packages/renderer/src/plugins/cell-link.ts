@@ -29,6 +29,14 @@ export function init(api: HostApi): void {
 class CellLink extends HTMLElement {
   private _value = '';
   private _editing = false;
+  /**
+   * The input currently allowed to commit. Removing a focused input makes the
+   * browser fire `blur` (and sometimes `change`) on it while it still looks
+   * connected, so identity — not liveness — is what decides whether an event
+   * belongs to the live editor. Escape clears this first, which is what stops a
+   * cancelled edit from being saved by its own trailing blur.
+   */
+  private _editor: HTMLInputElement | null = null;
 
   set value(v: unknown) {
     const s = v == null ? '' : String(v);
@@ -53,6 +61,8 @@ class CellLink extends HTMLElement {
 
   private render() {
     this.innerHTML = '';
+    // Any editor from a previous paint is dead the moment we wipe the DOM.
+    this._editor = null;
     const v = this._value;
     // Priority: URL → email → phone. Email and URL never collide (no '@' in
     // an http URL host that's also bare), but URLs are still checked first
@@ -104,17 +114,33 @@ class CellLink extends HTMLElement {
       input.value = v;
       input.style.cssText =
         'width:100%;box-sizing:border-box;border:0;background:transparent;font:inherit;padding:0';
-      input.addEventListener('change', () => this.commit(input.value));
+      input.addEventListener('change', () => {
+        if (this._editor !== input) return;
+        this.commit(input.value);
+      });
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
           this.commit(input.value);
         } else if (e.key === 'Escape') {
+          // Disown this input first: render() removes it, which fires blur, and
+          // that blur must not save the edit we are cancelling.
+          this._editor = null;
           this._editing = false;
           this.render();
         }
       });
+      // Losing focus must leave edit mode, so a value that has BECOME a link
+      // renders as one straight away. `change` only fires when the value
+      // actually changed, so an unchanged field would otherwise stay an input
+      // forever (the pencil had no way back).
+      input.addEventListener('blur', () => {
+        // Only the LIVE editor may commit — see `_editor`.
+        if (this._editor !== input) return;
+        this.commit(input.value);
+      });
       this.append(input);
+      this._editor = input;
       if (this._editing) {
         setTimeout(() => {
           input.focus();
@@ -125,8 +151,15 @@ class CellLink extends HTMLElement {
   }
 
   private commit(v: string) {
+    const changed = v !== this._value;
     this._value = v;
     this._editing = false;
+    // Re-render on our own. The host writes the stored value back through the
+    // `value` setter, but that setter early-returns when the value is unchanged
+    // — and we just assigned it — so nothing would repaint: a cell where you
+    // typed a URL stayed an <input> instead of becoming a link.
+    this.render();
+    if (!changed) return;
     this.dispatchEvent(
       new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }),
     );

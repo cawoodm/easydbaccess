@@ -194,3 +194,81 @@ test.describe('cell editing constraints', () => {
     expect(rows[0]?.data.name).toBe('Original');
   });
 });
+
+/**
+ * A display-only renderer replaces the cell's content, which leaves the stored
+ * value unreachable — a script-rendered cell had no editor at all, and an image
+ * cell only offered "upload" while it was still empty. Both now carry a pencil
+ * at the cell's right edge that swaps in a raw-value editor.
+ */
+test.describe('pencil editor on display-only renderers', () => {
+  test('a script-rendered cell can be edited through its pencil', async ({ page }) => {
+    const id = await createTable(page, 'Scripted', [
+      {
+        field: 'code',
+        renderer: 'script',
+        script: 'function render(row) { return "<b>" + String(row.code).toUpperCase() + "</b>"; }',
+      },
+    ]);
+    await waitForPanel(page, id);
+    await addRow(page, id, { code: 'abc' });
+
+    const cell = page.locator(`#${panelDomId(id)}`).locator('data-table tbody td cell-script');
+    const pencil = cell.locator('.cell-pencil');
+    const input = cell.locator('input');
+
+    // The script's output is shown, with a pencil to reach the raw value.
+    await expect(cell.locator('b')).toHaveText('ABC');
+    await expect(pencil).toBeVisible();
+
+    // The pencil reveals the STORED value, not the rendered output.
+    await pencil.click();
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue('abc');
+
+    // Committing re-runs the script over the new value and persists it.
+    await input.fill('def');
+    await input.blur();
+    await expect(cell.locator('b')).toHaveText('DEF');
+    await expect
+      .poll(async () => (await readRows(page, id))[0]?.data.code)
+      .toBe('def');
+
+    // Escape cancels without saving.
+    await pencil.click();
+    await expect(input).toBeFocused();
+    await input.fill('DISCARDED');
+    await page.keyboard.press('Escape');
+    await expect(cell.locator('b')).toHaveText('DEF');
+    expect((await readRows(page, id))[0]?.data.code).toBe('def');
+  });
+
+  test('an image cell exposes its URL through the pencil', async ({ page }) => {
+    const id = await createTable(page, 'Pics', [{ field: 'pic', renderer: 'image' }]);
+    await waitForPanel(page, id);
+    await addRow(page, id, { pic: 'https://example.com/first.png' });
+
+    const cell = page.locator(`#${panelDomId(id)}`).locator('data-table tbody td cell-image');
+    const pencil = cell.locator('.cell-pencil');
+    const input = cell.locator('input[type="text"]');
+
+    // A thumbnail hides the source entirely, so the pencil is the only way in.
+    await expect(cell.locator('img')).toHaveAttribute('src', 'https://example.com/first.png');
+    await pencil.click();
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue('https://example.com/first.png');
+
+    // Retyping the URL moves the thumbnail with it.
+    await input.fill('https://example.com/second.png');
+    await input.blur();
+    await expect(cell.locator('img')).toHaveAttribute('src', 'https://example.com/second.png');
+
+    // Clearing it returns the empty state — which still keeps its pencil.
+    await pencil.click();
+    await expect(input).toBeFocused();
+    await input.fill('');
+    await input.blur();
+    await expect(cell).toContainText('no image');
+    await expect(pencil).toBeVisible();
+  });
+});

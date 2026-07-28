@@ -35,3 +35,49 @@ test('a long link is ellipsized to the column width, full value in the tooltip',
   // out to the full ~3600px URL width (the pre-fix behaviour).
   expect(box.clientWidth).toBeLessThan(760);
 });
+
+/**
+ * The link renderer must ACTIVATE when an edit ends, not only when the row is
+ * re-read from the store. Typing a URL into a plain-text cell and clicking away
+ * left the cell as an <input> — the renderer's own commit updated its internal
+ * value, so the host's write-back through the `value` setter saw no change and
+ * skipped the repaint. Escape must still cancel: removing a focused input fires
+ * a blur, which must not save the edit being cancelled.
+ */
+test('a URL typed into a cell becomes a link on blur; Escape cancels', async ({ page }) => {
+  const tableId = await createTable(page, 'editlinks', [{ field: 'url', renderer: 'link' }]);
+  await waitForPanel(page, tableId);
+  await addRow(page, tableId, { url: 'plain words' });
+
+  const cell = page.locator(`#${panelDomId(tableId)}`).locator('data-table tbody td cell-link');
+  const input = cell.locator('input');
+  const anchor = cell.locator('a');
+
+  // Not a link yet — an editable input.
+  await expect(input).toBeVisible();
+  await expect(anchor).toHaveCount(0);
+
+  // Type a URL, then click away. The cell must become a real link.
+  await input.fill('https://example.com/typed');
+  await input.blur();
+  await expect(anchor).toBeVisible();
+  await expect(anchor).toHaveAttribute('href', 'https://example.com/typed');
+  await expect(input).toHaveCount(0);
+
+  // The pencil returns to edit mode; Escape restores the link WITHOUT saving.
+  // The renderer focuses the new input on a timer, so wait for that before
+  // driving it — otherwise a blur can land before the focus does.
+  await cell.locator('button').click();
+  await expect(input).toBeFocused();
+  await input.fill('https://example.com/DISCARDED');
+  await page.keyboard.press('Escape');
+  await expect(anchor).toBeVisible();
+  await expect(anchor).toHaveAttribute('href', 'https://example.com/typed');
+
+  // Pencil in and blur with NO edit — the link must come back, not stay an input.
+  await cell.locator('button').click();
+  await expect(input).toBeFocused();
+  await input.blur();
+  await expect(anchor).toBeVisible();
+  await expect(anchor).toHaveAttribute('href', 'https://example.com/typed');
+});

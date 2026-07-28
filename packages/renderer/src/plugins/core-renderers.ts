@@ -1,4 +1,5 @@
 import type { ColumnSpec, HostApi, PluginModule } from '@easydb/shared';
+import { makePencil, makeValueEditor, pencilRow } from './cell-pencil.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'core-renderers',
@@ -203,9 +204,19 @@ function coerceBool(v: unknown): boolean {
 class CellScript extends HTMLElement {
   private _column: ColumnSpec | null = null;
   private _row: Record<string, unknown> = {};
+  private _value: unknown = '';
+  private _readonly = false;
+  private _editing = false;
+  /** The input allowed to commit — see `makeValueEditor`. */
+  private _editor: HTMLInputElement | null = null;
 
   set column(c: ColumnSpec | null) {
     this._column = c;
+    // Never repaint over an open editor. data-table re-binds `.row` with a
+    // freshly-read object on EVERY table render, so identity always differs and
+    // this setter fires constantly — it would otherwise throw away whatever the
+    // user is typing the moment any row in the table changes.
+    if (this._editing) return;
     this.render();
   }
   get column(): ColumnSpec | null {
@@ -214,20 +225,35 @@ class CellScript extends HTMLElement {
 
   set row(r: Record<string, unknown> | null | undefined) {
     this._row = (r ?? {}) as Record<string, unknown>;
+    if (this._editing) return;
     this.render();
   }
   get row(): Record<string, unknown> {
     return this._row;
   }
 
-  // `value` is bound by data-table for every renderer; we ignore it
-  // (the script reads from .row instead), but the setter has to exist
-  // so Lit's property binding doesn't fall back to setting an attribute.
-  set value(_v: unknown) {
-    /* intentionally unused */
+  // The script reads from `.row`, so the rendered OUTPUT ignores this. We still
+  // keep it: it's this column's stored value, and the pencil edits it. (It used
+  // to be discarded, which is why a script cell had no way back to its value.)
+  set value(v: unknown) {
+    if (this._value === v) return;
+    this._value = v;
+    this._editing = false;
+    this.render();
   }
   get value(): unknown {
-    return undefined;
+    return this._value;
+  }
+
+  // A read-only view offers no pencil.
+  set readonly(v: boolean) {
+    const n = !!v;
+    if (this._readonly === n) return;
+    this._readonly = n;
+    this.render();
+  }
+  get readonly(): boolean {
+    return this._readonly;
   }
 
   connectedCallback() {
@@ -236,39 +262,82 @@ class CellScript extends HTMLElement {
 
   private render() {
     this.innerHTML = '';
+    this._editor = null;
+    this.style.display = 'block';
+    this.style.minWidth = '0';
+    this.style.overflow = 'hidden';
+
+    if (this._editing) {
+      const input = makeValueEditor({
+        value: this._value == null ? '' : String(this._value),
+        onCommit: (v) => this.commit(v),
+        onCancel: () => {
+          // Disown the editor before re-rendering: removing it fires a blur
+          // that must not save the edit being cancelled.
+          this._editor = null;
+          this._editing = false;
+          this.render();
+        },
+        isLive: (el) => this._editor === el,
+      });
+      this.append(input);
+      this._editor = input;
+      return;
+    }
+
+    this.append(this._readonly ? this.renderOutput() : pencilRow(this.renderOutput(), this.pencil()));
+  }
+
+  /** The pencil that swaps the rendered output for a raw-value editor. */
+  private pencil(): HTMLElement {
+    return makePencil(() => {
+      this._editing = true;
+      this.render();
+    }, 'Edit the stored value');
+  }
+
+  /** The script's own output, or an inline chip explaining why there is none. */
+  private renderOutput(): HTMLElement {
     const src = this._column?.script;
     if (!src || !src.trim()) {
       const placeholder = document.createElement('span');
       placeholder.textContent = '(no script)';
       placeholder.style.cssText = 'color:#9ca3af;font-style:italic';
-      this.append(placeholder);
-      return;
+      return placeholder;
     }
     let fn: (row: unknown) => unknown;
     try {
       fn = compileScript(src);
     } catch (err) {
-      this.append(makeErrorChip('compile error', err));
-      return;
+      return makeErrorChip('compile error', err);
     }
     let out: unknown;
     try {
       out = fn(this._row);
     } catch (err) {
-      this.append(makeErrorChip('runtime error', err));
-      return;
+      return makeErrorChip('runtime error', err);
     }
     if (typeof out !== 'string') {
-      this.append(makeErrorChip('render(row) did not return a string', null));
-      return;
+      return makeErrorChip('render(row) did not return a string', null);
     }
     const host = document.createElement('span');
-    host.style.cssText = 'display:inline-block;width:100%';
+    host.style.cssText = 'display:block;width:100%';
     // Raw HTML injection — exactly what the user asked the renderer for.
     // Inline <script> tags are inert when assigned via innerHTML so this
     // does not bypass the page's existing trust boundaries.
     host.innerHTML = out;
-    this.append(host);
+    return host;
+  }
+
+  private commit(v: string) {
+    const changed = v !== this._value;
+    this._value = v;
+    this._editing = false;
+    this.render();
+    if (!changed) return;
+    this.dispatchEvent(
+      new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }),
+    );
   }
 }
 
