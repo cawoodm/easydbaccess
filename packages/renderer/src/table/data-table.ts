@@ -28,7 +28,15 @@ export class DataTable extends LitElement {
       :host {
         display: block;
         overflow: auto;
-        max-height: 60vh;
+        /* Fill whatever box the host gives us and scroll inside it. This used to
+           be a hard 60vh, which BEAT the height:100% the panel sets inline
+           (max-height wins over height) — so a maximized window left a dead gap
+           between the last row and the panel footer. 100% caps us at the parent
+           when its height is definite (a jsPanel content box always is) and is
+           ignored when it isn't, so a standalone mount still grows to its
+           content. view-window.ts overrides this with max-height:none because
+           it drives the height with flex instead. */
+        max-height: 100%;
       }
       /* Indeterminate loading bar, pinned to the top of the table's header while
        a (large / remote) table's rows are still loading. Sticky + high z-index

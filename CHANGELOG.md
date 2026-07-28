@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 28 Jul 2026 (v0.0.155)
+
+- Maximized windows now follow a browser resize, fill the panel with no gap above the footer, and show a pointer cursor. Double-click a titlebar to maximize or restore.
+
 ## 28 Jul 2026 (v0.0.152)
 
 - A `^` prefix in a column filter matches only from the start of the cell (`^S`). The suggestion list no longer covers the rows: it hides when nothing matches and closes on blur.

@@ -25,6 +25,8 @@ import { getContext, type AppContext } from '../app-context.js';
 import { openTableInfoDialog } from '../dialogs/table-info-dialog.js';
 import { initPanZoom, type PanZoomHandle } from './panzoom.js';
 import { createMaximizeFill } from './maximize-fill.js';
+import { startMaximizedRefit } from './refit-panels.js';
+import { startTitlebarBehavior } from './panel-titlebar.js';
 import { countSuffix, VISIBLE_COUNT_EVENT, type VisibleCountDetail } from './panel-title.js';
 import { sanitizeGeometry } from './geometry.js';
 import '../table/data-table.js';
@@ -156,7 +158,17 @@ export async function initWindowManager(): Promise<void> {
       if (header) ro.observe(header);
       if (footer) ro.observe(footer);
     }
+    // A maximized panel is sized once from the container, so it must be re-fit
+    // when the window (or the overlay's header/footer inset) changes size —
+    // otherwise it overflows or under-fills the new canvas. Covers table AND
+    // view windows; minimized panels ride the fixed dock and need nothing.
+    startMaximizedRefit(viewport);
   }
+
+  // Titlebar behavior jsPanel lacks: double-click to maximize / restore, and a
+  // pointer (not move) cursor while maximized, since a maximized panel can't be
+  // dragged. Delegated on the document, so table AND view windows are covered.
+  startTitlebarBehavior();
 
   // Initial population. Open in ascending saved-z order so jsPanel's internal
   // zi.next() counter reproduces the user's last layering — the panel that
