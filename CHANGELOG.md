@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 28 Jul 2026 (v0.0.157)
+
+- Choice dialogs now show the first option as the blue default button, focus it on open, and accept Enter to pick it.
+
 ## 28 Jul 2026 (v0.0.156)
 
 - Any column can now be dragged down to 10px, including link columns that refused to shrink. Chopped text and URLs end in an ellipsis.

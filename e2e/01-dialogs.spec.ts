@@ -93,6 +93,43 @@ test.describe('dialogs', () => {
     expect(await cancelResult).toBeNull();
   });
 
+  test('choice defaults to the first option: primary style, focused, Enter submits', async ({
+    page,
+  }) => {
+    const dialog = page.locator('host-dialogs');
+
+    const enterResult = page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const api = (window as any).__easydb.api;
+      return api.ui.dialogs.choice('Pick one', ['Append', 'Overwrite']);
+    });
+    const first = dialog.getByRole('button', { name: 'Append', exact: true });
+    const second = dialog.getByRole('button', { name: 'Overwrite', exact: true });
+    await expect(first).toBeVisible();
+
+    // First option is the focused default and carries the primary style.
+    await expect(first).toBeFocused();
+    await expect(first).toHaveClass(/primary/);
+    await expect(second).not.toHaveClass(/primary/);
+
+    await page.keyboard.press('Enter');
+    expect(await enterResult).toBe('Append');
+
+    // Regression guard: focusing the SECOND button and pressing Enter must
+    // resolve with that button's own value, not silently fall through to
+    // the form's default (first) option.
+    const secondResult = page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const api = (window as any).__easydb.api;
+      return api.ui.dialogs.choice('Pick one', ['Append', 'Overwrite']);
+    });
+    await dialog.getByRole('button', { name: 'Append', exact: true }).waitFor();
+    const secondBtn = dialog.getByRole('button', { name: 'Overwrite', exact: true });
+    await secondBtn.focus();
+    await page.keyboard.press('Enter');
+    expect(await secondResult).toBe('Overwrite');
+  });
+
   test('toast appears non-modally and auto-dismisses', async ({ page }) => {
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

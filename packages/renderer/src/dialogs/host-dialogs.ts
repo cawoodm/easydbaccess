@@ -81,6 +81,19 @@ export class HostDialogs extends LitElement {
         background: #f3f4f6;
         border-color: #9ca3af;
       }
+      button.choice.primary {
+        background: #3b82f6;
+        color: white;
+        border: 0;
+        text-align: left;
+      }
+      button.choice.primary:hover {
+        background: #2563eb;
+      }
+      button.choice.primary:focus-visible {
+        outline: 2px solid #1d4ed8;
+        outline-offset: 2px;
+      }
     `,
   ];
 
@@ -180,6 +193,14 @@ export class HostDialogs extends LitElement {
     this.closeAndResolve(this.current.value);
   };
 
+  private submitChoice = (e: Event) => {
+    e.preventDefault();
+    if (this.current?.kind !== 'choice') return;
+    const first = this.current.options[0];
+    // `noUncheckedIndexedAccess` is on — options[] could be empty.
+    if (first !== undefined) this.closeAndResolve(first);
+  };
+
   private submitAlert = (e: Event) => {
     e.preventDefault();
     this.closeAndResolve(undefined);
@@ -258,25 +279,35 @@ export class HostDialogs extends LitElement {
       case 'choice':
         // Choice options are themselves the actions, so they stay in the
         // body. The header keeps the consistent title bar + a Cancel so
-        // the action area still lives at the top.
+        // the action area still lives at the top. Wrapped in a form so the
+        // first (default) option submits on Enter, mirroring 'prompt'.
         return html`
-          <div class="dialog-header">
-            <h2>${c.title}</h2>
-            <div class="header-actions">
-              <button class="ghost" @click=${() => this.closeAndResolve(null)}>Cancel</button>
+          <form @submit=${this.submitChoice}>
+            <div class="dialog-header">
+              <h2>${c.title}</h2>
+              <div class="header-actions">
+                <button type="button" class="ghost" @click=${() => this.closeAndResolve(null)}>
+                  Cancel
+                </button>
+              </div>
             </div>
-          </div>
-          <div class="dialog-body">
-            ${c.message ? html`<p class="message">${c.message}</p>` : nothing}
-            <div class="choices">
-              ${c.options.map(
-                (opt) =>
-                  html`<button class="choice" @click=${() => this.closeAndResolve(opt)}>
-                    ${opt}
-                  </button>`,
-              )}
+            <div class="dialog-body">
+              ${c.message ? html`<p class="message">${c.message}</p>` : nothing}
+              <div class="choices">
+                ${c.options.map((opt, index) =>
+                  index === 0
+                    ? html`<button type="submit" class="choice primary" autofocus>${opt}</button>`
+                    : html`<button
+                        type="button"
+                        class="choice"
+                        @click=${() => this.closeAndResolve(opt)}
+                      >
+                        ${opt}
+                      </button>`,
+                )}
+              </div>
             </div>
-          </div>
+          </form>
         `;
     }
   }
