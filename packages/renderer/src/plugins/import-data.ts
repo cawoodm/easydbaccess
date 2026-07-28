@@ -203,7 +203,14 @@ async function openImport(api: HostApi, presetKind: ImportKind = 'auto'): Promis
       await importDatasette(api, url, { skipTablePicker: dbChosen });
     } else if (kind === 'csv') {
       // Reads show a top progress bar only if they take more than ~2s.
-      const text = await fetchImportTextWithBar(api, url, `Reading ${filenameFromUrl(url)}…`);
+      // A row limit means we keep only a prefix, so the size ceiling does not
+      // apply — see `ImportProgress.maxBytes`.
+      const text = await fetchImportTextWithBar(
+        api,
+        url,
+        `Reading ${filenameFromUrl(url)}…`,
+        maxRows != null ? { maxBytes: null } : {},
+      );
       // When "Edit columns" was checked, review/rename columns before creating
       // the table (importCsvText returns without inserting if the user cancels).
       await importCsvText(api, text, filenameFromUrl(url), {
@@ -217,7 +224,12 @@ async function openImport(api: HostApi, presetKind: ImportKind = 'auto'): Promis
         title: 'Import',
       });
     } else {
-      const text = await fetchImportTextWithBar(api, url, `Reading ${filenameFromUrl(url)}…`);
+      const text = await fetchImportTextWithBar(
+        api,
+        url,
+        `Reading ${filenameFromUrl(url)}…`,
+        maxRows != null ? { maxBytes: null } : {},
+      );
       await importJsonText(api, text, filenameFromUrl(url), { originUrl: url, maxRows });
       api.ui.dialogs.toast(`Imported ${filenameFromUrl(url)}.`, {
         kind: 'success',
@@ -335,7 +347,10 @@ async function createUrlReference(
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('No active workspace.');
   const baseName = opts.nameHint ?? filenameFromUrl(url);
-  const text = await fetchImportTextWithBar(api, url, `Reading ${baseName}…`);
+  // No size ceiling for a reference: it persists nothing, so the "a huge copy
+  // OOMs the tab and floods IndexedDB" reasoning behind the limit does not
+  // apply. We read the body once here only to infer the columns.
+  const text = await fetchImportTextWithBar(api, url, `Reading ${baseName}…`, { maxBytes: null });
   const columns = format === 'csv' ? parseCsv(text).columns : inferJsonColumns(text);
   if (columns.length === 0) throw new Error('No columns found in the referenced data.');
 

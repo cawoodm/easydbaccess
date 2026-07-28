@@ -63,6 +63,22 @@ export interface ImportProgress {
   onProgress?: (fraction: number) => void;
   /** Slow threshold before `onSlow` fires. Default 2000ms. */
   slowMs?: number;
+  /**
+   * Byte ceiling for this read. Defaults to {@link MAX_IMPORT_BYTES}; pass
+   * `null` to lift it.
+   *
+   * The ceiling exists because a COPY buffers the whole body and then writes
+   * every row to IndexedDB, so a huge file OOMs the tab. Two cases do not fit
+   * that reasoning and must not be refused on total size:
+   *   - a REFERENCE, which persists nothing (rows are re-fetched on demand),
+   *   - a capped import, which keeps only the first `maxRows` rows.
+   */
+  maxBytes?: number | null;
+}
+
+/** Human size for a byte count, used in the over-the-limit message. */
+function mb(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /**
@@ -112,12 +128,13 @@ export async function fetchImportText(
         `HTTP ${res.status} ${res.statusText || ''}`.trim() + (snippet ? ` — ${snippet}` : ''),
       );
     }
+    const ceiling = progress.maxBytes === null ? null : (progress.maxBytes ?? MAX_IMPORT_BYTES);
     const len = Number(res.headers.get('content-length'));
-    if (Number.isFinite(len) && len > MAX_IMPORT_BYTES) {
+    if (ceiling !== null && Number.isFinite(len) && len > ceiling) {
       throw new Error(
-        `Response is ${(len / (1024 * 1024)).toFixed(1)} MB, over the ` +
-          `${MAX_IMPORT_BYTES / (1024 * 1024)} MB browser import limit. Import a smaller ` +
-          `extract, or use a server/Datasette connection for large datasets.`,
+        `Response is ${mb(len)}, over the ${mb(ceiling)} browser import limit. ` +
+          `Set a row limit, import it as a Reference instead of a Copy, take a ` +
+          `smaller extract, or connect to a server/Datasette for large datasets.`,
       );
     }
     try {
@@ -142,6 +159,7 @@ export async function fetchImportTextWithBar(
   api: HostApi,
   url: string,
   label: string,
+  opts: { maxBytes?: number | null } = {},
 ): Promise<string> {
   // Resolve the bar class before the read starts, so the `onSlow` callback
   // (which must stay synchronous) has it to hand.
@@ -154,6 +172,7 @@ export async function fetchImportTextWithBar(
         ref.handle = TopProgress.begin(label);
       },
       onProgress: (f) => ref.handle?.fraction(f),
+      ...(opts.maxBytes !== undefined ? { maxBytes: opts.maxBytes } : {}),
     });
   } finally {
     ref.handle?.done();
