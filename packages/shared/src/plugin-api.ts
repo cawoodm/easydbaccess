@@ -316,6 +316,19 @@ export interface ImporterSpec {
         reference?: boolean | undefined;
         /** One source can yield several tables (`list` may return many). */
         multiTable?: boolean | undefined;
+        /**
+         * This importer runs through the import kernel (`runImport`), so the
+         * host drives it: the dialog picks the destination BEFORE the read
+         * starts (new table / append / overwrite) instead of a modal
+         * interrupting it partway, and the kernel does the writing.
+         *
+         * Absent ⇒ the importer still owns its own route and its own collision
+         * prompt, and the dialog hides the Target control rather than offering
+         * a choice nobody will honour. Each importer sets this as it moves
+         * across — see the phase table in
+         * `.claude/plans/2026-07-28-importer-architecture.md`.
+         */
+        kernel?: boolean | undefined;
       }
     | undefined;
   /**

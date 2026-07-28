@@ -9,7 +9,7 @@
 // Target field), so nothing interrupts a long read with a modal.
 
 import type { ColumnSpec, HostApi, ImportBatch, Row, Table, TableOrigin } from '@easydb/shared';
-import { reconcileColumns } from '../table/column-merge.js';
+import { reconcileColumns, rowRekeyer } from '../table/column-merge.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 
 /** Where an import's rows should go. Chosen up front, never mid-import. */
@@ -94,6 +94,12 @@ export async function landCandidate(
   let started = false;
   let written = 0;
   let total: number | undefined;
+  /**
+   * Set when the column editor renamed a field. The rows arriving from the
+   * importer are keyed by the ORIGINAL field names, so every batch — not just
+   * the first — has to be rewritten, or the renamed columns come out empty.
+   */
+  let rekey: ((row: Record<string, unknown>) => Record<string, unknown>) | null = null;
 
   const rowsColl = (id: string) => api.store.rows(id);
 
@@ -107,6 +113,7 @@ export async function landCandidate(
       if (opts.editColumns) {
         const edited = await opts.editColumns(cols);
         if (edited === null) return false; // user cancelled
+        rekey = rowRekeyer(cols, edited);
         cols = edited;
       }
       tableId = cryptoUUID();
@@ -166,6 +173,7 @@ export async function landCandidate(
       rows = rows.slice(0, maxRows - written);
     }
     if (rows.length === 0) continue;
+    if (rekey) rows = rows.map(rekey);
 
     const now = Date.now();
     const docs: Row[] = rows.map((data) => ({

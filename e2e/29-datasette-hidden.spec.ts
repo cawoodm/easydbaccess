@@ -32,7 +32,7 @@ test('hidden tables appear in the picker, tagged and unchecked by default', asyn
   const importDialog = page.locator('import-dialog dialog');
   await expect(importDialog).toBeVisible();
   await importDialog.locator('input[type="text"]').fill('https://ds.example/hidedb');
-  await importDialog.locator('select').last().selectOption('datasette');
+  await importDialog.getByTestId('import-format').selectOption('datasette');
   await importDialog.getByRole('button', { name: 'Import' }).click();
 
   const picker = page.locator('table-select-dialog dialog');

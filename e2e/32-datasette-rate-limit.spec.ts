@@ -51,7 +51,7 @@ test('a rate-limited import keeps and displays the rows that loaded before the 4
   const importDialog = page.locator('import-dialog dialog');
   await expect(importDialog).toBeVisible();
   await importDialog.locator('input[type="text"]').fill('https://ppl.example/energy/plants');
-  await importDialog.locator('select').last().selectOption('datasette');
+  await importDialog.getByTestId('import-format').selectOption('datasette');
   await importDialog.getByRole('button', { name: 'Import' }).click();
 
   // The two rows from page 1 land locally despite the page-2 rate limit — the

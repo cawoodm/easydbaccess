@@ -17,6 +17,31 @@
 
 import type { ColumnSpec } from '@easydb/shared';
 
+/**
+ * Build a row rekeyer for a column edit that only renamed fields.
+ *
+ * The pre-import column editor (`editColumnNames`) can rename and hide, never
+ * add, remove or reorder — so index `i` names the same column in both lists.
+ * Renaming a field changes the object KEY the rows are stored under, so every
+ * row must be rewritten or its values simply disappear.
+ *
+ * Returns null when nothing was renamed, so the caller can skip the copy.
+ * Values under keys the editor did not touch are carried across unchanged.
+ */
+export function rowRekeyer(
+  oldCols: ColumnSpec[],
+  newCols: ColumnSpec[],
+): ((row: Record<string, unknown>) => Record<string, unknown>) | null {
+  if (oldCols.every((c, i) => c.field === newCols[i]?.field)) return null;
+  return (row) => {
+    const out: Record<string, unknown> = {};
+    for (let i = 0; i < oldCols.length; i++) {
+      out[newCols[i]!.field] = row[oldCols[i]!.field];
+    }
+    return out;
+  };
+}
+
 export interface ColumnMergeResult {
   columns: ColumnSpec[];
   /** Incoming fields that were neither already known nor previously deleted. */

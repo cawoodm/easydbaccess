@@ -13,6 +13,7 @@ import type {
   WindowGeometry,
 } from '@easydb/shared';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
+import { rowRekeyer } from '../table/column-merge.js';
 import { filenameFromUrl } from '../import/fetch-source.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 // Type-only: erased at compile time, so importing this module for its type
@@ -156,7 +157,20 @@ export async function importJsonText(
   api: HostApi,
   text: string,
   filename: string,
-  opts: { originUrl?: string | undefined; maxRows?: number | undefined } = {},
+  opts: {
+    originUrl?: string | undefined;
+    maxRows?: number | undefined;
+    /**
+     * Hook for the Import dialog's "Edit columns before import" checkbox.
+     * Called once per NEW table with that table's inferred columns and its
+     * name. Return the edited columns, or `null` to leave that one table out.
+     * Matched tables in overwrite mode reuse their existing schema, so they
+     * never open the editor — the same rule the CSV importer follows.
+     */
+    editColumns?:
+      | ((columns: ColumnSpec[], tableName: string) => Promise<ColumnSpec[] | null>)
+      | undefined;
+  } = {},
 ): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('json-import: no active workspace');
@@ -273,6 +287,20 @@ export async function importJsonText(
 
       let tableId: string;
       const match = mode === 'overwrite-matching' ? existingByName.get(t.name) : undefined;
+
+      // "Edit columns before import": review/rename this table's columns before
+      // it is created. Only for a brand-new LOCAL table — a matched table keeps
+      // its own schema, and a live (`source`) table's columns belong to the
+      // remote. Cancelling leaves this one table out and continues with the rest.
+      let cols = t.columns;
+      let rows = t.rows;
+      if (opts.editColumns && !match && !source) {
+        const edited = await opts.editColumns(cols, t.name);
+        if (edited === null) continue;
+        rows = remapRows(rows, cols, edited);
+        cols = edited;
+      }
+
       if (match) {
         // Overwrite: keep the id (and thus its panel position) but wipe rows
         // and replace columns + sort + geometry + backing info from the import.
@@ -285,7 +313,7 @@ export async function importJsonText(
           await rowColl.bulkRemove(oldRows.map((r) => r.id));
         }
         await api.store.tables.patch(tableId, {
-          columns: t.columns,
+          columns: cols,
           ...(t.title ? { title: t.title } : {}),
           ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
           ...(t.sortColumn
@@ -307,7 +335,7 @@ export async function importJsonText(
           workspaceId,
           name: t.name,
           code: slugTable(t.name),
-          columns: t.columns,
+          columns: cols,
           view: 'table',
           ...(t.title ? { title: t.title } : {}),
           ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
@@ -330,7 +358,7 @@ export async function importJsonText(
       if (!source) {
         const rowColl = api.store.rows(tableId);
         // Apply the Import dialog's "Limit rows" cap per table (undefined ⇒ all).
-        const rowsToInsert = opts.maxRows != null ? t.rows.slice(0, opts.maxRows) : t.rows;
+        const rowsToInsert = opts.maxRows != null ? rows.slice(0, opts.maxRows) : rows;
         const docs = rowsToInsert.map((row) => ({
           id: cryptoUUID(),
           tableId,
@@ -676,6 +704,16 @@ function isDateString(s: string): boolean {
 }
 
 // -- helpers ------------------------------------------------------------------
+
+/** Apply a pre-import column rename to a whole table's rows. */
+function remapRows(
+  rows: Array<Record<string, unknown>>,
+  oldCols: ColumnSpec[],
+  newCols: ColumnSpec[],
+): Array<Record<string, unknown>> {
+  const rekey = rowRekeyer(oldCols, newCols);
+  return rekey ? rows.map(rekey) : rows;
+}
 
 function isObject(v: unknown): v is object {
   return typeof v === 'object' && v !== null && !Array.isArray(v);

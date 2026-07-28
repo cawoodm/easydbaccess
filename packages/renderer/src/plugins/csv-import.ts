@@ -23,6 +23,11 @@ export const meta: NonNullable<PluginModule['meta']> = {
 
 export function init(api: HostApi): void {
   api.ui.registerImporter(importerSpec);
+  // Define the options panel the Import dialog renders for this importer.
+  // Loaded dynamically because this module is unit-tested under Vitest's
+  // default Node environment, where `customElements` does not exist; `init`
+  // only ever runs in the browser.
+  void import('./csv-import-options.js');
   api.ui.registerHeaderButton({
     id: 'csv-import:paste',
     label: 'Paste CSV',
@@ -49,11 +54,22 @@ export function init(api: HostApi): void {
 // candidate and `read` yields a single batch. The kernel supplies the dialog,
 // the fetch, the naming and the write.
 
-/** The name a source should give its table, before the kernel's naming policy. */
-function candidateName(input: ImportSourceInput): string {
+/**
+ * The source's own file name, extension included. The extension matters — it
+ * pins the separator for a `.tsv`/`.tab` file — so this is what `read` looks at.
+ */
+function sourceName(input: ImportSourceInput): string {
   if (input.kind === 'file' && input.file) return input.file.name;
   if (input.kind === 'url' && input.url) return filenameFromUrl(input.url);
   return 'pasted';
+}
+
+/**
+ * The name to propose for the table, before the kernel's naming policy runs.
+ * The extension is dropped: nobody wants a table called `air.csv`.
+ */
+function candidateName(input: ImportSourceInput): string {
+  return stripDelimitedExt(sourceName(input)) || 'imported';
 }
 
 const importerSpec: ImporterSpec = {
@@ -62,13 +78,14 @@ const importerSpec: ImporterSpec = {
   icon: 'table_view',
   order: 10,
   accept: ['.csv', '.tsv', '.tab', 'text/csv', 'text/tab-separated-values'],
+  panel: 'csv-import-options',
   samples: [
     {
       label: 'Air quality — 2016 readings (CSV)',
       url: 'https://raw.githubusercontent.com/MainakRepositor/Datasets/master/Air%20Quality/real_2016_air.csv',
     },
   ],
-  supports: { url: true, file: true, text: true, reference: true },
+  supports: { url: true, file: true, text: true, reference: true, kernel: true },
 
   detect(input) {
     const name = input.kind === 'file' ? (input.file?.name ?? '') : (input.url ?? input.text ?? '');
@@ -92,11 +109,14 @@ const importerSpec: ImporterSpec = {
       text =
         ctx.maxRows != null ? await readCsvHead(input.file, ctx.maxRows) : await input.file.text();
     } else if (input.kind === 'url' && input.url) {
-      text = await ctx.fetchText(input.url, `Reading ${candidateName(input)}…`);
+      text = await ctx.fetchText(input.url, `Reading ${sourceName(input)}…`);
     } else {
       text = input.text ?? '';
     }
-    const sep = separatorForName(candidate.name);
+    // A separator chosen in the options panel beats the name-based rule, which
+    // in turn beats auto-detection.
+    const panelSep = typeof ctx.panel.separator === 'string' ? ctx.panel.separator : undefined;
+    const sep = panelSep ?? separatorForName(sourceName(input));
     const parseOpts = {
       ...(ctx.maxRows != null ? { maxRows: ctx.maxRows } : {}),
       ...(sep ? { separator: sep } : {}),
@@ -177,6 +197,11 @@ export interface CsvImportOpts {
    * overwrite modes alike.
    */
   maxRows?: number | undefined;
+  /**
+   * Separator character chosen in the CSV options panel. Overrides both the
+   * `.tsv`/`.tab` name rule and auto-detection. Undefined ⇒ keep that order.
+   */
+  separator?: string | undefined;
 }
 
 export async function importCsvText(
@@ -189,7 +214,9 @@ export async function importCsvText(
   if (!workspaceId) throw new Error('csv-import: no active workspace');
 
   const baseName = stripDelimitedExt(name || 'imported') || 'imported';
-  const separator = separatorForName(name);
+  // An explicit choice from the options panel wins over the `.tsv`/`.tab` name
+  // rule, which wins over auto-detection inside the parser.
+  const separator = opts.separator ?? separatorForName(name);
 
   // If a table with this name already exists in the workspace, ask the user
   // what to do: append rows, overwrite (clear + insert), or create a new

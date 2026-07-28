@@ -62,7 +62,7 @@ test('cancelling the paused prompt keeps a red Resume button that continues from
   await page.getByTitle('Import data from a URL').click();
   const importDialog = page.locator('import-dialog dialog');
   await importDialog.locator('input[type="text"]').fill('https://ppl4.example/energy/plants');
-  await importDialog.locator('select').last().selectOption('datasette');
+  await importDialog.getByTestId('import-format').selectOption('datasette');
   await importDialog.getByRole('button', { name: 'Import' }).click();
 
   // Page 2 is rate-limited → the paused prompt appears. Cancel it to keep the
@@ -158,7 +158,7 @@ test('the paused prompt\'s "Resume in 60s" waits then continues inline, leaving 
   await page.getByTitle('Import data from a URL').click();
   const importDialog = page.locator('import-dialog dialog');
   await importDialog.locator('input[type="text"]').fill('https://ppl4.example/energy/plants');
-  await importDialog.locator('select').last().selectOption('datasette');
+  await importDialog.getByTestId('import-format').selectOption('datasette');
   await importDialog.getByRole('button', { name: 'Import' }).click();
 
   // The paused prompt appears; choose to wait and auto-resume.

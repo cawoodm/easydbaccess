@@ -20,7 +20,7 @@ import type {
 import '../dialogs/datasette-connect-dialog.js';
 import { DatasetteConnectDialog } from '../dialogs/datasette-connect-dialog.js';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
-import { reconcileColumns } from '../table/column-merge.js';
+import { reconcileColumns, rowRekeyer } from '../table/column-merge.js';
 import { mergeRefreshedRows } from '../table/refresh-merge.js';
 import { setTableLoading } from '../table/data-table.js';
 import {
@@ -324,6 +324,27 @@ function uniqueTableName(taken: Set<string>, name: string): string {
   }
 }
 
+/** The common Import-dialog options this importer honours. */
+export interface DatasetteImportOpts {
+  /** The user already picked a database, so skip the table checklist. */
+  skipTablePicker?: boolean | undefined;
+  /**
+   * The dialog's "Limit rows" value, applied PER TABLE. Always further capped
+   * by `SETTINGS.maxImportRows`. Undefined ⇒ that setting alone applies.
+   */
+  maxRows?: number | undefined;
+  /**
+   * The dialog's "Edit columns before import" hook. Called once per table with
+   * the discovered schema and the table's name, after the rows are fetched but
+   * before anything is written. Return the edited columns, or `null` to leave
+   * that table empty. Only for a table being populated for the FIRST time — a
+   * re-import keeps the arrangement the user already has.
+   */
+  editColumns?:
+    | ((columns: ColumnSpec[], tableName: string) => Promise<ColumnSpec[] | null>)
+    | undefined;
+}
+
 /**
  * Smart entry point. Resolves a Datasette URL to one or many tables and imports
  * them. A single-table URL imports straight away; a database/instance URL
@@ -333,7 +354,7 @@ function uniqueTableName(taken: Set<string>, name: string): string {
 export async function importDatasette(
   api: HostApi,
   input: string,
-  opts: { skipTablePicker?: boolean | undefined } = {},
+  opts: DatasetteImportOpts = {},
 ): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('datasette-source: no active workspace');
@@ -387,7 +408,7 @@ export async function importDatasette(
   const failed: string[] = [];
   for (const p of plans) {
     try {
-      const r = await fillImportTable(api, p.tableId, p.ref, p.overwrite, p.knownCount);
+      const r = await fillImportTable(api, p.tableId, p.ref, p.overwrite, p.knownCount, opts);
       imported += 1;
       totalRows += r.rowCount;
       // A partial import (paging stopped on a failure, e.g. rate limiting) still
@@ -472,9 +493,14 @@ async function fillImportTable(
   ref: DatasetteRef,
   overwrite: boolean,
   knownCount: number | null = null,
+  opts: DatasetteImportOpts = {},
 ): Promise<OneResult> {
   const name = `${ref.db}/${ref.table}`;
   const fetchFn = (u: string) => api.backend.fetch(u);
+  // The dialog's "Limit rows" narrows the import; the plugin's own setting is
+  // the hard ceiling, so the smaller of the two wins.
+  const rowCap =
+    opts.maxRows != null ? Math.min(opts.maxRows, SETTINGS.maxImportRows) : SETTINGS.maxImportRows;
   setTableLoading(tableId, true);
   try {
     // Schema discovery via ?_extra=… is best-effort: older instances give no
@@ -502,7 +528,7 @@ async function fillImportTable(
     // The row count gives a denominator for a proportional progress bar; without
     // it the bar stays indeterminate. Cap the denominator at the import limit so
     // the fraction reflects what we'll actually pull.
-    const target = count && count > 0 ? Math.min(count, SETTINGS.maxImportRows) : 0;
+    const target = count && count > 0 ? Math.min(count, rowCap) : 0;
 
     // Page through with an interactive resume. If a page hop fails (commonly the
     // instance rate-limiting a large import), keep the rows fetched so far and
@@ -519,7 +545,7 @@ async function fillImportTable(
     let startUrl: string | undefined;
     for (;;) {
       const seg = await fetchRows(fetchFn, ref, {
-        maxRows: Math.max(0, SETTINGS.maxImportRows - rows.length),
+        maxRows: Math.max(0, rowCap - rows.length),
         pageSize: SETTINGS.pageSize,
         ...(startUrl ? { startUrl } : {}),
         onProgress: (n) => {
@@ -534,7 +560,7 @@ async function fillImportTable(
       nextUrl = seg.nextUrl;
       // Stop unless we were genuinely interrupted (an error WITH a resume cursor)
       // and still have room under the cap. A clean read or a cap-hit ends here.
-      if (!seg.error || !seg.nextUrl || rows.length >= SETTINGS.maxImportRows) break;
+      if (!seg.error || !seg.nextUrl || rows.length >= rowCap) break;
 
       const choice = await api.ui.dialogs.choice(
         `Import of "${name}" paused after ${rows.length.toLocaleString()} rows (${seg.error}). ` +
@@ -587,7 +613,22 @@ async function fillImportTable(
     const current = await api.store.tables.findOne(tableId);
     const existingCols = current?.columns ?? [];
     const isInitial = existingCols.length === 0;
-    const { columns: mergedCols } = reconcileColumns(existingCols, cols, current?.deletedColumns);
+    let { columns: mergedCols } = reconcileColumns(existingCols, cols, current?.deletedColumns);
+
+    // "Edit columns before import": review/rename the discovered schema before
+    // it is written. Only on the FIRST population — a re-import must keep the
+    // arrangement the user already has. Renaming rekeys the fetched rows to
+    // match. Cancelling leaves the table as an empty shell rather than
+    // aborting a whole batch of tables.
+    let importRows = rows;
+    if (opts.editColumns && isInitial) {
+      const edited = await opts.editColumns(mergedCols, name);
+      if (edited === null) {
+        return { name, rowCount: 0, hasMore: false, truncated: false, pages, count, error };
+      }
+      importRows = remapRowKeys(importRows, mergedCols, edited);
+      mergedCols = edited;
+    }
 
     const now = Date.now();
     api.events.emit('import:before', { source: 'datasette', tableId });
@@ -616,14 +657,35 @@ async function fillImportTable(
       const old = await rowColl.find();
       await rowColl.bulkRemove(old.map((r) => r.id));
     }
-    const docs: Row[] = rows.map((data) => ({ id: cryptoUUID(), tableId, data, updatedAt: now }));
+    const docs: Row[] = importRows.map((data) => ({
+      id: cryptoUUID(),
+      tableId,
+      data,
+      updatedAt: now,
+    }));
     await rowColl.bulkInsert(docs);
 
-    api.events.emit('import:after', { source: 'datasette', tableId, rowCount: rows.length });
-    return { name, rowCount: rows.length, hasMore, truncated, pages, count, error };
+    api.events.emit('import:after', { source: 'datasette', tableId, rowCount: docs.length });
+    return { name, rowCount: docs.length, hasMore, truncated, pages, count, error };
   } finally {
     setTableLoading(tableId, false);
   }
+}
+
+/**
+ * Apply a pre-import column rename to the fetched rows.
+ *
+ * Renaming a Datasette column detaches it from the remote name, so a later
+ * Refresh sees the remote column as new and re-adds it. That is the user's
+ * choice to make — hiding a column has no such effect.
+ */
+function remapRowKeys(
+  rows: Array<Record<string, unknown>>,
+  oldCols: ColumnSpec[],
+  newCols: ColumnSpec[],
+): Array<Record<string, unknown>> {
+  const rekey = rowRekeyer(oldCols, newCols);
+  return rekey ? rows.map(rekey) : rows;
 }
 
 function summariseBatch(

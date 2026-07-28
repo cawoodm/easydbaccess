@@ -23,13 +23,13 @@ test('imports a CSV from a URL into a typed table', async ({ page, workspaceId }
   await expect(dlg).toBeVisible();
 
   // The CSV sample is offered in the dropdown.
-  const presetLabels = (await dlg.locator('select').first().locator('option').allTextContents())
+  const presetLabels = (await dlg.getByTestId('import-sample').locator('option').allTextContents())
     .join(' | ')
     .toLowerCase();
   expect(presetLabels).toContain('csv');
 
   await dlg.locator('input[type="text"]').fill('https://ex.example/data.csv');
-  await dlg.locator('select').last().selectOption('csv'); // "Import as: CSV file"
+  await dlg.getByTestId('import-format').selectOption('csv'); // "Import as: CSV file"
   await dlg.getByRole('button', { name: 'Import', exact: true }).click();
 
   const summary = await (async () => {
@@ -75,7 +75,7 @@ async function attemptCsvImport(page: import('@playwright/test').Page, url: stri
   const dlg = page.locator('import-dialog dialog');
   await expect(dlg).toBeVisible();
   await dlg.locator('input[type="text"]').fill(url);
-  await dlg.locator('select').last().selectOption('csv');
+  await dlg.getByTestId('import-format').selectOption('csv');
   await dlg.getByRole('button', { name: 'Import', exact: true }).click();
 }
 
@@ -138,7 +138,7 @@ test('a row limit lifts the size ceiling — an oversized CSV still imports', as
   const dlg = page.locator('import-dialog dialog');
   await expect(dlg).toBeVisible();
   await dlg.locator('input[type="text"]').fill('https://ex.example/huge-capped.csv');
-  await dlg.locator('select').last().selectOption('csv');
+  await dlg.getByTestId('import-format').selectOption('csv');
   await dlg.locator('input[type="number"]').fill('1'); // Limit rows
   await dlg.getByRole('button', { name: 'Import', exact: true }).click();
 
@@ -170,7 +170,7 @@ test('Reference mode lifts the size ceiling — an oversized CSV is referenced',
   const dlg = page.locator('import-dialog dialog');
   await expect(dlg).toBeVisible();
   await dlg.locator('input[type="text"]').fill('https://ex.example/huge-ref.csv');
-  await dlg.locator('select').last().selectOption('csv');
+  await dlg.getByTestId('import-format').selectOption('csv');
   await dlg.locator('input[type="radio"]').last().check(); // Reference, not Copy
   await dlg.getByRole('button', { name: 'Import', exact: true }).click();
 
@@ -222,7 +222,7 @@ test('shows the top progress bar when a URL read takes more than 2s', async ({
   const dlg = page.locator('import-dialog dialog');
   await expect(dlg).toBeVisible();
   await dlg.locator('input[type="text"]').fill('https://ex.example/slow.csv');
-  await dlg.locator('select').last().selectOption('csv');
+  await dlg.getByTestId('import-format').selectOption('csv');
   await dlg.getByRole('button', { name: 'Import', exact: true }).click();
 
   // The bar (role=progressbar, rendered only while visible) appears once the
