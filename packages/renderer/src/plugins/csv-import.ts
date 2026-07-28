@@ -3,9 +3,11 @@ import type {
   ColumnType,
   HostApi,
   ImporterSpec,
+  ImportSourceInput,
   PluginModule,
   TableOrigin,
 } from '@easydb/shared';
+import { filenameFromUrl } from '../import/fetch-source.js';
 import { cryptoUUID, slugField } from '../util/ids.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
@@ -41,15 +43,75 @@ export function init(api: HostApi): void {
   });
 }
 
-// -- Importer spec (for non-drop call sites: future Import dialog, URL sources) --
+// -- Importer spec ------------------------------------------------------------
+//
+// One delimited file is always exactly one table, so `list` returns a single
+// candidate and `read` yields a single batch. The kernel supplies the dialog,
+// the fetch, the naming and the write.
+
+/** The name a source should give its table, before the kernel's naming policy. */
+function candidateName(input: ImportSourceInput): string {
+  if (input.kind === 'file' && input.file) return input.file.name;
+  if (input.kind === 'url' && input.url) return filenameFromUrl(input.url);
+  return 'pasted';
+}
 
 const importerSpec: ImporterSpec = {
   id: 'csv',
   label: 'CSV / TSV',
+  icon: 'table_view',
+  order: 10,
   accept: ['.csv', '.tsv', '.tab', 'text/csv', 'text/tab-separated-values'],
-  async parse(input) {
-    const text = typeof input === 'string' ? input : await input.text();
-    return parseCsv(text);
+  samples: [
+    {
+      label: 'Air quality — 2016 readings (CSV)',
+      url: 'https://raw.githubusercontent.com/MainakRepositor/Datasets/master/Air%20Quality/real_2016_air.csv',
+    },
+  ],
+  supports: { url: true, file: true, text: true, reference: true },
+
+  detect(input) {
+    const name = input.kind === 'file' ? (input.file?.name ?? '') : (input.url ?? input.text ?? '');
+    if (/\.(csv|tsv|tab)$/i.test(name)) return 0.95;
+    if (input.file?.type === 'text/csv') return 0.9;
+    // A delimited body is a plausible last resort but never a confident guess.
+    return input.kind === 'text' ? 0.2 : 0;
+  },
+
+  async list(_ctx, input) {
+    return [{ name: candidateName(input), rowCount: null, handle: input }];
+  },
+
+  async *read(ctx, candidate) {
+    const input = candidate.handle as ImportSourceInput;
+    let text: string;
+    if (input.kind === 'file' && input.file) {
+      // Honour the cap by STREAMING a prefix rather than reading the whole
+      // file. A 150 MB CSV read and parsed whole — before any cap applies —
+      // can silently kill a memory-limited tab.
+      text =
+        ctx.maxRows != null ? await readCsvHead(input.file, ctx.maxRows) : await input.file.text();
+    } else if (input.kind === 'url' && input.url) {
+      text = await ctx.fetchText(input.url, `Reading ${candidateName(input)}…`);
+    } else {
+      text = input.text ?? '';
+    }
+    const parsed = parseCsv(text, {
+      ...(ctx.maxRows != null ? { maxRows: ctx.maxRows } : {}),
+      ...(() => {
+        const sep = separatorForName(candidate.name);
+        return sep ? { separator: sep } : {};
+      })(),
+    });
+    yield { columns: parsed.columns, rows: parsed.rows };
+  },
+
+  reference(_ctx, candidate) {
+    const input = candidate.handle as ImportSourceInput;
+    if (input.kind !== 'url' || !input.url) {
+      throw new Error('A reference needs a re-fetchable URL — an upload cannot be referenced.');
+    }
+    return { type: 'url', config: { url: input.url, format: 'csv' } };
   },
 };
 
@@ -686,4 +748,3 @@ function remapRows(
     return out;
   });
 }
-

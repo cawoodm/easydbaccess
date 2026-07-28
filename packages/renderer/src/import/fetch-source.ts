@@ -8,7 +8,13 @@
 // Behavior is unchanged from the version that lived in `import-data.ts`.
 
 import type { HostApi } from '@easydb/shared';
-import { TopProgress, type ProgressHandle } from '../chrome/top-progress.js';
+// Type-only on purpose. `top-progress.js` registers a custom element at import
+// time, which throws under a plain Node test environment. This module is
+// imported by EVERY importer, so it must stay free of DOM side effects; the
+// class is loaded lazily in `fetchImportTextWithBar` below. `json-import`
+// already used this trick — keeping it here means each importer no longer has
+// to remember it.
+import type { ProgressHandle } from '../chrome/top-progress.js';
 import { readResponseText, toCorsFriendlyUrl } from '../plugins/read-url.js';
 
 /**
@@ -137,6 +143,9 @@ export async function fetchImportTextWithBar(
   url: string,
   label: string,
 ): Promise<string> {
+  // Resolve the bar class before the read starts, so the `onSlow` callback
+  // (which must stay synchronous) has it to hand.
+  const { TopProgress } = await import('../chrome/top-progress.js');
   // Held on an object so the closure assignment isn't narrowed away in finally.
   const ref: { handle: ProgressHandle | null } = { handle: null };
   try {

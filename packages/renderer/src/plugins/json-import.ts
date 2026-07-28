@@ -3,6 +3,7 @@ import type {
   ColumnType,
   HostApi,
   ImporterSpec,
+  ImportSourceInput,
   PluginModule,
   TableInfo,
   TableOrigin,
@@ -12,6 +13,7 @@ import type {
   WindowGeometry,
 } from '@easydb/shared';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
+import { filenameFromUrl } from '../import/fetch-source.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a
@@ -48,21 +50,96 @@ export function init(api: HostApi): void {
 
 // -- Importer spec ------------------------------------------------------------
 
+// A JSON dump can hold MANY tables, so `list` parses once and returns one
+// candidate per table, carrying the parsed table as the opaque handle. `read`
+// then just hands back what `list` already produced — no second parse.
+
 const importerSpec: ImporterSpec = {
   id: 'json',
-  label: 'JSON',
+  label: 'JSON dump',
+  icon: 'data_object',
+  order: 20,
   accept: ['.json', '.db.json', 'application/json'],
-  async parse(input) {
-    const text = typeof input === 'string' ? input : await input.text();
-    const parsed = JSON.parse(text);
-    const tables = parsedToTables(parsed, 'imported');
-    const first = tables[0];
-    return {
-      columns: first?.columns ?? [],
-      rows: first?.rows ?? [],
-    };
+  samples: [
+    {
+      label: 'Northwind — sample database (JSON dump)',
+      url: 'https://raw.githubusercontent.com/cawoodm/easydbaccess/main/data/northwind.db.json',
+    },
+  ],
+  supports: { url: true, file: true, text: true, reference: true, multiTable: true },
+
+  detect(input) {
+    const name = input.kind === 'file' ? (input.file?.name ?? '') : (input.url ?? '');
+    if (/\.db\.json$/i.test(name)) return 1; // our own dump format
+    if (/\.json$/i.test(name)) return 0.95;
+    if (input.file?.type === 'application/json') return 0.9;
+    const body = (input.text ?? '').trimStart();
+    return body.startsWith('{') || body.startsWith('[') ? 0.3 : 0;
+  },
+
+  async list(ctx, input) {
+    let text: string;
+    if (input.kind === 'file' && input.file) text = await input.file.text();
+    else if (input.kind === 'url' && input.url) {
+      text = await ctx.fetchText(input.url, `Reading ${filenameFromUrl(input.url)}…`);
+    } else text = input.text ?? '';
+
+    const fallback =
+      input.kind === 'file' && input.file
+        ? stripJsonExt(input.file.name)
+        : input.kind === 'url' && input.url
+          ? stripJsonExt(filenameFromUrl(input.url))
+          : 'imported';
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      throw new Error(`Invalid JSON in ${fallback}: ${(err as Error).message}`);
+    }
+    const tables = parsedToTables(parsed, fallback);
+    return tables.map((t) => ({
+      name: t.name,
+      rowCount: t.rows.length,
+      handle: { table: t, input, single: tables.length === 1 } satisfies JsonHandle,
+    }));
+  },
+
+  async *read(_ctx, candidate) {
+    const { table } = candidate.handle as JsonHandle;
+    yield { columns: table.columns, rows: table.rows };
+  },
+
+  reference(_ctx, candidate) {
+    const { input, single } = candidate.handle as JsonHandle;
+    if (input.kind !== 'url' || !input.url) {
+      throw new Error('A reference needs a re-fetchable URL — an upload cannot be referenced.');
+    }
+    // The `url` row-source re-fetches the WHOLE document and reads the first
+    // array of objects out of it. That is only the right table when the
+    // document held exactly one, so refuse a multi-table dump rather than
+    // silently referencing the wrong rows.
+    if (!single) {
+      throw new Error(
+        'That URL holds several tables, so a reference would be ambiguous. Import a copy instead.',
+      );
+    }
+    return { type: 'url', config: { url: input.url, format: 'json' } };
   },
 };
+
+/** What json-import passes to itself between `list` and `read`/`reference`. */
+interface JsonHandle {
+  table: NormalizedTable;
+  input: ImportSourceInput;
+  /** The document held exactly one table, so a `url` reference is unambiguous. */
+  single: boolean;
+}
+
+/** Strip `.db.json` / `.json` so a dump names its table without the extension. */
+function stripJsonExt(name: string): string {
+  return name.replace(/\.db\.json$/i, '').replace(/\.json$/i, '') || 'imported';
+}
 
 // -- Core: file -> Tables -----------------------------------------------------
 
@@ -320,8 +397,7 @@ async function restoreViews(
 
   for (const inst of instances) {
     if (!isObject(inst) || typeof inst.id !== 'string') continue;
-    const tableId =
-      (inst.tableName ? nameToId.get(inst.tableName) : undefined) ?? inst.tableId;
+    const tableId = (inst.tableName ? nameToId.get(inst.tableName) : undefined) ?? inst.tableId;
     if (!tableId) continue;
     await api.store.viewInstances.upsert({ ...inst, workspaceId, tableId });
   }
@@ -627,4 +703,3 @@ function isJson(file: File): boolean {
   if (file.type === 'application/json') return true;
   return false;
 }
-

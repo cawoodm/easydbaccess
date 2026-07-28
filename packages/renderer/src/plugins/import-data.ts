@@ -15,6 +15,7 @@
 import type { ColumnSpec, ColumnType, HostApi, PluginModule, Table } from '@easydb/shared';
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
+import { getContext } from '../app-context.js';
 import { editColumnNames } from '../dialogs/column-names-dialog.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from '../dialogs/dialog-chrome.js';
 import { makeDialogDraggable } from '../dialogs/draggable.js';
@@ -144,9 +145,10 @@ async function refreshImported(api: HostApi, tableId: string): Promise<void> {
   }
 }
 
-async function openImport(api: HostApi): Promise<void> {
+async function openImport(api: HostApi, presetKind: ImportKind = 'auto'): Promise<void> {
   const dlg = ImportDialog.instance ?? mountDialog();
   const result = await dlg.open({
+    presetKind,
     // Lets the dialog list an instance's databases so the user can pick one
     // before importing (a root URL otherwise defers the choice to a modal).
     async listDatabases(url) {
@@ -600,12 +602,47 @@ export class ImportDialog extends LitElement {
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
   }
 
+  /**
+   * The formats offered by "Import as", built from the importer REGISTRY at
+   * open time — so a new importer plugin appears here with no edit to this
+   * file. `id` is the option value, which is also the dialog's `kind`, so a
+   * registered `ImporterSpec.id` must match a kind the dispatcher understands
+   * until the kernel takes over the dispatch in Phase C.
+   *
+   * Staging note: `datasette-source` declares `meta.type: 'source'` and
+   * registers no `ImporterSpec`, so its entry is appended by hand. Phase D
+   * splits it into `datasette-import` + `datasette-connect`, after which this
+   * fallback goes and the list is purely the registry.
+   */
+  @state() private formats: Array<{ id: string; label: string }> = [];
+
+  private async loadFormats(): Promise<void> {
+    const { registries } = await getContext();
+    const registered = [...registries.importers]
+      .sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER))
+      .map((s) => ({ id: s.id, label: s.label }));
+    const withDatasette = registered.some((f) => f.id === 'datasette')
+      ? registered
+      : [...registered, { id: 'datasette', label: 'Datasette (table or instance)' }];
+    this.formats = withDatasette;
+
+    // The file input's filter is now the union of what the importers declare,
+    // instead of a hand-maintained string that silently omitted new formats.
+    const exts = new Set<string>(['.txt']);
+    for (const spec of registries.importers) for (const a of spec.accept ?? []) exts.add(a);
+    this.acceptAttr = [...exts].join(',');
+  }
+
+  @state() private acceptAttr = '.txt';
+
   /** Open the dialog. Resolves with the chosen URL + kind, or null on cancel. */
   open(opts?: {
     listDatabases?: (url: string) => Promise<string[]>;
+    /** Preselect the format, e.g. when the Import menu already chose one. */
+    presetKind?: ImportKind | undefined;
   }): Promise<ImportChoice | null> {
     this.url = '';
-    this.kind = 'auto';
+    this.kind = opts?.presetKind ?? 'auto';
     this.presetIdx = -1;
     this.editColumns = false;
     this.file = null;
@@ -613,9 +650,14 @@ export class ImportDialog extends LitElement {
     this.mode = 'copy';
     this.resetDbList();
     this.listDatabases = opts?.listDatabases ?? null;
+    // Re-read the registry on every open so a plugin installed since last time
+    // (the Plugin Manager hot-loads) shows up without a reload. The modal must
+    // not open until the format options have rendered — a caller that selects a
+    // format the instant the dialog appears would otherwise race an empty list.
+    const formatsReady = this.loadFormats();
     return new Promise<ImportChoice | null>((resolve) => {
       this.resolveFn = resolve;
-      void this.updateComplete.then(() => this.dialogEl?.showModal());
+      void formatsReady.then(() => this.updateComplete).then(() => this.dialogEl?.showModal());
     });
   }
 
@@ -786,7 +828,7 @@ export class ImportDialog extends LitElement {
               …or upload a file
               <input
                 type="file"
-                accept=".csv,.tsv,.tab,.json,.txt,text/csv,text/tab-separated-values,application/json"
+                accept=${this.acceptAttr}
                 @change=${(e: Event) => this.onFileChange(e)}
               />
             </label>
@@ -807,11 +849,10 @@ export class ImportDialog extends LitElement {
                 }}
               >
                 <option value="auto" ?selected=${this.kind === 'auto'}>Auto-detect</option>
-                <option value="json" ?selected=${this.kind === 'json'}>JSON dump</option>
-                <option value="csv" ?selected=${this.kind === 'csv'}>CSV / TSV file</option>
-                <option value="datasette" ?selected=${this.kind === 'datasette'}>
-                  Datasette (table or instance)
-                </option>
+                ${this.formats.map(
+                  (f) =>
+                    html`<option value=${f.id} ?selected=${this.kind === f.id}>${f.label}</option>`,
+                )}
               </select>
             </label>
 
@@ -874,11 +915,11 @@ export class ImportDialog extends LitElement {
               : nothing}
 
             <p class="hint">
-              Paste any URL or pick a sample above — a JSON dump, a <code>.csv</code> or <code>.tsv</code> file, or a
-              Datasette table/database/instance. For a Datasette instance root, click
-              <em>List databases</em> to pick one first. Multi-table sources let you choose which
-              tables to import; Datasette tables import a read-only snapshot (capped at 10,000 rows
-              each).
+              Paste any URL or pick a sample above — a JSON dump, a <code>.csv</code> or
+              <code>.tsv</code> file, or a Datasette table/database/instance. For a Datasette
+              instance root, click <em>List databases</em> to pick one first. Multi-table sources
+              let you choose which tables to import; Datasette tables import a read-only snapshot
+              (capped at 10,000 rows each).
             </p>
           </div>
         </form>
