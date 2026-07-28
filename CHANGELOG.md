@@ -21,11 +21,11 @@
 - v0.0.146 Import now offers Copy vs Reference. A Reference is a live, read-only table (Datasette table/database or CSV/JSON URL) that's never stored or synced. A Copy's Refresh keeps columns you added while refreshing the rest.
 - v0.0.143 Two HTML cell renderers: `html-preview` shows a truncated plain-text preview (edit in a dialog, popup icon to view rendered HTML), and `html` renders full HTML in-cell with inline editing. Both editable.
 - v0.0.142 The column editor's live preview now hides columns marked hidden, matching the actual table.
-- v0.0.139 Closing a table window now hides it (keeping its data) instead of deleting — reopen it from the Ctrl+K palette ("Go to <table>"). A new trash button in each table's button bar permanently deletes the table and its rows (with confirmation).
+- v0.0.139 Closing a table window now hides it (keeping its data) instead of deleting — reopen it from the Ctrl+K palette ("Go to `<table>`"). A new trash button in each table's button bar permanently deletes the table and its rows (with confirmation).
 - v0.0.138 Gist sync now carries every workspace setting (no more excluded prefixes); keep pushed gists private if a setting still holds a raw token. Settings → General gained a Download secrets.txt button.
 - v0.0.137 The table info (ⓘ) dialog now explains whether a table is Connected (live backend — rows fetched on demand) or Imported (a local snapshot, with a link to its origin); the ⓘ button also shows for such tables even without other metadata.
 - v0.0.136 Command palette (Ctrl+K): manage windows (minimize/restore/maximize/cascade/tile/close all), go to a table, run any action, plus Search/Plugins/Changelog/Docs. Plugins can register commands.
-- v0.0.134 Column filters gained operators: `!text` (does not contain), `NULL` (blank cells), `!NULL` (has a value); `!true` now also shows empty cells. The filter dropdown adds a *(Blanks)* entry and a **hide** checkbox to negate your pick.
+- v0.0.134 Column filters gained operators: `!text` (does not contain), `NULL` (blank cells), `!NULL` (has a value); `!true` now also shows empty cells. The filter dropdown adds a _(Blanks)_ entry and a **hide** checkbox to negate your pick.
 - v0.0.133 Gist sync now syncs remote (backend-backed, e.g. Datasette) tables by definition only — their live rows are never pushed, and a pulled remote table reconnects to its backend instead of importing stale rows.
 - v0.0.132 New `html` cell renderer: set a column's renderer to "html" to show its value as unescaped HTML inline; click the cell to open the full HTML in its own window.
 - v0.0.131 Gist Push and Pull now offer a scope choice — Everything, Data only (tables + rows), or Settings only (views + settings).
