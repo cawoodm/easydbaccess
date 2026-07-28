@@ -20,6 +20,19 @@ type SortDir = 'asc' | 'desc' | null;
 /** Delay before the header loading bar appears, so fast loads don't flash it. */
 const LOAD_BAR_DELAY_MS = 200;
 
+/**
+ * Narrowest a column may be dragged. Small enough to park a column you don't
+ * want to read as a sliver, while still leaving a grab target for the resize
+ * gutter (which is 6px wide) so the column can be dragged back open.
+ */
+const MIN_COL_W = 10;
+
+/**
+ * Width of the trailing action column (the row-delete button). A px value, not
+ * `2rem`, so `tableSizingStyle` can add it to the exact column sum.
+ */
+const ACTION_COL_W = 32;
+
 @customElement('data-table')
 export class DataTable extends LitElement {
   static override styles = [
@@ -90,6 +103,13 @@ export class DataTable extends LitElement {
         padding: 0.25rem 0.5rem;
         text-align: left;
         vertical-align: top;
+        /* A narrow column must CHOP its content, not spill it over the next
+           column and not wrap into a taller row. One line + ellipsis also keeps
+           every row the same height, which the row virtualization assumes when
+           it converts scrollTop into a row index. */
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       th {
         background: #f9fafb;
@@ -316,6 +336,11 @@ export class DataTable extends LitElement {
         padding: 0;
         width: 100%;
         box-sizing: border-box;
+        /* An editable cell is an <input>, which clips its value flat — the td's
+           own text-overflow can't reach inside it. Inputs honor text-overflow
+           themselves while unfocused, so a narrow column ellipses its text and
+           still reveals the whole value once you click into it. */
+        text-overflow: ellipsis;
       }
       .mi.sm {
         font-size: 1rem;
@@ -995,7 +1020,7 @@ export class DataTable extends LitElement {
     const onMove = (ev: PointerEvent) => {
       if (!this.resizing) return;
       const dx = ev.clientX - this.resizing.startX;
-      const w = Math.max(40, this.resizing.startW + dx);
+      const w = Math.max(MIN_COL_W, this.resizing.startW + dx);
       // Live update: patch the in-memory column width so the colgroup reflows.
       this.columns = this.columns.map((c) =>
         c.field === this.resizing!.field ? { ...c, width: w } : c,
@@ -1118,6 +1143,26 @@ export class DataTable extends LitElement {
    * Returns the slice plus virtual padding heights for the rows skipped above
    * and below the viewport. For small tables it just returns the whole list.
    */
+  /**
+   * Inline sizing for the <table> once columns carry explicit widths.
+   *
+   * `table-layout: fixed` alone is not enough to make a <col> width exact: it
+   * needs a DEFINITE table width. The stylesheet's `width: max-content` isn't
+   * definite, so the browser measured content anyway and then redistributed the
+   * surplus across the columns — a column dragged to 10px still rendered at 341px.
+   * Pinning the table to the exact sum of its columns (and releasing the
+   * `min-width: 100%` that stretched it to the panel) makes each <col> exact, so
+   * a column really can be 10px wide.
+   *
+   * Returns null while any visible column is still unsized — then the default
+   * auto layout applies and a narrow table still fills the panel.
+   */
+  private tableSizingStyle(cols: ColumnSpec[]): string | null {
+    if (cols.length === 0 || !cols.every((c) => typeof c.width === 'number')) return null;
+    const total = cols.reduce((sum, c) => sum + (c.width ?? 0), 0) + ACTION_COL_W;
+    return `table-layout: fixed; width: ${total}px; min-width: 0`;
+  }
+
   private virtualSlice(rows: Row[]): { slice: Row[]; topPad: number; bottomPad: number } {
     if (rows.length <= this.VIRT_THRESHOLD || this.viewportHeight === 0) {
       return { slice: rows, topPad: 0, bottomPad: 0 };
@@ -1160,10 +1205,10 @@ export class DataTable extends LitElement {
             ></div>
           </div>`
         : nothing}
-      <table style=${cols.some((c) => c.width != null) ? 'table-layout: fixed' : nothing}>
+      <table style=${this.tableSizingStyle(cols) ?? nothing}>
         <colgroup>
           ${cols.map((c) => html`<col style=${c.width != null ? `width: ${c.width}px` : ''} />`)}
-          <col style="width:2rem" />
+          <col style="width:${ACTION_COL_W}px" />
         </colgroup>
         <thead>
           <tr>
@@ -1234,7 +1279,7 @@ export class DataTable extends LitElement {
                 </th>
               `;
             })}
-            <th style="width:2rem"></th>
+            <th style="width:${ACTION_COL_W}px"></th>
           </tr>
           <tr class="filter-row">
             ${cols.map((c) => {

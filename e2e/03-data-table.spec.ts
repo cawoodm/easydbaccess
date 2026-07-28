@@ -110,6 +110,83 @@ test.describe('data-table rendering', () => {
       .toBe(12);
   });
 
+  test('any column can be dragged down to 10px, and chopped text ellipses', async ({ page }) => {
+    // Regression, two causes. (1) The drag floor was 40px. (2) Even at 40px the
+    // column didn't shrink: `table-layout: fixed` needs a DEFINITE table width,
+    // and the stylesheet's `width: max-content` + `min-width: 100%` isn't one —
+    // so the browser measured content and redistributed the surplus back across
+    // the columns. A link column asked to be 10px still rendered at 341px.
+    const id = await createTable(page, 'Narrow', [
+      { field: 'url', label: 'A Rather Long URL Column Label', renderer: 'link' },
+      { field: 'text', label: 'Long Text' },
+    ]);
+    await waitForPanel(page, id);
+    await bulkAddRows(
+      page,
+      id,
+      Array.from({ length: 6 }, (_, i) => ({
+        url: `https://www.example.com/a/very/long/path/number/${i}?with=query`,
+        text: 'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod',
+      })),
+    );
+
+    const panel = page.locator(`#${panelDomId(id)}`);
+    const shrink = async (nth: number) => {
+      const th = panel.locator('data-table thead tr:first-child th').nth(nth);
+      const box = (await th.boundingBox())!;
+      const handle = th.locator('.col-resize');
+      const hb = (await handle.boundingBox())!;
+      const y = hb.y + hb.height / 2;
+      await page.mouse.move(hb.x + hb.width / 2, y);
+      await page.mouse.down();
+      // Aim well past the floor; the clamp decides where it stops.
+      await page.mouse.move(hb.x - box.width, y, { steps: 12 });
+      await page.mouse.up();
+      await page.waitForTimeout(120);
+      return (await th.boundingBox())!.width;
+    };
+
+    // The link column is the one that previously refused to shrink at all.
+    expect(await shrink(0)).toBeLessThanOrEqual(11);
+    expect(await shrink(1)).toBeLessThanOrEqual(11);
+
+    // Rows stay one line tall — a narrow column must chop, not wrap (the row
+    // virtualization converts scrollTop into an index assuming a uniform height).
+    const heights = await panel
+      .locator('data-table')
+      .evaluate((el) =>
+        [
+          ...(el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelectorAll(
+            'tbody tr',
+          ),
+        ]
+          .slice(0, 4)
+          .map((tr) => Math.round((tr as HTMLElement).getBoundingClientRect().height)),
+      );
+    expect(new Set(heights).size).toBe(1);
+
+    // An editable cell is an <input>, which clips flat unless it ellipses itself.
+    const textOverflow = await panel
+      .locator('data-table')
+      .evaluate((el) => {
+        const input = (
+          el as HTMLElement & { shadowRoot: ShadowRoot }
+        ).shadowRoot.querySelector('tbody td input');
+        return input ? getComputedStyle(input).textOverflow : null;
+      });
+    expect(textOverflow).toBe('ellipsis');
+
+    // And it's reversible — a 10px column can be dragged back open.
+    const th = panel.locator('data-table thead tr:first-child th').nth(0);
+    const hb = (await th.locator('.col-resize').boundingBox())!;
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(hb.x + 200, hb.y + hb.height / 2, { steps: 12 });
+    await page.mouse.up();
+    await page.waitForTimeout(120);
+    expect((await th.boundingBox())!.width).toBeGreaterThan(150);
+  });
+
   test('the th is not draggable — only the grip handle reorders columns', async ({ page }) => {
     // Regression: making the whole <th> draggable (a) turned the entire header
     // cell into a grab surface that covered the sort icon and (b) started a

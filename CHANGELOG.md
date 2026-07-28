@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 28 Jul 2026 (v0.0.156)
+
+- Any column can now be dragged down to 10px, including link columns that refused to shrink. Chopped text and URLs end in an ellipsis.
+
 ## 28 Jul 2026 (v0.0.155)
 
 - Maximized windows now follow a browser resize, fill the panel with no gap above the footer, and show a pointer cursor. Double-click a titlebar to maximize or restore.
