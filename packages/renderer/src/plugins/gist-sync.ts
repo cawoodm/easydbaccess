@@ -13,6 +13,7 @@ import type {
 // Node environment). The actual class is loaded lazily via dynamic import()
 // only inside pull(), below.
 import type { ProgressHandle } from '../chrome/top-progress.js';
+import { tableToFile } from '../export/table-file.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'gist-sync',
@@ -706,50 +707,9 @@ async function viewTableGist(api: HostApi, tableId: string): Promise<void> {
 }
 
 // -- helpers ------------------------------------------------------------------
-
-function tableToFile(t: Table, rows: Row[]) {
-  // Project each row onto the table's CURRENT columns — exactly like CSV export
-  // and the data-table do (`r.data[c.field]`). Deleting a column removes it from
-  // `t.columns` but does NOT purge its (potentially large) value from each row's
-  // `data` blob (see new-table-dialog: "row data isn't migrated"). Dumping raw
-  // `r.data` would therefore sync — and size-count — long-deleted columns, which
-  // is why a 2 MB table (per its CSV) was warning as 32 MB on push.
-  const fields = t.columns.map((c) => c.field);
-  // A table backed by a live source (Datasette, or any registered backend) is
-  // "remote": its rows live in the backend, not locally. Such tables sync their
-  // DEFINITION only — never the (possibly huge, possibly stale) row data.
-  const isRemote = t.source != null;
-  return {
-    name: t.name,
-    title: t.title,
-    columns: t.columns,
-    // Full display/query state so a pull restores the table exactly, not just
-    // its data: view mode, window layout, sort, filters, label column, deleted
-    // columns, and info.
-    view: t.view,
-    windowGeometry: t.windowGeometry,
-    sortColumn: t.sortColumn,
-    sortAsc: t.sortAsc,
-    filters: t.filters,
-    labelColumn: t.labelColumn,
-    deletedColumns: t.deletedColumns,
-    info: t.info,
-    // Routing descriptors so a pulled remote/snapshot table reconnects to its
-    // backend (or remembers where a snapshot came from) instead of returning as
-    // a dead, source-less local table. No secrets live here — backend tokens are
-    // kept in settings, not in `source.config`.
-    source: t.source,
-    origin: t.origin,
-    // Remote tables carry no rows; their data is re-fetched live on pull.
-    rows: isRemote
-      ? []
-      : rows.map((r) => {
-          const projected: Record<string, unknown> = {};
-          for (const f of fields) projected[f] = r.data[f];
-          return projected;
-        }),
-  };
-}
+//
+// `tableToFile` (the `.table.json` shape) now lives in `../export/table-file.js`
+// — it's shared with the per-table export menu's JSON option (dump-export.ts).
 
 /** The per-table display/query fields a gist file may carry (beyond name/columns/rows). */
 type TableFileMeta = {

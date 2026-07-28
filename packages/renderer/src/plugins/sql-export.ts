@@ -53,6 +53,30 @@ export async function serializeWorkspaceAsSql(api: HostApi): Promise<string> {
   return lines.join('\n');
 }
 
+/**
+ * Serializes a single table (+ its already-fetched, already-scoped rows) as a
+ * standalone `.sql` script: the same `DROP TABLE IF EXISTS` → `CREATE TABLE`
+ * → `INSERT INTO` shape `serializeWorkspaceAsSql` emits per table, wrapped in
+ * its own transaction. Used by the per-table export menu (dump-export.ts) —
+ * `table`/`rows` should already be narrowed to the desired export scope
+ * (Raw vs. Visible Data; see `../export/table-file.js`).
+ */
+export function serializeTableAsSql(table: Table, rows: Row[]): string {
+  const lines: string[] = [
+    `-- easyDBAccess table export`,
+    `-- table:    ${table.name}`,
+    `-- exported: ${new Date().toISOString()}`,
+    ``,
+    `BEGIN;`,
+    ``,
+    renderTable(table, rows),
+    ``,
+    `COMMIT;`,
+    ``,
+  ];
+  return lines.join('\n');
+}
+
 function renderTable(table: Table, rows: Row[]): string {
   const tableName = sanitizeIdent(table.code || table.name || `table_${table.id}`);
   const colDefs = [

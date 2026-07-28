@@ -191,10 +191,11 @@ test.describe('general', () => {
     const footer = page.locator(`#${panelDomId(id)} panel-footer`);
     await expect(footer.getByRole('button', { name: /Add row/ })).toBeVisible();
     await expect(footer.getByRole('button', { name: /Columns/ })).toBeVisible();
-    // csv-export plugin registers a "CSV" table button — confirms the
-    // registry → footer path works. Footer buttons are icon-only, so the
-    // accessible name comes from aria-label (set to the button's label).
-    await expect(footer.getByRole('button', { name: /CSV/ })).toBeVisible();
+    // dump-export plugin registers an "Export" table button (CSV/JSON/SQL
+    // menu) — confirms the registry → footer path works. Footer buttons are
+    // icon-only, so the accessible name comes from aria-label (set to the
+    // button's label).
+    await expect(footer.getByRole('button', { name: /Export/ })).toBeVisible();
 
     // Icon-only: the button shows just its icon glyph (ligature text "add"),
     // not the "Add row" text label (which now lives on aria-label/title).

@@ -5,7 +5,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   name: 'CSV Export',
   type: 'exporter',
   version: '0.1.0',
-  description: 'Export a single table as a .csv file via a per-table button.',
+  description: 'CSV serializer for the per-table export menu (see dump-export.ts) and the importer/exporter registry.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/csv-export.ts',
@@ -22,19 +22,9 @@ const exporterSpec: ExporterSpec = {
 
 export function init(api: HostApi): void {
   api.ui.registerExporter(exporterSpec);
-  api.ui.registerTableButton({
-    id: 'csv-export:download',
-    label: 'CSV',
-    icon: 'file_download',
-    tooltip: 'Download this table as a .csv file',
-    onClick: async (host, ctx) => {
-      const t = await host.store.tables.findOne(ctx.tableId);
-      if (!t) return;
-      const rows = await host.store.rows(t.id).find();
-      const text = serializeCsv(t, rows);
-      await host.backend.saveFile(`${t.code || t.name || 'table'}.csv`, text, 'text/csv');
-    },
-  });
+  // The per-table footer button now lives in dump-export.ts's consolidated
+  // "Export" menu (CSV / JSON / SQL, each with a Raw vs. Visible Data prompt)
+  // — this plugin only supplies the CSV serializer.
 }
 
 /**
