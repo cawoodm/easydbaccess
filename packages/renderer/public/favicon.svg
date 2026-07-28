@@ -1,0 +1,31 @@
+<!--
+  easyDBAccess favicon.
+
+  Deliberately NOT the stacked-cylinder "database" glyph every other DB tool
+  uses — that says "one server", and this app is about something else: a canvas
+  of overlapping table WINDOWS you arrange yourself. So the mark is two panels,
+  offset, the front one showing a titlebar and a row of data.
+
+  Drawn on a 32-unit grid so every edge lands on a whole pixel at 16px and 32px.
+  Three things keep it readable in a 16px browser tab, where an earlier draft
+  turned to mush:
+    - the front panel is knocked out of the back one with a tile-coloured
+      stroke, so the two never merge into a single blob;
+    - one data row, not two — a second row closes up at small sizes;
+    - nothing is thinner than 2 units (1px at 16px).
+  The slate tile matches the app header and holds against light or dark browser
+  chrome.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="easyDBAccess">
+  <rect width="32" height="32" rx="7" fill="#1f2937" />
+
+  <!-- Back window: silhouette only, enough to read as "another table". -->
+  <rect x="5" y="5" width="15" height="14" rx="2" fill="#3b82f6" opacity="0.55" />
+
+  <!-- Front window, outlined in the tile colour so it lifts off the one behind. -->
+  <g stroke="#1f2937" stroke-width="2">
+    <rect x="12" y="12" width="15" height="15" rx="2.5" fill="#f9fafb" />
+  </g>
+  <path d="M13 14.5A1.5 1.5 0 0 1 14.5 13h10A1.5 1.5 0 0 1 26 14.5V17H13z" fill="#2563eb" />
+  <rect x="15" y="20" width="9" height="2.5" rx="1.25" fill="#94a3b8" />
+</svg>

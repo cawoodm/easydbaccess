@@ -7,7 +7,12 @@
          `target` only — no `href` — so relative URL / module resolution is
          unaffected. Modern browsers imply rel=noopener for target=_blank. -->
     <base target="_blank" />
-    <title>easyDBAccess v0.0.158</title>
+    <!-- `href` is relative so it resolves against the deploy base (the app also
+         ships under a GitHub Pages subpath, where a leading "/" would 404). -->
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <!-- The version is kept in sync by scripts/bump-version.mjs. app-shell
+         prefixes the workspace title at runtime, keeping this as the base. -->
+    <title>easyDBAccess v0.0.159</title>
     <style>
       html,
       body {

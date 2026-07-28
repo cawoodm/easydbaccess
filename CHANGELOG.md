@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 28 Jul 2026 (v0.0.159)
+
+- New favicon, and the workspace title now shows in the browser tab.
+
 ## 28 Jul 2026 (v0.0.158)
 
 - Typing a URL into a cell now turns it into a link as soon as you click away. Script-rendered and image cells gained a pencil on the right to edit their stored value.

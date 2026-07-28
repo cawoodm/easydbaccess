@@ -372,6 +372,7 @@ export class AppShell extends LitElement {
     this.workspaceUnsub = ctx.store.workspaces.subscribe((all) => {
       const me = all.find((w) => w.id === ctx.workspaceId);
       this.workspaceTitle = me?.title?.trim() ?? '';
+      syncDocumentTitle(this.workspaceTitle);
     });
   }
 
@@ -457,7 +458,7 @@ export class AppShell extends LitElement {
             target="_blank"
             rel="noopener"
             title="View the changelog on GitHub"
-            ><span class="version">v0.0.158</span></a
+            ><span class="version">v0.0.159</span></a
           ></strong
         >
         ${this.headerButtons
@@ -520,6 +521,24 @@ export class AppShell extends LitElement {
       <toast-host></toast-host>
     `;
   }
+}
+
+/**
+ * The `<title>` shipped in index.html — "easyDBAccess v<version>", kept current
+ * by scripts/bump-version.mjs. Captured before we touch it so it stays the base
+ * every later title is built from (and the fallback when no workspace title is
+ * set). Read at module load, which is before the shell can render.
+ */
+const BASE_DOCUMENT_TITLE = document.title;
+
+/**
+ * Put the workspace title in the browser tab, so several open workspaces are
+ * tellable apart from the tab strip alone. The app name and version stay as the
+ * suffix — they're what makes the tab identifiable as this app.
+ */
+function syncDocumentTitle(workspaceTitle: string): void {
+  const t = workspaceTitle.trim();
+  document.title = t ? `${t} — ${BASE_DOCUMENT_TITLE}` : BASE_DOCUMENT_TITLE;
 }
 
 function hasFiles(e: DragEvent): boolean {
