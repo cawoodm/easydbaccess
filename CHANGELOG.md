@@ -2,7 +2,7 @@
 
 ## 29 Jul 2026
 
-- 📝 New `docs/tech/MEMORY.md`: every table loads fully into memory today — no windowed/paged loading yet (v0.0.171)
+- 📝 New `docs/tech/MEMORY.md`: every table loads fully into memory today — no windowed/paged loading yet (v0.0.172)
 
 ## 28 Jul 2026
 
