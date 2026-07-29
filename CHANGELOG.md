@@ -2,33 +2,34 @@
 
 ## 29 Jul 2026
 
-- 🪲 The e2e backing server port is now resolved per branch instead of a shared 3998, so two worktrees can run the suite at once (v0.0.193)
-- 🔧 Added an ESLint config (adapted from twikki for TypeScript + Prettier); `npm run lint` works for the first time (v0.0.193)
-- 🪲 Tile and Cascade now leave minimized windows alone, instead of restoring them and reserving empty cells for them (v0.0.192)
-- ✨ New Auto Renderer plugin: after any import, columns get a renderer from their values — a URL becomes a link, an image URL a thumbnail, markup or long text a preview (v0.0.191)
-- 🪲 A JSON column of URLs was typed as a date, which locked out the link renderer (v0.0.191)
-- 🪲 The `script` renderer is gone — any column can carry a script, so it was a second way to do the same thing. A script returning HTML now needs the `html` renderer (v0.0.186)
-- ✨ The column script button is always a pencil now: gray when no script is set, blue when one is (v0.0.186)
-- 🪲 Reloading now keeps windows stacked as you left them: views no longer jump in front of tables (v0.0.185)
-- ✨ Each window titlebar now starts with an icon for its kind — local, imported, referenced, connected or view — and remote-backed tables get a violet titlebar (v0.0.184)
+### Features
+
+- ✨ New Auto Renderer plugin: after any import, columns get an appropriate renderer from their values (v0.0.191)
+- ✨ Each window titlebar now starts with an icon for its kind (local, imported, referenced etc) (v0.0.184)
 - ✨ The boolean renderer now tells empty apart from false: a grayed checkbox for empty, red-bordered raw text for an invalid value (v0.0.183)
-- 🪲 An invalid stored value is shown with a red border and a pencil to fix it, instead of being blanked or coerced (v0.0.183)
-- 🪲 A boolean column with no renderer now shows its raw value, not a checkbox that hid empty and invalid data (v0.0.183)
 - ✨ The date, datetime, boolean and script renderers are now four separate plugins you can turn off individually (v0.0.183)
-- 🪲 Saving the column editor no longer discards a column's width, description, units, sortable flag or default (v0.0.183)
-- ✨ Any column can carry a script now: its `render(row)` output is what the column's renderer displays, so a link, image or boolean cell can show a computed value (v0.0.181)
+- ✨ Any column can carry a script now: its `render(row)` output is what the column's renderer displays (v0.0.181)
 - ✨ A GitHub file URL now imports its real content: the blob link becomes the raw link, and a Git-LFS file is fetched from the media host (v0.0.180)
-- 🪲 Refreshing a CSV or JSON table now finds columns the source has added and keeps columns you added yourself (v0.0.179)
 - ✨ One header Connect button lists every installed backend, instead of one button per backend (v0.0.178)
 - 🪶 The Datasette plugin split into Import and Connect, so each can be switched off on its own (v0.0.177)
-- 🪲 Dev/e2e server port now resolves per branch instead of hardcoded 5190; a taken port fails loudly instead of drifting (v0.0.176)
 - 🪶 Import dialog split in two blocks: the options every format shares, then the chosen format's own. CSV gained a Separator field (v0.0.176)
 - ✨ "Import into" lets you pick new table, append or replace up front, instead of a modal interrupting the import (v0.0.176)
 - ✨ "Edit columns before import" and "Limit rows" now work for JSON and Datasette, not only CSV (v0.0.176)
 - 🪶 A `.db.json` dump is now offered as a workspace restore, keeping window layout and views, not flattened into tables (v0.0.176)
-- 🪲 The pre-import column editor renamed columns without moving their values, so a renamed column came out empty (v0.0.176)
 - ✨ The delete-table trash icon is now dark red instead of inheriting the button's default color (v0.0.174)
-- 📝 New [Memory Docs](docs/tech/MEMORY.md): every table loads fully into memory today — no windowed/paged loading yet (v0.0.172)
+
+### Bugs
+
+- 🪲 The e2e backing server port is now resolved per branch instead of a shared 3998, so two worktrees can run the suite at once (v0.0.193)
+- 🪲 Tile and Cascade now leave minimized windows alone, instead of restoring them and reserving empty cells for them (v0.0.192)
+- 🪲 A JSON column of URLs was typed as a date, which locked out the link renderer (v0.0.191)
+- 🪲 Reloading now keeps windows stacked as you left them: views no longer jump in front of tables (v0.0.185)
+- 🪲 An invalid stored value is shown with a red border and a pencil to fix it, instead of being blanked or coerced (v0.0.183)
+- 🪲 A boolean column with no renderer now shows its raw value, not a checkbox that hid empty and invalid data (v0.0.183)
+- 🪲 Saving the column editor no longer discards a column's width, description, units, sortable flag or default (v0.0.183)
+- 🪲 Refreshing a CSV or JSON table now finds columns the source has added and keeps columns you added yourself (v0.0.179)
+- 🪲 Dev/e2e server port now resolves per branch instead of hardcoded 5190; a taken port fails loudly instead of drifting (v0.0.176)
+- 🪲 The pre-import column editor renamed columns without moving their values, so a renamed column came out empty (v0.0.176)
 
 ## 28 Jul 2026
 
