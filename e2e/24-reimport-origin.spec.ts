@@ -105,8 +105,8 @@ test('a dump round-trips a snapshot origin (reconstructable on another device)',
     async (args) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ctx = (window as any).__easydb;
-      const { importJsonText } = await import('/src/plugins/json-import.ts');
-      await importJsonText(ctx.api, args.dump, 'restore.json');
+      const { restoreWorkspaceDump } = await import('/src/plugins/json-import.ts');
+      await restoreWorkspaceDump(ctx.api, args.dump, 'restore.json');
       const t = (await ctx.store.tables.find()).find(
         (x: any) => x.workspaceId === args.ws && x.name === 'FromUrl',
       );

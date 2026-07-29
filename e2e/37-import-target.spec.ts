@@ -7,7 +7,10 @@ import { test, expect } from './fixtures.js';
  * read starts, and the import kernel writes there.
  *
  * The control only appears for an importer that runs on the kernel
- * (`supports.kernel`). CSV does; JSON and Datasette do not yet.
+ * (`supports.kernel`). CSV and JSON do; Datasette does not yet.
+ *
+ * The second half covers the other half of that split: a native `.db.json`
+ * dump is a workspace restore, not a table import.
  */
 
 const FIRST = 'city,pop\nBern,133000\nZug,30000\n';
@@ -71,13 +74,14 @@ test('the target control is hidden for an importer that is not on the kernel', a
   const dlg = page.locator('import-dialog dialog');
   await expect(dlg).toBeVisible();
 
+  // Both formats that run on the kernel take their destination from here.
   await dlg.getByTestId('import-format').selectOption('csv');
   await expect(dlg.getByTestId('import-target')).toBeVisible();
-
-  // JSON and Datasette still run their own collision prompt, so offering a
-  // destination here would be a promise the dialog cannot keep.
   await dlg.getByTestId('import-format').selectOption('json');
-  await expect(dlg.getByTestId('import-target')).toHaveCount(0);
+  await expect(dlg.getByTestId('import-target')).toBeVisible();
+
+  // Datasette still runs its own collision prompt, so offering a destination
+  // here would be a promise the dialog cannot keep.
   await dlg.getByTestId('import-format').selectOption('datasette');
   await expect(dlg.getByTestId('import-target')).toHaveCount(0);
 });
@@ -146,4 +150,81 @@ test('a name clash with target "new" makes a second table instead of prompting',
     .poll(async () => (await rowsOf(page, workspaceId, 'e-2'))?.fields)
     .toEqual(['town', 'inhabitants']);
   expect((await rowsOf(page, workspaceId, 'e'))?.values).toEqual(['Bern|133000', 'Zug|30000']);
+});
+
+/**
+ * Import and restore are different actions on the same file type. A native
+ * `.db.json` dump carries a whole workspace — geometry, views, filters — which
+ * the import kernel's table writer cannot express, so the dialog asks which
+ * one the user meant instead of silently throwing the extras away.
+ */
+const DUMP = JSON.stringify({
+  tables: [
+    {
+      name: 'people',
+      columns: [{ field: 'name', label: 'Name', type: 'string' }],
+      rows: [{ name: 'Ada' }],
+      windowGeometry: { x: 40, y: 60, w: 500, h: 300, z: 120 },
+    },
+  ],
+});
+const PLAIN = JSON.stringify([{ name: 'Ada' }, { name: 'Grace' }]);
+
+async function openJsonImport(page: import('@playwright/test').Page, url: string, body: string) {
+  await page.route(url, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' },
+      body,
+    }),
+  );
+  await page.getByTitle('Import data from a URL').click();
+  const dlg = page.locator('import-dialog dialog');
+  await dlg.locator('input[type="text"]').fill(url);
+  await dlg.getByTestId('import-format').selectOption('json');
+  await dlg.getByRole('button', { name: 'Import', exact: true }).click();
+  return dlg;
+}
+
+test('plain tabular JSON runs on the kernel with no restore prompt', async ({
+  page,
+  workspaceId,
+}) => {
+  await openJsonImport(page, 'https://ex.example/plain.json', PLAIN);
+
+  // No question asked — an array of objects is just data. (The element is
+  // always in the DOM; only an OPEN dialog is visible.)
+  await expect(page.locator('host-dialogs dialog')).toBeHidden();
+  await expect
+    .poll(async () => {
+      const t = await rowsOf(page, workspaceId, 'plain');
+      return t?.fields;
+    })
+    .toEqual(['name']);
+});
+
+test('a workspace dump offers to restore, and restoring keeps the window geometry', async ({
+  page,
+  workspaceId,
+}) => {
+  await openJsonImport(page, 'https://ex.example/space.db.json', DUMP);
+
+  const ask = page.locator('host-dialogs dialog');
+  await expect(ask).toBeVisible();
+  await expect(ask).toContainText('workspace dump');
+  await ask.getByRole('button', { name: /^(Yes|OK|Restore)/ }).click();
+
+  // The geometry travelled with it — that is what the restore path is for.
+  await expect
+    .poll(() =>
+      page.evaluate(async (ws) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__easydb.store;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const t = (await store.tables.find()).find((x: any) => x.workspaceId === ws);
+        return t?.windowGeometry?.x ?? null;
+      }, workspaceId),
+    )
+    .toBe(40);
 });

@@ -218,6 +218,13 @@ export interface ImportSourceInput {
   url?: string | undefined;
   file?: File | undefined;
   text?: string | undefined;
+  /**
+   * Name to propose for the table, when the input alone does not carry one.
+   * A `url` or `file` names itself; a `text` body does not, so a caller that
+   * already read the body (to sniff its shape, say) passes the original name
+   * here rather than letting every importer fall back to "imported".
+   */
+  name?: string | undefined;
 }
 
 /**

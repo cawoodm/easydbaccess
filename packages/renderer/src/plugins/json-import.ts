@@ -13,6 +13,7 @@ import type {
   WindowGeometry,
 } from '@easydb/shared';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
+import { runImport } from '../import/import-kernel.js';
 import { rowRekeyer } from '../table/column-merge.js';
 import { filenameFromUrl } from '../import/fetch-source.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
@@ -50,14 +51,43 @@ export function init(api: HostApi): void {
 }
 
 // -- Importer spec ------------------------------------------------------------
+//
+// This spec is the GENERIC JSON importer: an array of objects, a `{rows: […]}`
+// envelope, or a single object. Those are plain tabular data, so they run on
+// the import kernel exactly like a CSV.
+//
+// A native `.db.json` dump is a different thing. It carries window geometry,
+// sort, filters, view templates and view instances, and can replace the whole
+// workspace — that is RESTORING a workspace, not importing a table, and no
+// generic table writer can express it. It keeps its own path
+// (`restoreWorkspaceDump` below). `isWorkspaceDump` is how a caller tells them
+// apart before choosing which to run.
+//
+// `list` parses once and returns one candidate per table, carrying the parsed
+// table as the opaque handle. `read` hands back what `list` already produced —
+// no second parse.
 
-// A JSON dump can hold MANY tables, so `list` parses once and returns one
-// candidate per table, carrying the parsed table as the opaque handle. `read`
-// then just hands back what `list` already produced — no second parse.
+/**
+ * True when this parsed body is a native or v1 workspace dump rather than
+ * plain tabular JSON. Exported so the Import dialog and the drop handler can
+ * route to the restore path instead of the kernel.
+ */
+export function isWorkspaceDump(parsed: unknown): boolean {
+  if (!isObject(parsed)) return false;
+  if (looksLikeV1Dump(parsed as Record<string, unknown>)) return true;
+  return Array.isArray((parsed as { tables?: unknown }).tables);
+}
+
+/** The name a source should give its table, before the kernel's naming policy. */
+function candidateName(input: ImportSourceInput): string {
+  if (input.kind === 'file' && input.file) return stripJsonExt(input.file.name);
+  if (input.kind === 'url' && input.url) return stripJsonExt(filenameFromUrl(input.url));
+  return stripJsonExt(input.name ?? 'imported');
+}
 
 const importerSpec: ImporterSpec = {
   id: 'json',
-  label: 'JSON dump',
+  label: 'JSON (array of objects or a dump)',
   icon: 'data_object',
   order: 20,
   accept: ['.json', '.db.json', 'application/json'],
@@ -67,7 +97,7 @@ const importerSpec: ImporterSpec = {
       url: 'https://raw.githubusercontent.com/cawoodm/easydbaccess/main/data/northwind.db.json',
     },
   ],
-  supports: { url: true, file: true, text: true, reference: true, multiTable: true },
+  supports: { url: true, file: true, text: true, reference: true, multiTable: true, kernel: true },
 
   detect(input) {
     const name = input.kind === 'file' ? (input.file?.name ?? '') : (input.url ?? '');
@@ -85,12 +115,7 @@ const importerSpec: ImporterSpec = {
       text = await ctx.fetchText(input.url, `Reading ${filenameFromUrl(input.url)}…`);
     } else text = input.text ?? '';
 
-    const fallback =
-      input.kind === 'file' && input.file
-        ? stripJsonExt(input.file.name)
-        : input.kind === 'url' && input.url
-          ? stripJsonExt(filenameFromUrl(input.url))
-          : 'imported';
+    const fallback = candidateName(input);
 
     let parsed: unknown;
     try {
@@ -144,16 +169,57 @@ function stripJsonExt(name: string): string {
 
 // -- Core: file -> Tables -----------------------------------------------------
 
+/**
+ * A dropped `.json` file. A workspace dump is restored whole; anything else is
+ * plain tabular data and goes through the kernel, so a dropped file lands
+ * exactly like the same file chosen in the Import dialog.
+ */
 async function importJsonFile(api: HostApi, file: File): Promise<void> {
-  await importJsonText(api, await file.text(), file.name);
+  const text = await file.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    api.events.emit('plugin:error', {
+      url: 'json-import',
+      phase: 'runtime',
+      error: new Error(`Invalid JSON in ${file.name}: ${(err as Error).message}`),
+    });
+    return;
+  }
+
+  if (isWorkspaceDump(parsed)) {
+    await restoreWorkspaceDump(api, text, file.name);
+    return;
+  }
+
+  const res = await runImport(
+    api,
+    importerSpec,
+    { kind: 'text', text, name: file.name },
+    { mode: 'copy', target: { kind: 'new' } },
+  );
+  const rows = res.landed.reduce((n, l) => n + l.rowCount, 0);
+  if (res.landed.length > 0) {
+    api.ui.dialogs.toast(`Imported ${file.name} (${rows.toLocaleString()} rows).`, {
+      kind: 'success',
+      title: 'Import',
+    });
+  }
 }
 
 /**
- * Imports a JSON dump given its text body and a source filename. Used by both
- * the drag-and-drop path and the import-data plugin's URL fetch path. Behavior
- * is identical: parse → detect shape → prompt user on collisions → write.
+ * Restore a native (or v1) workspace dump: tables plus everything around them
+ * — window geometry, sort, filters, label column, deleted columns, view
+ * templates and view instances — with the option to replace the whole
+ * workspace. This is deliberately NOT the import kernel's job: the kernel
+ * writes name, columns, rows and origin, which is all a table import means.
+ * Plain tabular JSON goes through the kernel instead (see `importerSpec`).
+ *
+ * Reached from the Import dialog and the drop handler once
+ * {@link isWorkspaceDump} says the body is a dump.
  */
-export async function importJsonText(
+export async function restoreWorkspaceDump(
   api: HostApi,
   text: string,
   filename: string,

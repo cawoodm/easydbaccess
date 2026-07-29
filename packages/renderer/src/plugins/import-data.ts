@@ -4,8 +4,9 @@
 // where the user pastes any URL or picks a predefined source from a dropdown
 // (our Northwind sample dump plus a few public Datasette tables), then routes
 // the import to the right engine:
-//   - JSON dump  -> fetch the body and hand it to json-import's importJsonText
-//   - Datasette  -> hand the URL to datasette-source's importDatasetteTable
+//   - a format on the import kernel (csv, json) -> runImport does the rest
+//   - a native .db.json dump -> json-import's restoreWorkspaceDump
+//   - Datasette -> datasette-source's importDatasette (until phase D)
 //
 // This is the grown-up replacement for the old single-prompt "Load sample data"
 // button: same Northwind default, but now Datasette tables are reachable from
@@ -31,7 +32,7 @@ import { parseCsv } from './csv-import.js';
 import { fetchDatabaseNames, fetchTablesForDb, parseDatasetteUrl } from './datasette-client.js';
 import { importDatasette } from './datasette-source.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
-import { importJsonText, parsedToTables } from './json-import.js';
+import { isWorkspaceDump, parsedToTables, restoreWorkspaceDump } from './json-import.js';
 import { fetchImportTextWithBar, filenameFromUrl } from '../import/fetch-source.js';
 import { runImport, type RunImportResult } from '../import/import-kernel.js';
 import type { ImportTarget } from '../import/land-tables.js';
@@ -193,19 +194,51 @@ async function openImport(api: HostApi, presetKind: ImportKind = 'auto'): Promis
     // the not-yet-migrated formats; it shrinks to nothing as the phases land.
     const spec = await findKernelImporter(kind);
     if (spec) {
-      const input: ImportSourceInput = file ? { kind: 'file', file } : { kind: 'url', url };
+      // A `.db.json` is not a table, it is a whole workspace — geometry, views,
+      // filters and all. Importing its tables would silently throw that away,
+      // so the dump is offered to the restore path instead. Sniffing the body
+      // costs one read, which is then handed to the kernel as `text` so nothing
+      // is fetched twice.
+      const sniffed = kind === 'json' ? await sniffJson(api, url, file, maxRows, mode) : null;
+      if (sniffed?.isDump) {
+        const restore = await api.ui.dialogs.confirm(
+          `"${label}" is a workspace dump, not a plain table. Restore it — tables, window ` +
+            `layout, views and filters? Choose Cancel to import only its tables as data.`,
+          'Restore workspace',
+        );
+        if (restore) {
+          await restoreWorkspaceDump(api, sniffed.text, label, {
+            maxRows,
+            editColumns: editHook,
+            ...(file ? {} : { originUrl: url }),
+          });
+          return;
+        }
+      }
+
+      // The body may already be read, in which case the input carries `text`
+      // and the source name has to travel with it — `label` is the whole URL,
+      // which is not a table name.
+      const sourceName = file ? file.name : filenameFromUrl(url);
+      const input: ImportSourceInput = sniffed
+        ? { kind: 'text', text: sniffed.text, name: sourceName }
+        : file
+          ? { kind: 'file', file }
+          : { kind: 'url', url };
       const res = await runImport(api, spec, input, {
         mode,
         target,
         maxRows,
         panel,
+        // The body was already read, so the input no longer names its source.
+        ...(sniffed && !file ? { origin: { type: spec.id, url } } : {}),
         ...(editHook ? { editColumns: (cols: ColumnSpec[]) => editHook(cols) } : {}),
       });
       if (!spec.ownToasts) reportImport(api, res, label);
       return;
     }
 
-    // --- Not yet on the kernel: json (Phase C) and datasette (Phase D). ------
+    // --- Not yet on the kernel: datasette (Phase D). -------------------------
 
     // Reference mode: a live, read-only table whose rows are fetched from the
     // source on demand and never persisted or synced, through the generic `url`
@@ -220,45 +253,51 @@ async function openImport(api: HostApi, presetKind: ImportKind = 'auto'): Promis
       return;
     }
 
-    if (file) {
-      const text = await file.text();
-      await importJsonText(api, text, file.name, { maxRows, editColumns: editHook });
-      api.ui.dialogs.toast(`Imported ${file.name}.`, { kind: 'success', title: 'Import' });
-      return;
-    }
-
-    if (kind === 'datasette') {
-      // importDatasette emits its own toasts. A table URL imports directly; a
-      // database/instance URL opens the table picker before importing — unless
-      // the user already picked a database here, in which case we import that
-      // database's tables directly (skipTablePicker).
-      await importDatasette(api, url, {
-        skipTablePicker: dbChosen,
-        maxRows,
-        editColumns: editHook,
-      });
-    } else {
-      const text = await fetchImportTextWithBar(
-        api,
-        url,
-        `Reading ${filenameFromUrl(url)}…`,
-        maxRows != null ? { maxBytes: null } : {},
-      );
-      await importJsonText(api, text, filenameFromUrl(url), {
-        originUrl: url,
-        maxRows,
-        editColumns: editHook,
-      });
-      api.ui.dialogs.toast(`Imported ${filenameFromUrl(url)}.`, {
-        kind: 'success',
-        title: 'Import',
-      });
-    }
+    // importDatasette emits its own toasts. A table URL imports directly; a
+    // database/instance URL opens the table picker before importing — unless
+    // the user already picked a database here, in which case we import that
+    // database's tables directly (skipTablePicker).
+    await importDatasette(api, url, {
+      skipTablePicker: dbChosen,
+      maxRows,
+      editColumns: editHook,
+    });
   } catch (err) {
     api.ui.dialogs.toast(`Could not import ${label}: ${(err as Error).message}`, {
       kind: 'error',
       title: 'Import',
     });
+  }
+}
+
+/**
+ * Read a JSON body once and say whether it is a workspace dump. Returns null
+ * when there is nothing to read. The text is passed back so the caller can
+ * hand it straight to whichever path wins, instead of fetching it again.
+ */
+async function sniffJson(
+  api: HostApi,
+  url: string,
+  file: File | undefined,
+  maxRows: number | undefined,
+  mode: 'copy' | 'reference',
+): Promise<{ text: string; isDump: boolean } | null> {
+  // A Reference never reads the whole body to write it, so leave that path to
+  // the kernel — and a dump cannot be referenced anyway.
+  if (mode === 'reference') return null;
+  const text = file
+    ? await file.text()
+    : await fetchImportTextWithBar(
+        api,
+        url,
+        `Reading ${filenameFromUrl(url)}…`,
+        maxRows != null ? { maxBytes: null } : {},
+      );
+  try {
+    return { text, isDump: isWorkspaceDump(JSON.parse(text)) };
+  } catch {
+    // Not valid JSON. Let the importer report it with its own message.
+    return { text, isDump: false };
   }
 }
 

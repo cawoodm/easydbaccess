@@ -39,6 +39,12 @@ export interface RunImportOptions {
   panel?: Record<string, unknown> | undefined;
   /** Resume cursor for continuing an interrupted import. */
   cursor?: string | undefined;
+  /**
+   * Stamp this origin on new tables instead of the one derived from the input.
+   * Needed when the caller already read the body and hands the kernel `text`,
+   * so the URL it came from is no longer visible in the input.
+   */
+  origin?: TableOrigin | undefined;
 }
 
 /**
@@ -179,7 +185,8 @@ export async function runImport(
 
       const batches: AsyncIterable<ImportBatch> = spec.read(readCtx, candidate);
       const origin: TableOrigin | undefined =
-        input.kind === 'url' && input.url ? { type: spec.id, url: input.url } : undefined;
+        opts.origin ??
+        (input.kind === 'url' && input.url ? { type: spec.id, url: input.url } : undefined);
 
       const result = await landCandidate(api, candidate.name, batches, {
         workspaceId,
