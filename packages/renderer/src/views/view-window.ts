@@ -86,6 +86,21 @@ export class ViewWindow extends LitElement {
       .vw-html {
         padding: 0.5rem 0.75rem;
       }
+      /* Editable $input.TOKEN controls injected into a template's row HTML. */
+      .eda-input-field {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        cursor: pointer;
+        font-size: 0.82rem;
+        color: #374151;
+      }
+      .eda-input-field input[disabled] {
+        cursor: not-allowed;
+      }
+      .eda-input-field .eda-input-label:empty {
+        display: none;
+      }
       /* Footer toolbar: the template on/off toggle sits at the bottom-right. */
       .vw-footer {
         flex: 0 0 auto;
@@ -299,6 +314,39 @@ export class ViewWindow extends LitElement {
     if (this.templateOn) emitVisibleCount(this.viewInstanceId, rows.length, this.allRows.length);
   }
 
+  /**
+   * Persist an edit made through an `$input.TOKEN` control in the template. The
+   * write goes straight to the row's cell; the live-query subscription then
+   * re-runs `recompute`, so the view refreshes and re-applies its filters — a
+   * row edited out of the filter (e.g. a `read` checkbox filtered on `!true`)
+   * simply disappears. No-ops for a readonly view (the inputs are disabled too).
+   */
+  private onInputChange = async (e: Event): Promise<void> => {
+    const t = e.target;
+    if (!(t instanceof HTMLInputElement) || !t.classList.contains('eda-input')) return;
+    if (!this.instance || this.instance.readonly === true) return;
+    const rowId = t.getAttribute('data-eda-row');
+    const field = t.getAttribute('data-eda-field');
+    const type = t.getAttribute('data-eda-type') ?? 'string';
+    if (!rowId || !field) return;
+    const existing = this.allRows.find((r) => r.id === rowId);
+    if (!existing) return;
+    let value: unknown;
+    if (type === 'boolean') {
+      value = t.checked;
+    } else if (type === 'number') {
+      const n = Number(t.value);
+      value = t.value.trim() === '' ? null : Number.isNaN(n) ? t.value : n;
+    } else {
+      value = t.value;
+    }
+    const ctx = await getContext();
+    await ctx.store.rows(this.instance.tableId).patch(rowId, {
+      data: { ...existing.data, [field]: value },
+      updatedAt: Date.now(),
+    });
+  };
+
   // -- footer actions ---------------------------------------------------------
 
   /** Flip the template on/off for this view and persist it to the instance. */
@@ -376,7 +424,13 @@ export class ViewWindow extends LitElement {
       // Row mode: concatenate header + repeated rows + footer into one HTML
       // block so a header that opens a wrapping tag pairs with the footer.
       const mapping = this.instance?.mapping ?? {};
-      const body = this.rows.map((r) => substituteRow(t.rowHtml, r, mapping)).join('');
+      // Column specs (field → spec) drive how an $input.TOKEN renders (checkbox
+      // for a boolean, number/text otherwise). A readonly view disables them.
+      const colMap = new Map(this.tableColumns.map((c) => [c.field, c]));
+      const readonly = this.instance?.readonly === true;
+      const body = this.rows
+        .map((r) => substituteRow(t.rowHtml, r, mapping, { columns: colMap, readonly }))
+        .join('');
       const full = (t.headerHtml ?? '') + body + (t.footerHtml ?? '');
       return html`<div class="vw-root">${unsafeHTML(full)}</div>`;
     }
@@ -457,7 +511,9 @@ export class ViewWindow extends LitElement {
 
     const on = this.templateOn;
     const body = on
-      ? html`<div class="vw-body scroll">${this.renderTemplated()}</div>`
+      ? html`<div class="vw-body scroll" @change=${this.onInputChange}>
+          ${this.renderTemplated()}
+        </div>`
       : html`<div class="vw-body grid">
           <data-table
             .tableId=${this.instance?.tableId ?? ''}

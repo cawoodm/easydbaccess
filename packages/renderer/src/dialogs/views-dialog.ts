@@ -411,6 +411,16 @@ export class ViewsDialog extends LitElement {
       (c) => c.field.toLowerCase() === lc || (c.label ?? '').toLowerCase() === lc,
     );
     if (hit) return hit.field;
+    // `CHECK1`, `CHECK2`, … (the RSS template's editable `$input.CHECKn` flags)
+    // map to the table's Nth boolean column, so a new view gets ready-to-tick
+    // checkboxes for its first couple of boolean fields.
+    const checkMatch = /^check(\d+)$/i.exec(token);
+    if (checkMatch) {
+      const idx = Number(checkMatch[1]) - 1;
+      const bools = this.columns.filter((c) => c.type === 'boolean');
+      return bools[idx]?.field ?? '';
+    }
+
     // Fall back to the table's designated label column (e.g. Datasette's
     // `label_column`) for a title/name/label token — a better "what identifies
     // a row" default than leaving it unmapped.
