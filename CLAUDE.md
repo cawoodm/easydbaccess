@@ -11,7 +11,7 @@ backend for multi-device sync and URL-based data ingestion.
 
 The canonical design lives at [`.claude/plans/2026-05-21-rewrite-architecture.md`](./.claude/plans/2026-05-21-rewrite-architecture.md).
 Read it before making structural changes — it is more authoritative than this
-file for the *why* behind the architecture. Phases 1–6 are landed (skeleton +
+file for the _why_ behind the architecture. Phases 1–6 are landed (skeleton +
 shared types + Dexie + plugin host + built-in plugins + jsPanel windows +
 standalone Hono server with `/sync`, `/fetch`, `/plugins/registry`). Phase 7
 (live multi-device replication beyond whole-workspace blob push/pull), Phase 8
@@ -23,21 +23,21 @@ standalone Hono server with `/sync`, `/fetch`, `/plugins/registry`). Phase 7
 All scripts run from the repo root (`npm` workspaces). Node ≥24 required
 (`engines.node`); the server's `process.loadEnvFile` and Electron 33 expect it.
 
-| Command | What it does |
-|---|---|
-| `npm install` | Install all workspace dependencies. |
-| `npm run dev:renderer` | Vite dev server at **`http://localhost:5190`** (port chosen to avoid clashing with the legacy `minniDBMax` on `:5173`). |
-| `npm run dev:server` | `tsx watch` for the Hono server (`packages/server/src/standalone.ts`), defaults to port 3000. |
-| `npm run dev:electron` | Vite + Electron with live reload (`scripts/dev.cjs` boots renderer first, then launches Electron pointed at it). |
-| `npm run build` | Build every workspace that defines a `build` script. |
-| `npm run typecheck` | `tsc -b` across all project references. Run this before claiming work is done. |
-| `npm run lint` | ESLint over `packages/`. |
-| `npm run test` | Vitest unit + integration suites (per package; the server package has e2e-style HTTP tests). |
-| `npm run test:e2e` | Playwright suite under `e2e/` (13 specs covering dialogs, table, columns editor, cells, import/export, filters, window manager, auto-sync, sql-export, backend proxy, plugins registry). |
-| `npm run test:e2e:ui` | Same, with Playwright's interactive UI. |
-| `npm run format` | Prettier across `packages/`. |
-| `npm run package:electron` | `package-electron.ps1 -Installer` — builds renderer + electron, runs `electron-builder` for the Windows installer. |
-| `npm run publish` | `publish.ps1` — release script. |
+| Command                    | What it does                                                                                                                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm install`              | Install all workspace dependencies.                                                                                                                                                      |
+| `npm run dev:renderer`     | Vite dev server at **`http://localhost:5190`** (port chosen to avoid clashing with the legacy `minniDBMax` on `:5173`).                                                                  |
+| `npm run dev:server`       | `tsx watch` for the Hono server (`packages/server/src/standalone.ts`), defaults to port 3000.                                                                                            |
+| `npm run dev:electron`     | Vite + Electron with live reload (`scripts/dev.cjs` boots renderer first, then launches Electron pointed at it).                                                                         |
+| `npm run build`            | Build every workspace that defines a `build` script.                                                                                                                                     |
+| `npm run typecheck`        | `tsc -b` across all project references. Run this before claiming work is done.                                                                                                           |
+| `npm run lint`             | ESLint over `packages/`.                                                                                                                                                                 |
+| `npm run test`             | Vitest unit + integration suites (per package; the server package has e2e-style HTTP tests).                                                                                             |
+| `npm run test:e2e`         | Playwright suite under `e2e/` (13 specs covering dialogs, table, columns editor, cells, import/export, filters, window manager, auto-sync, sql-export, backend proxy, plugins registry). |
+| `npm run test:e2e:ui`      | Same, with Playwright's interactive UI.                                                                                                                                                  |
+| `npm run format`           | Prettier across `packages/`.                                                                                                                                                             |
+| `npm run package:electron` | `package-electron.ps1 -Installer` — builds renderer + electron, runs `electron-builder` for the Windows installer.                                                                       |
+| `npm run publish`          | `publish.ps1` — release script.                                                                                                                                                          |
 
 The `dev` script chains renderer + server with `&`; on Windows prefer running
 `dev:renderer` and `dev:server` in separate terminals.
@@ -65,7 +65,7 @@ Three logical pieces:
    runs in the browser (Vite-served) and inside the Electron renderer. Talks
    to Dexie/IndexedDB locally; sync goes over HTTP to the server.
 2. **`packages/server`** — A Hono app exposed by `createServer({ store, fetchFn, ... })`.
-   The *same* exported app is designed to run inside Electron's main process
+   The _same_ exported app is designed to run inside Electron's main process
    **and** as a remote peer (`packages/server/src/standalone.ts`). Routes:
    `/health`, `/sync` (whole-workspace JSON blob push/pull with ETag), `/sync/:workspaceId/stream`
    (SSE), `/fetch` (URL proxy with allowlist + size cap), `/plugins/registry`
@@ -120,7 +120,7 @@ places in lockstep:
 2. Dexie schema + typed table → `packages/renderer/src/db/dexie-db.ts`
 3. Plugin-facing wrapper → `packages/renderer/src/db/data-store-dexie.ts`
 
-`store.rows(tableId)` returns a *view* (not a separate Dexie table) that
+`store.rows(tableId)` returns a _view_ (not a separate Dexie table) that
 auto-injects `tableId` into inserts and queries. There is one underlying
 `rows` table indexed on `tableId`.
 
@@ -168,3 +168,21 @@ Don't "fix" these without checking the plan section first:
   surface exists, but in Electron it still uses the browser `<a download>`
   fallback. Native `dialog.showSaveDialog` lands with Phase 8.
 - **Migration from v1 minniDBMax localStorage** — Phase 9.
+
+## Servers
+
+To make testing easier we need each branch on a stable port. The convention is:
+
+- main: http://localhost:5190
+- todos1: http://localhost:5191
+- todos2: http://localhost:5192
+
+Don't let other branches run on these ports, only run on this ports (strict).
+
+This is enforced, not just documented: `scripts/dev-port.mjs` resolves the
+port for the current git branch (falling back to a stable hash-derived port
+for any branch not listed above), and both `packages/renderer/vite.config.ts`
+(`strictPort: true`) and the root `playwright.config.ts` use it — so `npm run
+dev:renderer` and `npm run test:e2e` always agree on one port per branch and
+never silently drift onto a neighboring branch's port. Override for a one-off
+with `RENDERER_PORT=<n>`.

@@ -1,6 +1,7 @@
 import { defineConfig, searchForWorkspaceRoot } from 'vite';
 import { createRequire } from 'node:module';
 import { generatePluginCatalog } from '../../scripts/generate-plugin-catalog.mjs';
+import { resolveDevPort } from '../../scripts/dev-port.mjs';
 
 const require = createRequire(import.meta.url);
 // Deps hoist to the primary checkout's node_modules. When the renderer runs
@@ -16,8 +17,11 @@ const sharedNodeModules = cssPath.slice(
 
 export default defineConfig({
   server: {
-    port: 5190,
-    strictPort: false,
+    port: resolveDevPort(),
+    // Fail loudly instead of silently drifting to the next free port — a
+    // drifted port is exactly what made it hard to tell which branch a dev
+    // server was actually serving.
+    strictPort: true,
     // Bind all interfaces (not just whichever localhost resolves to first —
     // on some machines that's IPv6-only, so a plain 127.0.0.1 client can't
     // connect even though the server is up). Also what makes ngrok exposure

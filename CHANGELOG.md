@@ -2,8 +2,9 @@
 
 ## 29 Jul 2026
 
+- 🪲 Dev/e2e server port now resolves per branch instead of hardcoded 5190; a taken port fails loudly instead of drifting (v0.0.176)
 - ✨ The delete-table trash icon is now dark red instead of inheriting the button's default color (v0.0.174)
-- 📝 New `docs/tech/MEMORY.md`: every table loads fully into memory today — no windowed/paged loading yet (v0.0.172)
+- 📝 New [Memory Docs](docs/tech/MEMORY.md): every table loads fully into memory today — no windowed/paged loading yet (v0.0.172)
 
 ## 28 Jul 2026
 

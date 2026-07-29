@@ -1,4 +1,10 @@
 import { test, expect } from '@playwright/test';
+import { resolveDevPort } from '../scripts/dev-port.mjs';
+
+// This test opens two independent contexts via `browser.newContext()`, which
+// does NOT inherit the config's `use.baseURL` — so it needs the same
+// branch-resolved port used everywhere else, not a hardcoded one.
+const baseURL = `http://localhost:${resolveDevPort()}`;
 
 /**
  * Multi-tab schema-upgrade safety.
@@ -63,12 +69,12 @@ test('a blocked schema upgrade shows an actionable overlay, then boots once the 
         route.abort();
       }
     });
-    await holder.goto('http://localhost:5190/db-upgrade-holder');
+    await holder.goto(`${baseURL}/db-upgrade-holder`);
     await holder.evaluate(SEED_AND_HOLD_V1);
 
     // App tab: the real renderer wants version ≥2 → its open() is blocked.
     const app = await context.newPage();
-    await app.goto('http://localhost:5190/?test=1&space=upgrade-block');
+    await app.goto(`${baseURL}/?test=1&space=upgrade-block`);
     const overlay = app.locator('#easydb-upgrade-blocked');
     await expect(overlay).toBeVisible({ timeout: 15_000 });
     await expect(overlay).toContainText(/another tab/i);

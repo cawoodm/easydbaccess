@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
+import { resolveDevPort } from './scripts/dev-port.mjs';
 
 /**
  * E2E tests for the renderer. Playwright launches Vite, waits for the dev
@@ -10,7 +11,15 @@ import { defineConfig, devices } from '@playwright/test';
  * Per-test isolation: each test opens its own `?space=` workspace so the
  * RxDB/IndexedDB store from one test doesn't pollute another. The page
  * also wipes IndexedDB in `beforeEach` for belt-and-braces.
+ *
+ * The renderer port is resolved from the current branch (see
+ * scripts/dev-port.mjs), same as vite.config.ts, so e2e always targets
+ * whichever port THIS checkout's dev server actually runs on — never a
+ * hardcoded 5190 that might belong to a different worktree.
  */
+const rendererPort = resolveDevPort();
+const baseURL = `http://localhost:${rendererPort}`;
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
@@ -19,7 +28,7 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
-    baseURL: 'http://localhost:5190',
+    baseURL,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
@@ -32,7 +41,7 @@ export default defineConfig({
   webServer: [
     {
       command: 'npm run dev:renderer',
-      url: 'http://localhost:5190',
+      url: baseURL,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },
@@ -49,7 +58,7 @@ export default defineConfig({
         PORT: '3998',
         STORAGE_KIND: 'fs',
         STORAGE_PATH: '.playwright-storage',
-        CORS_ORIGINS: 'http://localhost:5190',
+        CORS_ORIGINS: baseURL,
         // Curated registry served at /plugins/registry — exercised by
         // e2e/13-plugins-registry.spec.ts. Resolve to absolute because
         // `npm run dev:server` changes cwd to packages/server/ where a
