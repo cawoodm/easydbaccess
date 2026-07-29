@@ -7,6 +7,7 @@ import type {
   ViewInstance,
   ViewTemplate,
 } from '@easydb/shared';
+import { cryptoUUID, slugTable } from '../util/ids.js';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a
 // custom element on import, which would blow up under Vitest's default
@@ -321,7 +322,7 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
     const label = `${t.name} (${(content.length / 1_000_000).toFixed(2)} MB)`;
     if (content.length > HARD_LIMIT) oversize.push(label);
     else if (content.length > SOFT_LIMIT) large.push(label);
-    files[`${slug(t.name)}.table.json`] = { content };
+    files[`${slugTable(t.name)}.table.json`] = { content };
   }
 
   // Warn before an oversized/heavy push (a single dialog covers both tiers) so
@@ -503,7 +504,7 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
             workspaceId: wsId,
             name: parsed.name,
             title: parsed.title,
-            code: slug(parsed.name),
+            code: slugTable(parsed.name),
             columns: parsed.columns,
             view: parsed.view ?? 'table',
             ...syncedTableFields(parsed),
@@ -618,7 +619,7 @@ async function pushTable(api: HostApi, tableId: string): Promise<void> {
   // Remote tables push their definition only; their rows live in the backend.
   const rows = table.source != null ? [] : await api.store.rows(tableId).find();
   const content = JSON.stringify(tableToFile(table, rows), null, 2);
-  const files = { [`${slug(table.name)}.table.json`]: { content } };
+  const files = { [`${slugTable(table.name)}.table.json`]: { content } };
   const res = await fetch(`https://api.github.com/gists/${creds.gistId}`, {
     method: 'PATCH',
     headers: {
@@ -640,7 +641,7 @@ async function pullTable(api: HostApi, tableId: string): Promise<void> {
   }
   const table = await api.store.tables.findOne(tableId);
   if (!table) return;
-  const filename = `${slug(table.name)}.table.json`;
+  const filename = `${slugTable(table.name)}.table.json`;
   const res = await fetch(`https://api.github.com/gists/${creds.gistId}`, {
     headers: { Authorization: `Bearer ${creds.token}`, Accept: 'application/vnd.github+json' },
   });
@@ -698,7 +699,7 @@ async function viewTableGist(api: HostApi, tableId: string): Promise<void> {
   const table = await api.store.tables.findOne(tableId);
   if (!table) return;
   // GitHub anchors a gist file as #file-<filename with non-alphanumerics as '-'>.
-  const fileAnchor = `file-${slug(table.name)}-table-json`;
+  const fileAnchor = `file-${slugTable(table.name)}-table-json`;
   window.open(
     `https://gist.github.com/${creds.user}/${creds.gistId}#${fileAnchor}`,
     '_blank',
@@ -776,19 +777,3 @@ async function readError(res: Response): Promise<string> {
   return `${res.status} ${res.statusText}${body ? `: ${body.slice(0, 200)}` : ''}`;
 }
 
-function slug(s: string): string {
-  return (
-    s
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'table'
-  );
-}
-
-function cryptoUUID(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  );
-}

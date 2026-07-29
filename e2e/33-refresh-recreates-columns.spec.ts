@@ -50,7 +50,7 @@ test('a failed import creates an empty table; Refresh recreates columns and open
   await page.getByTitle('Import data from a URL').click();
   const importDialog = page.locator('import-dialog dialog');
   await importDialog.locator('input[type="text"]').fill('https://ppl2.example/energy/plants');
-  await importDialog.locator('select').last().selectOption('datasette');
+  await importDialog.getByTestId('import-format').selectOption('datasette');
   await importDialog.getByRole('button', { name: 'Import' }).click();
 
   const tableId = await (async () => {
@@ -123,7 +123,7 @@ test('a deleted column is remembered and not re-added by a later refresh (issues
   await page.getByTitle('Import data from a URL').click();
   const importDialog = page.locator('import-dialog dialog');
   await importDialog.locator('input[type="text"]').fill('https://ppl3.example/energy/plants');
-  await importDialog.locator('select').last().selectOption('datasette');
+  await importDialog.getByTestId('import-format').selectOption('datasette');
   await importDialog.getByRole('button', { name: 'Import' }).click();
 
   const tableId = await (async () => {
@@ -165,7 +165,10 @@ test('a deleted column is remembered and not re-added by a later refresh (issues
       page.evaluate(async (id) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const t = await (window as any).__easydb.store.tables.findOne(id);
-        return { cols: t.columns.map((c: { field: string }) => c.field), deleted: t.deletedColumns };
+        return {
+          cols: t.columns.map((c: { field: string }) => c.field),
+          deleted: t.deletedColumns,
+        };
       }, tableId),
     )
     .toEqual({ cols: ['id', 'name'], deleted: ['capacity_mw'] });

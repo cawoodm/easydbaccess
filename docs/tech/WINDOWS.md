@@ -44,7 +44,7 @@ pull) opens a panel; a table disappearing closes one.
 **Geometry.** `WindowGeometry` is `{ x, y, w, h, z, minimized, maximized }`.
 On restore, `sanitizeGeometry()` (a pure function in its own
 `window-mgr/geometry.ts`, unit-tested in isolation from jsPanel/DOM) discards
-only *corrupt* records (missing, non-finite, or smaller than `200×100`) and
+only _corrupt_ records (missing, non-finite, or smaller than `200×100`) and
 the caller falls back to a cascading
 default position + a `720×360` content size — position itself is **never
 clamped to the viewport**, because a panel legitimately restoring off-screen
@@ -58,13 +58,36 @@ and every `onstatuschange` (minimize/maximize/normalize) calls
 describe the panel's "normal" rect, so the previous stored rect is kept and
 only the `minimized`/`maximized` flags flip.
 
+**`?minimize` — open everything minimized.** A rescue hatch for a workspace
+whose tables are too big to load: `http://localhost:5190/?minimize` (any
+truthy value, or the bare flag; `?minimize=0` is off) opens **every** table
+minimized regardless of its saved geometry. This works because a minimized
+panel mounts a bare placeholder instead of a `<data-table>` — it holds no rows,
+keeps no store subscription, and a live/remote table fetches nothing until it
+is expanded. So the workspace opens instantly and the user can expand one table
+at a time (or delete the one that is too big) via the titlebar or Ctrl+K →
+"Go to &lt;table&gt;", which normalizes a minimized panel.
+
+The flag is a **view override, not a saved preference.** While it is on,
+`saveGeometry()` keeps the stored `minimized`/`maximized` flags instead of
+writing the live status — otherwise a single visit would leave every table
+minimized on every later visit, and expanding one table to look at it would
+silently rewrite the saved layout. The flag is read once at module load, so
+editing the query string mid-session cannot retroactively change how
+already-open panels behave.
+
+**View windows are NOT covered.** `view-window-manager.ts` creates its
+`<view-window>` element eagerly (there is no lazy-placeholder equivalent), so
+minimizing a view would park it without preventing its data load. Giving views
+the same treatment means giving them lazy mounting first.
+
 **Z-order.** jsPanel has no stable, readable z-index: `front()` calls
 `resetZi()` internally, renormalizing every panel to a contiguous range each
 time, so the just-fronted panel always reads back the same "max" value.
 Instead, `onfronted` stamps `windowGeometry.z` with a monotonic front-rank
 counter (`lastFrontZ = Math.max(Date.now(), lastFrontZ + 1)`) — not a DOM
 value — and boot restore just sorts ascending by that number. Higher (more
-recent) = fronted later = ends up on top. It's *not* plain `Date.now()`:
+recent) = fronted later = ends up on top. It's _not_ plain `Date.now()`:
 two panels fronted within the same millisecond used to tie and lose their
 relative order; the `+ 1` fallback guarantees every stamp is strictly
 greater than the last regardless of wall-clock resolution.
@@ -99,7 +122,7 @@ which this time short-circuits straight through. `onclosed` then cascades:
 it deletes the `Table` record and (for a plain local table — **not** one
 carrying a `source`, since its rows live on the remote and must not be
 issued a bulk-delete) removes all of its rows too. A table removed
-*externally* (a JSON "replace entire workspace" import, a server/gist pull)
+_externally_ (a JSON "replace entire workspace" import, a server/gist pull)
 is tracked in a separate `externallyClosed` set so the reconciling
 subscription's forced close skips that redundant cascade — the data is
 already gone.
@@ -183,7 +206,7 @@ canvas's: for a canvas `translate(tx, ty) scale(s)`, the panel gets
 box back onto the overlay's `(0,0)-(W,H)` regardless of how the canvas is
 currently panned or zoomed. It subscribes to the shared `PanZoomHandle` for
 the duration of the maximized state (`enter()`/`exit()`, both idempotent) so
-panning or zooming *while* a window is maximized keeps it filling the
+panning or zooming _while_ a window is maximized keeps it filling the
 screen instead of sliding out from under itself. Table and view windows
 share the exact same helper and the exact same live `PanZoomHandle`
 (exposed via `currentPanZoom()` so the view-window manager, initialized

@@ -18,10 +18,18 @@ interface EditRow {
   hidden: boolean;
 }
 
-/** Open the editor for `columns`; resolves with the edited columns or null. */
-export function editColumnNames(columns: ColumnSpec[]): Promise<ColumnSpec[] | null> {
+/**
+ * Open the editor for `columns`; resolves with the edited columns or null.
+ * `subject` names what is being edited — a multi-table source (a JSON dump, a
+ * Datasette database) opens the editor once per table, so without the name the
+ * user cannot tell which one they are looking at.
+ */
+export function editColumnNames(
+  columns: ColumnSpec[],
+  subject?: string,
+): Promise<ColumnSpec[] | null> {
   const el = ColumnNamesDialog.instance ?? mount();
-  return el.open(columns);
+  return el.open(columns, subject);
 }
 
 function mount(): ColumnNamesDialog {
@@ -108,6 +116,7 @@ export class ColumnNamesDialog extends LitElement {
   ];
 
   @state() private rows: EditRow[] = [];
+  @state() private subject = '';
   private source: ColumnSpec[] = [];
   private dialogEl: HTMLDialogElement | null = null;
   private resolveFn: ((v: ColumnSpec[] | null) => void) | null = null;
@@ -127,8 +136,9 @@ export class ColumnNamesDialog extends LitElement {
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
   }
 
-  open(columns: ColumnSpec[]): Promise<ColumnSpec[] | null> {
+  open(columns: ColumnSpec[], subject?: string): Promise<ColumnSpec[] | null> {
     this.source = columns;
+    this.subject = subject ?? '';
     this.rows = columns.map((c) => ({ field: c.field, label: c.label, hidden: !!c.hidden }));
     return new Promise<ColumnSpec[] | null>((resolve) => {
       this.resolveFn = resolve;
@@ -205,7 +215,7 @@ export class ColumnNamesDialog extends LitElement {
         </button>
         <form @submit=${this.submit}>
           <div class="dialog-header">
-            <h2>Edit columns</h2>
+            <h2>${this.subject ? `Edit columns — ${this.subject}` : 'Edit columns'}</h2>
             <div class="header-actions">
               <button type="button" class="ghost" @click=${() => this.finish(null)}>Cancel</button>
               <button type="submit" class="primary" ?disabled=${errCount > 0}>Import</button>

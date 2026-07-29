@@ -82,7 +82,7 @@ test.describe('datasette import — whole database', () => {
     const dialog = page.locator('import-dialog dialog');
     await expect(dialog).toBeVisible();
 
-    const presets = dialog.locator('select').first();
+    const presets = dialog.getByTestId('import-sample');
     const labels = (await presets.locator('option').allTextContents()).map((s) => s.trim());
     const joined = labels.join(' | ');
     expect(joined).toContain('datasette.io');
@@ -541,7 +541,7 @@ test.describe('datasette import — instance-root database picker', () => {
     // A bare instance root. Force the Datasette kind so the picker shows even
     // though the host isn't literally "datasette".
     await dlg.locator('input[type="text"]').fill('https://inst.example');
-    await dlg.locator('select').last().selectOption('datasette');
+    await dlg.getByTestId('import-format').selectOption('datasette');
 
     // The Database row appears; load the list.
     await dlg.getByRole('button', { name: 'List databases' }).click();

@@ -8,6 +8,7 @@ changing code. For the user guide (how to use the app) see
 - [Storage](STORAGE.md)
 - [Plugins](PLUGINS.md)
 - [Commands](COMMANDS.md)
+- [Refresh](REFRESH.md) — reloading one table from its source, and its open questions
 - [Cloud Synch](SYNCH.md)
 - [Server](SERVER.md)
 - [Windows](WINDOWS.md)

@@ -67,14 +67,15 @@ Every plugin gets one `api` object. The pieces plugins actually touch:
 | `api.ui.registerTableButton` | Per-table button in a table's window titlebar | `csv-export` adds a "CSV" download button |
 | `api.ui.registerCellRenderer(name, tag)` | Custom element for a column whose `renderer` field matches `name` | `cell-color` registers `<cell-color>` under `'color'` |
 | `api.ui.registerImporter` / `registerExporter` | Named format handlers (used by drop handlers, the Import dialog, per-table export) | `csv-import`, `csv-export` |
-| `api.ui.registerDropHandler` | Intercept a file/text drag-drop onto the canvas | `csv-import`, `json-import`, `datasette-source` |
-| `api.ui.registerUrlSource` | A named "import from URL" flow | `datasette-source` |
+| `api.ui.registerDropHandler` | Intercept a file/text drag-drop onto the canvas | `csv-import`, `json-import`, `datasette-import` |
+| `api.ui.registerUrlSource` | A named "import from URL" flow | `datasette-import` |
+| `api.ui.registerConnector` | A live-backend CONNECT flow, listed by the Connect menu | `datasette-connect` |
 | `api.ui.registerSettings(pluginId, name, fields)` | Declares a settings tab (rendered by the Settings dialog) | `gist-sync`'s `user`/`gist_id`/`gist_token` fields |
 | `api.ui.openSettings()` | Opens the Settings dialog | the `settings` built-in's header gear button |
 | `api.settings` | Layered settings accessor (`get`/`set`/`placement`) — user layer shadows workspace layer, resolves `${secret:name}` refs on read | `gist-sync`, `server-sync` reading their config |
 | `api.ui.dialogs` | Promise-based alert/confirm/prompt/choice/toast | used everywhere instead of `window.*` |
 | `api.store` | The `DataStore` (tables, rows, settings, plugins, view templates/instances) | every plugin that persists data |
-| `api.registerRowSource` | Backs a table carrying a `source` descriptor with a non-local row collection | `datasette-source`'s live connector |
+| `api.registerRowSource` | Backs a table carrying a `source` descriptor with a non-local row collection | `datasette-connect` |
 | `api.events` | Typed pub/sub (`AppEvents`) | `import:before`/`import:after`, `plugin:error` |
 | `api.backend.fetch` / `saveFile` | CORS-aware fetch (proxied through the Hono server in browser mode) and a save-file abstraction | `import-data`, `gist-sync`, all exporters |
 | `api.windows` | Open/list/find jsPanel-backed windows | the core window manager; plugins rarely call this directly |
@@ -100,7 +101,9 @@ defaults to enabled but **can** be turned off by the user.
 | `new-table-button` | ui | | Adds the "+ New Table" header button that opens the table-creation dialog. | `registerHeaderButton` |
 | `csv-import` | importer | | Drag-and-drop or paste CSV to create a typed table; infers column types and a `field:label:type:default:max:flags` header mini-language; append/overwrite/new-table prompt on name collision. | `registerImporter`, `registerDropHandler`, `registerHeaderButton` |
 | `json-import` | importer | | Drag-and-drop JSON — native `.db.json` dumps, legacy v1 minniDBMax dumps, or plain arrays/objects — with a table picker for multi-table dumps. | `registerImporter`, `registerDropHandler` |
-| `datasette-source` | source | | Import (snapshot) or Connect (live, read-write) tables from any online [Datasette](https://datasette.io/) instance by URL — single table, whole database, or entire instance with a table checklist. Supports resumable paged imports and a per-table Refresh/Resume button. | `registerHeaderButton`, `registerTableButton`, `registerUrlSource`, `registerDropHandler`, `registerRowSource` |
+| `datasette-import` | importer | | IMPORT snapshot tables from any online [Datasette](https://datasette.io/) instance by URL — single table, whole database, or entire instance with a table checklist. Rows are stored locally and synced. Supports resumable paged imports, a per-table Refresh (re-fetch + merge by primary key) and a red Resume button. | `registerTableButton`, `registerUrlSource`, `registerDropHandler` |
+| `connect-menu` | ui | | Header "Connect" button plus a Ctrl+K command. Lists every registered `ConnectorSpec`; with one installed it opens that backend directly, with several it shows an anchored menu. Knows no backend itself. | `registerHeaderButton`, `registerCommand` |
+| `datasette-connect` | source | | CONNECT a live, read-write Datasette table. Rows are fetched on demand and never stored locally; the table carries `source: { type: 'datasette' }` and the routed store hands it `datasette-collection.ts`. Its Refresh re-reads the remote instead of merging. | `registerHeaderButton`, `registerTableButton`, `registerRowSource` |
 | `csv-export` | exporter | | Per-table "CSV" download button; RFC-4180-ish writer mirroring the CSV importer's dialect. | `registerExporter`, `registerTableButton` |
 | `dump-export` | exporter | | Footer "Export" menu button (JSON dump / SQL script) — the JSON option exports the whole workspace as one `.db.json` file; the SQL option delegates to `sql-export`'s serializer. | `registerFooterButton` |
 | `sql-export` | exporter | | No UI of its own — exports `serializeWorkspaceAsSql()`, called from `dump-export`'s "Export" menu. Still a standalone catalog entry (its own `meta.type`) for the Plugin Manager's type filter. | none (library only) |
@@ -112,7 +115,7 @@ defaults to enabled but **can** be turned off by the user.
 | `cell-color` | cell-renderer | | `color` renderer: a native `<input type=color>` swatch picker for hex values. | `registerCellRenderer` |
 | `cell-image` | cell-renderer | | `image` renderer: thumbnail + upload button; stores images as `data:` URIs. | `registerCellRenderer` |
 | `cell-link` | cell-renderer | | `link` renderer: detects http(s) URLs, email addresses, and phone numbers per-value and renders the matching `<a>` (target `_blank`/`mailto:`/`tel:`), with a pencil to switch to raw-text edit mode. | `registerCellRenderer` |
-| `import-data` | importer | | Header "Import" button — a URL/file dialog with curated sample sources (Northwind JSON, a public CSV, Datasette examples) that routes to `csv-import`, `json-import`, or `datasette-source` depending on detected/chosen kind; adds a per-table Refresh button for CSV/JSON snapshot origins. | `registerHeaderButton`, `registerTableButton` |
+| `import-data` | importer | | Header "Import" button — a URL/file dialog with curated sample sources (Northwind JSON, a public CSV, Datasette examples) that runs `csv-import` and `json-import` through the import kernel and still routes Datasette to `datasette-import`; recognises a native `.db.json` dump and offers to restore the workspace instead of importing its tables; adds a per-table Refresh button for CSV/JSON snapshot origins. | `registerHeaderButton`, `registerTableButton` |
 | `auto-sync` | sync | | Background timer (1 min) that silently pushes local changes to the configured sync server and prompts to pull when the server has diverged. Shares its config with `server-sync` via `api.settings`. | `load()` (timer) |
 | `views` | ui | | The View system: workspace-global HTML templates (header/row/footer with `$TOKEN` substitution) rendered read-only per table in their own windows, with auto-mapped tokens and an optional row limit; seeds a default "RSS Feed" template. Footer "Views" button opens the manager dialog; window lifecycle itself is core, not plugin, code. | `registerTableButton`, `load()` (template seeding) |
 
@@ -250,35 +253,67 @@ reconstructed with that backing intact rather than as a plain local table.
 Exports `parsedToTables`/`importJsonText` for reuse by `import-data` and
 `server-sync-core`.
 
-### datasette-source
+### datasette-import and datasette-connect
 
-Two distinct entry points against any online [Datasette](https://datasette.io/)
-instance: **Import** (a read-only snapshot, reachable via `registerUrlSource`
-and drop) and **Connect** (a live, read-write table backed by
-`api.registerRowSource({ type: 'datasette', ... })` — the one built-in that
-uses the row-source routing seam instead of writing to local Dexie). A URL
-may name a single table, a whole database, or an entire instance root; the
-latter two open a table checklist. Snapshot imports page through the API in
-fixed-size chunks (capped at 10,000 rows), and if paging is interrupted
-(e.g. rate-limited) the table records a resume cursor (`table.importResume`)
-surfaced as a red "Resume import" table button rather than silently
-truncating. A per-table Refresh button re-pulls live tables from the remote
-or re-fetches+replaces a snapshot's rows.
+Two plugins, because they are two different things against any online
+[Datasette](https://datasette.io/) instance.
+
+**`datasette-import`** takes a read-only **snapshot** you own: rows are written
+locally, synced, and editable. Reachable via `registerUrlSource`, a table-URL
+drop handler, and the Import dialog. A URL may name a single table, a whole
+database, or an entire instance root; the latter two open a table checklist.
+It pages through the API in fixed-size chunks (capped at 10,000 rows), and if
+paging is interrupted (e.g. rate-limited) the table records a resume cursor
+(`table.importResume`) surfaced as a red "Resume import" button rather than
+silently truncating. Its Refresh re-fetches and merges by primary key, keeping
+columns the user added and honouring the ones they deleted.
+
+**`datasette-connect`** points a window at somebody else's **live** table. It
+registers a `ConnectorSpec` rather than its own header button, so the single
+"Connect" in the header comes from `connect-menu` no matter how many backends
+are installed.
+Nothing is stored: the table carries `source: { type: 'datasette' }` and
+`api.registerRowSource({ type: 'datasette', ... })` hands it the collection in
+`datasette-collection.ts` — the one built-in that uses the row-source routing
+seam instead of writing to local Dexie. Its Refresh forces that collection to
+re-read, which is not the same operation as the import's merge, which is why
+each plugin registers its own Refresh button with a mutually-exclusive
+`visible` predicate.
+
+Both share `datasette-common.ts` (the table and database pickers, the row cap,
+the `TableInfo` stamp) and the wire layer in `datasette-client.ts`. Neither
+imports the other.
 
 ### import-data
 
-The header "Import" button — a dialog wrapping the three importers above
-behind one URL/file input plus a dropdown of curated sample sources
-(Northwind JSON dump, a public air-quality CSV, two Datasette examples).
-Guesses CSV vs. JSON vs. Datasette from the URL shape (`detectKind`) unless
-the user forces it via "Import as", supports uploading a local file instead
-of a URL, and offers a "Limit rows" cap and a CSV-only "Edit columns before
-import" checkbox (opens the column-rename dialog before the table is
-created). Also registers the per-table "Refresh" button for tables with a
-`csv`/`json` `origin` (re-fetches the origin URL and replaces the table's
-rows) — Datasette-origin tables get their own Refresh from
-`datasette-source` instead. Enforces a 50 MB hard ceiling on browser-buffered
-URL imports with an actionable error rather than an opaque failed transfer.
+The header "Import" button and the dialog behind it. The dialog is two blocks:
+the options EVERY importer has (sample source, URL, file upload, Copy vs.
+Reference, "Import into", "Edit columns before import", "Limit rows"), then a
+second block holding only the options of the chosen importer, mounted from the
+custom-element tag its `ImporterSpec.panel` declares — so this plugin imports
+no format code to render them. The format list, the file input's `accept` and
+the panel all come from `registries.importers`, so a new importer plugin
+appears with no edit here.
+
+An importer that declares `supports.kernel` (csv, json) runs entirely through
+`runImport`: the kernel owns the listing, the table picker, the row cap, the
+naming, the collision policy and the write, which is why "Import into" is only
+offered for those. Datasette is still dispatched to `datasette-import`, which
+owns its own paging and collision prompt.
+
+A native `.db.json` body is sniffed before anything is written: it is a whole
+workspace, so the dialog offers `json-import`'s `restoreWorkspaceDump` instead
+of flattening it into tables. The sniffed body is passed to the kernel as `text`
+so nothing is fetched twice.
+
+Also registers the per-table "Refresh" button for a `csv`/`json` `origin`,
+delegating to `import/refresh.ts` — which re-reads through the importer's own
+`list`/`read`, reconciles columns against the user's arrangement and honours
+`deletedColumns`. Datasette-origin tables keep their own Refresh in
+`datasette-import`, which additionally drives a progress bar and a resumable
+paged read. Enforces a 50 MB hard ceiling on browser-buffered URL imports with
+an actionable error rather than an opaque failed transfer — lifted for a
+Reference or a row-capped import, which do not buffer the whole body to keep.
 
 ## Exporters
 
