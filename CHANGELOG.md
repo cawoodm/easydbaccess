@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 29 Jul 2026
+
+- 📝 New `docs/tech/MEMORY.md`: every table loads fully into memory today — no windowed/paged loading yet (v0.0.171)
+
 ## 28 Jul 2026
 
 - 🪲 `?safemode` now opens the Plugin Manager and marks the plugins it skipped, so nothing reads as enabled while it is off (v0.0.170)

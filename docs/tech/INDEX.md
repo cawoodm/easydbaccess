@@ -12,6 +12,7 @@ changing code. For the user guide (how to use the app) see
 - [Server](SERVER.md)
 - [Windows](WINDOWS.md)
 - [Data Table](DATA-TABLE.md)
+- [Row Memory](MEMORY.md)
 - [Testing](TESTING.md)
 - [Electron](ELECTRON.md)
 - [Dialogs & Chrome](DIALOGS.md)
