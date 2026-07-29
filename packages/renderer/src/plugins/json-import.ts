@@ -763,10 +763,20 @@ function inferTypeFromValues(values: unknown[]): ColumnType {
   return 'string';
 }
 
+/**
+ * Date detection by SHAPE, not by `new Date(s)`. V8's fallback parser is far
+ * looser than it looks: `new Date('https://example.com/1')` returns a valid
+ * date (it plucks the "1" out), so a column of URLs was typed `date` — which
+ * then took the date renderer and locked out the link renderer. The accepted
+ * shapes match csv-import's: ISO `YYYY-MM-DD` (optionally with a time) and the
+ * D/M/Y forms with `/`, `-` or `.` separators.
+ */
 function isDateString(s: string): boolean {
-  if (/^\d+$/.test(s)) return false;
-  const d = new Date(s);
-  return !Number.isNaN(d.getTime());
+  const t = s.trim();
+  if (t === '' || /^\d+$/.test(t)) return false;
+  if (/^\d{4}-\d{2}-\d{2}([T ]\d{1,2}:\d{2}(:\d{2})?)?/.test(t)) return true;
+  if (/^\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}([T ]\d{1,2}:\d{2})?$/.test(t)) return true;
+  return false;
 }
 
 // -- helpers ------------------------------------------------------------------

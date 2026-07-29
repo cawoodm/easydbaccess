@@ -128,7 +128,12 @@ describe('parsedToTables: native dump shape ({ tables: [...] })', () => {
       ],
     };
     const [t] = parsedToTables(dump, 'fallback');
-    expect(t?.columns[0]).toEqual({ field: 'c', label: 'Color', type: 'string', renderer: 'color' });
+    expect(t?.columns[0]).toEqual({
+      field: 'c',
+      label: 'Color',
+      type: 'string',
+      renderer: 'color',
+    });
   });
 
   it('carries a live `source` descriptor and a snapshot `origin` when present', () => {
@@ -292,6 +297,31 @@ describe('parsedToTables: nested / heterogeneous objects (inferTypeFromValues vi
     const idRows = [{ d: '12345' }, { d: '67890' }];
     const [t2] = parsedToTables(idRows, 'fallback');
     expect(t2?.columns.find((c) => c.field === 'd')?.type).toBe('string');
+  });
+
+  it('does not type a URL column as a date', () => {
+    // `new Date('https://example.com/1')` is a VALID date in V8 — it plucks the
+    // "1" out — so URL columns used to become date columns, which then took the
+    // date renderer and locked out the link renderer the auto-renderer plugin
+    // would otherwise give them.
+    const rows = [{ u: 'https://example.com/1' }, { u: 'https://example.com/2' }];
+    const [t] = parsedToTables(rows, 'fallback');
+    const col = t?.columns.find((c) => c.field === 'u');
+    expect(col?.type).toBe('string');
+    expect(col?.renderer).toBeUndefined();
+  });
+
+  it('does not type free text as a date either', () => {
+    const rows = [{ v: 'March' }, { v: 'Tuesday' }];
+    const [t] = parsedToTables(rows, 'fallback');
+    expect(t?.columns.find((c) => c.field === 'v')?.type).toBe('string');
+  });
+
+  it('still types the date shapes it should', () => {
+    for (const v of ['2024-01-01', '2024-01-01 10:30', '01/02/2024', '1.2.2024']) {
+      const [t] = parsedToTables([{ d: v }], 'fallback');
+      expect(t?.columns.find((c) => c.field === 'd')?.type, v).toBe('date');
+    }
   });
 
   it('defaults an all-empty/null/undefined column to "string"', () => {

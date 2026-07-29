@@ -20,6 +20,7 @@ import * as cellImage from '../plugins/cell-image.js';
 import * as htmlPreview from '../plugins/html-preview.js';
 import * as htmlRender from '../plugins/html-render.js';
 import * as cellLink from '../plugins/cell-link.js';
+import * as autoRenderer from '../plugins/auto-renderer.js';
 import * as deleteTable from '../plugins/delete-table.js';
 import * as importData from '../plugins/import-data.js';
 import * as autoSync from '../plugins/auto-sync.js';
@@ -68,6 +69,7 @@ const modules: PluginModule[] = [
   htmlPreview,
   htmlRender,
   cellLink,
+  autoRenderer,
   deleteTable,
   importData,
   autoSync,

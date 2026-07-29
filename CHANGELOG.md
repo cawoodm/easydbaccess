@@ -2,6 +2,8 @@
 
 ## 29 Jul 2026
 
+- ✨ New Auto Renderer plugin: after any import, columns get a renderer from their values — a URL becomes a link, an image URL a thumbnail, markup or long text a preview (v0.0.191)
+- 🪲 A JSON column of URLs was typed as a date, which locked out the link renderer (v0.0.191)
 - 🪲 The `script` renderer is gone — any column can carry a script, so it was a second way to do the same thing. A script returning HTML now needs the `html` renderer (v0.0.186)
 - ✨ The column script button is always a pencil now: gray when no script is set, blue when one is (v0.0.186)
 - 🪲 Reloading now keeps windows stacked as you left them: views no longer jump in front of tables (v0.0.185)
