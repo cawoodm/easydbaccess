@@ -239,18 +239,34 @@ imports the other.
 
 ### import-data
 
-The header "Import" button — a dialog wrapping the three importers above
-behind one URL/file input plus a dropdown of curated sample sources
-(Northwind JSON dump, a public air-quality CSV, two Datasette examples).
-Guesses CSV vs. JSON vs. Datasette from the URL shape (`detectKind`) unless
-the user forces it via "Import as", supports uploading a local file instead
-of a URL, and offers a "Limit rows" cap and a CSV-only "Edit columns before
-import" checkbox (opens the column-rename dialog before the table is
-created). Also registers the per-table "Refresh" button for tables with a
-`csv`/`json` `origin` (re-fetches the origin URL and replaces the table's
-rows) — Datasette-origin tables get their own Refresh from
-`datasette-import` instead. Enforces a 50 MB hard ceiling on browser-buffered
-URL imports with an actionable error rather than an opaque failed transfer.
+The header "Import" button and the dialog behind it. The dialog is two blocks:
+the options EVERY importer has (sample source, URL, file upload, Copy vs.
+Reference, "Import into", "Edit columns before import", "Limit rows"), then a
+second block holding only the options of the chosen importer, mounted from the
+custom-element tag its `ImporterSpec.panel` declares — so this plugin imports
+no format code to render them. The format list, the file input's `accept` and
+the panel all come from `registries.importers`, so a new importer plugin
+appears with no edit here.
+
+An importer that declares `supports.kernel` (csv, json) runs entirely through
+`runImport`: the kernel owns the listing, the table picker, the row cap, the
+naming, the collision policy and the write, which is why "Import into" is only
+offered for those. Datasette is still dispatched to `datasette-import`, which
+owns its own paging and collision prompt.
+
+A native `.db.json` body is sniffed before anything is written: it is a whole
+workspace, so the dialog offers `json-import`'s `restoreWorkspaceDump` instead
+of flattening it into tables. The sniffed body is passed to the kernel as `text`
+so nothing is fetched twice.
+
+Also registers the per-table "Refresh" button for a `csv`/`json` `origin`,
+delegating to `import/refresh.ts` — which re-reads through the importer's own
+`list`/`read`, reconciles columns against the user's arrangement and honours
+`deletedColumns`. Datasette-origin tables keep their own Refresh in
+`datasette-import`, which additionally drives a progress bar and a resumable
+paged read. Enforces a 50 MB hard ceiling on browser-buffered URL imports with
+an actionable error rather than an opaque failed transfer — lifted for a
+Reference or a row-capped import, which do not buffer the whole body to keep.
 
 ## Exporters
 

@@ -8,8 +8,10 @@ is guessed automatically from the data.
 
 ![Import CSV](./screenshots/import-csv.png)
 
-If a table with the same name already exists, you're asked whether to
-**append**, **overwrite**, or create a **new table** instead.
+If a dropped CSV matches the name of a table you already have, you are asked
+whether to **append**, **overwrite**, or create a **new table**. A dropped JSON
+file just creates a new table, adding `-2` to the name if it is taken; use the
+Import dialog's **Import into** if you want it to land in an existing table.
 
 ## Defining columns up front
 
@@ -41,12 +43,34 @@ types. `flags` can be `unique` and/or `notnull`.
 
 ## The Import button
 
-The header's **Import** button opens a dialog where you can:
+The header's **Import** button opens a dialog in two parts.
 
-- Paste a URL or upload a file.
-- Pick from a few curated sample datasets to try the app out.
-- Set a **row limit**, so a huge file doesn't have to load in full.
-- Choose to edit columns before the import completes.
+The first block holds what every format has in common:
+
+- **Import as** — the format, or leave it on Auto-detect.
+- A **URL** to read, or a **file** to upload.
+- **Import mode** — Copy or Reference (see below).
+- **Import into** — a new table, or append to / replace the rows of one you
+  already have. You choose this before the import starts, so nothing
+  interrupts it half-way.
+- **Edit columns before import** — review and rename the columns first. A
+  source with several tables asks once per table, and names each one.
+- **Limit rows** — so a huge file does not have to load in full.
+- A few curated **sample sources**, to try the app out.
+
+The second block holds only the options of the format you picked. A CSV, for
+example, offers a **Separator**: auto-detect, comma, semicolon, tab, pipe, or a
+character you type. A `.tsv` or `.tab` file always uses TAB unless you override
+it here.
+
+## Connect is a different button
+
+**Import** copies data in and the copy is yours: it is stored, synced, and you
+can edit it offline. **Connect** points a window at a live table on someone
+else's server and stores nothing.
+
+They are separate buttons doing separate things. The **Connect** button lists
+every backend you have installed — [Datasette](https://datasette.io/) today.
 
 ## Copy vs. Reference
 
@@ -54,15 +78,22 @@ When importing from a live source (like a [Datasette](https://datasette.io/)
 instance), you choose:
 
 - **Copy** (the default) — a normal table. Your data is saved locally and
-  syncs like anything else; a **Refresh** button re-fetches the latest rows
-  and merges them in, keeping any columns or edits you added.
+  syncs like anything else; a **Refresh** button re-reads the source. Refresh
+  keeps the columns you added, keeps your column order and widths, adds any
+  column the source has grown since, and never brings back a column you
+  deleted.
 - **Reference** — a live, read-only table. Rows are fetched from the source
   on demand and are never stored or synced — useful for data too large or
   too fast-changing to copy.
 
-## Whole-workspace imports
+## Restoring a whole workspace
 
-Dropping a `.db.json` file (an export from easyDBAccess itself, see
-[Sharing & Sync](sharing-and-sync.md)) restores an entire workspace — every
-table, its rows, window positions, and views — in one go. You'll be asked
-whether to merge it into your current workspace or replace everything.
+A `.db.json` file (an export from easyDBAccess itself, see
+[Sharing & Sync](sharing-and-sync.md)) is not one table — it is a whole
+workspace, including window positions, views, sorting and filters. So it is
+**restored**, not imported.
+
+Drop the file and it restores in one go. Point the Import dialog at one and it
+asks first, because you may have meant to import only its tables as plain data.
+Either way you are then asked whether to merge it into your current workspace or
+replace everything.
