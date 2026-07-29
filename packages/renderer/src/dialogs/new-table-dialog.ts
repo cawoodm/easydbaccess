@@ -111,9 +111,16 @@ export class NewTableDialog extends LitElement {
         cursor: not-allowed;
       }
       /* A column that already carries a script — blue so it is obvious which
-       columns are computed without opening each editor. */
+       columns are computed without opening each editor. The glyph itself
+       never changes (always the pencil); colour alone carries the state. */
       button.icon-btn.has-script {
         color: #2563eb;
+      }
+      /* Without this, the plain :hover rule above (color: #111827) would win
+       and a script-set pencil would go near-black on hover, losing the blue
+       state cue. A darker blue keeps hover feedback without discarding it. */
+      button.icon-btn.has-script:hover:not(:disabled) {
+        color: #1d4ed8;
       }
       button.row-del {
         color: #9ca3af;
@@ -709,7 +716,7 @@ export class NewTableDialog extends LitElement {
                         : 'Add a script: render(row) computes what this column displays'}
                       @click=${() => this.editScript(i)}
                     >
-                      <span class="mi sm">${c.script?.trim() ? 'code' : 'edit'}</span>
+                      <span class="mi sm">edit</span>
                     </button>
                     <input
                       type="number"

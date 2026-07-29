@@ -21,9 +21,6 @@ export interface ColumnSpec {
    * when no renderer is set. A scripted cell is read-only — it is derived, so
    * there is nowhere to write an edit back to.
    *
-   * The `script` renderer is the exception: it runs the script itself and
-   * injects the returned string as raw HTML, keeping the stored value editable.
-   *
    * Not part of the CSV mini-language.
    */
   script?: string;

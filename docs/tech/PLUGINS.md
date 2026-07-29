@@ -43,7 +43,7 @@ export function init(api: HostApi): void {
   always-on and never shows a toggle. Today only `settings` is fixed;
   everything else (including things you might assume are load-bearing, like
   `new-table-button`, `csv-import`, or any of the `cell-date`/`cell-datetime`/
-  `cell-boolean`/`cell-script` renderers) can be disabled by the user. Toggle
+  `cell-boolean` renderers) can be disabled by the user. Toggle
   state is stored under the synthetic key `builtin:<id>` in the `plugins`
   collection. (The Plugin Manager button itself is **core**, not a plugin —
   a header button in `app-shell.ts`.)
@@ -109,7 +109,6 @@ defaults to enabled but **can** be turned off by the user.
 | `cell-date` | cell-renderer | | `date` renderer: a native `<input type=date>` picker. | `registerCellRenderer` |
 | `cell-datetime` | cell-renderer | | `datetime` renderer: a native `<input type=datetime-local>` picker. | `registerCellRenderer` |
 | `cell-boolean` | cell-renderer | | `boolean` renderer: a native checkbox. | `registerCellRenderer` |
-| `cell-script` | cell-renderer | | Power-user `script` renderer: runs a user-authored `render(row)` JS body and injects the returned HTML. | `registerCellRenderer` |
 | `cell-color` | cell-renderer | | `color` renderer: a native `<input type=color>` swatch picker for hex values. | `registerCellRenderer` |
 | `cell-image` | cell-renderer | | `image` renderer: thumbnail + upload button; stores images as `data:` URIs. | `registerCellRenderer` |
 | `cell-link` | cell-renderer | | `link` renderer: detects http(s) URLs, email addresses, and phone numbers per-value and renders the matching `<a>` (target `_blank`/`mailto:`/`tel:`), with a pencil to switch to raw-text edit mode. | `registerCellRenderer` |
@@ -127,6 +126,20 @@ need neighbouring fields, a `row` property) and dispatches a `change` event
 with `{ detail: { value } }` to commit an edit. A column with no renderer, or
 one pointing at an unregistered name, falls back to a plain read-only text
 cell.
+
+### Column scripts are renderer-independent
+
+A column may also carry a `script` — a JS body defining `function render(row)`,
+edited via the script button in the column editor (`script-editor-dialog.ts`,
+run by `util/column-script.ts`). Its return value REPLACES the stored value on
+the way into whatever renderer the column has: `link` can point at a computed
+URL, `image` at a computed `data:`/`http` value, `boolean` at a derived flag,
+or plain text when the column has no renderer at all. There used to be a
+dedicated `script` renderer that ran the same script a second time and
+injected the result as raw HTML; it duplicated this generic path and was
+removed. A scripted cell is always read-only — the value is derived, so there
+is nowhere to write an edit back to. If a script's own output is markup you
+want rendered rather than escaped, give the column the `html` renderer.
 
 ### Invalid stored values
 
@@ -164,23 +177,13 @@ clicking it, and it commits `true`; anything else (`'foo'`, `2`, `{}`, …)
 never renders a checkbox — a checkbox can't represent a value it isn't —
 instead the raw value shows as red-bordered text with a pencil to fix it.
 
-### cell-script
-
-Registers `script`, the power-user renderer. It reads `column.script` — a JS
-body the user writes in the column editor that must define
-`function render(row)` — compiles it once per unique source (cached in a
-`Map`), calls it per cell, and injects the returned string as raw HTML. A
-thrown error or a non-string return renders as a small inline `⚠` chip with
-the error in the tooltip instead of breaking the row. Trust model: the
-plugin host already lets user-supplied code do anything on the page, so a
-column script is no additional risk.
-
-`cell-date`, `cell-datetime`, `cell-boolean`, and `cell-script` used to ship
-as a single `core-renderers` plugin (`meta.fixed = true`, non-disableable).
-They were split into four separately-toggleable plugins so the Plugin
-Manager can disable any one of them independently; existing workspaces have
-no `builtin:core-renderers` disabled-state row, so all four simply default
-to enabled with no migration needed.
+`cell-date`, `cell-datetime`, and `cell-boolean` used to ship as a single
+`core-renderers` plugin (`meta.fixed = true`, non-disableable). They were
+split into separately-toggleable plugins so the Plugin Manager can disable
+any one of them independently; existing workspaces have no
+`builtin:core-renderers` disabled-state row, so all of them simply default
+to enabled with no migration needed. (A fourth split-out, `cell-script`, was
+later removed outright — see "Column scripts are renderer-independent" above.)
 
 ### cell-color
 

@@ -137,3 +137,25 @@ test('the column editor offers the script button on every column, not just scrip
   await expect(editor).toBeVisible();
   await expect(editor.locator('textarea')).toHaveValue(/function render\(row\)/);
 });
+
+test('the renderer dropdown no longer offers a dedicated "script" renderer', async ({ page }) => {
+  // The old `script` cell renderer duplicated this generic path (it ran the
+  // same column.script and injected the result as raw HTML). Removing it means
+  // the dropdown — populated live from `registries.cellRenderers` — should
+  // simply no longer list it, with no special-casing required.
+  const id = await createTable(page, 'Renderers', [{ field: 'plain' }]);
+  await waitForPanel(page, id);
+
+  await page
+    .locator(`#${panelDomId(id)}`)
+    .locator('panel-footer')
+    .getByRole('button', { name: /Columns/ })
+    .click();
+  const dlg = page.locator('new-table-dialog dialog');
+  await expect(dlg).toBeVisible();
+
+  const rendererSelect = dlg.locator('.col-row select[title^="Renderer"]');
+  await expect(rendererSelect.locator('option[value="script"]')).toHaveCount(0);
+  // Still-supported renderers remain listed.
+  await expect(rendererSelect.locator('option[value="link"]')).toHaveCount(1);
+});

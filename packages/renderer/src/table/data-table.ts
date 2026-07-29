@@ -754,11 +754,12 @@ export class DataTable extends LitElement {
     const raw = row.data[col.field];
     // A column can carry a `script` whose `render(row)` output REPLACES the
     // stored value on the way into the renderer — so any renderer (link, image,
-    // html, boolean…) can display something computed from the whole row. The
-    // `script` renderer is excluded: it runs the script itself and injects the
-    // result as HTML, and its `.value` stays the stored value so its pencil
-    // still edits the real cell.
-    if (col.script?.trim() && col.renderer !== 'script') {
+    // html, boolean…) or no renderer at all can display something computed
+    // from the whole row. There used to be a dedicated `script` renderer that
+    // ran the same script a second time and injected the result as raw HTML;
+    // it duplicated this generic path and was removed, so a scripted column
+    // always takes this branch now regardless of `col.renderer`.
+    if (col.script?.trim()) {
       return this.renderScriptedCell(row, col);
     }
     // Cell rendering is dispatched by the column's `renderer` attribute, not
@@ -766,8 +767,8 @@ export class DataTable extends LitElement {
     // name we hand off to its custom element; otherwise the cell falls back to
     // a plain editable input on the raw value (see the switch below — only a
     // read-only view renders text). The standard renderers (date, datetime,
-    // boolean, script) each ship as their own built-in plugin
-    // (`cell-date`/`cell-datetime`/`cell-boolean`/`cell-script`);
+    // boolean) each ship as their own built-in plugin
+    // (`cell-date`/`cell-datetime`/`cell-boolean`);
     // color/image/link come from their respective plugins.
     const rendererName = col.renderer;
     const customTag = rendererName ? this.cellRenderers?.get(rendererName) : undefined;
@@ -779,11 +780,12 @@ export class DataTable extends LitElement {
       // string, which is acceptable given the host trust model already lets
       // plugins do anything.
       const tag = unsafeStatic(customTag);
-      // `.row` is the full row data object — most renderers ignore it; the
-      // `script` renderer needs it so user-authored render(row) functions
-      // can pull from neighbouring fields. `.readonly` tells editor renderers
-      // (date/datetime/boolean) to display, not edit, in a read-only view;
-      // display-only renderers (link/image/html/…) just ignore it.
+      // `.row` is the full row data object, passed through for any renderer
+      // that wants neighbouring fields (built-ins currently ignore it —
+      // `renderScriptedCell` above is where a column's own script gets `.row`).
+      // `.readonly` tells editor renderers (date/datetime/boolean) to display,
+      // not edit, in a read-only view; display-only renderers (link/image/
+      // html/…) just ignore it.
       return staticHtml`<${tag}
         .value=${raw ?? ''}
         .column=${col}

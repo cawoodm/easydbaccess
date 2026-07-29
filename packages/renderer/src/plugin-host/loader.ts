@@ -13,7 +13,6 @@ import * as newTableButton from '../plugins/new-table-button.js';
 import * as cellDate from '../plugins/cell-date.js';
 import * as cellDatetime from '../plugins/cell-datetime.js';
 import * as cellBoolean from '../plugins/cell-boolean.js';
-import * as cellScript from '../plugins/cell-script.js';
 import * as cellColor from '../plugins/cell-color.js';
 import * as cellImage from '../plugins/cell-image.js';
 import * as htmlPreview from '../plugins/html-preview.js';
@@ -60,7 +59,6 @@ const modules: PluginModule[] = [
   cellDate,
   cellDatetime,
   cellBoolean,
-  cellScript,
   cellColor,
   cellImage,
   htmlPreview,

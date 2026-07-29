@@ -2,6 +2,8 @@
 
 ## 29 Jul 2026
 
+- 🪲 The `script` renderer is gone — any column can carry a script, so it was a second way to do the same thing. A script returning HTML now needs the `html` renderer (v0.0.186)
+- ✨ The column script button is always a pencil now: gray when no script is set, blue when one is (v0.0.186)
 - 🪲 Reloading now keeps windows stacked as you left them: views no longer jump in front of tables (v0.0.185)
 - ✨ Each window titlebar now starts with an icon for its kind — local, imported, referenced, connected or view — and remote-backed tables get a violet titlebar (v0.0.184)
 - ✨ The boolean renderer now tells empty apart from false: a grayed checkbox for empty, red-bordered raw text for an invalid value (v0.0.183)

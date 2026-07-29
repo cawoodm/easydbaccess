@@ -30,9 +30,9 @@ export function init(api: HostApi): void {
  * renders as the same checkbox grayed out so it reads as "no value" rather
  * than "false"; invalid never renders a checkbox at all — a checkbox can't
  * represent a value it isn't — instead the raw value shows as red-bordered
- * text with a pencil (`cell-pencil.ts`) so it stays fixable, mirroring
- * `cell-script.ts`'s editing lifecycle for the same "renderer hides the raw
- * value" problem.
+ * text with a pencil (`cell-pencil.ts`) so it stays fixable — the same shared
+ * affordance `cell-link.ts`/`cell-image.ts` use for the "renderer hides the
+ * raw value" problem.
  */
 class CellBoolean extends HTMLElement {
   private _value: unknown = false;

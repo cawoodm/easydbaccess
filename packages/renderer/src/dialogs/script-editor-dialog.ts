@@ -8,14 +8,12 @@ import { makeDialogDraggable } from './draggable.js';
  * `render(row)` signature and a minimal working example, so the user can hit
  * Save once and see the cell render without writing anything themselves.
  *
- * What the return value means depends on the column's renderer: with the
- * `script` renderer it is injected as raw HTML; with any other renderer (or
- * none) it is the VALUE that renderer displays.
+ * The return value replaces the stored value on its way into whatever
+ * renderer the column has (or is shown as text when the column has none).
  */
 const BOILERPLATE = `function render(row) {
   // \`row\` is the full row object — access any field by name (row.field).
-  // Return the value this column should display. With the "script" renderer
-  // the returned string is injected as raw HTML instead.
+  // Return the value this column should display.
   return row.name ?? '';
 }
 `;
@@ -144,9 +142,8 @@ export class ScriptEditorDialog extends LitElement {
             <p class="hint">
               Define <code>function render(row) { … }</code>. <code>row</code> is the full row
               object. What you return is passed to the column's renderer, so the cell shows a
-              computed value instead of the stored one — and the cell becomes read-only. With the
-              <code>script</code> renderer the returned string is injected as raw HTML instead. A
-              script that throws shows a small error chip in the cell.
+              computed value instead of the stored one — and the cell becomes read-only. A script
+              that throws shows a small error chip in the cell.
             </p>
             <textarea
               spellcheck="false"

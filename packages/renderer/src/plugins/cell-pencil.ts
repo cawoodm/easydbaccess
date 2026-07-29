@@ -2,14 +2,14 @@
  * The shared "edit this cell anyway" affordance.
  *
  * A display-only renderer replaces the cell's content, which leaves the stored
- * value unreachable — a script-rendered or image cell had no editor at all. Each
- * such renderer offers a small gray pencil pinned to the cell's right edge that
- * swaps in a raw-value editor; committing re-renders, so the cell goes straight
- * back to its rendered form.
+ * value unreachable — an image cell had no editor at all. Each such renderer
+ * offers a small gray pencil pinned to the cell's right edge that swaps in a
+ * raw-value editor; committing re-renders, so the cell goes straight back to
+ * its rendered form.
  *
  * Kept in one place so the pencil looks and behaves identically in every
- * renderer (`cell-link` was the original, `cell-script` and `cell-image`
- * followed).
+ * renderer (`cell-link` was the original, `cell-image` followed; the now-removed
+ * `cell-script` also used it).
  */
 
 /**

@@ -3,17 +3,18 @@ import { createTable, panelDomId, waitForPanel } from './helpers.js';
 
 /**
  * `core-renderers` (one `meta.fixed = true` plugin bundling four cell
- * renderers) was split into four separately-toggleable built-ins:
- * `cell-date`, `cell-datetime`, `cell-boolean`, `cell-script`. This spec
- * proves (a) each shows up in the Plugin Manager as an ordinary toggleable
- * row — no lock icon — and (b) the split didn't break renderer registration:
- * a `date` column still renders the `<cell-date>` custom element in the grid.
+ * renderers) was split into four separately-toggleable built-ins: `cell-date`,
+ * `cell-datetime`, `cell-boolean`, `cell-script`. `cell-script` was later
+ * removed outright — a column script now runs through whatever renderer the
+ * column has, so the dedicated renderer was redundant — leaving three. This
+ * spec proves (a) each of the three shows up in the Plugin Manager as an
+ * ordinary toggleable row — no lock icon — and (b) the split (and later
+ * removal) didn't break renderer registration: a `date` column still renders
+ * the `<cell-date>` custom element in the grid.
  */
 
 test.describe('split renderer plugins', () => {
-  test('cell-date, cell-datetime, cell-boolean, cell-script are toggleable (no lock icon)', async ({
-    page,
-  }) => {
+  test('cell-date, cell-datetime, cell-boolean are toggleable (no lock icon)', async ({ page }) => {
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__easydb.api.ui.openPluginManager();
@@ -24,12 +25,7 @@ test.describe('split renderer plugins', () => {
     // "Cell Date" is a text-prefix of "Cell Datetime" — hasText does substring
     // matching, so the Date lookup needs a negative-lookahead regex to avoid
     // also matching the Datetime row.
-    const names: Array<string | RegExp> = [
-      /Cell Date(?!time)/,
-      'Cell Datetime',
-      'Cell Boolean',
-      'Cell Script',
-    ];
+    const names: Array<string | RegExp> = [/Cell Date(?!time)/, 'Cell Datetime', 'Cell Boolean'];
     for (const name of names) {
       const row = dialog.locator('.row', { hasText: name });
       await expect(row).toBeVisible();
@@ -40,6 +36,10 @@ test.describe('split renderer plugins', () => {
       await expect(row.locator('input[type="checkbox"]')).toHaveCount(1);
       await expect(row.locator('input[type="checkbox"]')).toBeChecked();
     }
+
+    // The fourth split-out, `cell-script`, was removed outright — it no
+    // longer has a Plugin Manager row at all.
+    await expect(dialog.locator('.row', { hasText: 'Cell Script' })).toHaveCount(0);
   });
 
   test('a date column renders the <cell-date> element in the grid', async ({ page }) => {

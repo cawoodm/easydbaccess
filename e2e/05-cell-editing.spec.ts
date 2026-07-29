@@ -11,9 +11,7 @@ import { addRow, createTable, panelDomId, readRows, waitForPanel } from './helpe
 
 test.describe('cell editing constraints', () => {
   test('notnull rejects empty values with a dialog and reverts', async ({ page }) => {
-    const id = await createTable(page, 'Required', [
-      { field: 'name', renderer: 'link' },
-    ]);
+    const id = await createTable(page, 'Required', [{ field: 'name', renderer: 'link' }]);
     await waitForPanel(page, id);
     // Patch the column to set notnull=true (createTable helper doesn't pass flags).
     await page.evaluate(
@@ -134,11 +132,12 @@ test.describe('cell editing constraints', () => {
     );
 
     const panel = page.locator(`#${panelDomId(id)}`);
-    await panel.locator('panel-footer').getByRole('button', { name: /Add row/ }).click();
+    await panel
+      .locator('panel-footer')
+      .getByRole('button', { name: /Add row/ })
+      .click();
 
-    await expect
-      .poll(async () => (await readRows(page, id))[0]?.data.status)
-      .toBe('pending');
+    await expect.poll(async () => (await readRows(page, id))[0]?.data.status).toBe('pending');
   });
 
   test('pre-flight scan blocks unique save when existing rows would collide', async ({ page }) => {
@@ -148,7 +147,10 @@ test.describe('cell editing constraints', () => {
     await addRow(page, id, { code: 'X' }); // duplicate already present
 
     const panel = page.locator(`#${panelDomId(id)}`);
-    await panel.locator('panel-footer').getByRole('button', { name: /Columns/ }).click();
+    await panel
+      .locator('panel-footer')
+      .getByRole('button', { name: /Columns/ })
+      .click();
 
     const dialog = page.locator('new-table-dialog dialog');
     await expect(dialog).toBeVisible();
@@ -197,52 +199,20 @@ test.describe('cell editing constraints', () => {
 
 /**
  * A display-only renderer replaces the cell's content, which leaves the stored
- * value unreachable — a script-rendered cell had no editor at all, and an image
- * cell only offered "upload" while it was still empty. Both now carry a pencil
- * at the cell's right edge that swaps in a raw-value editor.
+ * value unreachable — an image cell only offered "upload" while it was still
+ * empty. It carries a pencil at the cell's right edge that swaps in a
+ * raw-value editor.
+ *
+ * The `cell-script` renderer used to be covered here too (its whole point was
+ * a pencil back to the stored value while the rendered output was raw HTML).
+ * It was removed: every column can now carry a script regardless of its
+ * renderer, so the dedicated renderer was a redundant second code path. A
+ * scripted cell's value is derived from the row on every read, so — unlike
+ * the old `cell-script` — there is nowhere to write an edit back to and no
+ * pencil is offered; see `41-column-script.spec.ts` for the generic-path
+ * coverage that replaces this test.
  */
 test.describe('pencil editor on display-only renderers', () => {
-  test('a script-rendered cell can be edited through its pencil', async ({ page }) => {
-    const id = await createTable(page, 'Scripted', [
-      {
-        field: 'code',
-        renderer: 'script',
-        script: 'function render(row) { return "<b>" + String(row.code).toUpperCase() + "</b>"; }',
-      },
-    ]);
-    await waitForPanel(page, id);
-    await addRow(page, id, { code: 'abc' });
-
-    const cell = page.locator(`#${panelDomId(id)}`).locator('data-table tbody td cell-script');
-    const pencil = cell.locator('.cell-pencil');
-    const input = cell.locator('input');
-
-    // The script's output is shown, with a pencil to reach the raw value.
-    await expect(cell.locator('b')).toHaveText('ABC');
-    await expect(pencil).toBeVisible();
-
-    // The pencil reveals the STORED value, not the rendered output.
-    await pencil.click();
-    await expect(input).toBeFocused();
-    await expect(input).toHaveValue('abc');
-
-    // Committing re-runs the script over the new value and persists it.
-    await input.fill('def');
-    await input.blur();
-    await expect(cell.locator('b')).toHaveText('DEF');
-    await expect
-      .poll(async () => (await readRows(page, id))[0]?.data.code)
-      .toBe('def');
-
-    // Escape cancels without saving.
-    await pencil.click();
-    await expect(input).toBeFocused();
-    await input.fill('DISCARDED');
-    await page.keyboard.press('Escape');
-    await expect(cell.locator('b')).toHaveText('DEF');
-    expect((await readRows(page, id))[0]?.data.code).toBe('def');
-  });
-
   test('an image cell exposes its URL through the pencil', async ({ page }) => {
     const id = await createTable(page, 'Pics', [{ field: 'pic', renderer: 'image' }]);
     await waitForPanel(page, id);

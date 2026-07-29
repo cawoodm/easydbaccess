@@ -12,7 +12,10 @@ export interface ColumnRow {
   label: string;
   type: ColumnType;
   renderer?: string | undefined;
-  /** JS body for the `script` renderer. Only meaningful when renderer === 'script'. */
+  /**
+   * JS body whose `render(row)` return value replaces the stored value on its
+   * way into whatever `renderer` this column has (or shows as text with none).
+   */
   script?: string | undefined;
   max?: number | undefined;
   unique?: boolean | undefined;

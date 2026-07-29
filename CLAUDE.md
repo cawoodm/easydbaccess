@@ -100,7 +100,7 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
   is currently: `new-table-button`, `csv-import`, `json-import`, `csv-export`,
   `dump-export`, `sql-export`, `gist-sync`, `server-sync`,
   `cell-color`, `cell-image`, `cell-link`, `cell-date`, `cell-datetime`,
-  `cell-boolean`, `cell-script`, `import-data`,
+  `cell-boolean`, `import-data`,
   `auto-sync`, `views`, `settings`, `datasette-source`. Don't add a feature to
   the core if it can be a plugin. (Exception: the Plugin Manager button is core
   chrome in `app-shell.ts`, not a plugin — it opens the manager that governs
