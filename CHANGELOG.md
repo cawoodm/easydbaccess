@@ -2,6 +2,7 @@
 
 ## 29 Jul 2026
 
+- ✨ A GitHub file URL now imports its real content: the blob link becomes the raw link, and a Git-LFS file is fetched from the media host instead of importing the pointer stub (v0.0.180)
 - 🪲 Dev/e2e server port now resolves per branch instead of hardcoded 5190; a taken port fails loudly instead of drifting (v0.0.176)
 - ✨ The delete-table trash icon is now dark red instead of inheriting the button's default color (v0.0.174)
 - 📝 New [Memory Docs](docs/tech/MEMORY.md): every table loads fully into memory today — no windowed/paged loading yet (v0.0.172)

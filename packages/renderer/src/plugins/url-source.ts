@@ -25,7 +25,12 @@ import type {
   Unsubscribe,
 } from '@easydb/shared';
 import { parseCsv } from './csv-import.js';
-import { readResponseText, toCorsFriendlyUrl } from './read-url.js';
+import {
+  isGitLfsPointer,
+  readResponseText,
+  toCorsFriendlyUrl,
+  toGitLfsMediaUrl,
+} from './read-url.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'url-source',
@@ -131,22 +136,34 @@ export function createUrlCollection(table: Table, ctx: RowSourceCtx): DataCollec
     return records.map((data, i) => ({ id: `url:${i}`, tableId: table.id, data, updatedAt: 0 }));
   }
 
-  async function fetchAndParse(): Promise<Array<Record<string, unknown>>> {
-    if (!url) throw new Error('This reference table has no URL configured.');
+  async function readText(target: string): Promise<string> {
     let res: Response;
     try {
-      res = await ctx.backend.fetch(toCorsFriendlyUrl(url));
+      res = await ctx.backend.fetch(target);
     } catch (err) {
       throw new Error(`Could not reach ${url}: ${(err as Error)?.message ?? String(err)}`);
     }
     if (!res.ok) {
       throw new Error(`Could not load ${url}: HTTP ${res.status} ${res.statusText}`);
     }
-    let text: string;
     try {
-      text = await readResponseText(res);
+      return await readResponseText(res);
     } catch (err) {
-      throw new Error(`Could not read response from ${url}: ${(err as Error)?.message ?? String(err)}`);
+      throw new Error(
+        `Could not read response from ${url}: ${(err as Error)?.message ?? String(err)}`,
+      );
+    }
+  }
+
+  async function fetchAndParse(): Promise<Array<Record<string, unknown>>> {
+    if (!url) throw new Error('This reference table has no URL configured.');
+    const cors = toCorsFriendlyUrl(url);
+    let text = await readText(cors);
+    // GitHub's raw host answers 200 with an LFS pointer stub for LFS-tracked
+    // files; the real bytes live on the media host.
+    if (isGitLfsPointer(text)) {
+      const media = toGitLfsMediaUrl(cors);
+      if (media) text = await readText(media);
     }
     try {
       if (format === 'json') {

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { readResponseText, toCorsFriendlyUrl } from './read-url.js';
+import {
+  isGitLfsPointer,
+  readResponseText,
+  toCorsFriendlyUrl,
+  toGitLfsMediaUrl,
+} from './read-url.js';
 
 /** A Response double that streams `text` in the given chunk sizes with a
  *  Content-Length header, so readResponseText takes its progress path. */
@@ -103,5 +108,72 @@ describe('toCorsFriendlyUrl', () => {
     const other = 'https://example.com/data.csv';
     expect(toCorsFriendlyUrl(other)).toBe(other);
     expect(toCorsFriendlyUrl('not a url')).toBe('not a url');
+  });
+});
+
+/**
+ * A real pointer, as `raw.githubusercontent.com` serves it for an LFS-tracked
+ * file — 200 OK, no header saying it is a stub.
+ */
+const POINTER = [
+  'version https://git-lfs.github.com/spec/v1',
+  'oid sha256:2d1f65308877282edfb4470520eabbc08cb499118432a3dcec6a66c086aa2baa',
+  'size 140893245',
+  '',
+].join('\n');
+
+describe('isGitLfsPointer', () => {
+  it('recognises a pointer file', () => {
+    expect(isGitLfsPointer(POINTER)).toBe(true);
+  });
+
+  it('rejects real content', () => {
+    expect(isGitLfsPointer('a,b,c\n1,2,3\n')).toBe(false);
+    expect(isGitLfsPointer('')).toBe(false);
+    expect(isGitLfsPointer('[{"a":1}]')).toBe(false);
+  });
+
+  it('needs all three pointer lines, not just the version line', () => {
+    expect(isGitLfsPointer('version https://git-lfs.github.com/spec/v1\n')).toBe(false);
+    expect(isGitLfsPointer('version https://git-lfs.github.com/spec/v1\noid sha256:ab\n')).toBe(
+      false,
+    );
+  });
+
+  it('does not mistake a CSV that merely mentions git-lfs for a pointer', () => {
+    const csv = 'url,oid ,size \nversion https://git-lfs.github.com/spec/v1,x,y\n';
+    expect(isGitLfsPointer(csv)).toBe(false);
+  });
+
+  it('rejects anything too large to be a pointer', () => {
+    expect(isGitLfsPointer(POINTER + 'x'.repeat(1024))).toBe(false);
+  });
+});
+
+describe('toGitLfsMediaUrl', () => {
+  it('maps a raw.githubusercontent.com URL onto the media host', () => {
+    expect(
+      toGitLfsMediaUrl(
+        'https://raw.githubusercontent.com/StackExchange/Survey/main/packages/archive/2025/results.csv',
+      ),
+    ).toBe(
+      'https://media.githubusercontent.com/media/StackExchange/Survey/main/packages/archive/2025/results.csv',
+    );
+  });
+
+  it('accepts the github.com blob URL a user pastes', () => {
+    expect(
+      toGitLfsMediaUrl(
+        'https://github.com/StackExchange/Survey/blob/main/packages/archive/2025/results.csv',
+      ),
+    ).toBe(
+      'https://media.githubusercontent.com/media/StackExchange/Survey/main/packages/archive/2025/results.csv',
+    );
+  });
+
+  it('returns null for non-GitHub URLs and for paths too short to be a file', () => {
+    expect(toGitLfsMediaUrl('https://example.com/data.csv')).toBeNull();
+    expect(toGitLfsMediaUrl('https://raw.githubusercontent.com/o/r/main')).toBeNull();
+    expect(toGitLfsMediaUrl('not a url')).toBeNull();
   });
 });

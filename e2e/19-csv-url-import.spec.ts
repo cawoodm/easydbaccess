@@ -169,6 +169,91 @@ test('shows the top progress bar when a URL read takes more than 2s', async ({
     .toBe(2);
 });
 
+/**
+ * GitHub serves an LFS-tracked file from the raw host as a ~130-byte pointer
+ * stub, HTTP 200, with nothing to say it is not the data. The real bytes live on
+ * media.githubusercontent.com, which 404s for files that are NOT LFS-tracked —
+ * so the media host is only tried once a pointer has actually come back.
+ */
+const LFS_POINTER =
+  'version https://git-lfs.github.com/spec/v1\n' +
+  'oid sha256:2d1f65308877282edfb4470520eabbc08cb499118432a3dcec6a66c086aa2baa\n' +
+  'size 140893245\n';
+
+const RAW_LFS = 'https://raw.githubusercontent.com/StackExchange/Survey/main/lfs.csv';
+const MEDIA_LFS = 'https://media.githubusercontent.com/media/StackExchange/Survey/main/lfs.csv';
+const BLOB_LFS = 'https://github.com/StackExchange/Survey/blob/main/lfs.csv';
+
+/** Column fields of an imported table, joined — '' when the table is absent. */
+async function columnFields(page: import('@playwright/test').Page, ws: string, name: string) {
+  return page.evaluate(
+    async ([w, n]) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__easydb.store;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const t = (await store.tables.find()).find((x: any) => x.workspaceId === w && x.name === n);
+      if (!t) return '';
+      return t.columns.map((c: { field: string }) => c.field).join(',');
+    },
+    [ws, name],
+  );
+}
+
+test('an LFS pointer from the raw host is followed to the media host', async ({
+  page,
+  workspaceId,
+}) => {
+  await page.route(RAW_LFS, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/plain',
+      headers: { 'access-control-allow-origin': '*' },
+      body: LFS_POINTER,
+    }),
+  );
+  await page.route(MEDIA_LFS, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/plain',
+      headers: { 'access-control-allow-origin': '*' },
+      body: 'city,pop\nBern,133000\nZug,30000\n',
+    }),
+  );
+
+  await attemptCsvImport(page, BLOB_LFS);
+
+  // Assert on the COLUMNS, not the row count: parsing the 3-line pointer as CSV
+  // also yields 2 rows, so a row count cannot tell the stub from the data. The
+  // header must come from the media body.
+  await expect.poll(() => columnFields(page, workspaceId, 'lfs')).toBe('city,pop');
+});
+
+test('the size limit applies to the media host, not just the first read', async ({ page }) => {
+  await page.route(RAW_LFS, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/plain',
+      headers: { 'access-control-allow-origin': '*' },
+      body: LFS_POINTER,
+    }),
+  );
+  // The real StackExchange 2025 survey CSV is 134 MB — over the import limit.
+  await page.route(MEDIA_LFS, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/plain',
+      headers: { 'access-control-allow-origin': '*', 'content-length': String(140893245) },
+      body: 'a,b\n1,2\n',
+    }),
+  );
+
+  await attemptCsvImport(page, BLOB_LFS);
+  const toast = page.locator('toast-host .toast.error');
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText('134.4 MB');
+  await expect(toast).toContainText(/limit/i);
+});
+
 test('a github.com blob/raw URL is auto-converted to the CORS raw host and imports', async ({
   page,
   workspaceId,

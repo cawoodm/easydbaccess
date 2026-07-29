@@ -51,6 +51,55 @@ export function toCorsFriendlyUrl(url: string): string {
   return url;
 }
 
+/**
+ * True when `text` is a Git-LFS pointer file rather than the real content.
+ *
+ * `raw.githubusercontent.com` serves LFS-tracked files as their pointer — a
+ * ~130-byte text stub — with HTTP 200 and no hint that it is not the data. An
+ * import of that stub "succeeds" and produces one garbage row, so callers must
+ * detect it and follow up on the media host (see {@link toGitLfsMediaUrl}).
+ *
+ * The pointer format is specified: a `version` line naming the spec URL, then
+ * `oid` and `size` lines. Requiring all three keeps a real CSV/JSON whose first
+ * line happens to mention git-lfs from being mistaken for a pointer.
+ */
+export function isGitLfsPointer(text: string): boolean {
+  // A pointer file is tiny; anything large is the real content.
+  if (text.length > 1024) return false;
+  const lines = text.split('\n');
+  return (
+    lines[0]?.startsWith('version https://git-lfs.github.com/spec/v1') === true &&
+    lines.some((l) => l.startsWith('oid ')) &&
+    lines.some((l) => l.startsWith('size '))
+  );
+}
+
+/**
+ * The `media.githubusercontent.com` URL that serves a GitHub LFS file's real
+ * bytes, or `null` when `url` is not a GitHub file URL.
+ *
+ * Accepts what a user pastes (`github.com/{owner}/{repo}/blob|raw/{ref}/{path}`)
+ * as well as the already-rewritten raw host, because both map onto the same
+ * media path:
+ *   media.githubusercontent.com/media/{owner}/{repo}/{ref}/{path…}
+ * The media host sends `access-control-allow-origin: *` and accepts either a
+ * plain branch name or a `refs/heads/…` ref. It 404s for files that are NOT
+ * LFS-tracked, so only reach for it once a pointer has actually come back.
+ */
+export function toGitLfsMediaUrl(url: string): string | null {
+  const raw = toCorsFriendlyUrl(url);
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (u.hostname.toLowerCase() !== 'raw.githubusercontent.com') return null;
+  const path = u.pathname.replace(/^\/+/, '');
+  if (path.split('/').filter(Boolean).length < 4) return null; // owner/repo/ref/path
+  return `https://media.githubusercontent.com/media/${path}`;
+}
+
 export async function readResponseText(
   res: Response,
   onProgress?: (fraction: number) => void,
