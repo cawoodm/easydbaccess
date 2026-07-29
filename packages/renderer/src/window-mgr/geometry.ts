@@ -20,3 +20,17 @@ export function sanitizeGeometry(g: WindowGeometry | undefined): WindowGeometry 
   if (g.w < MIN_W || g.h < MIN_H) return null;
   return { ...g };
 }
+
+/**
+ * Ascending order by `windowGeometry.z` (undefined ⇒ oldest/bottom). Shared by
+ * the table AND view window managers so each one's own boot-open loop
+ * reproduces its saved per-kind order. This only orders WITHIN one kind's
+ * opening sequence — the cross-kind merge that fixes relative table/view
+ * stacking is `z-order.ts` + `restack.ts`.
+ */
+export function byAscendingZ(
+  a: { windowGeometry?: WindowGeometry | undefined },
+  b: { windowGeometry?: WindowGeometry | undefined },
+): number {
+  return (a.windowGeometry?.z ?? -Infinity) - (b.windowGeometry?.z ?? -Infinity);
+}

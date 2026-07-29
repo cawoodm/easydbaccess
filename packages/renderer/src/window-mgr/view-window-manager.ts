@@ -13,6 +13,14 @@
  * window opens when its instance is flagged open and closes when the flag drops
  * or the instance is deleted. On boot, every instance already flagged `open`
  * gets its window re-created (jsPanel itself has no cross-reload memory).
+ *
+ * Z-ordering also mirrors the table manager: `onfronted` stamps a monotonic
+ * front-rank into `windowGeometry.z` (shared counter with tables — see
+ * `front-order.ts`), and the boot/reactive-open loops sort by it. That only
+ * orders views AMONG THEMSELVES, though — restoring the relative order
+ * BETWEEN a table and a view is a deliberately separate, cross-manager
+ * concern; see `restack.ts` (this manager stays independent of
+ * `jspanel-manager.ts` except for the shared `currentPanZoom` handle).
  */
 
 // @ts-expect-error — jspanel4 ships no types
@@ -23,6 +31,9 @@ import { currentPanZoom } from './jspanel-manager.js';
 import { createMaximizeFill } from './maximize-fill.js';
 import { countSuffix, VISIBLE_COUNT_EVENT, type VisibleCountDetail } from './panel-title.js';
 import { VIEW_ICON } from './table-kind.js';
+import { byAscendingZ } from './geometry.js';
+import { nextFrontZ } from './front-order.js';
+import { registerPanel, unregisterPanel } from './panel-registry.js';
 // Side-effect import registers the <view-window> custom element; the type-only
 // import would otherwise be elided, leaving <view-window> an unupgraded
 // (inline, zero-size) element.
@@ -35,6 +46,9 @@ import '../chrome/panel-search.js';
 type Panel = {
   id: string;
   close(): void;
+  // jsPanel: front(callback, execOnFrontedCallbacks = true). Passing `false`
+  // fronts WITHOUT firing `onfronted` (so without stamping a new front rank).
+  front?: (callback?: undefined, execOnFrontedCallbacks?: boolean) => void;
   minimize?: () => void;
   maximize?: () => void;
   setHeaderTitle?: (title: string) => void;
@@ -67,7 +81,7 @@ const panels = new Map<string, ViewEntry>();
 export function focusViewWindow(instanceId: string): boolean {
   const entry = panels.get(instanceId);
   if (!entry) return false;
-  const panel = entry.panel as Panel & { front?: () => void; normalize?: () => void };
+  const panel = entry.panel as Panel & { normalize?: () => void };
   if (panel.status === 'minimized') panel.normalize?.();
   panel.front?.();
   return true;
@@ -104,15 +118,21 @@ export async function initViewWindowManager(): Promise<void> {
   const openInWs = (all: ViewInstance[]): ViewInstance[] =>
     all.filter((i) => i.workspaceId === ctx.workspaceId && i.open);
 
-  // Initial restore: reopen every instance already flagged open.
-  for (const inst of openInWs(await ctx.store.viewInstances.find())) openPanel(inst, ctx);
+  // Initial restore: reopen every instance already flagged open, in ascending
+  // saved-z order (mirrors the table window manager) so jsPanel's internal
+  // zi.next() counter reproduces the last layering AMONG views. Restoring the
+  // relative order BETWEEN tables and views is a separate, cross-kind pass —
+  // see `restack.ts`.
+  const initial = openInWs(await ctx.store.viewInstances.find()).sort(byAscendingZ);
+  for (const inst of initial) openPanel(inst, ctx);
 
   // Reactive reconcile: open windows for newly-open instances, close windows
   // whose instance is no longer open (flag dropped) or was deleted.
   ctx.store.viewInstances.subscribe((all) => {
     const want = new Map(openInWs(all).map((i) => [i.id, i]));
     for (const id of [...panels.keys()]) if (!want.has(id)) closePanel(id);
-    for (const [id, inst] of want) if (!panels.has(id)) openPanel(inst, ctx);
+    const toOpen = [...want.values()].filter((i) => !panels.has(i.id)).sort(byAscendingZ);
+    for (const inst of toOpen) openPanel(inst, ctx);
   });
 
   // Reconnect-by-name: a view binds to its table by `tableId`, but deleting a
@@ -261,6 +281,13 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     minimizeTo: '#easydb-minimized-dock',
     dragit: { containment: false, stop: () => void saveGeometry(inst.id) },
     resizeit: { containment: false, stop: () => void saveGeometry(inst.id) },
+    // Fires when the panel is focused/brought-to-front by any means. Mirrors
+    // the table window manager's `onfronted` exactly (see its comment): DOM
+    // zIndex isn't a stable identity (jsPanel's resetZi() renormalizes it on
+    // every front()), so we stamp a monotonic wall-clock rank instead —
+    // shared with tables via `nextFrontZ()` so the two kinds compare
+    // correctly in the merged cross-kind restack (`restack.ts`).
+    onfronted: () => void stampViewFrontOrder(inst.id, ctx),
     onstatuschange: (p: Panel) => {
       if (p.status === 'maximized') maxFill.enter();
       else maxFill.exit();
@@ -274,6 +301,7 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     },
     onclosed: () => {
       panels.delete(inst.id);
+      unregisterPanel(inst.id);
       maxFill.exit();
       // The user closed the window → drop the persisted open flag so it isn't
       // reopened on the next boot. (Closing because the flag already dropped is
@@ -294,6 +322,11 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     total: -1,
   };
   panels.set(inst.id, entry);
+  // Registered so the global restack (`restack.ts`) can front this panel
+  // without importing this module directly — see `panel-registry.ts`. The
+  // `false` suppresses jsPanel's `onfronted`, so a restack does NOT re-stamp
+  // the front rank it is itself ordering by.
+  registerPanel(inst.id, () => panel.front?.(undefined, false));
 
   const panelEl = document.getElementById(panelId);
 
@@ -324,10 +357,39 @@ function closePanel(instanceId: string): void {
   const entry = panels.get(instanceId);
   if (!entry) return;
   panels.delete(instanceId);
+  unregisterPanel(instanceId);
   try {
     if (entry.panel.status !== 'closed') entry.panel.close();
   } catch {
     /* already gone */
+  }
+}
+
+/**
+ * Save a "front rank" into windowGeometry.z, exactly like the table window
+ * manager's `stampFrontOrder` (see its comment in `jspanel-manager.ts`) —
+ * `nextFrontZ()` is the SAME shared counter, so a table and a view fronted
+ * moments apart still compare correctly in the merged restack.
+ */
+async function stampViewFrontOrder(instanceId: string, ctx: AppContext): Promise<void> {
+  try {
+    const inst = await ctx.store.viewInstances.findOne(instanceId);
+    if (!inst) return;
+    const geom = inst.windowGeometry ?? {
+      x: 0,
+      y: 0,
+      w: 480,
+      h: 520,
+      z: 0,
+      minimized: false,
+      maximized: false,
+    };
+    await ctx.store.viewInstances.patch(instanceId, {
+      windowGeometry: { ...geom, z: nextFrontZ() },
+      updatedAt: Date.now(),
+    });
+  } catch {
+    /* instance may have just been deleted — ignore */
   }
 }
 
@@ -355,7 +417,18 @@ async function saveGeometry(instanceId: string): Promise<void> {
       h = prev.h;
     }
     if (x <= -9000) x = prev?.x ?? 40;
-    const geom: WindowGeometry = { x, y, w, h, z: 0, minimized, maximized };
+    const geom: WindowGeometry = {
+      x,
+      y,
+      w,
+      h,
+      // Preserve the front-order rank written by stampViewFrontOrder — a
+      // geometry save (drag/resize/status-change) must not clobber it back to
+      // 0, or the window's stacking position would be forgotten on reload.
+      z: prev?.z ?? 0,
+      minimized,
+      maximized,
+    };
     await ctx.store.viewInstances.patch(instanceId, {
       windowGeometry: geom,
       updatedAt: Date.now(),

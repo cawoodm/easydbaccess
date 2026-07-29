@@ -28,8 +28,11 @@ import { createMaximizeFill } from './maximize-fill.js';
 import { startMaximizedRefit } from './refit-panels.js';
 import { startTitlebarBehavior } from './panel-titlebar.js';
 import { countSuffix, VISIBLE_COUNT_EVENT, type VisibleCountDetail } from './panel-title.js';
-import { sanitizeGeometry } from './geometry.js';
+import { sanitizeGeometry, byAscendingZ } from './geometry.js';
 import { tableKind, isRefreshable, TABLE_KIND_ICONS } from './table-kind.js';
+import { nextFrontZ } from './front-order.js';
+import { registerPanel, unregisterPanel } from './panel-registry.js';
+import { initRestack } from './restack.js';
 import '../table/data-table.js';
 import '../chrome/panel-search.js';
 import '../chrome/panel-footer.js';
@@ -66,7 +69,9 @@ function syncOverlayInsets(outer: HTMLElement): void {
 type Panel = {
   id: string;
   close(): void;
-  front?: () => void;
+  // jsPanel: front(callback, execOnFrontedCallbacks = true). Passing `false`
+  // fronts WITHOUT firing `onfronted` (so without stamping a new front rank).
+  front?: (callback?: undefined, execOnFrontedCallbacks?: boolean) => void;
   minimize?: () => void;
   maximize?: () => void;
   setHeaderTitle?: (title: string) => void;
@@ -190,6 +195,7 @@ export async function initWindowManager(): Promise<void> {
       const t = byId.get(id);
       if (!t || t.windowGeometry?.closed) {
         panels.delete(id);
+        unregisterPanel(id);
         // Programmatic close: the table was removed (delete / json-import
         // "Replace entire workspace" / server/gist pull) or hidden elsewhere.
         // Tell onclosed to skip its default hide-on-close side-effect — the
@@ -210,35 +216,12 @@ export async function initWindowManager(): Promise<void> {
 
   // A bulk pull (gist / server-sync) inserts tables one at a time, so the
   // reactive `subscribe` above opens each panel in insertion order, not saved-z
-  // order (liveQuery fires per write, defeating its sort). After such a pull the
-  // gist plugin dispatches `easydb:restack-windows`; re-front every open,
-  // non-minimized panel in ascending-z order to restore the layering. liveQuery
-  // opens panels asynchronously, so retry until all expected panels exist.
-  document.addEventListener('easydb:restack-windows', () => {
-    let attempts = 0;
-    const restack = async (): Promise<void> => {
-      const ordered = (await ctx.store.tables.find())
-        .filter((t) => t.workspaceId === ctx.workspaceId && !t.windowGeometry?.minimized)
-        .sort(byAscendingZ);
-      if (attempts < 12 && !ordered.every((t) => panels.has(t.id))) {
-        attempts++;
-        setTimeout(() => void restack(), 80);
-        return;
-      }
-      for (const t of ordered) {
-        try {
-          panels.get(t.id)?.front?.();
-        } catch {
-          /* panel closed mid-restack */
-        }
-      }
-    };
-    void restack();
-  });
-}
-
-function byAscendingZ(a: Table, b: Table): number {
-  return (a.windowGeometry?.z ?? -Infinity) - (b.windowGeometry?.z ?? -Infinity);
+  // order (liveQuery fires per write, defeating its sort) — and the same is
+  // true across kinds at plain boot (tables always open before views; see
+  // `table-list.ts`). `initRestack()` wires the `easydb:restack-windows`
+  // listener (fired by gist-sync/json-import after a bulk pull) and runs one
+  // merged table+view restack pass immediately, covering the boot case too.
+  void initRestack();
 }
 
 /** Default size for new (or sanity-reset) panels — matches contentSize below. */
@@ -373,6 +356,7 @@ function openPanel(t: Table, ctx: AppContext): void {
     // data. Hiding happens in onclosed so it also covers jsPanel's own controls.
     onclosed: async () => {
       panels.delete(t.id);
+      unregisterPanel(t.id);
       // Programmatic close (table deleted/replaced/pulled, or hidden from
       // another tab) — the store already reflects the intended state, so don't
       // re-hide it.
@@ -408,6 +392,11 @@ function openPanel(t: Table, ctx: AppContext): void {
   }) as Panel;
 
   panels.set(t.id, panel);
+  // Registered so the global restack (`restack.ts`) can front this panel
+  // without importing this module directly — see `panel-registry.ts`. The
+  // `false` suppresses jsPanel's `onfronted`, so a restack does NOT re-stamp
+  // the front rank it is itself ordering by.
+  registerPanel(t.id, () => panel.front?.(undefined, false));
 
   // Inject the per-table search into the controlbar (right side of the title
   // row, next to min/max/close) so it shares the title bar instead of taking
@@ -562,24 +551,12 @@ async function saveGeometry(tableId: string, ctx: AppContext): Promise<void> {
 }
 
 /**
- * Monotonic front-rank source. `Date.now()` alone COLLIDES when several panels
- * are fronted within the same millisecond (a bulk restack, or panels opened
- * back-to-back), tying their `z` — and a tie loses the stacking order on the
- * next reload/pull (the sort can't tell them apart). This counter only ever
- * increases, so every stamp is unique and strictly ordered while still tracking
- * wall-clock time for cross-session comparisons.
- */
-let lastFrontZ = 0;
-function nextFrontZ(): number {
-  lastFrontZ = Math.max(Date.now(), lastFrontZ + 1);
-  return lastFrontZ;
-}
-
-/**
  * Save a "front rank" into windowGeometry.z. We don't read the DOM zIndex
  * (jsPanel renormalizes it on every front() so all panels would show the same
  * max), and we don't try to save all panels in a batch — each front fires once
  * and the relative ordering follows from the strictly-increasing rank.
+ * `nextFrontZ()` (`front-order.ts`) is shared with view windows so a table and
+ * a view fronted moments apart still compare correctly against each other.
  */
 async function stampFrontOrder(tableId: string, ctx: AppContext): Promise<void> {
   try {
