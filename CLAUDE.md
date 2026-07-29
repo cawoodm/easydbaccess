@@ -188,3 +188,12 @@ for any branch not listed above), and both `packages/renderer/vite.config.ts`
 dev:renderer` and `npm run test:e2e` always agree on one port per branch and
 never silently drift onto a neighboring branch's port. Override for a one-off
 with `RENDERER_PORT=<n>`.
+
+The **e2e backing Hono server** gets a per-branch port the same way, from
+`resolveServerPort()` in that file: the renderer port **+ 1000** (main 6190,
+todos1 6191, todos2 6192). `playwright.config.ts` starts the server on it and
+`e2e/server-url.ts` hands the matching URL to the specs, so two worktrees can
+run `npm run test:e2e` simultaneously — with a single shared port, the first
+server to start locked the others out of the auto-sync / backend-proxy /
+plugins-registry specs, because its `CORS_ORIGINS` only named its own
+renderer origin. Override with `EASYDB_SERVER_PORT=<n>`.

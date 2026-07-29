@@ -2,6 +2,8 @@
 
 ## 29 Jul 2026
 
+- 🪲 The e2e backing server port is now resolved per branch instead of a shared 3998, so two worktrees can run the suite at once (v0.0.193)
+- 🔧 Added an ESLint config (adapted from twikki for TypeScript + Prettier); `npm run lint` works for the first time (v0.0.193)
 - 🪲 Tile and Cascade now leave minimized windows alone, instead of restoring them and reserving empty cells for them (v0.0.192)
 - ✨ New Auto Renderer plugin: after any import, columns get a renderer from their values — a URL becomes a link, an image URL a thumbnail, markup or long text a preview (v0.0.191)
 - 🪲 A JSON column of URLs was typed as a date, which locked out the link renderer (v0.0.191)

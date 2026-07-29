@@ -83,7 +83,7 @@ export async function resolveChosenTables(
     return [await probeSingleTable(fetchFn, ref)];
   }
 
-  let tables: TableRef[] = [];
+  const tables: TableRef[] = [];
   if (ref.db) {
     // Include hidden tables so the picker can show + offer them; only the
     // no-picker fast path (db chosen upstream) auto-excludes them.

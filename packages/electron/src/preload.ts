@@ -16,7 +16,6 @@ contextBridge.exposeInMainWorld('easydb', {
 // Type augmentation for renderer code (informational — the renderer imports
 // no Electron types; this lives here so it's discoverable in main.ts edits).
 declare global {
-  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   interface Window {
     easydb?: { platform: 'electron'; version: string };
   }

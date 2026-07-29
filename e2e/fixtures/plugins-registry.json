@@ -5,7 +5,7 @@
       "name": "Server Demo",
       "type": "ui",
       "description": "Registered via PLUGINS_REGISTRY_PATH for e2e tests.",
-      "url": "http://localhost:3998/static/demo.js"
+      "url": "https://example.invalid/demo.js"
     }
   ]
 }

@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.js';
+import { SERVER_URL } from './server-url.js';
 
 /**
  * GET /plugins/registry returns the file at PLUGINS_REGISTRY_PATH (set in
@@ -7,8 +8,6 @@ import { test, expect } from './fixtures.js';
  * when `server-sync:url` is configured for the current workspace — there is
  * no separate "From server" section any more (see plugin-manager-dialog.ts).
  */
-
-const SERVER_URL = 'http://localhost:3998';
 
 test.describe('plugins registry', () => {
   test('GET /plugins/registry serves the configured file', async () => {

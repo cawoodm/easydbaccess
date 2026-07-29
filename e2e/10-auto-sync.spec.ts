@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures.js';
 import { addRow, createTable } from './helpers.js';
+import { SERVER_URL } from './server-url.js';
 
 /**
  * TODO § Architectural follow-ups — auto-sync
@@ -12,8 +13,6 @@ import { addRow, createTable } from './helpers.js';
  * Tick is driven via window.__autoSyncTick — exposed in main.ts when the
  * URL has ?test=1 — so we don't sit waiting on the 60s interval.
  */
-
-const SERVER_URL = 'http://localhost:3998';
 
 /** Configure the renderer's server URL setting (shared with server-sync). */
 async function configureServerUrl(page: import('@playwright/test').Page) {

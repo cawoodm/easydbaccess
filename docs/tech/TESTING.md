@@ -73,12 +73,22 @@ per feature area, growing as features are added.
 **Isolation.** `playwright.config.ts` runs a single Chromium project,
 `workers: 1`, `fullyParallel: false` — deliberately serial, not parallelized
 across workers. Two dev servers are booted for the run: the renderer
-(`npm run dev:renderer`, port 5190) and a **throwaway** backend server
-(`npm run dev:server`, forced to port 3998 so it never collides with a
-developer's own `npm run dev:server` on the default port) pointed at
-`STORAGE_PATH=.playwright-storage` with `fs` storage and a fixture-backed
-`PLUGINS_REGISTRY_PATH`, purely so the sync/auto-sync/plugins-registry specs
-have a real backend to talk to.
+(`npm run dev:renderer`) and a **throwaway** backend server
+(`npm run dev:server`) pointed at `STORAGE_PATH=.playwright-storage` with `fs`
+storage and a fixture-backed `PLUGINS_REGISTRY_PATH`, purely so the
+sync/auto-sync/plugins-registry specs have a real backend to talk to.
+
+**Neither port is hardcoded.** Both come from `scripts/dev-port.mjs`, keyed on
+the current git branch — `resolveDevPort()` for the renderer (main 5190) and
+`resolveServerPort()` for the backing server (renderer port + 1000, so main
+6190). Specs that need the backend import `SERVER_URL` from
+`e2e/server-url.ts`, which calls the same resolver, so the config and the
+specs can't disagree. This is what lets two worktrees run `npm run test:e2e`
+at the same time: with one shared server port, whichever run started first
+owned it, and the other run's auto-sync / backend-proxy / plugins-registry
+specs failed on CORS — the running server's `CORS_ORIGINS` named only the
+first run's renderer origin. Pin both with `RENDERER_PORT` /
+`EASYDB_SERVER_PORT` if you need a specific pair.
 
 **Per-test isolation without wiping the whole database.** The `app` page
 fixture (`e2e/fixtures.ts`) gives every test a unique `workspaceId`

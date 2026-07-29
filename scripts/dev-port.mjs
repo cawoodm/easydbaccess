@@ -1,10 +1,15 @@
-// Resolves the renderer dev-server port for the CURRENT git branch/worktree,
-// so `packages/renderer/vite.config.ts` and the root `playwright.config.ts`
-// agree on one port without either hardcoding 5190. See CLAUDE.md's "Servers"
-// section for the fixed assignments this enforces.
+// Resolves the dev-server ports for the CURRENT git branch/worktree, so
+// `packages/renderer/vite.config.ts`, the root `playwright.config.ts` and the
+// e2e specs all agree without any of them hardcoding a port. See CLAUDE.md's
+// "Servers" section for the fixed assignments this enforces.
 //
-// Override with RENDERER_PORT=<n> for a one-off (e.g. exposing via ngrok
-// alongside an already-running server on the branch's normal port).
+// Two ports per branch:
+//   - the renderer (Vite) port      → resolveDevPort()
+//   - the e2e backing Hono server   → resolveServerPort()
+//
+// Override either for a one-off with RENDERER_PORT=<n> / EASYDB_SERVER_PORT=<n>
+// (e.g. exposing via ngrok alongside an already-running server on the branch's
+// normal port).
 
 import { execSync } from 'node:child_process';
 
@@ -19,6 +24,17 @@ const FIXED_PORTS = {
 // fixed ports above.
 const FALLBACK_RANGE_START = 5200;
 const FALLBACK_RANGE_SIZE = 100;
+
+// The e2e backing Hono server (playwright.config.ts's second webServer) needs
+// its own per-branch port for the same reason the renderer does: two worktrees
+// running `npm run test:e2e` at once would otherwise fight over one port, and
+// the loser silently fails 6 specs — its renderer origin isn't in the winning
+// server's CORS_ORIGINS. Deriving it from the renderer port keeps the pair in
+// lockstep and inherits the per-branch uniqueness for free.
+//
+// The offset lands every server port in 6190+, clear of the user's own dev
+// servers (3000/3001) and of Chrome's blocked-port list (6000, 6665-6669).
+const SERVER_PORT_OFFSET = 1000;
 
 function currentBranch() {
   try {
@@ -42,4 +58,9 @@ export function resolveDevPort() {
   const branch = currentBranch();
   if (!branch) return FIXED_PORTS.main;
   return FIXED_PORTS[branch] ?? hashPort(branch);
+}
+
+export function resolveServerPort() {
+  if (process.env.EASYDB_SERVER_PORT) return Number(process.env.EASYDB_SERVER_PORT);
+  return resolveDevPort() + SERVER_PORT_OFFSET;
 }

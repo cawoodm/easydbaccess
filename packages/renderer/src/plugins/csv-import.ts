@@ -678,8 +678,8 @@ function normalizeDate(s: string): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
   const m = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/.exec(s);
   if (m) {
-    let a = parseInt(m[1]!, 10);
-    let b = parseInt(m[2]!, 10);
+    const a = parseInt(m[1]!, 10);
+    const b = parseInt(m[2]!, 10);
     const yr = m[3]!;
     let year = parseInt(yr, 10);
     if (yr.length === 2) year += 2000;

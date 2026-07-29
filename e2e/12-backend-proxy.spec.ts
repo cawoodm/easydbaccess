@@ -1,16 +1,16 @@
 import { test, expect } from './fixtures.js';
+import { SERVER_URL } from './server-url.js';
 
 /**
  * api.backend.fetch should route through the configured server's /fetch
  * endpoint when `server-sync:url` is set, and fall back to direct browser
  * fetch when it isn't.
  *
- * The Hono backend runs on :3998 (see playwright.config.ts webServer). We
- * call /fetch through the proxy and inspect which URL was actually fetched
- * by wrapping window.fetch from inside the page.
+ * The Hono backend runs on this branch's server port (see
+ * playwright.config.ts webServer + server-url.ts). We call /fetch through the
+ * proxy and inspect which URL was actually fetched by wrapping window.fetch
+ * from inside the page.
  */
-
-const SERVER_URL = 'http://localhost:3998';
 
 test.describe('backend.fetch proxy', () => {
   test('routes through /fetch when server-sync:url is configured', async ({ page }) => {

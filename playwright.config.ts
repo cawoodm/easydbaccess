@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
-import { resolveDevPort } from './scripts/dev-port.mjs';
+import { resolveDevPort, resolveServerPort } from './scripts/dev-port.mjs';
 
 /**
  * E2E tests for the renderer. Playwright launches Vite, waits for the dev
@@ -12,13 +12,15 @@ import { resolveDevPort } from './scripts/dev-port.mjs';
  * RxDB/IndexedDB store from one test doesn't pollute another. The page
  * also wipes IndexedDB in `beforeEach` for belt-and-braces.
  *
- * The renderer port is resolved from the current branch (see
- * scripts/dev-port.mjs), same as vite.config.ts, so e2e always targets
- * whichever port THIS checkout's dev server actually runs on — never a
- * hardcoded 5190 that might belong to a different worktree.
+ * Both ports — the renderer's and the backing server's — are resolved from
+ * the current branch (see scripts/dev-port.mjs), so e2e always targets
+ * whichever ports THIS checkout actually runs on, never a hardcoded pair that
+ * might belong to a different worktree. Specs read the server URL from
+ * `e2e/server-url.ts`, which calls the same resolver.
  */
 const rendererPort = resolveDevPort();
 const baseURL = `http://localhost:${rendererPort}`;
+const serverPort = resolveServerPort();
 
 export default defineConfig({
   testDir: './e2e',
@@ -49,13 +51,15 @@ export default defineConfig({
       // Backing server for auto-sync e2e. Node 22+ — sqlite-store is OK.
       // PORT/STORAGE_* env pre-empts packages/server/.env (process.loadEnvFile
       // documents that it doesn't overwrite existing process.env entries).
-      // Port 3998 stays clear of the user's typical dev server on 3001.
+      // The port is per-branch (renderer port + 1000) so parallel worktrees
+      // each get their own server instead of the first one to start locking
+      // the others out via CORS.
       command: 'npm run dev:server',
-      url: 'http://localhost:3998/health',
+      url: `http://localhost:${serverPort}/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
       env: {
-        PORT: '3998',
+        PORT: String(serverPort),
         STORAGE_KIND: 'fs',
         STORAGE_PATH: '.playwright-storage',
         CORS_ORIGINS: baseURL,
