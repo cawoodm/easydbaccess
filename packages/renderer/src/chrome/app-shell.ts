@@ -147,7 +147,8 @@ export class AppShell extends LitElement {
       .search-clear:hover {
         color: white;
       }
-      button.icon-btn {
+      button.icon-btn,
+      a.icon-btn {
         background: transparent;
         color: white;
         border: 1px solid #4b5563;
@@ -156,8 +157,14 @@ export class AppShell extends LitElement {
         font: inherit;
         cursor: pointer;
         line-height: 1;
+        /* a.icon-btn is a link, not a button — strip the underline/default
+           link colour so it renders identically to its button siblings. */
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
       }
-      button.icon-btn:hover {
+      button.icon-btn:hover,
+      a.icon-btn:hover {
         background: #374151;
       }
       /* Highlight the collapsed search icon while a global filter is active, so
@@ -458,7 +465,7 @@ export class AppShell extends LitElement {
             target="_blank"
             rel="noopener"
             title="View the changelog on GitHub"
-            ><span class="version">v0.0.201</span></a
+            ><span class="version">v0.0.202</span></a
           ></strong
         >
         ${this.headerButtons
@@ -501,6 +508,16 @@ export class AppShell extends LitElement {
         >
           <span class="mi">extension</span>
         </button>
+        <a
+          class="icon-btn"
+          href="https://github.com/cawoodm/easydbaccess/blob/main/docs/help/INDEX.md"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Help — open the user guide"
+          aria-label="Help — open the user guide"
+        >
+          <span class="mi">help</span>
+        </a>
         ${this.headerButtons
           .filter((b) => b.variant === 'secondary')
           .map((b) => this.renderSlotButton(b, 'header'))}
