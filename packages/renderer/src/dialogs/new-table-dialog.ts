@@ -110,6 +110,11 @@ export class NewTableDialog extends LitElement {
         color: #d1d5db;
         cursor: not-allowed;
       }
+      /* A column that already carries a script — blue so it is obvious which
+       columns are computed without opening each editor. */
+      button.icon-btn.has-script {
+        color: #2563eb;
+      }
       button.row-del {
         color: #9ca3af;
         font-size: 1.1rem;
@@ -696,16 +701,16 @@ export class NewTableDialog extends LitElement {
                         (r) => html`<option value=${r} ?selected=${r === c.renderer}>${r}</option>`,
                       )}
                     </select>
-                    ${c.renderer === 'script'
-                      ? html`<button
-                          type="button"
-                          class="icon-btn"
-                          title="Edit JS render(row)"
-                          @click=${() => this.editScript(i)}
-                        >
-                          <span class="mi sm">edit</span>
-                        </button>`
-                      : html`<span></span>`}
+                    <button
+                      type="button"
+                      class=${`icon-btn${c.script?.trim() ? ' has-script' : ''}`}
+                      title=${c.script?.trim()
+                        ? 'Edit the script — its render(row) output is what this column displays'
+                        : 'Add a script: render(row) computes what this column displays'}
+                      @click=${() => this.editScript(i)}
+                    >
+                      <span class="mi sm">${c.script?.trim() ? 'code' : 'edit'}</span>
+                    </button>
                     <input
                       type="number"
                       min="0"

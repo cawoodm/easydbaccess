@@ -14,9 +14,17 @@ export interface ColumnSpec {
    */
   renderer?: string;
   /**
-   * Source for the `script` renderer — a JavaScript body that must define
-   * `function render(row) { … }`. Edited via the column editor pencil and
-   * ignored when `renderer !== 'script'`. Not part of the CSV mini-language.
+   * A JavaScript body that must define `function render(row) { … }`, edited via
+   * the column editor's script button. Settable on ANY column: the return value
+   * replaces the stored value on its way into `renderer`, so a computed value
+   * can be displayed by the link / image / html / boolean renderers, or as text
+   * when no renderer is set. A scripted cell is read-only — it is derived, so
+   * there is nowhere to write an edit back to.
+   *
+   * The `script` renderer is the exception: it runs the script itself and
+   * injects the returned string as raw HTML, keeping the stored value editable.
+   *
+   * Not part of the CSV mini-language.
    */
   script?: string;
   default?: unknown;

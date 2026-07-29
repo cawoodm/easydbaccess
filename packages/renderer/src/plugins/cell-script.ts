@@ -1,4 +1,5 @@
 import type { ColumnSpec, HostApi, PluginModule } from '@easydb/shared';
+import { runColumnScript } from '../util/column-script.js';
 import { makePencil, makeValueEditor, pencilRow } from './cell-pencil.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
@@ -137,18 +138,9 @@ class CellScript extends HTMLElement {
       placeholder.style.cssText = 'color:#9ca3af;font-style:italic';
       return placeholder;
     }
-    let fn: (row: unknown) => unknown;
-    try {
-      fn = compileScript(src);
-    } catch (err) {
-      return makeErrorChip('compile error', err);
-    }
-    let out: unknown;
-    try {
-      out = fn(this._row);
-    } catch (err) {
-      return makeErrorChip('runtime error', err);
-    }
+    const run = runColumnScript(src, this._row);
+    if (!run.ok) return makeErrorChip(run.label, run.message);
+    const out = run.value;
     if (typeof out !== 'string') {
       return makeErrorChip('render(row) did not return a string', null);
     }
@@ -171,19 +163,6 @@ class CellScript extends HTMLElement {
       new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }),
     );
   }
-}
-
-const compiledScripts = new Map<string, (row: unknown) => unknown>();
-
-function compileScript(src: string): (row: unknown) => unknown {
-  const cached = compiledScripts.get(src);
-  if (cached) return cached;
-  // The user's body defines `render`; we then call it with the bound row.
-  // Wrapping in a function lets them also have `const` declarations,
-  // imports of `Date`/`Math`, etc., scoped to the function.
-  const fn = new Function('row', `${src}\nreturn render(row);`) as (row: unknown) => unknown;
-  compiledScripts.set(src, fn);
-  return fn;
 }
 
 function makeErrorChip(label: string, err: unknown): HTMLElement {

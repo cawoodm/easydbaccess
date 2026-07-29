@@ -18,7 +18,11 @@ export interface TestColumn {
    * `'boolean'` for the matching native inputs).
    */
   renderer?: string;
-  /** JS body for the `script` renderer — must define `function render(row) {…}`. */
+  /**
+   * JS body defining `function render(row) {…}`. Valid on ANY column: the return
+   * value is what the column's renderer displays (raw HTML for the `script`
+   * renderer).
+   */
   script?: string;
 }
 
