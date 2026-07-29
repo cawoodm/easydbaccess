@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import type { PluginRecord, PluginModule, PluginType } from '@easydb/shared';
 import { getContext } from '../app-context.js';
+import { SAFE_MODE } from '../plugin-host/safe-mode.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
@@ -43,11 +44,14 @@ type Category = 'built-in' | 'available' | 'installed' | 'fixed';
 /** Tri-state filter: off (ignore) → on (show only these) → not (hide these). */
 type FilterState = 'on' | 'not';
 
-/** Filter-toggle order + display labels, above the plugin list. */
+/**
+ * Filter-toggle order + display labels, above the plugin list. There is no
+ * "Available" chip — an available plugin is one that is not installed, which
+ * is exactly what the Installed chip in its "not" state already shows.
+ */
 const FILTER_LABELS: Array<[Category, string]> = [
   ['installed', 'Installed'],
   ['built-in', 'Built-in'],
-  ['available', 'Available'],
   ['fixed', 'Fixed'],
 ];
 
@@ -69,11 +73,16 @@ const TYPE_LABEL = new Map<PluginType, string>(TYPE_LABELS);
  */
 type PluginStatus = 'enabled' | 'disabled';
 
-/** Status-filter order + display labels. */
-const STATUS_LABELS: Array<[PluginStatus, string]> = [
-  ['enabled', 'Enabled'],
-  ['disabled', 'Disabled'],
-];
+/**
+ * Titles for the single "Enabled" status chip, by state. Unlike every other
+ * chip its "not" state is not merely an exclusion — enabled and disabled are
+ * the only two statuses, so hiding one shows the other.
+ */
+const STATUS_TITLES = {
+  off: 'Filter by status — click: only enabled → only disabled → off',
+  on: 'Showing only enabled plugins — click to show only disabled',
+  not: 'Showing only disabled plugins — click to clear',
+} as const;
 
 /** One row of the unified plugin list, merged from built-ins / catalogs / installed URLs. */
 interface PluginRow {
@@ -93,6 +102,13 @@ interface PluginRow {
   /** Enabled/disabled status — only present for rows that can be toggled (see `PluginStatus`). */
   status?: PluginStatus;
   fixed?: boolean;
+  /**
+   * True when safe mode kept this plugin from loading THIS BOOT. Distinct from
+   * `enabled`, which is the user's persisted setting — safe mode deliberately
+   * never writes that, so without this flag every row read as "Enabled" while
+   * nothing was actually running.
+   */
+  skipped?: boolean;
   installing?: boolean;
   /** Secondary line under the name — description, raw URL, fetch status, or an error. */
   meta?: string;
@@ -134,15 +150,14 @@ export class PluginManagerDialog extends LitElement {
         align-items: center;
         gap: 1rem;
       }
-      .type-filters,
-      .status-filters {
+      .filters .chips,
+      .type-filters {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
         gap: 0.4rem;
       }
-      .type-filters .filter-label,
-      .status-filters .filter-label {
+      .type-filters .filter-label {
         font-size: 0.72rem;
         font-weight: 600;
         text-transform: uppercase;
@@ -152,8 +167,7 @@ export class PluginManagerDialog extends LitElement {
       }
       /* Tri-state filter chip: off (neutral) → on (blue, ✓) → not (red, ≠). */
       .filters .tri,
-      .type-filters .tri,
-      .status-filters .tri {
+      .type-filters .tri {
         display: inline-flex;
         align-items: center;
         gap: 0.3rem;
@@ -167,24 +181,50 @@ export class PluginManagerDialog extends LitElement {
         user-select: none;
       }
       .filters .tri .tri-mark,
-      .type-filters .tri .tri-mark,
-      .status-filters .tri .tri-mark {
+      .type-filters .tri .tri-mark {
         font-weight: 700;
         line-height: 1;
       }
       .filters .tri.on,
-      .type-filters .tri.on,
-      .status-filters .tri.on {
+      .type-filters .tri.on {
         border-color: #2563eb;
         background: #eff6ff;
         color: #1d4ed8;
       }
       .filters .tri.not,
-      .type-filters .tri.not,
-      .status-filters .tri.not {
+      .type-filters .tri.not {
         border-color: #dc2626;
         background: #fef2f2;
         color: #b91c1c;
+      }
+      /* Safe-mode notice: explains why nothing is loaded despite the toggles. */
+      p.safemode {
+        margin: 0;
+        padding: 0.5rem 0.7rem;
+        border: 1px solid #fcd34d;
+        background: #fffbeb;
+        color: #92400e;
+        border-radius: 0.35rem;
+        font-size: 0.85rem;
+      }
+      .row-skipped {
+        display: inline-block;
+        font-size: 0.68rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+        color: #92400e;
+        background: #fef3c7;
+        border: 1px solid #fcd34d;
+        border-radius: 0.25rem;
+        padding: 0.05rem 0.35rem;
+        margin-left: 0.35rem;
+        vertical-align: middle;
+      }
+      /* A toggle whose plugin isn't running this boot: still editable (it edits
+         the persisted setting) but dimmed so it doesn't read as "active". */
+      .row.skipped .switch {
+        opacity: 0.55;
       }
       .row-type {
         display: inline-block;
@@ -436,8 +476,10 @@ export class PluginManagerDialog extends LitElement {
   @state() private filterStates: Map<Category, FilterState> = new Map();
   // Same tri-state semantics, keyed by plugin type.
   @state() private typeFilters: Map<PluginType, FilterState> = new Map();
-  // Same tri-state semantics, keyed by enabled/disabled status.
-  @state() private statusFilters: Map<PluginStatus, FilterState> = new Map();
+  // One chip covers both statuses: undefined = any, 'on' = enabled only,
+  // 'not' = disabled only. Rows with no status (a catalog plugin that is not
+  // installed) match neither.
+  @state() private statusFilter: FilterState | undefined = undefined;
   private dialogEl: HTMLDialogElement | null = null;
 
   override firstUpdated() {
@@ -464,7 +506,7 @@ export class PluginManagerDialog extends LitElement {
     this.search = '';
     this.filterStates = new Map();
     this.typeFilters = new Map();
-    this.statusFilters = new Map();
+    this.statusFilter = undefined;
     await this.updateComplete;
     this.dialogEl?.showModal();
     // Catalog fetches run after the dialog is visible so a slow network
@@ -552,10 +594,7 @@ export class PluginManagerDialog extends LitElement {
     if (!url) return;
     if (!/^https?:\/\//i.test(url)) {
       const ctx = await getContext();
-      await ctx.api.ui.dialogs.alert(
-        'Plugin URL must be an absolute http(s) URL.',
-        'Invalid URL',
-      );
+      await ctx.api.ui.dialogs.alert('Plugin URL must be an absolute http(s) URL.', 'Invalid URL');
       return;
     }
     if (this.urls.includes(url)) return;
@@ -681,15 +720,46 @@ export class PluginManagerDialog extends LitElement {
         lastFetched: Date.now(),
         lastError: `install: ${(err as Error).message}`,
       });
-      ctx.api.ui.dialogs.toast(
-        `Could not install ${entry.name}: ${(err as Error).message}`,
-        { kind: 'error', title: 'Plugin error' },
-      );
+      ctx.api.ui.dialogs.toast(`Could not install ${entry.name}: ${(err as Error).message}`, {
+        kind: 'error',
+        title: 'Plugin error',
+      });
     } finally {
       const next = new Set(this.installing);
       next.delete(entry.absUrl);
       this.installing = next;
     }
+  }
+
+  /**
+   * One tri-state filter chip. Every filter row uses this — category, status,
+   * and type all behave identically, so they must also look identical.
+   */
+  private renderTri(
+    label: string,
+    state: FilterState | undefined,
+    onClick: () => void,
+    extraClass = '',
+    titles?: { off: string; on: string; not: string },
+  ) {
+    const title = titles
+      ? titles[state ?? 'off']
+      : state === 'on'
+        ? `Showing only ${label} plugins — click to exclude`
+        : state === 'not'
+          ? `Hiding ${label} plugins — click to clear`
+          : `Filter by ${label} — click: show only → exclude → off`;
+    return html`
+      <button
+        type="button"
+        class=${`tri${extraClass ? ` ${extraClass}` : ''}${state ? ` ${state}` : ''}`}
+        title=${title}
+        aria-pressed=${state !== undefined}
+        @click=${onClick}
+      >
+        <span class="tri-mark">${state === 'on' ? '✓' : state === 'not' ? '≠' : ''}</span>${label}
+      </button>
+    `;
   }
 
   /** Advance a tri-state map entry: off → on (only these) → not (hide these) → off. */
@@ -712,9 +782,10 @@ export class PluginManagerDialog extends LitElement {
     this.typeFilters = this.cycleState(this.typeFilters, type);
   }
 
-  /** Cycle a status filter: off → on (only these) → not (hide these) → off. */
-  private cycleStatusFilter(status: PluginStatus): void {
-    this.statusFilters = this.cycleState(this.statusFilters, status);
+  /** Cycle the status filter: any → enabled only → disabled only → any. */
+  private cycleStatusFilter(): void {
+    this.statusFilter =
+      this.statusFilter === undefined ? 'on' : this.statusFilter === 'on' ? 'not' : undefined;
   }
 
   /**
@@ -730,6 +801,8 @@ export class PluginManagerDialog extends LitElement {
 
     for (const { id, meta } of builtinPlugins) {
       const enabled = meta.fixed ? true : this.records.get(builtinKey(id))?.enabled !== false;
+      // `?safemode` skips every non-fixed built-in for this boot only.
+      const skipped = !meta.fixed && SAFE_MODE === 'all-optional';
       // Built-ins ship with the app and are active in the workspace, so they
       // count as "installed" too — that's what the Installed filter should show.
       const categories: Category[] = meta.fixed
@@ -745,8 +818,10 @@ export class PluginManagerDialog extends LitElement {
         ...(meta.repo ? { repo: meta.repo } : {}),
         categories: new Set(categories),
         enabled,
-        status: enabled ? 'enabled' : 'disabled',
+        // Not running ⇒ filters as "disabled", whatever the stored setting says.
+        status: enabled && !skipped ? 'enabled' : 'disabled',
         fixed: !!meta.fixed,
+        ...(skipped ? { skipped: true } : {}),
       });
     }
 
@@ -756,6 +831,8 @@ export class PluginManagerDialog extends LitElement {
       const categories: Category[] = installedByUrl ? ['available', 'installed'] : ['available'];
       const existing = rows.get(entry.id);
       const entryEnabled = rec?.enabled !== false;
+      // Both safe-mode levels skip URL plugins.
+      const entrySkipped = installedByUrl && SAFE_MODE !== 'off';
       rows.set(entry.id, {
         id: entry.id,
         name: entry.name,
@@ -772,7 +849,12 @@ export class PluginManagerDialog extends LitElement {
         // Only rows that can actually be toggled (i.e. installed) get a
         // status — a catalog entry that's merely "available" has none, so
         // it never masquerades as "Enabled".
-        ...(installedByUrl ? { status: (entryEnabled ? 'enabled' : 'disabled') as PluginStatus } : {}),
+        ...(installedByUrl
+          ? {
+              status: (entryEnabled && !entrySkipped ? 'enabled' : 'disabled') as PluginStatus,
+            }
+          : {}),
+        ...(entrySkipped ? { skipped: true } : {}),
         installing: this.installing.has(entry.absUrl),
       });
       urlToKey.set(entry.absUrl, entry.id);
@@ -785,9 +867,7 @@ export class PluginManagerDialog extends LitElement {
         continue;
       }
       const rec = this.records.get(url);
-      const lastFetched = rec?.lastFetched
-        ? new Date(rec.lastFetched).toLocaleString()
-        : 'never';
+      const lastFetched = rec?.lastFetched ? new Date(rec.lastFetched).toLocaleString() : 'never';
       const urlEnabled = rec?.enabled !== false;
       rows.set(`url:${url}`, {
         id: url,
@@ -798,7 +878,9 @@ export class PluginManagerDialog extends LitElement {
         metaIsError: !!rec?.lastError,
         categories: new Set(['installed']),
         enabled: urlEnabled,
-        status: urlEnabled ? 'enabled' : 'disabled',
+        // Both safe-mode levels skip URL plugins, so it isn't running now.
+        status: urlEnabled && SAFE_MODE === 'off' ? 'enabled' : 'disabled',
+        ...(SAFE_MODE !== 'off' ? { skipped: true } : {}),
       });
     }
 
@@ -818,16 +900,14 @@ export class PluginManagerDialog extends LitElement {
     for (const [type, state] of this.typeFilters) {
       (state === 'on' ? typeInclude : typeExclude).push(type);
     }
-    const statusInclude: PluginStatus[] = [];
-    const statusExclude: PluginStatus[] = [];
-    for (const [status, state] of this.statusFilters) {
-      (state === 'on' ? statusInclude : statusExclude).push(status);
-    }
+    // The one status chip asks for a specific status, in both of its states.
+    const wantStatus: PluginStatus | undefined =
+      this.statusFilter === 'on' ? 'enabled' : this.statusFilter === 'not' ? 'disabled' : undefined;
     const byFilter = rows.filter((r) => {
-      // Fixed plugins (core, non-disableable) are hidden by default — they'd
-      // just be noise with a lock icon. They appear only when the user turns
-      // the "Fixed" filter explicitly on.
-      if (r.fixed && this.filterStates.get('fixed') !== 'on') return false;
+      // Fixed plugins used to be hidden unless the "Fixed" chip was on. That
+      // made every other filter lie: "Enabled" hid Settings and Core Renderers,
+      // which are the two plugins that are always enabled. "Fixed" is now an
+      // ordinary chip with no hidden default.
       // "on" filters are a union (row must be in at least one selected category);
       // "not" filters exclude (row must be in none of them).
       if (include.length && !include.some((c) => r.categories.has(c))) return false;
@@ -837,12 +917,10 @@ export class PluginManagerDialog extends LitElement {
       // matching types.
       if (typeInclude.length && !(r.type && typeInclude.includes(r.type))) return false;
       if (r.type && typeExclude.includes(r.type)) return false;
-      // Status filters: an "on" set requires the row to have a status among
-      // them (statusless rows — e.g. an available-but-not-installed catalog
-      // entry — are excluded when any status is required); "not" hides
-      // matching statuses.
-      if (statusInclude.length && !(r.status && statusInclude.includes(r.status))) return false;
-      if (r.status && statusExclude.includes(r.status)) return false;
+      // Status filter: a row must carry the wanted status. A statusless row —
+      // an available-but-not-installed catalog entry — is neither enabled nor
+      // disabled, so it drops out of both states of the chip.
+      if (wantStatus && r.status !== wantStatus) return false;
       return true;
     });
     if (!term) return byFilter;
@@ -856,7 +934,11 @@ export class PluginManagerDialog extends LitElement {
     const canUninstall = !!row.url && row.categories.has('installed');
     const canInstall = !!row.url && !row.categories.has('installed');
     return html`
-      <div class=${`row${row.categories.has('built-in') ? ' builtin' : ''}${row.metaIsError ? ' error' : ''}`}>
+      <div
+        class=${`row${row.categories.has('built-in') ? ' builtin' : ''}${
+          row.metaIsError ? ' error' : ''
+        }${row.skipped ? ' skipped' : ''}`}
+      >
         <span class="row-icon">${row.icon ? unsafeHTML(row.icon) : FALLBACK_ICON}</span>
         <div class="row-main">
           <div class=${`row-title${row.urlOnly ? ' mono' : ''}`}>
@@ -865,6 +947,12 @@ export class PluginManagerDialog extends LitElement {
               : ''}${row.type
               ? html`<span class="row-type" title="Plugin type"
                   >${TYPE_LABEL.get(row.type) ?? row.type}</span
+                >`
+              : ''}${row.skipped
+              ? html`<span
+                  class="row-skipped"
+                  title="Safe mode kept this plugin from loading this session — your saved setting is unchanged"
+                  >skipped</span
                 >`
               : ''}
           </div>
@@ -886,7 +974,12 @@ export class PluginManagerDialog extends LitElement {
         ${row.fixed
           ? html`<span class="mi sm lock-icon" title="Always on — cannot be disabled">lock</span>`
           : showToggle
-            ? html`<label class="switch" title="Enable / disable">
+            ? html`<label
+                class="switch"
+                title=${row.skipped
+                  ? 'Your saved setting — safe mode is what stopped this plugin loading now'
+                  : 'Enable / disable'}
+              >
                 <input
                   type="checkbox"
                   .checked=${row.enabled}
@@ -938,34 +1031,35 @@ export class PluginManagerDialog extends LitElement {
           </div>
           <div class="dialog-body">
             <p class="hint">
-              Plugins are JavaScript modules loaded by URL into this workspace.
-              Enable/disable changes take effect after reload; installing a
-              plugin activates it immediately.
+              Plugins are JavaScript modules loaded by URL into this workspace. Enable/disable
+              changes take effect after reload; installing a plugin activates it immediately.
             </p>
+            ${SAFE_MODE !== 'off'
+              ? html`<p class="safemode">
+                  <strong>Safe mode is on.</strong>
+                  ${SAFE_MODE === 'all-optional'
+                    ? html`<code>?safemode</code> skipped every URL plugin and every optional
+                        built-in for this session.`
+                    : html`<code>?safemode1</code> skipped every URL plugin for this session.`}
+                  Plugins marked <span class="row-skipped">skipped</span> are not running. The
+                  toggles below still show — and change — your saved settings, which safe mode never
+                  touches. Reload without the flag to run them again.
+                </p>`
+              : ''}
 
             <div class="filters">
-              ${FILTER_LABELS.map(([cat, label]) => {
-                const state = this.filterStates.get(cat);
-                const title =
-                  state === 'on'
-                    ? `Showing only ${label} plugins — click to exclude`
-                    : state === 'not'
-                      ? `Hiding ${label} plugins — click to clear`
-                      : `Filter by ${label} — click: show only → exclude → off`;
-                return html`
-                  <button
-                    type="button"
-                    class=${`tri${state ? ` ${state}` : ''}`}
-                    title=${title}
-                    aria-pressed=${state !== undefined}
-                    @click=${() => this.cycleFilter(cat)}
-                  >
-                    <span class="tri-mark"
-                      >${state === 'on' ? '✓' : state === 'not' ? '≠' : ''}</span
-                    >${label}
-                  </button>
-                `;
-              })}
+              <div class="chips">
+                ${FILTER_LABELS.map(([cat, label]) =>
+                  this.renderTri(label, this.filterStates.get(cat), () => this.cycleFilter(cat)),
+                )}
+                ${this.renderTri(
+                  'Enabled',
+                  this.statusFilter,
+                  () => this.cycleStatusFilter(),
+                  'status',
+                  STATUS_TITLES,
+                )}
+              </div>
               <div class="search">
                 <input
                   type="text"
@@ -978,54 +1072,9 @@ export class PluginManagerDialog extends LitElement {
 
             <div class="type-filters">
               <span class="filter-label">Type</span>
-              ${TYPE_LABELS.map(([type, label]) => {
-                const state = this.typeFilters.get(type);
-                const title =
-                  state === 'on'
-                    ? `Showing only ${label} plugins — click to exclude`
-                    : state === 'not'
-                      ? `Hiding ${label} plugins — click to clear`
-                      : `Filter by ${label} — click: show only → exclude → off`;
-                return html`
-                  <button
-                    type="button"
-                    class=${`tri${state ? ` ${state}` : ''}`}
-                    title=${title}
-                    aria-pressed=${state !== undefined}
-                    @click=${() => this.cycleTypeFilter(type)}
-                  >
-                    <span class="tri-mark"
-                      >${state === 'on' ? '✓' : state === 'not' ? '≠' : ''}</span
-                    >${label}
-                  </button>
-                `;
-              })}
-            </div>
-
-            <div class="status-filters">
-              <span class="filter-label">Status</span>
-              ${STATUS_LABELS.map(([status, label]) => {
-                const state = this.statusFilters.get(status);
-                const title =
-                  state === 'on'
-                    ? `Showing only ${label} plugins — click to exclude`
-                    : state === 'not'
-                      ? `Hiding ${label} plugins — click to clear`
-                      : `Filter by ${label} — click: show only → exclude → off`;
-                return html`
-                  <button
-                    type="button"
-                    class=${`tri${state ? ` ${state}` : ''}`}
-                    title=${title}
-                    aria-pressed=${state !== undefined}
-                    @click=${() => this.cycleStatusFilter(status)}
-                  >
-                    <span class="tri-mark"
-                      >${state === 'on' ? '✓' : state === 'not' ? '≠' : ''}</span
-                    >${label}
-                  </button>
-                `;
-              })}
+              ${TYPE_LABELS.map(([type, label]) =>
+                this.renderTri(label, this.typeFilters.get(type), () => this.cycleTypeFilter(type)),
+              )}
             </div>
 
             <div class="catalog-source">
@@ -1033,7 +1082,8 @@ export class PluginManagerDialog extends LitElement {
                 type="text"
                 list="catalog-url-options"
                 .value=${this.activeCatalogUrl}
-                @input=${(e: Event) => (this.activeCatalogUrl = (e.target as HTMLInputElement).value)}
+                @input=${(e: Event) =>
+                  (this.activeCatalogUrl = (e.target as HTMLInputElement).value)}
                 placeholder="Catalog source URL"
               />
               <datalist id="catalog-url-options">
@@ -1047,7 +1097,9 @@ export class PluginManagerDialog extends LitElement {
               ? html`<div class="meta err">Catalog unavailable: ${this.catalogError}</div>`
               : ''}
             ${this.serverCatalogError
-              ? html`<div class="meta err">Server registry unavailable: ${this.serverCatalogError}</div>`
+              ? html`<div class="meta err">
+                  Server registry unavailable: ${this.serverCatalogError}
+                </div>`
               : ''}
 
             <div class="plugin-list">
@@ -1064,9 +1116,7 @@ export class PluginManagerDialog extends LitElement {
                 .value=${this.addUrl}
                 @input=${(e: Event) => (this.addUrl = (e.target as HTMLInputElement).value)}
               />
-              <button type="submit" class="primary">
-                <span class="mi sm">add</span> Add
-              </button>
+              <button type="submit" class="primary"><span class="mi sm">add</span> Add</button>
             </div>
           </div>
         </form>

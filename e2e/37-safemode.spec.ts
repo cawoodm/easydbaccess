@@ -23,12 +23,26 @@ async function gotoWithFlags(page: import('@playwright/test').Page, ws: string, 
   );
 }
 
+/**
+ * Safe mode opens the Plugin Manager by itself (that is the whole point of the
+ * flag). It is a modal dialog, so anything testing the shell underneath has to
+ * dismiss it first.
+ */
+async function closeAutoPluginManager(page: import('@playwright/test').Page) {
+  const dlg = page.locator('plugin-manager-dialog dialog');
+  await expect(dlg).toBeVisible();
+  await page.locator('plugin-manager-dialog .header-actions button.ghost').click();
+  await expect(dlg).toBeHidden();
+}
+
 test.describe('safe mode', () => {
   test('control: no flag — optional built-in UI is present', async ({ page, workspaceId }) => {
     const header = page.locator('app-shell header');
     await expect(header.getByRole('button', { name: /New Table/ })).toBeVisible();
     await expect(header.getByTitle('Workspace and plugin settings')).toBeVisible();
-    await expect(header.locator('button.icon-btn[title="Add, disable, or remove plugins"]')).toBeVisible();
+    await expect(
+      header.locator('button.icon-btn[title="Add, disable, or remove plugins"]'),
+    ).toBeVisible();
     void workspaceId;
   });
 
@@ -48,6 +62,7 @@ test.describe('safe mode', () => {
     workspaceId,
   }) => {
     await gotoWithFlags(page, workspaceId, '&safemode');
+    await closeAutoPluginManager(page);
 
     const header = page.locator('app-shell header');
     // New Table is registered by a non-fixed built-in — must be absent.
@@ -73,6 +88,74 @@ test.describe('safe mode', () => {
     await expect(pluginManagerBtn).toBeVisible();
     await pluginManagerBtn.click();
     await expect(page.locator('plugin-manager-dialog dialog')).toBeVisible();
+  });
+
+  test('both safe-mode flags open the Plugin Manager on boot; no flag does not', async ({
+    page,
+    workspaceId,
+  }) => {
+    const dlg = page.locator('plugin-manager-dialog dialog');
+    // Control: a normal boot must not open anything.
+    await expect(dlg).toBeHidden();
+
+    await gotoWithFlags(page, workspaceId, '&safemode');
+    await expect(dlg).toBeVisible();
+
+    await gotoWithFlags(page, workspaceId, '&safemode1');
+    await expect(dlg).toBeVisible();
+  });
+
+  test('the Plugin Manager marks safe-mode-skipped plugins instead of showing them enabled', async ({
+    page,
+    workspaceId,
+  }) => {
+    await gotoWithFlags(page, workspaceId, '&safemode');
+    // No click needed — safe mode opens the manager itself.
+    const dlg = page.locator('plugin-manager-dialog');
+    await expect(dlg.locator('dialog')).toBeVisible();
+
+    // A banner explains why nothing is running — the toggles alone used to say
+    // "enabled" for every plugin, which is what made this confusing.
+    await expect(dlg.locator('p.safemode')).toContainText('Safe mode is on');
+
+    // Every plugin that WOULD have loaded is marked skipped. That's the rows
+    // carrying an enable toggle (built-in or installed) — a catalog entry that
+    // isn't installed was never going to load, so it isn't "skipped".
+    const toggleable = dlg.locator('.row:has(input[type="checkbox"])');
+    const toggleableCount = await toggleable.count();
+    expect(toggleableCount).toBeGreaterThan(0);
+    await expect(dlg.locator('.row.skipped')).toHaveCount(toggleableCount);
+    await expect(dlg.locator('.row:not(:has(input[type="checkbox"])).skipped')).toHaveCount(0);
+    await expect(toggleable.first().locator('.row-skipped')).toBeVisible();
+
+    // ...and reads as Disabled to the status filter, since it is not running.
+    // "Enabled" therefore matches only the fixed built-ins, which are the two
+    // plugins safe mode still runs.
+    await dlg.getByRole('button', { name: /Enabled/ }).click();
+    // Fixed rows are the ones carrying a lock icon instead of a toggle.
+    const fixedRows = dlg.locator('.row:has(.lock-icon)');
+    expect(await fixedRows.count()).toBeGreaterThan(0);
+    await expect(dlg.locator('.row')).toHaveCount(await fixedRows.count());
+    await expect(dlg.locator('.row.skipped')).toHaveCount(0);
+
+    // The saved setting is untouched — the toggle still shows the plugin as on.
+    await dlg.getByRole('button', { name: /Enabled/ }).click();
+    await dlg.getByRole('button', { name: /Enabled/ }).click();
+    await expect(toggleable.first().locator('input[type="checkbox"]')).toBeChecked();
+  });
+
+  test('without a flag nothing is marked skipped', async ({ page, workspaceId }) => {
+    void workspaceId;
+    await page
+      .locator('app-shell header button.icon-btn[title="Add, disable, or remove plugins"]')
+      .click();
+    const dlg = page.locator('plugin-manager-dialog');
+    await expect(dlg.locator('dialog')).toBeVisible();
+    await expect(dlg.locator('p.safemode')).toHaveCount(0);
+    await expect(dlg.locator('.row.skipped')).toHaveCount(0);
+    // Optional built-ins are running, so they read as Enabled.
+    await dlg.getByRole('button', { name: /Enabled/ }).click();
+    expect(await dlg.locator('.row').count()).toBeGreaterThan(0);
   });
 
   test('?safemode never persists disabled state to the plugins collection', async ({

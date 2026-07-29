@@ -180,8 +180,8 @@ async function init(): Promise<AppContext> {
       api.ui.dialogs.toast(
         'Safe mode is ON: only fixed built-ins (Settings, core rendering) loaded. ' +
           'All other built-in plugins and URL-installed plugins are disabled for this ' +
-          'session only — nothing was changed. Use the Plugin Manager to disable the ' +
-          'culprit, then reload without ?safemode.',
+          'session only — nothing was changed. Disable the culprit below, then reload ' +
+          'without ?safemode.',
         { kind: 'warning', title: 'Safe mode' },
       );
     } else if (SAFE_MODE === 'url-plugins') {
@@ -191,6 +191,12 @@ async function init(): Promise<AppContext> {
         { kind: 'warning', title: 'Safe mode' },
       );
     }
+
+    // Safe mode exists to reach the Plugin Manager when a plugin breaks the
+    // app, so open it for the user instead of making them find the button in a
+    // half-loaded shell. Both levels get it — the dialog marks the plugins each
+    // level skipped and is where the user turns the culprit off for good.
+    if (SAFE_MODE !== 'off') api.ui.openPluginManager();
   });
 
   return { store, events, workspaceId, registries, api };

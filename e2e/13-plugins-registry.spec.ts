@@ -40,12 +40,12 @@ test.describe('plugins registry', () => {
     const dialog = page.locator('plugin-manager-dialog dialog');
     await expect(dialog).toBeVisible();
 
-    // The search box and the four category filter toggles are present above
-    // the unified list.
+    // The search box, the three category toggles, and the status toggle all
+    // share the row above the unified list.
     await expect(dialog.getByPlaceholder('Search plugins…')).toBeVisible();
     const filters = dialog.locator('.filters .tri');
     await expect(filters).toHaveCount(4);
-    await expect(filters).toContainText(['Installed', 'Built-in', 'Available', 'Fixed']);
+    await expect(filters).toContainText(['Installed', 'Built-in', 'Fixed', 'Enabled']);
     // Tri-state: clicking a filter cycles off → on → not (adds a state class).
     const installed = filters.filter({ hasText: 'Installed' });
     await installed.click();
