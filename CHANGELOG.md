@@ -2,6 +2,7 @@
 
 ## 29 Jul 2026
 
+- 🪲 Tile and Cascade now leave minimized windows alone, instead of restoring them and reserving empty cells for them (v0.0.192)
 - ✨ New Auto Renderer plugin: after any import, columns get a renderer from their values — a URL becomes a link, an image URL a thumbnail, markup or long text a preview (v0.0.191)
 - 🪲 A JSON column of URLs was typed as a date, which locked out the link renderer (v0.0.191)
 - 🪲 The `script` renderer is gone — any column can carry a script, so it was a second way to do the same thing. A script returning HTML now needs the `html` renderer (v0.0.186)

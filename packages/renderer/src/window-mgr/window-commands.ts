@@ -14,12 +14,16 @@
 // @ts-expect-error — jspanel4 ships no types
 import { jsPanel } from 'jspanel4/es6module/jspanel.js';
 import { currentPanZoom } from './jspanel-manager.js';
+import { eligibleForArrange, tileSlots } from './tile-layout.js';
 
 type PanelEl = HTMLElement & {
   close?: () => void;
   minimize?: () => void;
   maximize?: () => void;
   normalize?: () => void;
+  // Mirrors jspanel-manager.ts's own `Panel.status` — jsPanel keeps the live
+  // status on the panel instance, not a DOM attribute.
+  status: 'normalized' | 'minimized' | 'maximized' | 'smallified' | 'closed';
 };
 
 /** Every open panel, newest-on-top first (jsPanel's `getPanels` z-order). */
@@ -66,32 +70,33 @@ function setGeom(p: PanelEl, x: number, y: number, w: number, h: number): void {
 
 export function cascadeAllWindows(): void {
   // Reverse so the front-most window ends up last (on top) after cascading.
-  const panels = allPanels().reverse();
+  // Minimized panels are excluded — cascading must not un-minimize a window
+  // the user deliberately parked (see `eligibleForArrange`).
+  const panels = eligibleForArrange(allPanels()).reverse();
   if (panels.length === 0) return;
   const r = visibleRect();
   const step = 32;
   const w = Math.min(680, Math.max(320, r.w * 0.6));
   const h = Math.min(480, Math.max(240, r.h * 0.6));
   panels.forEach((p, i) => {
-    p.normalize?.();
+    p.normalize?.(); // un-maximizes so the panel can take its cascade slot.
     setGeom(p, r.x + 24 + i * step, r.y + 24 + i * step, w, h);
   });
 }
 
 export function tileAllWindows(): void {
-  const panels = allPanels().reverse();
-  const n = panels.length;
-  if (n === 0) return;
-  const r = visibleRect();
-  const cols = Math.ceil(Math.sqrt(n));
-  const rows = Math.ceil(n / cols);
+  // Minimized panels are excluded from BOTH the layout and the count driving
+  // the grid maths — otherwise a minimized window would get un-minimized by
+  // tiling, and would still leave an empty hole in the grid (see
+  // `eligibleForArrange`).
+  const panels = eligibleForArrange(allPanels()).reverse();
+  if (panels.length === 0) return;
   const gap = 8;
-  const cellW = (r.w - gap * (cols + 1)) / cols;
-  const cellH = (r.h - gap * (rows + 1)) / rows;
+  const slots = tileSlots(panels.length, visibleRect(), gap);
   panels.forEach((p, i) => {
-    p.normalize?.();
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    setGeom(p, r.x + gap + col * (cellW + gap), r.y + gap + row * (cellH + gap), cellW, cellH);
+    p.normalize?.(); // un-maximizes so the panel can take its tile slot.
+    const slot = slots[i];
+    if (!slot) return; // unreachable — slots has exactly panels.length entries.
+    setGeom(p, slot.x, slot.y, slot.w, slot.h);
   });
 }
