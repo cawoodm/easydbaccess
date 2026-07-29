@@ -30,7 +30,7 @@ import { ctrlEnterSubmits, dialogChromeStyles } from '../dialogs/dialog-chrome.j
 import { makeDialogDraggable } from '../dialogs/draggable.js';
 import { parseCsv } from './csv-import.js';
 import { fetchDatabaseNames, fetchTablesForDb, parseDatasetteUrl } from './datasette-client.js';
-import { importDatasette } from './datasette-source.js';
+import { importDatasette } from './datasette-import.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 import { isWorkspaceDump, parsedToTables, restoreWorkspaceDump } from './json-import.js';
 import { fetchImportTextWithBar, filenameFromUrl } from '../import/fetch-source.js';

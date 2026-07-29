@@ -129,7 +129,7 @@ A `Table` may carry an optional `source: TableSource` descriptor
 `createRoutedDataStore` (a decorator `app-context.ts` wraps around the plain
 Dexie-backed store) hands `rows(tableId)` to whatever
 `RowCollectionProvider` a plugin registered for that `type` via
-`api.registerRowSource(...)` — e.g. the `datasette-source` plugin's live,
+`api.registerRowSource(...)` — e.g. the `datasette-connect` plugin's live,
 read-write Datasette connector — instead of the local `rows` Dexie table.
 
 This routing is a **strict no-op for every ordinary table**: no `source`, an

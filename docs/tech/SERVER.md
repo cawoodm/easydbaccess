@@ -83,7 +83,7 @@ Two guards protect the host running this proxy:
   response is buffered into memory and checked against this cap *after* the
   fetch completes; an oversized body gets a 413 rather than being streamed
   through unbounded. Every plugin that imports from a URL (`import-data`,
-  `datasette-source`) goes through this proxy in browser mode, so this cap
+  `datasette-import`) goes through this proxy in browser mode, so this cap
   is the actual ceiling on a single URL import, tighter than any client-side
   buffering limit those plugins add on top.
 
