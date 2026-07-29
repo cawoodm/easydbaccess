@@ -10,7 +10,10 @@ import * as sqlExport from '../plugins/sql-export.js';
 import * as gistSync from '../plugins/gist-sync.js';
 import * as serverSync from '../plugins/server-sync.js';
 import * as newTableButton from '../plugins/new-table-button.js';
-import * as coreRenderers from '../plugins/core-renderers.js';
+import * as cellDate from '../plugins/cell-date.js';
+import * as cellDatetime from '../plugins/cell-datetime.js';
+import * as cellBoolean from '../plugins/cell-boolean.js';
+import * as cellScript from '../plugins/cell-script.js';
 import * as cellColor from '../plugins/cell-color.js';
 import * as cellImage from '../plugins/cell-image.js';
 import * as htmlPreview from '../plugins/html-preview.js';
@@ -35,7 +38,7 @@ export interface BuiltinEntry {
  * delivery mechanism (static import vs. dynamic import of a Blob URL).
  *
  * Only plugins flagged `meta.fixed = true` are always-on and non-disableable
- * (currently `core-renderers`). Every other built-in is user-toggleable from
+ * (currently only `settings`). Every other built-in is user-toggleable from
  * the Plugin Manager and defaults to enabled. Disabled state is stored in the
  * plugins collection under the synthetic key `builtin:<id>`.
  *
@@ -54,7 +57,10 @@ const modules: PluginModule[] = [
   sqlExport,
   gistSync,
   serverSync,
-  coreRenderers,
+  cellDate,
+  cellDatetime,
+  cellBoolean,
+  cellScript,
   cellColor,
   cellImage,
   htmlPreview,

@@ -905,9 +905,9 @@ export class PluginManagerDialog extends LitElement {
       this.statusFilter === 'on' ? 'enabled' : this.statusFilter === 'not' ? 'disabled' : undefined;
     const byFilter = rows.filter((r) => {
       // Fixed plugins used to be hidden unless the "Fixed" chip was on. That
-      // made every other filter lie: "Enabled" hid Settings and Core Renderers,
-      // which are the two plugins that are always enabled. "Fixed" is now an
-      // ordinary chip with no hidden default.
+      // made every other filter lie: "Enabled" hid Settings (the plugin that
+      // is always enabled). "Fixed" is now an ordinary chip with no hidden
+      // default.
       // "on" filters are a union (row must be in at least one selected category);
       // "not" filters exclude (row must be in none of them).
       if (include.length && !include.some((c) => r.categories.has(c))) return false;

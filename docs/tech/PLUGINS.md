@@ -40,9 +40,10 @@ export function init(api: HostApi): void {
   every built-in declares one.
 - **Every built-in defaults to user-toggleable from the Plugin Manager.**
   Only `meta.fixed = true` opts a plugin *out* of that — it becomes
-  always-on and never shows a toggle. Today only `core-renderers` is fixed;
+  always-on and never shows a toggle. Today only `settings` is fixed;
   everything else (including things you might assume are load-bearing, like
-  `new-table-button` or `csv-import`) can be disabled by the user. Toggle
+  `new-table-button`, `csv-import`, or any of the `cell-date`/`cell-datetime`/
+  `cell-boolean`/`cell-script` renderers) can be disabled by the user. Toggle
   state is stored under the synthetic key `builtin:<id>` in the `plugins`
   collection. (The Plugin Manager button itself is **core**, not a plugin —
   a header button in `app-shell.ts`.)
@@ -105,7 +106,10 @@ defaults to enabled but **can** be turned off by the user.
 | `sql-export` | exporter | | No UI of its own — exports `serializeWorkspaceAsSql()`, called from `dump-export`'s "Export" menu. Still a standalone catalog entry (its own `meta.type`) for the Plugin Manager's type filter. | none (library only) |
 | `gist-sync` | sync | | Footer "Gist" menu button (Push/Pull/Settings/Share/View gist) plus a per-table "Gist" menu (push/pull/view just that table's file) that store the workspace as a private GitHub Gist. Credentials are Settings-dialog fields (`user`/`gist_id` workspace-scope, `gist_token` a user-scope secret). | `registerFooterButton`, `registerTableButton`, `registerSettings` |
 | `server-sync` | sync | | Footer "Sync" menu button (Push/Pull) against a configured easyDBAccess Hono server, with ETag-based conflict detection. | `registerFooterButton`, `registerSettings` |
-| `core-renderers` | cell-renderer | ✓ | Ships the `date`, `datetime`, `boolean`, and power-user `script` cell renderers (the last runs a user-authored `render(row)` JS body and injects the returned HTML). | `registerCellRenderer` |
+| `cell-date` | cell-renderer | | `date` renderer: a native `<input type=date>` picker. | `registerCellRenderer` |
+| `cell-datetime` | cell-renderer | | `datetime` renderer: a native `<input type=datetime-local>` picker. | `registerCellRenderer` |
+| `cell-boolean` | cell-renderer | | `boolean` renderer: a native checkbox. | `registerCellRenderer` |
+| `cell-script` | cell-renderer | | Power-user `script` renderer: runs a user-authored `render(row)` JS body and injects the returned HTML. | `registerCellRenderer` |
 | `cell-color` | cell-renderer | | `color` renderer: a native `<input type=color>` swatch picker for hex values. | `registerCellRenderer` |
 | `cell-image` | cell-renderer | | `image` renderer: thumbnail + upload button; stores images as `data:` URIs. | `registerCellRenderer` |
 | `cell-link` | cell-renderer | | `link` renderer: detects http(s) URLs, email addresses, and phone numbers per-value and renders the matching `<a>` (target `_blank`/`mailto:`/`tel:`), with a pencil to switch to raw-text edit mode. | `registerCellRenderer` |
@@ -124,19 +128,59 @@ with `{ detail: { value } }` to commit an edit. A column with no renderer, or
 one pointing at an unregistered name, falls back to a plain read-only text
 cell.
 
-### core-renderers
+### Invalid stored values
 
-Ships four renderers in one plugin: `date` and `datetime` (native
-`<input type=date|datetime-local>`, coercing whatever is stored into the
-input's expected string shape and back), `boolean` (a checkbox), and the
-power-user `script` renderer. `script` reads `column.script` — a JS body the
-user writes in the column editor that must define `function render(row)` —
-compiles it once per unique source (cached in a `Map`), calls it per cell,
-and injects the returned string as raw HTML. A thrown error or a non-string
-return renders as a small inline `⚠` chip with the error in the tooltip
-instead of breaking the row. Trust model: the plugin host already lets
-user-supplied code do anything on the page, so a column script is no
-additional risk.
+A stored value that doesn't fit its column must never be silently blanked or
+coerced — that loses data from the user's view (a stored `'foo'` in a boolean
+column rendering as an unchecked box is indistinguishable from a real
+`false`). The app-wide convention lives in `util/cell-validity.ts`: show the
+raw value as text with a `#dc2626` border (the same red as
+`dialogs/settings-dialog.ts`'s `.invalid` field) and a `title` explaining why,
+still editable. Renderer authors should reuse `booleanState`/`markInvalid`/
+`INVALID_INPUT_STYLE` from that module rather than inventing another marking.
+`cell-boolean`, `cell-date`, and `cell-datetime` below all apply it; so does
+`data-table.ts`'s no-renderer fallback for `number`/`date`/`datetime` columns.
+
+### cell-date
+
+Registers `date`: a native `<input type=date>` picker, coercing whatever is
+stored into the `YYYY-MM-DD` string the input expects and back. A non-empty
+value the picker can't parse (an unparseable string) shows as red-bordered
+raw text with a pencil instead of a misleadingly empty box — a genuinely
+empty value stays an empty date input.
+
+### cell-datetime
+
+Registers `datetime`: a native `<input type=datetime-local>` picker,
+coercing whatever is stored into the `YYYY-MM-DDTHH:MM` string the input
+expects and back. Same invalid-value handling as `cell-date`.
+
+### cell-boolean
+
+Registers `boolean`. Four states, per `booleanState()`: a real `true`/`false`
+render as the checkbox (checked/unchecked); an empty value (`null`/`''`)
+renders the same checkbox grayed out — clickable, so filling it in just means
+clicking it, and it commits `true`; anything else (`'foo'`, `2`, `{}`, …)
+never renders a checkbox — a checkbox can't represent a value it isn't —
+instead the raw value shows as red-bordered text with a pencil to fix it.
+
+### cell-script
+
+Registers `script`, the power-user renderer. It reads `column.script` — a JS
+body the user writes in the column editor that must define
+`function render(row)` — compiles it once per unique source (cached in a
+`Map`), calls it per cell, and injects the returned string as raw HTML. A
+thrown error or a non-string return renders as a small inline `⚠` chip with
+the error in the tooltip instead of breaking the row. Trust model: the
+plugin host already lets user-supplied code do anything on the page, so a
+column script is no additional risk.
+
+`cell-date`, `cell-datetime`, `cell-boolean`, and `cell-script` used to ship
+as a single `core-renderers` plugin (`meta.fixed = true`, non-disableable).
+They were split into four separately-toggleable plugins so the Plugin
+Manager can disable any one of them independently; existing workspaces have
+no `builtin:core-renderers` disabled-state row, so all four simply default
+to enabled with no migration needed.
 
 ### cell-color
 

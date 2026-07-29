@@ -6,10 +6,13 @@
  * `SAFE_MODE` is resolved ONCE at module load from `location.search` and is
  * used purely to decide what to SKIP LOADING this boot:
  *   - `?safemode`  → `'all-optional'`: skip every URL plugin AND every
- *     non-`fixed` built-in. Only `meta.fixed` built-ins load (currently
- *     `core-renderers` and `settings`), so the grid still renders and the
- *     user can still open Settings and the (core-chrome) Plugin Manager to
- *     disable whatever is misbehaving.
+ *     non-`fixed` built-in. Only `meta.fixed` built-ins load (currently just
+ *     `settings`), so no cell-renderer plugin loads either — a date/boolean
+ *     cell falls back to `data-table.ts`'s native `<input>` editor chosen by
+ *     `col.type` (see `renderCell`'s switch) instead of the usual
+ *     `<cell-date>`/`<cell-boolean>` custom element. The grid still renders
+ *     and the user can still open Settings and the (core-chrome) Plugin
+ *     Manager to disable whatever is misbehaving.
  *   - `?safemode1` → `'url-plugins'`: skip only URL plugins; all built-ins
  *     load normally.
  *   - neither param → `'off'`: unchanged behavior.

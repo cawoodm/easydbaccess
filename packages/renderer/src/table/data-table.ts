@@ -9,6 +9,7 @@ import '../chrome/filter-combobox.js';
 import { searchRows } from '../search/text-search.js';
 import { matchesColumnFilter } from '../search/column-filter.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
+import { INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
 
 /** A row matches `needle` (lower-cased) when any of its field values contains it. */
 function rowContains(r: Row, needle: string): boolean {
@@ -681,6 +682,27 @@ export class DataTable extends LitElement {
     el.blur();
   }
 
+  /**
+   * A non-empty value that doesn't fit the column's data type (unparseable
+   * date/datetime, non-numeric number). Rather than silently blanking or
+   * coercing it, show the raw value in a plain text input marked invalid
+   * (red border, `title` naming the problem) — still visible, still fixable
+   * on the very next `change`, which re-validates and switches back to the
+   * type-specific input once the value parses.
+   */
+  private renderInvalidCell(row: Row, col: ColumnSpec, raw: unknown, reason: string) {
+    const text = String(raw);
+    return html`<input
+      type="text"
+      class=${INVALID_CLASS}
+      style=${INVALID_INPUT_STYLE}
+      title=${reason}
+      .value=${text}
+      @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, text)}
+      @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
+    />`;
+  }
+
   /** Plain-text (non-editable) rendering of a cell for read-only view mode. */
   private renderReadonlyCell(col: ColumnSpec, raw: unknown) {
     if (col.type === 'boolean') {
@@ -697,10 +719,12 @@ export class DataTable extends LitElement {
     const raw = row.data[col.field];
     // Cell rendering is dispatched by the column's `renderer` attribute, not
     // its data type. If a renderer is registered for the column's chosen
-    // name we hand off to its custom element; otherwise the cell renders as
-    // read-only HTML-encoded text. The standard renderers (date, datetime,
-    // boolean) ship as the core-renderers built-in plugin; color/image/link
-    // come from their respective plugins.
+    // name we hand off to its custom element; otherwise the cell falls back to
+    // a plain editable input on the raw value (see the switch below — only a
+    // read-only view renders text). The standard renderers (date, datetime,
+    // boolean, script) each ship as their own built-in plugin
+    // (`cell-date`/`cell-datetime`/`cell-boolean`/`cell-script`);
+    // color/image/link come from their respective plugins.
     const rendererName = col.renderer;
     const customTag = rendererName ? this.cellRenderers?.get(rendererName) : undefined;
     if (customTag) {
@@ -730,21 +754,21 @@ export class DataTable extends LitElement {
     if (this.readOnlyView) {
       return this.renderReadonlyCell(col, raw);
     }
-    // No renderer set or unknown name — fall back to a native editor chosen
-    // by the column's data type. Renderers are a display concern; editing
+    // No renderer set or unknown name — fall back to a native editor. Most
+    // types get one chosen by the column's data type; `boolean` deliberately
+    // has no case here and falls through to `default:` (a plain text input on
+    // the raw stored value) — a checkbox can't distinguish false/null/''/0/a
+    // junk string, so it would silently coerce and invite an accidental
+    // write. A user who wants a checkbox opts in via the `boolean` renderer
+    // (the `cell-boolean` plugin). Renderers are a display concern; editing
     // works on any cell by default.
     switch (col.type) {
-      case 'boolean': {
-        const checked = raw === true || raw === 'true' || raw === 1 || raw === '1';
-        return html`<input
-          type="checkbox"
-          .checked=${checked}
-          @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, checked)}
-          @change=${(e: Event) =>
-            this.setCell(row, col.field, (e.target as HTMLInputElement).checked)}
-        />`;
-      }
       case 'date':
+        // A non-empty value the date input can't parse would otherwise render
+        // as a misleadingly empty box. Show it raw and fixable instead.
+        if (isNonEmptyButUnparsed(raw, toDateIso(raw))) {
+          return this.renderInvalidCell(row, col, raw, `Not a valid date: "${String(raw)}"`);
+        }
         return html`<input
           type="date"
           .value=${toDateIso(raw)}
@@ -753,6 +777,9 @@ export class DataTable extends LitElement {
             this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
         />`;
       case 'datetime':
+        if (isNonEmptyButUnparsed(raw, toDatetimeLocal(raw))) {
+          return this.renderInvalidCell(row, col, raw, `Not a valid datetime: "${String(raw)}"`);
+        }
         return html`<input
           type="datetime-local"
           .value=${toDatetimeLocal(raw)}
@@ -760,17 +787,21 @@ export class DataTable extends LitElement {
           @change=${(e: Event) =>
             this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
         />`;
-      case 'number':
+      case 'number': {
+        const isEmpty = raw == null || raw === '';
+        if (!isEmpty && Number.isNaN(Number(raw))) {
+          return this.renderInvalidCell(row, col, raw, `Not a valid number: "${String(raw)}"`);
+        }
         return html`<input
           type="number"
-          .value=${raw == null ? '' : String(raw)}
-          @keydown=${(e: KeyboardEvent) =>
-            this.cancelCellEdit(e, raw == null ? '' : String(raw))}
+          .value=${isEmpty ? '' : String(raw)}
+          @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, isEmpty ? '' : String(raw))}
           @change=${(e: Event) => {
             const v = (e.target as HTMLInputElement).value;
             this.setCell(row, col.field, v === '' ? null : Number(v));
           }}
         />`;
+      }
       default:
         return html`<input
           type="text"
@@ -933,9 +964,7 @@ export class DataTable extends LitElement {
       ([f, q]) => q && q.trim().length > 0 && f !== focusField,
     );
     if (active.length === 0) return this.rows;
-    return this.rows.filter((r) =>
-      active.every(([f, q]) => matchesColumnFilter(r.data[f], q)),
-    );
+    return this.rows.filter((r) => active.every(([f, q]) => matchesColumnFilter(r.data[f], q)));
   }
 
   /**
@@ -1398,6 +1427,19 @@ function toDatetimeLocal(raw: unknown): string {
   if (Number.isNaN(d.getTime())) return '';
   const iso = d.toISOString();
   return `${iso.slice(0, 10)}T${iso.slice(11, 16)}`;
+}
+
+/**
+ * True when `raw` has content (not null/undefined/empty/whitespace-only) but
+ * `parsed` — whatever `toDateIso`/`toDatetimeLocal` made of it — came back
+ * empty. Both parsers also return '' for a genuinely empty `raw`, so the
+ * empty-content check above is what tells "no value" apart from "unparseable
+ * value" — only the latter counts as invalid.
+ */
+function isNonEmptyButUnparsed(raw: unknown, parsed: string): boolean {
+  if (raw == null) return false;
+  if (typeof raw === 'string' && raw.trim() === '') return false;
+  return parsed === '';
 }
 
 // Compares two PRESENT (non-empty) values by column type. Empty handling is

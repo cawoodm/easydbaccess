@@ -87,7 +87,7 @@ test.describe('plugin manager status filter', () => {
     await expect(dialog.getByText('CSV Import')).toBeVisible();
   });
 
-  test('"Enabled" includes the always-on fixed built-ins', async ({ page }) => {
+  test('"Enabled" includes the always-on fixed built-in', async ({ page }) => {
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__easydb.api.ui.openPluginManager();
@@ -96,16 +96,16 @@ test.describe('plugin manager status filter', () => {
     await expect(dialog).toBeVisible();
 
     // Fixed built-ins are listed like any other plugin — they used to be hidden
-    // unless the "Fixed" chip was on, which made "Enabled" hide the only two
-    // plugins that can never be disabled. They show a lock instead of a toggle.
+    // unless the "Fixed" chip was on, which made "Enabled" hide the only
+    // plugin that can never be disabled. It shows a lock instead of a toggle.
+    // `core-renderers` used to be the other fixed built-in; it was split into
+    // four separately-toggleable cell-renderer plugins (cell-date/-datetime/
+    // -boolean/-script), so `settings` is now the only one left.
     const settings = dialog.locator('.row', { hasText: 'Settings' });
-    const coreRenderers = dialog.locator('.row', { hasText: 'Core Renderers' });
     await expect(settings.locator('.lock-icon')).toBeVisible();
-    await expect(coreRenderers.locator('.lock-icon')).toBeVisible();
 
     await dialog.locator('.filters .tri.status').click();
     await expect(settings).toBeVisible();
-    await expect(coreRenderers).toBeVisible();
   });
 
   test('a listed-but-not-installed catalog plugin has no status at all', async ({ page }) => {

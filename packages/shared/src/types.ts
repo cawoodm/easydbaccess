@@ -6,9 +6,11 @@ export interface ColumnSpec {
   type: ColumnType;
   /**
    * Optional cell renderer name. Looked up in `registries.cellRenderers` at
-   * render time. When unset (or no matching renderer is registered), cells
-   * render as read-only HTML-encoded text. Independent of `type`, which
-   * still drives coercion / sort / validation / SQL typing.
+   * render time. When unset (or no matching renderer is registered), a cell
+   * in the interactive grid falls back to a plain editable input showing the
+   * raw stored value (a read-only-text fallback only applies inside a
+   * read-only view). Independent of `type`, which still drives coercion /
+   * sort / validation / SQL typing.
    */
   renderer?: string;
   /**
