@@ -3,9 +3,12 @@ import type {
   ColumnType,
   HostApi,
   ImporterSpec,
+  ImportSourceInput,
   PluginModule,
   TableOrigin,
 } from '@easydb/shared';
+import { filenameFromUrl } from '../import/fetch-source.js';
+import { cryptoUUID, slugField } from '../util/ids.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'csv-import',
@@ -20,6 +23,11 @@ export const meta: NonNullable<PluginModule['meta']> = {
 
 export function init(api: HostApi): void {
   api.ui.registerImporter(importerSpec);
+  // Define the options panel the Import dialog renders for this importer.
+  // Loaded dynamically because this module is unit-tested under Vitest's
+  // default Node environment, where `customElements` does not exist; `init`
+  // only ever runs in the browser.
+  void import('./csv-import-options.js');
   api.ui.registerHeaderButton({
     id: 'csv-import:paste',
     label: 'Paste CSV',
@@ -40,15 +48,113 @@ export function init(api: HostApi): void {
   });
 }
 
-// -- Importer spec (for non-drop call sites: future Import dialog, URL sources) --
+// -- Importer spec ------------------------------------------------------------
+//
+// One delimited file is always exactly one table, so `list` returns a single
+// candidate and `read` yields a single batch. The kernel supplies the dialog,
+// the fetch, the naming and the write.
+
+/**
+ * The source's own file name, extension included. The extension matters — it
+ * pins the separator for a `.tsv`/`.tab` file — so this is what `read` looks at.
+ */
+function sourceName(input: ImportSourceInput): string {
+  if (input.kind === 'file' && input.file) return input.file.name;
+  if (input.kind === 'url' && input.url) return filenameFromUrl(input.url);
+  return 'pasted';
+}
+
+/**
+ * The name to propose for the table, before the kernel's naming policy runs.
+ * The extension is dropped: nobody wants a table called `air.csv`.
+ */
+function candidateName(input: ImportSourceInput): string {
+  return stripDelimitedExt(sourceName(input)) || 'imported';
+}
 
 const importerSpec: ImporterSpec = {
   id: 'csv',
   label: 'CSV / TSV',
+  icon: 'table_view',
+  order: 10,
   accept: ['.csv', '.tsv', '.tab', 'text/csv', 'text/tab-separated-values'],
-  async parse(input) {
-    const text = typeof input === 'string' ? input : await input.text();
-    return parseCsv(text);
+  panel: 'csv-import-options',
+  samples: [
+    {
+      label: 'Air quality — 2016 readings (CSV)',
+      url: 'https://raw.githubusercontent.com/MainakRepositor/Datasets/master/Air%20Quality/real_2016_air.csv',
+    },
+  ],
+  supports: { url: true, file: true, text: true, reference: true, kernel: true },
+
+  detect(input) {
+    const name = input.kind === 'file' ? (input.file?.name ?? '') : (input.url ?? input.text ?? '');
+    if (/\.(csv|tsv|tab)$/i.test(name)) return 0.95;
+    if (input.file?.type === 'text/csv') return 0.9;
+    // A delimited body is a plausible last resort but never a confident guess.
+    return input.kind === 'text' ? 0.2 : 0;
+  },
+
+  async list(_ctx, input) {
+    return [{ name: candidateName(input), rowCount: null, handle: input }];
+  },
+
+  async *read(ctx, candidate) {
+    const input = candidate.handle as ImportSourceInput;
+    let text: string;
+    if (input.kind === 'file' && input.file) {
+      // Honour the cap by STREAMING a prefix rather than reading the whole
+      // file. A 150 MB CSV read and parsed whole — before any cap applies —
+      // can silently kill a memory-limited tab.
+      text =
+        ctx.maxRows != null ? await readCsvHead(input.file, ctx.maxRows) : await input.file.text();
+    } else if (input.kind === 'url' && input.url) {
+      text = await ctx.fetchText(input.url, `Reading ${sourceName(input)}…`);
+    } else {
+      text = input.text ?? '';
+    }
+    // A separator chosen in the options panel beats the name-based rule, which
+    // in turn beats auto-detection.
+    const panelSep = typeof ctx.panel.separator === 'string' ? ctx.panel.separator : undefined;
+    const sep = panelSep ?? separatorForName(sourceName(input));
+    const parseOpts = {
+      ...(ctx.maxRows != null ? { maxRows: ctx.maxRows } : {}),
+      ...(sep ? { separator: sep } : {}),
+    };
+
+    // Appending to (or overwriting) an existing table: map cells onto its
+    // columns BY POSITION and coerce through each declared type. A CSV header
+    // need not match the target's field names — `Person Name,Years` into
+    // `[name, age]` must land in `name`/`age`, not invent `person_name`/`years`
+    // and drop the data. This is why the kernel hands over `targetColumns`
+    // rather than trying to match a generic row object itself.
+    const target = ctx.targetColumns;
+    if (target && target.length > 0) {
+      const raw = parseCsvRaw(text, parseOpts);
+      const rows = raw.rows.map((cells) => {
+        const data: Record<string, unknown> = {};
+        for (let i = 0; i < target.length; i++) {
+          const col = target[i]!;
+          data[col.field] = coerce(cells[i] ?? '', col.type);
+        }
+        return data;
+      });
+      // No `columns` on the batch: the target's schema wins, so the kernel must
+      // not reconcile our inferred names into it.
+      yield { rows };
+      return;
+    }
+
+    const parsed = parseCsv(text, parseOpts);
+    yield { columns: parsed.columns, rows: parsed.rows };
+  },
+
+  reference(_ctx, candidate) {
+    const input = candidate.handle as ImportSourceInput;
+    if (input.kind !== 'url' || !input.url) {
+      throw new Error('A reference needs a re-fetchable URL — an upload cannot be referenced.');
+    }
+    return { type: 'url', config: { url: input.url, format: 'csv' } };
   },
 };
 
@@ -91,6 +197,11 @@ export interface CsvImportOpts {
    * overwrite modes alike.
    */
   maxRows?: number | undefined;
+  /**
+   * Separator character chosen in the CSV options panel. Overrides both the
+   * `.tsv`/`.tab` name rule and auto-detection. Undefined ⇒ keep that order.
+   */
+  separator?: string | undefined;
 }
 
 export async function importCsvText(
@@ -103,7 +214,9 @@ export async function importCsvText(
   if (!workspaceId) throw new Error('csv-import: no active workspace');
 
   const baseName = stripDelimitedExt(name || 'imported') || 'imported';
-  const separator = separatorForName(name);
+  // An explicit choice from the options panel wins over the `.tsv`/`.tab` name
+  // rule, which wins over auto-detection inside the parser.
+  const separator = opts.separator ?? separatorForName(name);
 
   // If a table with this name already exists in the workspace, ask the user
   // what to do: append rows, overwrite (clear + insert), or create a new
@@ -167,7 +280,11 @@ export async function importCsvText(
       id: targetId,
       workspaceId,
       name: uniqueName,
-      code: slug(uniqueName),
+      // NOTE: csv-import derives the table `code` with the FIELD slug
+      // (underscores), unlike every other importer, which uses the TABLE slug
+      // (dashes). Kept as-is here so this extraction changes no behavior.
+      // Unify in Phase C — see .claude/plans/2026-07-28-importer-architecture.md.
+      code: slugField(uniqueName),
       columns,
       view: 'table',
       ...(opts.origin ? { origin: opts.origin } : {}),
@@ -388,10 +505,10 @@ function parseHeaderCell(h: string, idx: number): HeaderSpec {
   const trimmed = h.trim();
   if (!trimmed.includes(':')) {
     // Plain label; everything inferred.
-    return { field: slug(trimmed || `col_${idx + 1}`), label: trimmed || `Column ${idx + 1}` };
+    return { field: slugField(trimmed || `col_${idx + 1}`), label: trimmed || `Column ${idx + 1}` };
   }
   const parts = trimmed.split(':');
-  const field = slug(parts[0] || `col_${idx + 1}`);
+  const field = slugField(parts[0] || `col_${idx + 1}`);
   const label = (parts[1] ?? parts[0] ?? '').trim() || field;
   const spec: HeaderSpec = { field, label };
   const typeStr = (parts[2] ?? '').trim();
@@ -680,22 +797,4 @@ function remapRows(
     }
     return out;
   });
-}
-
-function slug(s: string): string {
-  return (
-    s
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9_]+/g, '_')
-      .replace(/^_+|_+$/g, '')
-      .replace(/_+/g, '_') || 'col'
-  );
-}
-
-function cryptoUUID(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  );
 }

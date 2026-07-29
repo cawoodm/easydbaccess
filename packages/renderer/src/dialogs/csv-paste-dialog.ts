@@ -2,6 +2,7 @@ import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { getContext } from '../app-context.js';
 import { parseCsv } from '../plugins/csv-import.js';
+import { slugTable } from '../util/ids.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 
@@ -99,7 +100,7 @@ export class CsvPasteDialog extends LitElement {
       id: tableId,
       workspaceId: ctx.workspaceId,
       name,
-      code: slug(name),
+      code: slugTable(name),
       columns: parsed.columns,
       view: 'table',
       updatedAt: Date.now(),
@@ -159,16 +160,6 @@ export class CsvPasteDialog extends LitElement {
       </dialog>
     `;
   }
-}
-
-function slug(s: string): string {
-  return (
-    s
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'table'
-  );
 }
 
 declare global {

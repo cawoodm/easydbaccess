@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { HostApi } from '@easydb/shared';
-import { fetchImportText, MAX_IMPORT_BYTES } from './import-fetch.js';
+import { fetchImportText, MAX_IMPORT_BYTES } from './fetch-source.js';
 
 interface Canned {
   body: string;

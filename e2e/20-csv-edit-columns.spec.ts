@@ -25,7 +25,7 @@ test('edit-columns editor highlights duplicates, blocks import, then applies edi
   await page.getByTitle('Import data from a URL').click();
   const importDlg = page.locator('import-dialog dialog');
   await importDlg.locator('input[type="text"]').fill('https://ex.example/data.csv');
-  await importDlg.locator('select').last().selectOption('csv');
+  await importDlg.getByTestId('import-format').selectOption('csv');
   await importDlg.locator('input[type="checkbox"]').check(); // Edit columns
   await importDlg.getByRole('button', { name: 'Import', exact: true }).click();
 

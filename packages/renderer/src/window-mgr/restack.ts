@@ -20,6 +20,7 @@
  * right after both managers finish their initial open.
  */
 import { getContext } from '../app-context.js';
+import { FORCE_MINIMIZED } from './boot-flags.js';
 import { hasPanel, frontPanel } from './panel-registry.js';
 import { orderForRestack, type ZOrderCandidate } from './z-order.js';
 
@@ -42,6 +43,15 @@ export async function initRestack(): Promise<void> {
  * `jspanel-manager.ts`.
  */
 export async function restackAll(): Promise<void> {
+  // Nothing to re-front under `?minimize`: every panel was opened minimized,
+  // and `frontPanel` would un-park them, defeating the flag. The `minimized`
+  // filter below cannot catch this — it reads the STORED geometry, which
+  // `?minimize` deliberately leaves untouched so a plain reload restores the
+  // user's real layout. So the flag has to be asked directly, here, where it
+  // also covers the `easydb:restack-windows` listener (a gist pull or a dump
+  // import can fire it long after boot).
+  if (FORCE_MINIMIZED) return;
+
   const ctx = await getContext();
   for (let attempts = 0; attempts <= 12; attempts++) {
     const [tables, views] = await Promise.all([

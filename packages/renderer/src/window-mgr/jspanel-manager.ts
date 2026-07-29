@@ -33,6 +33,10 @@ import { tableKind, isRefreshable, TABLE_KIND_ICONS } from './table-kind.js';
 import { nextFrontZ } from './front-order.js';
 import { registerPanel, unregisterPanel } from './panel-registry.js';
 import { initRestack } from './restack.js';
+import { FORCE_MINIMIZED } from './boot-flags.js';
+
+// Re-exported so existing importers of this module keep working.
+export { FORCE_MINIMIZED };
 import '../table/data-table.js';
 import '../chrome/panel-search.js';
 import '../chrome/panel-footer.js';
@@ -232,7 +236,7 @@ function openPanel(t: Table, ctx: AppContext): void {
   const panelId = `panel-${cssSafe(t.id)}`;
   const container = panelContainer();
   const g = sanitizeGeometry(t.windowGeometry);
-  const startMinimized = g?.minimized === true;
+  const startMinimized = FORCE_MINIMIZED || g?.minimized === true;
 
   // The live <data-table> holds every row in memory, keeps a store subscription
   // open, and (for remote/live tables) fetches rows the moment it mounts. So we
@@ -453,10 +457,12 @@ function openPanel(t: Table, ctx: AppContext): void {
 
   // Restore minimized/maximized state. Defer to next tick so jsPanel's own
   // init (centering, sizing) finishes before we drive a state change.
-  if (g?.maximized && typeof panel.maximize === 'function') {
-    queueMicrotask(() => panel.maximize?.());
-  } else if (g?.minimized && typeof panel.minimize === 'function') {
+  // `?minimize` wins over a saved maximized state — the whole point is that
+  // nothing loads its rows on boot.
+  if (startMinimized && typeof panel.minimize === 'function') {
     queueMicrotask(() => panel.minimize?.());
+  } else if (g?.maximized && typeof panel.maximize === 'function') {
+    queueMicrotask(() => panel.maximize?.());
   }
 
   // A table's kind (normal/imported/referenced/connected) can change at
@@ -512,8 +518,12 @@ async function saveGeometry(tableId: string, ctx: AppContext): Promise<void> {
   try {
     const t = await ctx.store.tables.findOne(tableId);
     const prev = t?.windowGeometry;
-    const minimized = status === 'minimized';
-    const maximized = status === 'maximized';
+    // Under `?minimize` the minimized/maximized state is a view override, so
+    // keep whatever was saved. Persisting it would make one visit to
+    // `?minimize` leave every table minimized on every later visit — and
+    // expanding a table to look at it would silently rewrite the saved layout.
+    const minimized = FORCE_MINIMIZED ? (prev?.minimized ?? false) : status === 'minimized';
+    const maximized = FORCE_MINIMIZED ? (prev?.maximized ?? false) : status === 'maximized';
     let x = el.offsetLeft;
     let y = el.offsetTop;
     let w = el.offsetWidth;
@@ -522,7 +532,16 @@ async function saveGeometry(tableId: string, ctx: AppContext): Promise<void> {
     // fills the container. In neither state does the live rect describe the
     // panel's normal geometry, so keep the last-stored rect instead. The
     // sentinel guard also covers the rare first-ever save while minimized.
-    if ((minimized || maximized) && prev) {
+    //
+    // Key off the LIVE status, not the flags above: under `?minimize` those
+    // flags carry the saved values, but the panel really is parked off-screen,
+    // so reading its rect would write x/y/w/h of a hidden window.
+    const parked = status === 'minimized' || status === 'maximized';
+    // Parked with nothing stored yet (e.g. a fresh table opened straight into
+    // `?minimize`): there is no honest rect to record, so record nothing rather
+    // than freeze the hidden window's size as the table's geometry.
+    if (parked && !prev) return;
+    if (parked && prev) {
       x = prev.x;
       y = prev.y;
       w = prev.w;

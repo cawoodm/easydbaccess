@@ -1,7 +1,7 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { serializeCsv } from './csv-export.js';
 import { serializeWorkspaceAsSql, serializeTableAsSql } from './sql-export.js';
-import { slug } from './server-sync-core.js';
+import { slugTable } from '../util/ids.js';
 import { scopedRows, scopedTable, tableToFile, type ExportScope } from '../export/table-file.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
@@ -90,7 +90,7 @@ export function init(api: HostApi): void {
         const allRows = await api.store.rows(table.id).find();
         const t = scopedTable(table, scope);
         const rows = scopedRows(table, allRows, scope);
-        const base = slug(table.code || table.name || 'table');
+        const base = slugTable(table.code || table.name || 'table');
         // The "no local rows" warning is about a live table's data not being
         // available locally — misleading noise when the user asked for the
         // structure only, since zero rows is then the intended outcome.

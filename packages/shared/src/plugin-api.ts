@@ -199,14 +199,193 @@ export interface TableButtonSpec {
   ): void | Promise<void>;
 }
 
-export interface ImporterSpec {
-  id: string;
+// -- Importers -------------------------------------------------------------
+//
+// An importer describes ONE data format (csv, json, datasette, sqlite, …). The
+// import kernel owns everything common — the dialog, the fetch, the row cap,
+// the table picker, the column editor, naming, collision policy, resume,
+// refresh and the toasts — and calls into the spec for the format-specific
+// parts only. An importer never writes to the store itself.
+//
+// Design note: `read` returns an async iterable rather than one result, so the
+// kernel has a single place to apply the row cap, drive the progress bar, save
+// a resume cursor and tolerate a mid-read failure. Single-shot formats (csv,
+// json) simply yield one batch; paged ones (datasette) yield one per page.
+
+/** What the user gave us: a URL, an uploaded file, or pasted text. */
+export interface ImportSourceInput {
+  kind: 'url' | 'file' | 'text';
+  url?: string | undefined;
+  file?: File | undefined;
+  text?: string | undefined;
+  /**
+   * Name to propose for the table, when the input alone does not carry one.
+   * A `url` or `file` names itself; a `text` body does not, so a caller that
+   * already read the body (to sniff its shape, say) passes the original name
+   * here rather than letting every importer fall back to "imported".
+   */
+  name?: string | undefined;
+}
+
+/**
+ * One table a source offers. `handle` is opaque to the kernel and private to
+ * the importer that produced it — the kernel only passes it back to `read`.
+ */
+export interface ImportCandidate {
+  /** Proposed table name. The kernel still applies its own naming policy. */
+  name: string;
+  /** Row count when the source reports one, else null (drives the picker). */
+  rowCount: number | null;
+  /** Secondary text in the picker, e.g. the database a table belongs to. */
+  detail?: string | undefined;
+  /** Source marks this as internal (FTS shadow tables, Datasette `hidden`). */
+  hidden?: boolean | undefined;
+  handle: unknown;
+}
+
+/** One chunk of rows from `read`. The FIRST batch must carry `columns`. */
+export interface ImportBatch {
+  columns?: ColumnSpec[] | undefined;
+  rows: Array<Record<string, unknown>>;
+  /** Cursor to resume from if the read stops early; persisted as `importResume`. */
+  nextCursor?: string | undefined;
+  /** Known total, when the source reports one, for a proportional bar. */
+  totalCount?: number | undefined;
+}
+
+/** Services the kernel lends an importer. Deliberately no store access. */
+export interface ImportCtx {
+  api: HostApi;
+  /**
+   * Fetch text with the CORS rewrite, the size ceiling, the informative errors
+   * and the slow-read progress bar already applied. Importers should use this
+   * instead of `api.backend.fetch` for a whole-body read.
+   */
+  fetchText(url: string, label?: string): Promise<string>;
+  /** Values reported by this importer's own `panel` element, if it has one. */
+  panel: Record<string, unknown>;
+  /** Resume cursor, when the user is continuing an interrupted import. */
+  cursor?: string | undefined;
+  /**
+   * The user's row cap, as an ADVISORY hint. The kernel enforces it regardless,
+   * so an importer may ignore it — but one that can cheaply read less should
+   * honour it. Reading a 150 MB CSV whole and then discarding all but 100 rows
+   * can kill a memory-limited tab, which is why the cap is visible here at all.
+   */
+  maxRows?: number | undefined;
+  /**
+   * The columns of the table being appended to or overwritten. Absent when
+   * importing into a NEW table, where the source defines the schema.
+   *
+   * Present so an importer can map its values onto an existing schema in the
+   * way that is correct FOR ITS FORMAT — the kernel cannot do this generically.
+   * A CSV maps cells by POSITION, because its header names need not match the
+   * target's fields (`Person Name,Years` into `[name, age]` must still land in
+   * `name` and `age`, not create `person_name`/`years` and drop the data). A
+   * JSON dump, whose rows are already objects, maps by field NAME instead.
+   */
+  targetColumns?: ColumnSpec[] | undefined;
+}
+
+/** A curated starting point this importer contributes to the dialog's picker. */
+export interface ImportSample {
   label: string;
-  /** File extensions or MIME types this importer accepts. */
-  accept: string[];
-  parse(
-    input: File | string,
-  ): Promise<{ columns: ColumnSpec[]; rows: Array<Record<string, unknown>> }>;
+  url: string;
+}
+
+export interface ImporterSpec {
+  /** Stable id, also the `origin.type` stamped on tables this importer makes. */
+  id: string;
+  /** Shown in the Import menu and the dialog's format selector. */
+  label: string;
+  /** Material Icons ligature or inline `<svg>` for the menu entry. */
+  icon?: string | undefined;
+  /** Menu sort order; lower first. Absent ⇒ registration order. */
+  order?: number | undefined;
+  /** File extensions / MIME types, unioned into the dialog's file input. */
+  accept?: string[] | undefined;
+  /** Sample sources merged into the dialog's picker. */
+  samples?: ImportSample[] | undefined;
+  /**
+   * Custom element tag rendered in the dialog's panel slot for this
+   * importer's own fields. The element MAY expose a `value` property the
+   * kernel reads into `ImportCtx.panel`, and SHOULD dispatch `change` when it
+   * edits. Registering a tag keeps the kernel free of plugin imports.
+   */
+  panel?: string | undefined;
+  /** Which source kinds and modes this format can do. Absent ⇒ url + file. */
+  supports?:
+    | {
+        url?: boolean | undefined;
+        file?: boolean | undefined;
+        text?: boolean | undefined;
+        /** Can back a live read-only reference table (needs `reference`). */
+        reference?: boolean | undefined;
+        /** One source can yield several tables (`list` may return many). */
+        multiTable?: boolean | undefined;
+        /**
+         * This importer runs through the import kernel (`runImport`), so the
+         * host drives it: the dialog picks the destination BEFORE the read
+         * starts (new table / append / overwrite) instead of a modal
+         * interrupting it partway, and the kernel does the writing.
+         *
+         * Absent ⇒ the importer still owns its own route and its own collision
+         * prompt, and the dialog hides the Target control rather than offering
+         * a choice nobody will honour. Each importer sets this as it moves
+         * across — see the phase table in
+         * `.claude/plans/2026-07-28-importer-architecture.md`.
+         */
+        kernel?: boolean | undefined;
+      }
+    | undefined;
+  /**
+   * Confidence from 0 to 1 that this input belongs to this importer. Drives
+   * "Auto-detect" and dropped files/URLs; the highest scorer wins. Absent ⇒
+   * matched on `accept` alone.
+   */
+  detect?(input: ImportSourceInput): number;
+  /** The tables this source offers. A single-table format returns exactly one. */
+  list(ctx: ImportCtx, input: ImportSourceInput): Promise<ImportCandidate[]>;
+  /** Stream one candidate's columns + rows. */
+  read(ctx: ImportCtx, candidate: ImportCandidate): AsyncIterable<ImportBatch>;
+  /** Build the live `TableSource` for Reference mode. */
+  reference?(ctx: ImportCtx, candidate: ImportCandidate): TableSource;
+  /**
+   * True when this importer emits its own toasts, so the kernel stays quiet.
+   * Replaces the hard-coded `source === 'datasette'` check the host used to
+   * carry.
+   */
+  ownToasts?: boolean | undefined;
+}
+
+// -- Connectors ------------------------------------------------------------
+//
+// A connector is the CONNECT counterpart to an importer. An importer copies
+// data in and you own the copy; a connector points a window at a live remote
+// table and stores nothing. They are separate contracts because they are
+// separate user intents with separate consequences — see
+// `.claude/plans/2026-07-28-importer-architecture.md`.
+//
+// A connector owns its whole flow: it asks for a URL and credentials however
+// its backend requires, then creates tables carrying a `source` descriptor that
+// a matching `RowCollectionProvider` (registered via `registerRowSource`) backs.
+// There is nothing generic to factor out, so unlike `ImporterSpec` this is a
+// thin contract: it exists so the Connect menu can list what is available
+// without the host knowing any backend.
+
+export interface ConnectorSpec {
+  /** Stable id, matching the `TableSource.type` this connector produces. */
+  id: string;
+  /** Shown in the Connect menu. */
+  label: string;
+  /** Material Icons ligature or inline `<svg>` for the menu entry. */
+  icon?: string | undefined;
+  /** Menu sort order; lower first. Absent ⇒ registration order. */
+  order?: number | undefined;
+  /** One line under the label, saying what connecting to this backend means. */
+  description?: string | undefined;
+  /** Run the connect flow: prompt, authenticate, create the live table(s). */
+  connect(api: HostApi): Promise<void>;
 }
 
 export interface ExporterSpec {
@@ -353,6 +532,12 @@ export interface UiRegistry {
   registerRowRenderer(viewName: string, tag: string): Unregister;
   registerTableRenderer(viewName: string, tag: string): Unregister;
   registerImporter(spec: ImporterSpec): Unregister;
+  /**
+   * Register a live-backend connector. The Connect menu lists these; the
+   * matching row-source provider is registered separately via
+   * `HostApi.registerRowSource`, because one is UI and the other is data.
+   */
+  registerConnector(spec: ConnectorSpec): Unregister;
   registerExporter(spec: ExporterSpec): Unregister;
   registerDropHandler(fn: DropHandler): Unregister;
   registerUrlSource(spec: UrlSourceSpec): Unregister;

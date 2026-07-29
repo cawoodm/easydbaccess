@@ -3,6 +3,7 @@ import type {
   ColumnType,
   HostApi,
   ImporterSpec,
+  ImportSourceInput,
   PluginModule,
   TableInfo,
   TableOrigin,
@@ -12,6 +13,10 @@ import type {
   WindowGeometry,
 } from '@easydb/shared';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
+import { runImport } from '../import/import-kernel.js';
+import { rowRekeyer } from '../table/column-merge.js';
+import { filenameFromUrl } from '../import/fetch-source.js';
+import { cryptoUUID, slugTable } from '../util/ids.js';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a
 // custom element on import, which would blow up under Vitest's default
@@ -46,39 +51,192 @@ export function init(api: HostApi): void {
 }
 
 // -- Importer spec ------------------------------------------------------------
+//
+// This spec is the GENERIC JSON importer: an array of objects, a `{rows: […]}`
+// envelope, or a single object. Those are plain tabular data, so they run on
+// the import kernel exactly like a CSV.
+//
+// A native `.db.json` dump is a different thing. It carries window geometry,
+// sort, filters, view templates and view instances, and can replace the whole
+// workspace — that is RESTORING a workspace, not importing a table, and no
+// generic table writer can express it. It keeps its own path
+// (`restoreWorkspaceDump` below). `isWorkspaceDump` is how a caller tells them
+// apart before choosing which to run.
+//
+// `list` parses once and returns one candidate per table, carrying the parsed
+// table as the opaque handle. `read` hands back what `list` already produced —
+// no second parse.
+
+/**
+ * True when this parsed body is a native or v1 workspace dump rather than
+ * plain tabular JSON. Exported so the Import dialog and the drop handler can
+ * route to the restore path instead of the kernel.
+ */
+export function isWorkspaceDump(parsed: unknown): boolean {
+  if (!isObject(parsed)) return false;
+  if (looksLikeV1Dump(parsed as Record<string, unknown>)) return true;
+  return Array.isArray((parsed as { tables?: unknown }).tables);
+}
+
+/** The name a source should give its table, before the kernel's naming policy. */
+function candidateName(input: ImportSourceInput): string {
+  if (input.kind === 'file' && input.file) return stripJsonExt(input.file.name);
+  if (input.kind === 'url' && input.url) return stripJsonExt(filenameFromUrl(input.url));
+  return stripJsonExt(input.name ?? 'imported');
+}
 
 const importerSpec: ImporterSpec = {
   id: 'json',
-  label: 'JSON',
+  label: 'JSON (array of objects or a dump)',
+  icon: 'data_object',
+  order: 20,
   accept: ['.json', '.db.json', 'application/json'],
-  async parse(input) {
-    const text = typeof input === 'string' ? input : await input.text();
-    const parsed = JSON.parse(text);
-    const tables = parsedToTables(parsed, 'imported');
-    const first = tables[0];
-    return {
-      columns: first?.columns ?? [],
-      rows: first?.rows ?? [],
-    };
+  samples: [
+    {
+      label: 'Northwind — sample database (JSON dump)',
+      url: 'https://raw.githubusercontent.com/cawoodm/easydbaccess/main/data/northwind.db.json',
+    },
+  ],
+  supports: { url: true, file: true, text: true, reference: true, multiTable: true, kernel: true },
+
+  detect(input) {
+    const name = input.kind === 'file' ? (input.file?.name ?? '') : (input.url ?? '');
+    if (/\.db\.json$/i.test(name)) return 1; // our own dump format
+    if (/\.json$/i.test(name)) return 0.95;
+    if (input.file?.type === 'application/json') return 0.9;
+    const body = (input.text ?? '').trimStart();
+    return body.startsWith('{') || body.startsWith('[') ? 0.3 : 0;
+  },
+
+  async list(ctx, input) {
+    let text: string;
+    if (input.kind === 'file' && input.file) text = await input.file.text();
+    else if (input.kind === 'url' && input.url) {
+      text = await ctx.fetchText(input.url, `Reading ${filenameFromUrl(input.url)}…`);
+    } else text = input.text ?? '';
+
+    const fallback = candidateName(input);
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      throw new Error(`Invalid JSON in ${fallback}: ${(err as Error).message}`);
+    }
+    const tables = parsedToTables(parsed, fallback);
+    return tables.map((t) => ({
+      name: t.name,
+      rowCount: t.rows.length,
+      handle: { table: t, input, single: tables.length === 1 } satisfies JsonHandle,
+    }));
+  },
+
+  async *read(_ctx, candidate) {
+    const { table } = candidate.handle as JsonHandle;
+    yield { columns: table.columns, rows: table.rows };
+  },
+
+  reference(_ctx, candidate) {
+    const { input, single } = candidate.handle as JsonHandle;
+    if (input.kind !== 'url' || !input.url) {
+      throw new Error('A reference needs a re-fetchable URL — an upload cannot be referenced.');
+    }
+    // The `url` row-source re-fetches the WHOLE document and reads the first
+    // array of objects out of it. That is only the right table when the
+    // document held exactly one, so refuse a multi-table dump rather than
+    // silently referencing the wrong rows.
+    if (!single) {
+      throw new Error(
+        'That URL holds several tables, so a reference would be ambiguous. Import a copy instead.',
+      );
+    }
+    return { type: 'url', config: { url: input.url, format: 'json' } };
   },
 };
 
+/** What json-import passes to itself between `list` and `read`/`reference`. */
+interface JsonHandle {
+  table: NormalizedTable;
+  input: ImportSourceInput;
+  /** The document held exactly one table, so a `url` reference is unambiguous. */
+  single: boolean;
+}
+
+/** Strip `.db.json` / `.json` so a dump names its table without the extension. */
+function stripJsonExt(name: string): string {
+  return name.replace(/\.db\.json$/i, '').replace(/\.json$/i, '') || 'imported';
+}
+
 // -- Core: file -> Tables -----------------------------------------------------
 
+/**
+ * A dropped `.json` file. A workspace dump is restored whole; anything else is
+ * plain tabular data and goes through the kernel, so a dropped file lands
+ * exactly like the same file chosen in the Import dialog.
+ */
 async function importJsonFile(api: HostApi, file: File): Promise<void> {
-  await importJsonText(api, await file.text(), file.name);
+  const text = await file.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    api.events.emit('plugin:error', {
+      url: 'json-import',
+      phase: 'runtime',
+      error: new Error(`Invalid JSON in ${file.name}: ${(err as Error).message}`),
+    });
+    return;
+  }
+
+  if (isWorkspaceDump(parsed)) {
+    await restoreWorkspaceDump(api, text, file.name);
+    return;
+  }
+
+  const res = await runImport(
+    api,
+    importerSpec,
+    { kind: 'text', text, name: file.name },
+    { mode: 'copy', target: { kind: 'new' } },
+  );
+  const rows = res.landed.reduce((n, l) => n + l.rowCount, 0);
+  if (res.landed.length > 0) {
+    api.ui.dialogs.toast(`Imported ${file.name} (${rows.toLocaleString()} rows).`, {
+      kind: 'success',
+      title: 'Import',
+    });
+  }
 }
 
 /**
- * Imports a JSON dump given its text body and a source filename. Used by both
- * the drag-and-drop path and the import-data plugin's URL fetch path. Behavior
- * is identical: parse → detect shape → prompt user on collisions → write.
+ * Restore a native (or v1) workspace dump: tables plus everything around them
+ * — window geometry, sort, filters, label column, deleted columns, view
+ * templates and view instances — with the option to replace the whole
+ * workspace. This is deliberately NOT the import kernel's job: the kernel
+ * writes name, columns, rows and origin, which is all a table import means.
+ * Plain tabular JSON goes through the kernel instead (see `importerSpec`).
+ *
+ * Reached from the Import dialog and the drop handler once
+ * {@link isWorkspaceDump} says the body is a dump.
  */
-export async function importJsonText(
+export async function restoreWorkspaceDump(
   api: HostApi,
   text: string,
   filename: string,
-  opts: { originUrl?: string | undefined; maxRows?: number | undefined } = {},
+  opts: {
+    originUrl?: string | undefined;
+    maxRows?: number | undefined;
+    /**
+     * Hook for the Import dialog's "Edit columns before import" checkbox.
+     * Called once per NEW table with that table's inferred columns and its
+     * name. Return the edited columns, or `null` to leave that one table out.
+     * Matched tables in overwrite mode reuse their existing schema, so they
+     * never open the editor — the same rule the CSV importer follows.
+     */
+    editColumns?:
+      | ((columns: ColumnSpec[], tableName: string) => Promise<ColumnSpec[] | null>)
+      | undefined;
+  } = {},
 ): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('json-import: no active workspace');
@@ -195,6 +353,20 @@ export async function importJsonText(
 
       let tableId: string;
       const match = mode === 'overwrite-matching' ? existingByName.get(t.name) : undefined;
+
+      // "Edit columns before import": review/rename this table's columns before
+      // it is created. Only for a brand-new LOCAL table — a matched table keeps
+      // its own schema, and a live (`source`) table's columns belong to the
+      // remote. Cancelling leaves this one table out and continues with the rest.
+      let cols = t.columns;
+      let rows = t.rows;
+      if (opts.editColumns && !match && !source) {
+        const edited = await opts.editColumns(cols, t.name);
+        if (edited === null) continue;
+        rows = remapRows(rows, cols, edited);
+        cols = edited;
+      }
+
       if (match) {
         // Overwrite: keep the id (and thus its panel position) but wipe rows
         // and replace columns + sort + geometry + backing info from the import.
@@ -207,7 +379,7 @@ export async function importJsonText(
           await rowColl.bulkRemove(oldRows.map((r) => r.id));
         }
         await api.store.tables.patch(tableId, {
-          columns: t.columns,
+          columns: cols,
           ...(t.title ? { title: t.title } : {}),
           ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
           ...(t.sortColumn
@@ -228,8 +400,8 @@ export async function importJsonText(
           id: tableId,
           workspaceId,
           name: t.name,
-          code: slug(t.name),
-          columns: t.columns,
+          code: slugTable(t.name),
+          columns: cols,
           view: 'table',
           ...(t.title ? { title: t.title } : {}),
           ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
@@ -252,7 +424,7 @@ export async function importJsonText(
       if (!source) {
         const rowColl = api.store.rows(tableId);
         // Apply the Import dialog's "Limit rows" cap per table (undefined ⇒ all).
-        const rowsToInsert = opts.maxRows != null ? t.rows.slice(0, opts.maxRows) : t.rows;
+        const rowsToInsert = opts.maxRows != null ? rows.slice(0, opts.maxRows) : rows;
         const docs = rowsToInsert.map((row) => ({
           id: cryptoUUID(),
           tableId,
@@ -319,8 +491,7 @@ async function restoreViews(
 
   for (const inst of instances) {
     if (!isObject(inst) || typeof inst.id !== 'string') continue;
-    const tableId =
-      (inst.tableName ? nameToId.get(inst.tableName) : undefined) ?? inst.tableId;
+    const tableId = (inst.tableName ? nameToId.get(inst.tableName) : undefined) ?? inst.tableId;
     if (!tableId) continue;
     await api.store.viewInstances.upsert({ ...inst, workspaceId, tableId });
   }
@@ -600,6 +771,16 @@ function isDateString(s: string): boolean {
 
 // -- helpers ------------------------------------------------------------------
 
+/** Apply a pre-import column rename to a whole table's rows. */
+function remapRows(
+  rows: Array<Record<string, unknown>>,
+  oldCols: ColumnSpec[],
+  newCols: ColumnSpec[],
+): Array<Record<string, unknown>> {
+  const rekey = rowRekeyer(oldCols, newCols);
+  return rekey ? rows.map(rekey) : rows;
+}
+
 function isObject(v: unknown): v is object {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -625,21 +806,4 @@ function isJson(file: File): boolean {
   if (/\.json$/i.test(file.name)) return true;
   if (file.type === 'application/json') return true;
   return false;
-}
-
-function slug(s: string): string {
-  return (
-    s
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'table'
-  );
-}
-
-function cryptoUUID(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  );
 }
