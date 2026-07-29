@@ -2,6 +2,7 @@
 
 ## 29 Jul 2026
 
+- 🪶 Any column can carry a script now: its `render(row)` output is what the column's renderer displays, so a link, image or boolean cell can show a computed value (v0.0.181)
 - ✨ A GitHub file URL now imports its real content: the blob link becomes the raw link, and a Git-LFS file is fetched from the media host instead of importing the pointer stub (v0.0.180)
 - 🪲 Dev/e2e server port now resolves per branch instead of hardcoded 5190; a taken port fails loudly instead of drifting (v0.0.176)
 - ✨ The delete-table trash icon is now dark red instead of inheriting the button's default color (v0.0.174)

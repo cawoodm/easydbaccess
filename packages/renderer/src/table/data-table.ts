@@ -8,6 +8,7 @@ import { FilterPopover } from '../chrome/filter-popover.js';
 import '../chrome/filter-combobox.js';
 import { searchRows } from '../search/text-search.js';
 import { matchesColumnFilter } from '../search/column-filter.js';
+import { runColumnScript } from '../util/column-script.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 
 /** A row matches `needle` (lower-cased) when any of its field values contains it. */
@@ -317,6 +318,15 @@ export class DataTable extends LitElement {
       }
       td.t-number input[type='text'] {
         text-align: right;
+      }
+      /* A column script that failed to compile or threw. Kept small and inline
+         so one broken script does not disturb the rest of the row; the full
+         message is the element's title. */
+      .script-err {
+        color: #b91c1c;
+        font-size: 0.8em;
+        font-family: ui-monospace, SFMono-Regular, monospace;
+        cursor: help;
       }
       /* Null / empty cell highlight — picks them out at a glance without
        shouting like full red. */
@@ -693,8 +703,42 @@ export class DataTable extends LitElement {
     return html`${String(raw)}`;
   }
 
+  /**
+   * A cell whose column carries a script: the script's return value is what the
+   * renderer receives. The result is derived from the row, so it is always
+   * read-only — there is nowhere to write an edit back to. A failing script
+   * shows an inline chip (title = the message) instead of taking the table down.
+   */
+  private renderScriptedCell(row: Row, col: ColumnSpec) {
+    const run = runColumnScript(col.script, row.data);
+    if (!run.ok) {
+      return html`<span class="script-err" title=${run.message}>⚠ ${run.label}</span>`;
+    }
+    const customTag = col.renderer ? this.cellRenderers?.get(col.renderer) : undefined;
+    if (!customTag) {
+      // No renderer (or an unknown name): show the computed value as text.
+      return html`${run.value == null ? '' : String(run.value)}`;
+    }
+    const tag = unsafeStatic(customTag);
+    return staticHtml`<${tag}
+      .value=${run.value ?? ''}
+      .column=${col}
+      .row=${row.data}
+      .readonly=${true}
+    ></${tag}>`;
+  }
+
   private renderCell(row: Row, col: ColumnSpec) {
     const raw = row.data[col.field];
+    // A column can carry a `script` whose `render(row)` output REPLACES the
+    // stored value on the way into the renderer — so any renderer (link, image,
+    // html, boolean…) can display something computed from the whole row. The
+    // `script` renderer is excluded: it runs the script itself and injects the
+    // result as HTML, and its `.value` stays the stored value so its pencil
+    // still edits the real cell.
+    if (col.script?.trim() && col.renderer !== 'script') {
+      return this.renderScriptedCell(row, col);
+    }
     // Cell rendering is dispatched by the column's `renderer` attribute, not
     // its data type. If a renderer is registered for the column's chosen
     // name we hand off to its custom element; otherwise the cell renders as
@@ -764,8 +808,7 @@ export class DataTable extends LitElement {
         return html`<input
           type="number"
           .value=${raw == null ? '' : String(raw)}
-          @keydown=${(e: KeyboardEvent) =>
-            this.cancelCellEdit(e, raw == null ? '' : String(raw))}
+          @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, raw == null ? '' : String(raw))}
           @change=${(e: Event) => {
             const v = (e.target as HTMLInputElement).value;
             this.setCell(row, col.field, v === '' ? null : Number(v));
@@ -933,9 +976,7 @@ export class DataTable extends LitElement {
       ([f, q]) => q && q.trim().length > 0 && f !== focusField,
     );
     if (active.length === 0) return this.rows;
-    return this.rows.filter((r) =>
-      active.every(([f, q]) => matchesColumnFilter(r.data[f], q)),
-    );
+    return this.rows.filter((r) => active.every(([f, q]) => matchesColumnFilter(r.data[f], q)));
   }
 
   /**

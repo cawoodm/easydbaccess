@@ -5,20 +5,23 @@ import { makeDialogDraggable } from './draggable.js';
 
 /**
  * Boilerplate inserted into a fresh script editor. Shows the required
- * `render(row)` signature, the contract (returns an HTML string), and a
- * minimal working example so the user can hit Save once and see the
- * cell render without writing anything themselves.
+ * `render(row)` signature and a minimal working example, so the user can hit
+ * Save once and see the cell render without writing anything themselves.
+ *
+ * What the return value means depends on the column's renderer: with the
+ * `script` renderer it is injected as raw HTML; with any other renderer (or
+ * none) it is the VALUE that renderer displays.
  */
 const BOILERPLATE = `function render(row) {
   // \`row\` is the full row object — access any field by name (row.field).
-  // Return an HTML string; it is injected into the cell as raw HTML.
-  return '<b>' + (row.name ?? '') + '</b>';
+  // Return the value this column should display. With the "script" renderer
+  // the returned string is injected as raw HTML instead.
+  return row.name ?? '';
 }
 `;
 
 /**
- * Modal editor for a column's `script` source — the JS body used by the
- * built-in `script` cell renderer. Mounted once from `<app-shell>` and
+ * Modal editor for a column's `script` source. Mounted once from `<app-shell>` and
  * accessed via the static `instance` accessor (same pattern as
  * `HostDialogs.instance`). `open()` returns a promise that resolves to
  * the new source on Save or `null` on Cancel.
@@ -51,7 +54,10 @@ export class ScriptEditorDialog extends LitElement {
         border-radius: 0.2rem;
       }
       textarea {
-        font: 0.85rem ui-monospace, SFMono-Regular, monospace;
+        font:
+          0.85rem ui-monospace,
+          SFMono-Regular,
+          monospace;
         padding: 0.6rem 0.75rem;
         border: 1px solid #d1d5db;
         border-radius: 0.25rem;
@@ -136,9 +142,11 @@ export class ScriptEditorDialog extends LitElement {
           </div>
           <div class="dialog-body">
             <p class="hint">
-              Define <code>function render(row) { … }</code>. <code>row</code> is
-              the full row object; return an HTML string. Throws or non-string
-              returns show a small error chip in the cell.
+              Define <code>function render(row) { … }</code>. <code>row</code> is the full row
+              object. What you return is passed to the column's renderer, so the cell shows a
+              computed value instead of the stored one — and the cell becomes read-only. With the
+              <code>script</code> renderer the returned string is injected as raw HTML instead. A
+              script that throws shows a small error chip in the cell.
             </p>
             <textarea
               spellcheck="false"
