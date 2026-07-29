@@ -17,6 +17,8 @@
 // what "contains" means (here: any field value contains the term, so a phrase
 // spanning two fields is NOT a phrase match, matching the old per-field logic).
 
+import { matchesColumnFilter } from './column-filter.js';
+
 /** Per-row predicate: does the row contain `needle` (already lower-cased)? */
 export type ContainsFn<T> = (row: T, needle: string) => boolean;
 
@@ -77,4 +79,56 @@ export function searchRows<T>(rows: T[], query: string, contains: ContainsFn<T>)
   const andHits = rows.filter((r) => words.every((w) => contains(r, w)));
   if (andHits.length > 0) return andHits;
   return rows.filter((r) => words.some((w) => contains(r, w)));
+}
+
+/** A searchable column: the data key plus an optional human label to also match on. */
+export interface SearchField {
+  field: string;
+  label?: string | undefined;
+}
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Field-aware free-text search over `{ data }` rows, sharing the boolean /
+ * phrase engine of {@link searchRows}.
+ *
+ * A term written `field:query` (field name OR label, case-insensitive) tests
+ * ONLY that column through the column-filter mini-language — so `!` (negate),
+ * `^` (starts-with), comma-OR and `NULL` all work inside it (e.g.
+ * `read:!true`, `status:^A`, `city:Paris,Zurich`). A space right after a known
+ * field's colon is tolerated (`read: !true`). Any other term is a plain
+ * substring across all field values, exactly as before. Top-level `AND` / `OR`
+ * and the plain phrase→AND→OR fallback are unchanged.
+ */
+export function searchRowsByField<T extends { data: Record<string, unknown> }>(
+  rows: T[],
+  query: string,
+  fields: SearchField[],
+): T[] {
+  // Lower-cased field name / label → the real data key.
+  const byName = new Map<string, string>();
+  for (const f of fields) {
+    byName.set(f.field.toLowerCase(), f.field);
+    if (f.label) byName.set(f.label.toLowerCase(), f.field);
+  }
+  // Collapse `field: value` → `field:value` for KNOWN fields only, so a value
+  // typed after a space survives whitespace tokenisation. Longest names first
+  // so `created_at:` isn't shadowed by a shorter `created:`.
+  const names = [...byName.keys()].filter(Boolean).sort((a, b) => b.length - a.length);
+  let q = query;
+  if (names.length > 0) {
+    q = q.replace(new RegExp(`(^|\\s)(${names.map(escapeRe).join('|')}):\\s+`, 'gi'), '$1$2:');
+  }
+  const contains: ContainsFn<T> = (row, needle) => {
+    const colon = needle.indexOf(':');
+    if (colon > 0) {
+      const real = byName.get(needle.slice(0, colon));
+      if (real) return matchesColumnFilter(row.data[real], needle.slice(colon + 1));
+    }
+    return Object.values(row.data).some(
+      (v) => v != null && String(v).toLowerCase().includes(needle),
+    );
+  };
+  return searchRows(rows, q, contains);
 }

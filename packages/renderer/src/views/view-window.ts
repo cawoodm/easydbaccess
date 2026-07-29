@@ -6,7 +6,7 @@ import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViewsDialog } from '../dialogs/views-dialog.js';
 import { hasRowHtml, substituteRow, viewRows } from './view-render.js';
-import { searchRows } from '../search/text-search.js';
+import { searchRowsByField } from '../search/text-search.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 // Side-effect import: the template-off mode renders the standard interactive
 // grid, bound to this view instance for its presentation state.
@@ -100,6 +100,46 @@ export class ViewWindow extends LitElement {
       }
       .eda-input-field .eda-input-label:empty {
         display: none;
+      }
+      /* Sort toolbar pinned to the top of a template view. */
+      .vw-sortbar {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.3rem 0.5rem;
+        border-bottom: 1px solid #e5e7eb;
+        background: #ffffff;
+        font-size: 0.82rem;
+        color: #6b7280;
+      }
+      .vw-sortbar select {
+        font: inherit;
+        padding: 0.15rem 0.3rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+        background: white;
+        color: #374151;
+      }
+      .vw-sortbar button {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.15rem 0.3rem;
+        border: 1px solid #d1d5db;
+        background: white;
+        border-radius: 0.25rem;
+        cursor: pointer;
+        color: #374151;
+      }
+      .vw-sortbar button:hover {
+        background: #f3f4f6;
+      }
+      .vw-sortbar button[disabled] {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .vw-sortbar .mi {
+        font-size: 1.05rem;
       }
       /* Footer toolbar: the template on/off toggle sits at the bottom-right. */
       .vw-footer {
@@ -294,16 +334,15 @@ export class ViewWindow extends LitElement {
   private recompute() {
     if (!this.instance) return;
     let rows = viewRows(this.allRows, this.instance);
-    // Free-text search across all field values — supports boolean AND/OR and
-    // the phrase→AND→OR fallback, matching the table window's behaviour. The
-    // view's own search AND the app-wide global search both apply (each
-    // narrows the set), so global search respects the view's search.
-    const contains = (r: Row, needle: string) =>
-      Object.values(r.data).some((v) => v != null && String(v).toLowerCase().includes(needle));
+    // Free-text search across field values — supports `field:value` (with
+    // !/^/comma-OR/NULL), boolean AND/OR, and the phrase→AND→OR fallback,
+    // matching the table window. The view's own search AND the app-wide global
+    // search both apply (each narrows the set), so global search respects the
+    // view's search. Field names resolve against the underlying table's columns.
     const local = this.searchQuery.trim();
     const global = this.globalQuery.trim();
-    if (local) rows = searchRows(rows, local, contains);
-    if (global) rows = searchRows(rows, global, contains);
+    if (local) rows = searchRowsByField(rows, local, this.tableColumns);
+    if (global) rows = searchRowsByField(rows, global, this.tableColumns);
     const lim = this.instance.limit ?? 0;
     if (lim > 0 && rows.length > lim) rows = rows.slice(0, lim);
     this.rows = rows;
@@ -348,6 +387,28 @@ export class ViewWindow extends LitElement {
   };
 
   // -- footer actions ---------------------------------------------------------
+
+  /** Change the view's sort column (persisted on the instance). Empty ⇒ unsorted. */
+  private async setSortColumn(field: string) {
+    if (!this.instance) return;
+    const ctx = await getContext();
+    await ctx.store.viewInstances.patch(this.instance.id, {
+      sortColumn: field || undefined,
+      updatedAt: Date.now(),
+    });
+    this.instance = { ...this.instance, sortColumn: field || undefined };
+    this.recompute();
+  }
+
+  /** Flip the sort direction (persisted on the instance). No-op when unsorted. */
+  private async toggleSortDir() {
+    if (!this.instance?.sortColumn) return;
+    const asc = !(this.instance.sortAsc ?? true);
+    const ctx = await getContext();
+    await ctx.store.viewInstances.patch(this.instance.id, { sortAsc: asc, updatedAt: Date.now() });
+    this.instance = { ...this.instance, sortAsc: asc };
+    this.recompute();
+  }
 
   /** Flip the template on/off for this view and persist it to the instance. */
   private async toggleTemplate() {
@@ -446,6 +507,37 @@ export class ViewWindow extends LitElement {
     </div>`;
   }
 
+  /** Top toolbar (template mode): a sort-column dropdown + direction toggle. */
+  private renderSortBar() {
+    if (!this.instance) return nothing;
+    // Offer every column the source lets us sort by (a provider can mark some
+    // unsortable via `sortable: false`).
+    const cols = this.tableColumns.filter((c) => c.sortable !== false);
+    const cur = this.instance.sortColumn ?? '';
+    const asc = this.instance.sortAsc ?? true;
+    return html`<div class="vw-sortbar">
+      <span class="mi" title="Sort">sort</span>
+      <select
+        aria-label="Sort by"
+        @change=${(e: Event) => void this.setSortColumn((e.target as HTMLSelectElement).value)}
+      >
+        <option value="" ?selected=${!cur}>— unsorted —</option>
+        ${cols.map(
+          (c) =>
+            html`<option value=${c.field} ?selected=${cur === c.field}>${c.label || c.field}</option>`,
+        )}
+      </select>
+      <button
+        aria-label="Toggle sort direction"
+        title=${asc ? 'Ascending (click for descending)' : 'Descending (click for ascending)'}
+        ?disabled=${!cur}
+        @click=${() => void this.toggleSortDir()}
+      >
+        <span class="mi">${asc ? 'arrow_upward' : 'arrow_downward'}</span>
+      </button>
+    </div>`;
+  }
+
   private renderFooter() {
     if (!this.instance) return nothing;
     const on = this.templateOn;
@@ -520,7 +612,9 @@ export class ViewWindow extends LitElement {
             .viewInstanceId=${this.viewInstanceId}
           ></data-table>
         </div>`;
-    return html`${body}${this.renderFooter()}`;
+    // The sort bar rides at the top in template mode; the grid (template-off)
+    // has its own clickable column headers, so it isn't shown there.
+    return html`${on ? this.renderSortBar() : nothing}${body}${this.renderFooter()}`;
   }
 }
 

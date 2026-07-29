@@ -6,16 +6,11 @@ import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
 import '../chrome/filter-combobox.js';
-import { searchRows } from '../search/text-search.js';
+import { searchRowsByField } from '../search/text-search.js';
 import { matchesColumnFilter } from '../search/column-filter.js';
 import { runColumnScript } from '../util/column-script.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
-
-/** A row matches `needle` (lower-cased) when any of its field values contains it. */
-function rowContains(r: Row, needle: string): boolean {
-  return Object.values(r.data).some((v) => v != null && String(v).toLowerCase().includes(needle));
-}
 
 type SortDir = 'asc' | 'desc' | null;
 
@@ -906,10 +901,12 @@ export class DataTable extends LitElement {
         active.every(([field, query]) => matchesColumnFilter(r.data[field], query)),
       );
     }
-    // Free-text search supports boolean AND/OR and the phrase→AND→OR fallback.
-    // Local and global queries each narrow the set independently.
-    if (lq) rows = searchRows(rows, lq, rowContains);
-    if (gq) rows = searchRows(rows, gq, rowContains);
+    // Free-text search supports `field:value` (with !/^/comma-OR/NULL), boolean
+    // AND/OR, and the phrase→AND→OR fallback. Local and global queries each
+    // narrow the set independently. Field names resolve against this view's
+    // columns (name or label).
+    if (lq) rows = searchRowsByField(rows, lq, this.columns);
+    if (gq) rows = searchRowsByField(rows, gq, this.columns);
     return rows;
   }
 

@@ -616,7 +616,7 @@ test.describe('views', () => {
 
     // The app-wide global search filters the view's rows too.
     const header = page.locator('app-shell header');
-    await header.locator('button.icon-btn').click();
+    await header.locator('button.icon-btn[title^="Search"]').click();
     const gsearch = header.locator('input.search');
     await gsearch.fill('Alice');
     await expect(vw.locator('a')).toHaveCount(1);
@@ -633,7 +633,7 @@ test.describe('views', () => {
 
     // Global search now intersects with (respects) the view's search: Carol is
     // in Paris → shown; Bob is not → global "Bob" leaves nothing.
-    await header.locator('button.icon-btn').click();
+    await header.locator('button.icon-btn[title^="Search"]').click();
     const gsearch2 = header.locator('input.search');
     await gsearch2.fill('Carol');
     await expect(vw.locator('a')).toHaveCount(1);
@@ -835,5 +835,98 @@ test.describe('minimized views load nothing until expanded', () => {
     const vw = page.locator('view-window');
     await expect(vw).toBeVisible();
     await expect(vw.locator('input[type="checkbox"].eda-input')).toBeDisabled();
+  });
+});
+
+/**
+ * The view top-bar sort dropdown, field-scoped search inside a view, and the
+ * additional seeded standard templates (Todo List, Gallery, Contact Cards).
+ */
+test.describe('views: sort, field search, standard templates', () => {
+  const useTemplate = async (
+    page: import('@playwright/test').Page,
+    tableId: string,
+    templateName: string,
+  ) => {
+    const footer = page.locator(`#${panelDomId(tableId)} panel-footer`);
+    await footer.getByRole('button', { name: /Views/ }).click();
+    const dlg = page.locator('views-dialog dialog');
+    await expect(dlg).toBeVisible();
+    await dlg
+      .locator('ul.list li', { hasText: templateName })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+  };
+
+  test('the top-bar sort dropdown reorders template rows', async ({ page }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'n', type: 'number' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      { title: 'Bravo', n: 2 },
+      { title: 'Alpha', n: 1 },
+      { title: 'Charlie', n: 3 },
+    ]);
+    await useTemplate(page, id, 'RSS Feed');
+
+    const vw = page.locator('view-window');
+    await expect(vw.locator('a')).toHaveCount(3);
+
+    // Sort by title ascending → Alpha first.
+    await vw.locator('.vw-sortbar select').selectOption({ label: 'title' });
+    await expect(vw.locator('a').first()).toHaveText('Alpha');
+
+    // Flip direction → descending → Charlie first.
+    await vw.locator('.vw-sortbar button[aria-label="Toggle sort direction"]').click();
+    await expect(vw.locator('a').first()).toHaveText('Charlie');
+  });
+
+  test('a view search supports field:value scoping', async ({ page }) => {
+    const id = await createTable(page, 'People', [{ field: 'name' }, { field: 'city' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      { name: 'Ann', city: 'Paris' },
+      { name: 'Bob', city: 'London' },
+      { name: 'Cara', city: 'Paris' },
+    ]);
+    await useTemplate(page, id, 'RSS Feed');
+
+    const vw = page.locator('view-window');
+    await expect(vw.locator('a')).toHaveCount(3);
+
+    const viewPanel = page.locator('[id^="view-panel-"]');
+    const vsearch = viewPanel.locator('.jsPanel-controlbar panel-search');
+    await vsearch.getByRole('button').click();
+    await vsearch.locator('input').fill('city:Paris');
+    await expect(vw.locator('a')).toHaveCount(2);
+    await vsearch.locator('input').fill('city:London');
+    await expect(vw.locator('a')).toHaveCount(1);
+  });
+
+  test('the new standard templates are seeded and listed', async ({ page }) => {
+    const id = await createTable(page, 'T', [{ field: 'a' }]);
+    await waitForPanel(page, id);
+    await page.locator(`#${panelDomId(id)} panel-footer`).getByRole('button', { name: /Views/ }).click();
+    const dlg = page.locator('views-dialog dialog');
+    await expect(dlg).toBeVisible();
+    for (const name of ['RSS Feed', 'Todo List', 'Gallery', 'Contact Cards']) {
+      await expect(dlg.locator('ul.list li', { hasText: name })).toBeVisible();
+    }
+  });
+
+  test('the Todo template maps DONE to a boolean column as a checkbox', async ({ page }) => {
+    const id = await createTable(page, 'Tasks', [
+      { field: 'title' },
+      { field: 'done', type: 'boolean' },
+      { field: 'due', type: 'date' },
+    ]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ title: 'Ship it', done: false, due: '2024-01-01' }]);
+    await useTemplate(page, id, 'Todo List');
+
+    const vw = page.locator('view-window');
+    await expect(vw).toBeVisible();
+    await expect(vw.locator('input[type="checkbox"].eda-input')).toHaveCount(1);
+    await expect(vw).toContainText('Ship it');
   });
 });
