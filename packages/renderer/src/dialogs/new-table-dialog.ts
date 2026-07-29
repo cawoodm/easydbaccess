@@ -6,21 +6,7 @@ import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { makeDialogDraggable } from './draggable.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
-
-interface ColumnRow {
-  field: string;
-  label: string;
-  type: ColumnType;
-  renderer?: string | undefined;
-  /** JS body for the `script` renderer. Only meaningful when renderer === 'script'. */
-  script?: string | undefined;
-  max?: number | undefined;
-  unique?: boolean | undefined;
-  notnull?: boolean | undefined;
-  hidden?: boolean | undefined;
-  /** field name in the saved table (edit mode only); used to detect field renames */
-  origField?: string | undefined;
-}
+import { buildColumnSpec, type ColumnRow } from './column-row.js';
 
 const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'datetime'];
 
@@ -39,175 +25,175 @@ export class NewTableDialog extends LitElement {
     materialIconStyles,
     dialogChromeStyles,
     css`
-    dialog {
-      max-width: 96vw;
-      width: 1180px;
-    }
-    label {
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
-      font-size: 0.85rem;
-      color: #374151;
-    }
-    input,
-    select {
-      font: inherit;
-      padding: 0.4rem 0.5rem;
-      border: 1px solid #d1d5db;
-      border-radius: 0.25rem;
-    }
-    .columns {
-      display: grid;
-      gap: 0.5rem;
-    }
-    .col-header,
-    .col-row {
-      display: grid;
-      grid-template-columns: 1.25rem 1fr 1fr 7rem 7rem 1.5rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem;
-      gap: 0.4rem;
-      align-items: center;
-    }
-    .drag-handle {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      color: #9ca3af;
-      cursor: grab;
-      user-select: none;
-    }
-    .drag-handle:active {
-      cursor: grabbing;
-    }
-    .drag-handle:hover {
-      color: #374151;
-    }
-    .col-row.drag-source {
-      opacity: 0.4;
-    }
-    .col-row.drop-before {
-      box-shadow: inset 0 3px 0 #3b82f6;
-    }
-    .col-row.drop-after {
-      box-shadow: inset 0 -3px 0 #3b82f6;
-    }
-    .col-row input[type='number'] {
-      width: 100%;
-      box-sizing: border-box;
-    }
-    .col-row .flag {
-      display: inline-flex;
-      justify-content: center;
-    }
-    .col-header .flag-label {
-      font-size: 0.7rem;
-      text-align: center;
-    }
-    .col-header {
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      color: #6b7280;
-    }
-    button.icon-btn {
-      background: transparent;
-      border: 0;
-      color: #6b7280;
-      cursor: pointer;
-      padding: 0;
-      font-size: 1rem;
-    }
-    button.icon-btn:hover:not(:disabled) {
-      color: #111827;
-    }
-    button.icon-btn:disabled {
-      color: #d1d5db;
-      cursor: not-allowed;
-    }
-    button.row-del {
-      color: #9ca3af;
-      font-size: 1.1rem;
-    }
-    button.row-del:hover:not(:disabled) {
-      color: #ef4444;
-    }
-    button.add {
-      align-self: start;
-      background: #f3f4f6;
-      border: 1px dashed #9ca3af;
-      padding: 0.4rem 0.75rem;
-      border-radius: 0.25rem;
-      cursor: pointer;
-    }
-    .error {
-      color: #ef4444;
-      font-size: 0.85rem;
-    }
-    .notice {
-      background: #fef9c3;
-      border: 1px solid #fde047;
-      color: #713f12;
-      border-radius: 0.35rem;
-      padding: 0.45rem 0.6rem;
-      font-size: 0.85rem;
-      margin-bottom: 0.6rem;
-    }
-    .hint {
-      color: #6b7280;
-      font-size: 0.78rem;
-    }
-    .mi.sm {
-      font-size: 0.95rem;
-    }
-    /* Live preview table: shows the first 100 rows so the user can see
+      dialog {
+        max-width: 96vw;
+        width: 1180px;
+      }
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        font-size: 0.85rem;
+        color: #374151;
+      }
+      input,
+      select {
+        font: inherit;
+        padding: 0.4rem 0.5rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+      }
+      .columns {
+        display: grid;
+        gap: 0.5rem;
+      }
+      .col-header,
+      .col-row {
+        display: grid;
+        grid-template-columns: 1.25rem 1fr 1fr 7rem 7rem 1.5rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem;
+        gap: 0.4rem;
+        align-items: center;
+      }
+      .drag-handle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: #9ca3af;
+        cursor: grab;
+        user-select: none;
+      }
+      .drag-handle:active {
+        cursor: grabbing;
+      }
+      .drag-handle:hover {
+        color: #374151;
+      }
+      .col-row.drag-source {
+        opacity: 0.4;
+      }
+      .col-row.drop-before {
+        box-shadow: inset 0 3px 0 #3b82f6;
+      }
+      .col-row.drop-after {
+        box-shadow: inset 0 -3px 0 #3b82f6;
+      }
+      .col-row input[type='number'] {
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .col-row .flag {
+        display: inline-flex;
+        justify-content: center;
+      }
+      .col-header .flag-label {
+        font-size: 0.7rem;
+        text-align: center;
+      }
+      .col-header {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #6b7280;
+      }
+      button.icon-btn {
+        background: transparent;
+        border: 0;
+        color: #6b7280;
+        cursor: pointer;
+        padding: 0;
+        font-size: 1rem;
+      }
+      button.icon-btn:hover:not(:disabled) {
+        color: #111827;
+      }
+      button.icon-btn:disabled {
+        color: #d1d5db;
+        cursor: not-allowed;
+      }
+      button.row-del {
+        color: #9ca3af;
+        font-size: 1.1rem;
+      }
+      button.row-del:hover:not(:disabled) {
+        color: #ef4444;
+      }
+      button.add {
+        align-self: start;
+        background: #f3f4f6;
+        border: 1px dashed #9ca3af;
+        padding: 0.4rem 0.75rem;
+        border-radius: 0.25rem;
+        cursor: pointer;
+      }
+      .error {
+        color: #ef4444;
+        font-size: 0.85rem;
+      }
+      .notice {
+        background: #fef9c3;
+        border: 1px solid #fde047;
+        color: #713f12;
+        border-radius: 0.35rem;
+        padding: 0.45rem 0.6rem;
+        font-size: 0.85rem;
+        margin-bottom: 0.6rem;
+      }
+      .hint {
+        color: #6b7280;
+        font-size: 0.78rem;
+      }
+      .mi.sm {
+        font-size: 0.95rem;
+      }
+      /* Live preview table: shows the first 100 rows so the user can see
        which cells would fail validation under the edited column specs. */
-    .preview {
-      border-top: 1px solid #e5e7eb;
-      margin-top: 0.5rem;
-      max-height: 36vh;
-      overflow: auto;
-    }
-    .preview h3 {
-      margin: 0;
-      padding: 0.6rem 0.4rem 0.4rem;
-      font-size: 0.85rem;
-      color: #6b7280;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .preview table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.8rem;
-    }
-    .preview th,
-    .preview td {
-      border: 1px solid #e5e7eb;
-      padding: 0.2rem 0.4rem;
-      text-align: left;
-      vertical-align: top;
-      white-space: nowrap;
-      max-width: 18rem;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .preview th {
-      background: #f9fafb;
-      position: sticky;
-      top: 0;
-      z-index: 1;
-    }
-    .preview td.violation {
-      background: #fee2e2;
-      color: #991b1b;
-    }
-    .preview .empty {
-      padding: 0.75rem 0.4rem;
-      color: #9ca3af;
-      font-style: italic;
-    }
-  `,
+      .preview {
+        border-top: 1px solid #e5e7eb;
+        margin-top: 0.5rem;
+        max-height: 36vh;
+        overflow: auto;
+      }
+      .preview h3 {
+        margin: 0;
+        padding: 0.6rem 0.4rem 0.4rem;
+        font-size: 0.85rem;
+        color: #6b7280;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .preview table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.8rem;
+      }
+      .preview th,
+      .preview td {
+        border: 1px solid #e5e7eb;
+        padding: 0.2rem 0.4rem;
+        text-align: left;
+        vertical-align: top;
+        white-space: nowrap;
+        max-width: 18rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .preview th {
+        background: #f9fafb;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      .preview td.violation {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      .preview .empty {
+        padding: 0.75rem 0.4rem;
+        color: #9ca3af;
+        font-style: italic;
+      }
+    `,
   ];
 
   @state() private mode: 'new' | 'edit' = 'new';
@@ -275,6 +261,7 @@ export class NewTableDialog extends LitElement {
         notnull: c.notnull,
         hidden: c.hidden,
         origField: c.field,
+        orig: c,
       }));
       // Pull the first 100 rows for the live preview. We deliberately don't
       // subscribe — the dialog is short-lived and external row edits during
@@ -304,10 +291,7 @@ export class NewTableDialog extends LitElement {
 
   private addColumn(): void {
     const i = this.columns.length + 1;
-    this.columns = [
-      ...this.columns,
-      { field: `field_${i}`, label: `Field ${i}`, type: 'string' },
-    ];
+    this.columns = [...this.columns, { field: `field_${i}`, label: `Field ${i}`, type: 'string' }];
   }
 
   private removeColumn(idx: number): void {
@@ -430,20 +414,12 @@ export class NewTableDialog extends LitElement {
     }
 
     const title = this.tableTitle.trim();
-    const columns: ColumnSpec[] = this.columns.map((c) => {
-      const spec: ColumnSpec = {
-        field: c.field.trim(),
-        label: c.label.trim() || c.field.trim(),
-        type: c.type,
-      };
-      if (c.renderer) spec.renderer = c.renderer;
-      if (c.script) spec.script = c.script;
-      if (c.max != null && c.max > 0) spec.max = c.max;
-      if (c.unique) spec.unique = true;
-      if (c.notnull) spec.notnull = true;
-      if (c.hidden) spec.hidden = true;
-      return spec;
-    });
+    // buildColumnSpec spreads each row's `orig` ColumnSpec (when hydrated from
+    // a saved table) as the base, so fields the editor doesn't own — default,
+    // width, description, units, sortable — survive the save instead of being
+    // dropped. See column-row.ts for why clearing a field must explicitly
+    // delete it rather than just skip setting it.
+    const columns: ColumnSpec[] = this.columns.map(buildColumnSpec);
 
     if (this.mode === 'edit' && this.editTableId) {
       // Pre-flight scan: if any column has just been flagged unique or notnull
@@ -525,9 +501,7 @@ export class NewTableDialog extends LitElement {
       // source table's name at creation time, so a rename must propagate or
       // the view would silently point at a stale name.
       if (oldName !== undefined && oldName !== name) {
-        const insts = (await ctx.store.viewInstances.find()).filter(
-          (vi) => vi.tableId === tableId,
-        );
+        const insts = (await ctx.store.viewInstances.find()).filter((vi) => vi.tableId === tableId);
         for (const vi of insts) {
           if (vi.tableName !== name) {
             await ctx.store.viewInstances.patch(vi.id, { tableName: name, updatedAt: Date.now() });
@@ -571,7 +545,10 @@ export class NewTableDialog extends LitElement {
     const visible = this.columns.filter((c) => !c.hidden);
     return html`
       <div class="preview">
-        <h3>Live preview — first ${this.previewRows.length} row${this.previewRows.length === 1 ? '' : 's'}</h3>
+        <h3>
+          Live preview — first ${this.previewRows.length}
+          row${this.previewRows.length === 1 ? '' : 's'}
+        </h3>
         <table>
           <thead>
             <tr>
@@ -585,10 +562,9 @@ export class NewTableDialog extends LitElement {
                   ${visible.map((c) => {
                     const v = r.data[c.field];
                     const reason = validateAgainstSpec(c, v, duplicateSets.get(c.field));
-                    return html`<td
-                      class=${reason ? 'violation' : ''}
-                      title=${reason ?? ''}
-                    >${formatPreview(v)}</td>`;
+                    return html`<td class=${reason ? 'violation' : ''} title=${reason ?? ''}>
+                      ${formatPreview(v)}
+                    </td>`;
                   })}
                 </tr>
               `,
@@ -623,43 +599,42 @@ export class NewTableDialog extends LitElement {
             </div>
           </div>
           <div class="dialog-body">
-          ${this.noticeMsg ? html`<div class="notice">${this.noticeMsg}</div>` : ''}
-          <label>
-            Name
-            <input
-              type="text"
-              autofocus
-              .value=${this.name}
-              @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)}
-            />
-          </label>
-          <label>
-            Title <span style="color:#9ca3af">(optional — shown in the window title)</span>
-            <input
-              type="text"
-              .value=${this.tableTitle}
-              @input=${(e: Event) => (this.tableTitle = (e.target as HTMLInputElement).value)}
-            />
-          </label>
+            ${this.noticeMsg ? html`<div class="notice">${this.noticeMsg}</div>` : ''}
+            <label>
+              Name
+              <input
+                type="text"
+                autofocus
+                .value=${this.name}
+                @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)}
+              />
+            </label>
+            <label>
+              Title <span style="color:#9ca3af">(optional — shown in the window title)</span>
+              <input
+                type="text"
+                .value=${this.tableTitle}
+                @input=${(e: Event) => (this.tableTitle = (e.target as HTMLInputElement).value)}
+              />
+            </label>
 
-          <div class="columns">
-            <div class="col-header">
-              <span></span>
-              <span>Field</span>
-              <span>Label</span>
-              <span>Type</span>
-              <span>Renderer</span>
-              <span></span>
-              <span class="flag-label">Max</span>
-              <span class="flag-label" title="Unique">U</span>
-              <span class="flag-label" title="Not null">!</span>
-              <span class="flag-label" title="Visible">👁</span>
-              <span></span>
-              <span></span>
-              <span></span>
-            </div>
-            ${this.columns.map(
-              (c, i) => {
+            <div class="columns">
+              <div class="col-header">
+                <span></span>
+                <span>Field</span>
+                <span>Label</span>
+                <span>Type</span>
+                <span>Renderer</span>
+                <span></span>
+                <span class="flag-label">Max</span>
+                <span class="flag-label" title="Unique">U</span>
+                <span class="flag-label" title="Not null">!</span>
+                <span class="flag-label" title="Visible">👁</span>
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              ${this.columns.map((c, i) => {
                 const isSrc = this.dragSrcIdx === i;
                 const isTgt = this.dropTargetIdx === i;
                 const edgeClass =
@@ -669,148 +644,147 @@ export class NewTableDialog extends LitElement {
                       ? ' drop-after'
                       : '';
                 return html`
-                <div
-                  class=${`col-row${isSrc ? ' drag-source' : ''}${edgeClass}`}
-                  @dragover=${(e: DragEvent) =>
-                    this.onRowDragOver(e, i, e.currentTarget as HTMLElement)}
-                  @dragleave=${() => this.onRowDragLeave(i)}
-                  @drop=${(e: DragEvent) => this.onRowDrop(e, i)}
-                >
-                  <span
-                    class="drag-handle"
-                    title="Drag to reorder"
-                    draggable="true"
-                    @dragstart=${(e: DragEvent) => this.onRowDragStart(e, i)}
-                    @dragend=${() => this.onRowDragEnd()}
+                  <div
+                    class=${`col-row${isSrc ? ' drag-source' : ''}${edgeClass}`}
+                    @dragover=${(e: DragEvent) =>
+                      this.onRowDragOver(e, i, e.currentTarget as HTMLElement)}
+                    @dragleave=${() => this.onRowDragLeave(i)}
+                    @drop=${(e: DragEvent) => this.onRowDrop(e, i)}
                   >
-                    <span class="mi sm">drag_indicator</span>
-                  </span>
-                  <input
-                    type="text"
-                    .value=${c.field}
-                    @input=${(e: Event) =>
-                      this.patchColumn(i, { field: (e.target as HTMLInputElement).value })}
-                  />
-                  <input
-                    type="text"
-                    .value=${c.label}
-                    @input=${(e: Event) =>
-                      this.patchColumn(i, { label: (e.target as HTMLInputElement).value })}
-                  />
-                  <select
-                    .value=${c.type}
-                    @change=${(e: Event) =>
-                      this.patchColumn(i, {
-                        type: (e.target as HTMLSelectElement).value as ColumnType,
-                      })}
-                  >
-                    ${TYPE_OPTIONS.map(
-                      (t) => html`<option value=${t} ?selected=${t === c.type}>${t}</option>`,
-                    )}
-                  </select>
-                  <select
-                    title="Renderer — how cells in this column display. Read-only HTML-encoded text when blank."
-                    .value=${c.renderer ?? ''}
-                    @change=${(e: Event) => {
-                      const v = (e.target as HTMLSelectElement).value;
-                      this.patchColumn(i, { renderer: v || undefined });
-                    }}
-                  >
-                    <option value="" ?selected=${!c.renderer}>— none —</option>
-                    ${this.rendererOptions.map(
-                      (r) => html`<option value=${r} ?selected=${r === c.renderer}>${r}</option>`,
-                    )}
-                  </select>
-                  ${c.renderer === 'script'
-                    ? html`<button
-                        type="button"
-                        class="icon-btn"
-                        title="Edit JS render(row)"
-                        @click=${() => this.editScript(i)}
-                      >
-                        <span class="mi sm">edit</span>
-                      </button>`
-                    : html`<span></span>`}
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="—"
-                    title="Max length (strings) or max value (numbers)"
-                    .value=${c.max == null ? '' : String(c.max)}
-                    @input=${(e: Event) => {
-                      const v = (e.target as HTMLInputElement).value;
-                      this.patchColumn(i, { max: v === '' ? undefined : Number(v) });
-                    }}
-                  />
-                  <span class="flag">
+                    <span
+                      class="drag-handle"
+                      title="Drag to reorder"
+                      draggable="true"
+                      @dragstart=${(e: DragEvent) => this.onRowDragStart(e, i)}
+                      @dragend=${() => this.onRowDragEnd()}
+                    >
+                      <span class="mi sm">drag_indicator</span>
+                    </span>
                     <input
-                      type="checkbox"
-                      title="Unique"
-                      .checked=${!!c.unique}
-                      @change=${(e: Event) =>
-                        this.patchColumn(i, { unique: (e.target as HTMLInputElement).checked })}
+                      type="text"
+                      .value=${c.field}
+                      @input=${(e: Event) =>
+                        this.patchColumn(i, { field: (e.target as HTMLInputElement).value })}
                     />
-                  </span>
-                  <span class="flag">
                     <input
-                      type="checkbox"
-                      title="Not null"
-                      .checked=${!!c.notnull}
-                      @change=${(e: Event) =>
-                        this.patchColumn(i, { notnull: (e.target as HTMLInputElement).checked })}
+                      type="text"
+                      .value=${c.label}
+                      @input=${(e: Event) =>
+                        this.patchColumn(i, { label: (e.target as HTMLInputElement).value })}
                     />
-                  </span>
-                  <span class="flag">
+                    <select
+                      .value=${c.type}
+                      @change=${(e: Event) =>
+                        this.patchColumn(i, {
+                          type: (e.target as HTMLSelectElement).value as ColumnType,
+                        })}
+                    >
+                      ${TYPE_OPTIONS.map(
+                        (t) => html`<option value=${t} ?selected=${t === c.type}>${t}</option>`,
+                      )}
+                    </select>
+                    <select
+                      title="Renderer — how cells in this column display. Read-only HTML-encoded text when blank."
+                      .value=${c.renderer ?? ''}
+                      @change=${(e: Event) => {
+                        const v = (e.target as HTMLSelectElement).value;
+                        this.patchColumn(i, { renderer: v || undefined });
+                      }}
+                    >
+                      <option value="" ?selected=${!c.renderer}>— none —</option>
+                      ${this.rendererOptions.map(
+                        (r) => html`<option value=${r} ?selected=${r === c.renderer}>${r}</option>`,
+                      )}
+                    </select>
+                    ${c.renderer === 'script'
+                      ? html`<button
+                          type="button"
+                          class="icon-btn"
+                          title="Edit JS render(row)"
+                          @click=${() => this.editScript(i)}
+                        >
+                          <span class="mi sm">edit</span>
+                        </button>`
+                      : html`<span></span>`}
                     <input
-                      type="checkbox"
-                      title="Visible — uncheck to hide the column without losing its data"
-                      .checked=${!c.hidden}
-                      @change=${(e: Event) =>
-                        this.patchColumn(i, { hidden: !(e.target as HTMLInputElement).checked })}
+                      type="number"
+                      min="0"
+                      placeholder="—"
+                      title="Max length (strings) or max value (numbers)"
+                      .value=${c.max == null ? '' : String(c.max)}
+                      @input=${(e: Event) => {
+                        const v = (e.target as HTMLInputElement).value;
+                        this.patchColumn(i, { max: v === '' ? undefined : Number(v) });
+                      }}
                     />
-                  </span>
-                  <button
-                    type="button"
-                    class="icon-btn"
-                    title="Move up"
-                    ?disabled=${i === 0}
-                    @click=${() => this.moveColumn(i, -1)}
-                  >
-                    <span class="mi sm">arrow_upward</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="icon-btn"
-                    title="Move down"
-                    ?disabled=${i === this.columns.length - 1}
-                    @click=${() => this.moveColumn(i, 1)}
-                  >
-                    <span class="mi sm">arrow_downward</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="icon-btn row-del"
-                    title="Remove column"
-                    @click=${() => this.removeColumn(i)}
-                  >
-                    <span class="mi sm">delete</span>
-                  </button>
-                </div>
-              `;
-              },
-            )}
-          </div>
+                    <span class="flag">
+                      <input
+                        type="checkbox"
+                        title="Unique"
+                        .checked=${!!c.unique}
+                        @change=${(e: Event) =>
+                          this.patchColumn(i, { unique: (e.target as HTMLInputElement).checked })}
+                      />
+                    </span>
+                    <span class="flag">
+                      <input
+                        type="checkbox"
+                        title="Not null"
+                        .checked=${!!c.notnull}
+                        @change=${(e: Event) =>
+                          this.patchColumn(i, { notnull: (e.target as HTMLInputElement).checked })}
+                      />
+                    </span>
+                    <span class="flag">
+                      <input
+                        type="checkbox"
+                        title="Visible — uncheck to hide the column without losing its data"
+                        .checked=${!c.hidden}
+                        @change=${(e: Event) =>
+                          this.patchColumn(i, { hidden: !(e.target as HTMLInputElement).checked })}
+                      />
+                    </span>
+                    <button
+                      type="button"
+                      class="icon-btn"
+                      title="Move up"
+                      ?disabled=${i === 0}
+                      @click=${() => this.moveColumn(i, -1)}
+                    >
+                      <span class="mi sm">arrow_upward</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="icon-btn"
+                      title="Move down"
+                      ?disabled=${i === this.columns.length - 1}
+                      @click=${() => this.moveColumn(i, 1)}
+                    >
+                      <span class="mi sm">arrow_downward</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="icon-btn row-del"
+                      title="Remove column"
+                      @click=${() => this.removeColumn(i)}
+                    >
+                      <span class="mi sm">delete</span>
+                    </button>
+                  </div>
+                `;
+              })}
+            </div>
 
-          <button type="button" class="add" @click=${this.addColumn}>+ Add column</button>
+            <button type="button" class="add" @click=${this.addColumn}>+ Add column</button>
 
-          ${this.renameDetected()
-            ? html`<div class="hint">
-                Renamed fields will appear empty for existing rows — the row data
-                isn't migrated automatically.
-              </div>`
-            : ''}
-          ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''}
-          ${this.mode === 'edit' ? this.renderPreview() : ''}
+            ${this.renameDetected()
+              ? html`<div class="hint">
+                  Renamed fields will appear empty for existing rows — the row data isn't migrated
+                  automatically.
+                </div>`
+              : ''}
+            ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''}
+            ${this.mode === 'edit' ? this.renderPreview() : ''}
           </div>
         </form>
       </dialog>
