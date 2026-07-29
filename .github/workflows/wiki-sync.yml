@@ -1,0 +1,67 @@
+name: wiki-sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/help/**'
+      - 'scripts/sync-wiki.mjs'
+      - '.github/workflows/wiki-sync.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Build wiki pages from docs/help/
+        run: node scripts/sync-wiki.mjs
+
+      - name: Push to the wiki repo
+        env:
+          WIKI_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git
+        run: |
+          set -e
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Clone the existing wiki so unrelated pages/history survive. On the
+          # very first run the wiki repo may not exist yet (no page has ever
+          # been saved) — fall back to a fresh repo on the branch GitHub wikis
+          # use, `master`.
+          if git clone "$WIKI_REMOTE" wiki-repo; then
+            echo "cloned existing wiki repo"
+          else
+            echo "wiki repo not found yet — initializing a fresh one"
+            mkdir wiki-repo
+            cd wiki-repo
+            git init -q -b master
+            git remote add origin "$WIKI_REMOTE"
+            cd ..
+          fi
+
+          # Remove everything we manage so a deleted docs/help page (or a
+          # renamed one, via toWikiName) doesn't leave a stale page behind.
+          # Anything a human added by hand outside these paths is untouched.
+          find wiki-repo -maxdepth 1 -name '*.md' -delete
+          rm -rf wiki-repo/screenshots
+
+          cp .wiki-build/*.md wiki-repo/
+          cp -r .wiki-build/screenshots wiki-repo/screenshots
+
+          cd wiki-repo
+          git add -A
+          if git diff --cached --quiet; then
+            echo "no changes to publish"
+            exit 0
+          fi
+          git commit -q -m "Sync docs/help -> wiki (${{ github.sha }})"
+          git push origin HEAD:master
