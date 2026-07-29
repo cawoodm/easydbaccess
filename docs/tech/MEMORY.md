@@ -1,11 +1,14 @@
 # Row Memory: What's Loaded, and What Isn't
 
-How much of a table's data actually sits in browser memory at once. Short
-answer: **all of it, for every open table** — there is no windowed/paged
-loading on `main` today. See [`DATA-TABLE.md`](./DATA-TABLE.md) for the
-rendering side of this (DOM row virtualization, which is a separate concern
-from the topic here) and [`STORAGE.md`](./STORAGE.md) for row-source
-routing.
+How much of a table's data actually sits in browser memory at once?
+
+- Open Tables: Everything
+- Minimized Tables: Nothing
+
+How much of a tables data is rendered as HTML?
+
+- Small tables (<200 rows): Everything
+- Large tables: As required (virtualization)
 
 ## Local (Dexie) tables load in full
 
@@ -61,13 +64,13 @@ about **how many tables are loaded at once**, not how much of one table is:
   [`window-mgr/jspanel-manager.ts`](../../packages/renderer/src/window-mgr/jspanel-manager.ts)
   detaches `<data-table>` entirely when a panel minimizes and mounts a fresh
   one when it's expanded again — so a minimized table holds no rows and no
-  store subscription. A table that *boots* already minimized never mounts a
+  store subscription. A table that _boots_ already minimized never mounts a
   grid, and so never fetches, until the user expands it. See `WINDOWS.md`'s
   "Minimize unmounts the grid" section.
 - **`?safemode` / `?safemode1`** (transient boot flags,
   [`plugin-host/safe-mode.ts`](../../packages/renderer/src/plugin-host/safe-mode.ts))
   skip loading optional/URL plugins for one boot. This helps when a plugin's
-  *code* is what's hanging the tab, but does nothing for the row count of an
+  _code_ is what's hanging the tab, but does nothing for the row count of an
   otherwise-normal table — it's a different failure mode than the one this
   page is about.
 

@@ -6,6 +6,7 @@ packages/electron/frontend/
 *.tsbuildinfo
 .DS_Store
 .vite/
+.vscode/
 .cache/
 coverage/
 test-results/
