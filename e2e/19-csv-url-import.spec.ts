@@ -23,13 +23,13 @@ test('imports a CSV from a URL into a typed table', async ({ page, workspaceId }
   await expect(dlg).toBeVisible();
 
   // The CSV sample is offered in the dropdown.
-  const presetLabels = (await dlg.locator('select').first().locator('option').allTextContents())
+  const presetLabels = (await dlg.getByTestId('import-sample').locator('option').allTextContents())
     .join(' | ')
     .toLowerCase();
   expect(presetLabels).toContain('csv');
 
   await dlg.locator('input[type="text"]').fill('https://ex.example/data.csv');
-  await dlg.locator('select').last().selectOption('csv'); // "Import as: CSV file"
+  await dlg.getByTestId('import-format').selectOption('csv'); // "Import as: CSV file"
   await dlg.getByRole('button', { name: 'Import', exact: true }).click();
 
   const summary = await (async () => {
@@ -75,7 +75,7 @@ async function attemptCsvImport(page: import('@playwright/test').Page, url: stri
   const dlg = page.locator('import-dialog dialog');
   await expect(dlg).toBeVisible();
   await dlg.locator('input[type="text"]').fill(url);
-  await dlg.locator('select').last().selectOption('csv');
+  await dlg.getByTestId('import-format').selectOption('csv');
   await dlg.getByRole('button', { name: 'Import', exact: true }).click();
 }
 
@@ -114,6 +114,85 @@ test('an oversized CSV surfaces the actual size and the limit, not "Load failed"
   await expect(toast).toContainText(/limit/i);
 });
 
+/**
+ * The size ceiling exists because a COPY buffers the body and writes every row
+ * to IndexedDB. Two cases do not fit that reasoning and must NOT be refused on
+ * total size: a capped import (keeps only a prefix) and a Reference (persists
+ * nothing). Both serve a huge Content-Length with a tiny body, so a refusal is
+ * distinguishable from a success.
+ */
+const HUGE_HEADERS = {
+  'access-control-allow-origin': '*',
+  'content-length': String(159525875), // 152 MB, well over the 50 MB ceiling
+};
+
+test('a row limit lifts the size ceiling — an oversized CSV still imports', async ({
+  page,
+  workspaceId,
+}) => {
+  await page.route('https://ex.example/huge-capped.csv', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/plain', headers: HUGE_HEADERS, body: CSV }),
+  );
+
+  await page.getByTitle('Import data from a URL').click();
+  const dlg = page.locator('import-dialog dialog');
+  await expect(dlg).toBeVisible();
+  await dlg.locator('input[type="text"]').fill('https://ex.example/huge-capped.csv');
+  await dlg.getByTestId('import-format').selectOption('csv');
+  await dlg.locator('input[type="number"]').fill('1'); // Limit rows
+  await dlg.getByRole('button', { name: 'Import', exact: true }).click();
+
+  // It imported (capped to 1 row) instead of being refused for its size.
+  await expect
+    .poll(async () =>
+      page.evaluate(async (ws) => {
+        const store = (window as any).__easydb.store;
+        const t = (await store.tables.find()).find(
+          (x: any) => x.workspaceId === ws && x.name === 'huge-capped',
+        );
+        if (!t) return -1;
+        return (await store.rows(t.id).find()).length;
+      }, workspaceId),
+    )
+    .toBe(1);
+  await expect(page.locator('toast-host .toast.error')).toHaveCount(0);
+});
+
+test('Reference mode lifts the size ceiling — an oversized CSV is referenced', async ({
+  page,
+  workspaceId,
+}) => {
+  await page.route('https://ex.example/huge-ref.csv', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/plain', headers: HUGE_HEADERS, body: CSV }),
+  );
+
+  await page.getByTitle('Import data from a URL').click();
+  const dlg = page.locator('import-dialog dialog');
+  await expect(dlg).toBeVisible();
+  await dlg.locator('input[type="text"]').fill('https://ex.example/huge-ref.csv');
+  await dlg.getByTestId('import-format').selectOption('csv');
+  await dlg.locator('input[type="radio"]').last().check(); // Reference, not Copy
+  await dlg.getByRole('button', { name: 'Import', exact: true }).click();
+
+  // A live `url` reference table exists, with columns and no persisted rows.
+  // NOTE the name keeps its extension ("huge-ref.csv"): `createUrlReference`
+  // uses the raw filename, while a Copy strips it ("huge-ref"). That
+  // inconsistency is pre-existing and is matched loosely here rather than
+  // asserted, since Phase C's one naming policy will settle it.
+  await expect
+    .poll(async () =>
+      page.evaluate(async (ws) => {
+        const store = (window as any).__easydb.store;
+        const t = (await store.tables.find()).find(
+          (x: any) => x.workspaceId === ws && String(x.name).startsWith('huge-ref'),
+        );
+        return t ? `${t.source?.type}:${t.columns.length}` : 'missing';
+      }, workspaceId),
+    )
+    .toBe('url:3');
+  await expect(page.locator('toast-host .toast.error')).toHaveCount(0);
+});
+
 test('a network/CORS failure surfaces a reason, not a bare "Load failed"', async ({ page }) => {
   await page.route('https://ex.example/blocked.csv', (route) => route.abort('failed'));
   await attemptCsvImport(page, 'https://ex.example/blocked.csv');
@@ -143,7 +222,7 @@ test('shows the top progress bar when a URL read takes more than 2s', async ({
   const dlg = page.locator('import-dialog dialog');
   await expect(dlg).toBeVisible();
   await dlg.locator('input[type="text"]').fill('https://ex.example/slow.csv');
-  await dlg.locator('select').last().selectOption('csv');
+  await dlg.getByTestId('import-format').selectOption('csv');
   await dlg.getByRole('button', { name: 'Import', exact: true }).click();
 
   // The bar (role=progressbar, rendered only while visible) appears once the

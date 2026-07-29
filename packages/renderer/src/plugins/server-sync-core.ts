@@ -1,5 +1,10 @@
 import type { HostApi, Row, Table } from '@easydb/shared';
+import { cryptoUUID, slugTable } from '../util/ids.js';
 import { parsedToTables } from './json-import.js';
+
+// Re-exported for the callers that used to get these from here. The
+// implementations moved to `util/ids.ts` so the eight copies became one.
+export { cryptoUUID, slugTable };
 
 /**
  * Shared helpers between `server-sync` (manual Push/Pull buttons) and
@@ -89,7 +94,7 @@ export async function replaceWorkspace(
       id: tableId,
       workspaceId: wsId,
       name: t.name,
-      code: slug(t.name),
+      code: slugTable(t.name),
       columns: t.columns,
       view: 'table',
       ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
@@ -108,19 +113,4 @@ export async function replaceWorkspace(
   return imported;
 }
 
-export function slug(s: string): string {
-  return (
-    s
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'table'
-  );
-}
 
-export function cryptoUUID(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  );
-}

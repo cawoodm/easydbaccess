@@ -4,27 +4,39 @@
 // where the user pastes any URL or picks a predefined source from a dropdown
 // (our Northwind sample dump plus a few public Datasette tables), then routes
 // the import to the right engine:
-//   - JSON dump  -> fetch the body and hand it to json-import's importJsonText
-//   - Datasette  -> hand the URL to datasette-source's importDatasetteTable
+//   - a format on the import kernel (csv, json) -> runImport does the rest
+//   - a native .db.json dump -> json-import's restoreWorkspaceDump
+//   - Datasette -> datasette-import's importDatasette (not on the kernel yet)
 //
 // This is the grown-up replacement for the old single-prompt "Load sample data"
 // button: same Northwind default, but now Datasette tables are reachable from
 // the UI too (the datasette-source plugin only registered an unsurfaced URL
 // source and a file-only drop handler, so there was no clickable way in).
 
-import type { ColumnSpec, ColumnType, HostApi, PluginModule, Table } from '@easydb/shared';
+import type {
+  ColumnSpec,
+  ColumnType,
+  HostApi,
+  ImporterSpec,
+  ImportSourceInput,
+  PluginModule,
+  Table,
+} from '@easydb/shared';
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { TopProgress, type ProgressHandle } from '../chrome/top-progress.js';
+import { getContext } from '../app-context.js';
 import { editColumnNames } from '../dialogs/column-names-dialog.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from '../dialogs/dialog-chrome.js';
 import { makeDialogDraggable } from '../dialogs/draggable.js';
-import { importCsvText, parseCsv, readCsvHead } from './csv-import.js';
+import { parseCsv } from './csv-import.js';
 import { fetchDatabaseNames, fetchTablesForDb, parseDatasetteUrl } from './datasette-client.js';
-import { importDatasette } from './datasette-source.js';
-import { slug } from './server-sync-core.js';
-import { importJsonText, parsedToTables } from './json-import.js';
-import { readResponseText, toCorsFriendlyUrl } from './read-url.js';
+import { importDatasette } from './datasette-import.js';
+import { cryptoUUID, slugTable } from '../util/ids.js';
+import { isWorkspaceDump, restoreWorkspaceDump } from './json-import.js';
+import { fetchImportTextWithBar, filenameFromUrl } from '../import/fetch-source.js';
+import { runImport, type RunImportResult } from '../import/import-kernel.js';
+import { refreshFromOrigin } from '../import/refresh.js';
+import type { ImportTarget } from '../import/land-tables.js';
 
 /** How a URL should be imported. `auto` is resolved to a concrete kind on submit. */
 type ImportKind = 'auto' | 'json' | 'csv' | 'datasette';
@@ -96,8 +108,9 @@ export function init(api: HostApi): void {
     onClick: () => openImport(api),
   });
 
-  // Refresh a snapshot table imported from a CSV/JSON URL by re-fetching it.
-  // (Datasette-origin tables get their own refresh from datasette-source.)
+  // Refresh a snapshot a kernel importer made, by re-reading its origin URL.
+  // Datasette snapshots keep their own Refresh in `datasette-import`, because
+  // that one also drives a progress bar and a resumable paged read.
   api.ui.registerTableButton({
     id: 'import-data:refresh',
     label: 'Refresh',
@@ -109,194 +122,131 @@ export function init(api: HostApi): void {
 }
 
 /**
- * Hard ceiling on a URL import buffered into the browser. A CSV/JSON body is
- * read fully into a string and parsed in memory (then written row-by-row to
- * IndexedDB), so a huge file OOMs or has the browser abort the transfer with an
- * opaque "Load failed" TypeError. We refuse up front with the real size so the
- * user gets an actionable reason instead of a bare failure.
+ * Reload a snapshot table from the URL it was imported from, through the
+ * importer that made it.
+ *
+ * This used to wipe every row and re-parse, never re-discovering columns — so a
+ * source that had grown a column never showed it, and a column the user had
+ * added locally lost its values. `refreshFromOrigin` gives every kernel importer
+ * the behaviour Datasette already had: reconcile the columns against the user's
+ * arrangement, honour `deletedColumns`, and merge rows by primary key when the
+ * origin recorded them.
  */
-const MAX_IMPORT_BYTES = 50 * 1024 * 1024; // 50 MB
-
-/** URL host for messages, falling back to the raw URL if it doesn't parse. */
-function urlHost(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}
-
-/** First ~300 chars of a response body, whitespace-collapsed, for error context. */
-async function bodySnippet(res: Response): Promise<string> {
-  try {
-    const t = await res.text();
-    return t.replace(/\s+/g, ' ').trim().slice(0, 300);
-  } catch {
-    return '';
-  }
-}
-
-/**
- * Fetch a URL for import and return its text, ALWAYS throwing an informative
- * Error on failure — never a bare "Load failed"/"Failed to fetch". Distinguishes:
- *   - fetch rejection (no response: unreachable / CORS-blocked / transfer aborted),
- *   - HTTP error status (surfaces the code + a response-body snippet),
- *   - oversized payload (surfaces the actual Content-Length vs the limit),
- *   - body-read failure (huge/truncated response).
- */
-interface ImportProgress {
-  /** Fired once if the whole read (connect + body) exceeds `slowMs`. */
-  onSlow?: () => void;
-  /** Fired with a 0..1 fraction while the body streams (when the size is known). */
-  onProgress?: (fraction: number) => void;
-  /** Slow threshold before `onSlow` fires. Default 2000ms. */
-  slowMs?: number;
-}
-
-async function fetchImportText(
-  api: HostApi,
-  rawUrl: string,
-  progress: ImportProgress = {},
-): Promise<string> {
-  // Rewrite known non-CORS web URLs (e.g. a github.com blob/raw link) to their
-  // CORS-enabled host so the browser can fetch them directly. No-op otherwise.
-  const url = toCorsFriendlyUrl(rawUrl);
-  // Slow-read timer spans the whole operation (a server slow to respond, or a
-  // large body slow to transfer) so the bar can be revealed only past ~2s.
-  const slowMs = progress.slowMs ?? 2000;
-  let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
-    timer = undefined;
-    progress.onSlow?.();
-  }, slowMs);
-  const stopTimer = (): void => {
-    if (timer !== undefined) {
-      clearTimeout(timer);
-      timer = undefined;
-    }
-  };
-
-  try {
-    let res: Response;
-    try {
-      res = await api.backend.fetch(url);
-    } catch (err) {
-      throw new Error(
-        `Could not reach ${urlHost(url)} — no response. The server may be down, ` +
-          `blocking cross-origin (CORS) requests, or the transfer may have failed ` +
-          `(e.g. a very large file). [${(err as Error).message}]`,
-      );
-    }
-    if (!res.ok) {
-      const snippet = await bodySnippet(res);
-      throw new Error(
-        `HTTP ${res.status} ${res.statusText || ''}`.trim() + (snippet ? ` — ${snippet}` : ''),
-      );
-    }
-    const len = Number(res.headers.get('content-length'));
-    if (Number.isFinite(len) && len > MAX_IMPORT_BYTES) {
-      throw new Error(
-        `Response is ${(len / (1024 * 1024)).toFixed(1)} MB, over the ` +
-          `${MAX_IMPORT_BYTES / (1024 * 1024)} MB browser import limit. Import a smaller ` +
-          `extract, or use a server/Datasette connection for large datasets.`,
-      );
-    }
-    try {
-      return await readResponseText(res, progress.onProgress);
-    } catch (err) {
-      throw new Error(
-        `Failed reading the response body from ${urlHost(url)}: ${(err as Error).message}`,
-      );
-    }
-  } finally {
-    stopTimer();
-  }
-}
-
-/**
- * {@link fetchImportText} while showing the top progress bar — but only if the
- * read is slow (exceeds ~2s). The bar is determinate when the response
- * advertises a `Content-Length`, indeterminate otherwise, so quick imports
- * never flash it.
- */
-async function fetchImportTextWithBar(api: HostApi, url: string, label: string): Promise<string> {
-  // Held on an object so the closure assignment isn't narrowed away in finally.
-  const ref: { handle: ProgressHandle | null } = { handle: null };
-  try {
-    return await fetchImportText(api, url, {
-      onSlow: () => {
-        ref.handle = TopProgress.begin(label);
-      },
-      onProgress: (f) => ref.handle?.fraction(f),
-    });
-  } finally {
-    ref.handle?.done();
-  }
-}
-
-/** Re-fetch a CSV/JSON snapshot table from its origin URL and replace its rows. */
 async function refreshImported(api: HostApi, tableId: string): Promise<void> {
   const t = await api.store.tables.findOne(tableId);
-  const origin = t?.origin;
-  if (!origin?.url) return;
+  if (!t?.origin?.url) return;
   try {
-    const text = await fetchImportTextWithBar(api, origin.url, `Reading ${t?.name ?? 'data'}…`);
-
-    let rows: Array<Record<string, unknown>>;
-    if (origin.type === 'csv') {
-      rows = parseCsv(text).rows;
-    } else {
-      const parsed = parsedToTables(JSON.parse(text), t!.name);
-      const match =
-        parsed.find((x) => x.name === t!.name) ?? (parsed.length === 1 ? parsed[0] : undefined);
-      if (!match) throw new Error(`"${t!.name}" is no longer in the dump at ${origin.url}`);
-      rows = match.rows;
+    const spec = await findKernelImporter(t.origin.type as ResolvedKind);
+    if (!spec) {
+      throw new Error(`No importer is installed that can read a "${t.origin.type}" source.`);
     }
-
-    const coll = api.store.rows(tableId);
-    const old = await coll.find();
-    await coll.bulkRemove(old.map((r) => r.id));
-    await coll.bulkInsert(
-      rows.map((data) => ({ id: cryptoUUID(), tableId, data, updatedAt: Date.now() })),
+    const res = await refreshFromOrigin(api, t, spec);
+    const notes: string[] = [];
+    if (res.newFields.length > 0) {
+      notes.push(`${res.newFields.length} new column${res.newFields.length === 1 ? '' : 's'}`);
+    }
+    if (!res.merged && res.rowCount > 0) notes.push('rows replaced (no primary key to match on)');
+    api.ui.dialogs.toast(
+      `Refreshed "${t.name}" (${res.rowCount.toLocaleString()} rows)` +
+        `${notes.length ? ` — ${notes.join(', ')}` : ''}.`,
+      { kind: res.newFields.length > 0 ? 'warning' : 'success', title: 'Refresh' },
     );
-    api.ui.dialogs.toast(`Refreshed "${t!.name}" (${rows.length} rows).`, {
-      kind: 'success',
-      title: 'Refresh',
-    });
   } catch (err) {
-    api.ui.dialogs.toast(`Couldn't refresh "${t?.name ?? tableId}": ${(err as Error).message}`, {
+    api.ui.dialogs.toast(`Couldn't refresh "${t.name}": ${(err as Error).message}`, {
       kind: 'error',
       title: 'Refresh',
     });
   }
 }
 
-function cryptoUUID(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  );
-}
-
-async function openImport(api: HostApi): Promise<void> {
+async function openImport(api: HostApi, presetKind: ImportKind = 'auto'): Promise<void> {
   const dlg = ImportDialog.instance ?? mountDialog();
   const result = await dlg.open({
+    presetKind,
     // Lets the dialog list an instance's databases so the user can pick one
     // before importing (a root URL otherwise defers the choice to a modal).
     async listDatabases(url) {
       const ref = parseDatasetteUrl(url);
       return fetchDatabaseNames((u) => api.backend.fetch(u), ref.base);
     },
+    // Destinations for "Append to" / "Replace the rows of".
+    async listTables() {
+      const ws = api.workspaceId();
+      return (await api.store.tables.find())
+        .filter((t) => t.workspaceId === ws && !t.source)
+        .map((t) => ({ id: t.id, name: t.name }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    },
   });
   if (!result) return; // cancelled
 
-  const { url, file, kind, dbChosen, editColumns, maxRows, mode } = result;
+  const { url, file, kind, dbChosen, editColumns, maxRows, mode, panel, target } = result;
   const label = file?.name ?? url;
+  // The one common hook, handed to whichever importer runs. Each calls it with
+  // the schema it discovered; a multi-table source calls it once per table.
+  const editHook = editColumns
+    ? (columns: ColumnSpec[], subject?: string) => editColumnNames(columns, subject)
+    : undefined;
+  // The CSV options panel's separator. Only csv reads it.
+  const separator = typeof panel.separator === 'string' ? panel.separator : undefined;
   try {
-    // Reference mode: create a live, read-only table whose rows are fetched from
-    // the source on demand and never persisted or synced — all sources go
-    // through the generic `url` provider, no connect dialog. A Datasette table
-    // is just its `.json?_shape=array` endpoint (an array of row objects), so we
-    // save that URL and treat it exactly like any other JSON reference.
+    // Formats that have moved onto the kernel take the WHOLE path through it —
+    // reference, upload and URL alike. The kernel owns the listing, the table
+    // picker, the row cap, the naming, the collision policy and the write, so
+    // there is nothing left here to branch on. The remaining `if/else` below is
+    // the not-yet-migrated formats; it shrinks to nothing as the phases land.
+    const spec = await findKernelImporter(kind);
+    if (spec) {
+      // A `.db.json` is not a table, it is a whole workspace — geometry, views,
+      // filters and all. Importing its tables would silently throw that away,
+      // so the dump is offered to the restore path instead. Sniffing the body
+      // costs one read, which is then handed to the kernel as `text` so nothing
+      // is fetched twice.
+      const sniffed = kind === 'json' ? await sniffJson(api, url, file, maxRows, mode) : null;
+      if (sniffed?.isDump) {
+        const restore = await api.ui.dialogs.confirm(
+          `"${label}" is a workspace dump, not a plain table. Restore it — tables, window ` +
+            `layout, views and filters? Choose Cancel to import only its tables as data.`,
+          'Restore workspace',
+        );
+        if (restore) {
+          await restoreWorkspaceDump(api, sniffed.text, label, {
+            maxRows,
+            editColumns: editHook,
+            ...(file ? {} : { originUrl: url }),
+          });
+          return;
+        }
+      }
+
+      // The body may already be read, in which case the input carries `text`
+      // and the source name has to travel with it — `label` is the whole URL,
+      // which is not a table name.
+      const sourceName = file ? file.name : filenameFromUrl(url);
+      const input: ImportSourceInput = sniffed
+        ? { kind: 'text', text: sniffed.text, name: sourceName }
+        : file
+          ? { kind: 'file', file }
+          : { kind: 'url', url };
+      const res = await runImport(api, spec, input, {
+        mode,
+        target,
+        maxRows,
+        panel,
+        // The body was already read, so the input no longer names its source.
+        ...(sniffed && !file ? { origin: { type: spec.id, url } } : {}),
+        ...(editHook ? { editColumns: (cols: ColumnSpec[]) => editHook(cols) } : {}),
+      });
+      if (!spec.ownToasts) reportImport(api, res, label);
+      return;
+    }
+
+    // --- Not yet on the kernel: datasette (Phase D). -------------------------
+
+    // Reference mode: a live, read-only table whose rows are fetched from the
+    // source on demand and never persisted or synced, through the generic `url`
+    // provider. A Datasette table is just its `.json` endpoint (an array of row
+    // objects), so we save that URL and treat it like any other JSON reference.
     if (mode === 'reference' && !file) {
       if (kind === 'datasette') {
         await referenceDatasette(api, url);
@@ -306,61 +256,88 @@ async function openImport(api: HostApi): Promise<void> {
       return;
     }
 
-    // Uploaded file: read its bytes locally (no network, no origin URL).
-    if (file) {
-      if (kind === 'csv') {
-        // With a row cap, stream only the first `maxRows` rows instead of
-        // loading the whole file — a 150 MB CSV read whole + parsed whole (all
-        // before the cap applies) can silently kill a memory-limited tab, so a
-        // capped import of a big file would do nothing.
-        const text = maxRows != null ? await readCsvHead(file, maxRows) : await file.text();
-        await importCsvText(api, text, file.name, {
-          editColumns: editColumns ? editColumnNames : undefined,
-          maxRows,
-        });
-      } else {
-        const text = await file.text();
-        await importJsonText(api, text, file.name, { maxRows });
-      }
-      api.ui.dialogs.toast(`Imported ${file.name}.`, { kind: 'success', title: 'Import' });
-      return;
-    }
-
-    if (kind === 'datasette') {
-      // importDatasette emits its own toasts. A table URL imports directly; a
-      // database/instance URL opens the table picker before importing — unless
-      // the user already picked a database here, in which case we import that
-      // database's tables directly (skipTablePicker).
-      await importDatasette(api, url, { skipTablePicker: dbChosen });
-    } else if (kind === 'csv') {
-      // Reads show a top progress bar only if they take more than ~2s.
-      const text = await fetchImportTextWithBar(api, url, `Reading ${filenameFromUrl(url)}…`);
-      // When "Edit columns" was checked, review/rename columns before creating
-      // the table (importCsvText returns without inserting if the user cancels).
-      await importCsvText(api, text, filenameFromUrl(url), {
-        editColumns: editColumns ? editColumnNames : undefined,
-        maxRows,
-        // Remember where it came from so it can be refreshed / reloaded later.
-        origin: { type: 'csv', url },
-      });
-      api.ui.dialogs.toast(`Imported ${filenameFromUrl(url)}.`, {
-        kind: 'success',
-        title: 'Import',
-      });
-    } else {
-      const text = await fetchImportTextWithBar(api, url, `Reading ${filenameFromUrl(url)}…`);
-      await importJsonText(api, text, filenameFromUrl(url), { originUrl: url, maxRows });
-      api.ui.dialogs.toast(`Imported ${filenameFromUrl(url)}.`, {
-        kind: 'success',
-        title: 'Import',
-      });
-    }
+    // importDatasette emits its own toasts. A table URL imports directly; a
+    // database/instance URL opens the table picker before importing — unless
+    // the user already picked a database here, in which case we import that
+    // database's tables directly (skipTablePicker).
+    await importDatasette(api, url, {
+      skipTablePicker: dbChosen,
+      maxRows,
+      editColumns: editHook,
+    });
   } catch (err) {
     api.ui.dialogs.toast(`Could not import ${label}: ${(err as Error).message}`, {
       kind: 'error',
       title: 'Import',
     });
   }
+}
+
+/**
+ * Read a JSON body once and say whether it is a workspace dump. Returns null
+ * when there is nothing to read. The text is passed back so the caller can
+ * hand it straight to whichever path wins, instead of fetching it again.
+ */
+async function sniffJson(
+  api: HostApi,
+  url: string,
+  file: File | undefined,
+  maxRows: number | undefined,
+  mode: 'copy' | 'reference',
+): Promise<{ text: string; isDump: boolean } | null> {
+  // A Reference never reads the whole body to write it, so leave that path to
+  // the kernel — and a dump cannot be referenced anyway.
+  if (mode === 'reference') return null;
+  const text = file
+    ? await file.text()
+    : await fetchImportTextWithBar(
+        api,
+        url,
+        `Reading ${filenameFromUrl(url)}…`,
+        maxRows != null ? { maxBytes: null } : {},
+      );
+  try {
+    return { text, isDump: isWorkspaceDump(JSON.parse(text)) };
+  } catch {
+    // Not valid JSON. Let the importer report it with its own message.
+    return { text, isDump: false };
+  }
+}
+
+/**
+ * The registered importer for `kind`, but only if it runs on the kernel. Any
+ * other format keeps its own route below until its phase lands.
+ */
+async function findKernelImporter(kind: ResolvedKind): Promise<ImporterSpec | undefined> {
+  const { registries } = await getContext();
+  return registries.importers.find((s) => s.id === kind && s.supports?.kernel === true);
+}
+
+/** One toast for a kernel import, however many tables it produced. */
+function reportImport(api: HostApi, res: RunImportResult, label: string): void {
+  if (res.cancelled && res.landed.length === 0) return;
+
+  const rows = res.landed.reduce((n, l) => n + l.rowCount, 0);
+  const what =
+    res.landed.length === 1
+      ? `"${res.landed[0]!.tableName}"`
+      : `${res.landed.length} tables from ${label}`;
+
+  if (res.landed.length > 0) {
+    const suffix = res.failed.length > 0 ? ` — ${res.failed.length} failed` : '';
+    api.ui.dialogs.toast(`Imported ${what} (${rows.toLocaleString()} rows)${suffix}.`, {
+      kind: res.failed.length > 0 ? 'warning' : 'success',
+      title: 'Import',
+    });
+    return;
+  }
+
+  // Nothing landed. Surface the reason rather than a bare "0 tables".
+  const why = res.failed.map((f) => `${f.name}: ${f.error}`).join('; ');
+  api.ui.dialogs.toast(`Could not import ${label}${why ? ` — ${why}` : ''}.`, {
+    kind: 'error',
+    title: 'Import',
+  });
 }
 
 /** Pull the row records out of a parsed JSON body: a top-level array of objects,
@@ -466,7 +443,10 @@ async function createUrlReference(
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('No active workspace.');
   const baseName = opts.nameHint ?? filenameFromUrl(url);
-  const text = await fetchImportTextWithBar(api, url, `Reading ${baseName}…`);
+  // No size ceiling for a reference: it persists nothing, so the "a huge copy
+  // OOMs the tab and floods IndexedDB" reasoning behind the limit does not
+  // apply. We read the body once here only to infer the columns.
+  const text = await fetchImportTextWithBar(api, url, `Reading ${baseName}…`, { maxBytes: null });
   const columns = format === 'csv' ? parseCsv(text).columns : inferJsonColumns(text);
   if (columns.length === 0) throw new Error('No columns found in the referenced data.');
 
@@ -483,7 +463,7 @@ async function createUrlReference(
     id: cryptoUUID(),
     workspaceId,
     name,
-    code: slug(name),
+    code: slugTable(name),
     columns,
     view: 'table',
     // A live source: the routed data store serves rows via the `url` provider,
@@ -546,16 +526,6 @@ function isDatasetteInstanceRoot(url: string, kind: ResolvedKind): boolean {
   }
 }
 
-function filenameFromUrl(url: string): string {
-  try {
-    const path = new URL(url).pathname;
-    const last = path.split('/').filter(Boolean).pop();
-    return last && last.length > 0 ? last : 'sample.db.json';
-  } catch {
-    return 'sample.db.json';
-  }
-}
-
 interface ImportChoice {
   /** Source URL. Empty when importing an uploaded {@link ImportChoice.file}. */
   url: string;
@@ -576,10 +546,22 @@ interface ImportChoice {
    * skips the table checklist and imports that database's tables directly.
    */
   dbChosen?: boolean;
-  /** True when "Edit columns" was checked — open the column editor pre-import (CSV). */
+  /** True when "Edit columns" was checked — open the column editor pre-import. */
   editColumns?: boolean;
   /** Cap on the number of rows imported (the "Limit rows" option); undefined ⇒ all. */
   maxRows?: number | undefined;
+  /**
+   * Whatever the chosen importer's own options panel reported, e.g. the CSV
+   * separator. Opaque to the dialog — it only reads the element's `value` and
+   * hands it on.
+   */
+  panel: Record<string, unknown>;
+  /**
+   * Where the rows go, chosen BEFORE the read starts. Only meaningful for an
+   * importer that declares `supports.target`; the others still run their own
+   * collision prompt and this stays `{ kind: 'new' }`.
+   */
+  target: ImportTarget;
 }
 
 /** Resolve a CSV/JSON kind from a filename (uploads have no URL to inspect). */
@@ -654,6 +636,29 @@ export class ImportDialog extends LitElement {
       .hint.error {
         color: #b91c1c;
       }
+      /*
+       * The dialog is two blocks: the options EVERY importer has (source,
+       * mode, edit-columns, row limit), then the options only the chosen
+       * importer has. Keeping them visually separate is the whole point —
+       * see .claude/plans/2026-07-28-importer-architecture.md.
+       */
+      fieldset.block {
+        border: 1px solid #e5e7eb;
+        border-radius: 0.35rem;
+        padding: 0.85rem 0.9rem 0.9rem;
+        margin: 0;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.85rem;
+      }
+      fieldset.block > legend {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #6b7280;
+        padding: 0 0.35rem;
+      }
       .db-row {
         align-items: stretch;
       }
@@ -678,10 +683,31 @@ export class ImportDialog extends LitElement {
   @state() private file: File | null = null;
   @state() private maxRowsInput = '';
   @state() private mode: 'copy' | 'reference' = 'copy';
+  @state() private targetKind: 'new' | 'append' | 'overwrite' = 'new';
+  @state() private targetTableId = '';
+  /** Tables in the workspace, for the append/overwrite picker. */
+  @state() private tables: Array<{ id: string; name: string }> = [];
 
   private dialogEl: HTMLDialogElement | null = null;
   private resolveFn: ((v: ImportChoice | null) => void) | null = null;
   private listDatabases: ((url: string) => Promise<string[]>) | null = null;
+
+  /**
+   * True when the chosen importer takes its destination from this dialog. Only
+   * then is the Target control shown — an importer still running its own
+   * collision prompt would ignore whatever the user picked here.
+   */
+  private get supportsTarget(): boolean {
+    return this.formats.find((f) => f.id === this.resolvedKind)?.kernel === true;
+  }
+
+  /** The destination, as the kernel wants it. Reference always makes a new table. */
+  private get target(): ImportTarget {
+    if (this.mode === 'reference' || this.targetKind === 'new' || !this.targetTableId) {
+      return { kind: 'new' };
+    }
+    return { kind: this.targetKind, tableId: this.targetTableId };
+  }
 
   /**
    * The concrete kind, resolving `auto` from the uploaded file's name (if any)
@@ -743,22 +769,131 @@ export class ImportDialog extends LitElement {
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
   }
 
+  /**
+   * Mount the active importer's own options element into the plugin block.
+   *
+   * Done imperatively rather than with a Lit template because the tag name is
+   * a runtime string from the registry, and because we need the element itself
+   * to read its `value` on submit. The element is defined by its own plugin
+   * (csv-import loads `<csv-import-options>` from `init`), so the dialog stays
+   * free of plugin imports — which is the point of the panel contract.
+   */
+  override updated(): void {
+    const host = this.shadowRoot?.querySelector('.panel-slot') as HTMLElement | null;
+    if (!host) {
+      // The whole block went away (a format with no panel). Forget what was
+      // mounted, so switching back to a panelled format mounts a fresh one.
+      this.panelEl = null;
+      this.mountedPanel = '';
+      return;
+    }
+    const tag = this.activePanelTag;
+    const want = tag ? `${tag}#${this.panelGeneration}` : '';
+    if (want === this.mountedPanel) return;
+    host.replaceChildren();
+    this.panelEl = null;
+    this.mountedPanel = want;
+    if (!tag) return;
+    const el = document.createElement(tag);
+    // A panel reports its own edits; re-render so anything keyed off its value
+    // (a hint, a dependent field) stays in step.
+    el.addEventListener('change', () => this.requestUpdate());
+    host.appendChild(el);
+    this.panelEl = el;
+  }
+
+  /** The `ImporterSpec.panel` tag for the resolved format, if it declares one. */
+  private get activePanelTag(): string | undefined {
+    return this.formats.find((f) => f.id === this.resolvedKind)?.panel;
+  }
+
+  /** Human label of the resolved format, for the plugin block's legend. */
+  private get activeLabel(): string {
+    return this.formats.find((f) => f.id === this.resolvedKind)?.label ?? this.resolvedKind;
+  }
+
+  /** Values the active panel reports, merged into the import as `ctx.panel`. */
+  private panelValue(): Record<string, unknown> {
+    const v = (this.panelEl as { value?: unknown } | null)?.value;
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+  }
+
+  private panelEl: HTMLElement | null = null;
+  private mountedPanel = '';
+  /** Bumped on each open so a re-opened dialog gets a FRESH panel, not the last one's values. */
+  private panelGeneration = 0;
+
+  /**
+   * The formats offered by "Import as", built from the importer REGISTRY at
+   * open time — so a new importer plugin appears here with no edit to this
+   * file. `id` is the option value, which is also the dialog's `kind`, so a
+   * registered `ImporterSpec.id` must match a kind the dispatcher understands
+   * until the kernel takes over the dispatch in Phase C.
+   *
+   * Staging note: `datasette-source` declares `meta.type: 'source'` and
+   * registers no `ImporterSpec`, so its entry is appended by hand. Phase D
+   * splits it into `datasette-import` + `datasette-connect`, after which this
+   * fallback goes and the list is purely the registry.
+   */
+  @state() private formats: Array<{
+    id: string;
+    label: string;
+    panel?: string | undefined;
+    /** The importer runs on the kernel, so the dialog owns its destination. */
+    kernel?: boolean | undefined;
+  }> = [];
+
+  private async loadFormats(): Promise<void> {
+    const { registries } = await getContext();
+    const registered = [...registries.importers]
+      .sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER))
+      .map((s) => ({ id: s.id, label: s.label, panel: s.panel, kernel: s.supports?.kernel }));
+    const withDatasette = registered.some((f) => f.id === 'datasette')
+      ? registered
+      : [...registered, { id: 'datasette', label: 'Datasette (table or instance)' }];
+    this.formats = withDatasette;
+
+    // The file input's filter is now the union of what the importers declare,
+    // instead of a hand-maintained string that silently omitted new formats.
+    const exts = new Set<string>(['.txt']);
+    for (const spec of registries.importers) for (const a of spec.accept ?? []) exts.add(a);
+    this.acceptAttr = [...exts].join(',');
+  }
+
+  @state() private acceptAttr = '.txt';
+
   /** Open the dialog. Resolves with the chosen URL + kind, or null on cancel. */
   open(opts?: {
     listDatabases?: (url: string) => Promise<string[]>;
+    /** Workspace tables offered as append/overwrite destinations. */
+    listTables?: () => Promise<Array<{ id: string; name: string }>>;
+    /** Preselect the format, e.g. when the Import menu already chose one. */
+    presetKind?: ImportKind | undefined;
   }): Promise<ImportChoice | null> {
+    this.targetKind = 'new';
+    this.targetTableId = '';
+    this.tables = [];
+    void opts?.listTables?.().then((t) => {
+      this.tables = t;
+    });
     this.url = '';
-    this.kind = 'auto';
+    this.kind = opts?.presetKind ?? 'auto';
     this.presetIdx = -1;
     this.editColumns = false;
     this.file = null;
     this.maxRowsInput = '';
     this.mode = 'copy';
+    this.panelGeneration += 1;
     this.resetDbList();
     this.listDatabases = opts?.listDatabases ?? null;
+    // Re-read the registry on every open so a plugin installed since last time
+    // (the Plugin Manager hot-loads) shows up without a reload. The modal must
+    // not open until the format options have rendered — a caller that selects a
+    // format the instant the dialog appears would otherwise race an empty list.
+    const formatsReady = this.loadFormats();
     return new Promise<ImportChoice | null>((resolve) => {
       this.resolveFn = resolve;
-      void this.updateComplete.then(() => this.dialogEl?.showModal());
+      void formatsReady.then(() => this.updateComplete).then(() => this.dialogEl?.showModal());
     });
   }
 
@@ -793,15 +928,18 @@ export class ImportDialog extends LitElement {
     if (!url && !this.file) return;
     const kind = this.resolvedKind;
     const maxRows = this.maxRows;
-    // "Edit columns" only applies to CSV (single-table, columns known up front).
-    const editColumns = kind === 'csv' && this.editColumns;
+    // "Edit columns" is a common option — every importer opens the editor with
+    // whatever schema it discovered. A Reference has no local schema to edit.
+    const editColumns = this.editColumns && this.mode === 'copy';
+    const panel = this.panelValue();
+    const target = this.supportsTarget ? this.target : ({ kind: 'new' } as ImportTarget);
 
     // A file can't be a live reference (nothing to re-fetch), so force copy.
     const mode: 'copy' | 'reference' = this.file ? 'copy' : this.mode;
 
     // Uploaded file: no URL/database picker applies — import its bytes directly.
     if (this.file) {
-      this.finish({ url: '', file: this.file, kind, editColumns, maxRows, mode });
+      this.finish({ url: '', file: this.file, kind, editColumns, maxRows, mode, panel, target });
       return;
     }
 
@@ -813,7 +951,7 @@ export class ImportDialog extends LitElement {
     const finalUrl = dbChosen
       ? `${url.replace(/\/+$/, '')}/${encodeURIComponent(this.selectedDb)}`
       : url;
-    this.finish({ url: finalUrl, kind, dbChosen, editColumns, maxRows, mode });
+    this.finish({ url: finalUrl, kind, dbChosen, editColumns, maxRows, mode, panel, target });
   };
 
   private onFileChange(e: Event): void {
@@ -875,6 +1013,93 @@ export class ImportDialog extends LitElement {
     `;
   }
 
+  /**
+   * Where the rows land, chosen up front. This is the control that replaces the
+   * "a table named X already exists — Append / Overwrite / Create new" modal
+   * that used to interrupt an import halfway through. It is only shown for an
+   * importer that declares `supports.target`; the rest still prompt.
+   *
+   * A Reference always creates a new table, so the control is hidden then.
+   */
+  private renderTarget() {
+    if (!this.supportsTarget || this.mode === 'reference') return nothing;
+    const needsTable = this.targetKind !== 'new';
+    return html`
+      <label>
+        Import into
+        <div class="row db-row">
+          <select
+            data-testid="import-target"
+            .value=${this.targetKind}
+            @change=${(e: Event) => {
+              this.targetKind = (e.target as HTMLSelectElement).value as typeof this.targetKind;
+              // Default to the first table so "Append" is never a silent no-op.
+              if (this.targetKind !== 'new' && !this.targetTableId) {
+                this.targetTableId = this.tables[0]?.id ?? '';
+              }
+            }}
+          >
+            <option value="new" ?selected=${this.targetKind === 'new'}>A new table</option>
+            <option value="append" ?selected=${this.targetKind === 'append'}>
+              Append to an existing table
+            </option>
+            <option value="overwrite" ?selected=${this.targetKind === 'overwrite'}>
+              Replace the rows of an existing table
+            </option>
+          </select>
+          ${needsTable
+            ? html`<select
+                data-testid="import-target-table"
+                .value=${this.targetTableId}
+                @change=${(e: Event) => {
+                  this.targetTableId = (e.target as HTMLSelectElement).value;
+                }}
+              >
+                ${this.tables.length === 0
+                  ? html`<option value="">— no tables yet —</option>`
+                  : this.tables.map(
+                      (t) =>
+                        html`<option value=${t.id} ?selected=${t.id === this.targetTableId}>
+                          ${t.name}
+                        </option>`,
+                    )}
+              </select>`
+            : nothing}
+        </div>
+      </label>
+      ${needsTable
+        ? html`<p class="hint">
+            The table keeps its own columns. Values map onto them the way the format requires — a
+            CSV by column position, so its header names need not match.
+          </p>`
+        : nothing}
+    `;
+  }
+
+  /**
+   * The second block: only the chosen importer's own options. The dialog knows
+   * nothing about what is inside it — the importer declares a `panel` tag and
+   * the element goes in the slot (see `updated`).
+   *
+   * The Datasette database picker is the one exception. `datasette-source` is
+   * still a `source` plugin with no `ImporterSpec`, so it has no panel to
+   * declare. Phase D splits it into `datasette-import` + `datasette-connect`,
+   * and the picker moves into that importer's own panel element. Until then it
+   * is rendered here, in the right block, by hand.
+   */
+  private renderPluginBlock() {
+    const dbPicker = this.renderDbPicker();
+    const hasPanel = !!this.activePanelTag;
+    if (!hasPanel && dbPicker === nothing) return nothing;
+    return html`
+      <fieldset class="block">
+        <legend>${this.activeLabel} options</legend>
+        <div class="panel-slot"></div>
+        ${dbPicker}
+      </fieldset>
+    `;
+  }
+
   override render() {
     return html`
       <dialog @cancel=${this.onCancel} @keydown=${ctrlEnterSubmits}>
@@ -891,58 +1116,9 @@ export class ImportDialog extends LitElement {
           </div>
           <div class="dialog-body">
             <label>
-              Sample source
-              <select
-                .value=${String(this.presetIdx)}
-                @change=${(e: Event) => this.onPresetChange(e)}
-              >
-                <option value="-1" ?selected=${this.presetIdx === -1}>— choose a sample —</option>
-                ${PREDEFINED.map(
-                  (p, i) =>
-                    html`<option value=${String(i)} ?selected=${i === this.presetIdx}>
-                      ${p.label}
-                    </option>`,
-                )}
-              </select>
-            </label>
-
-            <label>
-              URL
-              <input
-                type="text"
-                autofocus
-                placeholder="https://… (JSON dump, .csv/.tsv file, or Datasette table)"
-                ?disabled=${!!this.file}
-                .value=${this.url}
-                @input=${(e: Event) => {
-                  this.url = (e.target as HTMLInputElement).value;
-                  // A hand-edited URL is no longer "a preset" or an upload; drop
-                  // any stale database list (it belonged to the previous instance).
-                  this.presetIdx = -1;
-                  this.file = null;
-                  this.resetDbList();
-                }}
-              />
-            </label>
-
-            <label>
-              …or upload a file
-              <input
-                type="file"
-                accept=".csv,.tsv,.tab,.json,.txt,text/csv,text/tab-separated-values,application/json"
-                @change=${(e: Event) => this.onFileChange(e)}
-              />
-            </label>
-            ${this.file
-              ? html`<p class="hint">
-                  Importing <strong>${this.file.name}</strong> as
-                  ${this.resolvedKind.toUpperCase()}.
-                </p>`
-              : nothing}
-
-            <label>
               Import as
               <select
+                data-testid="import-format"
                 .value=${this.kind}
                 @change=${(e: Event) => {
                   this.kind = (e.target as HTMLSelectElement).value as ImportKind;
@@ -950,78 +1126,132 @@ export class ImportDialog extends LitElement {
                 }}
               >
                 <option value="auto" ?selected=${this.kind === 'auto'}>Auto-detect</option>
-                <option value="json" ?selected=${this.kind === 'json'}>JSON dump</option>
-                <option value="csv" ?selected=${this.kind === 'csv'}>CSV / TSV file</option>
-                <option value="datasette" ?selected=${this.kind === 'datasette'}>
-                  Datasette (table or instance)
-                </option>
+                ${this.formats.map(
+                  (f) =>
+                    html`<option value=${f.id} ?selected=${this.kind === f.id}>${f.label}</option>`,
+                )}
               </select>
             </label>
 
-            <label>
-              Import mode
-              <div class="row mode-row">
-                <label class="check">
-                  <input
-                    type="radio"
-                    name="import-mode"
-                    .checked=${this.mode === 'copy'}
-                    @change=${() => (this.mode = 'copy')}
-                  />
-                  Copy — a local, editable, synced snapshot you can refresh
-                </label>
-                <label class="check">
-                  <input
-                    type="radio"
-                    name="import-mode"
-                    ?disabled=${!!this.file}
-                    .checked=${this.mode === 'reference'}
-                    @change=${() => (this.mode = 'reference')}
-                  />
-                  Reference — live, read-only; rows never stored or synced
-                </label>
-              </div>
-            </label>
-            ${this.file
-              ? html`<p class="hint">Uploaded files can only be imported as a Copy.</p>`
-              : nothing}
-            ${this.renderDbPicker()}
-            ${this.resolvedKind === 'csv'
-              ? html`<label class="check">
-                  <input
-                    type="checkbox"
-                    .checked=${this.editColumns}
-                    @change=${(e: Event) =>
-                      (this.editColumns = (e.target as HTMLInputElement).checked)}
-                  />
-                  Edit columns before import (rename / hide / fix duplicate names)
-                </label>`
-              : nothing}
+            <fieldset class="block">
+              <legend>Source and options</legend>
+              <label>
+                Sample source
+                <select
+                  data-testid="import-sample"
+                  .value=${String(this.presetIdx)}
+                  @change=${(e: Event) => this.onPresetChange(e)}
+                >
+                  <option value="-1" ?selected=${this.presetIdx === -1}>— choose a sample —</option>
+                  ${PREDEFINED.map(
+                    (p, i) =>
+                      html`<option value=${String(i)} ?selected=${i === this.presetIdx}>
+                        ${p.label}
+                      </option>`,
+                  )}
+                </select>
+              </label>
 
-            <label>
-              Limit rows (optional)
-              <input
-                type="number"
-                min="1"
-                step="1"
-                placeholder="import all rows"
-                .value=${this.maxRowsInput}
-                @input=${(e: Event) => (this.maxRowsInput = (e.target as HTMLInputElement).value)}
-              />
-            </label>
-            ${this.resolvedKind === 'datasette' && this.maxRows != null
-              ? html`<p class="hint">
-                  Row limit applies to CSV/JSON imports; Datasette snapshots use their own
-                  10,000-row cap.
-                </p>`
-              : nothing}
+              <label>
+                URL
+                <input
+                  type="text"
+                  autofocus
+                  placeholder="https://… (JSON dump, .csv/.tsv file, or Datasette table)"
+                  ?disabled=${!!this.file}
+                  .value=${this.url}
+                  @input=${(e: Event) => {
+                    this.url = (e.target as HTMLInputElement).value;
+                    // A hand-edited URL is no longer "a preset" or an upload; drop
+                    // any stale database list (it belonged to the previous instance).
+                    this.presetIdx = -1;
+                    this.file = null;
+                    this.resetDbList();
+                  }}
+                />
+              </label>
+
+              <label>
+                …or upload a file
+                <input
+                  type="file"
+                  accept=${this.acceptAttr}
+                  @change=${(e: Event) => this.onFileChange(e)}
+                />
+              </label>
+              ${this.file
+                ? html`<p class="hint">
+                    Importing <strong>${this.file.name}</strong> as
+                    ${this.resolvedKind.toUpperCase()}.
+                  </p>`
+                : nothing}
+
+              <label>
+                Import mode
+                <div class="row mode-row">
+                  <label class="check">
+                    <input
+                      type="radio"
+                      name="import-mode"
+                      .checked=${this.mode === 'copy'}
+                      @change=${() => (this.mode = 'copy')}
+                    />
+                    Copy — a local, editable, synced snapshot you can refresh
+                  </label>
+                  <label class="check">
+                    <input
+                      type="radio"
+                      name="import-mode"
+                      ?disabled=${!!this.file}
+                      .checked=${this.mode === 'reference'}
+                      @change=${() => (this.mode = 'reference')}
+                    />
+                    Reference — live, read-only; rows never stored or synced
+                  </label>
+                </div>
+              </label>
+              ${this.file
+                ? html`<p class="hint">Uploaded files can only be imported as a Copy.</p>`
+                : nothing}
+              ${this.renderTarget()}
+
+              <label class="check">
+                <input
+                  type="checkbox"
+                  ?disabled=${this.mode === 'reference'}
+                  .checked=${this.editColumns}
+                  @change=${(e: Event) =>
+                    (this.editColumns = (e.target as HTMLInputElement).checked)}
+                />
+                Edit columns before import (rename / hide / fix duplicate names)
+              </label>
+              ${this.mode === 'reference'
+                ? html`<p class="hint">
+                    A Reference keeps the source's own schema, so there is nothing to edit.
+                  </p>`
+                : nothing}
+
+              <label>
+                Limit rows (optional)
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="import all rows"
+                  .value=${this.maxRowsInput}
+                  @input=${(e: Event) => (this.maxRowsInput = (e.target as HTMLInputElement).value)}
+                />
+              </label>
+            </fieldset>
+
+            ${this.renderPluginBlock()}
 
             <p class="hint">
-              Paste any URL or pick a sample above — a JSON dump, a <code>.csv</code> or <code>.tsv</code> file, or a
-              Datasette table/database/instance. For a Datasette instance root, click
-              <em>List databases</em> to pick one first. Multi-table sources let you choose which
-              tables to import; Datasette tables import a read-only snapshot (capped at 10,000 rows
-              each).
+              Paste any URL or pick a sample above — a JSON dump, a <code>.csv</code> or
+              <code>.tsv</code> file, or a Datasette table/database/instance. For a Datasette
+              instance root, click <em>List databases</em> to pick one first. Multi-table sources
+              let you choose which tables to import; Datasette tables are capped at 10,000 rows
+              each.
             </p>
           </div>
         </form>

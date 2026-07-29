@@ -24,7 +24,7 @@ test('CSV URL import stores its origin and Refresh re-pulls updated rows', async
   await page.getByTitle('Import data from a URL').click();
   const dlg = page.locator('import-dialog dialog');
   await dlg.locator('input[type="text"]').fill('https://ex.example/air.csv');
-  await dlg.locator('select').last().selectOption('csv');
+  await dlg.getByTestId('import-format').selectOption('csv');
   await dlg.getByRole('button', { name: 'Import', exact: true }).click();
 
   const tableId = await page.evaluate(async (ws) => {
@@ -83,7 +83,9 @@ test('a dump round-trips a snapshot origin (reconstructable on another device)',
       origin: { type: 'csv', url: 'https://ex.example/x.csv' },
       updatedAt: Date.now(),
     });
-    await ctx.store.rows(id).insert({ id: crypto.randomUUID(), tableId: id, data: { a: '1' }, updatedAt: Date.now() });
+    await ctx.store
+      .rows(id)
+      .insert({ id: crypto.randomUUID(), tableId: id, data: { a: '1' }, updatedAt: Date.now() });
     const { serializeWorkspace } = await import('/src/plugins/dump-export.ts');
     const text = await serializeWorkspace(ctx.api);
     // Wipe the table so the re-import recreates it.
@@ -93,19 +95,25 @@ test('a dump round-trips a snapshot origin (reconstructable on another device)',
   }, workspaceId);
 
   // The dump carries the origin.
-  expect(JSON.parse(dump).tables[0].origin).toEqual({ type: 'csv', url: 'https://ex.example/x.csv' });
+  expect(JSON.parse(dump).tables[0].origin).toEqual({
+    type: 'csv',
+    url: 'https://ex.example/x.csv',
+  });
 
   // Re-import the dump; the reconstructed table keeps its origin.
-  const origin = await page.evaluate(async (args) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ctx = (window as any).__easydb;
-    const { importJsonText } = await import('/src/plugins/json-import.ts');
-    await importJsonText(ctx.api, args.dump, 'restore.json');
-    const t = (await ctx.store.tables.find()).find(
-      (x: any) => x.workspaceId === args.ws && x.name === 'FromUrl',
-    );
-    return t?.origin ?? null;
-  }, { dump, ws: workspaceId });
+  const origin = await page.evaluate(
+    async (args) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      const { restoreWorkspaceDump } = await import('/src/plugins/json-import.ts');
+      await restoreWorkspaceDump(ctx.api, args.dump, 'restore.json');
+      const t = (await ctx.store.tables.find()).find(
+        (x: any) => x.workspaceId === args.ws && x.name === 'FromUrl',
+      );
+      return t?.origin ?? null;
+    },
+    { dump, ws: workspaceId },
+  );
 
   expect(origin).toEqual({ type: 'csv', url: 'https://ex.example/x.csv' });
 });
