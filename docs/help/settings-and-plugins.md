@@ -8,6 +8,8 @@ secrets), plus one tab for each feature that has its own configuration
 (Gist sync, server sync, and so on). Changes save immediately as you type —
 there's no separate Save button.
 
+![Settings](./screenshots/settings.png)
+
 ### Workspace vs. device settings
 
 Every setting field has a small checkbox next to it that controls where the
@@ -42,6 +44,8 @@ Open the **Plugin Manager** (the small icon next to Settings) to:
   fetched, cached for offline use, and loaded on next startup.
 - **Filter** the list by type (importer, exporter, cell renderer, sync,
   etc.) or by installed/enabled state.
+
+![Plugin Manager](./screenshots/plugin-manager.png)
 
 Plugin URLs travel with your workspace, so a plugin you add shows up on
 your other synced devices too.

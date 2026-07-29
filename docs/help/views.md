@@ -13,7 +13,10 @@ of your rows, without touching the underlying table.
   several instances of the same template pointed at different tables, each
   with its own column mapping, sort, filters, and row limit.
 
-Open the **Views** button in the footer to create, edit, or open a view.
+Open the **Views** icon in a table's own toolbar to create, edit, or open a
+view for that table.
+
+![Views](./screenshots/views.png)
 
 ## Handy defaults
 

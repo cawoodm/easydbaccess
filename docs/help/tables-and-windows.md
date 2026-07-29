@@ -48,6 +48,8 @@ Command Palette — a searchable list of everything you can do:
 Type to filter, use the arrow keys to move, **Enter** to run, and **Esc** to
 close.
 
+![Command Palette](./screenshots/command-palette.png)
+
 ## Renaming a table
 
 A table's title bar can show a friendlier name than its technical one — set
