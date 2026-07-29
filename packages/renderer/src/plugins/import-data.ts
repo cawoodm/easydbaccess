@@ -6,7 +6,7 @@
 // the import to the right engine:
 //   - a format on the import kernel (csv, json) -> runImport does the rest
 //   - a native .db.json dump -> json-import's restoreWorkspaceDump
-//   - Datasette -> datasette-source's importDatasette (until phase D)
+//   - Datasette -> datasette-import's importDatasette (not on the kernel yet)
 //
 // This is the grown-up replacement for the old single-prompt "Load sample data"
 // button: same Northwind default, but now Datasette tables are reachable from
@@ -32,9 +32,10 @@ import { parseCsv } from './csv-import.js';
 import { fetchDatabaseNames, fetchTablesForDb, parseDatasetteUrl } from './datasette-client.js';
 import { importDatasette } from './datasette-import.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
-import { isWorkspaceDump, parsedToTables, restoreWorkspaceDump } from './json-import.js';
+import { isWorkspaceDump, restoreWorkspaceDump } from './json-import.js';
 import { fetchImportTextWithBar, filenameFromUrl } from '../import/fetch-source.js';
 import { runImport, type RunImportResult } from '../import/import-kernel.js';
+import { refreshFromOrigin } from '../import/refresh.js';
 import type { ImportTarget } from '../import/land-tables.js';
 
 /** How a URL should be imported. `auto` is resolved to a concrete kind on submit. */
@@ -107,8 +108,9 @@ export function init(api: HostApi): void {
     onClick: () => openImport(api),
   });
 
-  // Refresh a snapshot table imported from a CSV/JSON URL by re-fetching it.
-  // (Datasette-origin tables get their own refresh from datasette-source.)
+  // Refresh a snapshot a kernel importer made, by re-reading its origin URL.
+  // Datasette snapshots keep their own Refresh in `datasette-import`, because
+  // that one also drives a progress bar and a resumable paged read.
   api.ui.registerTableButton({
     id: 'import-data:refresh',
     label: 'Refresh',
@@ -119,37 +121,38 @@ export function init(api: HostApi): void {
   });
 }
 
-/** Re-fetch a CSV/JSON snapshot table from its origin URL and replace its rows. */
+/**
+ * Reload a snapshot table from the URL it was imported from, through the
+ * importer that made it.
+ *
+ * This used to wipe every row and re-parse, never re-discovering columns — so a
+ * source that had grown a column never showed it, and a column the user had
+ * added locally lost its values. `refreshFromOrigin` gives every kernel importer
+ * the behaviour Datasette already had: reconcile the columns against the user's
+ * arrangement, honour `deletedColumns`, and merge rows by primary key when the
+ * origin recorded them.
+ */
 async function refreshImported(api: HostApi, tableId: string): Promise<void> {
   const t = await api.store.tables.findOne(tableId);
-  const origin = t?.origin;
-  if (!origin?.url) return;
+  if (!t?.origin?.url) return;
   try {
-    const text = await fetchImportTextWithBar(api, origin.url, `Reading ${t?.name ?? 'data'}…`);
-
-    let rows: Array<Record<string, unknown>>;
-    if (origin.type === 'csv') {
-      rows = parseCsv(text).rows;
-    } else {
-      const parsed = parsedToTables(JSON.parse(text), t!.name);
-      const match =
-        parsed.find((x) => x.name === t!.name) ?? (parsed.length === 1 ? parsed[0] : undefined);
-      if (!match) throw new Error(`"${t!.name}" is no longer in the dump at ${origin.url}`);
-      rows = match.rows;
+    const spec = await findKernelImporter(t.origin.type as ResolvedKind);
+    if (!spec) {
+      throw new Error(`No importer is installed that can read a "${t.origin.type}" source.`);
     }
-
-    const coll = api.store.rows(tableId);
-    const old = await coll.find();
-    await coll.bulkRemove(old.map((r) => r.id));
-    await coll.bulkInsert(
-      rows.map((data) => ({ id: cryptoUUID(), tableId, data, updatedAt: Date.now() })),
+    const res = await refreshFromOrigin(api, t, spec);
+    const notes: string[] = [];
+    if (res.newFields.length > 0) {
+      notes.push(`${res.newFields.length} new column${res.newFields.length === 1 ? '' : 's'}`);
+    }
+    if (!res.merged && res.rowCount > 0) notes.push('rows replaced (no primary key to match on)');
+    api.ui.dialogs.toast(
+      `Refreshed "${t.name}" (${res.rowCount.toLocaleString()} rows)` +
+        `${notes.length ? ` — ${notes.join(', ')}` : ''}.`,
+      { kind: res.newFields.length > 0 ? 'warning' : 'success', title: 'Refresh' },
     );
-    api.ui.dialogs.toast(`Refreshed "${t!.name}" (${rows.length} rows).`, {
-      kind: 'success',
-      title: 'Refresh',
-    });
   } catch (err) {
-    api.ui.dialogs.toast(`Couldn't refresh "${t?.name ?? tableId}": ${(err as Error).message}`, {
+    api.ui.dialogs.toast(`Couldn't refresh "${t.name}": ${(err as Error).message}`, {
       kind: 'error',
       title: 'Refresh',
     });
