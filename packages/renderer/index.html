@@ -12,7 +12,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <!-- The version is kept in sync by scripts/bump-version.mjs. app-shell
          prefixes the workspace title at runtime, keeping this as the base. -->
-    <title>easyDBAccess v0.0.183</title>
+    <title>easyDBAccess v0.0.184</title>
     <style>
       html,
       body {
@@ -51,6 +51,30 @@
       /* Panels need clicks; the transparent viewport itself does not. */
       #easydb-panels-viewport > .jsPanel {
         pointer-events: auto;
+      }
+      /* Kind icon (window-mgr/table-kind.ts) in jsPanel's `headerLogo` slot,
+         left of the title. The slot has no default sizing of its own. */
+      .jsPanel-headerlogo {
+        display: flex;
+        align-items: center;
+        padding-left: 8px;
+      }
+      .jsPanel-headerlogo svg {
+        display: block;
+      }
+      /* Refreshable tables (source- or origin-backed: connected / referenced /
+         imported) get a distinct header colour so they read as "backed by
+         something remote" at a glance — every kind except a plain local table
+         (jsPanel's default 'primary' theme, #01579b) and view windows (cyan,
+         see view-window-manager.ts). jsPanel applies its theme colours as
+         INLINE styles (applyColorTheme() in jspanel.js), so `!important` is
+         required to win here; that's deliberate — this overrides via a class
+         instead of touching the `theme: 'primary'` option in jspanel-manager.ts.
+         Violet (#6d28d9) keeps the existing white header text (colors[3]) at
+         ~7.1:1 contrast, matching the default theme's own ~7.4:1. */
+      #easydb-panels-viewport > .jsPanel.eda-refreshable,
+      #easydb-panels-viewport > .jsPanel.eda-refreshable > .jsPanel-hdr {
+        background-color: #6d28d9 !important;
       }
       /* Minimized-window dock. It lives OUTSIDE the pan/zoom viewport (a child
          of the fixed overlay), so minimized windows stay pinned to the bottom-

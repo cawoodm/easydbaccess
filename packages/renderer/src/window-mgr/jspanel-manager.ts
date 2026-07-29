@@ -29,6 +29,7 @@ import { startMaximizedRefit } from './refit-panels.js';
 import { startTitlebarBehavior } from './panel-titlebar.js';
 import { countSuffix, VISIBLE_COUNT_EVENT, type VisibleCountDetail } from './panel-title.js';
 import { sanitizeGeometry } from './geometry.js';
+import { tableKind, isRefreshable, TABLE_KIND_ICONS } from './table-kind.js';
 import '../table/data-table.js';
 import '../chrome/panel-search.js';
 import '../chrome/panel-footer.js';
@@ -69,6 +70,7 @@ type Panel = {
   minimize?: () => void;
   maximize?: () => void;
   setHeaderTitle?: (title: string) => void;
+  setHeaderLogo?: (logo: string) => void;
   status: 'normalized' | 'minimized' | 'maximized' | 'smallified' | 'closed';
 };
 
@@ -331,6 +333,10 @@ function openPanel(t: Table, ctx: AppContext): void {
     id: panelId,
     container,
     headerTitle: lastTitle,
+    // Kind icon (normal/imported/referenced/connected) at the far left of the
+    // titlebar, before the title — see table-kind.ts. Kept in sync below as
+    // the table's source/origin change at runtime.
+    headerLogo: TABLE_KIND_ICONS[tableKind(t)],
     footerToolbar: footer,
     // Default jsPanel controls; smallify (compact-header mode) is useful so
     // we keep it enabled. min/max/normalize/close are all on by default.
@@ -410,6 +416,10 @@ function openPanel(t: Table, ctx: AppContext): void {
   const controlbar = panelEl?.querySelector('.jsPanel-controlbar');
   if (controlbar) controlbar.prepend(search);
 
+  // Refreshable tables (source- or origin-backed) get a distinct panel colour
+  // (see index.html's `.eda-refreshable` rule) — every kind except `normal`.
+  if (isRefreshable(t)) panelEl?.classList.add('eda-refreshable');
+
   // Make the header/titlebar focusable so tapping it takes focus away from any
   // open search box (per-table or the global header search) — collapsing it.
   // jsPanel calls preventDefault on the titlebar's pointerdown (for dragging),
@@ -460,6 +470,12 @@ function openPanel(t: Table, ctx: AppContext): void {
     queueMicrotask(() => panel.minimize?.());
   }
 
+  // A table's kind (normal/imported/referenced/connected) can change at
+  // runtime — e.g. a plain table gains an `origin` after an import, or a
+  // `source` after a live connect — so the titlebar icon and refreshable
+  // colour must react too, exactly like the title does below.
+  let lastKind = tableKind(t);
+
   // Track name changes for the title and info-metadata arrival (cheap — this
   // does NOT fetch rows).
   void ctx.store.tables.subscribe((all) => {
@@ -469,6 +485,14 @@ function openPanel(t: Table, ctx: AppContext): void {
     if (displayName(cur) !== lastTitle) {
       lastTitle = displayName(cur);
       renderTitle();
+    }
+    const kind = tableKind(cur);
+    if (kind !== lastKind) {
+      lastKind = kind;
+      if (typeof panel.setHeaderLogo === 'function') {
+        panel.setHeaderLogo(TABLE_KIND_ICONS[kind]);
+      }
+      panelEl?.classList.toggle('eda-refreshable', isRefreshable(cur));
     }
   });
 

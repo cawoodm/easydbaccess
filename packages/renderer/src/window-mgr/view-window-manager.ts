@@ -22,6 +22,7 @@ import { getContext, type AppContext } from '../app-context.js';
 import { currentPanZoom } from './jspanel-manager.js';
 import { createMaximizeFill } from './maximize-fill.js';
 import { countSuffix, VISIBLE_COUNT_EVENT, type VisibleCountDetail } from './panel-title.js';
+import { VIEW_ICON } from './table-kind.js';
 // Side-effect import registers the <view-window> custom element; the type-only
 // import would otherwise be elided, leaving <view-window> an unupgraded
 // (inline, zero-size) element.
@@ -249,6 +250,9 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     id: panelId,
     container: viewContainer(),
     headerTitle: inst.name,
+    // Eye icon at the far left of the titlebar — a view's kind never changes
+    // at runtime (unlike a table's), so this is drawn once here (table-kind.ts).
+    headerLogo: VIEW_ICON,
     // A distinct cyan chrome so view windows read as different from tables.
     theme: '#0891b2',
     content,

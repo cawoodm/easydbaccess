@@ -10,6 +10,7 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import type { TableInfo, TableOrigin, TableSource } from '@easydb/shared';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
+import { tableKind } from '../window-mgr/table-kind.js';
 
 /** Where a table's rows come from — drives the "Kind" explanation. */
 export interface TableProvenance {
@@ -27,16 +28,27 @@ export function openTableInfoDialog(
   el.show(name, info, provenance);
 }
 
-/** Classify a table's provenance into a label + a "what this means" note. */
+/**
+ * Classify a table's provenance into a label + a "what this means" note.
+ * Branches on the shared `tableKind()` classifier (window-mgr/table-kind.ts)
+ * — the same one the panel titlebar icon uses — so this dialog and the
+ * titlebar can never disagree on what kind a table is. `'connected'` and
+ * `'referenced'` share the same "Connected (live X)" prose below (unchanged
+ * from before this de-duplication): the dialog never distinguished a `'url'`
+ * source from any other, only whether a `source` was present at all.
+ */
 function describeProvenance(p: TableProvenance | null): {
   label: string;
   note: string;
   url?: string;
 } | null {
   if (!p) return null;
-  if (p.source) {
-    const type = p.source.type;
-    const writable = p.source.writable
+  const kind = tableKind(p);
+  if (kind === 'connected' || kind === 'referenced') {
+    // Both kinds imply `source` is set (see tableKind), but TS can't narrow
+    // through the call — read it optionally rather than assert.
+    const type = p.source?.type ?? 'remote';
+    const writable = p.source?.writable
       ? 'Edits you make are written back to the source.'
       : 'It is read-only — edits are not saved back to the source.';
     return {
@@ -47,13 +59,15 @@ function describeProvenance(p: TableProvenance | null): {
         `disconnects the view — the source data is untouched.`,
     };
   }
-  if (p.origin) {
+  if (kind === 'imported') {
     return {
       label: 'Imported (snapshot)',
       note:
         `This table is a local snapshot imported once from its origin. The rows live in this ` +
         `browser, so edits stay local; use Refresh to re-fetch the latest data from the origin.`,
-      url: p.origin.url,
+      // Conditional spread, not `p.origin?.url`: `exactOptionalPropertyTypes`
+      // rejects assigning `string | undefined` to an optional `url?: string`.
+      ...(p.origin ? { url: p.origin.url } : {}),
     };
   }
   return {
@@ -199,7 +213,9 @@ export class TableInfoDialog extends LitElement {
                   <p class="kind-note">${kind.note}</p>
                   ${kind.url
                     ? html`<div class="kind-origin">
-                        <a href=${kind.url} target="_blank" rel="noopener noreferrer">${kind.url}</a>
+                        <a href=${kind.url} target="_blank" rel="noopener noreferrer"
+                          >${kind.url}</a
+                        >
                       </div>`
                     : nothing}
                 </div>`

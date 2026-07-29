@@ -2,6 +2,7 @@
 
 ## 29 Jul 2026
 
+- ✨ Each window titlebar now starts with an icon for its kind — local, imported, referenced, connected or view — and remote-backed tables get a violet titlebar (v0.0.184)
 - ✨ The boolean renderer now tells empty apart from false: a grayed checkbox for empty, red-bordered raw text for an invalid value (v0.0.183)
 - 🪲 An invalid stored value is shown with a red border and a pencil to fix it, instead of being blanked or coerced (v0.0.183)
 - 🪲 A boolean column with no renderer now shows its raw value, not a checkbox that hid empty and invalid data (v0.0.183)
