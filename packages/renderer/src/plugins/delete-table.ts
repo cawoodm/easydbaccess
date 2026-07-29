@@ -22,7 +22,7 @@ export function init(api: HostApi): void {
   api.ui.registerTableButton({
     id: 'delete-table:delete',
     label: 'Delete',
-    icon: 'delete',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="#7f1d1d" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
     tooltip: 'Delete this table permanently',
     onClick: async (api, ctx) => {
       const table = await api.store.tables.findOne(ctx.tableId);
