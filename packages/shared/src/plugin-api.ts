@@ -358,6 +358,36 @@ export interface ImporterSpec {
   ownToasts?: boolean | undefined;
 }
 
+// -- Connectors ------------------------------------------------------------
+//
+// A connector is the CONNECT counterpart to an importer. An importer copies
+// data in and you own the copy; a connector points a window at a live remote
+// table and stores nothing. They are separate contracts because they are
+// separate user intents with separate consequences — see
+// `.claude/plans/2026-07-28-importer-architecture.md`.
+//
+// A connector owns its whole flow: it asks for a URL and credentials however
+// its backend requires, then creates tables carrying a `source` descriptor that
+// a matching `RowCollectionProvider` (registered via `registerRowSource`) backs.
+// There is nothing generic to factor out, so unlike `ImporterSpec` this is a
+// thin contract: it exists so the Connect menu can list what is available
+// without the host knowing any backend.
+
+export interface ConnectorSpec {
+  /** Stable id, matching the `TableSource.type` this connector produces. */
+  id: string;
+  /** Shown in the Connect menu. */
+  label: string;
+  /** Material Icons ligature or inline `<svg>` for the menu entry. */
+  icon?: string | undefined;
+  /** Menu sort order; lower first. Absent ⇒ registration order. */
+  order?: number | undefined;
+  /** One line under the label, saying what connecting to this backend means. */
+  description?: string | undefined;
+  /** Run the connect flow: prompt, authenticate, create the live table(s). */
+  connect(api: HostApi): Promise<void>;
+}
+
 export interface ExporterSpec {
   id: string;
   label: string;
@@ -502,6 +532,12 @@ export interface UiRegistry {
   registerRowRenderer(viewName: string, tag: string): Unregister;
   registerTableRenderer(viewName: string, tag: string): Unregister;
   registerImporter(spec: ImporterSpec): Unregister;
+  /**
+   * Register a live-backend connector. The Connect menu lists these; the
+   * matching row-source provider is registered separately via
+   * `HostApi.registerRowSource`, because one is UI and the other is data.
+   */
+  registerConnector(spec: ConnectorSpec): Unregister;
   registerExporter(spec: ExporterSpec): Unregister;
   registerDropHandler(fn: DropHandler): Unregister;
   registerUrlSource(spec: UrlSourceSpec): Unregister;

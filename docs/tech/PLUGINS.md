@@ -68,6 +68,7 @@ Every plugin gets one `api` object. The pieces plugins actually touch:
 | `api.ui.registerImporter` / `registerExporter` | Named format handlers (used by drop handlers, the Import dialog, per-table export) | `csv-import`, `csv-export` |
 | `api.ui.registerDropHandler` | Intercept a file/text drag-drop onto the canvas | `csv-import`, `json-import`, `datasette-import` |
 | `api.ui.registerUrlSource` | A named "import from URL" flow | `datasette-import` |
+| `api.ui.registerConnector` | A live-backend CONNECT flow, listed by the Connect menu | `datasette-connect` |
 | `api.ui.registerSettings(pluginId, name, fields)` | Declares a settings tab (rendered by the Settings dialog) | `gist-sync`'s `user`/`gist_id`/`gist_token` fields |
 | `api.ui.openSettings()` | Opens the Settings dialog | the `settings` built-in's header gear button |
 | `api.settings` | Layered settings accessor (`get`/`set`/`placement`) — user layer shadows workspace layer, resolves `${secret:name}` refs on read | `gist-sync`, `server-sync` reading their config |
@@ -100,6 +101,7 @@ defaults to enabled but **can** be turned off by the user.
 | `csv-import` | importer | | Drag-and-drop or paste CSV to create a typed table; infers column types and a `field:label:type:default:max:flags` header mini-language; append/overwrite/new-table prompt on name collision. | `registerImporter`, `registerDropHandler`, `registerHeaderButton` |
 | `json-import` | importer | | Drag-and-drop JSON — native `.db.json` dumps, legacy v1 minniDBMax dumps, or plain arrays/objects — with a table picker for multi-table dumps. | `registerImporter`, `registerDropHandler` |
 | `datasette-import` | importer | | IMPORT snapshot tables from any online [Datasette](https://datasette.io/) instance by URL — single table, whole database, or entire instance with a table checklist. Rows are stored locally and synced. Supports resumable paged imports, a per-table Refresh (re-fetch + merge by primary key) and a red Resume button. | `registerTableButton`, `registerUrlSource`, `registerDropHandler` |
+| `connect-menu` | ui | | Header "Connect" button plus a Ctrl+K command. Lists every registered `ConnectorSpec`; with one installed it opens that backend directly, with several it shows an anchored menu. Knows no backend itself. | `registerHeaderButton`, `registerCommand` |
 | `datasette-connect` | source | | CONNECT a live, read-write Datasette table. Rows are fetched on demand and never stored locally; the table carries `source: { type: 'datasette' }` and the routed store hands it `datasette-collection.ts`. Its Refresh re-reads the remote instead of merging. | `registerHeaderButton`, `registerTableButton`, `registerRowSource` |
 | `csv-export` | exporter | | Per-table "CSV" download button; RFC-4180-ish writer mirroring the CSV importer's dialect. | `registerExporter`, `registerTableButton` |
 | `dump-export` | exporter | | Footer "Export" menu button (JSON dump / SQL script) — the JSON option exports the whole workspace as one `.db.json` file; the SQL option delegates to `sql-export`'s serializer. | `registerFooterButton` |
@@ -219,7 +221,10 @@ paging is interrupted (e.g. rate-limited) the table records a resume cursor
 silently truncating. Its Refresh re-fetches and merges by primary key, keeping
 columns the user added and honouring the ones they deleted.
 
-**`datasette-connect`** points a window at somebody else's **live** table.
+**`datasette-connect`** points a window at somebody else's **live** table. It
+registers a `ConnectorSpec` rather than its own header button, so the single
+"Connect" in the header comes from `connect-menu` no matter how many backends
+are installed.
 Nothing is stored: the table carries `source: { type: 'datasette' }` and
 `api.registerRowSource({ type: 'datasette', ... })` hands it the collection in
 `datasette-collection.ts` — the one built-in that uses the row-source routing

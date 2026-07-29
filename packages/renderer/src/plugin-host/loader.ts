@@ -3,6 +3,7 @@ import { SAFE_MODE } from './safe-mode.js';
 import * as csvImport from '../plugins/csv-import.js';
 import * as csvExport from '../plugins/csv-export.js';
 import * as jsonImport from '../plugins/json-import.js';
+import * as connectMenu from '../plugins/connect-menu.js';
 import * as datasetteImport from '../plugins/datasette-import.js';
 import * as datasetteConnect from '../plugins/datasette-connect.js';
 import * as urlSource from '../plugins/url-source.js';
@@ -48,6 +49,7 @@ const modules: PluginModule[] = [
   newTableButton,
   csvImport,
   jsonImport,
+  connectMenu,
   datasetteImport,
   datasetteConnect,
   urlSource,

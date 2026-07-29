@@ -57,16 +57,21 @@ export const meta: NonNullable<PluginModule['meta']> = {
 };
 
 export function init(api: HostApi): void {
-  // Register the visible UI first, so a later failure (e.g. an older host that
-  // predates `registerRowSource`) can never prevent the Connect button from
-  // appearing. The button is this plugin's only discoverable entry point;
-  // losing it silently is exactly the "I don't see a connect button" trap.
-  api.ui.registerHeaderButton({
-    id: 'datasette:connect',
-    label: 'Connect',
+  // Register the connector FIRST, so a later failure (e.g. an older host that
+  // predates `registerRowSource`) can never keep Datasette out of the Connect
+  // menu. Being unreachable from the UI is exactly the "I don't see a connect
+  // button" trap this plugin used to fall into.
+  //
+  // The header button itself belongs to `connect-menu`, which lists every
+  // registered connector. This plugin no longer owns a button, so a second
+  // backend does not mean a second "Connect" in the header.
+  api.ui.registerConnector({
+    id: 'datasette',
+    label: 'Datasette',
     icon: CONNECT_ICON_SVG,
-    tooltip: 'Connect a live, editable Datasette table',
-    onClick: () => openConnectDialog(api),
+    order: 10,
+    description: 'A live, editable table on any Datasette instance',
+    connect: (a) => openConnectDialog(a),
   });
 
   // Refresh for LIVE tables only. An imported snapshot has its own Refresh in
@@ -85,7 +90,7 @@ export function init(api: HostApi): void {
   // Tables carrying `source: { type: 'datasette', … }` are backed by a live
   // read-write collection instead of Dexie. Snapshot imports are unaffected —
   // they create plain local tables with no `source`. Guarded so a host without
-  // this seam still shows the Connect button above.
+  // this seam still lists the connector above.
   if (typeof api.registerRowSource === 'function') {
     api.registerRowSource({ type: 'datasette', create: createDatasetteCollection });
   }

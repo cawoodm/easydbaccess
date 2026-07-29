@@ -1,6 +1,7 @@
 import type {
   ButtonSpec,
   CommandSpec,
+  ConnectorSpec,
   Dialogs,
   DropHandler,
   ExporterSpec,
@@ -29,6 +30,8 @@ export interface Registries {
   footerButtons: ButtonSpec[];
   tableButtons: TableButtonSpec[];
   importers: ImporterSpec[];
+  /** Live-backend connectors listed by the Connect menu. */
+  connectors: ConnectorSpec[];
   exporters: ExporterSpec[];
   urlSources: UrlSourceSpec[];
   dropHandlers: DropHandler[];
@@ -49,6 +52,7 @@ export function createRegistries(): Registries {
     footerButtons: [],
     tableButtons: [],
     importers: [],
+    connectors: [],
     exporters: [],
     urlSources: [],
     dropHandlers: [],
@@ -82,6 +86,7 @@ export function createUiRegistry(r: Registries): UiRegistry {
     registerFooterButton: (spec) => pushReg(r.footerButtons, spec),
     registerTableButton: (spec) => pushReg(r.tableButtons, spec),
     registerImporter: (spec) => pushReg(r.importers, spec),
+    registerConnector: (spec) => pushReg(r.connectors, spec),
     registerExporter: (spec) => pushReg(r.exporters, spec),
     registerUrlSource: (spec) => pushReg(r.urlSources, spec),
     registerDropHandler: (fn) => pushReg(r.dropHandlers, fn),
