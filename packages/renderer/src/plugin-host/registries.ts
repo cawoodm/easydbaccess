@@ -1,4 +1,5 @@
 import type {
+  ColumnEditorActionSpec,
   ButtonSpec,
   CommandSpec,
   ConnectorSpec,
@@ -29,6 +30,8 @@ export interface Registries {
   headerButtons: ButtonSpec[];
   footerButtons: ButtonSpec[];
   tableButtons: TableButtonSpec[];
+  /** Buttons the column editor shows above its column list. */
+  columnEditorActions: ColumnEditorActionSpec[];
   importers: ImporterSpec[];
   /** Live-backend connectors listed by the Connect menu. */
   connectors: ConnectorSpec[];
@@ -51,6 +54,7 @@ export function createRegistries(): Registries {
     headerButtons: [],
     footerButtons: [],
     tableButtons: [],
+    columnEditorActions: [],
     importers: [],
     connectors: [],
     exporters: [],
@@ -85,6 +89,7 @@ export function createUiRegistry(r: Registries): UiRegistry {
     registerHeaderButton: (spec) => pushReg(r.headerButtons, spec),
     registerFooterButton: (spec) => pushReg(r.footerButtons, spec),
     registerTableButton: (spec) => pushReg(r.tableButtons, spec),
+    registerColumnEditorAction: (spec) => pushReg(r.columnEditorActions, spec),
     registerImporter: (spec) => pushReg(r.importers, spec),
     registerConnector: (spec) => pushReg(r.connectors, spec),
     registerExporter: (spec) => pushReg(r.exporters, spec),

@@ -511,10 +511,35 @@ export interface CommandSpec {
   run(api: HostApi): void | Promise<void>;
 }
 
+/**
+ * A button the column editor offers above its column list, for an action that
+ * rewrites the columns being edited — "give every column a renderer that suits
+ * its values", say.
+ *
+ * `run` receives the columns AS CURRENTLY EDITED (not the saved ones) and returns
+ * the new list, or null to change nothing. Nothing is written to the store: the
+ * result lands in the editor, so the user still reviews it and presses Save. That
+ * is what keeps an action from being a surprise the user cannot undo.
+ */
+export interface ColumnEditorActionSpec {
+  id: string;
+  label: string;
+  /** Material Icons ligature name, or inline `<svg>` markup. */
+  icon?: string;
+  tooltip?: string;
+  /** The table being edited; absent while a brand-new table is defined. */
+  run(
+    api: HostApi,
+    ctx: { columns: ColumnSpec[]; tableId?: string | undefined },
+  ): Promise<ColumnSpec[] | null> | ColumnSpec[] | null;
+}
+
 export interface UiRegistry {
   registerHeaderButton(spec: ButtonSpec): Unregister;
   registerFooterButton(spec: ButtonSpec): Unregister;
   registerTableButton(spec: TableButtonSpec): Unregister;
+  /** Add a button to the column editor that rewrites the columns being edited. */
+  registerColumnEditorAction(spec: ColumnEditorActionSpec): Unregister;
   /**
    * Register a cell renderer under a name. Columns opt in to it by setting
    * `column.renderer` to this name (independent of the column's data type).

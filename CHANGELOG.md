@@ -4,8 +4,8 @@
 
 ### Features
 
+- ✨ The column editor has a "Guess renderers" button: it picks a renderer per column from the values, then you press Save (v0.0.220)
 - ✨ A cell shows its full value as a tooltip, so a column narrower than its content is still readable (v0.0.219)
-- ✨ A cell shows its full value as a tooltip, so a column narrower than its content stays readable (v0.0.219)
 - 🪶 Sort by several columns: shift-click a header to add a sort level behind the ones already active (v0.0.218)
 - ✨ The column editor can turn off sorting or filtering per column; an unfilterable column is skipped by search too (v0.0.216)
 - ✨ An empty cell is pink and a value that does not fit its column type gets a red outline, under every renderer (v0.0.211)

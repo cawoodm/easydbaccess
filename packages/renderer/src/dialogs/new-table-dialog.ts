@@ -1,6 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import type { ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
+import type { ColumnEditorActionSpec, ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
@@ -231,6 +231,12 @@ export class NewTableDialog extends LitElement {
    * boolean, color, image, link) and any plugin-registered ones land here.
    */
   @state() private rendererOptions: string[] = [];
+  /**
+   * Plugin-registered buttons that rewrite the columns being edited (e.g. the
+   * auto-renderer's "Guess renderers"). Snapshotted on open, like the renderer
+   * options above.
+   */
+  @state() private columnActions: ColumnEditorActionSpec[] = [];
   private rendererSubUnsub?: (() => void) | undefined;
 
   private dialogEl: HTMLDialogElement | null = null;
@@ -255,8 +261,10 @@ export class NewTableDialog extends LitElement {
     const ctxForRenderers = await getContext();
     this.rendererOptions = [...ctxForRenderers.registries.cellRenderers.keys()].sort();
     this.rendererSubUnsub?.();
+    this.columnActions = [...ctxForRenderers.registries.columnEditorActions];
     this.rendererSubUnsub = ctxForRenderers.events.on('app:ready', () => {
       this.rendererOptions = [...ctxForRenderers.registries.cellRenderers.keys()].sort();
+      this.columnActions = [...ctxForRenderers.registries.columnEditorActions];
     });
     if (tableId) {
       const ctx = await getContext();
@@ -375,6 +383,43 @@ export class NewTableDialog extends LitElement {
 
   private patchColumn(idx: number, patch: Partial<ColumnRow>): void {
     this.columns = this.columns.map((c, i) => (i === idx ? { ...c, ...patch } : c));
+  }
+
+  /**
+   * Run a plugin's column-editor action on the current draft and take its result
+   * back into the editor. Nothing is saved: the user sees the change in the rows
+   * and still has to press Save (or close the dialog to drop it).
+   *
+   * The action gets the draft as ColumnSpecs, so it never has to know about the
+   * editor's row shape. Coming back, each returned spec is matched to its row by
+   * FIELD NAME — an action edits columns, it does not reorder or add them, and
+   * matching by name keeps a row's `orig`/`origField` (the rename tracking and
+   * the untouched-fields base) intact.
+   */
+  private async runColumnAction(action: ColumnEditorActionSpec): Promise<void> {
+    this.errorMsg = '';
+    const ctx = await getContext();
+    try {
+      const next = await action.run(ctx.api, {
+        columns: this.columns.map((c) => buildColumnSpec(c)),
+        ...(this.editTableId ? { tableId: this.editTableId } : {}),
+      });
+      if (!next) return;
+      const byField = new Map(next.map((c) => [c.field, c]));
+      this.columns = this.columns.map((row) => {
+        const spec = byField.get(row.field);
+        if (!spec) return row;
+        return {
+          ...row,
+          label: spec.label ?? row.label,
+          type: spec.type ?? row.type,
+          renderer: spec.renderer,
+          script: spec.script,
+        };
+      });
+    } catch (err) {
+      this.errorMsg = `${action.label} failed: ${(err as Error).message}`;
+    }
   }
 
   /**
@@ -847,6 +892,16 @@ export class NewTableDialog extends LitElement {
             </div>
 
             <button type="button" class="add" @click=${this.addColumn}>+ Add column</button>
+            ${this.columnActions.map(
+              (a) => html`<button
+                type="button"
+                class="add"
+                title=${a.tooltip ?? a.label}
+                @click=${() => void this.runColumnAction(a)}
+              >
+                ${a.label}
+              </button>`,
+            )}
 
             ${this.renameDetected()
               ? html`<div class="hint">
