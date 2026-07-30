@@ -539,6 +539,9 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
 
   let importedViews = 0;
   let metadataWarning = '';
+  // Ids of the view instances this pull carried — null until we know the gist
+  // has a marker file, so a gist without one never looks like "all views gone".
+  let pulledViewIds: Set<string> | null = null;
   const markerFile = includeSettings ? gist.files['_easydb.workspace.json'] : undefined;
   if (markerFile) {
     try {
@@ -552,6 +555,7 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
       const markerViewTemplates = parsedMarker.viewTemplates ?? [];
       const markerViewInstances = parsedMarker.viewInstances ?? [];
       const markerSettings = parsedMarker.settings ?? [];
+      pulledViewIds = new Set(markerViewInstances.map((v) => v.id));
 
       for (const vt of markerViewTemplates) {
         await api.store.viewTemplates.upsert({ ...vt, workspaceId: wsId });
@@ -596,10 +600,89 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
     }
   }
 
+  // A pull upserts, so anything local that the gist does not carry stays behind —
+  // either local-only work or something a peer deleted. Offer to remove it. Only
+  // after a clean pull: a table whose file failed to parse is missing from
+  // `nameToId` although the gist has it, and must not be offered for deletion.
+  if (failures.length === 0) {
+    await offerPrune(api, wsId, {
+      tableNames: includeData ? new Set([...nameToId.keys()].map((n) => n.toLowerCase())) : null,
+      viewInstanceIds: pulledViewIds,
+    });
+  }
+
   // The incremental inserts above opened panels in file order, not saved-z order
   // (liveQuery fires per write, so the window manager's z-sort never sees them
   // as a batch). Ask the window manager to restack the panels by saved z.
   document.dispatchEvent(new CustomEvent('easydb:restack-windows'));
+}
+
+/** At most `max` names, with a "+n more" tail so a long list stays readable. */
+function nameList(names: string[], max = 8): string {
+  const shown = names.slice(0, max).map((n) => `• ${n}`);
+  const rest = names.length - shown.length;
+  return [...shown, ...(rest > 0 ? [`• …and ${rest} more`] : [])].join('\n');
+}
+
+/**
+ * Offer to delete the workspace objects a pull did not carry. A `null` set means
+ * the pull carried no objects of that kind (a settings-only pull has no tables,
+ * a gist without the workspace marker file has no views), so those local objects
+ * are left alone rather than read as deleted upstream.
+ *
+ * Exported for the unit tests (like `fetchGistFileContent`) — a real pull needs
+ * the GitHub API, which the e2e suite does not talk to.
+ */
+export async function offerPrune(
+  api: HostApi,
+  wsId: string,
+  pulled: { tableNames: Set<string> | null; viewInstanceIds: Set<string> | null },
+): Promise<void> {
+  const extraTables = pulled.tableNames
+    ? (await api.store.tables.find()).filter(
+        (t) => t.workspaceId === wsId && !pulled.tableNames!.has(t.name.toLowerCase()),
+      )
+    : [];
+  const extraViews = pulled.viewInstanceIds
+    ? (await api.store.viewInstances.find()).filter(
+        (v) => v.workspaceId === wsId && !pulled.viewInstanceIds!.has(v.id),
+      )
+    : [];
+  if (extraTables.length === 0 && extraViews.length === 0) return;
+
+  const parts: string[] = [];
+  if (extraTables.length > 0) {
+    parts.push(
+      `${extraTables.length} table${extraTables.length === 1 ? '' : 's'}:\n` +
+        nameList(extraTables.map((t) => t.name)),
+    );
+  }
+  if (extraViews.length > 0) {
+    parts.push(
+      `${extraViews.length} view${extraViews.length === 1 ? '' : 's'}:\n` +
+        nameList(extraViews.map((v) => v.name)),
+    );
+  }
+  const yes = await api.ui.dialogs.confirm(
+    `The gist does not have these local objects:\n\n${parts.join('\n\n')}\n\n` +
+      `Delete them, so this workspace matches the gist? A table goes with its rows. ` +
+      `Keep them if this is local work you have not pushed yet.`,
+    'Delete objects missing from the pull?',
+  );
+  if (!yes) return;
+
+  for (const v of extraViews) await api.store.viewInstances.remove(v.id);
+  // Same cascade the trash button uses: local rows go, a live table's remote
+  // data stays and only the local connection is dropped. Imported lazily for the
+  // same reason as top-progress above — the module registers custom elements, so
+  // a static import would break the unit tests' Node environment.
+  const { deleteTable } = await import('../window-mgr/jspanel-manager.js');
+  for (const t of extraTables) await deleteTable(t.id);
+  api.ui.dialogs.toast(
+    `Deleted ${extraTables.length} table${extraTables.length === 1 ? '' : 's'} and ` +
+      `${extraViews.length} view${extraViews.length === 1 ? '' : 's'}.`,
+    { kind: 'success', title: 'Gist sync' },
+  );
 }
 
 // -- Per-table push/pull/view --------------------------------------------------
