@@ -6,6 +6,13 @@ import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { focusTableWindow } from '../window-mgr/jspanel-manager.js';
 import { focusViewWindow } from '../window-mgr/view-window-manager.js';
+import {
+  RECENT_GROUP,
+  RECENT_SETTING,
+  orderByRecent,
+  pushRecent,
+  readRecent,
+} from './palette-recent.js';
 
 /** One selectable entry in the palette (flattened from commands/buttons/tables). */
 interface PaletteItem {
@@ -19,7 +26,14 @@ interface PaletteItem {
 }
 
 /** Group display order; unknown groups sort last (alphabetically). */
-const GROUP_RANK: Record<string, number> = { Windows: 0, Actions: 1, App: 2, Tables: 3, Views: 4 };
+const GROUP_RANK: Record<string, number> = {
+  [RECENT_GROUP]: -1,
+  Windows: 0,
+  Actions: 1,
+  App: 2,
+  Tables: 3,
+  Views: 4,
+};
 function groupRank(g: string): number {
   return GROUP_RANK[g] ?? 3;
 }
@@ -38,6 +52,9 @@ function renderIcon(icon: string | undefined) {
  * Import / Export / Gist / Sync / Settings are all reachable), and a "Go to
  * <table>" entry per table in the workspace. Type to filter, ↑/↓ to move,
  * Enter to run, Esc or a click outside to close.
+ *
+ * The last few commands that ran are moved to a "Recent" section at the top
+ * (see `palette-recent.ts`), so Ctrl+K Enter repeats the last one.
  */
 @customElement('command-palette-dialog')
 export class CommandPaletteDialog extends LitElement {
@@ -137,10 +154,13 @@ export class CommandPaletteDialog extends LitElement {
   @query('dialog') private dialogEl?: HTMLDialogElement;
   @query('input') private inputEl?: HTMLInputElement;
   private api: HostApi | null = null;
+  /** Ids of the last few commands that ran, most recent first. */
+  private recentIds: string[] = [];
 
   async open(): Promise<void> {
     const ctx = await getContext();
     this.api = ctx.api;
+    this.recentIds = readRecent((await ctx.api.store.settings.findOne(RECENT_SETTING))?.value);
     this.items = await this.buildItems();
     this.search = '';
     this.selected = 0;
@@ -210,7 +230,9 @@ export class CommandPaletteDialog extends LitElement {
     }
 
     // Stable sort by group rank; within-group insertion order is preserved.
-    return items
+    // The recent commands are moved to the front first, so that order also
+    // decides their order inside the "Recent" group (which ranks first).
+    return orderByRecent(items, this.recentIds)
       .map((it, i) => ({ it, i }))
       .sort((a, b) => groupRank(a.it.group) - groupRank(b.it.group) || a.i - b.i)
       .map(({ it }) => it);
@@ -264,11 +286,27 @@ export class CommandPaletteDialog extends LitElement {
 
   private async execute(item: PaletteItem): Promise<void> {
     this.close();
+    // Remember BEFORE running: a command that opens a dialog only resolves once
+    // the user is done with it, and a command that throws was still the last
+    // thing the user asked for.
+    await this.remember(item.id);
     try {
       await item.run();
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error(`[command:${item.id}]`, err);
+    }
+  }
+
+  /** Records `id` as the most recent command, for the next open(). */
+  private async remember(id: string): Promise<void> {
+    this.recentIds = pushRecent(this.recentIds, id);
+    try {
+      await this.api?.store.settings.upsert({ name: RECENT_SETTING, value: this.recentIds });
+    } catch (err) {
+      // A palette that cannot write its history still has to run the command.
+      // eslint-disable-next-line no-console
+      console.warn('[command-palette] could not save recent commands', err);
     }
   }
 
