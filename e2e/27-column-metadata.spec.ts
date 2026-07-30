@@ -49,7 +49,12 @@ test('a column flagged sortable:false does not sort when its header is clicked',
     { id },
   );
 
-  const th = page.locator(`#${panelDomId(id)} data-table thead th`, { hasText: 'a' });
+  // Match the label span exactly. Plain `hasText: 'a'` on the <th> also matched
+  // column "b", because a header's text includes its icon ligatures and
+  // "drag_indicator" contains an "a".
+  const th = page
+    .locator(`#${panelDomId(id)} data-table thead th`)
+    .filter({ has: page.locator('.col-label', { hasText: /^a$/ }) });
   await expect(th).toHaveClass(/no-sort/);
   await th.click();
   // No sort was recorded on the table (the click is a no-op for a locked column).

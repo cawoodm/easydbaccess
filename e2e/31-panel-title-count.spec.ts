@@ -22,7 +22,7 @@ test.describe('panel title row counts', () => {
 
     // Global search (header box) narrows to the two "gadget" rows → "(2/3)".
     const header = page.locator('app-shell header');
-    await header.locator('button.icon-btn').click();
+    await header.getByRole('button', { name: 'Search' }).click();
     const input = header.locator('input.search');
     await input.fill('gadget');
     await expect(title).toHaveText('Widgets (2/3)');

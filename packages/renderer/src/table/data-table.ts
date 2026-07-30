@@ -1310,9 +1310,15 @@ export class DataTable extends LitElement {
                   @drop=${(e: DragEvent) => this.onColDrop(e, c.field)}
                 >
                   <div class="col-head">
+                    <!-- The grip, sort arrow and funnel glyph are decoration: a
+                         Material Icons glyph is its own ligature text, so without
+                         aria-hidden a header's accessible name reads
+                         "drag_indicator a filter_list" and every column looks
+                         alike to a screen reader (and to a by-name query). -->
                     <span
                       class="col-grip mi sm"
                       title="Drag to reorder column"
+                      aria-hidden="true"
                       draggable="true"
                       @click=${(e: Event) => e.stopPropagation()}
                       @dragstart=${(e: DragEvent) => this.onColDragStart(e, c.field)}
@@ -1326,13 +1332,14 @@ export class DataTable extends LitElement {
                       >${c.label}${c.units
                         ? html`<span class="col-units"> (${c.units})</span>`
                         : ''}</span
-                    ><span class="sort-icon">${icon}</span>
+                    ><span class="sort-icon" aria-hidden="true">${icon}</span>
                     <button
                       class=${`funnel${this.filters[c.field] ? ' active' : ''}`}
                       title="Filter by value"
+                      aria-label=${`Filter ${c.label || c.field}`}
                       @click=${(e: Event) => this.openFilterPicker(e, c.field)}
                     >
-                      <span class="mi sm">filter_list</span>
+                      <span class="mi sm" aria-hidden="true">filter_list</span>
                     </button>
                   </div>
                   <span
