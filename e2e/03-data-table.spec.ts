@@ -105,9 +105,97 @@ test.describe('data-table rendering', () => {
     await expect
       .poll(async () => {
         const t = await readTable(page, id);
-        return t?.columns.filter((c: { width?: number }) => typeof c.width === 'number').length ?? 0;
+        return (
+          t?.columns.filter((c: { width?: number }) => typeof c.width === 'number').length ?? 0
+        );
       })
       .toBe(12);
+  });
+
+  test('column resize on a background (non-topmost) window still persists its width', async ({
+    page,
+  }) => {
+    // Regression: table A opens first, so it's already open (and topmost) when
+    // table B opens after it and fronts itself, leaving A in the background.
+    // Starting a column drag on A's resize handle fires a pointerdown that
+    // panel-shell fronts (capture phase — data-table's own onResizeStart
+    // stopPropagation cannot stop an ancestor's capture listener) because A
+    // is not currently topmost. Fronting stamps a front-order write, which
+    // patches the Table record, which re-triggers data-table's own store
+    // subscription — and `applyTable` used to unconditionally overwrite
+    // `this.columns` from that stale record, wiping the in-memory freeze
+    // `onResizeStart` had just built for every OTHER column, so the table
+    // never switched to `table-layout: fixed` and the drag barely moved it.
+    const fields = Array.from({ length: 12 }, (_, i) => ({ field: `col${i}` }));
+    const idA = await createTable(page, 'BackgroundWide', fields);
+    await waitForPanel(page, idA);
+    await bulkAddRows(
+      page,
+      idA,
+      Array.from({ length: 15 }, () =>
+        Object.fromEntries(fields.map((f) => [f.field, 'a fairly long cell value here'])),
+      ),
+    );
+
+    // Table B opens after A and fronts itself, so A is now the background window.
+    const idB = await createTable(page, 'ForegroundOther', [{ field: 'x' }]);
+    await waitForPanel(page, idB);
+    // Move B well clear of A's default cascade position — B only needs to
+    // OUTRANK A in z-order (it does, being newer), not sit on top of it on
+    // screen. Left in the default cascade spot, B's own resize-edge hotspots
+    // overlap A's leftmost th and steal the raw page.mouse.* events below
+    // (which, unlike .click(), skip Playwright's is-actually-clickable check).
+    await page.evaluate((d) => {
+      const el = document.getElementById(d) as HTMLElement;
+      el.style.left = '900px';
+      el.style.top = '650px';
+    }, panelDomId(idB));
+
+    const panelA = page.locator(`#${panelDomId(idA)}`);
+    const th = panelA.locator('data-table th').first(); // leftmost — always visible
+    await expect(th).toBeVisible();
+    const startWidth = (await th.boundingBox())?.width ?? 0;
+
+    const handle = th.locator('.col-resize');
+    const box = await handle.boundingBox();
+    const x = box!.x + box!.width / 2;
+    const y = box!.y + box!.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 150, y, { steps: 15 });
+    await page.mouse.up();
+
+    // The dragged column grew by ~150px and A's table switched to fixed layout,
+    // exactly like the single-window case — being in the background must not
+    // change the outcome.
+    const endWidth = (await th.boundingBox())?.width ?? 0;
+    expect(endWidth).toBeGreaterThan(startWidth + 120);
+
+    const layout = await panelA
+      .locator('data-table')
+      .evaluate(
+        (el) =>
+          getComputedStyle(
+            (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelector('table')!,
+          ).tableLayout,
+      );
+    expect(layout).toBe('fixed');
+
+    // Every column on A was frozen with a width, and the dragged one persisted.
+    await expect
+      .poll(async () => {
+        const t = await readTable(page, idA);
+        return (
+          t?.columns.filter((c: { width?: number }) => typeof c.width === 'number').length ?? 0
+        );
+      })
+      .toBe(12);
+    await expect
+      .poll(async () => {
+        const t = await readTable(page, idA);
+        return t?.columns.find((c: { field: string }) => c.field === 'col0')?.width ?? 0;
+      })
+      .toBeGreaterThan(startWidth + 120);
   });
 
   test('any column can be dragged down to 10px, and chopped text ellipses', async ({ page }) => {
@@ -166,14 +254,12 @@ test.describe('data-table rendering', () => {
     expect(new Set(heights).size).toBe(1);
 
     // An editable cell is an <input>, which clips flat unless it ellipses itself.
-    const textOverflow = await panel
-      .locator('data-table')
-      .evaluate((el) => {
-        const input = (
-          el as HTMLElement & { shadowRoot: ShadowRoot }
-        ).shadowRoot.querySelector('tbody td input');
-        return input ? getComputedStyle(input).textOverflow : null;
-      });
+    const textOverflow = await panel.locator('data-table').evaluate((el) => {
+      const input = (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelector(
+        'tbody td input',
+      );
+      return input ? getComputedStyle(input).textOverflow : null;
+    });
     expect(textOverflow).toBe('ellipsis');
 
     // And it's reversible — a 10px column can be dragged back open.

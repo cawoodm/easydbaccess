@@ -330,7 +330,8 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
         if (from === 'normalized') normalRect = readRect();
         // A smallified panel may have been dragged; keep its live x/y but the
         // pre-collapse w/h captured at smallify time.
-        else if (from === 'smallified') normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
+        else if (from === 'smallified')
+          normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
         // display:none instead of jsPanel's left:-9999 parking — the managers'
         // "-9000 sentinel" guards become dead code but stay harmless.
         el.style.display = 'none';
@@ -341,7 +342,8 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
       }
       case 'maximized':
         if (from === 'normalized') normalRect = readRect();
-        else if (from === 'smallified') normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
+        else if (from === 'smallified')
+          normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
         enterMaximized();
         break;
       case 'smallified':
@@ -349,7 +351,8 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
         el.style.height = `${hdr.offsetHeight}px`;
         break;
       case 'normalized':
-        if (from === 'smallified') normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
+        if (from === 'smallified')
+          normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
         applyRect(normalRect);
         break;
       case 'closed':
@@ -465,7 +468,9 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
       let moved = false;
       const onMove = (ev: PointerEvent): void => {
         moved = true;
-        applyRect(resizeRect(startRect, edge, ev.clientX - sx, ev.clientY - sy, scale, MIN_W, MIN_H));
+        applyRect(
+          resizeRect(startRect, edge, ev.clientX - sx, ev.clientY - sy, scale, MIN_W, MIN_H),
+        );
       };
       const onUp = (): void => {
         zone.removeEventListener('pointermove', onMove);

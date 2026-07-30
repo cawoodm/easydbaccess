@@ -25,6 +25,7 @@ import { getContext, type AppContext } from '../app-context.js';
 import { openTableInfoDialog } from '../dialogs/table-info-dialog.js';
 import { initPanZoom, type PanZoomHandle } from './panzoom.js';
 import { createPanel, type PanelShellEl, type ShellViewport } from './panel-shell/panel-shell.js';
+import { startMaximizedRefit } from './refit-panels.js';
 import { queueGeometryWrite } from './geometry-writes.js';
 import { countSuffix, VISIBLE_COUNT_EVENT, type VisibleCountDetail } from './panel-title.js';
 import { sanitizeGeometry, byAscendingZ } from './geometry.js';
@@ -207,6 +208,12 @@ export async function initWindowManager(): Promise<void> {
       if (header) ro.observe(header);
       if (footer) ro.observe(footer);
     }
+    // Transitional: covers the still-jsPanel view windows only — a shell
+    // panel re-fits itself (panel-shell.ts's enterMaximized/ResizeObserver).
+    // View windows don't get that (Task 6 migrates them onto the shell), so
+    // without this a maximized view keeps its old box across a browser
+    // resize or header-wrap. Call and module go away once Tasks 6/8 land.
+    startMaximizedRefit(viewport);
   }
 
   bridgeJsPanelZOrder();

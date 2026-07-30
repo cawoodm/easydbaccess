@@ -595,7 +595,17 @@ export class DataTable extends LitElement {
   }
 
   private applyTable(table: Table) {
-    this.columns = table.columns;
+    // Don't stomp on columns while a resize is live (same precedent as the
+    // filter guard below): `onResizeStart` (see freezeColumnWidths) snapshots
+    // every visible column's width into `this.columns` so the grid can switch
+    // to `table-layout: fixed`, but that's purely in-memory until `onUp`
+    // persists it. A store write can land mid-drag from something else
+    // entirely — e.g. this panel getting fronted (a pointerdown anywhere in
+    // it, including the resize handle, bumps its z-order — see
+    // jspanel-manager.ts's onfronted) — and re-applying the OLDER `table`
+    // record here would overwrite the freeze with widthless columns, so the
+    // table never flips to fixed and the drag barely moves anything.
+    if (this.resizing == null) this.columns = table.columns;
     this.sortColumn = table.sortColumn ?? null;
     this.sortDir = table.sortColumn ? (table.sortAsc === false ? 'desc' : 'asc') : null;
     // Don't stomp on filters the user is mid-editing (a debounced save is

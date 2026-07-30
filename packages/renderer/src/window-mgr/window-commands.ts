@@ -36,7 +36,8 @@ type PanelEl = HTMLElement & {
 function allPanels(): PanelEl[] {
   const getLegacyPanels = (jsPanel as unknown as { getPanels?: () => ArrayLike<PanelEl> })
     .getPanels;
-  const legacy = typeof getLegacyPanels === 'function' ? Array.from(getLegacyPanels.call(jsPanel) ?? []) : [];
+  const legacy =
+    typeof getLegacyPanels === 'function' ? Array.from(getLegacyPanels.call(jsPanel) ?? []) : [];
   const shell = getShellPanels() as unknown as PanelEl[];
   return [...legacy, ...shell].sort(
     (a, b) => Number(b.style.zIndex || 0) - Number(a.style.zIndex || 0),
