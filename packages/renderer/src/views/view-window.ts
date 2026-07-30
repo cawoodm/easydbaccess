@@ -398,7 +398,13 @@ export class ViewWindow extends LitElement {
 
   private recompute() {
     if (!this.instance) return;
-    let rows = viewRows(this.allRows, this.instance);
+    // The view's OWN data: the instance's stored filters and pill filters applied
+    // to the table's rows, sorted, but not yet narrowed by a live search or the
+    // display limit. This is the denominator of the window title — the source
+    // table's row count says nothing about a view that deliberately shows a
+    // slice of it.
+    const viewData = viewRows(this.allRows, this.instance);
+    let rows = viewData;
     // Free-text search across field values — supports `field:value` (with
     // !/^/comma-OR/NULL), boolean AND/OR, and the phrase→AND→OR fallback,
     // matching the table window. The view's own search AND the app-wide global
@@ -412,10 +418,11 @@ export class ViewWindow extends LitElement {
     if (lim > 0 && rows.length > lim) rows = rows.slice(0, lim);
     this.rows = rows;
     // Template-ON: this component owns the visible set, so it reports the count
-    // for the view window's title. Template-OFF renders <data-table>, which
-    // emits its own count (keyed by the same view-instance id) — so we skip
-    // here to avoid two producers fighting over the title.
-    if (this.templateOn) emitVisibleCount(this.viewInstanceId, rows.length, this.allRows.length);
+    // for the view window's title — shown / in this view, NOT / in the table.
+    // Template-OFF renders <data-table>, which emits its own count (keyed by the
+    // same view-instance id) against the grid's own rows — so we skip here to
+    // avoid two producers fighting over the title.
+    if (this.templateOn) emitVisibleCount(this.viewInstanceId, rows.length, viewData.length);
   }
 
   /**
