@@ -562,6 +562,13 @@ export interface UiRegistry {
    * `data` object) for renderers that need neighbouring fields — for
    * example the built-in `script` renderer. Renderers that only care
    * about a single value can ignore it.
+   *
+   * On a scripted column the element also receives `rawValue`: the cell's
+   * STORED value, while `value` carries what the script computed. A renderer
+   * with an editor should display `value` and edit `rawValue` — the script
+   * result is derived, so an edit has to go back to the stored cell. A
+   * renderer that ignores `rawValue` keeps editing `value`, which on a scripted
+   * column means its edits are dropped.
    */
   registerCellRenderer(name: string, tag: string): Unregister;
   registerRowRenderer(viewName: string, tag: string): Unregister;

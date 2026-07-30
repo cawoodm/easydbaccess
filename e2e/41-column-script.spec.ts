@@ -159,3 +159,39 @@ test('the renderer dropdown no longer offers a dedicated "script" renderer', asy
   // Still-supported renderers remain listed.
   await expect(rendererSelect.locator('option[value="link"]')).toHaveCount(1);
 });
+
+test('the pencil on a scripted link edits the stored value, not the computed URL', async ({
+  page,
+}) => {
+  // The script expands the cell's OWN stored value, so the anchor shows a full
+  // URL while the thing to edit is the short form behind it.
+  const id = await createTable(page, 'Repos', [
+    { field: 'name' },
+    {
+      field: 'url',
+      renderer: 'link',
+      script: 'function render(row) { return "https://github.com/" + row.url; }',
+    },
+  ]);
+  await waitForPanel(page, id);
+  await addRow(page, id, { name: 'easyDBAccess', url: 'cawoodm/easydbaccess' });
+
+  const cell = cellsOf(page, id).nth(1);
+  await expect(cell.locator('a')).toHaveAttribute(
+    'href',
+    'https://github.com/cawoodm/easydbaccess',
+  );
+
+  // The editor opens on the stored value — it used to open on the computed URL
+  // and then drop the edit, because a scripted cell had no change handler.
+  await cell.locator('button[title="Edit"]').click();
+  const input = cell.locator('input');
+  await expect(input).toHaveValue('cawoodm/easydbaccess');
+
+  await input.fill('torvalds/linux');
+  await input.press('Enter');
+
+  // The write landed on the stored cell, and the script re-ran over it.
+  await expect(cell.locator('a')).toHaveAttribute('href', 'https://github.com/torvalds/linux');
+  await expect.poll(async () => (await readRows(page, id))[0]?.data.url).toBe('torvalds/linux');
+});

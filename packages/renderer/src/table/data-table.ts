@@ -730,9 +730,20 @@ export class DataTable extends LitElement {
 
   /**
    * A cell whose column carries a script: the script's return value is what the
-   * renderer receives. The result is derived from the row, so it is always
-   * read-only — there is nowhere to write an edit back to. A failing script
-   * shows an inline chip (title = the message) instead of taking the table down.
+   * renderer receives as `value`, so a `link` column can point at a computed
+   * URL. A failing script shows an inline chip (title = the message) instead of
+   * taking the table down.
+   *
+   * `readonly` stays true — the computed value itself cannot be edited — but the
+   * renderer also gets `rawValue`, the STORED cell, and its `change` event now
+   * writes there. A renderer that offers an editor can therefore edit the value
+   * the script works FROM: the link renderer's pencil used to open the computed
+   * URL and then throw the edit away, because this branch wired no `change`
+   * handler at all. Renderers that honour `readonly` (boolean, date, datetime)
+   * are unaffected and stay display-only.
+   *
+   * A scripted column with no renderer stays plain read-only text: there is no
+   * editor to point at the stored value.
    */
   private renderScriptedCell(row: Row, col: ColumnSpec) {
     const run = runColumnScript(col.script, row.data);
@@ -747,9 +758,14 @@ export class DataTable extends LitElement {
     const tag = unsafeStatic(customTag);
     return staticHtml`<${tag}
       .value=${run.value ?? ''}
+      .rawValue=${row.data[col.field] ?? ''}
       .column=${col}
       .row=${row.data}
       .readonly=${true}
+      @change=${this.readOnly
+        ? undefined
+        : (e: Event) =>
+            this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
     ></${tag}>`;
   }
 
