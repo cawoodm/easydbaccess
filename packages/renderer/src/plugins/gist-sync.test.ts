@@ -5,7 +5,9 @@ import { fetchGistFileContent, offerPrune } from './gist-sync.js';
 // offerPrune reaches the window manager through a dynamic import; the real module
 // registers custom elements and cannot load in this Node environment.
 const deleteTable = vi.fn();
-vi.mock('../window-mgr/jspanel-manager.js', () => ({ deleteTable: (id: string) => deleteTable(id) }));
+vi.mock('../window-mgr/jspanel-manager.js', () => ({
+  deleteTable: (id: string) => deleteTable(id),
+}));
 
 describe('fetchGistFileContent', () => {
   it('returns inline content when not truncated, without fetching', async () => {
@@ -20,7 +22,11 @@ describe('fetchGistFileContent', () => {
       async () => ({ ok: true, text: async () => '{"full":true}' }) as unknown as Response,
     );
     const out = await fetchGistFileContent(
-      { content: '{"trunc', truncated: true, raw_url: 'https://gist.githubusercontent.com/x/raw/y' },
+      {
+        content: '{"trunc',
+        truncated: true,
+        raw_url: 'https://gist.githubusercontent.com/x/raw/y',
+      },
       doFetch,
     );
     expect(out).toBe('{"full":true}');
@@ -28,9 +34,9 @@ describe('fetchGistFileContent', () => {
   });
 
   it('throws when truncated but no raw_url is provided', async () => {
-    await expect(
-      fetchGistFileContent({ content: 'x', truncated: true }, vi.fn()),
-    ).rejects.toThrow(/raw_url/);
+    await expect(fetchGistFileContent({ content: 'x', truncated: true }, vi.fn())).rejects.toThrow(
+      /raw_url/,
+    );
   });
 
   it('throws when the raw fetch is not ok', async () => {
@@ -50,7 +56,8 @@ describe('offerPrune', () => {
    *  two dialog surfaces offerPrune uses. */
   function fakeApi(tables: Array<Partial<Table>>, views: Array<Partial<ViewInstance>>) {
     const removedViews: string[] = [];
-    const confirm = vi.fn(async () => true);
+    // Parameters declared so the assertions can read back the message argument.
+    const confirm = vi.fn(async (_message: string, _title?: string) => true);
     return {
       removedViews,
       confirm,

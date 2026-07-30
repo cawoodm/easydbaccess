@@ -26,7 +26,8 @@ function groupRank(g: string): number {
 
 function renderIcon(icon: string | undefined) {
   if (!icon) return html`<span class="mi sm">chevron_right</span>`;
-  if (icon.trimStart().startsWith('<svg')) return html`<span class="cmd-svg">${unsafeSVG(icon)}</span>`;
+  if (icon.trimStart().startsWith('<svg'))
+    return html`<span class="cmd-svg">${unsafeSVG(icon)}</span>`;
   return html`<span class="mi sm">${icon}</span>`;
 }
 
@@ -36,7 +37,7 @@ function renderIcon(icon: string | undefined) {
  * any plugin commands), the existing header/footer buttons (so New Table /
  * Import / Export / Gist / Sync / Settings are all reachable), and a "Go to
  * <table>" entry per table in the workspace. Type to filter, ↑/↓ to move,
- * Enter to run, Esc to close.
+ * Enter to run, Esc or a click outside to close.
  */
 @customElement('command-palette-dialog')
 export class CommandPaletteDialog extends LitElement {
@@ -246,6 +247,21 @@ export class CommandPaletteDialog extends LitElement {
     // Escape is handled natively by <dialog> (cancel → close).
   }
 
+  /**
+   * Close on a backdrop click. A modal `<dialog>` reports such a click as a
+   * click on the dialog element itself, so the hit test compares the pointer
+   * against the dialog's box instead of trusting `event.target`.
+   */
+  private onDialogClick = (e: MouseEvent): void => {
+    // A keyboard-synthesized click (detail 0) carries no coordinates, which
+    // would read as (0,0) — outside the box — and close the palette.
+    if (e.detail === 0 || !this.dialogEl) return;
+    const r = this.dialogEl.getBoundingClientRect();
+    const inside =
+      e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    if (!inside) this.close();
+  };
+
   private async execute(item: PaletteItem): Promise<void> {
     this.close();
     try {
@@ -260,7 +276,11 @@ export class CommandPaletteDialog extends LitElement {
     const items = this.filtered;
     let lastGroup = '';
     return html`
-      <dialog @keydown=${this.onKeydown} @close=${() => (this.search = '')}>
+      <dialog
+        @keydown=${this.onKeydown}
+        @click=${this.onDialogClick}
+        @close=${() => (this.search = '')}
+      >
         <div class="search-row">
           <span class="mi">search</span>
           <input
