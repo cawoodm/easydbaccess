@@ -151,6 +151,15 @@ test.describe('data-table rendering', () => {
       el.style.top = '650px';
     }, panelDomId(idB));
 
+    // Pin the precondition: A must actually be behind B in z-order, or this
+    // test silently degrades into the single-window case and stops testing
+    // anything.
+    const [zA, zB] = await Promise.all([
+      page.evaluate((d) => Number(document.getElementById(d)!.style.zIndex), panelDomId(idA)),
+      page.evaluate((d) => Number(document.getElementById(d)!.style.zIndex), panelDomId(idB)),
+    ]);
+    expect(zA).toBeLessThan(zB);
+
     const panelA = page.locator(`#${panelDomId(idA)}`);
     const th = panelA.locator('data-table th').first(); // leftmost — always visible
     await expect(th).toBeVisible();

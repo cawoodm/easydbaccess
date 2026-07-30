@@ -440,6 +440,14 @@ export class DataTable extends LitElement {
     this.unsubscribe?.();
     this.tableSubUnsub?.();
     this.viewSubUnsub?.();
+    // A live column resize (see onResizeStart) has its own window-level
+    // pointermove/pointerup/pointercancel listeners, but those only fire on
+    // an actual pointer event — if the grid unmounts mid-drag (table
+    // deleted, panel closed) none of them ever will, so clear the flag here
+    // too. Otherwise it would stay set forever on THIS (now detached)
+    // instance, which is harmless since applyTable never runs again on a
+    // disconnected element, but leaves no ambiguity either way.
+    this.resizing = null;
   }
 
   private onScroll = () => {
@@ -1120,6 +1128,7 @@ export class DataTable extends LitElement {
     const onUp = async () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
       const fld = this.resizing?.field;
       this.resizing = null;
       if (!fld) return;
@@ -1145,6 +1154,12 @@ export class DataTable extends LitElement {
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    // A touch drag the browser takes over (`.col-resize` sets no
+    // touch-action) — or any other pointer interruption — fires
+    // `pointercancel` with NO following `pointerup`. Without this, `resizing`
+    // latches forever and the `applyTable` guard above then drops every
+    // store→grid column update for the rest of this element's life.
+    window.addEventListener('pointercancel', onUp);
   }
 
   private onColDragStart(e: DragEvent, field: string) {
