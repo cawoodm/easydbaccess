@@ -3,12 +3,9 @@
  *
  * These act on *every* open panel — table panels and view-instance panels
  * alike — so a single command affects the whole workspace regardless of
- * which manager opened each window. Table windows (and other panel-shell
- * consumers, e.g. the html-preview popup) run on the in-repo panel shell and
- * register in ITS OWN registry; view windows still run on jsPanel (Task 6
- * migrates them). So `allPanels()` merges both registries — read separately —
- * and re-sorts the combined list by live DOM z-index, since each registry's
- * own ordering is only correct within its own kind.
+ * which manager opened each window. Both kinds now run on the in-repo panel
+ * shell and register in its single registry (`getPanels()`), which already
+ * returns panels highest-z-first.
  *
  * Cascade/tile position panels within the *currently visible* region of the
  * pan/zoom canvas: geometry is written in viewport-local coordinates derived
@@ -16,32 +13,13 @@
  * user is actually looking. These set inline geometry directly (a transient
  * view action) and intentionally don't persist to the store.
  */
-// @ts-expect-error — jspanel4 ships no types
-import { jsPanel } from 'jspanel4/es6module/jspanel.js';
 import { currentPanZoom } from './jspanel-manager.js';
-import { getPanels as getShellPanels } from './panel-shell/panel-shell.js';
+import { getPanels, type PanelShellEl } from './panel-shell/panel-shell.js';
 import { eligibleForArrange, tileSlots } from './tile-layout.js';
 
-type PanelEl = HTMLElement & {
-  close?: () => void;
-  minimize?: () => void;
-  maximize?: () => void;
-  normalize?: () => void;
-  // Mirrors jspanel-manager.ts's own `Panel.status` — jsPanel keeps the live
-  // status on the panel instance, not a DOM attribute.
-  status: 'normalized' | 'minimized' | 'maximized' | 'smallified' | 'closed';
-};
-
-/** Every open panel (both registries), newest-on-top first by live z-index. */
-function allPanels(): PanelEl[] {
-  const getLegacyPanels = (jsPanel as unknown as { getPanels?: () => ArrayLike<PanelEl> })
-    .getPanels;
-  const legacy =
-    typeof getLegacyPanels === 'function' ? Array.from(getLegacyPanels.call(jsPanel) ?? []) : [];
-  const shell = getShellPanels() as unknown as PanelEl[];
-  return [...legacy, ...shell].sort(
-    (a, b) => Number(b.style.zIndex || 0) - Number(a.style.zIndex || 0),
-  );
+/** Every open panel, newest-on-top first. */
+function allPanels(): PanelShellEl[] {
+  return getPanels();
 }
 
 export function closeAllWindows(): void {
@@ -72,7 +50,7 @@ function visibleRect(): { x: number; y: number; w: number; h: number } {
   return { x: -tx / scale, y: -ty / scale, w: cw / scale, h: ch / scale };
 }
 
-function setGeom(p: PanelEl, x: number, y: number, w: number, h: number): void {
+function setGeom(p: PanelShellEl, x: number, y: number, w: number, h: number): void {
   p.style.left = `${Math.round(x)}px`;
   p.style.top = `${Math.round(y)}px`;
   p.style.width = `${Math.round(w)}px`;
