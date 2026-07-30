@@ -277,18 +277,21 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
     }
     switch (state.status) {
       case 'minimized': {
-        if (from === 'normalized' || from === 'smallified') normalRect = readRect();
+        if (from === 'normalized') normalRect = readRect();
+        // A smallified panel may have been dragged; keep its live x/y but the
+        // pre-collapse w/h captured at smallify time.
+        else if (from === 'smallified') normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
         // display:none instead of jsPanel's left:-9999 parking — the managers'
         // "-9000 sentinel" guards become dead code but stay harmless.
         el.style.display = 'none';
-        if (from === 'maximized') exitMaximized();
         const dock = opts.minimizeTo ? document.querySelector(opts.minimizeTo) : null;
         bar = makeBar();
         (dock ?? opts.container).append(bar);
         break;
       }
       case 'maximized':
-        if (from === 'normalized' || from === 'smallified') normalRect = readRect();
+        if (from === 'normalized') normalRect = readRect();
+        else if (from === 'smallified') normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
         enterMaximized();
         break;
       case 'smallified':
@@ -296,6 +299,7 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
         el.style.height = `${hdr.offsetHeight}px`;
         break;
       case 'normalized':
+        if (from === 'smallified') normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
         applyRect(normalRect);
         break;
       case 'closed':
