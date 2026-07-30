@@ -54,6 +54,15 @@ test('a rate-limited import keeps and displays the rows that loaded before the 4
   await importDialog.getByTestId('import-format').selectOption('datasette');
   await importDialog.getByRole('button', { name: 'Import' }).click();
 
+  // Since v0.0.208 a stalled page ASKS instead of giving up silently: wait and
+  // resume from that page, or cancel and keep what arrived. Cancel is this
+  // test's subject — the rows already fetched must survive it.
+  // `button.choice` is the option list — the dialog also has its own dismiss
+  // Cancel, so an unscoped name match hits two buttons.
+  const paused = page.locator('host-dialogs dialog', { hasText: 'Import paused' });
+  await expect(paused).toBeVisible();
+  await paused.locator('button.choice', { hasText: 'Cancel' }).click();
+
   // The two rows from page 1 land locally despite the page-2 rate limit — the
   // table is NOT left empty.
   await expect
