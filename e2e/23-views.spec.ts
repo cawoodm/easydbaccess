@@ -929,4 +929,57 @@ test.describe('views: sort, field search, standard templates', () => {
     await expect(vw.locator('input[type="checkbox"].eda-input')).toHaveCount(1);
     await expect(vw).toContainText('Ship it');
   });
+
+  test('copying a view picks up columns added to the table after it was created', async ({
+    page,
+    workspaceId,
+  }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ title: 'Hello', url: 'https://x/1' }]);
+    await useTemplate(page, id, 'RSS Feed'); // snapshots visibleColumns = [title, url]
+
+    // Add a new column to the table AFTER the view already exists.
+    await page.evaluate(async (tid) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__easydb.store;
+      const t = await store.tables.findOne(tid);
+      await store.tables.patch(tid, {
+        columns: [...t.columns, { field: 'author', label: 'author', type: 'string' }],
+        updatedAt: Date.now(),
+      });
+    }, id);
+
+    // Reopen the Views manager and Copy the instance.
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    const dlg = page.locator('views-dialog dialog');
+    await expect(dlg).toBeVisible();
+    await dlg
+      .locator('ul.list li', { hasText: 'RSS Feed — Feed' })
+      .getByRole('button', { name: 'Copy' })
+      .click();
+
+    // The copy carries the NEW column in its visibleColumns; the original — a
+    // pre-existing snapshot — does not.
+    await expect
+      .poll(() =>
+        page.evaluate(async (ws) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const store = (window as any).__easydb.store;
+          const insts = (await store.viewInstances.find()).filter(
+            (v: { workspaceId: string }) => v.workspaceId === ws,
+          );
+          const copy = insts.find((v: { name: string }) => v.name.endsWith('copy'));
+          const orig = insts.find((v: { name: string }) => v.name === 'RSS Feed — Feed');
+          return {
+            copyHasAuthor: copy ? copy.visibleColumns.includes('author') : null,
+            origHasAuthor: orig ? orig.visibleColumns.includes('author') : null,
+          };
+        }, workspaceId),
+      )
+      .toEqual({ copyHasAuthor: true, origHasAuthor: false });
+  });
 });
