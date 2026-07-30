@@ -18,6 +18,25 @@ function main() {
   $pagesRepo = "C:\projects\Marc\cawoodm.github.io"
   $targetDir = Join-Path $pagesRepo $Target
 
+  # GitHub Pages serves only master of the Pages repo, whatever branch we publish
+  # FROM. Switch back if a previous run left it elsewhere — a detached HEAD (from
+  # a conflicted pull) reports as "HEAD", and a commit on it would look
+  # successful but publish nothing. Done before the build so a failure here does
+  # not clear the slot first.
+  $pagesBranch = (git -C $pagesRepo rev-parse --abbrev-ref HEAD).Trim()
+  if ($pagesBranch -ne "master") {
+    Write-Host "Pages repo was on '$pagesBranch' - switching to master" -ForegroundColor Yellow
+    # A half-done rebase or merge blocks the switch. The repo holds generated
+    # build output only, so dropping that state (and any local edit, hence
+    # --force) loses nothing that this run does not rewrite anyway.
+    foreach ($state in ".git\rebase-merge", ".git\rebase-apply") {
+      if (Test-Path (Join-Path $pagesRepo $state)) { git -C $pagesRepo rebase --abort }
+    }
+    if (Test-Path (Join-Path $pagesRepo ".git\MERGE_HEAD")) { git -C $pagesRepo merge --abort }
+    git -C $pagesRepo checkout --force master
+    if ($LASTEXITCODE -ne 0) { throw "Cannot switch Pages repo to master (it is on '$pagesBranch')" }
+  }
+
   Push-Location $SrcDir
   $ver = (Get-Content -Raw .\package.json | ConvertFrom-Json).version
   $branch = (git rev-parse --abbrev-ref HEAD).Trim()
@@ -39,7 +58,9 @@ function main() {
   Write-Host "***************************************************" -ForegroundColor Cyan
   Write-Host "        $Target v$($ver) [$branch]: $msg" -ForegroundColor Cyan
   Write-Host "***************************************************" -ForegroundColor Cyan
-  git add . && git commit -m "easyDBAccess $Target $($ver) [$branch]: $msg" && git push
+  # Explicit refspec: the deploy lands on master even if this repo's HEAD moved,
+  # and it never follows a push.default that could target another branch.
+  git add . && git commit -m "easyDBAccess $Target $($ver) [$branch]: $msg" && git push origin master
   Pop-Location
 
   Pop-Location

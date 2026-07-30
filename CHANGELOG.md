@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 30 Jul 2026
+
+### Features
+
+- ✨ A view now has a Copy button: the copy picks up columns added to the table since, and keeps template, filters and sort (v0.0.196)
+
+### Bugs
+
+- 🪲 Publish now switches the GitHub Pages repo to master first, so a deploy from a detached HEAD cannot silently reach nobody (v0.0.197)
+
 ## 29 Jul 2026
 
 ### Features

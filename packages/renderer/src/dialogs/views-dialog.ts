@@ -296,6 +296,29 @@ export class ViewsDialog extends LitElement {
     await this.refresh();
   }
 
+  /**
+   * Duplicate a view, RE-SNAPSHOTTING the table's current columns. A view's
+   * `visibleColumns` is frozen at creation, so columns added to the table later
+   * never appear in it. Copying picks up the current schema (new columns
+   * included) while keeping the template, token mapping, filters, sort and other
+   * options. Lands closed in the list so the user can open or tweak it. */
+  private async copyInstance(inst: ViewInstance): Promise<void> {
+    const ctx = await getContext();
+    // Current, non-hidden columns — same rule new views use (see saveInstance).
+    const visibleColumns = this.columns.filter((c) => !c.hidden).map((c) => c.field);
+    const copy: ViewInstance = {
+      ...inst,
+      id: uuid(),
+      name: `${inst.name} copy`,
+      visibleColumns,
+      open: false, // don't auto-open; it shows in the list to open/edit
+      windowGeometry: undefined, // fresh position, not stacked on the original
+      updatedAt: Date.now(),
+    };
+    await ctx.store.viewInstances.insert(copy);
+    await this.refresh();
+  }
+
   // -- templates --------------------------------------------------------------
 
   private newTemplate(): void {
@@ -601,6 +624,14 @@ export class ViewsDialog extends LitElement {
                 </button>
                 <button type="button" class="mini" @click=${() => void this.editInstance(v)}>
                   Edit
+                </button>
+                <button
+                  type="button"
+                  class="mini"
+                  title="Duplicate this view, picking up columns added to the table since"
+                  @click=${() => void this.copyInstance(v)}
+                >
+                  Copy
                 </button>
                 <button
                   type="button"
