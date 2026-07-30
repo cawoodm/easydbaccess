@@ -348,20 +348,21 @@ export class ViewsDialog extends LitElement {
     this.mode = 'template';
   }
 
+  /**
+   * Delete a template after a confirm. EVERY template can go, built-ins
+   * included: a workspace that does not want the shipped Gallery or RSS should be
+   * able to be rid of it. The seeder respects that — it only ever seeds a slug it
+   * has not seeded in this workspace before — so a deleted built-in does not come
+   * back on the next load, which the confirm says out loud.
+   */
   private async deleteTemplate(t: ViewTemplate): Promise<void> {
     const ctx = await getContext();
-    // A built-in is part of the app, not user data. The list hides its Delete
-    // button, so this only catches a call from elsewhere (a plugin, a test).
-    if (t.builtin) {
-      await ctx.api.ui.dialogs.alert(
-        `"${t.name}" is a built-in template and cannot be deleted. Use Copy to make your own version.`,
-        'Built-in template',
-      );
-      return;
-    }
     const ok = await ctx.api.ui.dialogs.confirm(
-      `Delete the template "${t.name}"? Views already created from it keep working.`,
-      'Delete template',
+      t.builtin
+        ? `Delete the built-in template "${t.name}"? It will not be seeded again in this ` +
+            `workspace. Views already created from it keep working.`
+        : `Delete the template "${t.name}"? Views already created from it keep working.`,
+      t.builtin ? 'Delete built-in template' : 'Delete template',
     );
     if (!ok) return;
     await ctx.store.viewTemplates.remove(t.id);
@@ -680,16 +681,16 @@ export class ViewsDialog extends LitElement {
                 <button type="button" class="mini" @click=${() => this.copyTemplate(t)}>
                   Copy
                 </button>
-                ${t.builtin
-                  ? nothing
-                  : html`<button
-                      type="button"
-                      class="mini danger"
-                      title="Delete this template"
-                      @click=${() => void this.deleteTemplate(t)}
-                    >
-                      Delete
-                    </button>`}
+                <button
+                  type="button"
+                  class="mini danger"
+                  title=${t.builtin
+                    ? 'Delete this built-in template (it will not be seeded again)'
+                    : 'Delete this template'}
+                  @click=${() => void this.deleteTemplate(t)}
+                >
+                  Delete
+                </button>
               </li>`,
           )}
         </ul>

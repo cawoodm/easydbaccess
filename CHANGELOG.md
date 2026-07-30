@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ Any view template can be deleted, built-ins included — the confirm says a deleted built-in is not seeded again (v0.0.224)
 - ✨ Gallery cards are clickable: `$LINK` opens the row's URL in a new tab (v0.0.223)
 - ✨ A settings field can carry help behind an (i) icon; the GitHub token links to the page that creates one (v0.0.222)
 - ✨ The column editor has a "Guess renderers" button: it picks a renderer per column from the values, then you press Save (v0.0.220)

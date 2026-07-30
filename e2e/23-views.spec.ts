@@ -1040,7 +1040,47 @@ test.describe('views: sort, field search, standard templates', () => {
     await expect(vw).toHaveCount(0);
   });
 
-  test('a built-in template has no Delete button, its copy does', async ({ page }) => {
+  test('a built-in template can be deleted after a confirm, and stays deleted', async ({
+    page,
+  }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }]);
+    await waitForPanel(page, id);
+    const openManager = async () => {
+      await page
+        .locator(`#${panelDomId(id)} panel-footer`)
+        .getByRole('button', { name: /Views/ })
+        .click();
+      const dlg = page.locator('views-dialog dialog');
+      await expect(dlg).toBeVisible();
+      return dlg;
+    };
+    let dlg = await openManager();
+
+    const rss = dlg.locator('ul.list li', { hasText: 'RSS Feed' }).first();
+    await expect(rss.locator('.badge')).toHaveText('built-in');
+
+    // The confirm names it as built-in and says it will not be seeded again.
+    await rss.getByRole('button', { name: 'Delete' }).click();
+    const dialogs = page.locator('host-dialogs');
+    await expect(dialogs.getByText(/built-in template "RSS Feed"/)).toBeVisible();
+    await expect(dialogs.getByText(/not be seeded again/)).toBeVisible();
+    await dialogs.getByRole('button', { name: 'Yes', exact: true }).click();
+    await expect(dlg.locator('ul.list li', { hasText: 'RSS Feed' })).toHaveCount(0);
+
+    // A reload does not bring it back: the seeder only seeds a slug it has never
+    // seeded in this workspace.
+    await page.reload();
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => Boolean((window as any).__easydb),
+    );
+    await waitForPanel(page, id);
+    dlg = await openManager();
+    await expect(dlg.locator('ul.list li', { hasText: 'Gallery' })).toBeVisible();
+    await expect(dlg.locator('ul.list li', { hasText: 'RSS Feed' })).toHaveCount(0);
+  });
+
+  test('declining the confirm keeps the template', async ({ page }) => {
     const id = await createTable(page, 'Feed', [{ field: 'title' }]);
     await waitForPanel(page, id);
     await page
@@ -1048,17 +1088,9 @@ test.describe('views: sort, field search, standard templates', () => {
       .getByRole('button', { name: /Views/ })
       .click();
     const dlg = page.locator('views-dialog dialog');
-    await expect(dlg).toBeVisible();
-
     const rss = dlg.locator('ul.list li', { hasText: 'RSS Feed' }).first();
-    await expect(rss.locator('.badge')).toHaveText('built-in');
-    await expect(rss.getByRole('button', { name: 'Delete' })).toHaveCount(0);
-
-    // Copy makes a plain user template, which stays deletable.
-    await rss.getByRole('button', { name: 'Copy' }).click();
-    await dlg.getByRole('button', { name: 'Save', exact: true }).click();
-    const copy = dlg.locator('ul.list li', { hasText: 'RSS Feed copy' });
-    await expect(copy.locator('.badge')).toHaveCount(0);
-    await expect(copy.getByRole('button', { name: 'Delete' })).toHaveCount(1);
+    await rss.getByRole('button', { name: 'Delete' }).click();
+    await page.locator('host-dialogs').getByRole('button', { name: 'No', exact: true }).click();
+    await expect(dlg.locator('ul.list li', { hasText: 'RSS Feed' })).toHaveCount(1);
   });
 });
