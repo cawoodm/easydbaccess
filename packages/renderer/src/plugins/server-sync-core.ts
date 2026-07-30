@@ -26,7 +26,7 @@ export async function loadServerUrl(api: HostApi): Promise<string | null> {
 }
 
 export async function saveServerUrl(api: HostApi, url: string): Promise<void> {
-  await api.store.settings.upsert({ key: URL_KEY, value: url.replace(/\/+$/, '') });
+  await api.store.settings.upsert({ name: URL_KEY, value: url.replace(/\/+$/, '') });
 }
 
 export async function loadEtag(api: HostApi, wsId: string): Promise<string | null> {
@@ -36,15 +36,13 @@ export async function loadEtag(api: HostApi, wsId: string): Promise<string | nul
 }
 
 export async function saveEtag(api: HostApi, wsId: string, etag: string): Promise<void> {
-  await api.store.settings.upsert({ key: etagKey(wsId), value: etag });
+  await api.store.settings.upsert({ name: etagKey(wsId), value: etag });
 }
 
 export function stripEtag(value: string | null): string | null {
   if (!value) return null;
   const trimmed = value.trim();
-  return trimmed.startsWith('"') && trimmed.endsWith('"')
-    ? trimmed.slice(1, -1)
-    : trimmed;
+  return trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed;
 }
 
 /**
@@ -72,11 +70,7 @@ export function canonicalize(body: string): string {
  *
  * Returns the number of tables imported.
  */
-export async function replaceWorkspace(
-  api: HostApi,
-  wsId: string,
-  dump: unknown,
-): Promise<number> {
+export async function replaceWorkspace(api: HostApi, wsId: string, dump: unknown): Promise<number> {
   const tables = parsedToTables(dump, wsId);
 
   const existing = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
@@ -112,5 +106,3 @@ export async function replaceWorkspace(
   }
   return imported;
 }
-
-

@@ -4,6 +4,7 @@
 
 ### Features
 
+- 🪶 Settings belong to a workspace now, and a new workspace asks what to take over: everything, settings only, or nothing (v0.0.207)
 - ✨ After a gist pull you are offered the local tables and views the gist does not have, to delete or keep (v0.0.205)
 - ✨ A boolean column's filter dropdown always lists true and false, even when no row carries one of them (v0.0.203)
 - ✨ A Help (?) button in the header opens the user guide in a new tab (v0.0.202)

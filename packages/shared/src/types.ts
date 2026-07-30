@@ -202,9 +202,23 @@ export interface Row {
   updatedAt: number;
 }
 
+/**
+ * One stored setting of ONE workspace. Settings belong to a workspace and travel
+ * with it on export/import; the only device-global layer is the `user` one, which
+ * lives outside this collection (see `db/user-settings.ts`).
+ *
+ * `key` is the physical primary key `<workspaceId>::<name>` — two workspaces hold
+ * the same `name` at the same time. Plugins never build it: they address settings
+ * by `name` through `store.settings`, which is scoped to the active workspace.
+ */
 export interface Setting {
-  key: string;
+  /** The logical name a plugin uses, e.g. `gist-sync:gist_token`. */
+  name: string;
   value: unknown;
+  /** Physical primary key `<workspaceId>::<name>` — filled in by the store. */
+  key?: string;
+  /** Owning workspace — filled in by the store, from the active workspace. */
+  workspaceId?: string;
 }
 
 /**

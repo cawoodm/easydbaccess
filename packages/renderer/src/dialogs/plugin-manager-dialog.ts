@@ -579,7 +579,7 @@ export class PluginManagerDialog extends LitElement {
     if (!this.catalogUrls.includes(url)) {
       this.catalogUrls = [...this.catalogUrls, url];
       const ctx = await getContext();
-      await ctx.store.settings.upsert({ key: CATALOG_URLS_SETTING, value: this.catalogUrls });
+      await ctx.store.settings.upsert({ name: CATALOG_URLS_SETTING, value: this.catalogUrls });
     }
     await this.refreshCatalog(url);
   }

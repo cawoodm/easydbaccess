@@ -186,9 +186,9 @@ async function reconcileBuiltin(
         footerHtml: t.footer,
         updatedAt: Date.now(),
       });
-      await api.store.settings.upsert({ key: sigKey, value: shipped });
+      await api.store.settings.upsert({ name: sigKey, value: shipped });
     }
-    await api.store.settings.upsert({ key: seededKey, value: true });
+    await api.store.settings.upsert({ name: seededKey, value: true });
     return;
   }
 
@@ -205,8 +205,8 @@ async function reconcileBuiltin(
     builtin: true,
     updatedAt: Date.now(),
   });
-  await api.store.settings.upsert({ key: seededKey, value: true });
-  await api.store.settings.upsert({ key: sigKey, value: shipped });
+  await api.store.settings.upsert({ name: seededKey, value: true });
+  await api.store.settings.upsert({ name: sigKey, value: shipped });
 }
 
 function uuid(): string {

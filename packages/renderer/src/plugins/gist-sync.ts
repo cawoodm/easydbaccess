@@ -210,7 +210,7 @@ async function saveCreds(api: HostApi, creds: GistCreds): Promise<void> {
   await api.settings.set('gist-sync', 'gist_token', creds.token);
   // Keep the legacy composite in sync so anything still reading `gist:<wsId>`
   // (and the older share-link boot path) stays consistent.
-  await api.store.settings.upsert({ key: await settingKey(api), value: creds });
+  await api.store.settings.upsert({ name: await settingKey(api), value: creds });
 }
 
 /**
@@ -316,14 +316,14 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
   const large: string[] = [];
   if (includeData)
     for (const t of tables) {
-    // Remote tables emit definition only — don't fetch their live rows to discard them.
-    const rows = t.source != null ? [] : await api.store.rows(t.id).find();
-    const content = JSON.stringify(tableToFile(t, rows), null, 2);
-    const label = `${t.name} (${(content.length / 1_000_000).toFixed(2)} MB)`;
-    if (content.length > HARD_LIMIT) oversize.push(label);
-    else if (content.length > SOFT_LIMIT) large.push(label);
-    files[`${slugTable(t.name)}.table.json`] = { content };
-  }
+      // Remote tables emit definition only — don't fetch their live rows to discard them.
+      const rows = t.source != null ? [] : await api.store.rows(t.id).find();
+      const content = JSON.stringify(tableToFile(t, rows), null, 2);
+      const label = `${t.name} (${(content.length / 1_000_000).toFixed(2)} MB)`;
+      if (content.length > HARD_LIMIT) oversize.push(label);
+      else if (content.length > SOFT_LIMIT) large.push(label);
+      files[`${slugTable(t.name)}.table.json`] = { content };
+    }
 
   // Warn before an oversized/heavy push (a single dialog covers both tiers) so
   // the user isn't surprised by a GitHub rejection or a sluggish sync.
@@ -357,7 +357,12 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
     const viewInstances = (await api.store.viewInstances.find()).filter(
       (v) => v.workspaceId === wsId,
     );
-    const settings = await api.store.settings.find();
+    // Name + value only: the physical key and workspaceId are this device's, and
+    // the pulling side re-derives both for ITS workspace (see settingsView).
+    const settings = (await api.store.settings.find()).map((s) => ({
+      name: s.name,
+      value: s.value,
+    }));
     files['_easydb.workspace.json'] = {
       content: JSON.stringify(
         {
@@ -468,70 +473,70 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
     const { TopProgress } = await import('../chrome/top-progress.js');
     const progress: ProgressHandle = TopProgress.begin('Pulling from gist…');
     try {
-    for (const [i, [name, file]] of tableFiles.entries()) {
-      try {
-        const content = await fetchGistFileContent(file);
-        const parsed = JSON.parse(content) as {
-          name: string;
-          title?: string;
-          columns: Table['columns'];
-          rows: Array<Row['data']>;
-        } & TableFileMeta;
-        if (!parsed.name || !Array.isArray(parsed.columns)) {
-          throw new Error('unexpected file shape (missing name/columns)');
-        }
-
-        let table: Table;
-        const existing = byName.get(parsed.name.toLowerCase());
-        if (existing) {
-          table = await api.store.tables.patch(existing.id, {
-            title: parsed.title,
-            columns: parsed.columns,
-            ...syncedTableFields(parsed),
-            updatedAt: Date.now(),
-          });
-          // Wipe existing rows for clean reimport (simplest correct behavior) —
-          // but only for LOCAL tables. A remote table's rows are re-fetched live
-          // through its routed collection, so we must never touch them here.
-          if (table.source == null) {
-            const rowColl = api.store.rows(existing.id);
-            const oldRows = await rowColl.find();
-            await rowColl.bulkRemove(oldRows.map((r) => r.id));
+      for (const [i, [name, file]] of tableFiles.entries()) {
+        try {
+          const content = await fetchGistFileContent(file);
+          const parsed = JSON.parse(content) as {
+            name: string;
+            title?: string;
+            columns: Table['columns'];
+            rows: Array<Row['data']>;
+          } & TableFileMeta;
+          if (!parsed.name || !Array.isArray(parsed.columns)) {
+            throw new Error('unexpected file shape (missing name/columns)');
           }
-        } else {
-          table = await api.store.tables.insert({
-            id: cryptoUUID(),
-            workspaceId: wsId,
-            name: parsed.name,
-            title: parsed.title,
-            code: slugTable(parsed.name),
-            columns: parsed.columns,
-            view: parsed.view ?? 'table',
-            ...syncedTableFields(parsed),
-            updatedAt: Date.now(),
-          });
-        }
 
-        // Remote tables get no local rows — the definition alone reconnects
-        // them to their backend, which serves the live data.
-        if (table.source == null) {
-          const docs = (parsed.rows ?? []).map((data) => ({
-            id: cryptoUUID(),
-            tableId: table.id,
-            data,
-            updatedAt: Date.now(),
-          }));
-          await api.store.rows(table.id).bulkInsert(docs);
-        }
+          let table: Table;
+          const existing = byName.get(parsed.name.toLowerCase());
+          if (existing) {
+            table = await api.store.tables.patch(existing.id, {
+              title: parsed.title,
+              columns: parsed.columns,
+              ...syncedTableFields(parsed),
+              updatedAt: Date.now(),
+            });
+            // Wipe existing rows for clean reimport (simplest correct behavior) —
+            // but only for LOCAL tables. A remote table's rows are re-fetched live
+            // through its routed collection, so we must never touch them here.
+            if (table.source == null) {
+              const rowColl = api.store.rows(existing.id);
+              const oldRows = await rowColl.find();
+              await rowColl.bulkRemove(oldRows.map((r) => r.id));
+            }
+          } else {
+            table = await api.store.tables.insert({
+              id: cryptoUUID(),
+              workspaceId: wsId,
+              name: parsed.name,
+              title: parsed.title,
+              code: slugTable(parsed.name),
+              columns: parsed.columns,
+              view: parsed.view ?? 'table',
+              ...syncedTableFields(parsed),
+              updatedAt: Date.now(),
+            });
+          }
 
-        nameToId.set(parsed.name, table.id);
-        imported++;
-      } catch (err) {
-        failures.push({ file: name, error: (err as Error).message });
-      } finally {
-        progress.fraction((i + 1) / tableFiles.length);
+          // Remote tables get no local rows — the definition alone reconnects
+          // them to their backend, which serves the live data.
+          if (table.source == null) {
+            const docs = (parsed.rows ?? []).map((data) => ({
+              id: cryptoUUID(),
+              tableId: table.id,
+              data,
+              updatedAt: Date.now(),
+            }));
+            await api.store.rows(table.id).bulkInsert(docs);
+          }
+
+          nameToId.set(parsed.name, table.id);
+          imported++;
+        } catch (err) {
+          failures.push({ file: name, error: (err as Error).message });
+        } finally {
+          progress.fraction((i + 1) / tableFiles.length);
+        }
       }
-    }
     } finally {
       progress.done();
     }
@@ -859,4 +864,3 @@ async function readError(res: Response): Promise<string> {
   }
   return `${res.status} ${res.statusText}${body ? `: ${body.slice(0, 200)}` : ''}`;
 }
-

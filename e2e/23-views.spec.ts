@@ -189,7 +189,7 @@ test.describe('views', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rss = tpls.find((t: any) => t.builtin && t.name === 'RSS Feed');
         await ctx.store.viewTemplates.patch(rss.id, { rowHtml: staleRow });
-        await ctx.store.settings.upsert({ key: `views:sig:rss:${wsId}`, value: 'stale' });
+        await ctx.store.settings.upsert({ name: `views:sig:rss:${wsId}`, value: 'stale' });
       },
       { staleRow },
     );

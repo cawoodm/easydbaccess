@@ -189,7 +189,7 @@ export async function connectDatasette(api: HostApi, input: string, token: strin
   const status = await testConnection(baseFetch, ref.base, { token: token || undefined });
   // Store the token device-local (per instance base). Settings are not synced,
   // so the token never leaves this device or lands in a workspace export.
-  if (token) await api.store.settings.upsert({ key: tokenSettingKey(ref.base), value: token });
+  if (token) await api.store.settings.upsert({ name: tokenSettingKey(ref.base), value: token });
 
   let chosen: TableRef[] | null;
   try {

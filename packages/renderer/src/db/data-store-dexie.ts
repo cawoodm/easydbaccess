@@ -11,7 +11,7 @@ import type {
   ViewTemplate,
   Workspace,
 } from '@easydb/shared';
-import type { EasyDb } from './dexie-db.js';
+import { settingId, type EasyDb } from './dexie-db.js';
 
 /**
  * Dexie-backed DataStore. Implements `DataCollection<T>` from the plugin API;
@@ -129,16 +129,95 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string): DataCollectio
   };
 }
 
+/**
+ * A view over the settings of ONE workspace. Callers address a setting by its
+ * logical `name` — `findOne('gist-sync:user')`, `upsert({ name, value })` — and
+ * this maps it to the physical `<workspaceId>::<name>` key, so the same name can
+ * exist once per workspace.
+ *
+ * `workspaceId` is read per call: the store is built before the active workspace
+ * is resolved (see `app-context.ts`).
+ *
+ * An incoming `key`/`workspaceId` on a write is IGNORED and re-derived. That is
+ * what lets a gist pull upsert another device's settings straight into the local
+ * workspace instead of carrying its workspace id along.
+ */
+function settingsView(
+  coll: DexieTable<Setting, string>,
+  workspaceId: () => string,
+): DataCollection<Setting> {
+  const stamp = (doc: Partial<Setting> & { name: string }): Setting => ({
+    ...doc,
+    workspaceId: workspaceId(),
+    key: settingId(workspaceId(), doc.name),
+    name: doc.name,
+    value: doc.value,
+  });
+  const mine = () => coll.where('workspaceId').equals(workspaceId());
+  return {
+    async find(query) {
+      const all = await mine().toArray();
+      if (!query || Object.keys(query).length === 0) return all;
+      const entries = Object.entries(query as Record<string, unknown>);
+      return all.filter((doc) => matchesAll(doc as unknown as Record<string, unknown>, entries));
+    },
+    async findOne(name) {
+      const doc = await coll.get(settingId(workspaceId(), name as string));
+      return doc ?? null;
+    },
+    async insert(doc) {
+      const stamped = stamp(doc as Setting);
+      await coll.add(stamped);
+      return stamped;
+    },
+    async bulkInsert(docs) {
+      if (docs.length === 0) return [];
+      const stamped = docs.map((d) => stamp(d as Setting));
+      await coll.bulkAdd(stamped);
+      return stamped;
+    },
+    async upsert(doc) {
+      const stamped = stamp(doc as Setting);
+      await coll.put(stamped);
+      return stamped;
+    },
+    async patch(name, patch) {
+      const key = settingId(workspaceId(), name as string);
+      const n = await coll.update(key, patch as object);
+      if (n === 0) throw new Error(`setting patch: no setting ${name}`);
+      const updated = await coll.get(key);
+      if (!updated) throw new Error(`setting patch: ${name} vanished after update`);
+      return updated;
+    },
+    async remove(name) {
+      await coll.delete(settingId(workspaceId(), name as string));
+    },
+    async bulkRemove(names) {
+      if (names.length === 0) return;
+      await coll.bulkDelete(names.map((n) => settingId(workspaceId(), n as string)));
+    },
+    subscribe(fn): Unsubscribe {
+      const obs = liveQuery(() => mine().toArray());
+      const sub = obs.subscribe({ next: (docs) => fn(docs) });
+      return () => sub.unsubscribe();
+    },
+  };
+}
+
 function matchesAll(doc: Record<string, unknown>, entries: Array<[string, unknown]>): boolean {
   for (const [k, v] of entries) if (doc[k] !== v) return false;
   return true;
 }
 
-export function createDataStore(db: EasyDb): DataStore {
+/**
+ * `workspaceId` is a getter, not a value: `app-context.ts` builds the store first
+ * and resolves the active workspace with it, so the id is not known yet here.
+ */
+export function createDataStore(db: EasyDb, workspaceId: () => string): DataStore {
   return {
     workspaces: wrap<Workspace>(db.workspaces),
     tables: wrap<Table>(db.tables),
-    settings: wrap<Setting>(db.settings),
+    settings: settingsView(db.settings, workspaceId),
     plugins: wrap<PluginRecord>(db.plugins),
     viewTemplates: wrap<ViewTemplate>(db.viewTemplates),
     viewInstances: wrap<ViewInstance>(db.viewInstances),
