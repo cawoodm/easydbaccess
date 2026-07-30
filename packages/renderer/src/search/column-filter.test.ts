@@ -158,8 +158,61 @@ describe('parseColumnFilter / composeColumnFilter', () => {
       '^S,Norway',
       '"^caret"',
       '"!bang"',
+      '=foo',
+      '!=foo',
+      '=foo,=bar',
+      '"=x"',
     ]) {
       expect(composeColumnFilter(parseColumnFilter(raw))).toBe(raw);
     }
+  });
+});
+
+describe('exact match (=)', () => {
+  it('= matches the WHOLE cell, case-insensitively, not a substring', () => {
+    expect(matchesColumnFilter('foo', '=foo')).toBe(true);
+    expect(matchesColumnFilter('Foo', '=foo')).toBe(true);
+    expect(matchesColumnFilter('foobar', '=foo')).toBe(false);
+    expect(matchesColumnFilter('my foo', '=foo')).toBe(false);
+  });
+
+  it('!= inverts the exact match', () => {
+    expect(matchesColumnFilter('foo', '!=foo')).toBe(false);
+    expect(matchesColumnFilter('foobar', '!=foo')).toBe(true);
+    expect(matchesColumnFilter(null, '!=foo')).toBe(true);
+  });
+
+  it('=foo,=bar is an OR of two exact values', () => {
+    expect(matchesColumnFilter('foo', '=foo,=bar')).toBe(true);
+    expect(matchesColumnFilter('bar', '=foo,=bar')).toBe(true);
+    expect(matchesColumnFilter('baz', '=foo,=bar')).toBe(false);
+  });
+
+  it('parses = as an exact-match modifier, alone and after !', () => {
+    expect(parseColumnFilter('=foo')).toEqual([{ term: 'foo', negate: false, exact: true }]);
+    expect(parseColumnFilter('!=foo')).toEqual([{ term: 'foo', negate: true, exact: true }]);
+  });
+
+  it('= and ^ are mutually exclusive — the first wins, the second is literal text', () => {
+    expect(parseColumnFilter('^=foo')).toEqual([{ term: '=foo', negate: false, prefix: true }]);
+    expect(parseColumnFilter('=^foo')).toEqual([{ term: '^foo', negate: false, exact: true }]);
+  });
+
+  it('a quoted leading = survives as literal text (not the exact-match modifier)', () => {
+    expect(parseColumnFilter('"=x"')).toEqual([{ term: '=x', negate: false }]);
+    expect(matchesColumnFilter('=x', '"=x"')).toBe(true);
+    expect(matchesColumnFilter('x', '"=x"')).toBe(false);
+  });
+
+  it('=NULL matches the literal text "null", not an empty cell', () => {
+    expect(matchesColumnFilter('null', '=NULL')).toBe(true);
+    expect(matchesColumnFilter(null, '=NULL')).toBe(false);
+    expect(matchesColumnFilter('', '=NULL')).toBe(false);
+    expect(matchesColumnFilter('null pointer', '=NULL')).toBe(false); // not a substring match
+  });
+
+  it('composes = in the right position, after !', () => {
+    expect(composeColumnFilter([{ term: 'foo', negate: false, exact: true }])).toBe('=foo');
+    expect(composeColumnFilter([{ term: 'foo', negate: true, exact: true }])).toBe('!=foo');
   });
 });

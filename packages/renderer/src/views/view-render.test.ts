@@ -7,6 +7,8 @@ import {
   sortRows,
   viewRows,
   hasRowHtml,
+  addPillValue,
+  removePillValue,
 } from './view-render.js';
 
 const row = (data: Record<string, unknown>): Row => ({ id: 'r', tableId: 't', data, updatedAt: 0 });
@@ -110,5 +112,84 @@ describe('view-render', () => {
     expect(hasRowHtml('   \n')).toBe(false);
     expect(hasRowHtml(undefined)).toBe(false);
     expect(hasRowHtml('<div>$X</div>')).toBe(true);
+  });
+
+  it('extractTokens finds filter.-prefixed tokens under the bare name', () => {
+    expect(extractTokens('$filter.TAG $filter:STATUS $TAG').sort()).toEqual(['STATUS', 'TAG']);
+  });
+
+  it('$filter.TOKEN renders a clickable pill with field/value data attributes', () => {
+    const out = substituteRow('$filter.TAG', row({ tag: 'foo' }), { TAG: 'tag' });
+    expect(out).toContain('class="eda-filter-pill"');
+    expect(out).toContain('data-eda-filter-field="tag"');
+    expect(out).toContain('data-eda-filter-value="foo"');
+    expect(out).toContain('>foo</button>');
+    expect(out).toContain('<button type="button"');
+  });
+
+  it('$filter.TOKEN escapes the field/value attributes and text', () => {
+    const out = substituteRow('$filter.TAG', row({ tag: '"><script>' }), { TAG: 'tag' });
+    expect(out).not.toContain('"><script>');
+    expect(out).toContain('&lt;script&gt;');
+  });
+
+  it('a null/empty value renders no pill at all', () => {
+    expect(substituteRow('$filter.TAG', row({ tag: null }), { TAG: 'tag' })).toBe('');
+    expect(substituteRow('$filter.TAG', row({ tag: '' }), { TAG: 'tag' })).toBe('');
+    expect(substituteRow('$filter.NOPE', row({}), {})).toBe('');
+  });
+
+  it('$TOKEN and $input.TOKEN rendering is unchanged', () => {
+    expect(substituteRow('$TAG', row({ tag: 'foo' }), { TAG: 'tag' })).toBe('foo');
+    const cols = new Map([['tag', col('tag', 'string')]]);
+    expect(substituteRow('$input.TAG', row({ tag: 'foo' }), { TAG: 'tag' }, { columns: cols })).toContain(
+      'type="text"',
+    );
+  });
+
+  describe('addPillValue / removePillValue', () => {
+    it('addPillValue appends an exact-match token', () => {
+      expect(addPillValue(undefined, 'foo')).toBe('=foo');
+      expect(addPillValue('', 'foo')).toBe('=foo');
+    });
+
+    it('addPillValue OR-appends a second value on the same field', () => {
+      expect(addPillValue('=foo', 'bar')).toBe('=foo,=bar');
+    });
+
+    it('addPillValue is idempotent — clicking the same value twice leaves one token', () => {
+      expect(addPillValue('=foo', 'foo')).toBe('=foo');
+      expect(addPillValue('=foo,=bar', 'Foo')).toBe('=foo,=bar'); // case-insensitive
+    });
+
+    it('addPillValue preserves tokens already present', () => {
+      expect(addPillValue('=foo', 'bar')).toBe('=foo,=bar');
+    });
+
+    it('removePillValue removes one token, case-insensitively', () => {
+      expect(removePillValue('=foo,=bar', 'foo')).toBe('=bar');
+      expect(removePillValue('=foo,=bar', 'BAR')).toBe('=foo');
+    });
+
+    it('removePillValue returns empty string when nothing is left', () => {
+      expect(removePillValue('=foo', 'foo')).toBe('');
+      expect(removePillValue(undefined, 'foo')).toBe('');
+    });
+  });
+
+  it('viewRows ANDs the filters and pillFilters layers, then sorts', () => {
+    const rows = [
+      row({ n: 3, k: 'x', tag: 'a' }),
+      row({ n: 1, k: 'y', tag: 'a' }),
+      row({ n: 2, k: 'x', tag: 'b' }),
+      row({ n: 4, k: 'x', tag: 'a' }),
+    ];
+    const out = viewRows(rows, {
+      filters: { k: 'x' },
+      pillFilters: { tag: '=a' },
+      sortColumn: 'n',
+      sortAsc: true,
+    });
+    expect(out.map((r) => r.data.n)).toEqual([3, 4]);
   });
 });

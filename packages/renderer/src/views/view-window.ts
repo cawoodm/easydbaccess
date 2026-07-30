@@ -5,7 +5,8 @@ import type { ColumnSpec, Row, ViewInstance, ViewTemplate } from '@easydb/shared
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViewsDialog } from '../dialogs/views-dialog.js';
-import { hasRowHtml, substituteRow, viewRows } from './view-render.js';
+import { addPillValue, hasRowHtml, removePillValue, substituteRow, viewRows } from './view-render.js';
+import { parseColumnFilter } from '../search/column-filter.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 // Side-effect import: the template-off mode renders the standard interactive
@@ -106,6 +107,60 @@ export class ViewWindow extends LitElement {
       }
       .eda-input-field .eda-input-label:empty {
         display: none;
+      }
+      /* $filter.TOKEN pill rendered inline in a template's row HTML — looks
+         clickable, sits in the flow of the text around it. */
+      .eda-filter-pill {
+        font: inherit;
+        display: inline;
+        padding: 0.05rem 0.5rem;
+        margin: 0 0.1rem;
+        border: none;
+        border-radius: 1rem;
+        background: #e0f2fe;
+        color: #0369a1;
+        cursor: pointer;
+      }
+      .eda-filter-pill:hover {
+        background: #bae6fd;
+      }
+      /* Active pill-filter bar, pinned to the top of the view. */
+      .vw-pillbar {
+        flex: 0 0 auto;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.3rem 0.5rem;
+        border-bottom: 1px solid #e5e7eb;
+        background: #f0f9ff;
+      }
+      .eda-pill-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        padding: 0.1rem 0.3rem 0.1rem 0.55rem;
+        border-radius: 1rem;
+        background: #e0f2fe;
+        color: #0369a1;
+        font-size: 0.8rem;
+      }
+      .eda-pill-chip-remove {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.1rem;
+        height: 1.1rem;
+        padding: 0;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        line-height: 1;
+      }
+      .eda-pill-chip-remove:hover {
+        background: rgba(3, 105, 161, 0.15);
       }
       /* Sort toolbar pinned to the top of a template view. */
       .vw-sortbar {
@@ -396,6 +451,42 @@ export class ViewWindow extends LitElement {
     });
   };
 
+  /**
+   * A `$filter.TOKEN` pill was clicked in the template. Adds an exact-match
+   * pill filter for that field/value (OR-appended to any existing value on the
+   * same field) and persists it on the instance's SEPARATE `pillFilters`
+   * layer — never touching the view's snapshotted `filters`. Filtering is not
+   * editing, so this runs even on a readonly view.
+   */
+  private onPillClick = async (e: Event): Promise<void> => {
+    const t = e.target;
+    if (!(t instanceof HTMLElement) || !t.classList.contains('eda-filter-pill')) return;
+    if (!this.instance) return;
+    const field = t.getAttribute('data-eda-filter-field');
+    const value = t.getAttribute('data-eda-filter-value');
+    if (!field || value == null) return;
+    const next = addPillValue(this.instance.pillFilters?.[field], value);
+    const pillFilters = { ...(this.instance.pillFilters ?? {}), [field]: next };
+    const ctx = await getContext();
+    await ctx.store.viewInstances.patch(this.instance.id, { pillFilters, updatedAt: Date.now() });
+    this.instance = { ...this.instance, pillFilters };
+    this.recompute();
+  };
+
+  /** Remove one pill-filter chip (the `×` in the header bar). Drops the field
+   * entirely once its last value is removed. */
+  private async removePill(field: string, value: string) {
+    if (!this.instance) return;
+    const next = removePillValue(this.instance.pillFilters?.[field], value);
+    const pillFilters = { ...(this.instance.pillFilters ?? {}) };
+    if (next === '') delete pillFilters[field];
+    else pillFilters[field] = next;
+    const ctx = await getContext();
+    await ctx.store.viewInstances.patch(this.instance.id, { pillFilters, updatedAt: Date.now() });
+    this.instance = { ...this.instance, pillFilters };
+    this.recompute();
+  }
+
   // -- footer actions ---------------------------------------------------------
 
   /** Change the view's sort column (persisted on the instance). Empty ⇒ unsorted. */
@@ -565,6 +656,42 @@ export class ViewWindow extends LitElement {
     </div>`;
   }
 
+  /**
+   * The active pill-filter bar, pinned to the top of the view (above the
+   * rendered template). Shows ONLY the `pillFilters` layer — never the
+   * view's underlying/snapshotted `filters` — one chip per token, so two
+   * OR-ed values on the same field (e.g. `tag: foo`, `tag: bar`) get their
+   * own removable chip. Renders nothing when the pill layer is empty.
+   */
+  private renderPillBar() {
+    const pf = this.instance?.pillFilters;
+    if (!pf) return nothing;
+    const chips: Array<{ field: string; value: string }> = [];
+    for (const [field, raw] of Object.entries(pf)) {
+      if (!raw) continue;
+      for (const tok of parseColumnFilter(raw)) {
+        if (tok.term) chips.push({ field, value: tok.term });
+      }
+    }
+    if (chips.length === 0) return nothing;
+    return html`<div class="vw-pillbar">
+      ${chips.map(
+        (c) => html`<span class="eda-pill-chip">
+          <span class="eda-pill-chip-label">${c.field}: ${c.value}</span>
+          <button
+            type="button"
+            class="eda-pill-chip-remove"
+            aria-label=${`Remove filter ${c.field}: ${c.value}`}
+            title="Remove this filter"
+            @click=${() => void this.removePill(c.field, c.value)}
+          >
+            ×
+          </button>
+        </span>`,
+      )}
+    </div>`;
+  }
+
   private renderFooter() {
     if (!this.instance) return nothing;
     const on = this.templateOn;
@@ -638,7 +765,7 @@ export class ViewWindow extends LitElement {
 
     const on = this.templateOn;
     const body = on
-      ? html`<div class="vw-body scroll" @change=${this.onInputChange}>
+      ? html`<div class="vw-body scroll" @change=${this.onInputChange} @click=${this.onPillClick}>
           ${this.renderTemplated()}
         </div>`
       : html`<div class="vw-body grid">
@@ -648,8 +775,9 @@ export class ViewWindow extends LitElement {
           ></data-table>
         </div>`;
     // The sort bar rides at the top in template mode; the grid (template-off)
-    // has its own clickable column headers, so it isn't shown there.
-    return html`${on ? this.renderSortBar() : nothing}${body}${this.renderFooter()}`;
+    // has its own clickable column headers, so it isn't shown there. The pill
+    // bar rides above both — pill filters apply to both modes.
+    return html`${on ? this.renderSortBar() : nothing}${this.renderPillBar()}${body}${this.renderFooter()}`;
   }
 }
 

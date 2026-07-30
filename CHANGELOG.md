@@ -4,6 +4,8 @@
 
 ### Features
 
+- ✨ A `$filter.TOKEN` in a view template shows the value as a pill: click it to narrow the view to that value, and drop it from the chip in the view header (v0.0.226)
+- ✨ A column filter takes `=text` for an exact match, and `!=text` to exclude one (v0.0.226)
 - ✨ A dropped CSV asks first: import directly, or review the columns (v0.0.225)
 - ✨ Any view template can be deleted, built-ins included — the confirm says a deleted built-in is not seeded again (v0.0.224)
 - ✨ Gallery cards are clickable: `$LINK` opens the row's URL in a new tab (v0.0.223)

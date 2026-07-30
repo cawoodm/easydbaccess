@@ -293,6 +293,13 @@ export interface ViewInstance {
   sortBy?: SortSpec[] | undefined;
   /** Column-field → filter substring, snapshotted from the table. */
   filters: Record<string, string>;
+  /**
+   * The pill-filter layer: field → column-filter string, built by clicking
+   * `$filter.TOKEN` pills in the template. Kept SEPARATE from `filters` (which
+   * is snapshotted from the table) so the view's header bar can list only what
+   * the user clicked. Both layers apply, ANDed.
+   */
+  pillFilters?: Record<string, string> | undefined;
   /** Column fields to show, in order (snapshotted from the table). */
   visibleColumns: string[];
   /** Template token (without the leading `$`) → column field. */
