@@ -69,6 +69,14 @@ export function init(api: HostApi): void {
       scope: 'user',
       description:
         'Personal access token with the "gist" scope. Stored on this device only (not synced).',
+      help:
+        'A classic token with the single "gist" scope is enough — nothing else is ' +
+        'needed and nothing else should be granted. Give it an expiry you are ' +
+        'happy with; the sync stops working when it lapses and you paste a new ' +
+        'one here. Keep the value in the secrets store (General tab) and ' +
+        'reference it, so it is never written into a synced setting.',
+      helpUrl: 'https://github.com/settings/tokens/new?scopes=gist&description=easyDBAccess',
+      helpLinkLabel: 'Create a token on GitHub',
     },
   ]);
 

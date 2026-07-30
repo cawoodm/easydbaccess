@@ -467,6 +467,16 @@ export interface SettingsFieldSpec {
   options?: string[];
   /** Shown as field help below the control. */
   description?: string;
+  /**
+   * Longer explanation, behind an (i) icon next to the label — for what a
+   * `description` line cannot carry, e.g. which scopes a token needs. Shown only
+   * when the user asks for it, so a field with a long story stays compact.
+   */
+  help?: string;
+  /** Page that lets the user act on the help, linked from the (i) panel. */
+  helpUrl?: string;
+  /** Link text for `helpUrl`. Defaults to the URL's host. */
+  helpLinkLabel?: string;
   scope?: SettingScope;
 }
 

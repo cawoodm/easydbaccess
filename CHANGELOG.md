@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ A settings field can carry help behind an (i) icon; the GitHub token links to the page that creates one (v0.0.222)
 - ✨ The column editor has a "Guess renderers" button: it picks a renderer per column from the values, then you press Save (v0.0.220)
 - ✨ A cell shows its full value as a tooltip, so a column narrower than its content is still readable (v0.0.219)
 - 🪶 Sort by several columns: shift-click a header to add a sort level behind the ones already active (v0.0.218)
