@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { booleanState } from './cell-validity.js';
+import { booleanState, cellState } from './cell-validity.js';
 
 describe('booleanState', () => {
   it('recognizes true values', () => {
@@ -36,5 +36,45 @@ describe('booleanState', () => {
     expect(booleanState(NaN)).toBe('invalid');
     expect(booleanState({})).toBe('invalid');
     expect(booleanState([])).toBe('invalid');
+  });
+});
+
+describe('cellState', () => {
+  it('treats null, undefined and blank strings as empty for every type', () => {
+    for (const type of ['string', 'number', 'date', 'datetime', 'boolean']) {
+      expect(cellState(null, type)).toBe('empty');
+      expect(cellState(undefined, type)).toBe('empty');
+      expect(cellState('   ', type)).toBe('empty');
+    }
+  });
+
+  it('accepts anything non-empty in a string column', () => {
+    expect(cellState('foo', 'string')).toBe('ok');
+    expect(cellState('12abc', 'string')).toBe('ok');
+    expect(cellState(0, 'string')).toBe('ok');
+  });
+
+  it('flags a number column value that is not a finite number', () => {
+    expect(cellState(12, 'number')).toBe('ok');
+    expect(cellState('12', 'number')).toBe('ok');
+    expect(cellState('12abc', 'number')).toBe('invalid');
+    expect(cellState(Infinity, 'number')).toBe('invalid');
+  });
+
+  it('flags an unparseable date or datetime', () => {
+    expect(cellState('2024-01-01', 'date')).toBe('ok');
+    expect(cellState('2024-01-01T10:00', 'datetime')).toBe('ok');
+    expect(cellState('not-a-date', 'date')).toBe('invalid');
+  });
+
+  it('follows booleanState for boolean columns', () => {
+    expect(cellState(true, 'boolean')).toBe('ok');
+    expect(cellState('FALSE', 'boolean')).toBe('ok');
+    expect(cellState('maybe', 'boolean')).toBe('invalid');
+  });
+
+  it('marks 0 and false as present, not empty — they are real values', () => {
+    expect(cellState(0, 'number')).toBe('ok');
+    expect(cellState(false, 'boolean')).toBe('ok');
   });
 });

@@ -10,7 +10,7 @@ import { searchRowsByField } from '../search/text-search.js';
 import { matchesColumnFilter } from '../search/column-filter.js';
 import { runColumnScript } from '../util/column-script.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
-import { INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
+import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
 
 type SortDir = 'asc' | 'desc' | null;
 
@@ -324,13 +324,22 @@ export class DataTable extends LitElement {
         font-family: ui-monospace, SFMono-Regular, monospace;
         cursor: help;
       }
-      /* Null / empty cell highlight — picks them out at a glance without
-       shouting like full red. */
+      /* Empty cell: pink background, so a gap is visible at a glance whatever
+         the column's renderer draws. Kept distinct from the invalid red below —
+         "nothing here" is normal, "this does not fit the type" is not. */
       td.is-null {
-        background: #fef2f2;
+        background: #fce7f3;
       }
       td.is-null input[type='text'] {
         background: transparent;
+      }
+      /* Invalid stored value: the app-wide invalid red (see util/cell-validity),
+         as an inset outline so the cell keeps its size and the grid lines stay
+         put. Renderers additionally mark their own inputs. */
+      td.is-invalid {
+        outline: 1px solid #dc2626;
+        outline-offset: -1px;
+        background: #fef2f2;
       }
       td input[type='date'],
       td input[type='datetime-local'],
@@ -484,7 +493,6 @@ export class DataTable extends LitElement {
       this.rowHeight = firstTr.offsetHeight;
     }
     if (!this.viewportHeight) this.viewportHeight = this.clientHeight;
-    this.markEmptyCells();
     this.emitCount();
   }
 
@@ -502,25 +510,6 @@ export class DataTable extends LitElement {
     this.lastEmittedCount = count;
     this.lastEmittedTotal = total;
     emitVisibleCount(key, count, total);
-  }
-
-  /**
-   * Toggle `is-null` on each data cell based on its *rendered* content, not
-   * the stored value. Runs after Lit has updated the DOM and each cell
-   * renderer's `connectedCallback` has populated its custom element, so the
-   * check sees what the user sees.
-   */
-  private markEmptyCells() {
-    const tds = this.shadowRoot?.querySelectorAll<HTMLTableCellElement>(
-      'tbody tr:not(.spacer) > td',
-    );
-    if (!tds) return;
-    for (const td of tds) {
-      // Trailing action <td> has no `t-*` class — skip it; it's the delete
-      // button cell.
-      if (!td.className.startsWith('t-')) continue;
-      td.classList.toggle('is-null', isCellEmpty(td));
-    }
   }
 
   private tableSubUnsub?: () => void;
@@ -1395,7 +1384,9 @@ export class DataTable extends LitElement {
               <tr>
                 ${cols.map(
                   (c) =>
-                    html`<td class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}`}>
+                    html`<td
+                      class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}${cellStateClass(r, c)}`}
+                    >
                       ${this.renderCell(r, c)}
                     </td>`,
                 )}
@@ -1419,20 +1410,17 @@ export class DataTable extends LitElement {
 }
 
 /**
- * Visual-emptiness check for a rendered `<td>`. Used by `markEmptyCells` to
- * decide whether to apply the `is-null` highlight. A cell is empty iff it
- * shows no text, no image, and every input it contains is empty (checkboxes
- * excluded — they're meaningful in both states).
+ * The ` is-null` / ` is-invalid` suffix for a cell's `<td>` class, from the STORED
+ * value — so the marking holds whatever renderer the column has, including one
+ * that draws a checkbox or an image for an empty value.
+ *
+ * A scripted column is exempt: its display is computed by the script, so an empty
+ * stored value is normal there and pink would flag every row.
  */
-function isCellEmpty(td: Element): boolean {
-  if ((td.textContent ?? '').trim() !== '') return false;
-  if (td.querySelector('img')) return false;
-  const inputs = td.querySelectorAll('input');
-  for (const inp of Array.from(inputs)) {
-    if (inp.type === 'checkbox') return false;
-    if (inp.value !== '') return false;
-  }
-  return true;
+function cellStateClass(row: Row, col: ColumnSpec): string {
+  if (col.script) return '';
+  const state = cellState(row.data[col.field], col.type);
+  return state === 'empty' ? ' is-null' : state === 'invalid' ? ' is-invalid' : '';
 }
 
 /** Returns a human-readable rejection reason, or null if value is acceptable. */

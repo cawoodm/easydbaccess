@@ -43,6 +43,37 @@ export function markInvalid(el: HTMLElement, reason?: string): void {
   if (reason) el.title = reason;
 }
 
+export type CellState = 'ok' | 'empty' | 'invalid';
+
+/**
+ * Classify a stored value against its column type for the grid's own
+ * highlighting: an empty cell gets a pink background, a value that does not fit
+ * the type a red outline.
+ *
+ * This is the GLOBAL baseline, applied on the `<td>` whatever renderer the column
+ * has — a renderer that draws a checkbox or an image cannot show "there is
+ * nothing here" or "this does not parse" on its own. Type-specific renderers keep
+ * their own in-cell marking (see `markInvalid`); the two agree because both key
+ * off the same rules.
+ */
+export function cellState(value: unknown, type?: string): CellState {
+  if (value == null) return 'empty';
+  if (typeof value === 'string' && value.trim() === '') return 'empty';
+  switch (type) {
+    case 'boolean':
+      return booleanState(value) === 'invalid' ? 'invalid' : 'ok';
+    case 'number':
+      // A number column holding `12abc` is a broken import, not a 12.
+      return Number.isFinite(typeof value === 'number' ? value : Number(value)) ? 'ok' : 'invalid';
+    case 'date':
+    case 'datetime':
+      return Number.isNaN(Date.parse(String(value))) ? 'invalid' : 'ok';
+    default:
+      // A string column takes anything — only emptiness is worth marking.
+      return 'ok';
+  }
+}
+
 export type BooleanState = 'true' | 'false' | 'empty' | 'invalid';
 
 const TRUE_RE = /^\s*(true|1)\s*$/i;
