@@ -123,4 +123,64 @@ test.describe('window stacking across tables and views', () => {
       })
       .toBe(true);
   });
+
+  test('a table/view/table sandwich preserves interleaved stacking after a reload', async ({
+    page,
+  }) => {
+    // Both table windows AND view windows run on the same panel shell (view
+    // windows were the last jsPanel holdout — see the swap in
+    // view-window-manager.ts). Before that swap, a transitional bridge kept
+    // jsPanel's z bookkeeping from burying a view under a table, but it could
+    // only ever flatten "all views above/below all tables" as one block — a
+    // table/view/table SANDWICH (one kind fronted, then the other, then the
+    // first kind again) could not be reproduced. This test exercises exactly
+    // that interleaving with two tables and one view.
+    // Create the view over table A before table B exists, so table A's own
+    // panel-footer is still on top and clickable (table B would otherwise
+    // cascade-position on top of it, per createTable's default placement).
+    const tableAId = await createTable(page, 'TableA', [{ field: 'title' }]);
+    await waitForPanel(page, tableAId);
+    const viewPanelId = await createViewOver(page, tableAId);
+    const tableBId = await createTable(page, 'TableB', [{ field: 'title' }]);
+    await waitForPanel(page, tableBId);
+
+    const tableAPanelId = panelDomId(tableAId);
+    const tableBPanelId = panelDomId(tableBId);
+
+    // Front bottom → top: TableB, then the view, then TableA — a table/view/
+    // table sandwich (the view sits between the two tables, not above/below
+    // both of them).
+    await front(page, tableBPanelId);
+    await expect
+      .poll(async () => (await readTable(page, tableBId))?.windowGeometry?.z ?? 0)
+      .toBeGreaterThan(0);
+    await front(page, viewPanelId);
+    // No store helper for view instances in e2e/helpers.ts — give the view's
+    // own async front-rank write a moment to persist (mirrors the test above).
+    await page.waitForTimeout(200);
+    await front(page, tableAPanelId);
+    await expect
+      .poll(async () => (await readTable(page, tableAId))?.windowGeometry?.z ?? 0)
+      .toBeGreaterThan(0);
+
+    await page.reload();
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => Boolean((window as any).__easydb),
+    );
+    await waitForPanel(page, tableAId);
+    await waitForPanel(page, tableBId);
+    await page.locator(`#${viewPanelId}`).waitFor();
+
+    // The cross-kind restack runs asynchronously after boot — poll until the
+    // full sandwich order settles: B below the view, the view below A.
+    await expect
+      .poll(async () => {
+        const bZ = await zIndexOf(page, tableBPanelId);
+        const vZ = await zIndexOf(page, viewPanelId);
+        const aZ = await zIndexOf(page, tableAPanelId);
+        return bZ < vZ && vZ < aZ;
+      })
+      .toBe(true);
+  });
 });

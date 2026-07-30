@@ -16,16 +16,11 @@
  * the way.
  */
 
-// @ts-expect-error — jspanel4 ships no types. Only referenced for the
-// resetZi bridge below — table panels themselves no longer use jsPanel at
-// all; see the comment at its one call site.
-import { jsPanel } from 'jspanel4/es6module/jspanel.js';
 import type { Table, WindowGeometry } from '@easydb/shared';
 import { getContext, type AppContext } from '../app-context.js';
 import { openTableInfoDialog } from '../dialogs/table-info-dialog.js';
 import { initPanZoom, type PanZoomHandle } from './panzoom.js';
 import { createPanel, type PanelShellEl, type ShellViewport } from './panel-shell/panel-shell.js';
-import { startMaximizedRefit } from './refit-panels.js';
 import { queueGeometryWrite } from './geometry-writes.js';
 import { countSuffix, VISIBLE_COUNT_EVENT, type VisibleCountDetail } from './panel-title.js';
 import { sanitizeGeometry, byAscendingZ } from './geometry.js';
@@ -136,49 +131,6 @@ export async function deleteTable(tableId: string): Promise<void> {
   await deleteTableCascade(tableId, ctx);
 }
 
-let jsPanelZBridged = false;
-
-/**
- * Bridge jsPanel's own z-index bookkeeping so it never buries a view window
- * (still jsPanel-based — Task 6 migrates it) behind an already-open table
- * panel (panel-shell-based).
- *
- * jsPanel's `front()` — which it calls on every pointerdown inside a panel,
- * mirroring what the shell does — unconditionally calls `jsPanel.resetZi()`,
- * renormalizing every `.jsPanel-standard` element (jsPanel's own panels only;
- * table panels don't carry that class) to a fresh, LOW, sequential range
- * starting at `jsPanel.ziBase`. It has no idea a table panel might already
- * sit higher, so a single click inside an open view drops it right back
- * below any table — and that table's invisible resize-edge hotspots (see
- * `.eda-resize` in panel-shell.css) then swallow clicks meant for the view.
- *
- * Wrapping `resetZi` to float `ziBase` above the current combined max (both
- * `.jsPanel-standard` AND `.jsPanel` — table panels carry the latter, see
- * panel-shell.ts's file header) before delegating keeps the two systems'
- * z-order mutually consistent without touching the vendored jsPanel source.
- * This whole function goes away once Task 6 finishes the migration.
- */
-function bridgeJsPanelZOrder(): void {
-  if (jsPanelZBridged) return;
-  jsPanelZBridged = true;
-  const jp = jsPanel as { ziBase: number; resetZi: () => void };
-  const origResetZi = jp.resetZi.bind(jp);
-  jp.resetZi = () => {
-    let max = jp.ziBase - 1;
-    for (const el of document.querySelectorAll<HTMLElement>('.jsPanel')) {
-      const z = Number(el.style.zIndex);
-      if (Number.isFinite(z) && z > max) max = z;
-    }
-    const savedBase = jp.ziBase;
-    jp.ziBase = max + 1;
-    try {
-      origResetZi();
-    } finally {
-      jp.ziBase = savedBase;
-    }
-  };
-}
-
 export async function initWindowManager(): Promise<void> {
   if (initialized) return;
   initialized = true;
@@ -208,15 +160,7 @@ export async function initWindowManager(): Promise<void> {
       if (header) ro.observe(header);
       if (footer) ro.observe(footer);
     }
-    // Transitional: covers the still-jsPanel view windows only — a shell
-    // panel re-fits itself (panel-shell.ts's enterMaximized/ResizeObserver).
-    // View windows don't get that (Task 6 migrates them onto the shell), so
-    // without this a maximized view keeps its old box across a browser
-    // resize or header-wrap. Call and module go away once Tasks 6/8 land.
-    startMaximizedRefit(viewport);
   }
-
-  bridgeJsPanelZOrder();
 
   // Initial population. Open in ascending saved-z order so the panel-shell's
   // session z-counter reproduces the user's last layering — the panel that

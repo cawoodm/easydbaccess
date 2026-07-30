@@ -394,6 +394,51 @@ test.describe('views', () => {
     expect(Math.abs(box.height - overlay.height)).toBeLessThan(4);
   });
 
+  test('double-clicking a view titlebar maximizes it, and again restores', async ({ page }) => {
+    // Mirrors 21-maximize.spec.ts's table-window version. View windows only
+    // gained dblclick-to-maximize back (and the maximized-cursor swap) once
+    // the view swap moved them onto the panel shell, which provides this
+    // generically for every panel kind (`panel-shell.ts`'s `hdr` dblclick
+    // handler) — Task 5 had deleted the old titlebar behaviour for jsPanel,
+    // so view windows had NEITHER until this swap landed.
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ title: 'Hello', url: 'https://example.com/1' }]);
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    const dlg = page.locator('views-dialog dialog');
+    await dlg
+      .locator('ul.list li', { hasText: 'RSS Feed' })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+    const viewPanel = page.locator('[id^="view-panel-"]');
+    await expect(viewPanel).toBeVisible();
+
+    const status = () =>
+      viewPanel.evaluate((el) => (el as HTMLElement & { status: string }).status);
+    const title = viewPanel.locator('.jsPanel-title');
+    const titlebarCursor = () =>
+      viewPanel
+        .locator('.jsPanel-titlebar')
+        .evaluate((el) => getComputedStyle(el as HTMLElement).cursor);
+
+    expect(await status()).toBe('normalized');
+    expect(await titlebarCursor()).toBe('move');
+
+    await title.dblclick();
+    await page.waitForTimeout(120);
+    expect(await status()).toBe('maximized');
+    expect(await titlebarCursor()).toBe('pointer');
+
+    await title.dblclick();
+    await page.waitForTimeout(120);
+    expect(await status()).toBe('normalized');
+    expect(await titlebarCursor()).toBe('move');
+  });
+
   test('the view header has the core search box and it filters the view rows', async ({ page }) => {
     const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
     await waitForPanel(page, id);

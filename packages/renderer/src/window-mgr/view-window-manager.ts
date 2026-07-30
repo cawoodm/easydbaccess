@@ -1,18 +1,20 @@
 /**
- * Core window manager for View windows.
+ * Core window manager for View windows, running on the in-repo panel shell
+ * (`panel-shell/panel-shell.ts`) — the same shell table windows run on
+ * (`jspanel-manager.ts`).
  *
  * View windows are managed by the CORE, exactly like table windows are managed
  * by `jspanel-manager.ts` — window behaviour (drag/resize/maximize), geometry,
  * persistence, and boot-time restore are core responsibilities, NOT the `views`
  * plugin's. The plugin only owns data + intent: it seeds templates and the
  * dialog flips a `ViewInstance.open` flag. This manager reacts to that flag,
- * opening/closing the actual jsPanel windows and persisting their geometry.
+ * opening/closing the actual panel-shell windows and persisting their geometry.
  *
  * Mirrors the table window manager: a workspace-scoped subscription reconciles
  * live state (which instances are `open`) against the set of open panels, so a
  * window opens when its instance is flagged open and closes when the flag drops
  * or the instance is deleted. On boot, every instance already flagged `open`
- * gets its window re-created (jsPanel itself has no cross-reload memory).
+ * gets its window re-created (the shell itself has no cross-reload memory).
  *
  * Z-ordering also mirrors the table manager: `onfronted` stamps a monotonic
  * front-rank into `windowGeometry.z` (shared counter with tables — see
@@ -20,22 +22,20 @@
  * orders views AMONG THEMSELVES, though — restoring the relative order
  * BETWEEN a table and a view is a deliberately separate, cross-manager
  * concern; see `restack.ts` (this manager stays independent of
- * `jspanel-manager.ts` except for the shared `currentPanZoom` handle).
+ * `jspanel-manager.ts` except for the shared `shellViewport()` adapter, which
+ * both kinds use so a maximized panel of either kind fills the same canvas).
  */
 
-// @ts-expect-error — jspanel4 ships no types
-import { jsPanel } from 'jspanel4/es6module/jspanel.js';
 import type { Table, ViewInstance, WindowGeometry } from '@easydb/shared';
 import { getContext, type AppContext } from '../app-context.js';
-import { currentPanZoom } from './jspanel-manager.js';
-import { createMaximizeFill } from './maximize-fill.js';
-import { forgetMaximized, primeMaximized, trackMaximized } from './maximized-memory.js';
+import { shellViewport } from './jspanel-manager.js';
 import { queueGeometryWrite } from './geometry-writes.js';
 import { countSuffix, VISIBLE_COUNT_EVENT, type VisibleCountDetail } from './panel-title.js';
 import { VIEW_ICON } from './table-kind.js';
 import { byAscendingZ } from './geometry.js';
 import { nextFrontZ } from './front-order.js';
 import { registerPanel, unregisterPanel } from './panel-registry.js';
+import { createPanel, type PanelShellEl } from './panel-shell/panel-shell.js';
 // Side-effect import registers the <view-window> custom element; the type-only
 // import would otherwise be elided, leaving <view-window> an unupgraded
 // (inline, zero-size) element.
@@ -44,22 +44,9 @@ import type { ViewWindow } from '../views/view-window.js';
 // Core header search box — the same component the table windows use.
 import '../chrome/panel-search.js';
 
-/** jsPanel instance — typed loose since the lib ships no .d.ts. */
-type Panel = {
-  id: string;
-  close(): void;
-  // jsPanel: front(callback, execOnFrontedCallbacks = true). Passing `false`
-  // fronts WITHOUT firing `onfronted` (so without stamping a new front rank).
-  front?: (callback?: undefined, execOnFrontedCallbacks?: boolean) => void;
-  minimize?: () => void;
-  maximize?: () => void;
-  setHeaderTitle?: (title: string) => void;
-  status: 'normalized' | 'minimized' | 'maximized' | 'smallified' | 'closed';
-};
-
 /** Per-open-view window state: the panel, its element, and title inputs. */
 interface ViewEntry {
-  panel: Panel;
+  panel: PanelShellEl;
   /**
    * The mounted <view-window>, or null while the panel is minimized — a
    * minimized view is detached so it holds no rows and no subscription.
@@ -83,16 +70,16 @@ const panels = new Map<string, ViewEntry>();
 export function focusViewWindow(instanceId: string): boolean {
   const entry = panels.get(instanceId);
   if (!entry) return false;
-  const panel = entry.panel as Panel & { normalize?: () => void };
-  if (panel.status === 'minimized') panel.normalize?.();
-  panel.front?.();
+  const panel = entry.panel;
+  if (panel.status === 'minimized') panel.normalize();
+  panel.front();
   return true;
 }
 let initialized = false;
 
 /** Render a view panel's titlebar: "<name> (<count>)" / "(<visible>/<total>)". */
 function renderViewTitle(entry: ViewEntry): void {
-  entry.panel.setHeaderTitle?.(entry.name + countSuffix(entry.count, entry.total));
+  entry.panel.setHeaderTitle(entry.name + countSuffix(entry.count, entry.total));
 }
 
 /** Element view windows mount into — the pan/zoom-transformed canvas viewport. */
@@ -121,8 +108,8 @@ export async function initViewWindowManager(): Promise<void> {
     all.filter((i) => i.workspaceId === ctx.workspaceId && i.open);
 
   // Initial restore: reopen every instance already flagged open, in ascending
-  // saved-z order (mirrors the table window manager) so jsPanel's internal
-  // zi.next() counter reproduces the last layering AMONG views. Restoring the
+  // saved-z order (mirrors the table window manager) so the shell's session
+  // z-counter reproduces the last layering AMONG views. Restoring the
   // relative order BETWEEN tables and views is a separate, cross-kind pass —
   // see `restack.ts`.
   const initial = openInWs(await ctx.store.viewInstances.find()).sort(byAscendingZ);
@@ -232,7 +219,7 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
   };
   const content: HTMLElement = startMinimized ? document.createElement('div') : makeView();
 
-  // Declared before jsPanel.create because the create options close over them.
+  // Declared before createPanel because the create options close over them.
   // `entry` can only be filled in after create returns (it holds the panel), so
   // the mount helpers tolerate its absence — during create there is nothing
   // mounted to change anyway.
@@ -259,45 +246,31 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     host.appendChild(el);
     entry.el = el;
   };
-  const sizeOpt = g ? { panelSize: `${g.w} ${g.h}` } : { contentSize: '480 520' };
-  const position = g
-    ? { my: 'left-top', at: 'left-top', offsetX: g.x, offsetY: g.y }
-    : { my: 'center-top', at: 'center-top', offsetY: 60 };
 
-  // Keep a maximized view filling the visible area through canvas pan/zoom —
-  // the same counter-transform the table windows use (shared handle).
-  const maxFill = createMaximizeFill(panelId, currentPanZoom);
-
-  const panel = jsPanel.create({
+  const panel = createPanel({
     id: panelId,
     container: viewContainer(),
-    headerTitle: inst.name,
-    // Eye icon at the far left of the titlebar — a view's kind never changes
-    // at runtime (unlike a table's), so this is drawn once here (table-kind.ts).
-    headerLogo: VIEW_ICON,
-    // A distinct cyan chrome so view windows read as different from tables.
-    theme: '#0891b2',
+    title: inst.name,
+    logo: VIEW_ICON,
+    color: '#0891b2', // distinct cyan chrome so views read differently from tables
     content,
-    ...sizeOpt,
-    position,
+    ...(g
+      ? { panelSize: { w: g.w, h: g.h }, position: { x: g.x, y: g.y } }
+      : { contentSize: { w: 480, h: 520 }, position: { centerTopOffset: 60 } }),
     minimizeTo: '#easydb-minimized-dock',
-    dragit: { containment: false, stop: () => void saveGeometry(inst.id) },
-    resizeit: { containment: false, stop: () => void saveGeometry(inst.id) },
-    // Fires when the panel is focused/brought-to-front by any means. Mirrors
-    // the table window manager's `onfronted` exactly (see its comment): DOM
-    // zIndex isn't a stable identity (jsPanel's resetZi() renormalizes it on
-    // every front()), so we stamp a monotonic wall-clock rank instead —
-    // shared with tables via `nextFrontZ()` so the two kinds compare
-    // correctly in the merged cross-kind restack (`restack.ts`).
+    viewport: shellViewport(),
+    boot: { minimized: g?.minimized === true, maximized: g?.maximized === true },
+    onmoved: () => void saveGeometry(inst.id),
+    onresized: () => void saveGeometry(inst.id),
+    // Stamp a monotonic front rank; DOM z stays session-local in the shell but
+    // the persisted rank must survive reloads and merge with tables
+    // (front-order.ts / restack.ts).
     onfronted: () => void stampViewFrontOrder(inst.id, ctx),
-    onstatuschange: (p: Panel) => {
-      if (p.status === 'maximized') maxFill.enter();
-      else maxFill.exit();
+    onstatuschange: (p) => {
       // Detach the view while minimized; remount it fresh (re-reading the store)
       // when it comes back. Mirrors the table windows.
       if (p.status === 'minimized') unmountContent();
       else if (p.status === 'normalized' || p.status === 'maximized') mountContent();
-      trackMaximized(`view:${inst.id}`, p);
       // Persist the new status (minimized / maximized / normalized) so it
       // survives a reload, exactly like table windows.
       void saveGeometry(inst.id);
@@ -305,8 +278,6 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     onclosed: () => {
       panels.delete(inst.id);
       unregisterPanel(inst.id);
-      maxFill.exit();
-      forgetMaximized(`view:${inst.id}`);
       // The user closed the window → drop the persisted open flag so it isn't
       // reopened on the next boot. (Closing because the flag already dropped is
       // a harmless redundant write; the reconcile subscription is idempotent.)
@@ -316,7 +287,7 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
           /* instance may have been deleted — ignore */
         });
     },
-  }) as Panel;
+  });
 
   entry = {
     panel,
@@ -328,9 +299,9 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
   panels.set(inst.id, entry);
   // Registered so the global restack (`restack.ts`) can front this panel
   // without importing this module directly — see `panel-registry.ts`. The
-  // `false` suppresses jsPanel's `onfronted`, so a restack does NOT re-stamp
+  // `false` suppresses the shell's `onfronted`, so a restack does NOT re-stamp
   // the front rank it is itself ordering by.
-  registerPanel(inst.id, () => panel.front?.(undefined, false));
+  registerPanel(inst.id, () => panel.front(undefined, false));
 
   const panelEl = document.getElementById(panelId);
 
@@ -340,27 +311,6 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
   const search = document.createElement('panel-search');
   (search as HTMLElement & { tableId: string }).tableId = inst.id;
   panelEl?.querySelector('.jsPanel-controlbar')?.prepend(search);
-
-  // Make the titlebar focusable so tapping it blurs (collapses) an open search
-  // box — matches the table windows.
-  const titlebar = panelEl?.querySelector('.jsPanel-titlebar') as HTMLElement | null;
-  if (titlebar) {
-    titlebar.tabIndex = -1;
-    titlebar.style.outline = 'none';
-    titlebar.addEventListener('pointerdown', () => titlebar.focus());
-  }
-
-  // Restore a persisted minimized/maximized state. Defer to the next tick so
-  // jsPanel finishes its own init (centering, sizing) before we drive a state
-  // change — mirrors the table window manager.
-  // Minimized wins: a window stored as minimized AND maximized went down from
-  // maximized last session, so it restores maximized (see maximized-memory.ts).
-  if (g?.minimized) {
-    if (g.maximized) primeMaximized(`view:${inst.id}`);
-    queueMicrotask(() => panel.minimize?.());
-  } else if (g?.maximized) {
-    queueMicrotask(() => panel.maximize?.());
-  }
 }
 
 function closePanel(instanceId: string): void {
@@ -417,17 +367,14 @@ async function writeViewGeometry(instanceId: string): Promise<void> {
   const el = document.getElementById(panelDomId(instanceId));
   const entry = panels.get(instanceId);
   if (!el || !entry) return;
-  const status = entry.panel.status;
-  const minimized = status === 'minimized';
+  const { minimized, maximized } = entry.panel.persistFlags();
   try {
     const ctx = await getContext();
     const prev = (await ctx.store.viewInstances.findOne(instanceId))?.windowGeometry;
-    // A minimized window keeps the maximized flag it went down with, so a
-    // restore after a reload maximizes again (see maximized-memory.ts).
-    const maximized = minimized ? (prev?.maximized ?? false) : status === 'maximized';
-    // Only the normalized rect is meaningful; while minimized jsPanel parks the
-    // panel at left:-9999 and while maximized it fills the container, so in
-    // those states keep the last-stored normal rect and only flip the flag.
+    // Only the normalized rect is meaningful; while minimized the shell parks
+    // the panel off-DOM (display:none) and while maximized it fills the
+    // container, so in those states keep the last-stored normal rect and only
+    // flip the flag.
     let x = el.offsetLeft;
     let y = el.offsetTop;
     let w = el.offsetWidth;
