@@ -15,6 +15,7 @@ import { cryptoUUID, slugTable } from '../util/ids.js';
 // only inside pull(), below.
 import type { ProgressHandle } from '../chrome/top-progress.js';
 import { tableToFile } from '../export/table-file.js';
+import { restoreTemplates } from '../views/template-restore.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'gist-sync',
@@ -570,9 +571,11 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
       const markerSettings = parsedMarker.settings ?? [];
       pulledViewIds = new Set(markerViewInstances.map((v) => v.id));
 
-      for (const vt of markerViewTemplates) {
-        await api.store.viewTemplates.upsert({ ...vt, workspaceId: wsId });
-      }
+      const templateIds = await restoreTemplates(
+        api.store.viewTemplates,
+        wsId,
+        markerViewTemplates,
+      );
 
       for (const inst of markerViewInstances) {
         let tableId: string | undefined;
@@ -581,7 +584,8 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
         }
         tableId ??= inst.tableId;
         if (!tableId) continue;
-        await api.store.viewInstances.upsert({ ...inst, workspaceId: wsId, tableId });
+        const templateId = templateIds.get(inst.templateId) ?? inst.templateId;
+        await api.store.viewInstances.upsert({ ...inst, workspaceId: wsId, tableId, templateId });
         importedViews++;
       }
 

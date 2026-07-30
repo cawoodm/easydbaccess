@@ -17,6 +17,7 @@ import { runImport } from '../import/import-kernel.js';
 import { rowRekeyer } from '../table/column-merge.js';
 import { filenameFromUrl } from '../import/fetch-source.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
+import { restoreTemplates } from '../views/template-restore.js';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a
 // custom element on import, which would blow up under Vitest's default
@@ -465,11 +466,12 @@ export async function restoreWorkspaceDump(
 
 /**
  * Re-creates `ViewTemplate`s and `ViewInstance`s carried in a native dump.
- * Templates are upserted (merged, never cleared — that would drop built-ins the
- * dump omits). In replace-workspace mode the old instances are cleared first
- * (their tables were just wiped); otherwise instances are upserted. Each
- * instance's `tableId` is remapped via `nameToId` (falling back to its stored
- * id) so it binds to the table that was actually imported.
+ * Templates are merged by name, never cleared — see `restoreTemplates`. In
+ * replace-workspace mode the old instances are cleared first (their tables were
+ * just wiped); otherwise instances are upserted. Each instance's `tableId` is
+ * remapped via `nameToId` (falling back to its stored id) so it binds to the
+ * table that was actually imported, and its `templateId` via the remap
+ * `restoreTemplates` returns.
  */
 async function restoreViews(
   api: HostApi,
@@ -491,16 +493,14 @@ async function restoreViews(
     await api.store.viewInstances.bulkRemove(stale.map((v) => v.id));
   }
 
-  for (const vt of templates) {
-    if (!isObject(vt) || typeof vt.id !== 'string') continue;
-    await api.store.viewTemplates.upsert({ ...vt, workspaceId });
-  }
+  const templateIds = await restoreTemplates(api.store.viewTemplates, workspaceId, templates);
 
   for (const inst of instances) {
     if (!isObject(inst) || typeof inst.id !== 'string') continue;
     const tableId = (inst.tableName ? nameToId.get(inst.tableName) : undefined) ?? inst.tableId;
     if (!tableId) continue;
-    await api.store.viewInstances.upsert({ ...inst, workspaceId, tableId });
+    const templateId = templateIds.get(inst.templateId) ?? inst.templateId;
+    await api.store.viewInstances.upsert({ ...inst, workspaceId, tableId, templateId });
   }
 }
 

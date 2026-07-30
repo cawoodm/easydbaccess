@@ -31,6 +31,7 @@
 
 ### Bugs
 
+- 🪲 Importing a workspace, or pulling one from a Gist, added a second copy of every view template the workspace already had (v0.0.229)
 - 🪲 A view window's title counted against the source table, so a view showing a slice of it never read as complete (v0.0.228)
 - 🪲 Referencing a Datasette database took every table without asking, and each reference stopped at its first 1000 rows (v0.0.227)
 - 🪲 Re-importing a table exported as JSON lost all but one row, and its refresh URL (v0.0.221)
