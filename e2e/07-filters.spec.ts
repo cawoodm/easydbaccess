@@ -28,6 +28,31 @@ test.describe('filters', () => {
     await expect(popover.locator('li').filter({ hasText: 'cat' })).toContainText('2');
   });
 
+  test('a boolean column always offers both true and false', async ({ page }) => {
+    // Every row is true, so "false" is absent from the data — the dropdown must
+    // still offer it (at count 0) or there is no way to filter for it.
+    const id = await createTable(page, 'Tasks', [
+      { field: 'name' },
+      { field: 'done', type: 'boolean' },
+    ]);
+    await waitForPanel(page, id);
+    await addRow(page, id, { name: 'a', done: true });
+    await addRow(page, id, { name: 'b', done: true });
+
+    const panel = page.locator(`#${panelDomId(id)}`);
+    await panel.locator('data-table thead th button.funnel').nth(1).click();
+
+    const popover = page.locator('filter-popover');
+    await expect(popover).toBeVisible();
+    const items = popover.locator('li');
+    await expect(items).toHaveCount(2);
+    // true first (count 2), then false at 0.
+    await expect(items.nth(0)).toContainText('true');
+    await expect(items.nth(0)).toContainText('2');
+    await expect(items.nth(1)).toContainText('false');
+    await expect(items.nth(1)).toContainText('0');
+  });
+
   test('picking a value filters the table and lights the funnel', async ({ page }) => {
     const id = await createTable(page, 'Pets', [{ field: 'species' }]);
     await waitForPanel(page, id);

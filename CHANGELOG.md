@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ A boolean column's filter dropdown always lists true and false, even when no row carries one of them (v0.0.203)
 - ✨ A Help (?) button in the header opens the user guide in a new tab (v0.0.202)
 - ✨ A view window footer has a Delete button now: it asks first, then removes the view and closes the window (v0.0.200)
 - ✨ A built-in view template has no Delete button now. Copy it first if you want a version you can delete (v0.0.199)

@@ -955,9 +955,18 @@ export class DataTable extends LitElement {
       const s = String(v);
       counts.set(s, (counts.get(s) ?? 0) + 1);
     }
-    const values = [...counts.entries()]
+    let values = [...counts.entries()]
       .map(([value, count]) => ({ value, count }))
       .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+    // A boolean column has a known domain, so both sides are always listed (in
+    // that order) even when the rows carry only one of them — a column of
+    // all-true rows would otherwise give you no way to filter for false. A
+    // count of 0 says none are there. Any other stored spelling (`yes`, `1`)
+    // keeps its own entry below.
+    if (this.columns.find((c) => c.field === field)?.type === 'boolean') {
+      const domain = ['true', 'false'].map((value) => ({ value, count: counts.get(value) ?? 0 }));
+      values = [...domain, ...values.filter((v) => v.value !== 'true' && v.value !== 'false')];
+    }
     // Toggles apply live while the popover stays open (multi-value tri-state);
     // the promise only reports dismissal or an explicit Clear.
     const result = await popover.open(
