@@ -104,15 +104,18 @@ const ICONS: Record<string, string> = {
 let zSeq = 100;
 
 /**
- * Next z-index, guaranteed above every panel currently in the DOM — including
- * jsPanel's own view-window panels, which carry the identical `.jsPanel` class
- * (deliberate contract compatibility, see the file header). Until Task 6
- * migrates view windows onto this shell, table panels (this module) and view
- * panels (jsPanel) keep SEPARATE creation-order counters; scanning the DOM
- * instead of trusting only the local `zSeq` keeps the two numberings mutually
- * comparable, so a freshly-created/fronted table panel can't end up
- * numerically behind an older view panel — which would let its invisible
- * resize-edge hotspots intercept clicks meant for that view.
+ * Next z-index, guaranteed above every panel currently in the DOM. Table
+ * panels and view panels are each created by their own manager
+ * (`jspanel-manager.ts` / `view-window-manager.ts`) but share this one shell
+ * module, so scanning the DOM (rather than trusting only the local `zSeq`)
+ * keeps their z numbering mutually comparable — a freshly-created/fronted
+ * table panel can't end up numerically behind an older view panel, which
+ * would let its invisible resize-edge hotspots intercept clicks meant for
+ * that view. (Formerly jsPanel's `front()` called `resetZi()` internally,
+ * renormalizing every panel to a contiguous range on each front — so the
+ * just-fronted panel always read back the same "max" value. This counter is
+ * session-monotonic instead: it only ever increases, so a panel's z-index is
+ * a stable identity while it lives — see WINDOWS.md.)
  */
 function nextZ(): number {
   let max = zSeq;

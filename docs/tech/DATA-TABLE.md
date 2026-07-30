@@ -185,7 +185,7 @@ count and the underlying total against what was last emitted, and — only on
 a change — dispatches the shared `easydb:visible-count` event (from
 [`window-mgr/panel-title.ts`](../../packages/renderer/src/window-mgr/panel-title.ts),
 see `WINDOWS.md`) keyed by either the view instance id (view-bound mode) or
-the table id, so the enclosing jsPanel's title bar can show
+the table id, so the enclosing panel's title bar can show
 `"Name (12)"` or `"Name (3/12)"` when a filter/search has narrowed the set.
 The grid has no direct reference to its own panel — this decoupling is why
 the event goes through `document` rather than a callback prop.

@@ -233,7 +233,7 @@ Opening one of those built-in dialogs from plugin code goes through a
 `document`, and `<app-shell>` listens for it and calls `this.dialog.open()`.
 This indirection exists because table/view **panels live in light DOM**
 (mounted into `#easydb-panels`, outside any shadow root — see
-`WINDOWS.md`), so a jsPanel titlebar action (e.g. "Edit columns") can't hold
+`WINDOWS.md`), so a panel titlebar action (e.g. "Edit columns") can't hold
 a direct reference into `<app-shell>`'s shadow DOM; a bubbling `document`
 event is the one channel both sides can reach.
 

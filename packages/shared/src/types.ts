@@ -268,8 +268,9 @@ export interface ViewInstance {
   windowGeometry?: WindowGeometry | undefined;
   /**
    * Whether this view's window is currently open. Persisted so the `views`
-   * plugin can reopen open windows on boot (jsPanel itself has no cross-reload
-   * memory — table windows are likewise re-created from persisted state).
+   * plugin can reopen open windows on boot (the panel shell itself has no
+   * cross-reload memory — table windows are likewise re-created from
+   * persisted state).
    */
   open?: boolean | undefined;
   /** Max rows to show (TOP N). Absent or ≤0 ⇒ show all. */

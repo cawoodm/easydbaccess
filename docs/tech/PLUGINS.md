@@ -78,7 +78,7 @@ Every plugin gets one `api` object. The pieces plugins actually touch:
 | `api.registerRowSource` | Backs a table carrying a `source` descriptor with a non-local row collection | `datasette-connect` |
 | `api.events` | Typed pub/sub (`AppEvents`) | `import:before`/`import:after`, `plugin:error` |
 | `api.backend.fetch` / `saveFile` | CORS-aware fetch (proxied through the Hono server in browser mode) and a save-file abstraction | `import-data`, `gist-sync`, all exporters |
-| `api.windows` | Open/list/find jsPanel-backed windows | the core window manager; plugins rarely call this directly |
+| `api.windows` | Open/list/find panel-shell-backed windows | the core window manager; plugins rarely call this directly |
 
 A `ButtonSpec.onClick(api, ctx?)` handler for a header/footer button
 optionally receives `ctx.anchor` — the button's own DOM element, when the
@@ -484,7 +484,7 @@ the shipped HTML so an app update can patch an already-seeded workspace's
 copy without touching a copy the user deleted. Actually opening, closing,
 positioning, and maximizing view windows is core code
 (`window-mgr/view-window-manager.ts`), not plugin code — plugins must not
-manage jsPanel windows directly.
+manage panel-shell windows directly.
 
 ## Chrome / UI
 

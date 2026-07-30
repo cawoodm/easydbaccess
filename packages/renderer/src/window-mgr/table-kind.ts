@@ -2,8 +2,8 @@
 //
 // Single source of truth for classifying a table's "kind" from its
 // `source`/`origin` fields, plus the small inline SVGs shown at the far left
-// of its panel titlebar (jsPanel's `headerLogo` slot — see jspanel-manager.ts
-// and view-window-manager.ts). `dialogs/table-info-dialog.ts`'s
+// of its panel titlebar (the panel shell's `headerLogo` slot — see
+// jspanel-manager.ts and view-window-manager.ts). `dialogs/table-info-dialog.ts`'s
 // `describeProvenance()` classifies via `tableKind()` too, so the (i) dialog's
 // prose and the titlebar icon can never drift apart.
 
@@ -46,7 +46,7 @@ export function isRefreshable(t: Pick<Table, 'source' | 'origin'>): boolean {
 
 /** Shared attributes for every titlebar icon — matches the style of plugin
  * `meta.icon` strings (dump-export.ts, cell-boolean.ts, views.ts), sized to
- * sit comfortably in a jsPanel titlebar (~14–16px). */
+ * sit comfortably in a panel titlebar (~14–16px). */
 const ICON_ATTRS =
   'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15" role="img"';
 

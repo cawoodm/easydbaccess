@@ -1,6 +1,6 @@
 /**
  * Pure grid math for "Tile windows", plus the panel filter shared with
- * "Cascade windows". Kept free of jsPanel/DOM so it's directly
+ * "Cascade windows". Kept free of the panel shell/DOM so it's directly
  * unit-testable — see `tile-layout.test.ts`.
  */
 
@@ -14,7 +14,7 @@ export interface ArrangeCandidate {
  * the `?minimize` boot flag) and must not be forced back to normalized, nor
  * occupy a layout slot: both commands used to run over EVERY panel, which
  * un-minimized minimized windows and inflated the tile grid with empty holes
- * for windows that were never shown. `smallified` (jsPanel's collapsed-header
+ * for windows that were never shown. `smallified` (the collapsed-header-only
  * state) stays on screen, so it IS still laid out.
  */
 export function eligibleForArrange<T extends ArrangeCandidate>(panels: T[]): T[] {

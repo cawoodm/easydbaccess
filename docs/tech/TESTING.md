@@ -40,7 +40,7 @@ without spinning up a browser. Examples scattered through this codebase:
 | `plugins/read-url.test.ts` | CORS-friendly URL rewriting |
 | `db/routed-data-store.test.ts` | The row-source routing seam (see `STORAGE.md`) — verifies it's a strict no-op for tables with no `source` |
 
-None of these import Lit, Dexie, or jsPanel. When you're about to add logic
+None of these import Lit, Dexie, or the panel shell. When you're about to add logic
 to a `.ts` file that's mostly DOM glue, ask whether the actual *decision*
 (what geometry counts as corrupt, how a search query parses, how a column
 merge resolves) can be pulled into a plain function next to it — that's

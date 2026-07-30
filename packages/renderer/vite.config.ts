@@ -38,22 +38,6 @@ export default defineConfig({
     sourcemap: true,
   },
   plugins: [
-    // jspanel4 ships a /*# sourceMappingURL=jspanel.css.map */ annotation but
-    // not the .map file. Vite logs a noisy ENOENT every time it loads the CSS.
-    // Strip the annotation before Vite tries to resolve it.
-    {
-      name: 'strip-jspanel-css-sourcemap',
-      enforce: 'pre',
-      transform(code: string, id: string) {
-        if (id.includes('jspanel4') && id.endsWith('.css')) {
-          return {
-            code: code.replace(/\/\*[#@]\s*sourceMappingURL=[^*]*\*\//g, ''),
-            map: null,
-          };
-        }
-        return null;
-      },
-    },
     // Keep public/plugins/catalog.json in sync with the plugin .js files'
     // exported meta on every build/dev start.
     {

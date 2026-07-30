@@ -31,7 +31,7 @@ plugin registry.
 | Desktop storage | SQLite via `better-sqlite3` (Phase 8) |
 | Backend | [Hono](https://hono.dev/) on `@hono/node-server`, ESM, Node ≥ 24 |
 | Desktop shell | Electron 33 with contextIsolation, sandbox, no nodeIntegration |
-| Windows | jsPanel4 for draggable in-app panels |
+| Windows | in-repo panel shell (`window-mgr/panel-shell/`) for draggable in-app panels |
 | Icons | `material-icons` |
 | Reactivity | RxJS (transitively via RxDB) |
 | Testing | Vitest (unit) + Playwright (e2e) |
@@ -109,7 +109,7 @@ is the single source of truth for what plugins can do.
   - `events` — typed bus (`app:ready`, `table:created`, `drop:files`, …).
   - `ui` — slot registries for header/footer/table buttons, cell/row/table
     renderers, importers, exporters, drop handlers, URL sources.
-  - `windows` — jsPanel-backed window manager.
+  - `windows` — panel-shell-backed window manager.
   - `backend.fetch` — URL proxy through the Hono server (escapes the CORS
     cage when one is available).
 - Plugins **may monkey-patch `api.*` methods** to override defaults — this

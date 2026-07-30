@@ -12,7 +12,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <!-- The version is kept in sync by scripts/bump-version.mjs. app-shell
          prefixes the workspace title at runtime, keeping this as the base. -->
-    <title>easyDBAccess v0.0.220</title>
+    <title>easyDBAccess v0.0.221</title>
     <style>
       html,
       body {
@@ -22,12 +22,13 @@
         overflow: hidden;
       }
       /*
-       * Light-DOM container that jsPanels mount into. Fixed between the
-       * app-shell's header and footer (their heights are pinned by their
-       * own CSS: ~48px each), with overflow hidden. Panels drag freely with
-       * no containment — they may extend past this region or off-screen; the
-       * pan/zoom canvas (touch pan / desktop right-drag) brings them back.
-       * The chrome keeps a higher z-index so panels never cover it.
+       * Light-DOM container that panel-shell windows mount into. Fixed
+       * between the app-shell's header and footer (their heights are pinned
+       * by their own CSS: ~48px each), with overflow hidden. Panels drag
+       * freely with no containment — they may extend past this region or
+       * off-screen; the pan/zoom canvas (touch pan / desktop right-drag)
+       * brings them back. The chrome keeps a higher z-index so panels never
+       * cover it.
        */
       #easydb-panels {
         position: fixed;
@@ -38,9 +39,10 @@
         overflow: hidden;
         pointer-events: none;
       }
-      /* Inner viewport that pan/zoom transforms. jsPanels mount here; it fills
-         the overlay, so panel geometry stays in the same layout coordinates
-         jsPanel already uses (transform is purely visual). */
+      /* Inner viewport that pan/zoom transforms. Panel-shell windows mount
+         here; it fills the overlay, so panel geometry stays in the same
+         layout coordinates the panel shell already uses (transform is
+         purely visual). */
       #easydb-panels-viewport {
         position: absolute;
         inset: 0;
@@ -52,8 +54,10 @@
       #easydb-panels-viewport > .jsPanel {
         pointer-events: auto;
       }
-      /* Kind icon (window-mgr/table-kind.ts) in jsPanel's `headerLogo` slot,
-         left of the title. The slot has no default sizing of its own. */
+      /* Kind icon (window-mgr/table-kind.ts) in the panel shell's `headerLogo`
+         slot, left of the title (class name kept from the old jsPanel API for
+         CSS/e2e compatibility — see panel-shell.ts). The slot has no default
+         sizing of its own. */
       .jsPanel-headerlogo {
         display: flex;
         align-items: center;
@@ -65,13 +69,14 @@
       /* Refreshable tables (source- or origin-backed: connected / referenced /
          imported) get a distinct header colour so they read as "backed by
          something remote" at a glance — every kind except a plain local table
-         (jsPanel's default 'primary' theme, #01579b) and view windows (cyan,
-         see view-window-manager.ts). jsPanel applies its theme colours as
-         INLINE styles (applyColorTheme() in jspanel.js), so `!important` is
-         required to win here; that's deliberate — this overrides via a class
-         instead of touching the `theme: 'primary'` option in jspanel-manager.ts.
-         Violet (#6d28d9) keeps the existing white header text (colors[3]) at
-         ~7.1:1 contrast, matching the default theme's own ~7.4:1. */
+         (the default panel colour, #01579b) and view windows (cyan, see
+         view-window-manager.ts). The panel shell sets its header colour as an
+         INLINE `--eda-panel-color` custom property (createPanel() in
+         panel-shell.ts), so `!important` is required to win here; that's
+         deliberate — this overrides via a class instead of touching the
+         `color` option passed to `createPanel()` in jspanel-manager.ts.
+         Violet (#6d28d9) keeps the existing white header text at ~7.1:1
+         contrast, matching the default colour's own ~7.4:1. */
       #easydb-panels-viewport > .jsPanel.eda-refreshable,
       #easydb-panels-viewport > .jsPanel.eda-refreshable > .jsPanel-hdr {
         background-color: #6d28d9 !important;

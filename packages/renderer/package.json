@@ -13,7 +13,6 @@
   "dependencies": {
     "@easydb/shared": "*",
     "dexie": "^4.0.10",
-    "jspanel4": "^4.16.1",
     "lit": "^3.2.0",
     "material-icons": "^1.13.14"
   },

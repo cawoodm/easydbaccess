@@ -34,8 +34,8 @@ Tables → (other groups)**; within a group, registration order is preserved.
 Registered in `plugin-host/core-commands.ts` (`registerCoreCommands`, called
 once at boot from `app-context.ts`), all in the **Windows** group. The bulk
 window operations live in `window-mgr/window-commands.ts` and act on **every**
-open panel — table windows *and* view-instance windows — via jsPanel's global
-`getPanels()` registry:
+open panel — table windows *and* view-instance windows — via the panel
+shell's global `getPanels()` registry:
 
 | Command | Action |
 |---|---|

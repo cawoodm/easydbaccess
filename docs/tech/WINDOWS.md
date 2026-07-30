@@ -3,13 +3,13 @@
 How table and view panels are drawn, dragged, resized, minimized, maximized,
 and restored across reloads. This is entirely **core** code
 (`packages/renderer/src/window-mgr/`), not plugin code — plugins request a
-table or a view be shown; they never touch a jsPanel instance directly. See
+table or a view be shown; they never touch a panel instance directly. See
 [`PLUGINS.md`](./PLUGINS.md) for how the `views` plugin's dialog and the
 core view-window manager divide responsibility, and [`STORAGE.md`](./STORAGE.md)
 for where `WindowGeometry` is persisted (`Table.windowGeometry` /
 `ViewInstance.windowGeometry`).
 
-## Two window managers, one shared plumbing
+## Two window managers, one shared panel shell
 
 There are two independent, structurally identical managers:
 
@@ -18,24 +18,42 @@ There are two independent, structurally identical managers:
 - **`view-window-manager.ts`** — one floating window per open `ViewInstance`
   (see `PLUGINS.md`'s Views section), holding a read-only `<view-window>`.
 
-Both are built on [jsPanel4](https://jspanel.de/) and follow the same
-pattern: a workspace-scoped `subscribe()` on the relevant Dexie-backed
-collection reconciles "what should be open" against "what is currently
+Both create their windows through `createPanel()` in the in-repo
+[`window-mgr/panel-shell/panel-shell.ts`](../../packages/renderer/src/window-mgr/panel-shell/panel-shell.ts).
+This replaced the third-party [jsPanel4](https://jspanel.de/) library — the
+app no longer depends on it, and no code imports it. The shell keeps jsPanel's
+old DOM shape and class names on purpose (`.jsPanel`, `.jsPanel-hdr`,
+`.jsPanel-headerlogo`, `.jsPanel-replacement`, …) so the existing CSS in
+`index.html` and the existing e2e specs did not need to change; a panel
+element also still doubles as its own handle (`document.getElementById(id).minimize()`
+works), matching jsPanel's API shape. Everything about *how* a panel behaves —
+minimize, maximize, smallify, drag, resize, close, front — is now first-party
+code, not a vendored library.
+
+Each manager runs a workspace-scoped `subscribe()` on its Dexie-backed
+collection that reconciles "what should be open" against "what is currently
 open" — opening panels for new/flagged records, closing panels for deleted
-ones — and every geometry-affecting jsPanel callback (`dragit.stop`,
-`resizeit.stop`, `onstatuschange`) writes straight back to that record's
-`windowGeometry`. Three small modules are shared between them:
-`maximize-fill.ts` (keep a maximized panel filling the screen despite canvas
-pan/zoom), `panzoom.ts` (the canvas transform itself), and `panel-title.ts`
-(the "`Name (12)`" / "`Name (3/12)`" row-count suffix, driven by a
-`document`-level custom event so the title bar doesn't need a direct
-reference to the grid inside it).
+ones — and every geometry-affecting callback (`onmoved`, `onresized`,
+`onstatuschange`) writes straight back to that record's `windowGeometry`.
+Several small modules are shared between the two managers:
+
+- `panzoom.ts` — the canvas pan/zoom transform (see below).
+- `panel-title.ts` — the "`Name (12)`" / "`Name (3/12)`" row-count suffix,
+  driven by a `document`-level custom event so the title bar doesn't need a
+  direct reference to the grid inside it.
+- `front-order.ts` — one monotonic front-rank counter shared by both kinds,
+  so a table fronted a moment before a view (or vice versa) still compares
+  correctly against it (see Z-order below).
+- `geometry-writes.ts` — serializes the read-modify-write races between a
+  panel's own callbacks (see Z-order below).
+- `panel-registry.ts` / `restack.ts` — the cross-kind restack (see Z-order
+  below).
 
 ## Table windows (`jspanel-manager.ts`)
 
 **Boot restore.** On `initWindowManager()`, every table in the current
-workspace is loaded and opened in **ascending saved-`z` order** — so
-jsPanel's own internal z-index counter re-creates the panels in the same
+workspace is loaded and opened in **ascending saved-`z` order** — so the
+panel shell's z-index counter re-creates the panels in the same relative
 order they were last stacked, and the panel that was on top last session
 ends up on top again. A live `tables.subscribe()` then keeps this
 reconciled afterward: a table appearing (import, another device's sync
@@ -43,20 +61,20 @@ pull) opens a panel; a table disappearing closes one.
 
 **Geometry.** `WindowGeometry` is `{ x, y, w, h, z, minimized, maximized }`.
 On restore, `sanitizeGeometry()` (a pure function in its own
-`window-mgr/geometry.ts`, unit-tested in isolation from jsPanel/DOM) discards
+`window-mgr/geometry.ts`, unit-tested in isolation from the DOM) discards
 only _corrupt_ records (missing, non-finite, or smaller than `200×100`) and
 the caller falls back to a cascading
 default position + a `720×360` content size — position itself is **never
 clamped to the viewport**, because a panel legitimately restoring off-screen
 is recoverable via the pan/zoom canvas (see below), and clamping would
-fight a user who deliberately parked a window there. `dragit`/`resizeit`
-both set `containment: false` for the same reason. Every drag/resize stop
-and every `onstatuschange` (minimize/maximize/normalize) calls
+fight a user who deliberately parked a window there. Dragging and resizing
+both ignore any containment box for the same reason. Every drag/resize stop
+and every status change (minimize/maximize/normalize) calls
 `saveGeometry()`, which reads the panel's live `offsetLeft/Top/Width/Height`
-— **except** while minimized or maximized, where jsPanel's own layout
-(parked off-screen at `left:-9999`, or filling the container) doesn't
-describe the panel's "normal" rect, so the previous stored rect is kept and
-only the `minimized`/`maximized` flags flip.
+— **except** while minimized or maximized, where the shell's own layout
+(`display: none`, or filling the container) doesn't describe the panel's
+"normal" rect, so the previous stored rect is kept and only the
+`minimized`/`maximized` flags flip.
 
 **`?minimize` — open everything minimized.** A rescue hatch for a workspace
 whose tables are too big to load: `http://localhost:5190/?minimize` (any
@@ -72,60 +90,69 @@ The flag is a **view override, not a saved preference.** While it is on,
 `saveGeometry()` keeps the stored `minimized`/`maximized` flags instead of
 writing the live status — otherwise a single visit would leave every table
 minimized on every later visit, and expanding one table to look at it would
-silently rewrite the saved layout. The flag is read once at module load, so
-editing the query string mid-session cannot retroactively change how
-already-open panels behave.
+silently rewrite the saved layout. The flag (`FORCE_MINIMIZED` in
+`boot-flags.ts`) is read once at module load, so editing the query string
+mid-session cannot retroactively change how already-open panels behave.
 
-**View windows are NOT covered.** `view-window-manager.ts` creates its
-`<view-window>` element eagerly (there is no lazy-placeholder equivalent), so
-minimizing a view would park it without preventing its data load. Giving views
-the same treatment means giving them lazy mounting first.
+**`?minimize` only forces table windows.** View windows now support the
+same lazy mount/unmount as tables — minimizing a view window manually
+detaches its `<view-window>` and drops its row subscription, exactly like a
+table (see "View windows", below) — but `view-window-manager.ts` doesn't
+read `FORCE_MINIMIZED`, so the boot-time flag itself doesn't touch already-open
+views. A workspace with `?minimize` still opens its views at their normal cost.
 
-**Z-order.** jsPanel has no stable, readable z-index: `front()` calls
-`resetZi()` internally, renormalizing every panel to a contiguous range each
-time, so the just-fronted panel always reads back the same "max" value.
-Instead, `onfronted` stamps `windowGeometry.z` with a monotonic front-rank
-counter (`lastFrontZ = Math.max(Date.now(), lastFrontZ + 1)`) — not a DOM
-value — and boot restore just sorts ascending by that number. Higher (more
-recent) = fronted later = ends up on top. It's _not_ plain `Date.now()`:
-two panels fronted within the same millisecond used to tie and lose their
-relative order; the `+ 1` fallback guarantees every stamp is strictly
-greater than the last regardless of wall-clock resolution.
+**Z-order.** A panel's DOM `z-index` is session-local: the shell's own
+counter (`nextZ()` in `panel-shell.ts`) only ever increases while the app is
+open, but it is never persisted and resets on every reload. So `onfronted`
+instead stamps `windowGeometry.z` with a monotonic front-rank counter
+(`nextFrontZ()` in `front-order.ts`) — not a DOM value — and boot restore
+just sorts ascending by that number. Higher (more recent) = fronted later =
+ends up on top. It's _not_ plain `Date.now()`: two panels fronted within the
+same millisecond used to tie and lose their relative order; a `+ 1` fallback
+guarantees every stamp is strictly greater than the last regardless of
+wall-clock resolution. (This replaced jsPanel's `front()`, which called an
+internal `resetZi()` on every front, renormalizing every panel to a
+contiguous range — so the just-fronted panel always read back the same "max"
+DOM value and gave no stable ordering to persist.)
 
-A bulk restore can also need to re-establish z-order **after** boot: a
+A bulk restore can also need to re-establish z-order **after** boot — a
 gist Pull inserts tables one at a time (each a separate `liveQuery` write),
-so panels open in file order, not saved-z order. `gist-sync` (see
-`PLUGINS.md`) dispatches an `easydb:restack-windows` document event once
-the pull finishes; `jspanel-manager.ts` listens for it and re-fronts every
-currently-open panel by its saved `z`, same sort as boot restore uses.
+so panels open in file order, not saved-z order — and the two managers open
+in a fixed sequence at plain boot (every table, then every view), which
+also defeats a saved order where a view was on top of a table. `restack.ts`
+is the one place both kinds are merged and re-fronted together: it runs once
+right after both managers finish their initial open, and again whenever
+`gist-sync.ts` / `json-import.ts` dispatch an `easydb:restack-windows`
+document event after a bulk pull/import. Both cases end up in the same
+`restackAll()`, which merges open tables and open views into one candidate
+list, sorts by the shared `front-order.ts` rank, and fronts each in turn —
+skipped entirely under `?minimize`, since fronting would un-park a
+deliberately-minimized panel.
 
 **Minimize unmounts the grid.** A `<data-table>` holds every row in memory,
 keeps a live store subscription open, and — for a source-routed table (see
 `STORAGE.md`'s row-source section) — fetches rows the instant it mounts. So
-a minimized window doesn't just visually collapse: `onstatuschange` detaches
-the `<data-table>` entirely (`unmountContent`) and replaces it with a bare
-placeholder, releasing memory and stopping any polling; expanding it again
-(`mountContent`) mounts a fresh grid that re-subscribes and re-fetches from
-scratch. A window that restores already minimized on boot never mounts a
-grid until the user expands it.
+a minimized window doesn't just visually collapse: the status-change handler
+detaches the `<data-table>` entirely (`unmountContent`) and replaces it with
+a bare placeholder, releasing memory and stopping any polling; expanding it
+again (`mountContent`) mounts a fresh grid that re-subscribes and re-fetches
+from scratch. A window that restores already minimized on boot never mounts
+a grid until the user expands it.
 
 **Maximize interacts with the pan/zoom canvas.** See "Maximize while panned
 or zoomed" below — table windows and view windows share the exact same
-`createMaximizeFill()` helper for this.
+re-fit logic, built into the panel shell itself.
 
-**Closing asks first, twice.** jsPanel's `onbeforeclose` hook can't `await`
-a confirm dialog — it must return synchronously. The workaround is a
-two-step dance: the first close attempt opens the async confirm dialog and
-returns `false` (cancelling that close); if the user confirms, the table id
-is added to a `confirmedClose` set and `panel.close()` is called again,
-which this time short-circuits straight through. `onclosed` then cascades:
-it deletes the `Table` record and (for a plain local table — **not** one
-carrying a `source`, since its rows live on the remote and must not be
-issued a bulk-delete) removes all of its rows too. A table removed
-_externally_ (a JSON "replace entire workspace" import, a server/gist pull)
-is tracked in a separate `externallyClosed` set so the reconciling
-subscription's forced close skips that redundant cascade — the data is
-already gone.
+**Closing hides the table, it doesn't delete it.** `close()` on the panel is
+a plain synchronous call — there is no confirm dialog in the close path
+itself. `onclosed` fires right after and just marks the table's
+`windowGeometry` as `closed: true`, keeping its data; the table reopens from
+the command palette ("Go to &lt;table&gt;"). Actually deleting a table's data
+is a separate, explicit action (the delete-table plugin's own button, with
+its own confirm). A table removed _externally_ (a JSON "replace entire
+workspace" import, a server/gist pull) is tracked in a separate
+`externallyClosed` set so the reconciling subscription's forced close skips
+re-marking a record whose data is already gone.
 
 **Titlebar text is `Table.title || Table.name`**, via a small `displayName()`
 helper — a table may carry an optional display `title` (edited in the
@@ -133,11 +160,11 @@ column editor) shown in the panel instead of its technical `name`; exports,
 filenames, and every other reference still use `name`. Same split as
 `Workspace.title`/`name` in the header (see `STORAGE.md`, `DIALOGS.md`).
 
-**Chrome additions beyond jsPanel's defaults:** a per-table `<panel-search>`
-box and an info (`ⓘ`) button are prepended into jsPanel's own controlbar
-(next to minimize/maximize/close); a `<panel-footer>` (icon toolbar — CSV
-export/import, column editor, etc. — see `PLUGINS.md`) is passed as
-`footerToolbar`. The titlebar is made programmatically focusable
+**Chrome additions beyond the panel shell's defaults:** a per-table
+`<panel-search>` box and an info (`ⓘ`) button are prepended into the panel's
+own controlbar (next to minimize/maximize/close); a `<panel-footer>` (icon
+toolbar — CSV export/import, column editor, etc. — see `PLUGINS.md`) is
+passed as `footerToolbar`. The titlebar is made programmatically focusable
 (`tabIndex=-1` + a `pointerdown` listener) purely so clicking it can blur
 whatever search box currently has focus, collapsing it.
 
@@ -147,8 +174,15 @@ Structurally the same manager, driven by `ViewInstance.open` instead of the
 table set itself: the reconciling subscription opens a window for every
 instance where `open === true` and closes one the moment that flag drops or
 the instance is deleted. Closing the window (user click, not a data change)
-writes `open: false` back so it doesn't reopen on the next boot — jsPanel
-itself has no cross-reload memory, exactly like table windows.
+writes `open: false` back so it doesn't reopen on the next boot — the panel
+shell itself has no cross-reload memory of its own, exactly like table
+windows.
+
+Like table windows, a view window mounts its content (`<view-window>`)
+lazily: one that opens minimized gets a bare placeholder, and minimizing an
+open one later detaches the element and drops its row subscription. The one
+difference from table windows is the boot-time `?minimize` flag, which only
+table windows honor (see above).
 
 Two behaviors are unique to view windows:
 
@@ -165,7 +199,7 @@ Two behaviors are unique to view windows:
   several open instances) — let the Views dialog push an edit into an
   already-open window without tearing it down and reopening it.
 
-View panels use a distinct chrome color (`theme: '#0891b2'`, cyan) purely so
+View panels use a distinct chrome color (`color: '#0891b2'`, cyan) purely so
 they read visually as different from table windows.
 
 ## The pan/zoom canvas (`panzoom.ts`)
@@ -184,47 +218,58 @@ off-screen — and the pan/zoom canvas is how you get it back:
 - **Desktop:** right-button drag anywhere over the canvas pans it (a
   `mousemove`/`mouseup` pair attached at `window` level in the capture
   phase, since the overlay itself is `pointer-events: none` on desktop so
-  left-clicks fall through to jsPanel's own dragging). A plain right-click
+  left-clicks fall through to the panel's own dragging). A plain right-click
   with no movement still opens the context menu — only a drag that actually
   moved past a small threshold suppresses it.
 
 Panel geometry is always stored in the viewport's own **untransformed**
-layout coordinates, so jsPanel's internal drag/resize math never has to
-know about the canvas transform — only the maximize-fill counter-transform
-below cares about it. Scale is clamped to `[0.25, 4]`.
+layout coordinates, so the panel shell's internal drag/resize math never has
+to know about the canvas transform — only the maximize re-fit below cares
+about it. Scale is clamped to `[0.25, 4]`.
 
-## Maximize while panned or zoomed (`maximize-fill.ts`)
+## Maximize while panned or zoomed
 
-jsPanel sizes a maximized panel to fill its **container's layout box**
-(`left:0, top:0`, `clientWidth × clientHeight`) — correct in layout terms,
-but since the container itself is scaled/translated by the canvas
+The panel shell sizes a maximized panel to fill its **container's layout
+box** (`left:0, top:0`, `clientWidth × clientHeight`) — correct in layout
+terms, but since the container itself is scaled/translated by the canvas
 transform, a maximized window would visually drift or scale along with
-whatever pan/zoom state happened to be active. `createMaximizeFill()` gives
-the maximized panel its own counter-transform that exactly cancels the
-canvas's: for a canvas `translate(tx, ty) scale(s)`, the panel gets
+whatever pan/zoom state happened to be active. `createPanel()` gives every
+maximized panel its own counter-transform that exactly cancels the canvas's:
+for a canvas `translate(tx, ty) scale(s)`, the panel gets
 `translate(-tx/s, -ty/s) scale(1/s)`, which maps the panel's `(0,0)-(W,H)`
 box back onto the overlay's `(0,0)-(W,H)` regardless of how the canvas is
-currently panned or zoomed. It subscribes to the shared `PanZoomHandle` for
-the duration of the maximized state (`enter()`/`exit()`, both idempotent) so
-panning or zooming _while_ a window is maximized keeps it filling the
-screen instead of sliding out from under itself. Table and view windows
-share the exact same helper and the exact same live `PanZoomHandle`
-(exposed via `currentPanZoom()` so the view-window manager, initialized
-separately, can reuse the table manager's canvas instance).
+currently panned or zoomed. It subscribes to the shared pan/zoom state for
+the duration of the maximized state (`enterMaximized()`/`exitMaximized()`,
+both idempotent) so panning or zooming _while_ a window is maximized keeps
+it filling the screen instead of sliding out from under itself, and it
+attaches a `ResizeObserver` on the container so a maximized panel also
+re-fits on a plain browser resize or header wrap, with no pan/zoom
+involved. Table and view windows share the exact same code path inside
+`panel-shell.ts` and the exact same live pan/zoom state (exposed via
+`shellViewport()`/`currentPanZoom()` in `jspanel-manager.ts`, so the
+view-window manager, initialized separately, can reuse the table manager's
+canvas instance).
+
+**Restore-from-dock returns to maximized, if that's where it was minimized
+from.** The shell's status machine (`panel-shell/state.ts`) remembers
+`restoreStatus` across a minimize: minimizing a maximized window and then
+restoring it from the dock lands back on maximized, not merely normalized.
+`persistFlags()` keeps `maximized: true` in that case too, so the same
+behavior survives a reload (pinned by the `08-window-manager` e2e spec).
 
 ## Practical implications
 
 - **A panel's on-screen position is not its "real" position while minimized
   or maximized.** Both `saveGeometry` functions special-case those two
   states and reuse the last normalized rect rather than reading
-  `offsetLeft`/`offsetTop`, which would otherwise persist jsPanel's `-9999`
-  minimize-parking coordinate or the maximized full-container size as if it
-  were the user's intended layout.
+  `offsetLeft`/`offsetTop`, which would otherwise persist the `display: none`
+  minimize state or the maximized full-container size as if it were the
+  user's intended layout.
 - **Z-order is a timestamp, not a DOM read.** Anything that needs "is this
   panel on top" has to go through the persisted `windowGeometry.z`
-  (`onfronted` → `stampFrontOrder`) — reading `element.style.zIndex`
-  directly would see jsPanel's renormalized, momentarily-identical value
-  instead of a stable per-panel ordering.
+  (`onfronted` → `stampFrontOrder`/`stampViewFrontOrder`) — reading the
+  panel's live `style.zIndex` directly would see a session-local value that
+  resets on reload, not a stable per-panel ordering.
 - **Off-screen geometry is a feature, not a bug to guard against.** Don't
   "fix" a window that restores partially or fully outside the viewport —
   that's expected, and the pan/zoom canvas (or a double-tap reset on touch)

@@ -1,7 +1,7 @@
 /**
  * Pan/zoom for the table canvas.
  *
- * The jsPanel windows live in an inner viewport (`#easydb-panels-viewport`)
+ * The panel-shell windows live in an inner viewport (`#easydb-panels-viewport`)
  * inside the fixed `#easydb-panels` overlay. This controller drives a CSS
  * `translate()/scale()` on that viewport from two input paths:
  *
@@ -15,7 +15,7 @@
  *
  * Mouse (desktop):
  *   - right-button drag anywhere over the canvas  → pan (translate).
- * Left-button drag is untouched, so jsPanel window dragging still works.
+ * Left-button drag is untouched, so panel dragging still works.
  * The right-drag handlers are attached at the window level (capture) because
  * the desktop overlay stays `pointer-events:none` so left-clicks fall through
  * to the chrome beneath; window capture still sees the events, and activation
@@ -23,10 +23,11 @@
  * only when a drag actually happened — a plain right-click still opens it.
  *
  * Panel geometry is stored in the viewport's own (untransformed) layout
- * coordinates, so jsPanel's drag/resize/clamp math is unaffected by the
- * transform. The one known caveat: while zoomed (scale ≠ 1) a jsPanel titlebar
- * drag moves by raw pointer delta, so it tracks the finger at 1/scale speed —
- * acceptable since panning/zooming to view is the mobile-primary interaction.
+ * coordinates, so the panel shell's drag/resize/clamp math is unaffected by
+ * the transform. The one known caveat: while zoomed (scale ≠ 1) a panel
+ * titlebar drag moves by raw pointer delta, so it tracks the finger at
+ * 1/scale speed — acceptable since panning/zooming to view is the
+ * mobile-primary interaction.
  */
 
 export interface PanZoomState {
