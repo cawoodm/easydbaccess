@@ -1449,6 +1449,7 @@ export class DataTable extends LitElement {
                   (c) =>
                     html`<td
                       class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}${cellStateClass(r, c)}`}
+                      title=${cellTooltip(r, c)}
                     >
                       ${this.renderCell(r, c)}
                     </td>`,
@@ -1480,6 +1481,30 @@ export class DataTable extends LitElement {
  * A scripted column is exempt: its display is computed by the script, so an empty
  * stored value is normal there and pink would flag every row.
  */
+/**
+ * Longest tooltip we hand a cell. Past a few hundred characters a native
+ * tooltip is unreadable anyway, and the browser truncates it at its own
+ * (undocumented) limit — better to cut it ourselves with a visible ellipsis.
+ */
+const MAX_TOOLTIP_CHARS = 500;
+
+/**
+ * The `title` for a cell: its full stored value, because a column narrower than
+ * its content shows only an ellipsis and there is otherwise no way to read the
+ * rest without widening the column or clicking in.
+ *
+ * A scripted column is skipped — what it shows is computed, so its stored value
+ * would explain nothing. An empty cell gets no tooltip.
+ */
+function cellTooltip(row: Row, col: ColumnSpec): string {
+  if (col.script) return '';
+  const v = row.data[col.field];
+  if (v == null) return '';
+  const text = typeof v === 'string' ? v : String(v);
+  if (text.trim() === '') return '';
+  return text.length > MAX_TOOLTIP_CHARS ? `${text.slice(0, MAX_TOOLTIP_CHARS)}…` : text;
+}
+
 function cellStateClass(row: Row, col: ColumnSpec): string {
   if (col.script) return '';
   const state = cellState(row.data[col.field], col.type);

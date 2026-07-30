@@ -77,6 +77,12 @@ export class ViewWindow extends LitElement {
         text-align: left;
         vertical-align: top;
         white-space: nowrap;
+        /* Clip a long value to the column instead of stretching the table past
+           the window; the cell's title attribute carries the whole thing.
+           Matches the grid (data-table). */
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 40ch;
       }
       table.vw-table th {
         background: #f9fafb;
@@ -486,7 +492,10 @@ export class ViewWindow extends LitElement {
               html`<tr>
                 ${this.columns.map((c) => {
                   const v = r.data[c.field];
-                  return html`<td>${v == null ? '' : String(v)}</td>`;
+                  const text = v == null ? '' : String(v);
+                  // Same deal as the grid: the cell clips to the column width,
+                  // so the full value has to be reachable on hover.
+                  return html`<td title=${text}>${text}</td>`;
                 })}
               </tr>`,
           )}
