@@ -167,6 +167,10 @@ export class ViewWindow extends LitElement {
       .vw-footer button:hover {
         background: #f3f4f6;
       }
+      /* Same dark red as the delete-table trash icon (panel-footer). */
+      .vw-footer button.danger {
+        color: #b91c1c;
+      }
       /* Active = template is OFF (showing the raw table). */
       .vw-footer button.active {
         background: #0891b2;
@@ -436,6 +440,20 @@ export class ViewWindow extends LitElement {
     openViewsDialog(this.instance.tableId, { editInstanceId: this.instance.id });
   }
 
+  /** Delete this view instance after a confirm. No explicit window close: the
+   * view-window manager drops the window when the instance leaves its
+   * reconcile subscription (same path as the Views manager's Delete). */
+  private async deleteView() {
+    if (!this.instance) return;
+    const ctx = await getContext();
+    const ok = await ctx.api.ui.dialogs.confirm(
+      `Delete the view "${this.instance.name}"? The table and its rows stay.`,
+      'Delete view',
+    );
+    if (!ok) return;
+    await ctx.store.viewInstances.remove(this.instance.id);
+  }
+
   /** Show/hide a column in template-off mode (persisted on the instance). */
   private async toggleColumn(field: string) {
     if (!this.instance) return;
@@ -591,6 +609,14 @@ export class ViewWindow extends LitElement {
         @click=${() => void this.toggleTemplate()}
       >
         <span class="mi">table_view</span>
+      </button>
+      <button
+        class="danger"
+        aria-label="Delete view"
+        title="Delete this view (the table stays)"
+        @click=${() => void this.deleteView()}
+      >
+        <span class="mi">delete</span>
       </button>
     </div>`;
   }

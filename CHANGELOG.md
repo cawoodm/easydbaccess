@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ A view window footer has a Delete button now: it asks first, then removes the view and closes the window (v0.0.200)
 - ✨ A built-in view template has no Delete button now. Copy it first if you want a version you can delete (v0.0.199)
 - ✨ A view now has a Copy button: the copy picks up columns added to the table since, and keeps template, filters and sort (v0.0.196)
 - ✨ Views gained a sort bar: pick a column and a direction, kept on the view, and the rows re-sort live (v0.0.193)

@@ -983,6 +983,36 @@ test.describe('views: sort, field search, standard templates', () => {
       .toEqual({ copyHasAuthor: true, origHasAuthor: false });
   });
 
+  test('the view footer Delete button removes the view and closes its window', async ({
+    page,
+    workspaceId,
+  }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ title: 'Hello', url: 'https://x/1' }]);
+    await useTemplate(page, id, 'RSS Feed');
+
+    const vw = page.locator('view-window');
+    await expect(vw).toBeVisible();
+    await vw.getByRole('button', { name: 'Delete view' }).click();
+    await page.locator('host-dialogs').getByRole('button', { name: 'Yes' }).click();
+
+    // The instance is gone from the store, and the manager closed the window.
+    await expect
+      .poll(() =>
+        page.evaluate(async (ws) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const store = (window as any).__easydb.store;
+          const insts = (await store.viewInstances.find()).filter(
+            (v: { workspaceId: string }) => v.workspaceId === ws,
+          );
+          return insts.length;
+        }, workspaceId),
+      )
+      .toBe(0);
+    await expect(vw).toHaveCount(0);
+  });
+
   test('a built-in template has no Delete button, its copy does', async ({ page }) => {
     const id = await createTable(page, 'Feed', [{ field: 'title' }]);
     await waitForPanel(page, id);
