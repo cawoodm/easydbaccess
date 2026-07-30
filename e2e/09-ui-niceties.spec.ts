@@ -28,7 +28,9 @@ test.describe('ui niceties', () => {
     page,
   }) => {
     const header = page.locator('app-shell header');
-    const searchBtn = header.locator('button.icon-btn');
+    // By accessible name, not `button.icon-btn` — the header carries three of
+    // those now (search, plugins, help).
+    const searchBtn = header.getByRole('button', { name: 'Search' });
 
     // The collapsed search icon is the last (right-most) element in the header,
     // to the right of the action buttons (e.g. "New Table").
@@ -52,7 +54,7 @@ test.describe('ui niceties', () => {
     await input.fill('widget');
     await header.locator('strong').click();
     await expect(header.locator('input.search')).toHaveCount(0);
-    const collapsed = header.locator('button.icon-btn');
+    const collapsed = header.getByRole('button', { name: 'Search' });
     await expect(collapsed).toHaveClass(/active/);
     await expect(collapsed).toHaveAttribute('title', /Filtering all tables: widget/);
 
@@ -66,7 +68,7 @@ test.describe('ui niceties', () => {
     page,
   }) => {
     const header = page.locator('app-shell header');
-    await header.locator('button.icon-btn').click();
+    await header.getByRole('button', { name: 'Search' }).click();
     const input = header.locator('input.search');
     await input.fill('widget');
 

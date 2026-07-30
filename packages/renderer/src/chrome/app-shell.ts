@@ -24,13 +24,18 @@ import './workspace-selector.js';
  * Render a button's `icon`. An icon string that begins with `<svg` is rendered
  * as inline SVG (sized + coloured by CSS); anything else is treated as a
  * Material Icons ligature name, the long-standing default.
+ *
+ * Both branches are `aria-hidden`: a Material Icons glyph IS its ligature text,
+ * so an unhidden icon span joins the button's accessible name — a screen reader
+ * (and `getByRole('button', { name })`) saw "cloud_sync Sync" instead of "Sync".
+ * The label next to it carries the meaning.
  */
 function renderButtonIcon(icon: string | undefined) {
   if (!icon) return '';
   if (icon.trimStart().startsWith('<svg')) {
-    return html`<span class="icon-svg">${unsafeSVG(icon)}</span>`;
+    return html`<span class="icon-svg" aria-hidden="true">${unsafeSVG(icon)}</span>`;
   }
-  return html`<span class="mi sm">${icon}</span>`;
+  return html`<span class="mi sm" aria-hidden="true">${icon}</span>`;
 }
 
 @customElement('app-shell')
@@ -465,7 +470,7 @@ export class AppShell extends LitElement {
             target="_blank"
             rel="noopener"
             title="View the changelog on GitHub"
-            ><span class="version">v0.0.211</span></a
+            ><span class="version">v0.0.213</span></a
           ></strong
         >
         ${this.headerButtons
@@ -497,16 +502,18 @@ export class AppShell extends LitElement {
               title=${this.searchQuery.trim().length > 0
                 ? `Filtering all tables: ${this.searchQuery}`
                 : 'Search across all tables in this workspace'}
+              aria-label="Search"
               @click=${this.openSearch}
             >
-              <span class="mi">search</span>
+              <span class="mi" aria-hidden="true">search</span>
             </button>`}
         <button
           class="icon-btn"
           title="Add, disable, or remove plugins"
+          aria-label="Plugins"
           @click=${() => this.api?.ui.openPluginManager()}
         >
-          <span class="mi">extension</span>
+          <span class="mi" aria-hidden="true">extension</span>
         </button>
         <a
           class="icon-btn"
@@ -516,7 +523,7 @@ export class AppShell extends LitElement {
           title="Help — open the user guide"
           aria-label="Help — open the user guide"
         >
-          <span class="mi">help</span>
+          <span class="mi" aria-hidden="true">help</span>
         </a>
         ${this.headerButtons
           .filter((b) => b.variant === 'secondary')
