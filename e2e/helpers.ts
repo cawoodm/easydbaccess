@@ -136,7 +136,14 @@ export function panelDomId(tableId: string): string {
   return `panel-${tableId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 }
 
-/** Waits until the panel for a given table is mounted in the DOM. */
+/**
+ * Waits until the panel for a given table is mounted in the DOM.
+ *
+ * `state: 'attached'`, not Playwright's default `'visible'`: a panel that
+ * boots (or is driven) minimized is `display:none` in the shell — a
+ * deliberate change from jsPanel's old off-screen `left:-9999` parking (see
+ * panel-shell.ts) — so it would never satisfy a visibility wait.
+ */
 export async function waitForPanel(page: Page, tableId: string) {
-  await page.locator(`#${panelDomId(tableId)}`).waitFor();
+  await page.locator(`#${panelDomId(tableId)}`).waitFor({ state: 'attached' });
 }

@@ -1,9 +1,14 @@
 /**
  * Bulk window operations used by the command palette's "Windows" commands.
  *
- * These act on *every* open jsPanel — table panels and view-instance panels
- * alike — via jsPanel's global `getPanels()` registry, so a single command
- * affects the whole workspace regardless of which manager opened each window.
+ * These act on *every* open panel — table panels and view-instance panels
+ * alike — so a single command affects the whole workspace regardless of
+ * which manager opened each window. Table windows (and other panel-shell
+ * consumers, e.g. the html-preview popup) run on the in-repo panel shell and
+ * register in ITS OWN registry; view windows still run on jsPanel (Task 6
+ * migrates them). So `allPanels()` merges both registries — read separately —
+ * and re-sorts the combined list by live DOM z-index, since each registry's
+ * own ordering is only correct within its own kind.
  *
  * Cascade/tile position panels within the *currently visible* region of the
  * pan/zoom canvas: geometry is written in viewport-local coordinates derived
@@ -14,6 +19,7 @@
 // @ts-expect-error — jspanel4 ships no types
 import { jsPanel } from 'jspanel4/es6module/jspanel.js';
 import { currentPanZoom } from './jspanel-manager.js';
+import { getPanels as getShellPanels } from './panel-shell/panel-shell.js';
 import { eligibleForArrange, tileSlots } from './tile-layout.js';
 
 type PanelEl = HTMLElement & {
@@ -26,11 +32,15 @@ type PanelEl = HTMLElement & {
   status: 'normalized' | 'minimized' | 'maximized' | 'smallified' | 'closed';
 };
 
-/** Every open panel, newest-on-top first (jsPanel's `getPanels` z-order). */
+/** Every open panel (both registries), newest-on-top first by live z-index. */
 function allPanels(): PanelEl[] {
-  const getPanels = (jsPanel as unknown as { getPanels?: () => ArrayLike<PanelEl> }).getPanels;
-  if (typeof getPanels !== 'function') return [];
-  return Array.from(getPanels.call(jsPanel) ?? []);
+  const getLegacyPanels = (jsPanel as unknown as { getPanels?: () => ArrayLike<PanelEl> })
+    .getPanels;
+  const legacy = typeof getLegacyPanels === 'function' ? Array.from(getLegacyPanels.call(jsPanel) ?? []) : [];
+  const shell = getShellPanels() as unknown as PanelEl[];
+  return [...legacy, ...shell].sort(
+    (a, b) => Number(b.style.zIndex || 0) - Number(a.style.zIndex || 0),
+  );
 }
 
 export function closeAllWindows(): void {

@@ -70,6 +70,22 @@ export type PanelShellEl = HTMLDivElement & {
 /** Titlebar contents where a drag or dblclick must NOT start. */
 const INTERACTIVE = 'input, textarea, select, button, a, .jsPanel-controlbar';
 
+/**
+ * Whether `e` originated on (or inside) an INTERACTIVE element — checked via
+ * `composedPath()`, not `e.target`. The footer/controlbar may host a Lit
+ * custom element (panel-footer, panel-search) with its own shadow root; for a
+ * listener attached outside that shadow tree, `e.target` is retargeted to the
+ * shadow HOST, which doesn't match `button`/`input` and has no matching
+ * ancestor either — so `e.target.closest(INTERACTIVE)` misses it, but
+ * `composedPath()` still walks through the real (shadow-internal) elements.
+ */
+function isInteractiveTarget(e: Event): boolean {
+  for (const node of e.composedPath()) {
+    if (node instanceof HTMLElement && node.matches(INTERACTIVE)) return true;
+  }
+  return false;
+}
+
 const ICONS: Record<string, string> = {
   smallify:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 15 12 9 18 15"/></svg>',
@@ -86,6 +102,37 @@ const ICONS: Record<string, string> = {
 /** Session-monotonic z counter. Never renormalized, so a panel's z-index is a
  * stable identity while it lives (jsPanel's resetZi() was not — see WINDOWS.md). */
 let zSeq = 100;
+
+/**
+ * Next z-index, guaranteed above every panel currently in the DOM — including
+ * jsPanel's own view-window panels, which carry the identical `.jsPanel` class
+ * (deliberate contract compatibility, see the file header). Until Task 6
+ * migrates view windows onto this shell, table panels (this module) and view
+ * panels (jsPanel) keep SEPARATE creation-order counters; scanning the DOM
+ * instead of trusting only the local `zSeq` keeps the two numberings mutually
+ * comparable, so a freshly-created/fronted table panel can't end up
+ * numerically behind an older view panel — which would let its invisible
+ * resize-edge hotspots intercept clicks meant for that view.
+ */
+function nextZ(): number {
+  let max = zSeq;
+  for (const other of document.querySelectorAll<HTMLElement>('.jsPanel')) {
+    const z = Number(other.style.zIndex);
+    if (Number.isFinite(z) && z > max) max = z;
+  }
+  zSeq = max + 1;
+  return zSeq;
+}
+
+/** Whether `el` already has the highest z-index among every panel in the DOM
+ * (both registries — see `nextZ()`), i.e. fronting it would be a no-op. */
+function isTopmost(el: HTMLElement): boolean {
+  const mine = Number(el.style.zIndex);
+  for (const other of document.querySelectorAll<HTMLElement>('.jsPanel')) {
+    if (other !== el && Number(other.style.zIndex) > mine) return false;
+  }
+  return true;
+}
 
 const registry = new Set<PanelShellEl>();
 
@@ -126,9 +173,12 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
   titlebar.className = 'jsPanel-titlebar';
   // Focusable via pointer so tapping the header blurs (collapses) an open
   // search box; not in the tab order. The shell does not preventDefault on
-  // pointerdown, so the default focus shift works without the explicit-focus
-  // hack the managers needed against jsPanel.
+  // pointerdown, so a real click's native focus-follows-click already lands
+  // here — but a script-dispatched PointerEvent (e2e's `dispatchEvent`) never
+  // triggers that native side effect, so focus it explicitly too.
   titlebar.tabIndex = -1;
+  titlebar.style.outline = 'none'; // no focus ring on the drag bar
+  titlebar.addEventListener('pointerdown', () => titlebar.focus());
   const title = document.createElement('span');
   title.className = 'jsPanel-title';
   title.textContent = opts.title;
@@ -163,7 +213,7 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
     z.dataset['edge'] = edge;
     el.append(z);
   }
-  el.style.zIndex = String(++zSeq);
+  el.style.zIndex = String(nextZ());
   opts.container.append(el);
 
   // Size. panelSize is the total box (restores persist offsetWidth/Height);
@@ -327,7 +377,7 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
   el.normalize = () => act('normalize');
   el.smallify = () => act('smallify');
   el.front = (_cb?: undefined, execOnFrontedCallbacks?: boolean) => {
-    el.style.zIndex = String(++zSeq);
+    el.style.zIndex = String(nextZ());
     if (execOnFrontedCallbacks !== false) opts.onfronted?.();
   };
   el.close = () => {
@@ -353,14 +403,27 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
   registry.add(el);
 
   // ---- interactions ----------------------------------------------------
-  // Any pointerdown inside the panel fronts it (and fires onfronted).
-  el.addEventListener('pointerdown', () => el.front(), true);
+  // Any pointerdown inside the panel fronts it — but only when another panel
+  // is actually on top. Fronting unconditionally on every pointerdown fired
+  // `onfronted` (a store write — see stampFrontOrder in jspanel-manager.ts)
+  // on every click anywhere in the content, including mid-drag on a data-table
+  // column-resize handle: the resulting table-record update raced the
+  // in-memory column-width freeze the resize was building, so an interior
+  // click no longer just "focuses" the panel — a REAL front (z-order change)
+  // still fires onfronted normally.
+  el.addEventListener(
+    'pointerdown',
+    () => {
+      if (!isTopmost(el)) el.front();
+    },
+    true,
+  );
 
   // Drag by header, logo, and footer. Unclamped by design.
   const wireDrag = (handle: HTMLElement): void => {
     handle.addEventListener('pointerdown', (e: PointerEvent) => {
       if (e.button !== 0) return;
-      if ((e.target as HTMLElement).closest(INTERACTIVE)) return;
+      if (isInteractiveTarget(e)) return;
       if (state.status === 'maximized' || state.status === 'minimized') return;
       const startRect = readRect();
       const scale = opts.viewport?.getState().scale ?? 1;
@@ -419,7 +482,7 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
 
   // Double-click the header toggles maximize/restore (replaces panel-titlebar.ts).
   hdr.addEventListener('dblclick', (e: MouseEvent) => {
-    if ((e.target as HTMLElement).closest(INTERACTIVE)) return;
+    if (isInteractiveTarget(e)) return;
     if (state.status === 'maximized') act('normalize');
     else el.maximize();
   });
