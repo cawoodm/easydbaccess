@@ -374,6 +374,20 @@ export class ViewsDialog extends LitElement {
     const d = this.tDraft;
     if (!d.name.trim()) return;
     const ctx = await getContext();
+    // Template names are how a view reports which template it uses, and Copy
+    // proposes "<name> copy" — two templates called the same thing are then
+    // impossible to tell apart in the list. Compared case-insensitively, and
+    // against the OTHER templates only, so re-saving a template is fine.
+    const clash = this.templates.find(
+      (t) => t.id !== d.id && t.name.trim().toLowerCase() === d.name.trim().toLowerCase(),
+    );
+    if (clash) {
+      await ctx.api.ui.dialogs.alert(
+        `A template called “${clash.name}” already exists. Pick another name.`,
+        'Duplicate template name',
+      );
+      return;
+    }
     if (d.id) {
       // Editing a built-in template turns it into a plain user template: it keeps
       // the SAME id (so there's no duplicate) but drops the `builtin` flag, so the
@@ -660,8 +674,12 @@ export class ViewsDialog extends LitElement {
                 <span class="name">${t.name}</span>
                 ${t.builtin ? html`<span class="badge">built-in</span>` : nothing}
                 <button type="button" class="mini" @click=${() => this.useTemplate(t)}>Use</button>
-                <button type="button" class="mini" @click=${() => this.editTemplate(t)}>Edit</button>
-                <button type="button" class="mini" @click=${() => this.copyTemplate(t)}>Copy</button>
+                <button type="button" class="mini" @click=${() => this.editTemplate(t)}>
+                  Edit
+                </button>
+                <button type="button" class="mini" @click=${() => this.copyTemplate(t)}>
+                  Copy
+                </button>
                 ${t.builtin
                   ? nothing
                   : html`<button

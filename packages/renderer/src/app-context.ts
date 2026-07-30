@@ -207,6 +207,12 @@ async function init(): Promise<AppContext> {
     if (SAFE_MODE !== 'off') api.ui.openPluginManager();
   });
 
+  // User scripting: the very HostApi that plugins receive, on `window.api`, so
+  // anything a plugin can do can also be typed into the browser console —
+  // `api.store.tables.find()`, `api.ui.dialogs.toast('hi')`. Not gated by
+  // `?test=1` (that gate is for `window.__easydb`, the whole AppContext).
+  (globalThis as unknown as Record<string, unknown>).api = api;
+
   return { store, events, workspaceId, registries, api };
 }
 
