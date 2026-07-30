@@ -411,6 +411,31 @@ export class ViewsDialog extends LitElement {
       (c) => c.field.toLowerCase() === lc || (c.label ?? '').toLowerCase() === lc,
     );
     if (hit) return hit.field;
+    // `CHECK1`, `CHECK2`, … (the RSS template's editable `$input.CHECKn` flags)
+    // map to the table's Nth boolean column, so a new view gets ready-to-tick
+    // checkboxes for its first couple of boolean fields.
+    const checkMatch = /^check(\d+)$/i.exec(token);
+    if (checkMatch) {
+      const idx = Number(checkMatch[1]) - 1;
+      const bools = this.columns.filter((c) => c.type === 'boolean');
+      return bools[idx]?.field ?? '';
+    }
+    // Todo's DONE (and similar flag words) -> the first boolean column.
+    const boolWords = [
+      'done',
+      'complete',
+      'completed',
+      'checked',
+      'check',
+      'read',
+      'active',
+      'enabled',
+      'starred',
+      'flag',
+      'ok',
+    ];
+    if (boolWords.includes(lc)) return this.firstColumn((c) => c.type === 'boolean');
+
     // Fall back to the table's designated label column (e.g. Datasette's
     // `label_column`) for a title/name/label token — a better "what identifies
     // a row" default than leaving it unmapped.
@@ -441,6 +466,42 @@ export class ViewsDialog extends LitElement {
         const l = (c.label ?? '').toLowerCase();
         return urlWords.some((w) => f.includes(w) || l.includes(w));
       });
+    }
+
+    const nameContains = (words: string[]) => (c: ColumnSpec) => {
+      const f = c.field.toLowerCase();
+      const l = (c.label ?? '').toLowerCase();
+      return words.some((w) => f.includes(w) || l.includes(w));
+    };
+
+    // Gallery's IMAGE -> an image-renderer column, else an image-named column,
+    // else any URL-ish column (images are commonly stored as URLs).
+    const imageWords = [
+      'image',
+      'img',
+      'photo',
+      'picture',
+      'pic',
+      'thumbnail',
+      'thumb',
+      'avatar',
+      'cover',
+      'poster',
+      'logo',
+      'icon',
+    ];
+    if (imageWords.includes(lc)) {
+      const byRenderer = this.firstColumn((c) => c.renderer === 'image');
+      if (byRenderer) return byRenderer;
+      const named = this.firstColumn(nameContains(imageWords));
+      if (named) return named;
+      return this.firstColumn(nameContains(['url', 'src', 'href', 'link']));
+    }
+
+    // Contact Cards' EMAIL / PHONE.
+    if (['email', 'mail', 'e-mail'].includes(lc)) return this.firstColumn(nameContains(['mail']));
+    if (['phone', 'tel', 'telephone', 'mobile', 'cell', 'cellphone'].includes(lc)) {
+      return this.firstColumn(nameContains(['phone', 'tel', 'mobile', 'cell']));
     }
 
     const descWords = [

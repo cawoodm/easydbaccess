@@ -197,3 +197,17 @@ run `npm run test:e2e` simultaneously — with a single shared port, the first
 server to start locked the others out of the auto-sync / backend-proxy /
 plugins-registry specs, because its `CORS_ORIGINS` only named its own
 renderer origin. Override with `EASYDB_SERVER_PORT=<n>`.
+
+## Pull request descriptions
+
+Every PR description **starts with a live preview link** on the first line, e.g.:
+
+```
+**🔎 Live preview:** https://cawoodm.github.io/easydbaccess3/
+```
+
+Publish the branch's preview first (`npm run publish -- -Target easydbaccess<N>`,
+which builds with `--base /easydbaccess<N>/` and deploys the folder to the
+`cawoodm/cawoodm.github.io` Pages repo), then put that URL at the very top of the
+PR body — above the summary — so reviewers can try the build before reading the
+diff. Keep it there when updating an existing PR description.
