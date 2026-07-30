@@ -949,12 +949,23 @@ test.describe('views: sort, field search, standard templates', () => {
     await expect(vw).toBeVisible();
     const cards = vw.locator('figure');
     await expect(cards).toHaveCount(2);
-    // Each card is one anchor wrapping the image and its caption.
-    const first = cards.nth(0).locator('a');
-    await expect(first).toHaveAttribute('href', 'https://pics.test/1');
-    await expect(first).toHaveAttribute('target', '_blank');
-    await expect(first.locator('img')).toHaveAttribute('src', 'https://pics.test/1.png');
-    await expect(cards.nth(1).locator('a')).toHaveAttribute('href', 'https://pics.test/2');
+    // The view has no sort, so the cards come in row-id order — which is random,
+    // the ids being uuids. Assert per card that its OWN row's values line up,
+    // and that both rows are present, rather than pinning either position.
+    for (const n of [0, 1]) {
+      const a = cards.nth(n).locator('a');
+      await expect(a).toHaveAttribute('target', '_blank');
+      const href = (await a.getAttribute('href'))!;
+      expect(href).toMatch(/^https:\/\/pics\.test\/[12]$/);
+      // Each card is one anchor wrapping the image and its caption, all from the
+      // same row: card 1's link never carries card 2's picture.
+      await expect(a.locator('img')).toHaveAttribute('src', `${href}.png`);
+      await expect(a).toContainText(href.endsWith('1') ? 'First' : 'Second');
+    }
+    const hrefs = await cards.locator('a').evaluateAll((els) =>
+      els.map((el) => (el as HTMLAnchorElement).getAttribute('href')),
+    );
+    expect([...hrefs].sort()).toEqual(['https://pics.test/1', 'https://pics.test/2']);
   });
 
   test('copying a view picks up columns added to the table after it was created', async ({

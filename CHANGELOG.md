@@ -32,6 +32,7 @@
 
 ### Bugs
 
+- 🪲 A command picked from the palette started a moment late, after the palette had saved its history (v0.0.233)
 - 🪲 The pencil on a script-generated link opened the computed URL and then dropped the edit (v0.0.232)
 - 🪲 A scripted column was blank in a view, and a view could not filter or sort on one (v0.0.231)
 - 🪲 Importing a workspace, or pulling one from a Gist, added a second copy of every view template the workspace already had (v0.0.229)

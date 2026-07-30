@@ -288,8 +288,9 @@ export class CommandPaletteDialog extends LitElement {
     this.close();
     // Remember BEFORE running: a command that opens a dialog only resolves once
     // the user is done with it, and a command that throws was still the last
-    // thing the user asked for.
-    await this.remember(item.id);
+    // thing the user asked for. NOT awaited — the command must start on this
+    // tick, not after a round trip to IndexedDB.
+    void this.remember(item.id);
     try {
       await item.run();
     } catch (err) {
