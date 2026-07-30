@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ColumnSpec } from '@easydb/shared';
-import { reconcileColumns, rowRekeyer } from './column-merge.js';
+import { reconcileColumns, renameRowFields, rowRekeyer } from './column-merge.js';
 
 const col = (field: string, extra: Partial<ColumnSpec> = {}): ColumnSpec => ({
   field,
@@ -78,5 +78,53 @@ describe('rowRekeyer', () => {
   it('keeps a missing value as undefined rather than dropping the key', () => {
     const rekey = rowRekeyer(cols('a', 'b'), cols('a', 'c'))!;
     expect(rekey({ a: 1 })).toEqual({ a: 1, c: undefined });
+  });
+});
+
+describe('renameRowFields', () => {
+  it('returns null when there are no renames', () => {
+    expect(renameRowFields({ a: 1, b: 2 }, [])).toBeNull();
+  });
+
+  it('moves the value to the new key and drops the old one', () => {
+    const out = renameRowFields({ alpha: 'A1', beta: 'B1' }, [{ from: 'alpha', to: 'alpha_renamed' }]);
+    expect(out).toEqual({ alpha_renamed: 'A1', beta: 'B1' });
+  });
+
+  it('preserves unrelated keys untouched', () => {
+    const out = renameRowFields({ a: 1, b: 2, c: 3 }, [{ from: 'a', to: 'aa' }]);
+    expect(out).toEqual({ aa: 1, b: 2, c: 3 });
+  });
+
+  it('swaps two fields without clobbering either value', () => {
+    const out = renameRowFields({ a: 1, b: 2 }, [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'a' },
+    ]);
+    expect(out).toEqual({ a: 2, b: 1 });
+  });
+
+  it('chains renames (a->b, b->c) reading from the original snapshot', () => {
+    const out = renameRowFields({ a: 1, b: 2 }, [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'c' },
+    ]);
+    expect(out).toEqual({ b: 1, c: 2 });
+  });
+
+  it('does not create the target key when the source key is absent', () => {
+    const out = renameRowFields({ b: 2 }, [{ from: 'a', to: 'aa' }]);
+    expect(out).toEqual({ b: 2 });
+    expect('aa' in (out as object)).toBe(false);
+  });
+
+  it('moves falsy values (null, 0, false, empty string) rather than skipping them', () => {
+    const out = renameRowFields({ n: null, z: 0, f: false, e: '' }, [
+      { from: 'n', to: 'n2' },
+      { from: 'z', to: 'z2' },
+      { from: 'f', to: 'f2' },
+      { from: 'e', to: 'e2' },
+    ]);
+    expect(out).toEqual({ n2: null, z2: 0, f2: false, e2: '' });
   });
 });

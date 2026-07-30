@@ -21,6 +21,7 @@
 
 ### Bugs
 
+- 🪲 Renaming a field in the column editor kept its data: every row is re-keyed on save, and the live preview shows the values instead of an empty column (v0.0.218)
 - 🪲 Two view templates can no longer share a name; `window.api` now exposes the plugin API for console scripting (v0.0.210)
 - 🪲 A tiled or cascaded layout survives a reload — the arrangement is stored, not only drawn (v0.0.209)
 - 🪲 A click outside the command palette closes it, like Esc already did (v0.0.206)

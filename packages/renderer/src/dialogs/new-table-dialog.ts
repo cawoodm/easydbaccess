@@ -8,6 +8,7 @@ import { makeDialogDraggable } from './draggable.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
 import { buildColumnSpec, type ColumnRow } from './column-row.js';
+import { renameRowFields, type FieldRename } from '../table/column-merge.js';
 
 const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'datetime'];
 
@@ -15,10 +16,10 @@ const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'date
  * Dual-purpose dialog: creates new tables and edits the columns of existing
  * ones. Open mode is chosen by the optional tableId argument to open().
  *
- * Edit mode keeps existing field names intact by default (renames are
- * destructive — they would require re-keying every row's data object).
- * Renaming is still allowed if you really want it, but the warning text
- * below the columns spells out what happens.
+ * Edit mode keeps existing field names intact by default. Renaming a field
+ * is allowed; on save every row's `data` object is re-keyed (see
+ * `renameRowFields` in `table/column-merge.ts`) so existing values follow
+ * the field to its new name.
  */
 @customElement('new-table-dialog')
 export class NewTableDialog extends LitElement {
@@ -481,8 +482,8 @@ export class NewTableDialog extends LitElement {
         (f) => !savedFields.has(f),
       );
 
-      // Patch the saved table; row data isn't migrated. If a field was
-      // renamed, downstream cells will read undefined and display as empty.
+      // Patch the saved table; renamed fields are re-keyed in every row's
+      // `data` below so existing values follow the field to its new name.
       const patch: Partial<Table> = { name, title, columns, updatedAt: Date.now() };
       // Only persist the deleted-columns list when it carries meaning (there's
       // something tracked, or we're clearing a previously-tracked set).
@@ -498,11 +499,20 @@ export class NewTableDialog extends LitElement {
       // them. Renamed columns keep their `origField`, so they're excluded here;
       // only true deletions are purged. Skip rows that carry none of the fields.
       const purgeFields = removedNow.filter((f) => !savedFields.has(f));
-      if (purgeFields.length > 0) {
+      // Renamed fields must be re-keyed too, or the new column reads undefined
+      // and the old value lingers under the stale key forever. Apply renames
+      // before purges so a renamed-then-purged field can never collide.
+      const renames = this.fieldRenames();
+      if (purgeFields.length > 0 || renames.length > 0) {
         const rows = await ctx.store.rows(tableId).find();
         for (const r of rows) {
           let touched = false;
-          const data = { ...r.data };
+          let data = { ...r.data };
+          const renamed = renameRowFields(data, renames);
+          if (renamed) {
+            data = renamed;
+            touched = true;
+          }
           for (const f of purgeFields) {
             if (f in data) {
               delete data[f];
@@ -544,13 +554,22 @@ export class NewTableDialog extends LitElement {
     if (this.previewRows.length === 0) {
       return html`<div class="preview"><div class="empty">No rows to preview.</div></div>`;
     }
+    // The preview rows are keyed by the field names as SAVED, but the columns
+    // below read the names the user has typed. Re-key a copy exactly the way
+    // `submit` will on save, so a pending rename previews its real values
+    // instead of an empty column (and its constraints are checked against them).
+    const renames = this.fieldRenames();
+    const previewRows =
+      renames.length > 0
+        ? this.previewRows.map((r) => ({ ...r, data: renameRowFields(r.data, renames) ?? r.data }))
+        : this.previewRows;
     // Precompute duplicate maps for any unique column so per-row checks are O(1).
     const duplicateSets = new Map<string, Set<unknown>>();
     for (const c of this.columns) {
       if (!c.unique) continue;
       const seen = new Set<unknown>();
       const dups = new Set<unknown>();
-      for (const r of this.previewRows) {
+      for (const r of previewRows) {
         const v = r.data[c.field];
         if (v == null || v === '') continue;
         if (seen.has(v)) dups.add(v);
@@ -573,7 +592,7 @@ export class NewTableDialog extends LitElement {
             </tr>
           </thead>
           <tbody>
-            ${this.previewRows.map(
+            ${previewRows.map(
               (r) => html`
                 <tr>
                   ${visible.map((c) => {
@@ -592,11 +611,22 @@ export class NewTableDialog extends LitElement {
     `;
   }
 
+  /**
+   * Pending field renames: the draft's `origField` (the name as SAVED) paired
+   * with the name the user has typed. One source of truth for all three
+   * consumers — the save-time row re-key, the live preview's re-key, and the
+   * hint below the column list — so they can never disagree about what counts
+   * as a rename. Empty in `new` mode, where no row data exists yet.
+   */
+  private fieldRenames(): FieldRename[] {
+    if (this.mode !== 'edit') return [];
+    return this.columns
+      .filter((c) => c.origField && c.origField !== c.field.trim())
+      .map((c) => ({ from: c.origField as string, to: c.field.trim() }));
+  }
+
   private renameDetected(): boolean {
-    return (
-      this.mode === 'edit' &&
-      this.columns.some((c) => c.origField && c.origField !== c.field.trim())
-    );
+    return this.fieldRenames().length > 0;
   }
 
   override render() {
@@ -820,8 +850,7 @@ export class NewTableDialog extends LitElement {
 
             ${this.renameDetected()
               ? html`<div class="hint">
-                  Renamed fields will appear empty for existing rows — the row data isn't migrated
-                  automatically.
+                  Existing rows are re-keyed on save, so renamed fields keep their data.
                 </div>`
               : ''}
             ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''}
