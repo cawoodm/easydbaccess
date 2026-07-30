@@ -429,7 +429,13 @@ test.describe('datasette import — whole database', () => {
     await infoBtn.click();
     const infoDlg = page.locator('table-info-dialog dialog');
     await expect(infoDlg).toBeVisible();
-    await expect(infoDlg.locator('a[href="https://datasette.io/mini/people"]')).toBeVisible();
+    // The URL appears twice by design — once in the origin block (which explains
+    // snapshot + Refresh) and once in the Source metadata row — so assert the
+    // origin link rather than matching the href across the whole dialog.
+    await expect(infoDlg.locator('.kind-origin a')).toHaveAttribute(
+      'href',
+      'https://datasette.io/mini/people',
+    );
   });
 
   const importExecutives = async (page: import('@playwright/test').Page) => {
