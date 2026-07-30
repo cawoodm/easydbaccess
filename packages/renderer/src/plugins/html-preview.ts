@@ -1,6 +1,5 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
-// @ts-expect-error — jspanel4 ships no types
-import { jsPanel } from 'jspanel4/es6module/jspanel.js';
+import { createPanel } from '../window-mgr/panel-shell/panel-shell.js';
 import { looksLikeHtml, htmlToPreviewText } from '../util/html-text.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
@@ -156,17 +155,15 @@ class HtmlPreviewCell extends HTMLElement {
       pre.textContent = this._value;
       content.append(pre);
     }
-    jsPanel.create({
+    createPanel({
       id: `easydb-html-popup-${++popupSeq}`,
       container: popupContainer(),
-      headerTitle: this._label,
-      theme: '#7c3aed',
+      title: this._label,
+      color: '#7c3aed',
       content,
-      contentSize: '520 400',
-      position: 'center-top 0 60',
+      contentSize: { w: 520, h: 400 },
+      position: { centerTopOffset: 60 },
       minimizeTo: '#easydb-minimized-dock',
-      dragit: { containment: false },
-      resizeit: { containment: false },
     });
   }
 
@@ -193,18 +190,16 @@ class HtmlPreviewCell extends HTMLElement {
     bar.append(cancel, save);
     content.append(ta, bar);
 
-    const panel = jsPanel.create({
+    const panel = createPanel({
       id: `easydb-html-edit-${++popupSeq}`,
       container: popupContainer(),
-      headerTitle: `Edit ${this._label}`,
-      theme: '#7c3aed',
+      title: `Edit ${this._label}`,
+      color: '#7c3aed',
       content,
-      contentSize: '520 400',
+      contentSize: { w: 520, h: 400 },
       position: 'center',
       minimizeTo: '#easydb-minimized-dock',
-      dragit: { containment: false },
-      resizeit: { containment: false },
-    }) as { close: () => void };
+    });
 
     cancel.addEventListener('click', () => panel.close());
     save.addEventListener('click', () => {
