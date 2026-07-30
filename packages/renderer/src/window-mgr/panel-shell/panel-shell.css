@@ -1,0 +1,151 @@
+/* packages/renderer/src/window-mgr/panel-shell/panel-shell.css
+ * Shell styling. Class names deliberately mirror jsPanel4's so index.html's
+ * rules, panzoom.ts's '.jsPanel' checks, and the e2e selectors keep working.
+ * Colors flow from --eda-panel-color, set inline by createPanel; the
+ * .eda-refreshable override in index.html still wins via !important. */
+.jsPanel {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--eda-panel-color, #01579b);
+  border-radius: 4px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  font-family: system-ui, sans-serif;
+}
+.jsPanel-hdr {
+  flex: none;
+  color: #fff;
+  user-select: none;
+  border-radius: 4px 4px 0 0;
+}
+.jsPanel-headerbar {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+}
+.jsPanel-titlebar {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  cursor: move;
+  outline: none;
+  touch-action: none;
+}
+.jsPanel-title {
+  padding: 0 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.jsPanel-controlbar {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 2px;
+  padding-right: 4px;
+}
+.jsPanel-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: #fff;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.jsPanel-btn:hover {
+  opacity: 1;
+}
+.jsPanel-btn svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.jsPanel-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+}
+.jsPanel-ftr {
+  flex: none;
+  display: none;
+  background: #f3f4f6;
+  border-radius: 0 0 4px 4px;
+  cursor: move;
+}
+.jsPanel-ftr.active {
+  display: block;
+}
+/* Status-driven visibility: no per-panel JS to sync buttons or cursors. */
+.jsPanel[data-status='normalized'] .jsPanel-btn-normalize {
+  display: none;
+}
+.jsPanel[data-status='maximized'] .jsPanel-btn-maximize,
+.jsPanel[data-status='smallified'] .jsPanel-btn-smallify {
+  display: none;
+}
+.jsPanel[data-status='smallified'] .jsPanel-content,
+.jsPanel[data-status='smallified'] .jsPanel-ftr {
+  display: none;
+}
+/* A maximized panel cannot be dragged; advertise the dblclick-restore. */
+.jsPanel[data-status='maximized'] .jsPanel-titlebar,
+.jsPanel[data-status='maximized'] .jsPanel-headerlogo,
+.jsPanel[data-status='maximized'] .jsPanel-ftr {
+  cursor: pointer;
+}
+.jsPanel[data-status='maximized'] .eda-resize {
+  display: none;
+}
+/* Invisible resize zones on all edges and corners. */
+.eda-resize {
+  position: absolute;
+  touch-action: none;
+  z-index: 1;
+}
+.eda-resize[data-edge='n'] { top: -4px; left: 8px; right: 8px; height: 8px; cursor: n-resize; }
+.eda-resize[data-edge='s'] { bottom: -4px; left: 8px; right: 8px; height: 8px; cursor: s-resize; }
+.eda-resize[data-edge='e'] { right: -4px; top: 8px; bottom: 8px; width: 8px; cursor: e-resize; }
+.eda-resize[data-edge='w'] { left: -4px; top: 8px; bottom: 8px; width: 8px; cursor: w-resize; }
+.eda-resize[data-edge='ne'] { top: -4px; right: -4px; width: 12px; height: 12px; cursor: ne-resize; }
+.eda-resize[data-edge='nw'] { top: -4px; left: -4px; width: 12px; height: 12px; cursor: nw-resize; }
+.eda-resize[data-edge='se'] { bottom: -4px; right: -4px; width: 12px; height: 12px; cursor: se-resize; }
+.eda-resize[data-edge='sw'] { bottom: -4px; left: -4px; width: 12px; height: 12px; cursor: sw-resize; }
+/* Minimized replacement bar in the dock. */
+.jsPanel-replacement {
+  display: flex;
+  align-items: center;
+  height: 30px;
+  max-width: 220px;
+  background-color: var(--eda-panel-color, #01579b);
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: system-ui, sans-serif;
+  user-select: none;
+}
+.jsPanel-replacement .jsPanel-headerlogo {
+  display: flex;
+  align-items: center;
+  padding-left: 6px;
+}
+.jsPanel-replacement .jsPanel-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0 6px;
+}
+.jsPanel-replacement .jsPanel-btn {
+  width: 24px;
+  height: 24px;
+}
