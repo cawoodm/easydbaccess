@@ -22,5 +22,6 @@ data.sqlite
 tmp*
 *.stackdump
 TODO.md
+TODO.*
 .claude
 AGENT_PERMISSIONS.md
