@@ -12,8 +12,25 @@ import { bulkAddRows, createTable, panelDomId, readTable, waitForPanel } from '.
  */
 test.describe('window stacking across tables and views', () => {
   /** Creates an RSS-templated view over `tableId` via the real dialog flow
-   * (mirrors `e2e/23-views.spec.ts`). Returns the view's jsPanel DOM id. */
+   * (mirrors `e2e/23-views.spec.ts`). Returns the view's panel DOM id.
+   *
+   * Counts view PANELS (`[id^="view-panel-"]`), not `<view-window>` elements,
+   * and resolves via the LAST one once the count grows: a caller creating a
+   * SECOND view (over the same or another table) needs the NEW panel, not
+   * the first one. Two problems rule out the obvious `view-window`-based
+   * approaches: (1) `document.querySelector('view-window')` always returns
+   * the FIRST match, so a second call would silently return the first view's
+   * id every time; (2) asserting `page.locator('view-window')` is VISIBLE is
+   * a strict-mode violation the moment a second view exists (Playwright
+   * refuses to resolve "is it visible" against >1 match, even mid-load with
+   * one still showing "Loading…") — it doesn't matter that only the new one
+   * is loading, the query itself is already ambiguous. Panel DOM ids are
+   * unique per view instance and exist immediately (even before the inner
+   * <view-window> mounts), so polling their count sidesteps both. */
   async function createViewOver(page: Page, tableId: string): Promise<string> {
+    const before = await page.evaluate(
+      () => document.querySelectorAll('[id^="view-panel-"]').length,
+    );
     await page
       .locator(`#${panelDomId(tableId)} panel-footer`)
       .getByRole('button', { name: /Views/ })
@@ -25,8 +42,13 @@ test.describe('window stacking across tables and views', () => {
       .getByRole('button', { name: 'Use' })
       .click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
-    await expect(page.locator('view-window')).toBeVisible();
-    return page.evaluate(() => document.querySelector('view-window')!.closest('.jsPanel')!.id);
+    await expect
+      .poll(() => page.evaluate(() => document.querySelectorAll('[id^="view-panel-"]').length))
+      .toBeGreaterThan(before);
+    return page.evaluate(() => {
+      const panels = [...document.querySelectorAll('[id^="view-panel-"]')];
+      return panels[panels.length - 1]!.id;
+    });
   }
 
   async function zIndexOf(page: Page, domId: string): Promise<number> {
@@ -127,14 +149,12 @@ test.describe('window stacking across tables and views', () => {
   test('a table/view/table sandwich preserves interleaved stacking after a reload', async ({
     page,
   }) => {
-    // Both table windows AND view windows run on the same panel shell (view
-    // windows were the last jsPanel holdout — see the swap in
-    // view-window-manager.ts). Before that swap, a transitional bridge kept
-    // jsPanel's z bookkeeping from burying a view under a table, but it could
-    // only ever flatten "all views above/below all tables" as one block — a
-    // table/view/table SANDWICH (one kind fronted, then the other, then the
-    // first kind again) could not be reproduced. This test exercises exactly
-    // that interleaving with two tables and one view.
+    // An additional stacking-restore case alongside the two above: a single
+    // view sandwiched between two tables. NOTE: this shape does NOT pin the
+    // old jsPanel-bridge regression (see the view/table/view test below for
+    // that) — with only one view in play, the bridge's block-wide
+    // renormalization of every jsPanel-side panel moves just that one view,
+    // so any relative position was still reproducible even pre-swap.
     // Create the view over table A before table B exists, so table A's own
     // panel-footer is still on top and clickable (table B would otherwise
     // cascade-position on top of it, per createTable's default placement).
@@ -180,6 +200,60 @@ test.describe('window stacking across tables and views', () => {
         const vZ = await zIndexOf(page, viewPanelId);
         const aZ = await zIndexOf(page, tableAPanelId);
         return bZ < vZ && vZ < aZ;
+      })
+      .toBe(true);
+  });
+
+  test('a view/table/view sandwich preserves interleaved stacking after a reload — the actual bridge-regression pin', async ({
+    page,
+  }) => {
+    // THIS is the shape the old jsPanel z-order bridge (`bridgeJsPanelZOrder`,
+    // removed in the view-window-manager swap) could not reproduce. With only
+    // ONE view in play (see the table/view/table test above), the bridge's
+    // renormalization touches just that one jsPanel-side panel, so any
+    // relative position was still reproducible. With TWO views straddling one
+    // table, fronting the upper view renormalized EVERY jsPanel panel as one
+    // block — dragging the lower view up along with it — so a saved
+    // `viewLower < table < viewUpper` order restored as
+    // `table < viewLower < viewUpper` instead. Now that both kinds share one
+    // z-index numbering (panel-shell.ts's `nextZ()`), there is no second
+    // registry to renormalize, so the sandwich survives a reload intact.
+    const tableAId = await createTable(page, 'TableA', [{ field: 'title' }]);
+    await waitForPanel(page, tableAId);
+    const viewLowerPanelId = await createViewOver(page, tableAId);
+    const viewUpperPanelId = await createViewOver(page, tableAId);
+    const tableAPanelId = panelDomId(tableAId);
+
+    // Front bottom → top: the lower view, then the table, then the upper view.
+    await front(page, viewLowerPanelId);
+    // No store helper for view instances in e2e/helpers.ts — give the view's
+    // own async front-rank write a moment to persist before the next front.
+    await page.waitForTimeout(200);
+    await front(page, tableAPanelId);
+    await expect
+      .poll(async () => (await readTable(page, tableAId))?.windowGeometry?.z ?? 0)
+      .toBeGreaterThan(0);
+    await front(page, viewUpperPanelId);
+    await page.waitForTimeout(200);
+
+    await page.reload();
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => Boolean((window as any).__easydb),
+    );
+    await waitForPanel(page, tableAId);
+    await page.locator(`#${viewLowerPanelId}`).waitFor();
+    await page.locator(`#${viewUpperPanelId}`).waitFor();
+
+    // The cross-kind restack runs asynchronously after boot — poll until the
+    // full sandwich order settles: the lower view below the table, the table
+    // below the upper view.
+    await expect
+      .poll(async () => {
+        const lowerZ = await zIndexOf(page, viewLowerPanelId);
+        const tableZ = await zIndexOf(page, tableAPanelId);
+        const upperZ = await zIndexOf(page, viewUpperPanelId);
+        return lowerZ < tableZ && tableZ < upperZ;
       })
       .toBe(true);
   });
