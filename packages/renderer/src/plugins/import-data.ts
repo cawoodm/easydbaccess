@@ -29,7 +29,8 @@ import { editColumnNames } from '../dialogs/column-names-dialog.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from '../dialogs/dialog-chrome.js';
 import { makeDialogDraggable } from '../dialogs/draggable.js';
 import { parseCsv } from './csv-import.js';
-import { fetchDatabaseNames, fetchTablesForDb, parseDatasetteUrl } from './datasette-client.js';
+import { fetchDatabaseNames, parseDatasetteUrl } from './datasette-client.js';
+import { resolveChosenTables } from './datasette-common.js';
 import { importDatasette } from './datasette-import.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 import { isWorkspaceDump, restoreWorkspaceDump } from './json-import.js';
@@ -399,20 +400,11 @@ async function referenceDatasette(api: HostApi, url: string): Promise<void> {
   const ref = parseDatasetteUrl(url);
   const fetchFn = (u: string) => api.backend.fetch(u);
 
-  const targets: Array<{ db: string; table: string }> = [];
-  if (ref.db && ref.table) {
-    targets.push({ db: ref.db, table: ref.table });
-  } else if (ref.db) {
-    for (const t of await fetchTablesForDb(fetchFn, ref.base, ref.db)) {
-      if (!t.hidden) targets.push({ db: t.db, table: t.table });
-    }
-  } else {
-    for (const db of await fetchDatabaseNames(fetchFn, ref.base)) {
-      for (const t of await fetchTablesForDb(fetchFn, ref.base, db)) {
-        if (!t.hidden) targets.push({ db: t.db, table: t.table });
-      }
-    }
-  }
+  // The same picker Import and Connect use. Referencing a database or an
+  // instance root used to silently take EVERY table, which is rarely what
+  // someone pasting a database URL wants.
+  const targets = await resolveChosenTables(fetchFn, ref, 'Reference');
+  if (targets === null) return; // cancelled
   if (targets.length === 0) throw new Error('No tables found to reference at that URL.');
 
   let ok = 0;
@@ -469,6 +461,9 @@ async function createUrlReference(
     // A live source: the routed data store serves rows via the `url` provider,
     // so nothing is stored locally and gist sync carries the definition only.
     source: { type: 'url', config: { url, format } },
+    // The rows live at the source and the provider throws on every write, so
+    // the grid must not offer editors it cannot honour.
+    readonly: true,
     updatedAt: Date.now(),
   };
   await api.store.tables.insert(table);

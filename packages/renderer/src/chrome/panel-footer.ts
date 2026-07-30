@@ -1,4 +1,4 @@
-import { LitElement, css, html } from 'lit';
+import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeSVG } from 'lit/directives/unsafe-svg.js';
 import type { ColumnSpec, Table, TableButtonSpec } from '@easydb/shared';
@@ -181,9 +181,11 @@ export class PanelFooter extends LitElement {
 
   override render() {
     return html`
-      <button title="Add a blank row" aria-label="Add row" @click=${this.addRow}>
-        <span class="mi sm">add</span>
-      </button>
+      ${this.table?.readonly
+        ? nothing
+        : html`<button title="Add a blank row" aria-label="Add row" @click=${this.addRow}>
+            <span class="mi sm">add</span>
+          </button>`}
       <button title="Edit columns" aria-label="Columns" @click=${this.editColumns}>
         <span class="mi sm">view_column</span>
       </button>

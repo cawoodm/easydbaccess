@@ -84,7 +84,20 @@ instance), you choose:
   deleted.
 - **Reference** — a live, read-only table. Rows are fetched from the source
   on demand and are never stored or synced — useful for data too large or
-  too fast-changing to copy.
+  too fast-changing to copy. The grid shows the values without editors, and
+  offers no add or delete row, because there is nowhere to write a change to.
+  A paged source (a Datasette table, for one) is followed page by page up to
+  50 000 rows, so a reference is not limited to the first page.
+
+Referencing a Datasette **database** or **instance** asks which tables you want,
+the same way a copy does.
+
+## Read-only tables
+
+Any table can be marked read-only: open the column editor (the **Columns**
+button in the window footer) and tick **Read-only**. The grid then shows values
+as plain text, with no add or delete row. Nothing about the stored data changes —
+untick it to edit again. Referenced tables start out read-only.
 
 ## Restoring a whole workspace
 

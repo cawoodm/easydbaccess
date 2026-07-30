@@ -147,6 +147,17 @@ export interface Table {
   /** Non-local backing store; absent ⇒ ordinary local table (unchanged behaviour). */
   source?: TableSource | undefined;
   /**
+   * The table is read-only: the grid shows values without editors and offers no
+   * add/delete row. Set automatically on a reference table (its rows live at the
+   * source and every write throws anyway), and toggleable per table in the
+   * column editor for a local table someone wants to protect.
+   *
+   * Presentation + intent only — it is not a security boundary. A plugin writing
+   * straight to the store still can; the row source is what actually refuses.
+   * Absent/false ⇒ editable, as before.
+   */
+  readonly?: boolean | undefined;
+  /**
    * Where a *snapshot* table's rows were imported from, so it can be refreshed
    * (re-fetched) later. Unlike `source`, this does NOT route reads to a remote
    * — the rows live locally; `origin` just records how to re-pull them. Absent

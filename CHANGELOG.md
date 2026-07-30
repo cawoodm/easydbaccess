@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ A table can be set read-only in the column editor, and a referenced table is read-only from the moment it is created (v0.0.227)
 - ✨ A `$filter.TOKEN` in a view template shows the value as a pill: click it to narrow the view to that value, and drop it from the chip in the view header (v0.0.226)
 - ✨ A column filter takes `=text` for an exact match, and `!=text` to exclude one (v0.0.226)
 - ✨ A dropped CSV asks first: import directly, or review the columns (v0.0.225)
@@ -30,6 +31,7 @@
 
 ### Bugs
 
+- 🪲 Referencing a Datasette database took every table without asking, and each reference stopped at its first 1000 rows (v0.0.227)
 - 🪲 Re-importing a table exported as JSON lost all but one row, and its refresh URL (v0.0.221)
 - 🪲 Renaming a field in the column editor lost its data (v0.0.218)
 - 🪲 Two view templates can no longer share a name; `window.api` now exposes the plugin API for console scripting (v0.0.210)

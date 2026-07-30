@@ -394,6 +394,7 @@ export async function restoreWorkspaceDump(
           ...(t.labelColumn ? { labelColumn: t.labelColumn } : {}),
           ...(t.info ? { info: t.info } : {}),
           ...(t.deletedColumns ? { deletedColumns: t.deletedColumns } : {}),
+          ...(t.readonly ? { readonly: true } : {}),
           source: source ?? undefined,
           origin: origin ?? undefined,
           updatedAt: Date.now(),
@@ -415,6 +416,7 @@ export async function restoreWorkspaceDump(
           ...(t.labelColumn ? { labelColumn: t.labelColumn } : {}),
           ...(t.info ? { info: t.info } : {}),
           ...(t.deletedColumns ? { deletedColumns: t.deletedColumns } : {}),
+          ...(t.readonly ? { readonly: true } : {}),
           ...(source ? { source } : {}),
           ...(origin ? { origin } : {}),
           updatedAt: Date.now(),
@@ -516,6 +518,7 @@ interface NormalizedTable {
   labelColumn?: string;
   info?: TableInfo;
   deletedColumns?: string[];
+  readonly?: boolean;
   /** Live remote backing carried in the dump (rows re-pulled from the provider). */
   source?: TableSource;
   /** Snapshot origin URL carried in the dump (refreshable). */
@@ -701,7 +704,8 @@ function isSingleNativeTable(v: unknown): v is { name: unknown; columns: unknown
 /**
  * Reads name/columns/rows plus everything a native table entry can carry —
  * window geometry, sort, filters, label column, table info, deleted columns,
- * and a live `source` or snapshot `origin` — into one `NormalizedTable`.
+ * the read-only flag, and a live `source` or snapshot `origin` — into one
+ * `NormalizedTable`.
  * Shared by the `{ tables: [...] }` dump loop and a top-level single native
  * table, so both carry the exact same fields.
  */
@@ -721,6 +725,7 @@ function nativeTableToNormalized(entry: {
   const deletedColumns = Array.isArray(e.deletedColumns)
     ? (e.deletedColumns.filter((c) => typeof c === 'string') as string[])
     : undefined;
+  const readonly = e.readonly === true ? true : undefined;
   // Carry a live `source` or snapshot `origin` if the dump recorded one.
   const source =
     isObject(e.source) && typeof (e.source as { type?: unknown }).type === 'string'
@@ -745,6 +750,7 @@ function nativeTableToNormalized(entry: {
     ...(labelColumn ? { labelColumn } : {}),
     ...(info ? { info } : {}),
     ...(deletedColumns ? { deletedColumns } : {}),
+    ...(readonly ? { readonly } : {}),
     ...(source ? { source } : {}),
     ...(origin ? { origin } : {}),
   };

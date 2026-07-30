@@ -140,6 +140,10 @@ async function landReference(
     columns,
     view: 'table',
     source,
+    // A reference's rows live at the source and its provider throws on every
+    // write, so the grid must not offer editors it cannot honour. The user can
+    // still clear the flag in the column editor if they want to see why.
+    readonly: true,
     updatedAt: Date.now(),
   });
   return { tableId, tableName: name, rowCount: 0, created: true };

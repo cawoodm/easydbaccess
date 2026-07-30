@@ -426,6 +426,16 @@ export class DataTable extends LitElement {
   private get readOnlyView(): boolean {
     return this.viewMode && !!this.viewInst?.readonly;
   }
+  /** The table itself is read-only (a reference, or the user marked it so). */
+  @state() private tableReadonly = false;
+  /**
+   * No editing at all, from either source. A reference table used to render
+   * editors it could never honour: typing in a cell threw
+   * `ReadOnlyReferenceError` only AFTER the user had committed the edit.
+   */
+  private get readOnly(): boolean {
+    return this.readOnlyView || this.tableReadonly;
+  }
   /** Visible-row count from the last render, emitted for the panel title. */
   private renderedCount = 0;
   private lastEmittedCount = -1;
@@ -595,6 +605,7 @@ export class DataTable extends LitElement {
 
   private applyTable(table: Table) {
     this.columns = table.columns;
+    this.tableReadonly = !!table.readonly;
     this.sortSpecs = readSortSpecs(table);
     // Don't stomp on filters the user is mid-editing (a debounced save is
     // pending) with the older store value — that reverts the just-typed filter.
@@ -782,14 +793,14 @@ export class DataTable extends LitElement {
         .value=${raw ?? ''}
         .column=${col}
         .row=${row.data}
-        .readonly=${this.readOnlyView}
+        .readonly=${this.readOnly}
         @change=${(e: Event) =>
           this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
       ></${tag}>`;
     }
-    // A read-only view never offers an editor: show the value as plain text
+    // Read-only never offers an editor: show the value as plain text
     // (dates/booleans formatted) instead of the native <input>.
-    if (this.readOnlyView) {
+    if (this.readOnly) {
       return this.renderReadonlyCell(col, raw);
     }
     // No renderer set or unknown name — fall back to a native editor. Most
@@ -1455,9 +1466,15 @@ export class DataTable extends LitElement {
                     </td>`,
                 )}
                 <td>
-                  <button class="danger" title="Delete row" @click=${() => this.deleteRow(r.id)}>
-                    <span class="mi sm">delete</span>
-                  </button>
+                  ${this.readOnly
+                    ? nothing
+                    : html`<button
+                        class="danger"
+                        title="Delete row"
+                        @click=${() => this.deleteRow(r.id)}
+                      >
+                        <span class="mi sm">delete</span>
+                      </button>`}
                 </td>
               </tr>
             `,

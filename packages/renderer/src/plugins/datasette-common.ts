@@ -171,7 +171,7 @@ export function uniqueTableName(taken: Set<string>, name: string): string {
 export async function resolveChosenTables(
   fetchFn: FetchFn,
   ref: DatasetteRef,
-  verb: 'Import' | 'Connect',
+  verb: 'Import' | 'Connect' | 'Reference',
   opts: { skipPicker?: boolean | undefined } = {},
 ): Promise<TableRef[] | null> {
   if (ref.db && ref.table) {

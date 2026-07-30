@@ -394,7 +394,7 @@ including it, so a pull can restore views and plugin config too, without
 ever round-tripping a credential through the gist itself. Each table's own
 file is likewise more than rows: `tableToFile()` also carries `title`,
 `view`, `windowGeometry`, `sortColumn`/`sortAsc`, `filters`, `labelColumn`,
-`deletedColumns`, and `info`, so a pull restores a table's window
+`deletedColumns`, `readonly`, and `info`, so a pull restores a table's window
 position/size, sort, and filters exactly as pushed, not just its data
 (row values are projected onto the table's *current* columns, so a
 long-deleted column's leftover data never inflates the push size or gets

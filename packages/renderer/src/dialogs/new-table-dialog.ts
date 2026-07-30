@@ -38,6 +38,16 @@ export class NewTableDialog extends LitElement {
         font-size: 0.85rem;
         color: #374151;
       }
+      /* A checkbox reads as one line with its text, not stacked above it. */
+      label.inline {
+        flex-direction: row;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      label.inline input[type='checkbox'] {
+        width: auto;
+        margin: 0;
+      }
       input,
       select {
         font: inherit;
@@ -216,6 +226,8 @@ export class NewTableDialog extends LitElement {
   @state() private editTableId: string | null = null;
   @state() private name = '';
   @state() private tableTitle = '';
+  /** Table-level read-only flag (`Table.readonly`) — no editors, no add/delete row. */
+  @state() private tableReadonly = false;
   @state() private columns: ColumnRow[] = [];
   @state() private errorMsg = '';
   /** Non-error banner (e.g. "a refresh found new columns — review them"). */
@@ -274,6 +286,7 @@ export class NewTableDialog extends LitElement {
       this.editTableId = tableId;
       this.name = t.name;
       this.tableTitle = t.title ?? '';
+      this.tableReadonly = !!t.readonly;
       this.columns = t.columns.map((c) => ({
         field: c.field,
         label: c.label,
@@ -299,6 +312,7 @@ export class NewTableDialog extends LitElement {
       this.editTableId = null;
       this.name = '';
       this.tableTitle = '';
+      this.tableReadonly = false;
       this.columns = [
         { field: 'name', label: 'Name', type: 'string' },
         { field: 'note', label: 'Note', type: 'string' },
@@ -529,7 +543,13 @@ export class NewTableDialog extends LitElement {
 
       // Patch the saved table; renamed fields are re-keyed in every row's
       // `data` below so existing values follow the field to its new name.
-      const patch: Partial<Table> = { name, title, columns, updatedAt: Date.now() };
+      const patch: Partial<Table> = {
+        name,
+        title,
+        columns,
+        readonly: this.tableReadonly,
+        updatedAt: Date.now(),
+      };
       // Only persist the deleted-columns list when it carries meaning (there's
       // something tracked, or we're clearing a previously-tracked set).
       if (deletedColumns.length > 0 || prevDeleted.length > 0) {
@@ -708,6 +728,17 @@ export class NewTableDialog extends LitElement {
                 .value=${this.tableTitle}
                 @input=${(e: Event) => (this.tableTitle = (e.target as HTMLInputElement).value)}
               />
+            </label>
+            <label class="inline">
+              <input
+                type="checkbox"
+                data-testid="table-readonly"
+                .checked=${this.tableReadonly}
+                @change=${(e: Event) =>
+                  (this.tableReadonly = (e.target as HTMLInputElement).checked)}
+              />
+              Read-only
+              <span style="color:#9ca3af">(show values, no editing or add/delete row)</span>
             </label>
 
             <div class="columns">
@@ -998,8 +1029,6 @@ function scanConstraintViolations(specs: ColumnSpec[], rows: Row[]): string[] {
   }
   return out;
 }
-
-
 
 declare global {
   interface HTMLElementTagNameMap {
