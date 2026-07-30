@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { html as staticHtml, unsafeStatic } from 'lit/static-html.js';
 import { customElement, property, state } from 'lit/decorators.js';
-import type { ColumnSpec, ColumnType, Row, Table, ViewInstance } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, Row, SortSpec, Table, ViewInstance } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
@@ -12,7 +12,6 @@ import { runColumnScript } from '../util/column-script.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
 
-type SortDir = 'asc' | 'desc' | null;
 
 /** Delay before the header loading bar appears, so fast loads don't flash it. */
 const LOAD_BAR_DELAY_MS = 200;
@@ -157,6 +156,12 @@ export class DataTable extends LitElement {
       }
       th.sorted .sort-icon {
         color: #2563eb;
+      }
+      /* Sort priority (1, 2, 3 …), shown only while several columns sort. */
+      .sort-rank {
+        font-size: 0.85em;
+        vertical-align: super;
+        margin-left: 0.05em;
       }
       th .col-units {
         color: #9ca3af;
@@ -373,8 +378,13 @@ export class DataTable extends LitElement {
   @property({ type: String }) viewInstanceId = '';
   @state() private columns: ColumnSpec[] = [];
   @state() private rows: Row[] = [];
-  @state() private sortColumn: string | null = null;
-  @state() private sortDir: SortDir = null;
+  /**
+   * Sort keys in priority order. A plain header click replaces the list; a
+   * shift-click adds the column as a tie-breaker behind the ones already there.
+   * `sortColumn`/`sortAsc` on the record mirror the first entry, so anything
+   * reading a single sort (view windows, exports) keeps working.
+   */
+  @state() private sortSpecs: SortSpec[] = [];
   @state() private filters: Record<string, string> = {};
   @state() private globalQuery = '';
   @state() private localQuery = '';
@@ -585,8 +595,7 @@ export class DataTable extends LitElement {
 
   private applyTable(table: Table) {
     this.columns = table.columns;
-    this.sortColumn = table.sortColumn ?? null;
-    this.sortDir = table.sortColumn ? (table.sortAsc === false ? 'desc' : 'asc') : null;
+    this.sortSpecs = readSortSpecs(table);
     // Don't stomp on filters the user is mid-editing (a debounced save is
     // pending) with the older store value — that reverts the just-typed filter.
     if (this.filterSaveTimer == null) this.filters = { ...(table.filters ?? {}) };
@@ -610,8 +619,7 @@ export class DataTable extends LitElement {
         const w = widths[c.field];
         return typeof w === 'number' ? { ...c, width: w } : c;
       });
-    this.sortColumn = inst.sortColumn ?? null;
-    this.sortDir = inst.sortColumn ? (inst.sortAsc === false ? 'desc' : 'asc') : null;
+    this.sortSpecs = readSortSpecs(inst);
     // See applyTable: never revert a filter the user is mid-editing (pending
     // debounced save) to the older instance value.
     if (this.filterSaveTimer == null) this.filters = { ...(inst.filters ?? {}) };
@@ -860,20 +868,46 @@ export class DataTable extends LitElement {
    * Sort state is persisted on the Table record so it survives reloads
    * and rides along through the dump/restore export path.
    */
-  private async toggleSort(field: string) {
-    let nextDir: SortDir;
-    if (this.sortColumn !== field) nextDir = 'asc';
-    else if (this.sortDir === 'asc') nextDir = 'desc';
-    else if (this.sortDir === 'desc') nextDir = null;
-    else nextDir = 'asc';
+  /**
+   * Cycle one column's sort. Each click walks asc → desc → off for that column.
+   *
+   * `additive` (shift-click) keeps the sort keys already in place and works on
+   * this column behind them, so "city, then age descending" is two clicks. A
+   * plain click drops the others — the common case is one column, and having to
+   * clear leftover keys first would be worse than losing them.
+   */
+  private async toggleSort(field: string, additive = false) {
+    const current = this.sortSpecs.find((s) => s.field === field);
+    const isOnlyKey = this.sortSpecs.length === 1 && this.sortSpecs[0]?.field === field;
+    // A plain click on a column that is NOT already the only key means "sort by
+    // this instead": it becomes the sole ascending key. Only when it is already
+    // alone does the click walk the cycle on to descending and then off —
+    // otherwise dropping the other keys would land on "unsorted" unexpectedly.
+    if (!additive && !isOnlyKey) {
+      this.sortSpecs = [{ field, asc: true }];
+      await this.persistSort(this.sortSpecs);
+      return;
+    }
+    const next: SortSpec[] = additive ? this.sortSpecs.filter((s) => s.field !== field) : [];
+    // asc → desc → gone. An untouched column starts ascending.
+    if (!current) next.push({ field, asc: true });
+    else if (current.asc) next.push({ field, asc: false });
+    // (a descending column simply stays out of `next` — that is the "off" step)
 
-    this.sortColumn = nextDir ? field : null;
-    this.sortDir = nextDir;
+    this.sortSpecs = next;
+    await this.persistSort(next);
+  }
 
+  /** Write the sort keys, mirroring the first one into `sortColumn`/`sortAsc`. */
+  private async persistSort(specs: SortSpec[]): Promise<void> {
+    const first = specs[0];
+    const patch = {
+      sortBy: specs.length > 0 ? specs : undefined,
+      sortColumn: first?.field,
+      sortAsc: first ? first.asc : undefined,
+      updatedAt: Date.now(),
+    };
     const ctx = await getContext();
-    const patch = nextDir
-      ? { sortColumn: field, sortAsc: nextDir === 'asc', updatedAt: Date.now() }
-      : { sortColumn: undefined, sortAsc: undefined, updatedAt: Date.now() };
     if (this.viewMode) await ctx.store.viewInstances.patch(this.viewInstanceId, patch);
     else await ctx.store.tables.patch(this.tableId, patch);
   }
@@ -910,25 +944,21 @@ export class DataTable extends LitElement {
 
   private sortedRows(): Row[] {
     const base = this.filteredRows();
-    if (!this.sortColumn || !this.sortDir) return base;
-    const field = this.sortColumn;
-    const col = this.columns.find((c) => c.field === field);
-    const type: ColumnType = col?.type ?? 'string';
-    const factor = this.sortDir === 'asc' ? 1 : -1;
+    if (this.sortSpecs.length === 0) return base;
+    // Resolve each key's column type once, not per comparison.
+    const keys = this.sortSpecs.map((s) => ({
+      field: s.field,
+      factor: s.asc ? 1 : -1,
+      type: (this.columns.find((c) => c.field === s.field)?.type ?? 'string') as ColumnType,
+    }));
     const arr = [...base];
     arr.sort((a, b) => {
-      const av = a.data[field];
-      const bv = b.data[field];
-      // Emptiness is ranked as the *smallest* value: null < blank < present.
-      // The rank rides the direction flip, so ascending floats empties to the
-      // top (nulls first, then blanks) and descending sinks them to the bottom
-      // (blanks, then nulls last). null and blank are DISTINCT — a null cell is
-      // "no value" and sorts ahead of an empty-string cell.
-      const rank = (v: unknown): number => (v == null ? 0 : v === '' ? 1 : 2);
-      const ar = rank(av);
-      const br = rank(bv);
-      if (ar !== 2 || br !== 2) return (ar - br) * factor;
-      return compareValues(av, bv, type) * factor;
+      // Walk the keys in order; the next one only speaks when the previous ties.
+      for (const k of keys) {
+        const cmp = compareBySortKey(a.data[k.field], b.data[k.field], k.type, k.factor);
+        if (cmp !== 0) return cmp;
+      }
+      return 0;
     });
     return arr;
   }
@@ -1297,8 +1327,13 @@ export class DataTable extends LitElement {
             ${cols.map((c) => {
               const canSort = c.sortable !== false;
               const canFilter = c.filterable !== false;
-              const sorted = this.sortColumn === c.field && this.sortDir;
+              const sortAt = this.sortSpecs.findIndex((s) => s.field === c.field);
+              const spec = sortAt >= 0 ? this.sortSpecs[sortAt] : undefined;
+              const sorted = spec ? (spec.asc ? 'asc' : 'desc') : null;
               const icon = !canSort ? '' : sorted === 'asc' ? '▲' : sorted === 'desc' ? '▼' : '⇅';
+              // The key's position, shown only when more than one column sorts —
+              // with a single key the number would be noise.
+              const rankLabel = this.sortSpecs.length > 1 && sortAt >= 0 ? String(sortAt + 1) : '';
               const typeClass = `t-${c.type}`;
               const isSrc = this.dragSourceField === c.field;
               const isTgt = this.dropTargetField === c.field;
@@ -1311,13 +1346,13 @@ export class DataTable extends LitElement {
               const tip =
                 (c.description ? `${c.description}\n` : '') +
                 (c.units ? `Units: ${c.units}\n` : '') +
-                `${c.field} — ${canSort ? 'click to sort, ' : 'not sortable · '}drag to reorder` +
+                `${c.field} — ${canSort ? 'click to sort, shift-click to add a sort level, ' : 'not sortable · '}drag to reorder` +
                 (canFilter ? '' : ' · not filterable');
               return html`
                 <th
                   class=${`${typeClass}${sorted ? ' sorted' : ''}${isSrc ? ' drag-source' : ''}${edgeClass}${canSort ? '' : ' no-sort'}`}
                   title=${tip}
-                  @click=${() => canSort && this.toggleSort(c.field)}
+                  @click=${(e: MouseEvent) => canSort && this.toggleSort(c.field, e.shiftKey)}
                   @dragover=${(e: DragEvent) =>
                     this.onColDragOver(e, c.field, e.currentTarget as HTMLElement)}
                   @dragleave=${() => this.onColDragLeave(c.field)}
@@ -1346,7 +1381,11 @@ export class DataTable extends LitElement {
                       >${c.label}${c.units
                         ? html`<span class="col-units"> (${c.units})</span>`
                         : ''}</span
-                    ><span class="sort-icon" aria-hidden="true">${icon}</span>
+                    ><span class="sort-icon" aria-hidden="true"
+                      >${icon}${rankLabel
+                        ? html`<span class="sort-rank">${rankLabel}</span>`
+                        : nothing}</span
+                    >
                     ${canFilter
                       ? html`<button
                           class=${`funnel${this.filters[c.field] ? ' active' : ''}`}
@@ -1506,9 +1545,45 @@ function isNonEmptyButUnparsed(raw: unknown, parsed: string): boolean {
   return parsed === '';
 }
 
+/**
+ * One sort key applied to one pair of rows, direction included. Extracted from
+ * `sortedRows` so several keys can be walked in priority order.
+ *
+ * Emptiness is ranked as the *smallest* value: null < blank < present. The rank
+ * rides the direction flip, so ascending floats empties to the top (nulls first,
+ * then blanks) and descending sinks them to the bottom. null and blank are
+ * DISTINCT — a null cell is "no value" and sorts ahead of an empty string.
+ */
+function compareBySortKey(
+  av: unknown,
+  bv: unknown,
+  type: ColumnType,
+  factor: number,
+): number {
+  const rank = (v: unknown): number => (v == null ? 0 : v === '' ? 1 : 2);
+  const ar = rank(av);
+  const br = rank(bv);
+  if (ar !== 2 || br !== 2) return (ar - br) * factor;
+  return compareValues(av, bv, type) * factor;
+}
+
+/**
+ * The sort keys of a table or view instance: the `sortBy` list when present,
+ * else the single legacy `sortColumn`/`sortAsc` pair (a workspace written before
+ * multi-sort, or a view whose sort bar still sets one column).
+ */
+function readSortSpecs(rec: {
+  sortBy?: SortSpec[] | undefined;
+  sortColumn?: string | undefined;
+  sortAsc?: boolean | undefined;
+}): SortSpec[] {
+  if (rec.sortBy?.length) return rec.sortBy.map((s) => ({ field: s.field, asc: s.asc !== false }));
+  if (!rec.sortColumn) return [];
+  return [{ field: rec.sortColumn, asc: rec.sortAsc !== false }];
+}
+
 // Compares two PRESENT (non-empty) values by column type. Empty handling is
-// the caller's job — `sortedRows` sinks blanks to the bottom regardless of
-// sort direction, before this runs.
+// the caller's job — `compareBySortKey` deals with blanks before this runs.
 function compareValues(a: unknown, b: unknown, type: ColumnType): number {
   switch (type) {
     case 'number': {

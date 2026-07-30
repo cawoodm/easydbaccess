@@ -4,6 +4,7 @@
 
 ### Features
 
+- 🪶 Sort by several columns: shift-click a header to add a sort level behind the ones already active (v0.0.218)
 - ✨ The column editor can turn off sorting or filtering per column; an unfilterable column is skipped by search too (v0.0.216)
 - ✨ An empty cell is pink and a value that does not fit its column type gets a red outline, under every renderer (v0.0.211)
 - 🪶 Settings belong to a workspace now, and a new workspace asks what to take over: everything, settings only, or nothing (v0.0.207)

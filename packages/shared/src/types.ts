@@ -56,6 +56,15 @@ export interface ColumnSpec {
   filterable?: boolean;
 }
 
+/**
+ * One key of a multi-column sort: which column, ascending or not. A list of
+ * these is applied in order — the second key only decides rows the first ties on.
+ */
+export interface SortSpec {
+  field: string;
+  asc: boolean;
+}
+
 export interface WindowGeometry {
   x: number;
   y: number;
@@ -122,8 +131,18 @@ export interface Table {
   columns: ColumnSpec[];
   view: string;
   windowGeometry?: WindowGeometry | undefined;
+  /**
+   * Primary sort, kept for everything that reads a single sort (view windows,
+   * exports, older workspaces). Always mirrors `sortBy[0]` when that is set.
+   */
   sortColumn?: string | undefined;
   sortAsc?: boolean | undefined;
+  /**
+   * Sort keys in priority order — first is primary, the next break its ties.
+   * Absent ⇒ fall back to `sortColumn`/`sortAsc`, so a workspace written before
+   * multi-sort keeps sorting exactly as it did.
+   */
+  sortBy?: SortSpec[] | undefined;
   filters?: Record<string, string> | undefined;
   /** Non-local backing store; absent ⇒ ordinary local table (unchanged behaviour). */
   source?: TableSource | undefined;
@@ -267,8 +286,11 @@ export interface ViewInstance {
   tableName?: string | undefined;
   templateId: string;
   name: string;
+  /** Primary sort — mirrors `sortBy[0]`; see the same fields on `Table`. */
   sortColumn?: string | undefined;
   sortAsc?: boolean | undefined;
+  /** Sort keys in priority order; absent ⇒ use `sortColumn`/`sortAsc`. */
+  sortBy?: SortSpec[] | undefined;
   /** Column-field → filter substring, snapshotted from the table. */
   filters: Record<string, string>;
   /** Column fields to show, in order (snapshotted from the table). */
