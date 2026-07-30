@@ -879,7 +879,15 @@ export class DataTable extends LitElement {
   }
 
   private filteredRows(): Row[] {
-    const active = Object.entries(this.filters).filter(([, q]) => q && q.trim().length > 0);
+    // A column flagged `filterable: false` is excluded from free-text search
+    // as well as from the per-column funnel. A stored per-column filter that
+    // predates the flag being set must not silently keep narrowing the grid.
+    const unfilterable = new Set(
+      this.columns.filter((c) => c.filterable === false).map((c) => c.field),
+    );
+    const active = Object.entries(this.filters).filter(
+      ([field, q]) => q && q.trim().length > 0 && !unfilterable.has(field),
+    );
     const gq = this.globalQuery.trim();
     const lq = this.localQuery.trim();
     if (active.length === 0 && gq.length === 0 && lq.length === 0) return this.rows;
@@ -893,9 +901,10 @@ export class DataTable extends LitElement {
     // Free-text search supports `field:value` (with !/^/comma-OR/NULL), boolean
     // AND/OR, and the phrase→AND→OR fallback. Local and global queries each
     // narrow the set independently. Field names resolve against this view's
-    // columns (name or label).
-    if (lq) rows = searchRowsByField(rows, lq, this.columns);
-    if (gq) rows = searchRowsByField(rows, gq, this.columns);
+    // columns (name or label), excluding non-filterable ones.
+    const searchable = this.columns.filter((c) => c.filterable !== false);
+    if (lq) rows = searchRowsByField(rows, lq, searchable);
+    if (gq) rows = searchRowsByField(rows, gq, searchable);
     return rows;
   }
 
@@ -1001,8 +1010,11 @@ export class DataTable extends LitElement {
    * Pass `null` to evaluate against ALL per-column filters.
    */
   private rowsFacetedFor(focusField: string | null): Row[] {
+    const unfilterable = new Set(
+      this.columns.filter((c) => c.filterable === false).map((c) => c.field),
+    );
     const active = Object.entries(this.filters).filter(
-      ([f, q]) => q && q.trim().length > 0 && f !== focusField,
+      ([f, q]) => q && q.trim().length > 0 && f !== focusField && !unfilterable.has(f),
     );
     if (active.length === 0) return this.rows;
     return this.rows.filter((r) => active.every(([f, q]) => matchesColumnFilter(r.data[f], q)));
@@ -1284,6 +1296,7 @@ export class DataTable extends LitElement {
           <tr>
             ${cols.map((c) => {
               const canSort = c.sortable !== false;
+              const canFilter = c.filterable !== false;
               const sorted = this.sortColumn === c.field && this.sortDir;
               const icon = !canSort ? '' : sorted === 'asc' ? '▲' : sorted === 'desc' ? '▼' : '⇅';
               const typeClass = `t-${c.type}`;
@@ -1298,7 +1311,8 @@ export class DataTable extends LitElement {
               const tip =
                 (c.description ? `${c.description}\n` : '') +
                 (c.units ? `Units: ${c.units}\n` : '') +
-                `${c.field} — ${canSort ? 'click to sort, ' : 'not sortable · '}drag to reorder`;
+                `${c.field} — ${canSort ? 'click to sort, ' : 'not sortable · '}drag to reorder` +
+                (canFilter ? '' : ' · not filterable');
               return html`
                 <th
                   class=${`${typeClass}${sorted ? ' sorted' : ''}${isSrc ? ' drag-source' : ''}${edgeClass}${canSort ? '' : ' no-sort'}`}
@@ -1333,14 +1347,16 @@ export class DataTable extends LitElement {
                         ? html`<span class="col-units"> (${c.units})</span>`
                         : ''}</span
                     ><span class="sort-icon" aria-hidden="true">${icon}</span>
-                    <button
-                      class=${`funnel${this.filters[c.field] ? ' active' : ''}`}
-                      title="Filter by value"
-                      aria-label=${`Filter ${c.label || c.field}`}
-                      @click=${(e: Event) => this.openFilterPicker(e, c.field)}
-                    >
-                      <span class="mi sm" aria-hidden="true">filter_list</span>
-                    </button>
+                    ${canFilter
+                      ? html`<button
+                          class=${`funnel${this.filters[c.field] ? ' active' : ''}`}
+                          title="Filter by value"
+                          aria-label=${`Filter ${c.label || c.field}`}
+                          @click=${(e: Event) => this.openFilterPicker(e, c.field)}
+                        >
+                          <span class="mi sm" aria-hidden="true">filter_list</span>
+                        </button>`
+                      : ''}
                   </div>
                   <span
                     class="col-resize"
@@ -1360,6 +1376,7 @@ export class DataTable extends LitElement {
           </tr>
           <tr class="filter-row">
             ${cols.map((c) => {
+              if (c.filterable === false) return html`<th></th>`;
               const opts = suggestions.get(c.field) ?? [];
               return html`
                 <th>

@@ -48,6 +48,12 @@ export interface ColumnSpec {
    * sortable, preserving existing behaviour.
    */
   sortable?: boolean;
+  /**
+   * When explicitly false, the grid does not let the user filter or free-text
+   * search this column (no funnel button; the field is skipped by table and
+   * global search). Absent ⇒ filterable, preserving existing behaviour.
+   */
+  filterable?: boolean;
 }
 
 export interface WindowGeometry {

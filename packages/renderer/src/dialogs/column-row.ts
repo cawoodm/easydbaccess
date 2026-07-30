@@ -21,14 +21,21 @@ export interface ColumnRow {
   unique?: boolean | undefined;
   notnull?: boolean | undefined;
   hidden?: boolean | undefined;
+  /** Uncheck to disable sorting on this column. Absent/true ⇒ sortable. */
+  sortable?: boolean | undefined;
+  /**
+   * Uncheck to disable filtering (funnel + free-text search) on this column.
+   * Absent/true ⇒ filterable.
+   */
+  filterable?: boolean | undefined;
   /** field name in the saved table (edit mode only); used to detect field renames */
   origField?: string | undefined;
   /**
    * The full ColumnSpec this row was hydrated from (edit mode only). Kept as
    * the spread base in `buildColumnSpec` so ColumnSpec fields the editor
-   * doesn't own — `default`, `width`, `description`, `units`, `sortable`, and
-   * anything added to ColumnSpec later — survive a save untouched instead of
-   * being silently dropped. Absent in "new table" mode.
+   * doesn't own — `default`, `width`, `description`, `units`, and anything
+   * added to ColumnSpec later — survive a save untouched instead of being
+   * silently dropped. Absent in "new table" mode.
    */
   orig?: ColumnSpec | undefined;
 }
@@ -41,11 +48,14 @@ export interface ColumnRow {
  * `type` are always overwritten from the draft.
  *
  * Every OTHER editor-owned optional field (`renderer`, `script`, `max`,
- * `unique`, `notnull`, `hidden`) is explicitly set OR deleted based on the
- * current draft state — never left to a bare `if (truthy) spec.x = ...`,
- * because with a spread base that pattern would leave the OLD value from
- * `orig` alive when the user clears the field in the UI (e.g. picks "— none —"
- * for renderer after it had one). The delete branch looks redundant for a
+ * `unique`, `notnull`, `hidden`, `sortable`, `filterable`) is explicitly set
+ * OR deleted based on the current draft state — never left to a bare
+ * `if (truthy) spec.x = ...`, because with a spread base that pattern would
+ * leave the OLD value from `orig` alive when the user clears the field in
+ * the UI (e.g. picks "— none —" for renderer after it had one). Note
+ * `sortable`/`filterable` are inverted: they default to enabled, so the
+ * "set" branch fires on `false` and the "delete" branch fires otherwise. The
+ * delete branch looks redundant for a
  * fresh spec (there's nothing to remove) but is load-bearing once `orig`
  * carries a previous value.
  */
@@ -68,5 +78,9 @@ export function buildColumnSpec(row: ColumnRow): ColumnSpec {
   else delete spec.notnull;
   if (row.hidden) spec.hidden = true;
   else delete spec.hidden;
+  if (row.sortable === false) spec.sortable = false;
+  else delete spec.sortable;
+  if (row.filterable === false) spec.filterable = false;
+  else delete spec.filterable;
   return spec;
 }

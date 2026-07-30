@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ The column editor can turn off sorting or filtering per column; an unfilterable column is skipped by search too (v0.0.216)
 - ✨ An empty cell is pink and a value that does not fit its column type gets a red outline, under every renderer (v0.0.211)
 - 🪶 Settings belong to a workspace now, and a new workspace asks what to take over: everything, settings only, or nothing (v0.0.207)
 - ✨ Datasette limits are now settings: max import rows (0 = unlimited), page size, connected-table cap, rate-limit wait (v0.0.208)

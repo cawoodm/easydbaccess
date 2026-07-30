@@ -51,7 +51,9 @@ export class NewTableDialog extends LitElement {
       .col-header,
       .col-row {
         display: grid;
-        grid-template-columns: 1.25rem 1fr 1fr 7rem 7rem 1.5rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem;
+        grid-template-columns:
+          1.25rem 1fr 1fr 7rem 7rem 1.5rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem
+          1.5rem;
         gap: 0.4rem;
         align-items: center;
       }
@@ -273,6 +275,8 @@ export class NewTableDialog extends LitElement {
         unique: c.unique,
         notnull: c.notnull,
         hidden: c.hidden,
+        sortable: c.sortable,
+        filterable: c.filterable,
         origField: c.field,
         orig: c,
       }));
@@ -429,9 +433,9 @@ export class NewTableDialog extends LitElement {
     const title = this.tableTitle.trim();
     // buildColumnSpec spreads each row's `orig` ColumnSpec (when hydrated from
     // a saved table) as the base, so fields the editor doesn't own — default,
-    // width, description, units, sortable — survive the save instead of being
-    // dropped. See column-row.ts for why clearing a field must explicitly
-    // delete it rather than just skip setting it.
+    // width, description, units — survive the save instead of being dropped.
+    // See column-row.ts for why clearing a field must explicitly delete it
+    // rather than just skip setting it.
     const columns: ColumnSpec[] = this.columns.map(buildColumnSpec);
 
     if (this.mode === 'edit' && this.editTableId) {
@@ -643,6 +647,8 @@ export class NewTableDialog extends LitElement {
                 <span class="flag-label" title="Unique">U</span>
                 <span class="flag-label" title="Not null">!</span>
                 <span class="flag-label" title="Visible">👁</span>
+                <span class="flag-label" title="Sortable">⇅</span>
+                <span class="flag-label" title="Filterable (includes search)">⚲</span>
                 <span></span>
                 <span></span>
                 <span></span>
@@ -755,6 +761,28 @@ export class NewTableDialog extends LitElement {
                         .checked=${!c.hidden}
                         @change=${(e: Event) =>
                           this.patchColumn(i, { hidden: !(e.target as HTMLInputElement).checked })}
+                      />
+                    </span>
+                    <span class="flag">
+                      <input
+                        type="checkbox"
+                        title="Sortable — uncheck to disable sorting on this column"
+                        .checked=${c.sortable !== false}
+                        @change=${(e: Event) =>
+                          this.patchColumn(i, {
+                            sortable: (e.target as HTMLInputElement).checked ? undefined : false,
+                          })}
+                      />
+                    </span>
+                    <span class="flag">
+                      <input
+                        type="checkbox"
+                        title="Filterable — uncheck to disable filtering and search on this column"
+                        .checked=${c.filterable !== false}
+                        @change=${(e: Event) =>
+                          this.patchColumn(i, {
+                            filterable: (e.target as HTMLInputElement).checked ? undefined : false,
+                          })}
                       />
                     </span>
                     <button

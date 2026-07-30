@@ -17,19 +17,17 @@ const row = (extra: Partial<ColumnRow> = {}): ColumnRow => ({
 });
 
 describe('buildColumnSpec', () => {
-  it('carries width/description/units/sortable/default through unchanged', () => {
+  it('carries width/description/units/default through unchanged', () => {
     const base = orig({
       width: 120,
       description: 'How many',
       units: 'kg',
-      sortable: false,
       default: 0,
     });
     const spec = buildColumnSpec(row({ orig: base }));
     expect(spec.width).toBe(120);
     expect(spec.description).toBe('How many');
     expect(spec.units).toBe('kg');
-    expect(spec.sortable).toBe(false);
     expect(spec.default).toBe(0);
   });
 
@@ -84,6 +82,27 @@ describe('buildColumnSpec', () => {
     const base = orig({ max: 50 });
     const spec = buildColumnSpec(row({ orig: base, max: 0 }));
     expect('max' in spec).toBe(false);
+  });
+
+  it('persists sortable: false and filterable: false from the draft', () => {
+    const spec = buildColumnSpec(row({ sortable: false, filterable: false }));
+    expect(spec.sortable).toBe(false);
+    expect(spec.filterable).toBe(false);
+  });
+
+  it('re-enabling sortable/filterable (draft undefined) deletes the keys, even when orig had them false', () => {
+    const base = orig({ sortable: false, filterable: false });
+    const spec = buildColumnSpec(
+      row({ orig: base, sortable: undefined, filterable: undefined }),
+    );
+    expect('sortable' in spec).toBe(false);
+    expect('filterable' in spec).toBe(false);
+  });
+
+  it('a column with neither flag set produces a spec with neither key present', () => {
+    const spec = buildColumnSpec(row());
+    expect('sortable' in spec).toBe(false);
+    expect('filterable' in spec).toBe(false);
   });
 
   it('new-table mode (no orig) produces a minimal spec with no leftover fields', () => {
