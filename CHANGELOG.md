@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ The columns editor and the Settings dialog hold on to unsaved edits: the browser asks before it reloads or leaves the page (v0.0.234)
 - ✨ The command palette keeps the last five commands in a "Recent" section at the top, so Ctrl+K Enter runs the last one again (v0.0.230)
 - ✨ A table can be set read-only in the column editor, and a referenced table is read-only from the moment it is created (v0.0.227)
 - ✨ A `$filter.TOKEN` in a view template shows the value as a pill: click it to narrow the view to that value, and drop it from the chip in the view header (v0.0.226)

@@ -5,6 +5,7 @@ import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
+import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import {
   parseSecrets,
   readSecretsText,
@@ -257,6 +258,8 @@ export class SettingsDialog extends LitElement {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
     const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
+    // A typed-in token or URL must survive a reload — see dirty-guard.
+    if (this.dialogEl) watchDialogDirty('settings', this.dialogEl);
   }
 
   async open(): Promise<void> {

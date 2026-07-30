@@ -5,6 +5,7 @@ import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 import { makeDialogDraggable } from './draggable.js';
+import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
 import { buildColumnSpec, type ColumnRow } from './column-row.js';
@@ -257,6 +258,8 @@ export class NewTableDialog extends LitElement {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
     const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
+    // Half-defined columns must not be lost to a reload — see dirty-guard.
+    if (this.dialogEl) watchDialogDirty('columns-editor', this.dialogEl);
   }
 
   /**
