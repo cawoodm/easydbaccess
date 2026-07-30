@@ -6,7 +6,7 @@ import { getContext } from '../app-context.js';
 import { materialIconStyles } from './material-icon-css.js';
 
 /**
- * Permanent action bar that lives in a jsPanel's footer toolbar. Stays visible
+ * Permanent action bar that lives in a panel window's footer toolbar. Stays visible
  * regardless of how the data-table inside the content area is scrolled, and
  * never appears at the end of a long table where the user would have to
  * scroll to reach + Add row.

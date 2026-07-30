@@ -7,9 +7,9 @@ import { initViewWindowManager } from '../window-mgr/view-window-manager.js';
 
 /**
  * Used to be a card-list renderer. Now it's a thin controller:
- * boots the jsPanel-based window manager once and renders only an
+ * boots the window manager once and renders only an
  * empty-state hint when no tables exist in the current workspace.
- * The actual table UI lives in floating jsPanels in document.body.
+ * The actual table UI lives in floating panels in the canvas viewport.
  */
 @customElement('table-list')
 export class TableList extends LitElement {

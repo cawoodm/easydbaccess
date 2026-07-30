@@ -2,13 +2,13 @@
  * Cross-manager panel lookup for the global restack pass (`restack.ts`).
  *
  * Table windows (`jspanel-manager.ts`) and view windows
- * (`view-window-manager.ts`) each register/unregister their jsPanel's
+ * (`view-window-manager.ts`) each register/unregister their shell panel's
  * `front()` here as panels open/close, so the restack can front both kinds
  * without the two managers importing each other (they're deliberately kept
  * separate — see the header comment in `view-window-manager.ts`).
  *
  * What each manager MUST register is the *silent* front —
- * `panel.front(undefined, false)`. jsPanel's signature is
+ * `front(undefined, false)`. The shell keeps jsPanel4's historical signature:
  * `front(callback, execOnFrontedCallbacks = true)`, and the second argument
  * gates the `onfronted` callbacks; `onfronted` is what stamps a NEW front rank
  * into the stored geometry (`stampFrontOrder` / `stampViewFrontOrder`). A

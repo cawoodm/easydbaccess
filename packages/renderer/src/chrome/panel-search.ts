@@ -3,7 +3,7 @@ import { customElement, property, query, state } from 'lit/decorators.js';
 import { materialIconStyles } from './material-icon-css.js';
 
 /**
- * Collapsible search box that lives in a jsPanel's header toolbar. Default
+ * Collapsible search box that lives in a panel window's header toolbar. Default
  * state is a 🔍 icon; clicking expands into an input and focuses it. Clicking
  * outside (blur) collapses back to the icon. When a query is active the
  * collapsed icon is highlighted so the live filter stays discoverable. Each
