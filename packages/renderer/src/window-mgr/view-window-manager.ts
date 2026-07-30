@@ -29,6 +29,8 @@ import type { Table, ViewInstance, WindowGeometry } from '@easydb/shared';
 import { getContext, type AppContext } from '../app-context.js';
 import { currentPanZoom } from './jspanel-manager.js';
 import { createMaximizeFill } from './maximize-fill.js';
+import { forgetMaximized, primeMaximized, trackMaximized } from './maximized-memory.js';
+import { queueGeometryWrite } from './geometry-writes.js';
 import { countSuffix, VISIBLE_COUNT_EVENT, type VisibleCountDetail } from './panel-title.js';
 import { VIEW_ICON } from './table-kind.js';
 import { byAscendingZ } from './geometry.js';
@@ -295,6 +297,7 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
       // when it comes back. Mirrors the table windows.
       if (p.status === 'minimized') unmountContent();
       else if (p.status === 'normalized' || p.status === 'maximized') mountContent();
+      trackMaximized(`view:${inst.id}`, p);
       // Persist the new status (minimized / maximized / normalized) so it
       // survives a reload, exactly like table windows.
       void saveGeometry(inst.id);
@@ -303,6 +306,7 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
       panels.delete(inst.id);
       unregisterPanel(inst.id);
       maxFill.exit();
+      forgetMaximized(`view:${inst.id}`);
       // The user closed the window → drop the persisted open flag so it isn't
       // reopened on the next boot. (Closing because the flag already dropped is
       // a harmless redundant write; the reconcile subscription is idempotent.)
@@ -349,8 +353,14 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
   // Restore a persisted minimized/maximized state. Defer to the next tick so
   // jsPanel finishes its own init (centering, sizing) before we drive a state
   // change — mirrors the table window manager.
-  if (g?.maximized) queueMicrotask(() => panel.maximize?.());
-  else if (g?.minimized) queueMicrotask(() => panel.minimize?.());
+  // Minimized wins: a window stored as minimized AND maximized went down from
+  // maximized last session, so it restores maximized (see maximized-memory.ts).
+  if (g?.minimized) {
+    if (g.maximized) primeMaximized(`view:${inst.id}`);
+    queueMicrotask(() => panel.minimize?.());
+  } else if (g?.maximized) {
+    queueMicrotask(() => panel.maximize?.());
+  }
 }
 
 function closePanel(instanceId: string): void {
@@ -371,7 +381,12 @@ function closePanel(instanceId: string): void {
  * `nextFrontZ()` is the SAME shared counter, so a table and a view fronted
  * moments apart still compare correctly in the merged restack.
  */
-async function stampViewFrontOrder(instanceId: string, ctx: AppContext): Promise<void> {
+function stampViewFrontOrder(instanceId: string, ctx: AppContext): Promise<void> {
+  // Serialized against saveGeometry — see geometry-writes.ts.
+  return queueGeometryWrite(`view:${instanceId}`, () => writeViewFrontOrder(instanceId, ctx));
+}
+
+async function writeViewFrontOrder(instanceId: string, ctx: AppContext): Promise<void> {
   try {
     const inst = await ctx.store.viewInstances.findOne(instanceId);
     if (!inst) return;
@@ -393,16 +408,23 @@ async function stampViewFrontOrder(instanceId: string, ctx: AppContext): Promise
   }
 }
 
-async function saveGeometry(instanceId: string): Promise<void> {
+function saveGeometry(instanceId: string): Promise<void> {
+  // Serialized against stampViewFrontOrder: both patch the whole geometry.
+  return queueGeometryWrite(`view:${instanceId}`, () => writeViewGeometry(instanceId));
+}
+
+async function writeViewGeometry(instanceId: string): Promise<void> {
   const el = document.getElementById(panelDomId(instanceId));
   const entry = panels.get(instanceId);
   if (!el || !entry) return;
   const status = entry.panel.status;
   const minimized = status === 'minimized';
-  const maximized = status === 'maximized';
   try {
     const ctx = await getContext();
     const prev = (await ctx.store.viewInstances.findOne(instanceId))?.windowGeometry;
+    // A minimized window keeps the maximized flag it went down with, so a
+    // restore after a reload maximizes again (see maximized-memory.ts).
+    const maximized = minimized ? (prev?.maximized ?? false) : status === 'maximized';
     // Only the normalized rect is meaningful; while minimized jsPanel parks the
     // panel at left:-9999 and while maximized it fills the container, so in
     // those states keep the last-stored normal rect and only flip the flag.

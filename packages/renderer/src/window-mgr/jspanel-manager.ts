@@ -25,6 +25,8 @@ import { getContext, type AppContext } from '../app-context.js';
 import { openTableInfoDialog } from '../dialogs/table-info-dialog.js';
 import { initPanZoom, type PanZoomHandle } from './panzoom.js';
 import { createMaximizeFill } from './maximize-fill.js';
+import { forgetMaximized, primeMaximized, trackMaximized } from './maximized-memory.js';
+import { queueGeometryWrite } from './geometry-writes.js';
 import { startMaximizedRefit } from './refit-panels.js';
 import { startTitlebarBehavior } from './panel-titlebar.js';
 import { countSuffix, VISIBLE_COUNT_EVENT, type VisibleCountDetail } from './panel-title.js';
@@ -361,6 +363,7 @@ function openPanel(t: Table, ctx: AppContext): void {
     onclosed: async () => {
       panels.delete(t.id);
       unregisterPanel(t.id);
+      forgetMaximized(`table:${t.id}`);
       // Programmatic close (table deleted/replaced/pulled, or hidden from
       // another tab) — the store already reflects the intended state, so don't
       // re-hide it.
@@ -391,6 +394,7 @@ function openPanel(t: Table, ctx: AppContext): void {
       else if (p.status === 'normalized' || p.status === 'maximized') mountContent();
       if (p.status === 'maximized') maxFill.enter();
       else maxFill.exit();
+      trackMaximized(`table:${t.id}`, p);
       void saveGeometry(t.id, ctx);
     },
   }) as Panel;
@@ -460,6 +464,9 @@ function openPanel(t: Table, ctx: AppContext): void {
   // `?minimize` wins over a saved maximized state — the whole point is that
   // nothing loads its rows on boot.
   if (startMinimized && typeof panel.minimize === 'function') {
+    // Minimized AND maximized in the stored geometry means the user minimized a
+    // maximized window last session: the first restore must maximize again.
+    if (g?.maximized) primeMaximized(`table:${t.id}`);
     queueMicrotask(() => panel.minimize?.());
   } else if (g?.maximized && typeof panel.maximize === 'function') {
     queueMicrotask(() => panel.maximize?.());
@@ -510,7 +517,12 @@ function nextCascadePosition(): { my: string; at: string; offsetX: number; offse
   };
 }
 
-async function saveGeometry(tableId: string, ctx: AppContext): Promise<void> {
+function saveGeometry(tableId: string, ctx: AppContext): Promise<void> {
+  // Serialized against stampFrontOrder: both patch the whole geometry object.
+  return queueGeometryWrite(`table:${tableId}`, () => writeGeometry(tableId, ctx));
+}
+
+async function writeGeometry(tableId: string, ctx: AppContext): Promise<void> {
   const el = document.getElementById(`panel-${cssSafe(tableId)}`);
   if (!el) return;
   // jsPanel keeps the status on the panel instance, not a DOM attribute.
@@ -523,7 +535,11 @@ async function saveGeometry(tableId: string, ctx: AppContext): Promise<void> {
     // `?minimize` leave every table minimized on every later visit — and
     // expanding a table to look at it would silently rewrite the saved layout.
     const minimized = FORCE_MINIMIZED ? (prev?.minimized ?? false) : status === 'minimized';
-    const maximized = FORCE_MINIMIZED ? (prev?.maximized ?? false) : status === 'maximized';
+    // A minimized panel keeps the maximized flag it went down with, so a restore
+    // after a reload maximizes again (see maximized-memory.ts). Only a live
+    // normalized/maximized status decides the flag.
+    const keepMaximized = FORCE_MINIMIZED || status === 'minimized';
+    const maximized = keepMaximized ? (prev?.maximized ?? false) : status === 'maximized';
     let x = el.offsetLeft;
     let y = el.offsetTop;
     let w = el.offsetWidth;
@@ -577,7 +593,12 @@ async function saveGeometry(tableId: string, ctx: AppContext): Promise<void> {
  * `nextFrontZ()` (`front-order.ts`) is shared with view windows so a table and
  * a view fronted moments apart still compare correctly against each other.
  */
-async function stampFrontOrder(tableId: string, ctx: AppContext): Promise<void> {
+function stampFrontOrder(tableId: string, ctx: AppContext): Promise<void> {
+  // Serialized against saveGeometry — see geometry-writes.ts.
+  return queueGeometryWrite(`table:${tableId}`, () => writeFrontOrder(tableId, ctx));
+}
+
+async function writeFrontOrder(tableId: string, ctx: AppContext): Promise<void> {
   try {
     const t = await ctx.store.tables.findOne(tableId);
     if (!t) return;

@@ -14,6 +14,8 @@
 
 ### Bugs
 
+- 🪲 A maximized window that you minimize comes back maximized, in this session and after a reload (v0.0.201)
+- 🪲 Two jsPanel callbacks for one action no longer overwrite each other's window geometry (v0.0.201)
 - 🪲 Publish now switches the GitHub Pages repo to master first, so a deploy from a detached HEAD cannot silently reach nobody (v0.0.197)
 
 ## 29 Jul 2026

@@ -201,6 +201,46 @@ test.describe('window manager', () => {
     expect(geo.titlebarTop).toBeGreaterThanOrEqual(geo.headerBottom - 1);
   });
 
+  test('a maximized window that is minimized comes back maximized', async ({ page }) => {
+    const id = await createTable(page, 'Grow', [{ field: 'x' }]);
+    await waitForPanel(page, id);
+    const dom = panelDomId(id);
+    const status = () =>
+      page.evaluate(
+        (d) => (document.getElementById(d) as HTMLElement & { status: string }).status,
+        dom,
+      );
+
+    await page.evaluate(
+      (d) => (document.getElementById(d) as HTMLElement & { maximize(): void }).maximize(),
+      dom,
+    );
+    await expect.poll(status).toBe('maximized');
+    const storedFlags = () =>
+      page.evaluate(async (tid) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const t = await (window as any).__easydb.store.tables.findOne(tid);
+        return { min: t.windowGeometry?.minimized, max: t.windowGeometry?.maximized };
+      }, id);
+    await expect.poll(storedFlags).toEqual({ min: false, max: true });
+
+    await page.evaluate(
+      (d) => (document.getElementById(d) as HTMLElement & { minimize(): void }).minimize(),
+      dom,
+    );
+    await expect.poll(status).toBe('minimized');
+    // Both flags stay stored: that is what makes the restore after a reload
+    // maximize as well, not only the restore in this session.
+    await expect.poll(storedFlags).toEqual({ min: true, max: true });
+
+    // Restoring from the dock returns to maximized, not to the normal rect.
+    await page.evaluate(
+      (d) => (document.getElementById(d) as HTMLElement & { normalize(): void }).normalize(),
+      dom,
+    );
+    await expect.poll(status).toBe('maximized');
+  });
+
   test('minimized dock stays below the active table window', async ({ page }) => {
     const idA = await createTable(page, 'Keep', [{ field: 'x' }]);
     await waitForPanel(page, idA);
