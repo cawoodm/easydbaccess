@@ -350,14 +350,21 @@ export class ViewsDialog extends LitElement {
 
   private async deleteTemplate(t: ViewTemplate): Promise<void> {
     const ctx = await getContext();
+    // A built-in is part of the app, not user data. The list hides its Delete
+    // button, so this only catches a call from elsewhere (a plugin, a test).
+    if (t.builtin) {
+      await ctx.api.ui.dialogs.alert(
+        `"${t.name}" is a built-in template and cannot be deleted. Use Copy to make your own version.`,
+        'Built-in template',
+      );
+      return;
+    }
     const ok = await ctx.api.ui.dialogs.confirm(
       `Delete the template "${t.name}"? Views already created from it keep working.`,
       'Delete template',
     );
     if (!ok) return;
     await ctx.store.viewTemplates.remove(t.id);
-    // A deleted built-in stays deleted: the seeder only re-inserts into a
-    // workspace it has never seeded, and this one's "seeded" flag is already set.
     document.dispatchEvent(new CustomEvent('easydb:reload-views'));
     await this.refresh();
   }
@@ -655,14 +662,16 @@ export class ViewsDialog extends LitElement {
                 <button type="button" class="mini" @click=${() => this.useTemplate(t)}>Use</button>
                 <button type="button" class="mini" @click=${() => this.editTemplate(t)}>Edit</button>
                 <button type="button" class="mini" @click=${() => this.copyTemplate(t)}>Copy</button>
-                <button
-                  type="button"
-                  class="mini danger"
-                  title="Delete this template"
-                  @click=${() => void this.deleteTemplate(t)}
-                >
-                  Delete
-                </button>
+                ${t.builtin
+                  ? nothing
+                  : html`<button
+                      type="button"
+                      class="mini danger"
+                      title="Delete this template"
+                      @click=${() => void this.deleteTemplate(t)}
+                    >
+                      Delete
+                    </button>`}
               </li>`,
           )}
         </ul>

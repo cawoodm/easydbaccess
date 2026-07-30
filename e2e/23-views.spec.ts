@@ -982,4 +982,26 @@ test.describe('views: sort, field search, standard templates', () => {
       )
       .toEqual({ copyHasAuthor: true, origHasAuthor: false });
   });
+
+  test('a built-in template has no Delete button, its copy does', async ({ page }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }]);
+    await waitForPanel(page, id);
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    const dlg = page.locator('views-dialog dialog');
+    await expect(dlg).toBeVisible();
+
+    const rss = dlg.locator('ul.list li', { hasText: 'RSS Feed' }).first();
+    await expect(rss.locator('.badge')).toHaveText('built-in');
+    await expect(rss.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+
+    // Copy makes a plain user template, which stays deletable.
+    await rss.getByRole('button', { name: 'Copy' }).click();
+    await dlg.getByRole('button', { name: 'Save', exact: true }).click();
+    const copy = dlg.locator('ul.list li', { hasText: 'RSS Feed copy' });
+    await expect(copy.locator('.badge')).toHaveCount(0);
+    await expect(copy.getByRole('button', { name: 'Delete' })).toHaveCount(1);
+  });
 });
