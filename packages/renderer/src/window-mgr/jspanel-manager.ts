@@ -108,6 +108,17 @@ export function currentPanZoom(): PanZoomHandle | null {
  * Used by the command palette's "Go to <table>" commands. Returns false when
  * no panel exists for that table id.
  */
+/**
+ * Persist every open table panel's current rect. Tile/Cascade move panels by
+ * writing inline styles, which no jsPanel callback reports, so without this the
+ * arranged layout was lost on the next reload (the stored rect still described
+ * where the window sat before). Called by the bulk window commands.
+ */
+export async function persistTablePanelGeometry(): Promise<void> {
+  const ctx = await getContext();
+  await Promise.all([...panels.keys()].map((id) => saveGeometry(id, ctx)));
+}
+
 export function focusTableWindow(tableId: string): boolean {
   const p = panels.get(tableId) as (Panel & { normalize?: () => void }) | undefined;
   if (p) {

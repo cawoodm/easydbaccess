@@ -19,6 +19,7 @@
 
 ### Bugs
 
+- 🪲 A tiled or cascaded layout survives a reload — the arrangement is stored, not only drawn (v0.0.209)
 - 🪲 A click outside the command palette closes it, like Esc already did (v0.0.206)
 - 🪲 Settings will not close while a field points at a `${secret:name}` the store does not have (v0.0.204)
 - 🪲 A maximized window that you minimize comes back maximized, in this session and after a reload (v0.0.201)

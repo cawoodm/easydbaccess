@@ -80,6 +80,11 @@ const panels = new Map<string, ViewEntry>();
  * opens a closed view via the reactive reconcile below); this fronts one that
  * is already open. Returns false if no window is currently open for that id.
  */
+/** The view-window half of `persistTablePanelGeometry` — see its comment. */
+export async function persistViewWindowGeometry(): Promise<void> {
+  await Promise.all([...panels.keys()].map((id) => saveGeometry(id)));
+}
+
 export function focusViewWindow(instanceId: string): boolean {
   const entry = panels.get(instanceId);
   if (!entry) return false;
