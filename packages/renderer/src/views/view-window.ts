@@ -5,7 +5,7 @@ import type { ColumnSpec, Row, ViewInstance, ViewTemplate } from '@easydb/shared
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViewsDialog } from '../dialogs/views-dialog.js';
-import { addPillValue, hasRowHtml, removePillValue, substituteRow, viewRows } from './view-render.js';
+import { addPillValue, evaluateRows, hasRowHtml, removePillValue, substituteRow, viewRows } from './view-render.js';
 import { parseColumnFilter } from '../search/column-filter.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
@@ -403,7 +403,10 @@ export class ViewWindow extends LitElement {
     // display limit. This is the denominator of the window title — the source
     // table's row count says nothing about a view that deliberately shows a
     // slice of it.
-    const viewData = viewRows(this.allRows, this.instance);
+    // Scripted columns first: a view shows, filters, sorts and searches the
+    // values the grid computes, not the (empty) stored cells behind them.
+    const evaluated = evaluateRows(this.allRows, this.tableColumns);
+    const viewData = viewRows(evaluated, this.instance);
     let rows = viewData;
     // Free-text search across field values — supports `field:value` (with
     // !/^/comma-OR/NULL), boolean AND/OR, and the phrase→AND→OR fallback,
