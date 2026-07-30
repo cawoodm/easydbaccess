@@ -188,3 +188,17 @@ for any branch not listed above), and both `packages/renderer/vite.config.ts`
 dev:renderer` and `npm run test:e2e` always agree on one port per branch and
 never silently drift onto a neighboring branch's port. Override for a one-off
 with `RENDERER_PORT=<n>`.
+
+## Pull request descriptions
+
+Every PR description **starts with a live preview link** on the first line, e.g.:
+
+```
+**🔎 Live preview:** https://cawoodm.github.io/easydbaccess3/
+```
+
+Publish the branch's preview first (`npm run publish -- -Target easydbaccess<N>`,
+which builds with `--base /easydbaccess<N>/` and deploys the folder to the
+`cawoodm/cawoodm.github.io` Pages repo), then put that URL at the very top of the
+PR body — above the summary — so reviewers can try the build before reading the
+diff. Keep it there when updating an existing PR description.
