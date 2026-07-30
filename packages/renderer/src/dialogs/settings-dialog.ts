@@ -273,7 +273,40 @@ export class SettingsDialog extends LitElement {
     return bad;
   }
 
-  /** Close unless a secret field holds a raw value — then block and point at it. */
+  /** Every `${secret:name}` name in a value. Any field may hold a reference,
+   *  not only a secret-typed one, so callers scan all of them. */
+  private static secretRefs(v: unknown): string[] {
+    if (typeof v !== 'string') return [];
+    return [...v.matchAll(/\$\{secret:([^}]*)\}/g)].map((m) => (m[1] ?? '').trim());
+  }
+
+  /** Names a value references that the secrets store does not define. */
+  private missingRefs(v: unknown): string[] {
+    const known = new Set(Object.keys(parseSecrets(this.secretsText)));
+    return SettingsDialog.secretRefs(v).filter((name) => !known.has(name));
+  }
+
+  /**
+   * Fields referencing a secret name that is not in the store. `interpolateSecrets`
+   * leaves an unknown name in place verbatim, so the plugin goes on to use the
+   * literal `${secret:name}` text as its token — a failure that surfaces much
+   * later, as a rejected request. The dialog is the place to catch it.
+   */
+  private danglingSecrets(): Array<{ tab: Tab; field: SettingsFieldSpec; names: string[] }> {
+    const bad: Array<{ tab: Tab; field: SettingsFieldSpec; names: string[] }> = [];
+    for (const tab of this.tabs) {
+      for (const f of tab.fields) {
+        const names = this.missingRefs(this.values[`${tab.id}:${f.key}`]);
+        if (names.length > 0) bad.push({ tab, field: f, names });
+      }
+    }
+    return bad;
+  }
+
+  /**
+   * Close unless a secret field holds a raw value, or a field points at a secret
+   * name the store does not define — then block and point at the first offender.
+   */
   private attemptClose = (e?: Event): void => {
     const bad = this.invalidSecrets();
     if (bad.length > 0) {
@@ -285,6 +318,18 @@ export class SettingsDialog extends LitElement {
         `“${first.field.label}” must be empty or a \${secret:name} reference. ` +
         `Move the value into the secrets store (General tab) and reference it, ` +
         `so the raw secret is never saved or synced.`;
+      return;
+    }
+    const dangling = this.danglingSecrets();
+    if (dangling.length > 0) {
+      e?.preventDefault();
+      const first = dangling[0]!;
+      this.active = first.tab.id;
+      const names = first.names.map((n) => `“${n}”`).join(', ');
+      this.secretError =
+        `“${first.field.label}” references ${names}, which the secrets store does not have. ` +
+        `Add it in the General tab or correct the name — an unknown reference is passed on as ` +
+        `the literal \${secret:name} text.`;
       return;
     }
     this.secretError = '';
@@ -301,8 +346,7 @@ export class SettingsDialog extends LitElement {
   private async setValue(tab: Tab, f: SettingsFieldSpec, value: unknown) {
     const k = `${tab.id}:${f.key}`;
     this.values = { ...this.values, [k]: value };
-    // Clear a pending secret-validation error once nothing raw remains.
-    if (this.secretError && this.invalidSecrets().length === 0) this.secretError = '';
+    this.clearSecretErrorIfFixed();
     const ctx = await getContext();
     await ctx.api.settings.set(tab.id, f.key, value, this.placements[k]);
   }
@@ -317,9 +361,19 @@ export class SettingsDialog extends LitElement {
     await ctx.api.settings.set(tab.id, f.key, this.values[k], scope);
   }
 
+  /** Drop a blocked-close message once the offending value is gone. Adding the
+   *  missing secret counts as a fix too, hence the call from onSecretsInput. */
+  private clearSecretErrorIfFixed(): void {
+    if (!this.secretError) return;
+    if (this.invalidSecrets().length === 0 && this.danglingSecrets().length === 0) {
+      this.secretError = '';
+    }
+  }
+
   private onSecretsInput(e: Event) {
     this.secretsText = (e.target as HTMLTextAreaElement).value;
     writeSecretsText(this.secretsText);
+    this.clearSecretErrorIfFixed();
   }
 
   /** Save the current secrets store to a `secrets.txt` file the user can back
@@ -418,7 +472,9 @@ export class SettingsDialog extends LitElement {
 
   private renderSecretControl(tab: Tab, f: SettingsFieldSpec, v: unknown) {
     const names = Object.keys(parseSecrets(this.secretsText));
-    const invalid = SettingsDialog.rawSecret(v);
+    // Red border for a raw secret AND for a reference to a name that is not in
+    // the store — both block the close, so both must be visible as the cause.
+    const invalid = SettingsDialog.rawSecret(v) || this.missingRefs(v).length > 0;
     return html`<div class="secret-row">
       <input
         type="text"
