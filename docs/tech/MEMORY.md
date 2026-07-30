@@ -38,11 +38,11 @@ is invoked (`datasette-collection.ts:131`) — so scrolling or re-rendering
 never triggers another network round-trip, but the whole fetched set stays
 resident for the table's lifetime.
 
-The fetch itself is capped at `maxRows` — default `10_000`
-(`datasette-collection.ts:66`, same default as the importer's
-`SETTINGS.maxImportRows` in
-[`datasette-common.ts`](../../packages/renderer/src/plugins/datasette-common.ts)) —
-pulled in `pageSize: 1000` hops (the same `SETTINGS`). This is a **bulk-fetch cap**, not a viewport
+The fetch itself is capped at `maxRows` — default `10_000`, now user-set via
+the Settings → Datasette tab (`connectMaxRows`; the importer's own cap is
+`maxImportRows`, 0 = unlimited), resolved in
+[`datasette-common.ts`](../../packages/renderer/src/plugins/datasette-common.ts) —
+pulled in hops of the `pageSize` setting (default 1000). This is a **bulk-fetch cap**, not a viewport
 window: opening a live table with 8,000 rows loads all 8,000 before the grid
 renders anything, identical in spirit to a local table's `find()`. A
 **Reference** table (see `PLUGINS.md`'s Import section) is not cheaper here
@@ -50,7 +50,7 @@ than a **Copy** — the only difference is persistence (a Reference's rows
 never get written to Dexie), not how much ends up in memory while it's open.
 
 Going over the cap doesn't fail the import/connect — it truncates and warns
-(`datasette-import.ts`, "capped at 10000 — more available"), per the
+(`datasette-import.ts`, "capped at N — more available"), per the
 TODO history: importing a referenced table is no longer blocked outright
 for being large, it's silently capped instead.
 

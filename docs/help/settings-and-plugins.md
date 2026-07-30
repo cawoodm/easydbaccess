@@ -10,25 +10,8 @@ there's no separate Save button.
 
 ![Settings](./screenshots/settings.png)
 
-### Workspace vs. device settings
-
-Every setting field has a small checkbox next to it that controls where the
-value is stored:
-
-- **Unchecked (default):** the value travels with your workspace — it syncs
-  to your other devices.
-- **Checked ("user"):** the value stays on this device only. Use this for
-  anything device-specific, or for a secret you don't want traveling with
-  your synced data.
-
-### Secrets
-
-Fields like access tokens use a `${secret:name}` reference instead of
-holding the raw value, so tokens never get swept up into a sync or export by
-accident. You can download your secrets as a `secrets.txt` file to back them
-up or move them to another device (drag the file back onto the window to
-restore it), and the app blocks you from closing Settings if a secret field
-still holds a raw, un-referenced value.
+See [Settings](settings.md) for the full guide: field types, workspace vs.
+device scope, and how secrets work.
 
 ## Plugins
 

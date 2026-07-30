@@ -33,6 +33,13 @@ export interface TableMeta {
   pks: string[];
   count: number | null;
   /**
+   * True when `count` is a floor, not an exact total (Datasette's
+   * `count_truncated`) — the instance gave up counting past its row cap
+   * (commonly ~10k rows). A progress bar using `count` as its denominator
+   * must not trust it as a target in that case.
+   */
+  countTruncated: boolean;
+  /**
    * Whether the response carried real per-column type info (`column_details`).
    * When false the columns are just names (every type defaulted to 'string')
    * and the caller should refine types from row data — some instances answer
@@ -486,6 +493,7 @@ export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promi
   let { columns, pks } = mapColumns(json);
   let typed = !!json && json.column_details != null;
   let count: number | null = json?.count ?? null;
+  let countTruncated = json?.count_truncated === true;
   let raw: unknown = json;
 
   if (columns.length === 0) {
@@ -495,9 +503,10 @@ export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promi
     ({ columns, pks } = mapColumns(cjson));
     typed = !!cjson && cjson.column_details != null; // still false here
     count = cjson?.count ?? count;
+    countTruncated = cjson?.count_truncated === true || countTruncated;
     raw = cjson;
   }
-  return { columns, pks, count, typed, raw };
+  return { columns, pks, count, countTruncated, typed, raw };
 }
 
 /**
@@ -958,15 +967,23 @@ export async function fetchPrimaryKeys(fetchFn: FetchFn, ref: DatasetteRef): Pro
 /**
  * Fetch a table's total row count via `?_extra=count` — a cheap `SELECT
  * count(*)` most instances answer even when the schema response omits `count`
- * (datasette.io does). Single `_`-param, so it's WAF-safe. `null` on failure,
- * so a determinate import progress bar degrades to indeterminate, never errors.
+ * (datasette.io does). Single `_`-param, so it's WAF-safe. `count: null` on
+ * failure, so a determinate import progress bar degrades to indeterminate,
+ * never errors. `truncated` mirrors Datasette's `count_truncated` — see
+ * {@link TableMeta.countTruncated}.
  */
-export async function fetchTableCount(fetchFn: FetchFn, ref: DatasetteRef): Promise<number | null> {
+export async function fetchTableCount(
+  fetchFn: FetchFn,
+  ref: DatasetteRef,
+): Promise<{ count: number | null; truncated: boolean }> {
   try {
     const json = await fetchJson(fetchFn, buildTableUrl(ref, { _extra: 'count' }));
-    return typeof json?.count === 'number' ? json.count : null;
+    return {
+      count: typeof json?.count === 'number' ? json.count : null,
+      truncated: json?.count_truncated === true,
+    };
   } catch {
-    return null;
+    return { count: null, truncated: false };
   }
 }
 

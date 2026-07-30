@@ -294,7 +294,11 @@ describe('fetchRows follows the `next` token', () => {
 
   it('exposes a resume cursor (nextUrl) at the hop that was interrupted', async () => {
     const errRes = (status: number, body: unknown): Promise<Response> =>
-      Promise.resolve({ ok: false, status, json: () => Promise.resolve(body) } as unknown as Response);
+      Promise.resolve({
+        ok: false,
+        status,
+        json: () => Promise.resolve(body),
+      } as unknown as Response);
     const fetchFn = vi.fn((url: string) =>
       url.includes('_next=') ? errRes(429, { ok: false, error: 'rl' }) : jsonRes(GPP_PAGE1),
     );
@@ -686,14 +690,25 @@ describe('fetchTableCount', () => {
       seen.push(url);
       return jsonRes({ ok: true, count: 116, next: null, rows: [] });
     };
-    expect(await fetchTableCount(fetchFn, ref)).toBe(116);
+    expect(await fetchTableCount(fetchFn, ref)).toEqual({ count: 116, truncated: false });
     expect(seen[0]).toContain('_extra=count');
     expect(seen[0]).not.toContain('_size');
   });
 
-  it('returns null when no count is present or the request throws', async () => {
-    expect(await fetchTableCount(() => jsonRes({ ok: true, rows: [] }), ref)).toBeNull();
-    expect(await fetchTableCount(() => Promise.reject(new Error('network')), ref)).toBeNull();
+  it('reports count_truncated when the instance gave up counting past its cap', async () => {
+    const fetchFn = () => jsonRes({ ok: true, count: 10001, count_truncated: true, rows: [] });
+    expect(await fetchTableCount(fetchFn, ref)).toEqual({ count: 10001, truncated: true });
+  });
+
+  it('returns a null count when absent or the request throws, never truncated', async () => {
+    expect(await fetchTableCount(() => jsonRes({ ok: true, rows: [] }), ref)).toEqual({
+      count: null,
+      truncated: false,
+    });
+    expect(await fetchTableCount(() => Promise.reject(new Error('network')), ref)).toEqual({
+      count: null,
+      truncated: false,
+    });
   });
 });
 

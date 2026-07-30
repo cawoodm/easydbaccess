@@ -262,7 +262,8 @@ Two plugins, because they are two different things against any online
 locally, synced, and editable. Reachable via `registerUrlSource`, a table-URL
 drop handler, and the Import dialog. A URL may name a single table, a whole
 database, or an entire instance root; the latter two open a table checklist.
-It pages through the API in fixed-size chunks (capped at 10,000 rows), and if
+It pages through the API in fixed-size chunks (cap and page size come from the
+Settings → Datasette tab; default cap 10,000 rows, 0 = unlimited), and if
 paging is interrupted (e.g. rate-limited) the table records a resume cursor
 (`table.importResume`) surfaced as a red "Resume import" button rather than
 silently truncating. Its Refresh re-fetches and merges by primary key, keeping

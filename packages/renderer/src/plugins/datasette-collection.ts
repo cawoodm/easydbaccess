@@ -8,7 +8,14 @@
 // token. Row identity is the tilde-encoded primary key, so a row's id is exactly
 // the URL segment used to update/delete it and stays stable across refetches.
 
-import type { DataCollection, Row, RowSourceCtx, Table, Unsubscribe } from '@easydb/shared';
+import type {
+  DataCollection,
+  HostApi,
+  Row,
+  RowSourceCtx,
+  Table,
+  Unsubscribe,
+} from '@easydb/shared';
 import { cryptoUUID } from '../util/ids.js';
 import {
   deleteRowByPk,
@@ -20,6 +27,7 @@ import {
   withAuthFetch,
   type DatasetteRef,
 } from './datasette-client.js';
+import { DEFAULT_CONNECT_MAX_ROWS, getDatasetteSettings } from './datasette-common.js';
 
 /** Thrown when a write is attempted against a table resolved as read-only. */
 export class SourceReadOnlyError extends Error {
@@ -57,14 +65,37 @@ function matchesQuery(row: Row, query: Partial<Row>): boolean {
 /**
  * Build the live read-write collection for a sourced table. Pure enough to
  * unit-test: all I/O goes through `ctx.backend.fetch` and `ctx.settings`.
+ *
+ * `api` is optional and used ONLY to resolve the "Datasette" settings tab's
+ * `connectMaxRows` when `cfg.maxRows` doesn't already pin it — `RowSourceCtx`
+ * carries no layered settings resolver (see its doc comment), so the caller
+ * (`datasette-connect.ts`, which has the real `HostApi` at `init` time) passes
+ * it through explicitly. Omitting it (as the unit tests do) falls back to
+ * {@link DEFAULT_CONNECT_MAX_ROWS}.
  */
-export function createDatasetteCollection(table: Table, ctx: RowSourceCtx): DataCollection<Row> {
+export function createDatasetteCollection(
+  table: Table,
+  ctx: RowSourceCtx,
+  api?: HostApi,
+): DataCollection<Row> {
   const src = table.source;
   const cfg = (src?.config ?? {}) as unknown as DatasetteSourceConfig;
   const ref: DatasetteRef = { base: cfg.base, db: cfg.db, table: cfg.table, query: {} };
   const pks = Array.isArray(cfg.pks) && cfg.pks.length > 0 ? cfg.pks : ['rowid'];
   const writable = src?.writable === true;
-  const maxRows = cfg.maxRows ?? 10_000;
+  const explicitMaxRows = cfg.maxRows;
+  let maxRowsPromise: Promise<number> | null = null;
+  // Resolved once per collection and memoised — `resolveMaxRows` is awaited on
+  // every `loadAll`, and the setting can't change mid-session anyway.
+  function resolveMaxRows(): Promise<number> {
+    if (explicitMaxRows != null) return Promise.resolve(explicitMaxRows);
+    if (!maxRowsPromise) {
+      maxRowsPromise = api
+        ? getDatasetteSettings(api).then((s) => s.connectMaxRows)
+        : Promise.resolve(DEFAULT_CONNECT_MAX_ROWS);
+    }
+    return maxRowsPromise;
+  }
   const pollIntervalMs = cfg.pollIntervalMs ?? 0;
 
   const baseFetch = (u: string, o?: unknown) => ctx.backend.fetch(u, o as never);
@@ -116,7 +147,7 @@ export function createDatasetteCollection(table: Table, ctx: RowSourceCtx): Data
     if (inFlight) return inFlight;
     inFlight = (async () => {
       try {
-        const { rows } = await fetchRows(fetchFn, ref, { maxRows });
+        const { rows } = await fetchRows(fetchFn, ref, { maxRows: await resolveMaxRows() });
         cache = rows.map(toRow);
         loaded = true;
         for (const fn of subscribers) fn(cache);
