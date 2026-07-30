@@ -930,6 +930,33 @@ test.describe('views: sort, field search, standard templates', () => {
     await expect(vw).toContainText('Ship it');
   });
 
+  test('the Gallery template makes each card open its row link', async ({ page }) => {
+    const id = await createTable(page, 'Shots', [
+      { field: 'title' },
+      { field: 'image' },
+      { field: 'url' },
+    ]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      { title: 'First', image: 'https://pics.test/1.png', url: 'https://pics.test/1' },
+      { title: 'Second', image: 'https://pics.test/2.png', url: 'https://pics.test/2' },
+    ]);
+    // $LINK auto-maps to the url column (it is one of the URL words), $IMAGE to
+    // image and $TITLE to title.
+    await useTemplate(page, id, 'Gallery');
+
+    const vw = page.locator('view-window');
+    await expect(vw).toBeVisible();
+    const cards = vw.locator('figure');
+    await expect(cards).toHaveCount(2);
+    // Each card is one anchor wrapping the image and its caption.
+    const first = cards.nth(0).locator('a');
+    await expect(first).toHaveAttribute('href', 'https://pics.test/1');
+    await expect(first).toHaveAttribute('target', '_blank');
+    await expect(first.locator('img')).toHaveAttribute('src', 'https://pics.test/1.png');
+    await expect(cards.nth(1).locator('a')).toHaveAttribute('href', 'https://pics.test/2');
+  });
+
   test('copying a view picks up columns added to the table after it was created', async ({
     page,
     workspaceId,

@@ -85,7 +85,8 @@ const TODO: BuiltinTemplate = {
   footer: '</div>',
 };
 
-// Gallery: a responsive grid of image cards. $IMAGE is used as an <img> src.
+// Gallery: a responsive grid of image cards. $IMAGE is the <img> src; $LINK makes
+// the whole card open its row's URL in a new tab (same shape as RSS's $URL).
 const GALLERY: BuiltinTemplate = {
   slug: 'gallery',
   name: 'Gallery',
@@ -93,8 +94,10 @@ const GALLERY: BuiltinTemplate = {
     '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;padding:12px;">',
   row: [
     '<figure style="margin:0;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;background:#ffffff;box-shadow:0 1px 2px rgba(0,0,0,0.06);">',
+    '<a href="$LINK" target="_blank" rel="noopener noreferrer" style="display:block;text-decoration:none;color:inherit;">',
     '<img src="$IMAGE" alt="$TITLE" loading="lazy" style="width:100%;height:150px;object-fit:cover;display:block;background:#f3f4f6;" />',
     '<figcaption style="padding:6px 8px;font-size:0.85rem;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">$TITLE</figcaption>',
+    '</a>',
     '</figure>',
   ].join(''),
   footer: '</div>',
