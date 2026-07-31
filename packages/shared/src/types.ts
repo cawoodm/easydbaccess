@@ -54,6 +54,13 @@ export interface ColumnSpec {
    * global search). Absent ⇒ filterable, preserving existing behaviour.
    */
   filterable?: boolean;
+  /**
+   * When true, the grid shows this column without an editor (display value
+   * only). Generalises the existing "scripted cells are read-only" behaviour to
+   * an explicit flag; a Projection sets it on its computed and secondary-source
+   * columns, which cannot be written back. Absent/false ⇒ editable as before.
+   */
+  readonly?: boolean;
 }
 
 /**
@@ -115,6 +122,63 @@ export interface TableSource {
    * Absent/false ⇒ the grid sorts/filters the full snapshot as usual.
    */
   serverQuery?: boolean | undefined;
+}
+
+/**
+ * A "Projection": a virtual table whose rows are DERIVED from one or more other
+ * tables (a database view / JOIN). Stored as the `config` of a table's
+ * `source` descriptor (`source.type === 'projection'`); the `projection`
+ * `RowCollectionProvider` computes the rows on demand and keeps them live.
+ *
+ * The projection's own `Table.columns` are COMPILED from `columns` below at
+ * save time (so the grid, exports and views treat it like any table). The spec
+ * here is the editable source of truth the projection editor round-trips.
+ */
+export interface ProjectionSpec {
+  version: 1;
+  /** FROM + JOINs. `sources[0]` is the base (FROM) table. */
+  sources: ProjectionSource[];
+  /** SELECT list; array order is display order. */
+  columns: ProjectionColumn[];
+  /**
+   * Optional WHERE, keyed by OUTPUT field. Reuses the existing filter-substring
+   * shape (`Record<field, substring>`), applied to the joined rows.
+   */
+  filters?: Record<string, string> | undefined;
+}
+
+/** One table participating in a projection: the base, or a JOIN onto it. */
+export interface ProjectionSource {
+  /** Qualifies this source's columns (e.g. "orders"); unique within the spec. */
+  alias: string;
+  /** Bound by NAME so it survives a source being deleted and recreated. */
+  tableName: string;
+  /** Fast-path resolution hint only; `tableName` wins if they disagree. */
+  tableId?: string | undefined;
+  /** Absent for `sources[0]`; present for each JOIN. */
+  join?:
+    | {
+        type: 'inner' | 'left';
+        /**
+         * Equijoin keys: this source's `field` must equal the already-introduced
+         * source `eqAlias`'s `eqField`. Multiple entries are ANDed.
+         */
+        on: Array<{ field: string; eqAlias: string; eqField: string }>;
+      }
+    | undefined;
+}
+
+/** One output column of a projection (the SELECT list). */
+export interface ProjectionColumn {
+  /** Output field name; unique within the spec. */
+  field: string;
+  label: string;
+  type: ColumnType;
+  from:
+    /** A real stored column of a source — the only writeback candidate. */
+    | { kind: 'source'; alias: string; field: string }
+    /** Computed via `function render(row) { … }` — always read-only. */
+    | { kind: 'script'; script: string };
 }
 
 export interface Table {
