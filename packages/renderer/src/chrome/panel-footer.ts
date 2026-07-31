@@ -160,11 +160,13 @@ export class PanelFooter extends LitElement {
   }
 
   private editColumns() {
-    document.dispatchEvent(
-      new CustomEvent('easydb:edit-columns', {
-        detail: { tableId: this.tableId },
-      }),
-    );
+    // A Projection's structure is defined by its spec, not a raw column list, so
+    // editing its columns must go through the projection editor (which recompiles
+    // the columns) rather than the generic column editor that would desync them.
+    // The projection plugin listens for `easydb:edit-projection`.
+    const eventName =
+      this.table?.source?.type === 'projection' ? 'easydb:edit-projection' : 'easydb:edit-columns';
+    document.dispatchEvent(new CustomEvent(eventName, { detail: { tableId: this.tableId } }));
   }
 
   private runTableButton = async (spec: TableButtonSpec, e?: Event) => {

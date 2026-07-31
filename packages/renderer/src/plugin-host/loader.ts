@@ -26,6 +26,7 @@ import * as importData from '../plugins/import-data.js';
 import * as autoSync from '../plugins/auto-sync.js';
 import * as views from '../plugins/views.js';
 import * as settings from '../plugins/settings.js';
+import * as projection from '../plugins/projection.js';
 
 /** A built-in plugin paired with its id (mirrors `meta.id`, cheaply reachable without importing every module). */
 export interface BuiltinEntry {
@@ -74,6 +75,7 @@ const modules: PluginModule[] = [
   importData,
   autoSync,
   views,
+  projection,
 ];
 
 function requireMeta(p: PluginModule): NonNullable<PluginModule['meta']> {
