@@ -223,6 +223,7 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
   // `entry` can only be filled in after create returns (it holds the panel), so
   // the mount helpers tolerate its absence — during create there is nothing
   // mounted to change anyway.
+  // eslint-disable-next-line prefer-const -- closures above must capture the binding before it is assigned
   let entry: ViewEntry | undefined;
 
   const unmountContent = (): void => {

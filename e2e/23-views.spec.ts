@@ -395,12 +395,10 @@ test.describe('views', () => {
   });
 
   test('double-clicking a view titlebar maximizes it, and again restores', async ({ page }) => {
-    // Mirrors 21-maximize.spec.ts's table-window version. View windows only
-    // gained dblclick-to-maximize back (and the maximized-cursor swap) once
-    // the view swap moved them onto the panel shell, which provides this
-    // generically for every panel kind (`panel-shell.ts`'s `hdr` dblclick
-    // handler) — Task 5 had deleted the old titlebar behaviour for jsPanel,
-    // so view windows had NEITHER until this swap landed.
+    // Mirrors 21-maximize.spec.ts's table-window version. Dblclicking a view
+    // window's titlebar toggles maximize, generically provided for every
+    // panel kind by the panel shell (`panel-shell.ts`'s `hdr` dblclick
+    // handler), including the maximized-cursor swap.
     const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [{ title: 'Hello', url: 'https://example.com/1' }]);

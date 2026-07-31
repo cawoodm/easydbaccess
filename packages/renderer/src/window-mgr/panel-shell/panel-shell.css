@@ -83,6 +83,13 @@
   background: #f3f4f6;
   border-radius: 0 0 4px 4px;
   cursor: move;
+  touch-action: none;
+}
+/* Also a drag handle (wireDrag(logo) in panel-shell.ts); its base layout
+   rule lives in index.html, but touch-action belongs with the other drag
+   handles here. */
+.jsPanel-headerlogo {
+  touch-action: none;
 }
 .jsPanel-ftr.active {
   display: block;

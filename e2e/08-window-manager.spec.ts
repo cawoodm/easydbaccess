@@ -2,7 +2,7 @@ import { test, expect } from './fixtures.js';
 import { addRow, createTable, panelDomId, waitForPanel } from './helpers.js';
 
 /**
- * TODO § Window manager (jsPanel)
+ * TODO § Window manager
  * - panel title shows row count after table name, e.g. `Inventory (3)`
  * - header-drag visual feedback when reordering columns
  *   (z-order persistence is in 02-general.spec.ts)

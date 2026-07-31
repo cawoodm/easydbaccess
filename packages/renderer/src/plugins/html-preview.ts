@@ -1,5 +1,6 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { createPanel } from '../window-mgr/panel-shell/panel-shell.js';
+import { shellViewport } from '../window-mgr/jspanel-manager.js';
 import { looksLikeHtml, htmlToPreviewText } from '../util/html-text.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
@@ -164,6 +165,7 @@ class HtmlPreviewCell extends HTMLElement {
       contentSize: { w: 520, h: 400 },
       position: { centerTopOffset: 60 },
       minimizeTo: '#easydb-minimized-dock',
+      viewport: shellViewport(),
     });
   }
 
@@ -199,6 +201,7 @@ class HtmlPreviewCell extends HTMLElement {
       contentSize: { w: 520, h: 400 },
       position: 'center',
       minimizeTo: '#easydb-minimized-dock',
+      viewport: shellViewport(),
     });
 
     cancel.addEventListener('click', () => panel.close());

@@ -24,10 +24,8 @@
  *
  * Panel geometry is stored in the viewport's own (untransformed) layout
  * coordinates, so the panel shell's drag/resize/clamp math is unaffected by
- * the transform. The one known caveat: while zoomed (scale ≠ 1) a panel
- * titlebar drag moves by raw pointer delta, so it tracks the finger at
- * 1/scale speed — acceptable since panning/zooming to view is the
- * mobile-primary interaction.
+ * the transform. Drags track the pointer at any zoom because the shell
+ * divides deltas by the scale (see `panel-shell/geometry-math.ts`).
  */
 
 export interface PanZoomState {

@@ -1,7 +1,7 @@
 /**
  * Serialize the geometry read-modify-writes of ONE window.
  *
- * jsPanel fires several callbacks for a single user action — maximizing a panel
+ * The shell fires several callbacks for a single user action — maximizing a panel
  * both fronts it (`onfronted` → stamp the z rank) and changes its status
  * (`onstatuschange` → save the flags). Each handler reads `windowGeometry`,
  * changes its own field and patches the whole object back, so when they overlap

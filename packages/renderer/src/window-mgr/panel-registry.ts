@@ -16,8 +16,9 @@
  * it from the restack is circular, and it would rewrite `z` + `updatedAt` for
  * every window on every boot — churning the store and, with auto-sync/gist on,
  * pushing the whole workspace after each page load (and letting two devices
- * ping-pong geometry). A user click still fronts through jsPanel normally and
- * still stamps.
+ * ping-pong geometry). A user click still fronts through the shell and
+ * stamps — unless the panel is already topmost (`isTopmost` suppresses the
+ * redundant stamp).
  */
 type FrontFn = () => void;
 

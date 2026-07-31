@@ -307,15 +307,20 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
     const bTitle = document.createElement('span');
     bTitle.className = 'jsPanel-title';
     bTitle.textContent = title.textContent;
+    // A dock-bar click is a focus gesture; programmatic normalize() stays silent.
     b.append(
       bLogo,
       bTitle,
-      btn('normalize', 'Restore', () => act('normalize')),
+      btn('normalize', 'Restore', () => {
+        act('normalize');
+        el.front();
+      }),
       btn('close', 'Close', () => el.close()),
     );
     b.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('button')) return;
       act('normalize');
+      el.front();
     });
     return b;
   }
