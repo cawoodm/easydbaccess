@@ -27,6 +27,7 @@ import * as autoSync from '../plugins/auto-sync.js';
 import * as views from '../plugins/views.js';
 import * as settings from '../plugins/settings.js';
 import * as projection from '../plugins/projection.js';
+import * as commandPaletteButton from '../plugins/command-palette-button.js';
 
 /** A built-in plugin paired with its id (mirrors `meta.id`, cheaply reachable without importing every module). */
 export interface BuiltinEntry {
@@ -76,6 +77,7 @@ const modules: PluginModule[] = [
   autoSync,
   views,
   projection,
+  commandPaletteButton,
 ];
 
 function requireMeta(p: PluginModule): NonNullable<PluginModule['meta']> {
