@@ -10,17 +10,23 @@
 
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import type { ColumnSpec, ColumnType, ProjectionSpec } from '@easydb/shared';
+import type { ProjectionSpec } from '@easydb/shared';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
-import { guessJoinKeys } from '../plugins/projection-compute.js';
+import {
+  addComputedToModel,
+  addSourceToModel,
+  editorToSpec,
+  removeSourceFromModel,
+  specToEditor,
+  type EdColumn,
+  type EditorModel,
+  type EdJoin,
+  type EdSource,
+  type ProjectionCandidate,
+} from './projection-spec.js';
 
-/** A table the projection can draw from. */
-export interface ProjectionCandidate {
-  id: string;
-  name: string;
-  columns: ColumnSpec[];
-}
+export type { ProjectionCandidate };
 
 export interface ProjectionDialogOpts {
   /** Tables offered as JOIN sources (excludes the base). */
@@ -31,31 +37,6 @@ export interface ProjectionDialogOpts {
   initial?: { name: string; spec: ProjectionSpec } | undefined;
   /** Persist the projection; throw to keep the dialog open with an inline error. */
   onSave: (name: string, spec: ProjectionSpec) => Promise<void>;
-}
-
-interface EdJoin {
-  type: 'inner' | 'left';
-  thisField: string;
-  otherAlias: string;
-  otherField: string;
-}
-
-interface EdSource {
-  alias: string;
-  tableId: string;
-  tableName: string;
-  columns: ColumnSpec[];
-  join?: EdJoin;
-}
-
-interface EdColumn {
-  include: boolean;
-  label: string;
-  type: ColumnType;
-  /** kind 'source' */ alias?: string;
-  field?: string;
-  /** kind 'script' */ script?: string;
-  computed: boolean;
 }
 
 @customElement('projection-dialog')
@@ -137,6 +118,8 @@ export class ProjectionDialog extends LitElement {
 
   private candidates: ProjectionCandidate[] = [];
   private editing = false;
+  /** The spec being edited, so a save preserves fields the UI does not model. */
+  private originalSpec: ProjectionSpec | null = null;
   private dialogEl: HTMLDialogElement | null = null;
   private onSave?: ((name: string, spec: ProjectionSpec) => Promise<void>) | undefined;
 
@@ -159,6 +142,7 @@ export class ProjectionDialog extends LitElement {
     this.onSave = opts.onSave;
     this.error = '';
     this.editing = !!opts.initial;
+    this.originalSpec = null;
     this.name = '';
     this.sources = [];
     this.columns = [];
@@ -173,33 +157,25 @@ export class ProjectionDialog extends LitElement {
     void this.updateComplete.then(() => this.dialogEl?.showModal());
   }
 
-  private loadFrom(name: string, spec: ProjectionSpec): void {
-    this.name = name;
-    this.sources = spec.sources.map((s) => {
-      const cand = this.candidates.find((c) => c.name === s.tableName) ?? this.candidates.find((c) => c.id === s.tableId);
-      const key0 = s.join?.on[0];
-      return {
-        alias: s.alias,
-        tableId: cand?.id ?? s.tableId ?? '',
-        tableName: s.tableName,
-        columns: cand?.columns ?? [],
-        ...(s.join && key0
-          ? { join: { type: s.join.type, thisField: key0.field, otherAlias: key0.eqAlias, otherField: key0.eqField } }
-          : {}),
-      };
-    });
-    this.columns = spec.columns.map((c) =>
-      c.from.kind === 'source'
-        ? { include: true, label: c.label, type: c.type, alias: c.from.alias, field: c.from.field, computed: false }
-        : { include: true, label: c.label, type: c.type, script: c.from.script, computed: true },
-    );
+  /** The editor state as one model, for the pure transforms in projection-spec. */
+  private modelOf(): EditorModel {
+    return {
+      name: this.name,
+      sources: this.sources,
+      columns: this.columns,
+      ...(this.originalSpec ? { original: this.originalSpec } : {}),
+    };
   }
 
-  private nextAlias(): string {
-    for (let i = 0; ; i++) {
-      const a = String.fromCharCode(97 + (i % 26)) + (i >= 26 ? String(Math.floor(i / 26)) : '');
-      if (!this.sources.some((s) => s.alias === a)) return a;
-    }
+  private applyModel(m: EditorModel): void {
+    this.name = m.name;
+    this.sources = m.sources;
+    this.columns = m.columns;
+  }
+
+  private loadFrom(name: string, spec: ProjectionSpec): void {
+    this.originalSpec = spec;
+    this.applyModel(specToEditor(name, spec, this.candidates));
   }
 
   private addSource(tableId: string): void {
@@ -208,52 +184,15 @@ export class ProjectionDialog extends LitElement {
   }
 
   private addCandidateAsSource(cand: ProjectionCandidate): void {
-    const alias = this.nextAlias();
-    const isBase = this.sources.length === 0;
-    let join: EdJoin | undefined;
-    if (!isBase) {
-      // Preselect the join keys from field-name heuristics (FK conventions,
-      // shared xId columns) so the user usually just confirms rather than picks.
-      const guess = guessJoinKeys(
-        { tableName: cand.name, fields: cand.columns.map((c) => c.field) },
-        this.sources.map((s) => ({
-          alias: s.alias,
-          tableName: s.tableName,
-          fields: s.columns.map((c) => c.field),
-        })),
-      );
-      join = {
-        type: 'left',
-        thisField: guess?.thisField ?? cand.columns[0]?.field ?? '',
-        otherAlias: guess?.otherAlias ?? this.sources[0]?.alias ?? '',
-        otherField: guess?.otherField ?? '',
-      };
-    }
-    const src: EdSource = {
-      alias,
-      tableId: cand.id,
-      tableName: cand.name,
-      columns: cand.columns,
-      ...(join ? { join } : {}),
-    };
-    this.sources = [...this.sources, src];
-    // Add this source's columns to the selection (included by default).
-    this.columns = [
-      ...this.columns,
-      ...cand.columns.map((col) => ({ include: true, label: col.label, type: col.type, alias, field: col.field, computed: false })),
-    ];
+    this.applyModel(addSourceToModel(this.modelOf(), cand));
   }
 
   private removeSource(alias: string): void {
-    this.sources = this.sources.filter((s) => s.alias !== alias);
-    this.columns = this.columns.filter((c) => c.computed || c.alias !== alias);
+    this.applyModel(removeSourceFromModel(this.modelOf(), alias));
   }
 
   private addComputed(): void {
-    this.columns = [
-      ...this.columns,
-      { include: true, label: 'computed', type: 'string', script: 'function render(row) {\n  return "";\n}', computed: true },
-    ];
+    this.applyModel(addComputedToModel(this.modelOf()));
   }
 
   private patchSource(alias: string, patch: Partial<EdJoin>): void {
@@ -263,44 +202,12 @@ export class ProjectionDialog extends LitElement {
   }
 
   private buildSpec(): { name: string; spec: ProjectionSpec } | null {
-    const name = this.name.trim();
-    if (!name) return this.fail('Give the projection a name.');
-    if (this.sources.length === 0) return this.fail('Add at least one source table.');
-    const chosen = this.columns.filter((c) => c.include);
-    if (chosen.length === 0) return this.fail('Select at least one column.');
-
-    for (const s of this.sources) {
-      if (s.join && (!s.join.thisField || !s.join.otherField)) {
-        return this.fail(`Set both join keys for "${s.tableName}".`);
-      }
+    const built = editorToSpec(this.modelOf());
+    if (!built.ok) {
+      this.error = built.error;
+      return null;
     }
-
-    const usedFields = new Set<string>();
-    const outColumns = chosen.map((c) => {
-      const field = uniqueField(c.label, usedFields);
-      return c.computed
-        ? { field, label: c.label.trim() || field, type: c.type, from: { kind: 'script' as const, script: c.script ?? '' } }
-        : { field, label: c.label.trim() || field, type: c.type, from: { kind: 'source' as const, alias: c.alias!, field: c.field! } };
-    });
-
-    const spec: ProjectionSpec = {
-      version: 1,
-      sources: this.sources.map((s) => ({
-        alias: s.alias,
-        tableName: s.tableName,
-        tableId: s.tableId,
-        ...(s.join
-          ? { join: { type: s.join.type, on: [{ field: s.join.thisField, eqAlias: s.join.otherAlias, eqField: s.join.otherField }] } }
-          : {}),
-      })),
-      columns: outColumns,
-    };
-    return { name, spec };
-  }
-
-  private fail(msg: string): null {
-    this.error = msg;
-    return null;
+    return { name: built.name, spec: built.spec };
   }
 
   private submit = async (e: Event): Promise<void> => {
@@ -445,16 +352,6 @@ export class ProjectionDialog extends LitElement {
       <span></span>
     `;
   }
-}
-
-/** Slugify a label to a unique output field name. */
-function uniqueField(label: string, used: Set<string>): string {
-  const base = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'col';
-  let field = base;
-  let n = 2;
-  while (used.has(field)) field = `${base}_${n++}`;
-  used.add(field);
-  return field;
 }
 
 declare global {

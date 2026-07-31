@@ -8,7 +8,7 @@
 //
 // See docs/superpowers/specs/2026-07-31-projection-virtual-tables-design.md.
 
-import type { ProjectionColumn, ProjectionSpec, Row } from '@easydb/shared';
+import type { ProjectionColumn, ProjectionSource, ProjectionSpec, Row, Table } from '@easydb/shared';
 import { runColumnScript } from '../util/column-script.js';
 
 /** Rows of each source table, keyed by the source's `alias`. */
@@ -132,6 +132,52 @@ export function resolveWritability(spec: ProjectionSpec): Set<string> {
     if (col.from.kind === 'source' && col.from.alias === baseAlias) writable.add(col.field);
   }
   return writable;
+}
+
+// -- Cycle detection -------------------------------------------------------
+
+/** Resolve a spec source to a table: by name, with `tableId` as a hint only. */
+function resolveSource(
+  s: ProjectionSource,
+  byId: Map<string, Table>,
+  byName: Map<string, Table>,
+): Table | undefined {
+  if (s.tableId) {
+    const hit = byId.get(s.tableId);
+    if (hit && hit.name === s.tableName) return hit;
+  }
+  return byName.get(s.tableName);
+}
+
+/**
+ * True when following `rootId`'s projection sources leads back to a table
+ * already on the path — a chain that could never terminate.
+ *
+ * This walks the SPEC GRAPH rather than any runtime "currently computing" state,
+ * so the answer depends only on how the projections are defined. That matters:
+ * an ambient in-flight flag cannot tell a genuine cycle from two ordinary
+ * concurrent reads of the same projection, and mistaking one for the other
+ * publishes a spurious empty result.
+ */
+export function hasProjectionCycle(rootId: string, tables: Table[]): boolean {
+  const byId = new Map(tables.map((t) => [t.id, t] as const));
+  const byName = new Map<string, Table>();
+  for (const t of tables) if (!byName.has(t.name)) byName.set(t.name, t);
+
+  const walk = (id: string, path: Set<string>): boolean => {
+    if (path.has(id)) return true;
+    const t = byId.get(id);
+    if (t?.source?.type !== 'projection') return false; // a plain table ends the chain
+    const spec = t.source.config as unknown as ProjectionSpec | undefined;
+    if (!spec || !Array.isArray(spec.sources)) return false;
+    const next = new Set(path).add(id);
+    for (const s of spec.sources) {
+      const src = resolveSource(s, byId, byName);
+      if (src && walk(src.id, next)) return true;
+    }
+    return false;
+  };
+  return walk(rootId, new Set());
 }
 
 // -- Join-key guessing (editor convenience) -------------------------------

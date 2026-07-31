@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { ProjectionSpec, Row } from '@easydb/shared';
+import type { ProjectionSpec, Row, Table } from '@easydb/shared';
 import {
   computeProjection,
   guessJoinKeys,
+  hasProjectionCycle,
   resolveWritability,
   writebackTarget,
 } from './projection-compute.js';
@@ -103,6 +104,55 @@ describe('computeProjection', () => {
       columns: [{ field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'a', field: 'name' } }],
     };
     expect(computeProjection(spec, {})).toEqual([]);
+  });
+});
+
+describe('hasProjectionCycle', () => {
+  const plain = (id: string, name: string): Table => ({
+    id,
+    workspaceId: 'ws',
+    name,
+    code: name,
+    columns: [],
+    view: 'table',
+    updatedAt: 0,
+  });
+  const proj = (id: string, name: string, sourceNames: string[]): Table => ({
+    ...plain(id, name),
+    source: {
+      type: 'projection',
+      config: {
+        version: 1,
+        sources: sourceNames.map((n, i) => ({ alias: `s${i}`, tableName: n })),
+        columns: [],
+      } as unknown as Record<string, unknown>,
+    },
+  });
+
+  it('is false for a projection over plain tables', () => {
+    const tables = [plain('t1', 'People'), proj('p1', 'View', ['People'])];
+    expect(hasProjectionCycle('p1', tables)).toBe(false);
+  });
+
+  it('is false for a legitimate projection-on-projection chain', () => {
+    const tables = [plain('t1', 'People'), proj('p1', 'A', ['People']), proj('p2', 'B', ['A'])];
+    expect(hasProjectionCycle('p2', tables)).toBe(false);
+  });
+
+  it('detects a projection that sources itself', () => {
+    expect(hasProjectionCycle('p1', [proj('p1', 'Self', ['Self'])])).toBe(true);
+  });
+
+  it('detects a transitive cycle', () => {
+    const tables = [proj('p1', 'A', ['B']), proj('p2', 'B', ['C']), proj('p3', 'C', ['A'])];
+    expect(hasProjectionCycle('p1', tables)).toBe(true);
+  });
+
+  it('does not depend on how many projections are read at once', () => {
+    // Nine independent projections: none is a cycle, however many exist.
+    const tables: Table[] = [plain('t1', 'People')];
+    for (let i = 0; i < 9; i++) tables.push(proj(`p${i}`, `V${i}`, ['People']));
+    for (let i = 0; i < 9; i++) expect(hasProjectionCycle(`p${i}`, tables)).toBe(false);
   });
 });
 

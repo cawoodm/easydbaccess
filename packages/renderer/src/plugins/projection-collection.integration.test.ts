@@ -139,6 +139,53 @@ describe('createProjectionCollection', () => {
     expect(base?.data.name).toBe('Robert');
   });
 
+  it('computes every projection when many are read at once', async () => {
+    // Regression: an ambient depth counter incremented across `await`s measured
+    // CONCURRENCY, not recursion depth, so the 9th simultaneous projection
+    // silently rendered empty. Any table write fans a recompute out to every
+    // projection at once, so this is reachable with no nesting at all.
+    const mem = memStore();
+    mem.addTable(localTable('p1', 'People'));
+    mem.addRow({ id: 'pa', tableId: 'p1', data: { name: 'Bob' }, updatedAt: 1 });
+    const colls = Array.from({ length: 9 }, (_, i) => {
+      const t: Table = {
+        ...localTable(`proj${i}`, `View ${i}`),
+        source: {
+          type: 'projection',
+          config: {
+            version: 1,
+            sources: [{ alias: 'p', tableName: 'People' }],
+            columns: [
+              { field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'p', field: 'name' } },
+            ],
+          },
+        },
+      };
+      mem.addTable(t);
+      return createProjectionCollection(mem.store, t);
+    });
+
+    const counts = (await Promise.all(colls.map((c) => c.find()))).map((rows) => rows.length);
+
+    expect(counts).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1]);
+  });
+
+  it('never publishes an empty frame when find() and subscribe() race in one tick', async () => {
+    // Regression: the cycle guard treated a concurrent read of the SAME
+    // projection as a cycle, so one of the two bailed to [] and pushed that
+    // empty array to subscribers — a visible empty-grid flash.
+    const { coll } = setup();
+    const seen: number[][] = [];
+    const found = coll.find();
+    const unsub = coll.subscribe((rows) => seen.push(rows.map(() => 1)));
+    const rows = await found;
+
+    expect(rows).toHaveLength(2);
+    await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0));
+    expect(seen.every((frame) => frame.length === 2)).toBe(true);
+    unsub();
+  });
+
   it('rejects a patch that touches only read-only (secondary/computed) columns', async () => {
     const { coll } = setup();
     // The grid never gives a read-only cell an editor (see data-table), so a

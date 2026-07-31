@@ -25,6 +25,7 @@ import type {
 } from '@easydb/shared';
 import {
   computeProjection,
+  hasProjectionCycle,
   resolveWritability,
   writebackTarget,
   type SourceRowsByAlias,
@@ -37,18 +38,6 @@ export class ProjectionReadOnlyError extends Error {
     this.name = 'ProjectionReadOnlyError';
   }
 }
-
-/**
- * Guards against a projection that (directly or transitively) sources itself.
- * Shared across all projection collections: while a projection is mid-compute
- * its id sits here, so a re-entrant read of the same projection returns [] and
- * breaks the cycle instead of recursing forever.
- */
-const computing = new Set<string>();
-
-/** Depth backstop in case the id-based guard is ever defeated by aliasing. */
-const MAX_DEPTH = 8;
-let depth = 0;
 
 function parseSpec(config: unknown): ProjectionSpec {
   const spec = config as Partial<ProjectionSpec> | undefined;
@@ -72,13 +61,13 @@ export function createProjectionCollection(store: DataStore, table: Table): Data
   const subscribers = new Set<(rows: Row[]) => void>();
   let cache: Row[] = [];
   let loaded = false;
+  let inFlight: Promise<Row[]> | null = null;
   const sourceSubs = new Map<string, Unsubscribe>(); // source tableId → unsubscribe
   let tablesSub: Unsubscribe | null = null;
   let queued = false;
 
-  /** alias → resolved source tableId (by name, `tableId` used only as a hint). */
-  async function resolveSourceTableIds(): Promise<Map<string, string>> {
-    const all = await store.tables.find({ workspaceId: table.workspaceId });
+  /** alias → source tableId, resolved by NAME (`tableId` is only a hint). */
+  function mapSourceIds(all: Table[]): Map<string, string> {
     const byName = new Map<string, Table>();
     for (const t of all) if (!byName.has(t.name)) byName.set(t.name, t);
     const map = new Map<string, string>();
@@ -94,23 +83,50 @@ export function createProjectionCollection(store: DataStore, table: Table): Data
     return map;
   }
 
+  async function resolveSourceTableIds(): Promise<Map<string, string>> {
+    return mapSourceIds(await store.tables.find({ workspaceId: table.workspaceId }));
+  }
+
   async function compute(): Promise<Row[]> {
-    if (computing.has(table.id) || depth >= MAX_DEPTH) return []; // cycle / depth guard
-    computing.add(table.id);
-    depth++;
-    try {
-      const ids = await resolveSourceTableIds();
-      const sourceRows: SourceRowsByAlias = {};
-      for (const s of spec.sources) {
-        const tid = ids.get(s.alias);
-        if (!tid) return []; // a source table is missing → render empty
-        sourceRows[s.alias] = await store.rows(tid).find();
-      }
-      return computeProjection(spec, sourceRows).map((r) => ({ ...r, tableId: table.id }));
-    } finally {
-      computing.delete(table.id);
-      depth--;
+    const all = await store.tables.find({ workspaceId: table.workspaceId });
+    // A cycle is a property of how the projections are DEFINED, so it is decided
+    // from the spec graph. (An ambient "already computing" flag cannot tell a
+    // real cycle from two ordinary concurrent reads, and guessing wrong would
+    // publish an empty result for a perfectly good projection.)
+    if (hasProjectionCycle(table.id, all)) return [];
+    const ids = mapSourceIds(all);
+    const sourceRows: SourceRowsByAlias = {};
+    for (const s of spec.sources) {
+      const tid = ids.get(s.alias);
+      if (!tid) return []; // a source table is missing → render empty
+      sourceRows[s.alias] = await store.rows(tid).find();
     }
+    return computeProjection(spec, sourceRows).map((r) => ({ ...r, tableId: table.id }));
+  }
+
+  /** Recompute and adopt the result as the cache. */
+  async function recompute(): Promise<Row[]> {
+    const rows = await compute();
+    cache = rows;
+    loaded = true;
+    return rows;
+  }
+
+  /**
+   * First read: collapse concurrent callers onto ONE compute. The grid both
+   * `find()`s and `subscribe()`s in the same tick, so without this the same
+   * projection would be computed twice on open.
+   */
+  function loadAll(): Promise<Row[]> {
+    if (inFlight) return inFlight;
+    inFlight = (async () => {
+      try {
+        return await recompute();
+      } finally {
+        inFlight = null;
+      }
+    })();
+    return inFlight;
   }
 
   /** (Re)subscribe to exactly the current set of source tables' row streams. */
@@ -134,9 +150,10 @@ export function createProjectionCollection(store: DataStore, table: Table): Data
     queueMicrotask(async () => {
       queued = false;
       await refreshSubscriptions();
-      cache = await compute();
-      loaded = true;
-      for (const fn of subscribers) fn(cache);
+      // The very first delivery may share an in-flight `find()`; a recompute
+      // triggered by a CHANGE must not reuse a snapshot that predates it.
+      const rows = loaded ? await recompute() : await loadAll();
+      for (const fn of subscribers) fn(rows);
     });
   }
 
@@ -167,12 +184,12 @@ export function createProjectionCollection(store: DataStore, table: Table): Data
 
   return {
     async find(query) {
-      const rows = loaded ? cache : ((cache = await compute()), (loaded = true), cache);
+      const rows = loaded ? cache : await loadAll();
       if (!query || Object.keys(query).length === 0) return rows;
       return rows.filter((r) => matchesQuery(r, query));
     },
     async findOne(id) {
-      const rows = loaded ? cache : await compute();
+      const rows = loaded ? cache : await loadAll();
       return rows.find((r) => r.id === id) ?? null;
     },
     async insert() {
@@ -212,9 +229,8 @@ export function createProjectionCollection(store: DataStore, table: Table): Data
     },
     async refresh() {
       await refreshSubscriptions();
-      cache = await compute();
-      loaded = true;
-      for (const fn of subscribers) fn(cache);
+      const rows = await recompute();
+      for (const fn of subscribers) fn(rows);
     },
   };
 }
