@@ -174,6 +174,13 @@ export interface ProjectionColumn {
   field: string;
   label: string;
   type: ColumnType;
+  /**
+   * Excluded from the rendered grid (the value is still computed and exported).
+   * Copied from the source column when the projection is created — a column the
+   * user had hidden on the base table stays hidden here — and kept on the spec
+   * so it survives an edit and travels with sync.
+   */
+  hidden?: boolean | undefined;
   from:
     /** A real stored column of a source — the only writeback candidate. */
     | { kind: 'source'; alias: string; field: string }

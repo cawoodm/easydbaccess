@@ -16,7 +16,7 @@
 
 import type { ColumnSpec, HostApi, PluginModule, ProjectionSpec, Table } from '@easydb/shared';
 import { cryptoUUID, slugTable } from '../util/ids.js';
-import { resolveWritability } from './projection-compute.js';
+import { presentationFromBase, resolveWritability } from './projection-compute.js';
 import { createProjectionCollection } from './projection-collection.js';
 import '../dialogs/projection-dialog.js';
 import { ProjectionDialog, type ProjectionCandidate } from '../dialogs/projection-dialog.js';
@@ -68,12 +68,13 @@ export function init(api: HostApi): void {
   });
 }
 
-/** Compile a spec into the Table's stored `columns` (script + readonly flags). */
+/** Compile a spec into the Table's stored `columns` (script/hidden/readonly flags). */
 function compileColumns(spec: ProjectionSpec): ColumnSpec[] {
   const writable = resolveWritability(spec);
   return spec.columns.map((c) => {
     const col: ColumnSpec = { field: c.field, label: c.label, type: c.type };
     if (c.from.kind === 'script') col.script = c.from.script;
+    if (c.hidden) col.hidden = true;
     if (!writable.has(c.field)) col.readonly = true;
     return col;
   });
@@ -112,15 +113,21 @@ async function openProjectionEditor(
     base: toCand(baseTable),
     // Join candidates: every table except the base (which is already source 0).
     candidates: all.filter((t) => t.id !== baseTable.id).map(toCand),
-    onSave: makeOnSave(api, workspaceId, null),
+    onSave: makeOnSave(api, workspaceId, null, baseTable),
   });
 }
 
-/** Build the persist callback shared by new/edit: compile columns, then write. */
+/**
+ * Build the persist callback shared by new/edit: compile columns, then write.
+ * `base` is the table a NEW projection was launched from — its sort and filters
+ * are carried over so the projection opens showing what the user was looking at.
+ * (Hidden columns ride on the spec itself, so they survive later edits too.)
+ */
 function makeOnSave(
   api: HostApi,
   workspaceId: string,
   editing: Table | null,
+  base?: Table,
 ): (name: string, spec: ProjectionSpec) => Promise<void> {
   return async (name, spec) => {
     const columns = compileColumns(spec);
@@ -147,6 +154,9 @@ function makeOnSave(
         view: 'table',
         source,
         readonly: tableReadonly,
+        // Inherit the base table's sort / filters, translated to this
+        // projection's output fields.
+        ...(base ? presentationFromBase(spec, base) : {}),
         updatedAt: Date.now(),
       });
     }

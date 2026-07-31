@@ -10,6 +10,7 @@
 
 import type { ColumnSpec, ColumnType, TableInfo } from '@easydb/shared';
 import { parseColumnFilter } from '../search/column-filter.js';
+import { isInternalField } from '../util/internal-fields.js';
 
 export interface DatasetteRef {
   base: string;
@@ -197,7 +198,9 @@ export function mapColumns(meta: any): { columns: ColumnSpec[]; pks: string[] } 
     };
     if (d.notnull === true || d.notnull === 1 || isPk) spec.notnull = true;
     if (isPk) spec.unique = true;
-    if (d.hidden === true || d.hidden === 1) spec.hidden = true;
+    // Datasette's own hidden flag, plus storage plumbing (`rowid`) that has to
+    // stay in the row for writes but is not user data.
+    if (d.hidden === true || d.hidden === 1 || isInternalField(field)) spec.hidden = true;
     // Carry a column's SQL default (from column_details) so an added row starts
     // with the same value the database would use.
     if (d.default != null && d.default !== '') spec.default = d.default;
@@ -237,11 +240,16 @@ export function inferColumnsFromRows(rows: Array<Record<string, unknown>>): Colu
       }
     }
   }
-  return fields.map((field) => ({
-    field,
-    label: prettifyLabel(field),
-    type: inferColumnType(rows.map((r) => r[field])),
-  }));
+  return fields.map((field) => {
+    const spec: ColumnSpec = {
+      field,
+      label: prettifyLabel(field),
+      type: inferColumnType(rows.map((r) => r[field])),
+    };
+    // Same rule as `mapColumns`: keep `rowid` in the data, out of sight.
+    if (isInternalField(field)) spec.hidden = true;
+    return spec;
+  });
 }
 
 function inferColumnType(values: unknown[]): ColumnType {

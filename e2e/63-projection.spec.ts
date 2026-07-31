@@ -128,6 +128,60 @@ test.describe('projections', () => {
       .toEqual([{ name: 'only-row' }]);
   });
 
+  test("inherits the base table's hidden columns, sort and filters", async ({ page }) => {
+    const id = await createTable(page, 'Staff', [
+      { field: 'name' },
+      { field: 'dept' },
+      { field: 'rowid' },
+    ]);
+    await bulkAddRows(page, id, [
+      { name: 'Bob', dept: 'Sales', rowid: 1 },
+      { name: 'Ann', dept: 'Support', rowid: 2 },
+    ]);
+    // The user hides a column, sorts, and filters the ordinary table.
+    await page.evaluate(async (tableId) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      const t = await ctx.store.tables.findOne(tableId);
+      await ctx.store.tables.patch(tableId, {
+        columns: t.columns.map((c: { field: string }) =>
+          c.field === 'dept' ? { ...c, hidden: true } : c,
+        ),
+        sortBy: [{ field: 'name', asc: true }],
+        sortColumn: 'name',
+        sortAsc: true,
+        filters: { name: 'B' },
+        updatedAt: Date.now(),
+      });
+    }, id);
+    await waitForPanel(page, id);
+
+    await page.locator(`#${panelDomId(id)}`).getByRole('button', { name: 'New Projection' }).click();
+    const dialog = page.locator('projection-dialog');
+    await expect(dialog.locator('dialog')).toBeVisible();
+    await dialog.locator('input').first().fill('Staff view');
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+
+    const proj = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      const all = await ctx.store.tables.find({ workspaceId: ctx.workspaceId });
+      return all.find(
+        (t: { source?: { type?: string }; name: string }) =>
+          t.source?.type === 'projection' && t.name === 'Staff view',
+      );
+    });
+
+    // Hidden column and rowid both carried over as hidden; sort + filter copied.
+    const hidden = (proj.columns as Array<{ field: string; hidden?: boolean }>)
+      .filter((c) => c.hidden)
+      .map((c) => c.field)
+      .sort();
+    expect(hidden).toEqual(['dept', 'rowid']);
+    expect(proj.sortBy).toEqual([{ field: 'name', asc: true }]);
+    expect(proj.filters).toEqual({ name: 'B' });
+  });
+
   test('adding a join preselects sensible keys, so the join works without picking fields', async ({
     page,
   }) => {

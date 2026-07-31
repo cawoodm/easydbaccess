@@ -8,7 +8,14 @@
 //
 // See docs/superpowers/specs/2026-07-31-projection-virtual-tables-design.md.
 
-import type { ProjectionColumn, ProjectionSource, ProjectionSpec, Row, Table } from '@easydb/shared';
+import type {
+  ProjectionColumn,
+  ProjectionSource,
+  ProjectionSpec,
+  Row,
+  SortSpec,
+  Table,
+} from '@easydb/shared';
 import { runColumnScript } from '../util/column-script.js';
 
 /** Rows of each source table, keyed by the source's `alias`. */
@@ -132,6 +139,78 @@ export function resolveWritability(spec: ProjectionSpec): Set<string> {
     if (col.from.kind === 'source' && col.from.alias === baseAlias) writable.add(col.field);
   }
   return writable;
+}
+
+// -- Carrying the base table's presentation over ---------------------------
+
+/**
+ * Map each BASE-table stored field to the projection's output field, so the
+ * base table's presentation can be expressed in the projection's own terms.
+ */
+function baseFieldToOutput(spec: ProjectionSpec): Map<string, string> {
+  const baseAlias = spec.sources[0]?.alias;
+  const map = new Map<string, string>();
+  if (!baseAlias) return map;
+  for (const c of spec.columns) {
+    if (c.from.kind === 'source' && c.from.alias === baseAlias && !map.has(c.from.field)) {
+      map.set(c.from.field, c.field);
+    }
+  }
+  return map;
+}
+
+/** The subset of a Table's presentation a new projection inherits. */
+export interface CarriedPresentation {
+  sortBy?: SortSpec[] | undefined;
+  sortColumn?: string | undefined;
+  sortAsc?: boolean | undefined;
+  filters?: Record<string, string> | undefined;
+}
+
+/**
+ * Copy the base table's sort and filters onto a projection built from it, so the
+ * projection opens showing what the user was already looking at rather than an
+ * unsorted, unfiltered grid.
+ *
+ * Keys are translated from the base table's stored fields to the projection's
+ * output fields; anything whose column was not selected is dropped rather than
+ * carried over as a dangling reference. (Hidden columns travel separately, on
+ * the spec's own columns — see `ProjectionColumn.hidden`.)
+ */
+export function presentationFromBase(spec: ProjectionSpec, base: Table): CarriedPresentation {
+  const map = baseFieldToOutput(spec);
+  const out: CarriedPresentation = {};
+
+  const baseSort: SortSpec[] =
+    base.sortBy && base.sortBy.length > 0
+      ? base.sortBy
+      : base.sortColumn
+        ? [{ field: base.sortColumn, asc: base.sortAsc ?? true }]
+        : [];
+  const sortBy: SortSpec[] = [];
+  for (const key of baseSort) {
+    const field = map.get(key.field);
+    if (field) sortBy.push({ field, asc: key.asc });
+  }
+  if (sortBy.length > 0) {
+    out.sortBy = sortBy;
+    const first = sortBy[0];
+    if (first) {
+      out.sortColumn = first.field;
+      out.sortAsc = first.asc;
+    }
+  }
+
+  if (base.filters) {
+    const filters: Record<string, string> = {};
+    for (const [field, value] of Object.entries(base.filters)) {
+      const outField = map.get(field);
+      if (outField && value) filters[outField] = value;
+    }
+    if (Object.keys(filters).length > 0) out.filters = filters;
+  }
+
+  return out;
 }
 
 // -- Cycle detection -------------------------------------------------------

@@ -86,6 +86,57 @@ describe('editorToSpec: output field names', () => {
   });
 });
 
+describe('hidden columns', () => {
+  it('copies a hidden source column into the projection as hidden', () => {
+    const withHidden: ProjectionCandidate = {
+      id: 'p1',
+      name: 'People',
+      columns: [
+        { field: 'name', label: 'name', type: 'string' },
+        { field: 'secret', label: 'secret', type: 'string', hidden: true },
+      ],
+    };
+    const built = editorToSpec(addSourceToModel({ name: 'X', sources: [], columns: [] }, withHidden));
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    // Both columns are present; only the hidden one is flagged.
+    expect(built.spec.columns.map((c) => [c.field, c.hidden ?? false])).toEqual([
+      ['name', false],
+      ['secret', true],
+    ]);
+  });
+
+  it('hides rowid even when the source table still shows it', () => {
+    // A Datasette table imported before rowid was hidden at the source.
+    const legacy: ProjectionCandidate = {
+      id: 'd9',
+      name: 'Legacy',
+      columns: [
+        { field: 'rowid', label: 'Rowid', type: 'number' },
+        { field: 'title', label: 'Title', type: 'string' },
+      ],
+    };
+    const built = editorToSpec(addSourceToModel({ name: 'X', sources: [], columns: [] }, legacy));
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.spec.columns.find((c) => c.field === 'rowid')?.hidden).toBe(true);
+    expect(built.spec.columns.find((c) => c.field === 'title')?.hidden).toBeUndefined();
+  });
+
+  it('survives an edit round-trip', () => {
+    const spec: ProjectionSpec = {
+      version: 1,
+      // `tableId` is the resolution hint the editor refreshes from the candidate.
+      sources: [{ alias: 'p', tableName: 'People', tableId: 'p1' }],
+      columns: [
+        { field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'p', field: 'name' } },
+        { field: 'rowid', label: 'Rowid', type: 'number', hidden: true, from: { kind: 'source', alias: 'p', field: 'rowid' } },
+      ],
+    };
+    expect(roundTrip(spec)).toEqual(spec);
+  });
+});
+
 describe('removeSourceFromModel', () => {
   it('cascades to sources whose join referenced the removed one', () => {
     // base a=People, b=Dept joined on a, c=Extra joined on b.

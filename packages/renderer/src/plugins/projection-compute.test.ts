@@ -4,6 +4,7 @@ import {
   computeProjection,
   guessJoinKeys,
   hasProjectionCycle,
+  presentationFromBase,
   resolveWritability,
   writebackTarget,
 } from './projection-compute.js';
@@ -104,6 +105,58 @@ describe('computeProjection', () => {
       columns: [{ field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'a', field: 'name' } }],
     };
     expect(computeProjection(spec, {})).toEqual([]);
+  });
+});
+
+describe('presentationFromBase', () => {
+  const baseTable = (over: Partial<Table>): Table => ({
+    id: 'p1',
+    workspaceId: 'ws',
+    name: 'People',
+    code: 'people',
+    columns: [],
+    view: 'table',
+    updatedAt: 0,
+    ...over,
+  });
+  // Base field `fullname` is exposed as output field `name`.
+  const spec: ProjectionSpec = {
+    version: 1,
+    sources: [{ alias: 'p', tableName: 'People' }],
+    columns: [
+      { field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'p', field: 'fullname' } },
+    ],
+  };
+
+  it('translates sort keys to the projection output fields', () => {
+    const out = presentationFromBase(spec, baseTable({ sortBy: [{ field: 'fullname', asc: false }] }));
+    expect(out.sortBy).toEqual([{ field: 'name', asc: false }]);
+    // The single-sort mirror stays in step, as everywhere else in the app.
+    expect(out.sortColumn).toBe('name');
+    expect(out.sortAsc).toBe(false);
+  });
+
+  it('falls back to a legacy sortColumn/sortAsc pair', () => {
+    const out = presentationFromBase(spec, baseTable({ sortColumn: 'fullname', sortAsc: true }));
+    expect(out.sortBy).toEqual([{ field: 'name', asc: true }]);
+  });
+
+  it('translates filters to the projection output fields', () => {
+    const out = presentationFromBase(spec, baseTable({ filters: { fullname: 'Bo' } }));
+    expect(out.filters).toEqual({ name: 'Bo' });
+  });
+
+  it('drops sort/filter keys whose column was not selected', () => {
+    const out = presentationFromBase(
+      spec,
+      baseTable({ sortBy: [{ field: 'deptId', asc: true }], filters: { deptId: 'd1' } }),
+    );
+    expect(out.sortBy).toBeUndefined();
+    expect(out.filters).toBeUndefined();
+  });
+
+  it('carries nothing over from an unsorted, unfiltered table', () => {
+    expect(presentationFromBase(spec, baseTable({}))).toEqual({});
   });
 });
 

@@ -15,6 +15,7 @@ import type {
   ProjectionSpec,
 } from '@easydb/shared';
 import { guessJoinKeys } from '../plugins/projection-compute.js';
+import { isInternalField } from '../util/internal-fields.js';
 
 /** A table the projection can draw from. */
 export interface ProjectionCandidate {
@@ -55,6 +56,11 @@ export interface EdColumn {
   /** Computed columns: the `function render(row)` body. */
   script?: string;
   computed: boolean;
+  /**
+   * Present in the projection but not shown in the grid — copied from the source
+   * column, so a column the user hid on the base table stays hidden here.
+   */
+  hidden?: boolean;
   /**
    * The EXISTING output field name, when this column came from a saved spec.
    * Reused verbatim on save so renaming a label never renames the field —
@@ -131,26 +137,13 @@ export function specToEditor(
     return src;
   });
 
-  const columns: EdColumn[] = spec.columns.map((c) =>
-    c.from.kind === 'source'
-      ? {
-          include: true,
-          label: c.label,
-          type: c.type,
-          alias: c.from.alias,
-          field: c.from.field,
-          computed: false,
-          outField: c.field,
-        }
-      : {
-          include: true,
-          label: c.label,
-          type: c.type,
-          script: c.from.script,
-          computed: true,
-          outField: c.field,
-        },
-  );
+  const columns: EdColumn[] = spec.columns.map((c) => {
+    const base = { include: true, label: c.label, type: c.type, outField: c.field };
+    const withHidden = c.hidden ? { ...base, hidden: true } : base;
+    return c.from.kind === 'source'
+      ? { ...withHidden, alias: c.from.alias, field: c.from.field, computed: false }
+      : { ...withHidden, script: c.from.script, computed: true };
+  });
 
   return { name, sources, columns, original: spec };
 }
@@ -190,14 +183,21 @@ export function addSourceToModel(model: EditorModel, cand: ProjectionCandidate):
     sources: [...model.sources, src],
     columns: [
       ...model.columns,
-      ...cand.columns.map((col) => ({
-        include: true,
-        label: col.label,
-        type: col.type,
-        alias,
-        field: col.field,
-        computed: false,
-      })),
+      ...cand.columns.map((col) => {
+        const ed: EdColumn = {
+          include: true,
+          label: col.label,
+          type: col.type,
+          alias,
+          field: col.field,
+          computed: false,
+        };
+        // Carry the source table's own presentation over: a column the user hid
+        // there stays hidden here. Storage plumbing (`rowid`) defaults to hidden
+        // even on a table that still shows it.
+        if (col.hidden || isInternalField(col.field)) ed.hidden = true;
+        return ed;
+      }),
     ],
   };
 }
@@ -285,8 +285,15 @@ export function editorToSpec(model: EditorModel): BuildResult {
       field = uniqueField(c.label, used);
     }
     const label = c.label.trim() || field;
+    const hidden = c.hidden ? { hidden: true } : {};
     if (c.computed) {
-      outColumns.push({ field, label, type: c.type, from: { kind: 'script', script: c.script ?? '' } });
+      outColumns.push({
+        field,
+        label,
+        type: c.type,
+        ...hidden,
+        from: { kind: 'script', script: c.script ?? '' },
+      });
       continue;
     }
     const alias = c.alias;
@@ -297,7 +304,13 @@ export function editorToSpec(model: EditorModel): BuildResult {
         error: `Column "${c.label}" belongs to a table that is no longer part of this projection.`,
       };
     }
-    outColumns.push({ field, label, type: c.type, from: { kind: 'source', alias, field: srcField } });
+    outColumns.push({
+      field,
+      label,
+      type: c.type,
+      ...hidden,
+      from: { kind: 'source', alias, field: srcField },
+    });
   }
 
   const sources: ProjectionSource[] = model.sources.map((s) => {
