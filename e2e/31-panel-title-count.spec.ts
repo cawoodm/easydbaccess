@@ -22,7 +22,7 @@ test.describe('panel title row counts', () => {
 
     // Global search (header box) narrows to the two "gadget" rows → "(2/3)".
     const header = page.locator('app-shell header');
-    await header.locator('button.icon-btn').click();
+    await header.getByRole('button', { name: 'Search' }).click();
     const input = header.locator('input.search');
     await input.fill('gadget');
     await expect(title).toHaveText('Widgets (2/3)');
@@ -79,5 +79,58 @@ test.describe('panel title row counts', () => {
     await search.getByRole('button').click();
     await search.locator('input').fill('Alpha');
     await expect(viewTitle).toHaveText('RSS Feed — Feed (1/2)');
+  });
+
+  test('a view title counts against the view, not the source table', async ({
+    page,
+    workspaceId,
+  }) => {
+    // Six rows in the table; the view keeps only the three "keep" ones through
+    // its own stored filter. Its title must talk about those three.
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'tag' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      { title: 'Alpha', tag: 'keep' },
+      { title: 'Beta', tag: 'keep' },
+      { title: 'Gamma', tag: 'keep' },
+      { title: 'Delta', tag: 'drop' },
+      { title: 'Epsilon', tag: 'drop' },
+      { title: 'Zeta', tag: 'drop' },
+    ]);
+
+    await page.evaluate(
+      async ({ tableId, ws }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__easydb.store;
+        const templates = await store.viewTemplates.find({ workspaceId: ws });
+        const rss = templates.find((t: { name: string }) => t.name === 'RSS Feed');
+        await store.viewInstances.insert({
+          id: crypto.randomUUID(),
+          workspaceId: ws,
+          tableId,
+          templateId: rss.id,
+          name: 'Kept',
+          filters: { tag: 'keep' },
+          mapping: { TITLE: 'title' },
+          visibleColumns: ['title', 'tag'],
+          open: true,
+          updatedAt: Date.now(),
+        });
+      },
+      { tableId: id, ws: workspaceId },
+    );
+
+    const viewPanel = page.locator('[id^="view-panel-"]');
+    await expect(viewPanel).toBeVisible();
+    const viewTitle = viewPanel.locator('.jsPanel-title');
+    // Three of three IN THE VIEW — not "3/6", which is what the source table's
+    // row count used to produce.
+    await expect(viewTitle).toHaveText('Kept (3)');
+
+    // Searching inside the view narrows the numerator only.
+    const search = viewPanel.locator('.jsPanel-controlbar panel-search');
+    await search.getByRole('button').click();
+    await search.locator('input').fill('Alpha');
+    await expect(viewTitle).toHaveText('Kept (1/3)');
   });
 });

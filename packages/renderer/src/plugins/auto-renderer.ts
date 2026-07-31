@@ -103,6 +103,51 @@ export function init(api: HostApi): void {
   api.events.on('import:after', ({ tableId }) => {
     void applyToTable(api, tableId);
   });
+
+  // The same guessing, on demand: an import that predates this plugin (or a
+  // table typed by hand) has no renderers, and re-importing just to get them
+  // would be silly. The result lands in the editor, not the store, so the user
+  // reviews it and saves — see ColumnEditorActionSpec.
+  api.ui.registerColumnEditorAction({
+    id: 'auto-renderer:guess',
+    label: 'Guess renderers',
+    icon: 'auto_fix_high',
+    tooltip: 'Pick a renderer for each column from what its values look like',
+    async run(hostApi, { columns, tableId }) {
+      // No table yet (a brand-new one being defined) means no values to learn
+      // from, so there is nothing this can honestly do.
+      if (!tableId) {
+        hostApi.ui.dialogs.toast('Guessing needs rows to look at — import or add data first.', {
+          kind: 'info',
+          title: meta.name,
+        });
+        return null;
+      }
+      const rows = (await hostApi.store.rows(tableId).find()).slice(0, SAMPLE_ROWS);
+      if (rows.length === 0) {
+        hostApi.ui.dialogs.toast('This table has no rows to learn from yet.', {
+          kind: 'info',
+          title: meta.name,
+        });
+        return null;
+      }
+      // Ignore the columns' current renderers, unlike the import hook: pressing
+      // the button IS the request to redo them.
+      const bare = columns.map(({ renderer: _drop, ...rest }) => rest as ColumnSpec);
+      const next = withInferredRenderers(
+        bare,
+        rows.map((r) => r.data),
+      );
+      const changed = next.filter((c, i) => c.renderer !== columns[i]?.renderer).length;
+      hostApi.ui.dialogs.toast(
+        changed === 0
+          ? 'No renderer fits these values — columns left as they are.'
+          : `Set ${changed} renderer${changed === 1 ? '' : 's'}. Press Save to keep them.`,
+        { kind: changed === 0 ? 'info' : 'success', title: meta.name },
+      );
+      return next;
+    },
+  });
 }
 
 /**

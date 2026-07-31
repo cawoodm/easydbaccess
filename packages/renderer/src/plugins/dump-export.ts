@@ -182,6 +182,7 @@ export async function serializeWorkspace(api: HostApi): Promise<string> {
       ...(t.labelColumn ? { labelColumn: t.labelColumn } : {}),
       ...(t.info ? { info: t.info } : {}),
       ...(t.deletedColumns ? { deletedColumns: t.deletedColumns } : {}),
+      ...(t.readonly ? { readonly: true } : {}),
       // Carry the backing info so the dump reconstructs a live/refreshable
       // table on another device: `source` = live remote (rows re-pulled from
       // the provider), `origin` = snapshot with a URL it can be refreshed from.

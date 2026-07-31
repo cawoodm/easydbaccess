@@ -98,6 +98,78 @@ function matchesQuery(row: Row, query: Partial<Row>): boolean {
  * top-level array of objects, or an object whose first array-valued property
  * (preferring `rows` / `records` / `data`) holds the objects.
  */
+/**
+ * Ceiling on how many rows one reference will page in. A reference re-fetches on
+ * every load and holds its rows in memory, so an unbounded walk of a huge table
+ * would hang the tab. 50k is well past the 1000-row page cap that made this
+ * necessary, and past anything the grid is comfortable with anyway.
+ */
+const MAX_REFERENCE_ROWS = 50_000;
+
+/**
+ * A Datasette JSON envelope: `{ ok, rows, next, truncated }`. Recognising it is
+ * what licenses the `_next=<token>` rebuild below — that convention is
+ * Datasette's, and guessing it for any API that happens to have a `next` field
+ * would fetch nonsense.
+ */
+function isDatasetteEnvelope(body: Record<string, unknown>): boolean {
+  return body.ok === true && Array.isArray(body.rows);
+}
+
+/**
+ * The next page's URL from a paged JSON body, or null when there is no more.
+ *
+ * Two shapes, because Datasette sends either:
+ *   - `next_url` — a ready-made URL (some versions/configurations), or
+ *   - `next` — a bare CURSOR TOKEN and nothing else. datasette.io does this, so
+ *     ignoring tokens would have left a reference stuck on page one, which is
+ *     the whole bug being fixed.
+ *
+ * A token is turned into `<path>?_next=<token>` and NOTHING else. Dropping
+ * `_size` is deliberate, and copied from `datasette-client.fetchRows`:
+ * datasette.io sits behind a WAF that challenges any `.json` request carrying
+ * two or more `_`-prefixed params. Later pages then use Datasette's default page
+ * size, which is fine — the walk accumulates rows either way.
+ *
+ * `base` resolves a relative cursor and pins the origin: a body pointing at
+ * another host is not paging, and following it would turn one reference into a
+ * fetch of somewhere else entirely.
+ */
+function nextPageUrl(parsed: unknown, base: string): string | null {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const body = parsed as Record<string, unknown>;
+
+  let origin: URL;
+  try {
+    origin = new URL(base);
+  } catch {
+    return null;
+  }
+
+  for (const key of ['next_url', 'nextUrl', 'next']) {
+    const raw = body[key];
+    if (typeof raw !== 'string') continue;
+    const candidate = raw.trim();
+    if (candidate === '') continue;
+    // Looks like a URL (absolute, absolute path, or query string)?
+    if (/^(https?:\/\/|[/?])/i.test(candidate)) {
+      try {
+        const resolved = new URL(candidate, base);
+        if (resolved.origin !== origin.origin) continue;
+        return resolved.toString();
+      } catch {
+        continue;
+      }
+    }
+    // Otherwise it can only be a cursor token, and only Datasette tells us how
+    // to spend one.
+    if (key === 'next' && isDatasetteEnvelope(body)) {
+      return `${origin.origin}${origin.pathname}?_next=${encodeURIComponent(candidate)}`;
+    }
+  }
+  return null;
+}
+
 function jsonToRecords(parsed: unknown): Array<Record<string, unknown>> {
   const isObj = (v: unknown): v is Record<string, unknown> =>
     typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -155,9 +227,11 @@ export function createUrlCollection(table: Table, ctx: RowSourceCtx): DataCollec
     }
   }
 
-  async function fetchAndParse(): Promise<Array<Record<string, unknown>>> {
-    if (!url) throw new Error('This reference table has no URL configured.');
-    const cors = toCorsFriendlyUrl(url);
+  /** One page: fetch, follow a GitHub LFS pointer if that is what came back, parse. */
+  async function fetchPage(
+    target: string,
+  ): Promise<{ records: Array<Record<string, unknown>>; nextUrl: string | null }> {
+    const cors = toCorsFriendlyUrl(target);
     let text = await readText(cors);
     // GitHub's raw host answers 200 with an LFS pointer stub for LFS-tracked
     // files; the real bytes live on the media host.
@@ -167,14 +241,36 @@ export function createUrlCollection(table: Table, ctx: RowSourceCtx): DataCollec
     }
     try {
       if (format === 'json') {
-        return jsonToRecords(JSON.parse(text));
+        const parsed: unknown = JSON.parse(text);
+        return { records: jsonToRecords(parsed), nextUrl: nextPageUrl(parsed, cors) };
       }
-      return parseCsv(text).rows;
+      return { records: parseCsv(text).rows, nextUrl: null };
     } catch (err) {
       throw new Error(
         `Could not parse ${format.toUpperCase()} from ${url}: ${(err as Error)?.message ?? String(err)}`,
       );
     }
+  }
+
+  async function fetchAndParse(): Promise<Array<Record<string, unknown>>> {
+    if (!url) throw new Error('This reference table has no URL configured.');
+    const records: Array<Record<string, unknown>> = [];
+    let target: string | null = url;
+    const seen = new Set<string>();
+    // Follow the paging cursor. A referenced Datasette table is capped by the
+    // instance's `max_returned_rows` (1000 by default) no matter what `_size` we
+    // ask for, so a single page silently truncated every reference to 1000 rows.
+    while (target && records.length < MAX_REFERENCE_ROWS) {
+      if (seen.has(target)) break; // a cursor that points at itself must not loop
+      seen.add(target);
+      const page: { records: Array<Record<string, unknown>>; nextUrl: string | null } =
+        await fetchPage(target);
+      records.push(...page.records);
+      // A page that returns nothing ends the walk even if it still offers a
+      // cursor — otherwise a quirky endpoint could page forever.
+      target = page.records.length > 0 ? page.nextUrl : null;
+    }
+    return records.slice(0, MAX_REFERENCE_ROWS);
   }
 
   // Materialise rows, collapsing concurrent callers onto a single request —

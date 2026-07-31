@@ -17,7 +17,7 @@ test.describe('backend.fetch proxy', () => {
     await page.evaluate(async (url) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ctx = (window as any).__easydb;
-      await ctx.store.settings.upsert({ key: 'server-sync:url', value: url });
+      await ctx.store.settings.upsert({ name: 'server-sync:url', value: url });
     }, SERVER_URL);
 
     // The server's allowlist is unset → it'll happily proxy any host. We

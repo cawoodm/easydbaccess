@@ -66,6 +66,9 @@ test.describe('general', () => {
     await input.waitFor();
     await input.fill(newName);
     await dialog.getByRole('button', { name: 'OK', exact: true }).click();
+    // Second step: what the new workspace starts with (see 51-workspace-clone
+    // for what each answer copies). This test only cares that it switches.
+    await dialog.getByRole('button', { name: /Empty workspace/ }).click();
 
     // Selector switches by location.assign — wait for the navigation and
     // re-establish the __easydb hook (the URL keeps ?test=1 in the query).

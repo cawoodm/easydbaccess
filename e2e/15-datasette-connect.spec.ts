@@ -196,7 +196,7 @@ test.describe('datasette live connect', () => {
     expect(writes).toEqual([]); // no write request was attempted
   });
 
-  test('closing a live table window deletes it locally and it does not reappear', async ({
+  test('deleting a live table removes it locally, writes nothing remote, and it does not reappear', async ({
     page,
     workspaceId,
   }) => {
@@ -262,8 +262,11 @@ test.describe('datasette live connect', () => {
 
     await page.locator(`#${panelDomId(tableId)}`).waitFor();
 
-    // Click the panel's close (X) and confirm the dialog.
-    await page.locator(`#${panelDomId(tableId)} .jsPanel-btn-close`).click();
+    // Closing a window only HIDES a table now (v0.0.139), for a live table as
+    // much as a local one — permanent removal is the footer's trash button, and
+    // that is the path this test is about: it must drop the local record without
+    // ever writing to the remote.
+    await page.locator(`#${panelDomId(tableId)} panel-footer`).getByTitle(/Delete this table/).click();
     await page.locator('host-dialogs').getByRole('button', { name: 'Yes' }).click();
 
     // The local Table record is removed (the bug left it behind because the
@@ -279,7 +282,7 @@ test.describe('datasette live connect', () => {
 
     // The panel is gone and stays gone (no subscription-driven reappearance).
     await expect(page.locator(`#${panelDomId(tableId)}`)).toHaveCount(0);
-    // Closing must never issue a remote write (no row DELETEs on the server).
+    // Deleting must never issue a remote write (no row DELETEs on the server).
     expect(writes).toEqual([]);
   });
 

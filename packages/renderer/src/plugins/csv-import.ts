@@ -41,8 +41,29 @@ export function init(api: HostApi): void {
     if (csvs.length === 0) return false;
 
     event.preventDefault();
+    // A drop used to go straight in, which is right for a clean file and wrong
+    // for one with duplicate or unusable headers — the Import dialog has always
+    // offered "Edit columns" and a drop had no way to ask for it. One question
+    // for the whole drop, not one per file.
+    const subject = csvs.length === 1 ? `"${csvs[0]!.name}"` : `${csvs.length} files`;
+    const choice = await api.ui.dialogs.choice(
+      `Import ${subject} straight away, or review the columns first (rename, hide, fix duplicate names)?`,
+      [DROP_DIRECT, DROP_EDIT],
+      'Import CSV',
+    );
+    // Dismissed ⇒ the drop is cancelled. `true` still claims the event: the file
+    // was ours to handle, the user simply changed their mind.
+    if (!choice) return true;
+    const editColumns =
+      choice === DROP_EDIT
+        ? async (columns: ColumnSpec[]) => {
+            const { editColumnNames } = await import('../dialogs/column-names-dialog.js');
+            return editColumnNames(columns);
+          }
+        : undefined;
+
     for (const file of csvs) {
-      await importCsvFile(api, file);
+      await importCsvFile(api, file, editColumns);
     }
     return true;
   });
@@ -71,6 +92,11 @@ function sourceName(input: ImportSourceInput): string {
 function candidateName(input: ImportSourceInput): string {
   return stripDelimitedExt(sourceName(input)) || 'imported';
 }
+
+/** The two answers of the drop question. Constants because a choice dialog
+ *  reports back the label the user picked. */
+const DROP_DIRECT = 'Import directly';
+const DROP_EDIT = 'Edit columns first';
 
 const importerSpec: ImporterSpec = {
   id: 'csv',
@@ -160,10 +186,14 @@ const importerSpec: ImporterSpec = {
 
 // -- Core: turn one File into a Table + Rows ----------------------------------
 
-async function importCsvFile(api: HostApi, file: File): Promise<void> {
+async function importCsvFile(
+  api: HostApi,
+  file: File,
+  editColumns?: CsvImportOpts['editColumns'],
+): Promise<void> {
   // Keep the extension on the name we pass down: importCsvText strips it and
   // reads it to pin the separator for a .tsv file.
-  await importCsvText(api, await file.text(), file.name);
+  await importCsvText(api, await file.text(), file.name, editColumns ? { editColumns } : undefined);
 }
 
 /**

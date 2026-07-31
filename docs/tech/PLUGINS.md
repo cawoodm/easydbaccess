@@ -262,7 +262,8 @@ Two plugins, because they are two different things against any online
 locally, synced, and editable. Reachable via `registerUrlSource`, a table-URL
 drop handler, and the Import dialog. A URL may name a single table, a whole
 database, or an entire instance root; the latter two open a table checklist.
-It pages through the API in fixed-size chunks (capped at 10,000 rows), and if
+It pages through the API in fixed-size chunks (cap and page size come from the
+Settings → Datasette tab; default cap 10,000 rows, 0 = unlimited), and if
 paging is interrupted (e.g. rate-limited) the table records a resume cursor
 (`table.importResume`) surfaced as a red "Resume import" button rather than
 silently truncating. Its Refresh re-fetches and merges by primary key, keeping
@@ -393,7 +394,7 @@ including it, so a pull can restore views and plugin config too, without
 ever round-tripping a credential through the gist itself. Each table's own
 file is likewise more than rows: `tableToFile()` also carries `title`,
 `view`, `windowGeometry`, `sortColumn`/`sortAsc`, `filters`, `labelColumn`,
-`deletedColumns`, and `info`, so a pull restores a table's window
+`deletedColumns`, `readonly`, and `info`, so a pull restores a table's window
 position/size, sort, and filters exactly as pushed, not just its data
 (row values are projected onto the table's *current* columns, so a
 long-deleted column's leftover data never inflates the push size or gets

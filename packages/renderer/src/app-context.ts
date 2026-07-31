@@ -25,7 +25,11 @@ export function getContext(): Promise<AppContext> {
 
 async function init(): Promise<AppContext> {
   const db = await getDb();
-  const baseStore = createDataStore(db);
+  // Settings are workspace-scoped, but the active workspace is resolved further
+  // down using this very store — so the store reads the id through this holder,
+  // which is filled before any settings access happens.
+  let activeWorkspaceId = '';
+  const baseStore = createDataStore(db, () => activeWorkspaceId);
   const events = createEventBus();
   const registries = createRegistries();
 
@@ -123,6 +127,10 @@ async function init(): Promise<AppContext> {
     }
   }
 
+  // Point the settings view at the resolved workspace before anything reads a
+  // setting (the plugin host below does, immediately).
+  activeWorkspaceId = workspaceId;
+
   // Remember the active workspace so a fresh tab / reload without ?space= comes
   // back to it (see resolution step 2 above).
   persistLastWorkspace(workspaceId);
@@ -199,6 +207,12 @@ async function init(): Promise<AppContext> {
     if (SAFE_MODE !== 'off') api.ui.openPluginManager();
   });
 
+  // User scripting: the very HostApi that plugins receive, on `window.api`, so
+  // anything a plugin can do can also be typed into the browser console —
+  // `api.store.tables.find()`, `api.ui.dialogs.toast('hi')`. Not gated by
+  // `?test=1` (that gate is for `window.__easydb`, the whole AppContext).
+  (globalThis as unknown as Record<string, unknown>).api = api;
+
   return { store, events, workspaceId, registries, api };
 }
 
@@ -228,7 +242,9 @@ function persistLastWorkspace(id: string): void {
   }
 }
 
-function slugifyWorkspace(s: string): string {
+/** Workspace name → id. Only `a-z0-9_-` survive, so an id never contains the
+ *  `::` that separates a setting's workspace from its name (see `settingId`). */
+export function slugifyWorkspace(s: string): string {
   return (
     s
       .toLowerCase()

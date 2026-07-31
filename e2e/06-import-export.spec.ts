@@ -38,6 +38,19 @@ async function dropFile(page: import('@playwright/test').Page, filename: string,
 }
 
 /**
+ * A dropped CSV first asks whether to import straight away or review the columns
+ * (v0.0.225). Every CSV drop has to answer it before the flow continues.
+ */
+async function answerCsvDropPrompt(
+  page: import('@playwright/test').Page,
+  pick: 'Import directly' | 'Edit columns first' = 'Import directly',
+) {
+  const dialogs = page.locator('host-dialogs');
+  await expect(dialogs.getByText(/straight away/)).toBeVisible();
+  await dialogs.locator('button.choice', { hasText: pick }).click();
+}
+
+/**
  * Multi-table imports now open the table-select picker first (all rows
  * pre-selected). Accept it so the flow proceeds to the import-mode choice.
  */
@@ -97,6 +110,7 @@ test.describe('import / export', () => {
       'Person Name,Years\nAlice,30\nBob,25',
       'text/csv',
     );
+    await answerCsvDropPrompt(page);
     const dialog = page.locator('host-dialogs');
     await expect(dialog.getByRole('button', { name: 'Append rows' })).toBeVisible();
     await dialog.getByRole('button', { name: 'Append rows' }).click();
@@ -139,6 +153,7 @@ test.describe('import / export', () => {
       'WhateverHeader,SomethingElse\nCarol,40\nDan,50',
       'text/csv',
     );
+    await answerCsvDropPrompt(page);
     const dialog = page.locator('host-dialogs');
     await dialog.getByRole('button', { name: 'Overwrite rows' }).click();
     await dropPromise;
@@ -188,6 +203,7 @@ test.describe('import / export', () => {
     await addRow(page, '', {}); // no-op; just ensures __easydb is ready
 
     const dropPromise = dropFile(page, 'people.csv', 'name\nCarol\nDan', 'text/csv');
+    await answerCsvDropPrompt(page);
 
     const dialog = page.locator('host-dialogs');
     await expect(dialog.getByText(/already exists/i)).toBeVisible();
@@ -435,5 +451,54 @@ test.describe('import / export', () => {
       alphaRows.map((r: { data: { name: unknown } }) => r.data.name).sort(),
     ).toEqual(['apple', 'pear']);
     expect(bravoRows[0]?.data.tag).toBe('green');
+  });
+
+  test('a dropped CSV can be reviewed first: "Edit columns" opens the editor', async ({ page }) => {
+    // Duplicate headers are exactly why a drop needs the review step: without it
+    // the second "name" lands as `name_2` and there is no chance to say otherwise.
+    const dropPromise = dropFile(
+      page,
+      'dupes.csv',
+      'name,name\nAlice,Smith\nBob,Jones',
+      'text/csv',
+    );
+    await answerCsvDropPrompt(page, 'Edit columns first');
+
+    const editor = page.locator('column-names-dialog dialog');
+    await expect(editor).toBeVisible();
+    await expect(editor.getByLabel('Column 1 name')).toHaveValue('name');
+    await expect(editor.getByLabel('Column 2 name')).toHaveValue('name_2');
+    await editor.getByLabel('Column 2 name').fill('surname');
+    await editor.getByRole('button', { name: 'Import', exact: true }).click();
+    await dropPromise;
+
+    // The table takes the reviewed names, and the values follow the rename.
+    const tables = await page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => (window as any).__easydb.store.tables.find(),
+    );
+    const t = (tables as Array<{ name: string; id: string; columns: Array<{ field: string }> }>).find(
+      (x) => x.name === 'dupes',
+    )!;
+    expect(t.columns.map((c) => c.field)).toEqual(['name', 'surname']);
+    const rows = await readRows(page, t.id);
+    expect(rows.map((r: { data: Record<string, unknown> }) => r.data.surname).sort()).toEqual([
+      'Jones',
+      'Smith',
+    ]);
+  });
+
+  test('dismissing the drop question imports nothing', async ({ page }) => {
+    const dropPromise = dropFile(page, 'ignored.csv', 'a\n1', 'text/csv');
+    const dialogs = page.locator('host-dialogs');
+    await expect(dialogs.getByText(/straight away/)).toBeVisible();
+    await dialogs.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await dropPromise;
+
+    const names = await page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async () => (await (window as any).__easydb.store.tables.find()).map((t: { name: string }) => t.name),
+    );
+    expect(names).not.toContain('ignored');
   });
 });

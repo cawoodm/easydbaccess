@@ -467,6 +467,16 @@ export interface SettingsFieldSpec {
   options?: string[];
   /** Shown as field help below the control. */
   description?: string;
+  /**
+   * Longer explanation, behind an (i) icon next to the label — for what a
+   * `description` line cannot carry, e.g. which scopes a token needs. Shown only
+   * when the user asks for it, so a field with a long story stays compact.
+   */
+  help?: string;
+  /** Page that lets the user act on the help, linked from the (i) panel. */
+  helpUrl?: string;
+  /** Link text for `helpUrl`. Defaults to the URL's host. */
+  helpLinkLabel?: string;
   scope?: SettingScope;
 }
 
@@ -511,10 +521,35 @@ export interface CommandSpec {
   run(api: HostApi): void | Promise<void>;
 }
 
+/**
+ * A button the column editor offers above its column list, for an action that
+ * rewrites the columns being edited — "give every column a renderer that suits
+ * its values", say.
+ *
+ * `run` receives the columns AS CURRENTLY EDITED (not the saved ones) and returns
+ * the new list, or null to change nothing. Nothing is written to the store: the
+ * result lands in the editor, so the user still reviews it and presses Save. That
+ * is what keeps an action from being a surprise the user cannot undo.
+ */
+export interface ColumnEditorActionSpec {
+  id: string;
+  label: string;
+  /** Material Icons ligature name, or inline `<svg>` markup. */
+  icon?: string;
+  tooltip?: string;
+  /** The table being edited; absent while a brand-new table is defined. */
+  run(
+    api: HostApi,
+    ctx: { columns: ColumnSpec[]; tableId?: string | undefined },
+  ): Promise<ColumnSpec[] | null> | ColumnSpec[] | null;
+}
+
 export interface UiRegistry {
   registerHeaderButton(spec: ButtonSpec): Unregister;
   registerFooterButton(spec: ButtonSpec): Unregister;
   registerTableButton(spec: TableButtonSpec): Unregister;
+  /** Add a button to the column editor that rewrites the columns being edited. */
+  registerColumnEditorAction(spec: ColumnEditorActionSpec): Unregister;
   /**
    * Register a cell renderer under a name. Columns opt in to it by setting
    * `column.renderer` to this name (independent of the column's data type).
@@ -527,6 +562,13 @@ export interface UiRegistry {
    * `data` object) for renderers that need neighbouring fields — for
    * example the built-in `script` renderer. Renderers that only care
    * about a single value can ignore it.
+   *
+   * On a scripted column the element also receives `rawValue`: the cell's
+   * STORED value, while `value` carries what the script computed. A renderer
+   * with an editor should display `value` and edit `rawValue` — the script
+   * result is derived, so an edit has to go back to the stored cell. A
+   * renderer that ignores `rawValue` keeps editing `value`, which on a scripted
+   * column means its edits are dropped.
    */
   registerCellRenderer(name: string, tag: string): Unregister;
   registerRowRenderer(viewName: string, tag: string): Unregister;

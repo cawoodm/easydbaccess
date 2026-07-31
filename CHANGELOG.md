@@ -1,9 +1,31 @@
 # CHANGELOG
 
+## 31 Jul 2026
+
+### Features
+
+- ✨ Floating windows run on an in-repo panel shell instead of jsPanel4: restored windows keep maximized state, drags track any zoom (v0.0.235)
+
 ## 30 Jul 2026
 
 ### Features
 
+- ✨ The columns editor and the Settings dialog hold on to unsaved edits: the browser asks before it reloads or leaves the page (v0.0.234)
+- ✨ The command palette keeps the last five commands in a "Recent" section at the top, so Ctrl+K Enter runs the last one again (v0.0.230)
+- ✨ A table can be set read-only in the column editor, and a referenced table is read-only from the moment it is created (v0.0.227)
+- ✨ A `$filter.TOKEN` in a view template shows the value as a pill: click it to narrow the view to that value, and drop it from the chip in the view header (v0.0.226)
+- ✨ A column filter takes `=text` for an exact match, and `!=text` to exclude one (v0.0.226)
+- ✨ A dropped CSV asks first: import directly, or review the columns (v0.0.225)
+- ✨ Any view template can be deleted, built-ins included — the confirm says a deleted built-in is not seeded again (v0.0.224)
+- ✨ Gallery cards are clickable: `$LINK` opens the row's URL in a new tab (v0.0.223)
+- ✨ A settings field can carry help behind an (i) icon; the GitHub token links to the page that creates one (v0.0.222)
+- ✨ The column editor has a "Guess renderers" button: it picks a renderer per column from the values, then you press Save (v0.0.220)
+- ✨ A cell shows its full value as a tooltip, so a column narrower than its content is still readable (v0.0.219)
+- 🪶 Sort by several columns: shift-click a header to add a sort level behind the ones already active (v0.0.218)
+- ✨ The column editor can turn off sorting or filtering per column; an unfilterable column is skipped by search too (v0.0.216)
+- ✨ An empty cell is pink and a value that does not fit its column type gets a red outline, under every renderer (v0.0.211)
+- 🪶 Settings belong to a workspace now, and a new workspace asks what to take over: everything, settings only, or nothing (v0.0.207)
+- ✨ Datasette limits are now settings: max import rows (0 = unlimited), page size, connected-table cap, rate-limit wait (v0.0.208)
 - ✨ After a gist pull you are offered the local tables and views the gist does not have, to delete or keep (v0.0.205)
 - ✨ A boolean column's filter dropdown always lists true and false, even when no row carries one of them (v0.0.203)
 - ✨ A Help (?) button in the header opens the user guide in a new tab (v0.0.202)
@@ -17,6 +39,16 @@
 
 ### Bugs
 
+- 🪲 A command picked from the palette started a moment late, after the palette had saved its history (v0.0.233)
+- 🪲 The pencil on a script-generated link opened the computed URL and then dropped the edit (v0.0.232)
+- 🪲 A scripted column was blank in a view, and a view could not filter or sort on one (v0.0.231)
+- 🪲 Importing a workspace, or pulling one from a Gist, added a second copy of every view template the workspace already had (v0.0.229)
+- 🪲 A view window's title counted against the source table, so a view showing a slice of it never read as complete (v0.0.228)
+- 🪲 Referencing a Datasette database took every table without asking, and each reference stopped at its first 1000 rows (v0.0.227)
+- 🪲 Re-importing a table exported as JSON lost all but one row, and its refresh URL (v0.0.221)
+- 🪲 Renaming a field in the column editor lost its data (v0.0.218)
+- 🪲 Two view templates can no longer share a name; `window.api` now exposes the plugin API for console scripting (v0.0.210)
+- 🪲 A tiled or cascaded layout survives a reload — the arrangement is stored, not only drawn (v0.0.209)
 - 🪲 A click outside the command palette closes it, like Esc already did (v0.0.206)
 - 🪲 Settings will not close while a field points at a `${secret:name}` the store does not have (v0.0.204)
 - 🪲 A maximized window that you minimize comes back maximized, in this session and after a reload (v0.0.201)

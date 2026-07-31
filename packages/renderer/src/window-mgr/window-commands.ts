@@ -10,10 +10,12 @@
  * Cascade/tile position panels within the *currently visible* region of the
  * pan/zoom canvas: geometry is written in viewport-local coordinates derived
  * from the live pan/zoom transform, so the arranged windows land where the
- * user is actually looking. These set inline geometry directly (a transient
- * view action) and intentionally don't persist to the store.
+ * user is actually looking. They write inline geometry, which no jsPanel
+ * callback reports, and then ask both window managers to persist the result —
+ * an arranged layout used to be lost on the next reload.
  */
-import { currentPanZoom } from './jspanel-manager.js';
+import { currentPanZoom, persistTablePanelGeometry } from './jspanel-manager.js';
+import { persistViewWindowGeometry } from './view-window-manager.js';
 import { getPanels, type PanelShellEl } from './panel-shell/panel-shell.js';
 import { eligibleForArrange, tileSlots } from './tile-layout.js';
 
@@ -71,6 +73,18 @@ export function cascadeAllWindows(): void {
     p.normalize?.(); // un-maximizes so the panel can take its cascade slot.
     setGeom(p, r.x + 24 + i * step, r.y + 24 + i * step, w, h);
   });
+  persistArrangement();
+}
+
+/**
+ * Write the arranged rects to the store. Both managers are asked: a bulk command
+ * spans table panels and view windows, and each manager persists only its own.
+ * Fire-and-forget — the layout is already on screen, and the geometry writes
+ * serialize per window (see `geometry-writes.ts`).
+ */
+function persistArrangement(): void {
+  void persistTablePanelGeometry();
+  void persistViewWindowGeometry();
 }
 
 export function tileAllWindows(): void {
@@ -88,4 +102,5 @@ export function tileAllWindows(): void {
     if (!slot) return; // unreachable — slots has exactly panels.length entries.
     setGeom(p, slot.x, slot.y, slot.w, slot.h);
   });
+  persistArrangement();
 }

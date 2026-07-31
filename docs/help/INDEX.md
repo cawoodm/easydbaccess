@@ -18,6 +18,7 @@ built, see the [developer docs](../tech/INDEX.md) instead.
 - [Views](views.md) — read-only, styled layouts of your data
 - [Sharing & Sync](sharing-and-sync.md) — export, your own server, GitHub
   Gist
+- [Settings](settings.md) — fields, workspace vs. device scope, secrets
 - [Settings & Plugins](settings-and-plugins.md) — configuration, secrets,
   extending the app
 

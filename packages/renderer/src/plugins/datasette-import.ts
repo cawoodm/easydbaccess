@@ -34,9 +34,12 @@ import {
   type MetadataTablePatch,
 } from './datasette-client.js';
 import {
+  type DatasetteSettings,
+  getDatasetteSettings,
   host,
+  importRowCap,
+  registerDatasetteSettings,
   resolveChosenTables,
-  SETTINGS,
   uniqueTableName,
   withDatasetteSourceInfo,
 } from './datasette-common.js';
@@ -45,13 +48,14 @@ import { cryptoUUID, slugTable } from '../util/ids.js';
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /**
- * How long to wait before auto-resuming a rate-limited import — 60s in
- * production, matching the "resume delayed" prompt. A test seam
- * (`window.__eda_resumeDelayMs`) shortens it so e2e doesn't stall a real minute.
+ * How long to wait before auto-resuming a rate-limited import — the settings
+ * tab's `retryWaitSeconds` (60s by default), matching the "resume delayed"
+ * prompt. A test seam (`window.__eda_resumeDelayMs`) overrides it so e2e
+ * doesn't stall a real minute.
  */
-function resumeDelayMs(): number {
+function resumeDelayMs(retryWaitSeconds: number): number {
   const o = (globalThis as { __eda_resumeDelayMs?: number }).__eda_resumeDelayMs;
-  return typeof o === 'number' && o >= 0 ? o : 60_000;
+  return typeof o === 'number' && o >= 0 ? o : retryWaitSeconds * 1000;
 }
 
 /**
@@ -84,6 +88,8 @@ export const meta: NonNullable<PluginModule['meta']> = {
 const EXAMPLE = 'https://latest.datasette.io/fixtures/facetable';
 
 export function init(api: HostApi): void {
+  registerDatasetteSettings(api);
+
   // Refresh for imported SNAPSHOTS only. A live connected table has its own
   // Refresh in `datasette-connect`, which re-reads a cache rather than
   // re-fetching and merging — different operations, so different buttons. The
@@ -177,7 +183,8 @@ export interface DatasetteImportOpts {
   skipTablePicker?: boolean | undefined;
   /**
    * The dialog's "Limit rows" value, applied PER TABLE. Always further capped
-   * by `SETTINGS.maxImportRows`. Undefined ⇒ that setting alone applies.
+   * by the "Datasette" settings tab's `maxImportRows` (0 there = unlimited, so
+   * the dialog's value then wins as-is). Undefined ⇒ that setting alone applies.
    */
   maxRows?: number | undefined;
   /**
@@ -206,6 +213,7 @@ export async function importDatasette(
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('datasette-source: no active workspace');
 
+  const settings = await getDatasetteSettings(api);
   const ref = parseDatasetteUrl(input);
   const fetchFn = (u: string) => api.backend.fetch(u);
 
@@ -255,7 +263,15 @@ export async function importDatasette(
   const failed: string[] = [];
   for (const p of plans) {
     try {
-      const r = await fillImportTable(api, p.tableId, p.ref, p.overwrite, p.knownCount, opts);
+      const r = await fillImportTable(
+        api,
+        p.tableId,
+        p.ref,
+        p.overwrite,
+        p.knownCount,
+        opts,
+        settings,
+      );
       imported += 1;
       totalRows += r.rowCount;
       // A partial import (paging stopped on a failure, e.g. rate limiting) still
@@ -267,11 +283,17 @@ export async function importDatasette(
     }
   }
 
+  // The dialog's "Limit rows" narrows the batch's cap the same way it does per
+  // table in fillImportTable — mirrored here only for the "capped at N" wording.
+  const settingCap = importRowCap(settings.maxImportRows);
+  const effectiveCap = opts.maxRows != null ? Math.min(opts.maxRows, settingCap) : settingCap;
+
   summariseBatch(api, {
     imported,
     skipped,
     totalRows,
     capped,
+    cap: effectiveCap,
     partial,
     failed,
     requested: chosen.length,
@@ -339,15 +361,17 @@ async function fillImportTable(
   tableId: string,
   ref: DatasetteRef,
   overwrite: boolean,
-  knownCount: number | null = null,
-  opts: DatasetteImportOpts = {},
+  knownCount: number | null,
+  opts: DatasetteImportOpts,
+  settings: DatasetteSettings,
 ): Promise<OneResult> {
   const name = `${ref.db}/${ref.table}`;
   const fetchFn = (u: string) => api.backend.fetch(u);
-  // The dialog's "Limit rows" narrows the import; the plugin's own setting is
-  // the hard ceiling, so the smaller of the two wins.
-  const rowCap =
-    opts.maxRows != null ? Math.min(opts.maxRows, SETTINGS.maxImportRows) : SETTINGS.maxImportRows;
+  // The dialog's "Limit rows" narrows the import; the setting is the hard
+  // ceiling, so the smaller of the two wins. An unlimited setting (0) never
+  // narrows — the dialog's own value then wins as-is.
+  const settingCap = importRowCap(settings.maxImportRows);
+  const rowCap = opts.maxRows != null ? Math.min(opts.maxRows, settingCap) : settingCap;
   setTableLoading(tableId, true);
   try {
     // Schema discovery via ?_extra=… is best-effort: older instances give no
@@ -355,12 +379,16 @@ async function fillImportTable(
     // row fetch surfaces any real problem.
     let metaColumns: ColumnSpec[] = [];
     let count: number | null = knownCount;
+    let countTruncated = false;
     let typed = false;
     let pks: string[] = [];
     try {
       const meta = await fetchTableMeta(fetchFn, ref);
       metaColumns = meta.columns;
-      count = count ?? meta.count;
+      if (count == null) {
+        count = meta.count;
+        countTruncated = meta.countTruncated;
+      }
       typed = meta.typed;
       pks = meta.pks ?? [];
     } catch {
@@ -369,13 +397,21 @@ async function fillImportTable(
     // Datasette.io's schema responses omit `count`, so a single-table import had
     // no denominator and only ever showed the indeterminate bar. Fetch the count
     // directly (cheap `?_extra=count`, WAF-safe) so the bar is proportional.
-    // Best-effort: fetchTableCount returns null (never throws) on failure.
-    if (count == null) count = await fetchTableCount(fetchFn, ref);
+    // Best-effort: fetchTableCount never throws — count stays null on failure.
+    if (count == null) {
+      const c = await fetchTableCount(fetchFn, ref);
+      count = c.count;
+      countTruncated = c.truncated;
+    }
 
     // The row count gives a denominator for a proportional progress bar; without
     // it the bar stays indeterminate. Cap the denominator at the import limit so
-    // the fraction reflects what we'll actually pull.
-    const target = count && count > 0 ? Math.min(count, rowCap) : 0;
+    // the fraction reflects what we'll actually pull — UNLESS the count itself
+    // is a floor (`countTruncated`) and the cap exceeds it: then we genuinely
+    // don't know when we'll finish, so a determinate bar would falsely read
+    // 100% the moment we cross that floor. Fall back to indeterminate instead.
+    const target =
+      count && count > 0 && (!countTruncated || rowCap <= count) ? Math.min(count, rowCap) : 0;
 
     // Page through with an interactive resume. If a page hop fails (commonly the
     // instance rate-limiting a large import), keep the rows fetched so far and
@@ -393,7 +429,7 @@ async function fillImportTable(
     for (;;) {
       const seg = await fetchRows(fetchFn, ref, {
         maxRows: Math.max(0, rowCap - rows.length),
-        pageSize: SETTINGS.pageSize,
+        pageSize: settings.pageSize,
         ...(startUrl ? { startUrl } : {}),
         onProgress: (n) => {
           if (target > 0) setTableLoading(tableId, true, Math.min(1, (rows.length + n) / target));
@@ -409,22 +445,26 @@ async function fillImportTable(
       // and still have room under the cap. A clean read or a cap-hit ends here.
       if (!seg.error || !seg.nextUrl || rows.length >= rowCap) break;
 
+      const waitLabel = `${settings.retryWaitSeconds}s`;
       const choice = await api.ui.dialogs.choice(
         `Import of "${name}" paused after ${rows.length.toLocaleString()} rows (${seg.error}). ` +
-          `Datasette may be rate-limiting a large import. Wait 60 seconds and resume from ` +
+          `Datasette may be rate-limiting a large import. Wait ${waitLabel} and resume from ` +
           `where it stopped, or cancel and keep the rows imported so far (you can resume ` +
           `later from the table's footer)?`,
-        ['Resume in 60s', 'Cancel'],
+        [`Resume in ${waitLabel}`, 'Cancel'],
         'Import paused — rate limited?',
       );
       // Cancel / dismiss → keep the partial; the importResume marker persisted
       // below drives the footer's manual resume button.
-      if (choice !== 'Resume in 60s') break;
+      if (choice !== `Resume in ${waitLabel}`) break;
 
       // Indeterminate bar + a heads-up toast during the wait, then resume.
       setTableLoading(tableId, true);
-      api.ui.dialogs.toast(`Resuming "${name}" in 60s…`, { kind: 'info', title: 'Import paused' });
-      await delay(resumeDelayMs());
+      api.ui.dialogs.toast(`Resuming "${name}" in ${waitLabel}…`, {
+        kind: 'info',
+        title: 'Import paused',
+      });
+      await delay(resumeDelayMs(settings.retryWaitSeconds));
       startUrl = seg.nextUrl;
       error = undefined; // re-set if the resumed segment fails again
       nextUrl = undefined;
@@ -542,6 +582,8 @@ function summariseBatch(
     skipped: number;
     totalRows: number;
     capped: string[];
+    /** The effective per-table row cap that produced `capped`, for the message below. */
+    cap: number;
     partial: string[];
     failed: string[];
     requested: number;
@@ -578,8 +620,11 @@ function summariseBatch(
     return;
   }
   if (s.capped.length > 0) {
+    // An unlimited setting (cap === MAX_SAFE_INTEGER) still hits Datasette's own
+    // truncation sometimes — show that as "capped", just without a silly number.
+    const capNote = s.cap < Number.MAX_SAFE_INTEGER ? ` at ${s.cap.toLocaleString()}` : '';
     api.ui.dialogs.toast(
-      `Imported ${tables} (${rows}).${skippedNote} ${s.capped.length} capped at ${SETTINGS.maxImportRows} — ` +
+      `Imported ${tables} (${rows}).${skippedNote} ${s.capped.length} capped${capNote} — ` +
         `more available: ${s.capped.join(', ')}.`,
       { kind: 'warning', title: 'Datasette import' },
     );
@@ -601,7 +646,8 @@ async function refreshSnapshotTable(api: HostApi, tableId: string): Promise<void
   const t = await api.store.tables.findOne(tableId);
   if (!t?.origin?.url || t.origin.type !== 'datasette') return;
   try {
-    await refreshSnapshot(api, t);
+    const settings = await getDatasetteSettings(api);
+    await refreshSnapshot(api, t, settings);
   } catch (err) {
     const msg =
       err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
@@ -618,9 +664,10 @@ async function refreshSnapshotTable(api: HostApi, tableId: string): Promise<void
  * columns appear, the column editor opens so the user can arrange them. Drives
  * the window's progress bar for the duration, exactly like the initial import.
  */
-async function refreshSnapshot(api: HostApi, t: Table): Promise<void> {
+async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettings): Promise<void> {
   const ref = parseDatasetteUrl(t.origin!.url);
   const fetchFn = (u: string) => api.backend.fetch(u);
+  const rowCap = importRowCap(settings.maxImportRows);
   setTableLoading(t.id, true);
   let outcome: {
     rowCount: number;
@@ -634,24 +681,33 @@ async function refreshSnapshot(api: HostApi, t: Table): Promise<void> {
     // authoritative column names/types when the instance supports `?_extra=`.
     let metaColumns: ColumnSpec[] = [];
     let count: number | null = null;
+    let countTruncated = false;
     let typed = false;
     try {
       const meta = await fetchTableMeta(fetchFn, ref);
       metaColumns = meta.columns;
       count = meta.count;
+      countTruncated = meta.countTruncated;
       typed = meta.typed;
     } catch {
       /* fall back to row inference */
     }
     // Datasette.io omits `count` in schema responses; fetch it directly (cheap,
     // WAF-safe) so the refresh progress bar is proportional, not indeterminate.
-    // Best-effort: fetchTableCount returns null (never throws) on failure.
-    if (count == null) count = await fetchTableCount(fetchFn, ref);
+    // Best-effort: fetchTableCount never throws — count stays null on failure.
+    if (count == null) {
+      const c = await fetchTableCount(fetchFn, ref);
+      count = c.count;
+      countTruncated = c.truncated;
+    }
 
-    const target = count && count > 0 ? Math.min(count, SETTINGS.maxImportRows) : 0;
+    // See the matching comment in fillImportTable: a truncated count is only a
+    // trustworthy denominator when the cap is at or below it.
+    const target =
+      count && count > 0 && (!countTruncated || rowCap <= count) ? Math.min(count, rowCap) : 0;
     const { rows, hasMore, truncated, error, nextUrl } = await fetchRows(fetchFn, ref, {
-      maxRows: SETTINGS.maxImportRows,
-      pageSize: SETTINGS.pageSize,
+      maxRows: rowCap,
+      pageSize: settings.pageSize,
       onProgress: (n) => {
         if (target > 0) setTableLoading(t.id, true, Math.min(1, n / target));
       },
@@ -729,7 +785,10 @@ async function refreshSnapshot(api: HostApi, t: Table): Promise<void> {
   // the rows with what loaded; note it rather than pretending it was complete.
   const parts: string[] = [];
   if (outcome.error) parts.push(`partial (${outcome.error})`);
-  else if (outcome.hasMore || outcome.truncated) parts.push(`capped at ${SETTINGS.maxImportRows}`);
+  else if (outcome.hasMore || outcome.truncated) {
+    const capNote = rowCap < Number.MAX_SAFE_INTEGER ? ` at ${rowCap.toLocaleString()}` : '';
+    parts.push(`capped${capNote}`);
+  }
   if (newFields.length > 0)
     parts.push(`${newFields.length} new column${newFields.length === 1 ? '' : 's'}`);
   const note = parts.length ? ` — ${parts.join(', ')}` : '';
@@ -756,11 +815,16 @@ async function resumeImport(api: HostApi, tableId: string): Promise<void> {
   const t = await api.store.tables.findOne(tableId);
   const resumeState = t?.importResume;
   if (!t || !t.origin?.url || !resumeState) return;
+  const settings = await getDatasetteSettings(api);
+  const rowCap = importRowCap(settings.maxImportRows);
   const ref = parseDatasetteUrl(t.origin.url);
   const fetchFn = (u: string) => api.backend.fetch(u);
   const base = resumeState.loadedRows;
+  // `ImportResume` doesn't persist whether `totalCount` was itself a truncated
+  // floor (see the countTruncated handling in fillImportTable) — a resumed
+  // import's bar can't distinguish that case and stays determinate.
   const total = resumeState.totalCount ?? null;
-  const target = total && total > 0 ? Math.min(total, SETTINGS.maxImportRows) : 0;
+  const target = total && total > 0 ? Math.min(total, rowCap) : 0;
 
   setTableLoading(tableId, true, target > 0 ? Math.min(1, base / target) : undefined);
   let added = 0;
@@ -769,8 +833,8 @@ async function resumeImport(api: HostApi, tableId: string): Promise<void> {
     const res = await fetchRows(fetchFn, ref, {
       startUrl: resumeState.nextUrl,
       // Keep the whole import within the cap: only pull up to the remaining room.
-      maxRows: Math.max(0, SETTINGS.maxImportRows - base),
-      pageSize: SETTINGS.pageSize,
+      maxRows: Math.max(0, rowCap - base),
+      pageSize: settings.pageSize,
       onProgress: (n) => {
         if (target > 0) setTableLoading(tableId, true, Math.min(1, (base + n) / target));
       },

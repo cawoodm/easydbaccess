@@ -264,7 +264,7 @@ across devices, since it only ever reads from a subset of this list.
 
 | Data | Where stored today |
 |---|---|
-| Table fields (`name`, `title`, `columns`, `view`, `windowGeometry`, `sortColumn`/`sortAsc`, `filters`, `labelColumn`, `deletedColumns`, `info`, `source`, `origin`) | IndexedDB (`easydb`) → `tables` |
+| Table fields (`name`, `title`, `columns`, `view`, `windowGeometry`, `sortColumn`/`sortAsc`, `filters`, `labelColumn`, `deletedColumns`, `readonly`, `info`, `source`, `origin`) | IndexedDB (`easydb`) → `tables` |
 | Row data (`row.data`) | IndexedDB → `rows` |
 | View templates | IndexedDB → `viewTemplates` |
 | View instances (incl. their own `windowGeometry`) | IndexedDB → `viewInstances` |

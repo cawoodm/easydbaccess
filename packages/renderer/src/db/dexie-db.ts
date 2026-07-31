@@ -25,6 +25,15 @@ import type {
 
 const DB_NAME = 'easydb';
 
+/**
+ * Physical primary key of a setting: the workspace it belongs to plus its logical
+ * name. `::` separates them — a workspace id is a slug (see `slugifyWorkspace`),
+ * so it never contains one.
+ */
+export function settingId(workspaceId: string, name: string): string {
+  return `${workspaceId}::${name}`;
+}
+
 export interface EasyDb {
   raw: Dexie;
   workspaces: DexieTable<Workspace, string>;
@@ -54,6 +63,40 @@ export function getDexie(): EasyDb {
   raw.version(2).stores({
     viewTemplates: 'id, workspaceId',
     viewInstances: 'id, workspaceId, tableId',
+  });
+  // v3 scopes settings to a workspace. Until now one global `settings` store was
+  // shared by every workspace, so a new workspace inherited the old one's server
+  // URL, tokens and view-seed flags. The primary key becomes the composite
+  // `<workspaceId>::<name>` (built by `settingId`) with `workspaceId`/`name`
+  // indexed for lookups; the store name and its `key` primary key stay, so no
+  // store has to be dropped and recreated.
+  //
+  // Migration copies every old setting into EVERY existing workspace: each
+  // workspace keeps exactly the values it saw before the upgrade, and only later
+  // edits diverge.
+  raw.version(3).stores({ settings: 'key, workspaceId, name' }).upgrade(async (tx) => {
+    const settings = tx.table('settings');
+    const old = (await settings.toArray()) as Array<{
+      key: string;
+      workspaceId?: string;
+      name?: string;
+      value: unknown;
+    }>;
+    // Already-scoped rows would be re-keyed a second time on a repeated upgrade.
+    const legacy = old.filter((s) => s.workspaceId == null);
+    if (legacy.length === 0) return;
+    const workspaceIds = ((await tx.table('workspaces').toArray()) as Array<{ id: string }>).map(
+      (w) => w.id,
+    );
+    // No workspace yet (a fresh DB that somehow holds settings): nothing to scope
+    // them to, and app-context creates `default` right after this.
+    const targets = workspaceIds.length > 0 ? workspaceIds : ['default'];
+    for (const s of legacy) {
+      for (const workspaceId of targets) {
+        await settings.put({ key: settingId(workspaceId, s.key), workspaceId, name: s.key, value: s.value });
+      }
+      await settings.delete(s.key);
+    }
   });
 
   // Multi-tab schema-upgrade safety. A schema bump (new object stores) can only

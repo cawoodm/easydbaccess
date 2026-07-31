@@ -189,7 +189,7 @@ test.describe('views', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rss = tpls.find((t: any) => t.builtin && t.name === 'RSS Feed');
         await ctx.store.viewTemplates.patch(rss.id, { rowHtml: staleRow });
-        await ctx.store.settings.upsert({ key: `views:sig:rss:${wsId}`, value: 'stale' });
+        await ctx.store.settings.upsert({ name: `views:sig:rss:${wsId}`, value: 'stale' });
       },
       { staleRow },
     );
@@ -973,6 +973,44 @@ test.describe('views: sort, field search, standard templates', () => {
     await expect(vw).toContainText('Ship it');
   });
 
+  test('the Gallery template makes each card open its row link', async ({ page }) => {
+    const id = await createTable(page, 'Shots', [
+      { field: 'title' },
+      { field: 'image' },
+      { field: 'url' },
+    ]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      { title: 'First', image: 'https://pics.test/1.png', url: 'https://pics.test/1' },
+      { title: 'Second', image: 'https://pics.test/2.png', url: 'https://pics.test/2' },
+    ]);
+    // $LINK auto-maps to the url column (it is one of the URL words), $IMAGE to
+    // image and $TITLE to title.
+    await useTemplate(page, id, 'Gallery');
+
+    const vw = page.locator('view-window');
+    await expect(vw).toBeVisible();
+    const cards = vw.locator('figure');
+    await expect(cards).toHaveCount(2);
+    // The view has no sort, so the cards come in row-id order — which is random,
+    // the ids being uuids. Assert per card that its OWN row's values line up,
+    // and that both rows are present, rather than pinning either position.
+    for (const n of [0, 1]) {
+      const a = cards.nth(n).locator('a');
+      await expect(a).toHaveAttribute('target', '_blank');
+      const href = (await a.getAttribute('href'))!;
+      expect(href).toMatch(/^https:\/\/pics\.test\/[12]$/);
+      // Each card is one anchor wrapping the image and its caption, all from the
+      // same row: card 1's link never carries card 2's picture.
+      await expect(a.locator('img')).toHaveAttribute('src', `${href}.png`);
+      await expect(a).toContainText(href.endsWith('1') ? 'First' : 'Second');
+    }
+    const hrefs = await cards.locator('a').evaluateAll((els) =>
+      els.map((el) => (el as HTMLAnchorElement).getAttribute('href')),
+    );
+    expect([...hrefs].sort()).toEqual(['https://pics.test/1', 'https://pics.test/2']);
+  });
+
   test('copying a view picks up columns added to the table after it was created', async ({
     page,
     workspaceId,
@@ -1056,7 +1094,47 @@ test.describe('views: sort, field search, standard templates', () => {
     await expect(vw).toHaveCount(0);
   });
 
-  test('a built-in template has no Delete button, its copy does', async ({ page }) => {
+  test('a built-in template can be deleted after a confirm, and stays deleted', async ({
+    page,
+  }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }]);
+    await waitForPanel(page, id);
+    const openManager = async () => {
+      await page
+        .locator(`#${panelDomId(id)} panel-footer`)
+        .getByRole('button', { name: /Views/ })
+        .click();
+      const dlg = page.locator('views-dialog dialog');
+      await expect(dlg).toBeVisible();
+      return dlg;
+    };
+    let dlg = await openManager();
+
+    const rss = dlg.locator('ul.list li', { hasText: 'RSS Feed' }).first();
+    await expect(rss.locator('.badge')).toHaveText('built-in');
+
+    // The confirm names it as built-in and says it will not be seeded again.
+    await rss.getByRole('button', { name: 'Delete' }).click();
+    const dialogs = page.locator('host-dialogs');
+    await expect(dialogs.getByText(/built-in template "RSS Feed"/)).toBeVisible();
+    await expect(dialogs.getByText(/not be seeded again/)).toBeVisible();
+    await dialogs.getByRole('button', { name: 'Yes', exact: true }).click();
+    await expect(dlg.locator('ul.list li', { hasText: 'RSS Feed' })).toHaveCount(0);
+
+    // A reload does not bring it back: the seeder only seeds a slug it has never
+    // seeded in this workspace.
+    await page.reload();
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => Boolean((window as any).__easydb),
+    );
+    await waitForPanel(page, id);
+    dlg = await openManager();
+    await expect(dlg.locator('ul.list li', { hasText: 'Gallery' })).toBeVisible();
+    await expect(dlg.locator('ul.list li', { hasText: 'RSS Feed' })).toHaveCount(0);
+  });
+
+  test('declining the confirm keeps the template', async ({ page }) => {
     const id = await createTable(page, 'Feed', [{ field: 'title' }]);
     await waitForPanel(page, id);
     await page
@@ -1064,17 +1142,9 @@ test.describe('views: sort, field search, standard templates', () => {
       .getByRole('button', { name: /Views/ })
       .click();
     const dlg = page.locator('views-dialog dialog');
-    await expect(dlg).toBeVisible();
-
     const rss = dlg.locator('ul.list li', { hasText: 'RSS Feed' }).first();
-    await expect(rss.locator('.badge')).toHaveText('built-in');
-    await expect(rss.getByRole('button', { name: 'Delete' })).toHaveCount(0);
-
-    // Copy makes a plain user template, which stays deletable.
-    await rss.getByRole('button', { name: 'Copy' }).click();
-    await dlg.getByRole('button', { name: 'Save', exact: true }).click();
-    const copy = dlg.locator('ul.list li', { hasText: 'RSS Feed copy' });
-    await expect(copy.locator('.badge')).toHaveCount(0);
-    await expect(copy.getByRole('button', { name: 'Delete' })).toHaveCount(1);
+    await rss.getByRole('button', { name: 'Delete' }).click();
+    await page.locator('host-dialogs').getByRole('button', { name: 'No', exact: true }).click();
+    await expect(dlg.locator('ul.list li', { hasText: 'RSS Feed' })).toHaveCount(1);
   });
 });

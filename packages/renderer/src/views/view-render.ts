@@ -7,19 +7,27 @@
 // and the snapshotted filter/sort a view instance applies.
 
 import type { ColumnSpec, Row, ViewInstance } from '@easydb/shared';
-import { matchesColumnFilter } from '../search/column-filter.js';
+import {
+  composeColumnFilter,
+  matchesColumnFilter,
+  parseColumnFilter,
+  type FilterToken,
+} from '../search/column-filter.js';
+import { runColumnScript } from '../util/column-script.js';
 
 /**
  * Matches a `$TOKEN` placeholder. An optional `input.` (or `input:`) prefix
  * marks the token as EDITABLE — it renders an `<input>` bound to the mapped
- * field instead of the read-only value. Group 1 is the prefix (or undefined),
- * group 2 is the token NAME (letters/digits/underscore, not starting with a
- * digit); the name — without any prefix — is the mapping key, so `$TITLE` and
- * `$input.TITLE` map to the same column but render read-only vs. editable.
+ * field instead of the read-only value. A `filter.` (or `filter:`) prefix
+ * instead renders a clickable PILL — see {@link substituteRow}. Group 1 is the
+ * prefix (or undefined), group 2 is the token NAME (letters/digits/underscore,
+ * not starting with a digit); the name — without any prefix — is the mapping
+ * key, so `$TITLE`, `$input.TITLE` and `$filter.TITLE` all map to the same
+ * column but render read-only, editable, or as a filter pill.
  */
-const TOKEN_RE = /\$(input[.:])?([A-Za-z_][A-Za-z0-9_]*)/g;
+const TOKEN_RE = /\$((?:input|filter)[.:])?([A-Za-z_][A-Za-z0-9_]*)/g;
 
-/** Distinct token names (without the `$` or any `input.` prefix) found across the fragments. */
+/** Distinct token names (without the `$` or any `input.`/`filter.` prefix) found across the fragments. */
 export function extractTokens(...fragments: string[]): string[] {
   const seen = new Set<string>();
   for (const frag of fragments) {
@@ -74,11 +82,32 @@ function renderInput(
 }
 
 /**
+ * Render a `$filter.TOKEN` as a clickable pill showing the row's value for the
+ * mapped field. Clicking it (wired up in the view window) OR-appends an
+ * exact-match pill filter for that field/value. A null/empty value renders
+ * nothing — there is no pill for an empty cell.
+ */
+function renderFilterPill(field: string, value: unknown): string {
+  if (value == null || value === '') return '';
+  const text = String(value);
+  const field_ = escapeAttr(field);
+  const value_ = escapeAttr(text);
+  return (
+    `<button type="button" class="eda-filter-pill" data-eda-filter-field="${field_}" ` +
+    `data-eda-filter-value="${value_}" title="Filter by ${field_}: ${value_}">${escapeHtml(text)}</button>`
+  );
+}
+
+/**
  * Replace every `$TOKEN` in `html` with the row's value for the column mapped to
  * that token. An `$input.TOKEN` instead renders an editable control (checkbox /
- * number / text) bound to the mapped field (see {@link renderInput}). Unmapped
- * tokens (or null values) become an empty string, so a partially-mapped
- * template never shows a raw `$TOKEN`.
+ * number / text) bound to the mapped field (see {@link renderInput}); a
+ * `$filter.TOKEN` renders a clickable pill (see {@link renderFilterPill}).
+ * Unmapped tokens (or null values) become an empty string, so a
+ * partially-mapped template never shows a raw `$TOKEN`.
+ *
+ * Values are read straight from `row.data`, so pass a row that has been through
+ * {@link evaluateRow} when the table has scripted columns.
  */
 export function substituteRow(
   html: string,
@@ -91,7 +120,13 @@ export function substituteRow(
     if (!field) return '';
     const v = row.data[field];
     if (!prefix) return v == null ? '' : String(v);
-    return renderInput(field, v, row.id, opts.columns?.get(field), opts.readonly === true);
+    if (prefix.startsWith('filter')) return renderFilterPill(field, v);
+    const spec = opts.columns?.get(field);
+    // A scripted column is computed from the rest of the row, so there is
+    // nowhere to write an edit back to — the grid treats such a cell as
+    // read-only, and so does an `$input.TOKEN` bound to one.
+    const readonly = opts.readonly === true || !!spec?.script?.trim();
+    return renderInput(field, v, row.id, spec, readonly);
   });
 }
 
@@ -99,11 +134,74 @@ function isEmpty(v: unknown): boolean {
   return v == null || v === '';
 }
 
+/**
+ * A copy of `row` in which every scripted column carries what its script
+ * returns, under the column's own field name.
+ *
+ * A scripted column stores nothing: the grid computes its cell from the whole
+ * row on render. A view read the STORED value, so a computed column came out
+ * blank in a card — and a view filtered or sorted on one was working with
+ * empties. Running the scripts up front means the template, the filters, the
+ * sort and the search all see the values the grid shows.
+ *
+ * A script that will not compile, or that throws, puts its error label in the
+ * cell (as the grid does) rather than an empty string — a broken script must
+ * not read as "no data". A row with no scripted column is returned as it is,
+ * without a copy.
+ */
+export function evaluateRow(row: Row, columns: readonly ColumnSpec[]): Row {
+  let data: Record<string, unknown> | null = null;
+  for (const c of columns) {
+    if (!c.script?.trim()) continue;
+    const run = runColumnScript(c.script, row.data);
+    data ??= { ...row.data };
+    data[c.field] = run.ok ? run.value : `⚠ ${run.label}`;
+  }
+  return data ? { ...row, data } : row;
+}
+
+/**
+ * {@link evaluateRow} over a list. Returns `rows` untouched when no column is
+ * scripted, which is the common case — the scripts otherwise re-run on every
+ * recompute, exactly as the grid re-runs them on every render.
+ */
+export function evaluateRows(rows: Row[], columns: readonly ColumnSpec[]): Row[] {
+  if (!columns.some((c) => c.script?.trim())) return rows;
+  return rows.map((r) => evaluateRow(r, columns));
+}
+
 /** Apply an instance's snapshotted per-column filters (case-insensitive, AND). */
 export function filterRows(rows: Row[], filters: Record<string, string>): Row[] {
   const active = Object.entries(filters).filter(([, v]) => v != null && String(v).trim() !== '');
   if (active.length === 0) return rows;
   return rows.filter((r) => active.every(([field, needle]) => matchesColumnFilter(r.data[field], needle)));
+}
+
+/** Does an exact-match token's term equal `value`, case-insensitively? */
+function isExactPillToken(t: FilterToken, value: string): boolean {
+  return t.exact === true && !t.negate && t.term.toLowerCase() === value.toLowerCase();
+}
+
+/**
+ * Add an exact-match (`=`) token for `value` to a pill-filter column string,
+ * OR-ed with whatever tokens are already there. Idempotent — clicking the
+ * same value twice leaves a single token for it. Built on `parseColumnFilter`
+ * / `composeColumnFilter` rather than splicing the raw string.
+ */
+export function addPillValue(current: string | undefined, value: string): string {
+  const tokens = parseColumnFilter(current ?? '');
+  if (tokens.some((t) => isExactPillToken(t, value))) return composeColumnFilter(tokens);
+  tokens.push({ term: value, negate: false, exact: true });
+  return composeColumnFilter(tokens);
+}
+
+/**
+ * Remove the exact-match (`=`) token for `value` from a pill-filter column
+ * string. Returns `''` when nothing is left.
+ */
+export function removePillValue(current: string | undefined, value: string): string {
+  const tokens = parseColumnFilter(current ?? '').filter((t) => !isExactPillToken(t, value));
+  return composeColumnFilter(tokens);
 }
 
 /**
@@ -130,12 +228,20 @@ export function sortRows(rows: Row[], sortColumn?: string, sortAsc = true): Row[
   });
 }
 
-/** Rows a view instance shows, in order: filtered then sorted. */
+/**
+ * Rows a view instance shows, in order: the snapshotted `filters` layer, then
+ * the `pillFilters` layer (built by clicking `$filter.TOKEN` pills) — both
+ * ANDed via `filterRows` — then sorted.
+ */
 export function viewRows(
   rows: Row[],
-  inst: Pick<ViewInstance, 'filters' | 'sortColumn' | 'sortAsc'>,
+  inst: Pick<ViewInstance, 'filters' | 'sortColumn' | 'sortAsc'> & {
+    pillFilters?: Record<string, string> | undefined;
+  },
 ): Row[] {
-  return sortRows(filterRows(rows, inst.filters ?? {}), inst.sortColumn, inst.sortAsc ?? true);
+  const filtered = filterRows(rows, inst.filters ?? {});
+  const pilled = filterRows(filtered, inst.pillFilters ?? {});
+  return sortRows(pilled, inst.sortColumn, inst.sortAsc ?? true);
 }
 
 /** True when a template should render as a repeated row fragment (vs. a table). */

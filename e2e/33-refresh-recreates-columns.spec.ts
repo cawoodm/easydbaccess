@@ -1,13 +1,18 @@
 import { test, expect } from './fixtures.js';
 
 /**
- * The reported bug: a Datasette import that fails BEFORE the first page loads
- * leaves the table as an empty shell (no columns). Clicking Refresh must:
- *  - recreate the columns (issue 2), and
- *  - since these are columns we knew nothing about, open the column editor with
- *    a message so the user can arrange them (issue 5).
- * It also exercises that the user's columns/arrangement survive a refresh and
- * that a deleted column is not re-added (issues 3 & 4) via a second refresh.
+ * An empty table shell (no columns) must be recoverable: clicking Refresh
+ *  - recreates the columns (issue 2), and
+ *  - opens the column editor with a message, because these are columns the
+ *    table knew nothing about (issue 5).
+ * The second test covers that a deleted column is not re-added by a later
+ * refresh (issues 3 & 4).
+ *
+ * The shell is produced by cancelling the pre-import column editor, which the
+ * importer deliberately leaves as an empty table rather than aborting a whole
+ * batch. It used to be produced by an import that 429'd on its first page, but
+ * that no longer creates anything at all: the kernel creates the table lazily
+ * from the first batch, so a source that never yields one leaves no trace.
  */
 const ROWS = [
   { id: 1, name: 'Kajaki Hydro', capacity_mw: 33 },
@@ -27,16 +32,14 @@ const rateLimited = () => ({
   body: JSON.stringify({ ok: false, error: 'rate limit exceeded' }),
 });
 
-test('a failed import creates an empty table; Refresh recreates columns and opens the editor', async ({
+test('an empty table shell recovers on Refresh: columns recreated, editor opened', async ({
   page,
   workspaceId,
 }) => {
-  let phase: 'fail' | 'ok' = 'fail';
   await page.route('https://ppl2.example/**', (route) => {
     const u = new URL(route.request().url());
     if (u.pathname === '/-/metadata.json') return route.fulfill(json({}));
     if (u.pathname === '/energy/plants.json') {
-      if (phase === 'fail') return route.fulfill(rateLimited()); // every hop 429s
       const extra = u.searchParams.get('_extra') ?? '';
       if (extra.includes('columns'))
         return route.fulfill(json({ ok: true, columns: ['id', 'name', 'capacity_mw'], rows: [] }));
@@ -46,12 +49,23 @@ test('a failed import creates an empty table; Refresh recreates columns and open
     return route.fulfill({ status: 404, body: '{"ok":false}' });
   });
 
-  // Import fails on the first page → the table shell exists but has no columns.
+  // Import with "Edit columns", then cancel that editor → the table is left as
+  // an empty shell, columns and rows unwritten.
   await page.getByTitle('Import data from a URL').click();
   const importDialog = page.locator('import-dialog dialog');
   await importDialog.locator('input[type="text"]').fill('https://ppl2.example/energy/plants');
   await importDialog.getByTestId('import-format').selectOption('datasette');
+  await importDialog
+    .locator('label.check', { hasText: 'Edit columns before import' })
+    .locator('input[type="checkbox"]')
+    .check();
   await importDialog.getByRole('button', { name: 'Import' }).click();
+  // The pre-import editor is `column-names-dialog` (the table's own column
+  // editor, `new-table-dialog`, is what Refresh opens further down).
+  const preEditor = page.locator('column-names-dialog dialog');
+  await expect(preEditor).toBeVisible();
+  await preEditor.getByRole('button', { name: 'Cancel' }).click();
+  await expect(preEditor).toBeHidden();
 
   const tableId = await (async () => {
     await expect
@@ -79,8 +93,7 @@ test('a failed import creates an empty table; Refresh recreates columns and open
   const panelDom = `panel-${tableId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
   const footer = page.locator(`#${panelDom} panel-footer`);
 
-  // Now the server recovers. Refresh must recreate the columns and load rows.
-  phase = 'ok';
+  // Refresh must recreate the columns and load the rows.
   await footer.getByRole('button', { name: 'Refresh' }).click();
 
   // Columns recreated (issue 2) + rows loaded.

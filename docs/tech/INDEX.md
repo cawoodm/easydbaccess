@@ -7,6 +7,7 @@ changing code. For the user guide (how to use the app) see
 - [Technology & Architecture](TECH.md) — start here
 - [Storage](STORAGE.md)
 - [Plugins](PLUGINS.md)
+- [Settings](SETTINGS.md)
 - [Commands](COMMANDS.md)
 - [Refresh](REFRESH.md) — reloading one table from its source, and its open questions
 - [Cloud Synch](SYNCH.md)

@@ -42,6 +42,40 @@ export function rowRekeyer(
   };
 }
 
+export interface FieldRename {
+  from: string;
+  to: string;
+}
+
+/**
+ * Re-key a row's `data` object after the column editor renamed fields.
+ *
+ * Unlike `rowRekeyer` (positional, pre-import only), this handles the
+ * general edit-mode case: renames are named `from`/`to` pairs, and the
+ * editor can also add/remove/reorder columns in the same save, so position
+ * is meaningless here. All values are read from the original `data`
+ * snapshot before anything is written, so a swap (`a`↔`b`) or a chain
+ * (`a`→`b`→`c`) moves values correctly instead of one rename clobbering
+ * another's source value.
+ *
+ * Returns null when `renames` is empty, so the caller can skip the write.
+ */
+export function renameRowFields(
+  data: Record<string, unknown>,
+  renames: readonly FieldRename[],
+): Record<string, unknown> | null {
+  if (renames.length === 0) return null;
+  const fromKeys = new Set(renames.map((r) => r.from));
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(data)) {
+    if (!fromKeys.has(key)) out[key] = data[key];
+  }
+  for (const { from, to } of renames) {
+    if (Object.prototype.hasOwnProperty.call(data, from)) out[to] = data[from];
+  }
+  return out;
+}
+
 export interface ColumnMergeResult {
   columns: ColumnSpec[];
   /** Incoming fields that were neither already known nor previously deleted. */

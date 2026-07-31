@@ -5,6 +5,7 @@ import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
+import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import {
   parseSecrets,
   readSecretsText,
@@ -102,6 +103,40 @@ export class SettingsDialog extends LitElement {
         font-size: 0.78rem;
         color: #6b7280;
         margin: 0;
+      }
+      /* (i) next to the label — opens the field's help panel. */
+      .help-btn {
+        background: transparent;
+        border: 0;
+        padding: 0;
+        margin-right: auto;
+        color: #6b7280;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        line-height: 1;
+      }
+      .help-btn:hover,
+      .help-btn[aria-expanded='true'] {
+        color: #1d4ed8;
+      }
+      .help-panel {
+        font-size: 0.8rem;
+        color: #374151;
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        border-radius: 0.3rem;
+        padding: 0.45rem 0.6rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+      }
+      .help-panel p {
+        margin: 0;
+      }
+      .help-panel a {
+        color: #1d4ed8;
+        align-self: flex-start;
       }
       input[type='text'],
       input[type='number'],
@@ -212,12 +247,19 @@ export class SettingsDialog extends LitElement {
   @state() private workspaceTitle = '';
   /** Set when a close was blocked because a secret field held a raw value. */
   @state() private secretError = '';
+  /**
+   * Which field's (i) help panel is open, as `${tabId}:${key}` — one at a time,
+   * so a tab of fields with help does not turn into a wall of text.
+   */
+  @state() private openHelp = '';
   private dialogEl: HTMLDialogElement | null = null;
 
   override firstUpdated() {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
     const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
+    // A typed-in token or URL must survive a reload — see dirty-guard.
+    if (this.dialogEl) watchDialogDirty('settings', this.dialogEl);
   }
 
   async open(): Promise<void> {
@@ -501,9 +543,23 @@ export class SettingsDialog extends LitElement {
 
   private renderField(tab: Tab, f: SettingsFieldSpec) {
     const k = `${tab.id}:${f.key}`;
+    const hasHelp = Boolean(f.help || f.helpUrl);
+    const helpOpen = this.openHelp === k;
     return html`<div class="field">
       <div class="field-head">
         <label>${f.label}</label>
+        ${hasHelp
+          ? html`<button
+              type="button"
+              class="help-btn"
+              aria-label=${`Help for ${f.label}`}
+              aria-expanded=${helpOpen ? 'true' : 'false'}
+              title=${f.help ?? 'More about this setting'}
+              @click=${() => (this.openHelp = helpOpen ? '' : k)}
+            >
+              <span class="mi sm" aria-hidden="true">info</span>
+            </button>`
+          : nothing}
         <label class="scope" title="Store on this device only (not synced)">
           <input
             type="checkbox"
@@ -513,6 +569,16 @@ export class SettingsDialog extends LitElement {
           user
         </label>
       </div>
+      ${hasHelp && helpOpen
+        ? html`<div class="help-panel">
+            ${f.help ? html`<p>${f.help}</p>` : nothing}
+            ${f.helpUrl
+              ? html`<a href=${f.helpUrl} target="_blank" rel="noopener noreferrer"
+                  >${f.helpLinkLabel || hostOf(f.helpUrl)}</a
+                >`
+              : nothing}
+          </div>`
+        : nothing}
       ${this.renderControl(tab, f)}
       ${f.description ? html`<p class="desc">${f.description}</p>` : nothing}
     </div>`;
@@ -617,6 +683,19 @@ export class SettingsDialog extends LitElement {
         </form>
       </dialog>
     `;
+  }
+}
+
+/**
+ * Default link text for a `helpUrl`: its host, so the user can see where the
+ * link goes before clicking. Falls back to the raw string for anything that does
+ * not parse as a URL.
+ */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
   }
 }
 

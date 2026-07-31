@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parsedToTables } from './json-import.js';
+import { isWorkspaceDump, parsedToTables } from './json-import.js';
 
 // Characterization tests for `parsedToTables`, the JSON dump shape detector.
 // It is the only shape-detection entry point exported from json-import.ts —
@@ -328,5 +328,128 @@ describe('parsedToTables: nested / heterogeneous objects (inferTypeFromValues vi
     const rows = [{ v: null }, { v: undefined }, { v: '' }];
     const [t] = parsedToTables(rows, 'fallback');
     expect(t?.columns.find((c) => c.field === 'v')?.type).toBe('string');
+  });
+});
+
+describe('parsedToTables: top-level single native table ({ name, columns, rows, ... })', () => {
+  // This is the shape a per-table JSON export writes: one native table object
+  // at the top level, rather than wrapped in `{ tables: [...] }`. Without a
+  // dedicated branch it used to fall through to the single-object fallback
+  // and collapse into ONE row keyed by the top-level property names.
+  it('returns exactly one table with ALL its rows, not one row of nonsense', () => {
+    const doc = {
+      name: 'Plants',
+      columns: [{ field: 'id', label: 'ID', type: 'number' }, { field: 'name', label: 'Name', type: 'string' }],
+      rows: [{ id: 1, name: 'A' }, { id: 2, name: 'B' }, { id: 3, name: 'C' }],
+    };
+    const tables = parsedToTables(doc, 'fallback');
+    expect(tables).toHaveLength(1);
+    expect(tables[0]?.rows).toHaveLength(3);
+    expect(tables[0]?.rows).toEqual(doc.rows);
+  });
+
+  it('takes columns from `columns`, not inferred from the top-level keys', () => {
+    const doc = {
+      name: 'Plants',
+      columns: [{ field: 'id', label: 'ID', type: 'number' }],
+      rows: [{ id: 1 }],
+      origin: { type: 'datasette', url: 'https://example.com/x' },
+      windowGeometry: { x: 0, y: 0, w: 100, h: 100, z: 1, minimized: false, maximized: false },
+    };
+    const [t] = parsedToTables(doc, 'fallback');
+    expect(t?.columns.map((c) => c.field)).toEqual(['id']);
+    expect(t?.columns.some((c) => c.field === 'origin')).toBe(false);
+    expect(t?.columns.some((c) => c.field === 'rows')).toBe(false);
+    expect(t?.columns.some((c) => c.field === 'windowGeometry')).toBe(false);
+  });
+
+  it('carries origin, windowGeometry, info, sortColumn/sortAsc, filters, labelColumn, deletedColumns, and source when present', () => {
+    const geom = { x: 10, y: 20, w: 300, h: 200, z: 5, minimized: false, maximized: false };
+    const doc = {
+      name: 'Rich',
+      columns: [{ field: 'a' }],
+      rows: [],
+      title: 'Rich Display',
+      windowGeometry: geom,
+      sortColumn: 'a',
+      sortAsc: false,
+      filters: { a: 'x' },
+      labelColumn: 'a',
+      info: { description: 'about' },
+      deletedColumns: ['gone'],
+      origin: { type: 'datasette', url: 'https://example.com/db/table' },
+    };
+    const [t] = parsedToTables(doc, 'fallback');
+    expect(t?.title).toBe('Rich Display');
+    expect(t?.windowGeometry).toEqual(geom);
+    expect(t?.sortColumn).toBe('a');
+    expect(t?.sortAsc).toBe(false);
+    expect(t?.filters).toEqual({ a: 'x' });
+    expect(t?.labelColumn).toBe('a');
+    expect(t?.info).toEqual({ description: 'about' });
+    expect(t?.deletedColumns).toEqual(['gone']);
+    expect(t?.origin).toEqual({ type: 'datasette', url: 'https://example.com/db/table' });
+  });
+
+  it('carries a live `source` descriptor when present, instead of origin', () => {
+    const doc = {
+      name: 'Live',
+      columns: [{ field: 'a' }],
+      rows: [],
+      source: { type: 'datasette', config: { base: 'x' } },
+    };
+    const [t] = parsedToTables(doc, 'fallback');
+    expect(t?.source).toEqual({ type: 'datasette', config: { base: 'x' } });
+    expect(t?.origin).toBeUndefined();
+  });
+
+  it('omits optional keys entirely when absent, rather than carrying them as undefined', () => {
+    const doc = { name: 'Bare', columns: [{ field: 'a' }], rows: [] };
+    const [t] = parsedToTables(doc, 'fallback');
+    expect(t).toEqual({ name: 'Bare', columns: [{ field: 'a', label: 'a', type: 'string' }], rows: [] });
+    expect('origin' in (t as object)).toBe(false);
+    expect('windowGeometry' in (t as object)).toBe(false);
+    expect('info' in (t as object)).toBe(false);
+    expect('sortColumn' in (t as object)).toBe(false);
+    expect('filters' in (t as object)).toBe(false);
+    expect('labelColumn' in (t as object)).toBe(false);
+    expect('deletedColumns' in (t as object)).toBe(false);
+    expect('source' in (t as object)).toBe(false);
+    expect('title' in (t as object)).toBe(false);
+  });
+
+  it('accepts an empty `rows: []` (a "Structure Only" export) as a single native table, not a one-row fallback', () => {
+    const doc = { name: 'StructureOnly', columns: [{ field: 'a' }], rows: [] };
+    const tables = parsedToTables(doc, 'fallback');
+    expect(tables).toHaveLength(1);
+    expect(tables[0]?.rows).toEqual([]);
+  });
+});
+
+describe('isWorkspaceDump', () => {
+  it('is true for a single native table object (routes to the restore path)', () => {
+    expect(isWorkspaceDump({ name: 'T', columns: [], rows: [] })).toBe(true);
+  });
+
+  it('is true for a { tables: [...] } native dump', () => {
+    expect(isWorkspaceDump({ tables: [] })).toBe(true);
+  });
+
+  it('is true for a v1 dump', () => {
+    expect(
+      isWorkspaceDump({ 'T.table.json': { dataArray: [], columns: [] } }),
+    ).toBe(true);
+  });
+
+  it('is false for a plain array of objects', () => {
+    expect(isWorkspaceDump([{ a: 1 }, { a: 2 }])).toBe(false);
+  });
+
+  it('is false for a single arbitrary object', () => {
+    expect(isWorkspaceDump({ a: 1, b: 2 })).toBe(false);
+  });
+
+  it('is false for { name, columns } with no `rows` array', () => {
+    expect(isWorkspaceDump({ name: 'T', columns: [] })).toBe(false);
   });
 });

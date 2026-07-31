@@ -20,7 +20,7 @@ four copies of the same question, and §5.7 is where they become one.
 | Marked by             | `table.origin`                       | `table.source`                           |
 | Rows stored in Dexie  | yes                                  | no                                       |
 | Rows synced           | yes                                  | no (definition only)                     |
-| Editable              | yes                                  | connected: if writable. reference: no    |
+| Editable              | unless `table.readonly`              | connected: if writable. reference: no    |
 | What Refresh does     | re-read the source, write rows again | drop a cache, re-read                    |
 | What Refresh can lose | see §3                               | nothing — there is nothing local to lose |
 
@@ -139,18 +139,21 @@ phase F in
 
 From `TODO.md`, items that touch this:
 
-- **"Import datasette by reference doesn't prompt which tables to import and for
-  no apparent reason limits to 1000 rows."** A reference has no stored rows, so
-  whatever caps the read caps what a refresh shows as well — the same bug seen
-  twice. Worth fixing once, in the provider.
+- ~~**"Import datasette by reference doesn't prompt which tables to import and
+  for no apparent reason limits to 1000 rows."**~~ Fixed in the provider, which
+  is the one place that serves both a first load and a refresh:
+  `url-source.ts` now follows the paging cursor (`next_url`) up to
+  `MAX_REFERENCE_ROWS`, and `referenceDatasette` uses the same table picker
+  Import and Connect use.
 - **"For tables greater than a certain size we should not load them entirely
   into memory."** A refresh is the worst case: the fresh set, the old set and
   the merged set are all in memory at once. §3.6 gets worse with size, not
   better.
 - **"When importing, automatically apply renderer link for URL fields,
-  html-preview for long text…"** — whatever rule that lands on must apply to
-  columns a REFRESH discovers, or a new column arrives styled differently from
-  its neighbours.
+  html-preview for long text…"** Landed as the `auto-renderer` plugin, which
+  listens on `import:after`. A REFRESH does not emit that event, so a column a
+  refresh discovers still arrives with no renderer while its neighbours have
+  one — the gap this note predicted, now narrowed to one event.
 - **Parked: Datasette virtual tables** (lazy server-side paging,
   `.claude/plans/2026-07-26-datasette-virtual-tables-design.md`). For a virtual
   table "refresh" stops meaning "rewrite the rows" and starts meaning

@@ -33,6 +33,7 @@ import {
 } from './datasette-client.js';
 import {
   host,
+  registerDatasetteSettings,
   resolveChosenTables,
   uniqueTableName,
   withDatasetteSourceInfo,
@@ -57,6 +58,8 @@ export const meta: NonNullable<PluginModule['meta']> = {
 };
 
 export function init(api: HostApi): void {
+  registerDatasetteSettings(api);
+
   // Register the connector FIRST, so a later failure (e.g. an older host that
   // predates `registerRowSource`) can never keep Datasette out of the Connect
   // menu. Being unreachable from the UI is exactly the "I don't see a connect
@@ -92,7 +95,13 @@ export function init(api: HostApi): void {
   // they create plain local tables with no `source`. Guarded so a host without
   // this seam still lists the connector above.
   if (typeof api.registerRowSource === 'function') {
-    api.registerRowSource({ type: 'datasette', create: createDatasetteCollection });
+    api.registerRowSource({
+      type: 'datasette',
+      // Closure captures `api` so the collection can resolve the "Datasette"
+      // settings tab's `connectMaxRows` — `RowSourceCtx` alone has no layered
+      // settings resolver (device-local only, see its doc comment).
+      create: (table, ctx) => createDatasetteCollection(table, ctx, api),
+    });
   }
 }
 
@@ -189,7 +198,7 @@ export async function connectDatasette(api: HostApi, input: string, token: strin
   const status = await testConnection(baseFetch, ref.base, { token: token || undefined });
   // Store the token device-local (per instance base). Settings are not synced,
   // so the token never leaves this device or lands in a workspace export.
-  if (token) await api.store.settings.upsert({ key: tokenSettingKey(ref.base), value: token });
+  if (token) await api.store.settings.upsert({ name: tokenSettingKey(ref.base), value: token });
 
   let chosen: TableRef[] | null;
   try {

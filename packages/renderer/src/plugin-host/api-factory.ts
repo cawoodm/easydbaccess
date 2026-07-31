@@ -145,9 +145,7 @@ function createSettingsApi(store: DataStore, registries: Registries): SettingsAp
     registries.settings.get(pluginId)?.fields.find((f) => f.key === key);
 
   const resolveSecrets = (value: unknown): unknown =>
-    typeof value === 'string'
-      ? interpolateSecrets(value, parseSecrets(readSecretsText()))
-      : value;
+    typeof value === 'string' ? interpolateSecrets(value, parseSecrets(readSecretsText())) : value;
 
   return {
     async get<T = unknown>(pluginId: string, key: string): Promise<T | undefined> {
@@ -169,7 +167,7 @@ function createSettingsApi(store: DataStore, registries: Registries): SettingsAp
         writeUserSetting(k, value);
         await store.settings.remove(k).catch(() => undefined);
       } else {
-        await store.settings.upsert({ key: k, value });
+        await store.settings.upsert({ name: k, value });
         removeUserSetting(k);
       }
     },

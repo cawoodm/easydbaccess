@@ -17,6 +17,7 @@ import { runImport } from '../import/import-kernel.js';
 import { rowRekeyer } from '../table/column-merge.js';
 import { filenameFromUrl } from '../import/fetch-source.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
+import { restoreTemplates } from '../views/template-restore.js';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a
 // custom element on import, which would blow up under Vitest's default
@@ -68,14 +69,19 @@ export function init(api: HostApi): void {
 // no second parse.
 
 /**
- * True when this parsed body is a native or v1 workspace dump rather than
- * plain tabular JSON. Exported so the Import dialog and the drop handler can
- * route to the restore path instead of the kernel.
+ * True when this parsed body should route to the restore path
+ * ({@link restoreWorkspaceDump}) rather than the import kernel: a full
+ * workspace dump (native `{ tables: [...] }` or v1), or a single native table
+ * (the per-table JSON export). Only the restore path can carry `origin`,
+ * `windowGeometry`, `info`, sort/filters/labelColumn/deletedColumns — the
+ * kernel physically cannot. Exported so the Import dialog and the drop
+ * handler can tell dumps apart from plain tabular JSON.
  */
 export function isWorkspaceDump(parsed: unknown): boolean {
   if (!isObject(parsed)) return false;
   if (looksLikeV1Dump(parsed as Record<string, unknown>)) return true;
-  return Array.isArray((parsed as { tables?: unknown }).tables);
+  if (Array.isArray((parsed as { tables?: unknown }).tables)) return true;
+  return isSingleNativeTable(parsed);
 }
 
 /** The name a source should give its table, before the kernel's naming policy. */
@@ -389,6 +395,7 @@ export async function restoreWorkspaceDump(
           ...(t.labelColumn ? { labelColumn: t.labelColumn } : {}),
           ...(t.info ? { info: t.info } : {}),
           ...(t.deletedColumns ? { deletedColumns: t.deletedColumns } : {}),
+          ...(t.readonly ? { readonly: true } : {}),
           source: source ?? undefined,
           origin: origin ?? undefined,
           updatedAt: Date.now(),
@@ -410,6 +417,7 @@ export async function restoreWorkspaceDump(
           ...(t.labelColumn ? { labelColumn: t.labelColumn } : {}),
           ...(t.info ? { info: t.info } : {}),
           ...(t.deletedColumns ? { deletedColumns: t.deletedColumns } : {}),
+          ...(t.readonly ? { readonly: true } : {}),
           ...(source ? { source } : {}),
           ...(origin ? { origin } : {}),
           updatedAt: Date.now(),
@@ -458,11 +466,12 @@ export async function restoreWorkspaceDump(
 
 /**
  * Re-creates `ViewTemplate`s and `ViewInstance`s carried in a native dump.
- * Templates are upserted (merged, never cleared — that would drop built-ins the
- * dump omits). In replace-workspace mode the old instances are cleared first
- * (their tables were just wiped); otherwise instances are upserted. Each
- * instance's `tableId` is remapped via `nameToId` (falling back to its stored
- * id) so it binds to the table that was actually imported.
+ * Templates are merged by name, never cleared — see `restoreTemplates`. In
+ * replace-workspace mode the old instances are cleared first (their tables were
+ * just wiped); otherwise instances are upserted. Each instance's `tableId` is
+ * remapped via `nameToId` (falling back to its stored id) so it binds to the
+ * table that was actually imported, and its `templateId` via the remap
+ * `restoreTemplates` returns.
  */
 async function restoreViews(
   api: HostApi,
@@ -484,16 +493,14 @@ async function restoreViews(
     await api.store.viewInstances.bulkRemove(stale.map((v) => v.id));
   }
 
-  for (const vt of templates) {
-    if (!isObject(vt) || typeof vt.id !== 'string') continue;
-    await api.store.viewTemplates.upsert({ ...vt, workspaceId });
-  }
+  const templateIds = await restoreTemplates(api.store.viewTemplates, workspaceId, templates);
 
   for (const inst of instances) {
     if (!isObject(inst) || typeof inst.id !== 'string') continue;
     const tableId = (inst.tableName ? nameToId.get(inst.tableName) : undefined) ?? inst.tableId;
     if (!tableId) continue;
-    await api.store.viewInstances.upsert({ ...inst, workspaceId, tableId });
+    const templateId = templateIds.get(inst.templateId) ?? inst.templateId;
+    await api.store.viewInstances.upsert({ ...inst, workspaceId, tableId, templateId });
   }
 }
 
@@ -511,6 +518,7 @@ interface NormalizedTable {
   labelColumn?: string;
   info?: TableInfo;
   deletedColumns?: string[];
+  readonly?: boolean;
   /** Live remote backing carried in the dump (rows re-pulled from the provider). */
   source?: TableSource;
   /** Snapshot origin URL carried in the dump (refreshable). */
@@ -534,44 +542,7 @@ export function parsedToTables(parsed: unknown, fallbackName: string): Normalize
     const out: NormalizedTable[] = [];
     for (const entry of dump.tables) {
       if (isNativeTable(entry)) {
-        const e = entry as Record<string, unknown>;
-        const geom = isObject(e.windowGeometry) ? (e.windowGeometry as WindowGeometry) : undefined;
-        const sortColumn = typeof e.sortColumn === 'string' ? e.sortColumn : undefined;
-        const sortAsc = typeof e.sortAsc === 'boolean' ? e.sortAsc : undefined;
-        const title = typeof e.title === 'string' ? e.title : undefined;
-        const filters = isObject(e.filters) ? (e.filters as Record<string, string>) : undefined;
-        const labelColumn = typeof e.labelColumn === 'string' ? e.labelColumn : undefined;
-        const info = isObject(e.info) ? (e.info as TableInfo) : undefined;
-        const deletedColumns = Array.isArray(e.deletedColumns)
-          ? (e.deletedColumns.filter((c) => typeof c === 'string') as string[])
-          : undefined;
-        // Carry a live `source` or snapshot `origin` if the dump recorded one.
-        const source =
-          isObject(e.source) && typeof (e.source as { type?: unknown }).type === 'string'
-            ? (e.source as unknown as TableSource)
-            : undefined;
-        const origin =
-          isObject(e.origin) &&
-          typeof (e.origin as { type?: unknown }).type === 'string' &&
-          typeof (e.origin as { url?: unknown }).url === 'string'
-            ? (e.origin as unknown as TableOrigin)
-            : undefined;
-        out.push({
-          name: String(entry.name),
-          columns: entry.columns.map(normalizeColumn),
-          rows: Array.isArray(entry.rows)
-            ? (entry.rows.filter(isObject) as Array<Record<string, unknown>>)
-            : [],
-          ...(title ? { title } : {}),
-          ...(geom ? { windowGeometry: geom } : {}),
-          ...(sortColumn ? { sortColumn, sortAsc: sortAsc ?? true } : {}),
-          ...(filters ? { filters } : {}),
-          ...(labelColumn ? { labelColumn } : {}),
-          ...(info ? { info } : {}),
-          ...(deletedColumns ? { deletedColumns } : {}),
-          ...(source ? { source } : {}),
-          ...(origin ? { origin } : {}),
-        });
+        out.push(nativeTableToNormalized(entry));
         continue;
       }
       if (isObject(entry) && looksLikeV1Dump(entry as Record<string, unknown>)) {
@@ -579,6 +550,13 @@ export function parsedToTables(parsed: unknown, fallbackName: string): Normalize
       }
     }
     return out;
+  }
+
+  // Shape: { name, columns, rows, … } — ONE native table, as written by the
+  // per-table JSON export. Without this it would fall through to the
+  // single-object fallback below and become one row of nonsense.
+  if (isSingleNativeTable(parsed)) {
+    return [nativeTableToNormalized(parsed)];
   }
 
   // Shape: [{...}, {...}]  — array of objects, infer columns from union of keys
@@ -711,6 +689,71 @@ function isNativeTable(v: unknown): v is { name: unknown; columns: unknown[]; ro
     'columns' in v &&
     Array.isArray((v as { columns: unknown }).columns)
   );
+}
+
+/**
+ * A top-level single native table (the per-table JSON export). Stricter than
+ * `isNativeTable`: `rows` must be an array too, so an unrelated document that
+ * merely has `name` and `columns` still falls through to the generic shapes.
+ * A "Structure Only" export has `rows: []`, which still qualifies.
+ */
+function isSingleNativeTable(v: unknown): v is { name: unknown; columns: unknown[]; rows: unknown[] } {
+  return isNativeTable(v) && Array.isArray((v as { rows?: unknown }).rows);
+}
+
+/**
+ * Reads name/columns/rows plus everything a native table entry can carry —
+ * window geometry, sort, filters, label column, table info, deleted columns,
+ * the read-only flag, and a live `source` or snapshot `origin` — into one
+ * `NormalizedTable`.
+ * Shared by the `{ tables: [...] }` dump loop and a top-level single native
+ * table, so both carry the exact same fields.
+ */
+function nativeTableToNormalized(entry: {
+  name: unknown;
+  columns: unknown[];
+  rows?: unknown;
+}): NormalizedTable {
+  const e = entry as Record<string, unknown>;
+  const geom = isObject(e.windowGeometry) ? (e.windowGeometry as WindowGeometry) : undefined;
+  const sortColumn = typeof e.sortColumn === 'string' ? e.sortColumn : undefined;
+  const sortAsc = typeof e.sortAsc === 'boolean' ? e.sortAsc : undefined;
+  const title = typeof e.title === 'string' ? e.title : undefined;
+  const filters = isObject(e.filters) ? (e.filters as Record<string, string>) : undefined;
+  const labelColumn = typeof e.labelColumn === 'string' ? e.labelColumn : undefined;
+  const info = isObject(e.info) ? (e.info as TableInfo) : undefined;
+  const deletedColumns = Array.isArray(e.deletedColumns)
+    ? (e.deletedColumns.filter((c) => typeof c === 'string') as string[])
+    : undefined;
+  const readonly = e.readonly === true ? true : undefined;
+  // Carry a live `source` or snapshot `origin` if the dump recorded one.
+  const source =
+    isObject(e.source) && typeof (e.source as { type?: unknown }).type === 'string'
+      ? (e.source as unknown as TableSource)
+      : undefined;
+  const origin =
+    isObject(e.origin) &&
+    typeof (e.origin as { type?: unknown }).type === 'string' &&
+    typeof (e.origin as { url?: unknown }).url === 'string'
+      ? (e.origin as unknown as TableOrigin)
+      : undefined;
+  return {
+    name: String(entry.name),
+    columns: entry.columns.map(normalizeColumn),
+    rows: Array.isArray(entry.rows)
+      ? (entry.rows.filter(isObject) as Array<Record<string, unknown>>)
+      : [],
+    ...(title ? { title } : {}),
+    ...(geom ? { windowGeometry: geom } : {}),
+    ...(sortColumn ? { sortColumn, sortAsc: sortAsc ?? true } : {}),
+    ...(filters ? { filters } : {}),
+    ...(labelColumn ? { labelColumn } : {}),
+    ...(info ? { info } : {}),
+    ...(deletedColumns ? { deletedColumns } : {}),
+    ...(readonly ? { readonly } : {}),
+    ...(source ? { source } : {}),
+    ...(origin ? { origin } : {}),
+  };
 }
 
 function normalizeColumn(c: unknown): ColumnSpec {

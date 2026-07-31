@@ -48,6 +48,21 @@ export interface ColumnSpec {
    * sortable, preserving existing behaviour.
    */
   sortable?: boolean;
+  /**
+   * When explicitly false, the grid does not let the user filter or free-text
+   * search this column (no funnel button; the field is skipped by table and
+   * global search). Absent ⇒ filterable, preserving existing behaviour.
+   */
+  filterable?: boolean;
+}
+
+/**
+ * One key of a multi-column sort: which column, ascending or not. A list of
+ * these is applied in order — the second key only decides rows the first ties on.
+ */
+export interface SortSpec {
+  field: string;
+  asc: boolean;
 }
 
 export interface WindowGeometry {
@@ -116,11 +131,32 @@ export interface Table {
   columns: ColumnSpec[];
   view: string;
   windowGeometry?: WindowGeometry | undefined;
+  /**
+   * Primary sort, kept for everything that reads a single sort (view windows,
+   * exports, older workspaces). Always mirrors `sortBy[0]` when that is set.
+   */
   sortColumn?: string | undefined;
   sortAsc?: boolean | undefined;
+  /**
+   * Sort keys in priority order — first is primary, the next break its ties.
+   * Absent ⇒ fall back to `sortColumn`/`sortAsc`, so a workspace written before
+   * multi-sort keeps sorting exactly as it did.
+   */
+  sortBy?: SortSpec[] | undefined;
   filters?: Record<string, string> | undefined;
   /** Non-local backing store; absent ⇒ ordinary local table (unchanged behaviour). */
   source?: TableSource | undefined;
+  /**
+   * The table is read-only: the grid shows values without editors and offers no
+   * add/delete row. Set automatically on a reference table (its rows live at the
+   * source and every write throws anyway), and toggleable per table in the
+   * column editor for a local table someone wants to protect.
+   *
+   * Presentation + intent only — it is not a security boundary. A plugin writing
+   * straight to the store still can; the row source is what actually refuses.
+   * Absent/false ⇒ editable, as before.
+   */
+  readonly?: boolean | undefined;
   /**
    * Where a *snapshot* table's rows were imported from, so it can be refreshed
    * (re-fetched) later. Unlike `source`, this does NOT route reads to a remote
@@ -202,9 +238,23 @@ export interface Row {
   updatedAt: number;
 }
 
+/**
+ * One stored setting of ONE workspace. Settings belong to a workspace and travel
+ * with it on export/import; the only device-global layer is the `user` one, which
+ * lives outside this collection (see `db/user-settings.ts`).
+ *
+ * `key` is the physical primary key `<workspaceId>::<name>` — two workspaces hold
+ * the same `name` at the same time. Plugins never build it: they address settings
+ * by `name` through `store.settings`, which is scoped to the active workspace.
+ */
 export interface Setting {
-  key: string;
+  /** The logical name a plugin uses, e.g. `gist-sync:gist_token`. */
+  name: string;
   value: unknown;
+  /** Physical primary key `<workspaceId>::<name>` — filled in by the store. */
+  key?: string;
+  /** Owning workspace — filled in by the store, from the active workspace. */
+  workspaceId?: string;
 }
 
 /**
@@ -247,10 +297,20 @@ export interface ViewInstance {
   tableName?: string | undefined;
   templateId: string;
   name: string;
+  /** Primary sort — mirrors `sortBy[0]`; see the same fields on `Table`. */
   sortColumn?: string | undefined;
   sortAsc?: boolean | undefined;
+  /** Sort keys in priority order; absent ⇒ use `sortColumn`/`sortAsc`. */
+  sortBy?: SortSpec[] | undefined;
   /** Column-field → filter substring, snapshotted from the table. */
   filters: Record<string, string>;
+  /**
+   * The pill-filter layer: field → column-filter string, built by clicking
+   * `$filter.TOKEN` pills in the template. Kept SEPARATE from `filters` (which
+   * is snapshotted from the table) so the view's header bar can list only what
+   * the user clicked. Both layers apply, ANDed.
+   */
+  pillFilters?: Record<string, string> | undefined;
   /** Column fields to show, in order (snapshotted from the table). */
   visibleColumns: string[];
   /** Template token (without the leading `$`) → column field. */

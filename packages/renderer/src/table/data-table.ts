@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { html as staticHtml, unsafeStatic } from 'lit/static-html.js';
 import { customElement, property, state } from 'lit/decorators.js';
-import type { ColumnSpec, ColumnType, Row, Table, ViewInstance } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, Row, SortSpec, Table, ViewInstance } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
@@ -10,9 +10,8 @@ import { searchRowsByField } from '../search/text-search.js';
 import { matchesColumnFilter } from '../search/column-filter.js';
 import { runColumnScript } from '../util/column-script.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
-import { INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
+import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
 
-type SortDir = 'asc' | 'desc' | null;
 
 /** Delay before the header loading bar appears, so fast loads don't flash it. */
 const LOAD_BAR_DELAY_MS = 200;
@@ -157,6 +156,12 @@ export class DataTable extends LitElement {
       }
       th.sorted .sort-icon {
         color: #2563eb;
+      }
+      /* Sort priority (1, 2, 3 …), shown only while several columns sort. */
+      .sort-rank {
+        font-size: 0.85em;
+        vertical-align: super;
+        margin-left: 0.05em;
       }
       th .col-units {
         color: #9ca3af;
@@ -324,13 +329,22 @@ export class DataTable extends LitElement {
         font-family: ui-monospace, SFMono-Regular, monospace;
         cursor: help;
       }
-      /* Null / empty cell highlight — picks them out at a glance without
-       shouting like full red. */
+      /* Empty cell: pink background, so a gap is visible at a glance whatever
+         the column's renderer draws. Kept distinct from the invalid red below —
+         "nothing here" is normal, "this does not fit the type" is not. */
       td.is-null {
-        background: #fef2f2;
+        background: #fce7f3;
       }
       td.is-null input[type='text'] {
         background: transparent;
+      }
+      /* Invalid stored value: the app-wide invalid red (see util/cell-validity),
+         as an inset outline so the cell keeps its size and the grid lines stay
+         put. Renderers additionally mark their own inputs. */
+      td.is-invalid {
+        outline: 1px solid #dc2626;
+        outline-offset: -1px;
+        background: #fef2f2;
       }
       td input[type='date'],
       td input[type='datetime-local'],
@@ -364,8 +378,13 @@ export class DataTable extends LitElement {
   @property({ type: String }) viewInstanceId = '';
   @state() private columns: ColumnSpec[] = [];
   @state() private rows: Row[] = [];
-  @state() private sortColumn: string | null = null;
-  @state() private sortDir: SortDir = null;
+  /**
+   * Sort keys in priority order. A plain header click replaces the list; a
+   * shift-click adds the column as a tie-breaker behind the ones already there.
+   * `sortColumn`/`sortAsc` on the record mirror the first entry, so anything
+   * reading a single sort (view windows, exports) keeps working.
+   */
+  @state() private sortSpecs: SortSpec[] = [];
   @state() private filters: Record<string, string> = {};
   @state() private globalQuery = '';
   @state() private localQuery = '';
@@ -406,6 +425,16 @@ export class DataTable extends LitElement {
   /** A view whose instance opted into read-only: show values, offer no editors. */
   private get readOnlyView(): boolean {
     return this.viewMode && !!this.viewInst?.readonly;
+  }
+  /** The table itself is read-only (a reference, or the user marked it so). */
+  @state() private tableReadonly = false;
+  /**
+   * No editing at all, from either source. A reference table used to render
+   * editors it could never honour: typing in a cell threw
+   * `ReadOnlyReferenceError` only AFTER the user had committed the edit.
+   */
+  private get readOnly(): boolean {
+    return this.readOnlyView || this.tableReadonly;
   }
   /** Visible-row count from the last render, emitted for the panel title. */
   private renderedCount = 0;
@@ -492,7 +521,6 @@ export class DataTable extends LitElement {
       this.rowHeight = firstTr.offsetHeight;
     }
     if (!this.viewportHeight) this.viewportHeight = this.clientHeight;
-    this.markEmptyCells();
     this.emitCount();
   }
 
@@ -510,25 +538,6 @@ export class DataTable extends LitElement {
     this.lastEmittedCount = count;
     this.lastEmittedTotal = total;
     emitVisibleCount(key, count, total);
-  }
-
-  /**
-   * Toggle `is-null` on each data cell based on its *rendered* content, not
-   * the stored value. Runs after Lit has updated the DOM and each cell
-   * renderer's `connectedCallback` has populated its custom element, so the
-   * check sees what the user sees.
-   */
-  private markEmptyCells() {
-    const tds = this.shadowRoot?.querySelectorAll<HTMLTableCellElement>(
-      'tbody tr:not(.spacer) > td',
-    );
-    if (!tds) return;
-    for (const td of tds) {
-      // Trailing action <td> has no `t-*` class — skip it; it's the delete
-      // button cell.
-      if (!td.className.startsWith('t-')) continue;
-      td.classList.toggle('is-null', isCellEmpty(td));
-    }
   }
 
   private tableSubUnsub?: () => void;
@@ -614,8 +623,8 @@ export class DataTable extends LitElement {
     // record here would overwrite the freeze with widthless columns, so the
     // table never flips to fixed and the drag barely moves anything.
     if (this.resizing == null) this.columns = table.columns;
-    this.sortColumn = table.sortColumn ?? null;
-    this.sortDir = table.sortColumn ? (table.sortAsc === false ? 'desc' : 'asc') : null;
+    this.tableReadonly = !!table.readonly;
+    this.sortSpecs = readSortSpecs(table);
     // Don't stomp on filters the user is mid-editing (a debounced save is
     // pending) with the older store value — that reverts the just-typed filter.
     if (this.filterSaveTimer == null) this.filters = { ...(table.filters ?? {}) };
@@ -639,8 +648,7 @@ export class DataTable extends LitElement {
         const w = widths[c.field];
         return typeof w === 'number' ? { ...c, width: w } : c;
       });
-    this.sortColumn = inst.sortColumn ?? null;
-    this.sortDir = inst.sortColumn ? (inst.sortAsc === false ? 'desc' : 'asc') : null;
+    this.sortSpecs = readSortSpecs(inst);
     // See applyTable: never revert a filter the user is mid-editing (pending
     // debounced save) to the older instance value.
     if (this.filterSaveTimer == null) this.filters = { ...(inst.filters ?? {}) };
@@ -740,9 +748,20 @@ export class DataTable extends LitElement {
 
   /**
    * A cell whose column carries a script: the script's return value is what the
-   * renderer receives. The result is derived from the row, so it is always
-   * read-only — there is nowhere to write an edit back to. A failing script
-   * shows an inline chip (title = the message) instead of taking the table down.
+   * renderer receives as `value`, so a `link` column can point at a computed
+   * URL. A failing script shows an inline chip (title = the message) instead of
+   * taking the table down.
+   *
+   * `readonly` stays true — the computed value itself cannot be edited — but the
+   * renderer also gets `rawValue`, the STORED cell, and its `change` event now
+   * writes there. A renderer that offers an editor can therefore edit the value
+   * the script works FROM: the link renderer's pencil used to open the computed
+   * URL and then throw the edit away, because this branch wired no `change`
+   * handler at all. Renderers that honour `readonly` (boolean, date, datetime)
+   * are unaffected and stay display-only.
+   *
+   * A scripted column with no renderer stays plain read-only text: there is no
+   * editor to point at the stored value.
    */
   private renderScriptedCell(row: Row, col: ColumnSpec) {
     const run = runColumnScript(col.script, row.data);
@@ -757,9 +776,14 @@ export class DataTable extends LitElement {
     const tag = unsafeStatic(customTag);
     return staticHtml`<${tag}
       .value=${run.value ?? ''}
+      .rawValue=${row.data[col.field] ?? ''}
       .column=${col}
       .row=${row.data}
       .readonly=${true}
+      @change=${this.readOnly
+        ? undefined
+        : (e: Event) =>
+            this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
     ></${tag}>`;
   }
 
@@ -803,14 +827,14 @@ export class DataTable extends LitElement {
         .value=${raw ?? ''}
         .column=${col}
         .row=${row.data}
-        .readonly=${this.readOnlyView}
+        .readonly=${this.readOnly}
         @change=${(e: Event) =>
           this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
       ></${tag}>`;
     }
-    // A read-only view never offers an editor: show the value as plain text
+    // Read-only never offers an editor: show the value as plain text
     // (dates/booleans formatted) instead of the native <input>.
-    if (this.readOnlyView) {
+    if (this.readOnly) {
       return this.renderReadonlyCell(col, raw);
     }
     // No renderer set or unknown name — fall back to a native editor. Most
@@ -889,26 +913,60 @@ export class DataTable extends LitElement {
    * Sort state is persisted on the Table record so it survives reloads
    * and rides along through the dump/restore export path.
    */
-  private async toggleSort(field: string) {
-    let nextDir: SortDir;
-    if (this.sortColumn !== field) nextDir = 'asc';
-    else if (this.sortDir === 'asc') nextDir = 'desc';
-    else if (this.sortDir === 'desc') nextDir = null;
-    else nextDir = 'asc';
+  /**
+   * Cycle one column's sort. Each click walks asc → desc → off for that column.
+   *
+   * `additive` (shift-click) keeps the sort keys already in place and works on
+   * this column behind them, so "city, then age descending" is two clicks. A
+   * plain click drops the others — the common case is one column, and having to
+   * clear leftover keys first would be worse than losing them.
+   */
+  private async toggleSort(field: string, additive = false) {
+    const current = this.sortSpecs.find((s) => s.field === field);
+    const isOnlyKey = this.sortSpecs.length === 1 && this.sortSpecs[0]?.field === field;
+    // A plain click on a column that is NOT already the only key means "sort by
+    // this instead": it becomes the sole ascending key. Only when it is already
+    // alone does the click walk the cycle on to descending and then off —
+    // otherwise dropping the other keys would land on "unsorted" unexpectedly.
+    if (!additive && !isOnlyKey) {
+      this.sortSpecs = [{ field, asc: true }];
+      await this.persistSort(this.sortSpecs);
+      return;
+    }
+    const next: SortSpec[] = additive ? this.sortSpecs.filter((s) => s.field !== field) : [];
+    // asc → desc → gone. An untouched column starts ascending.
+    if (!current) next.push({ field, asc: true });
+    else if (current.asc) next.push({ field, asc: false });
+    // (a descending column simply stays out of `next` — that is the "off" step)
 
-    this.sortColumn = nextDir ? field : null;
-    this.sortDir = nextDir;
+    this.sortSpecs = next;
+    await this.persistSort(next);
+  }
 
+  /** Write the sort keys, mirroring the first one into `sortColumn`/`sortAsc`. */
+  private async persistSort(specs: SortSpec[]): Promise<void> {
+    const first = specs[0];
+    const patch = {
+      sortBy: specs.length > 0 ? specs : undefined,
+      sortColumn: first?.field,
+      sortAsc: first ? first.asc : undefined,
+      updatedAt: Date.now(),
+    };
     const ctx = await getContext();
-    const patch = nextDir
-      ? { sortColumn: field, sortAsc: nextDir === 'asc', updatedAt: Date.now() }
-      : { sortColumn: undefined, sortAsc: undefined, updatedAt: Date.now() };
     if (this.viewMode) await ctx.store.viewInstances.patch(this.viewInstanceId, patch);
     else await ctx.store.tables.patch(this.tableId, patch);
   }
 
   private filteredRows(): Row[] {
-    const active = Object.entries(this.filters).filter(([, q]) => q && q.trim().length > 0);
+    // A column flagged `filterable: false` is excluded from free-text search
+    // as well as from the per-column funnel. A stored per-column filter that
+    // predates the flag being set must not silently keep narrowing the grid.
+    const unfilterable = new Set(
+      this.columns.filter((c) => c.filterable === false).map((c) => c.field),
+    );
+    const active = Object.entries(this.filters).filter(
+      ([field, q]) => q && q.trim().length > 0 && !unfilterable.has(field),
+    );
     const gq = this.globalQuery.trim();
     const lq = this.localQuery.trim();
     if (active.length === 0 && gq.length === 0 && lq.length === 0) return this.rows;
@@ -922,33 +980,30 @@ export class DataTable extends LitElement {
     // Free-text search supports `field:value` (with !/^/comma-OR/NULL), boolean
     // AND/OR, and the phrase→AND→OR fallback. Local and global queries each
     // narrow the set independently. Field names resolve against this view's
-    // columns (name or label).
-    if (lq) rows = searchRowsByField(rows, lq, this.columns);
-    if (gq) rows = searchRowsByField(rows, gq, this.columns);
+    // columns (name or label), excluding non-filterable ones.
+    const searchable = this.columns.filter((c) => c.filterable !== false);
+    if (lq) rows = searchRowsByField(rows, lq, searchable);
+    if (gq) rows = searchRowsByField(rows, gq, searchable);
     return rows;
   }
 
   private sortedRows(): Row[] {
     const base = this.filteredRows();
-    if (!this.sortColumn || !this.sortDir) return base;
-    const field = this.sortColumn;
-    const col = this.columns.find((c) => c.field === field);
-    const type: ColumnType = col?.type ?? 'string';
-    const factor = this.sortDir === 'asc' ? 1 : -1;
+    if (this.sortSpecs.length === 0) return base;
+    // Resolve each key's column type once, not per comparison.
+    const keys = this.sortSpecs.map((s) => ({
+      field: s.field,
+      factor: s.asc ? 1 : -1,
+      type: (this.columns.find((c) => c.field === s.field)?.type ?? 'string') as ColumnType,
+    }));
     const arr = [...base];
     arr.sort((a, b) => {
-      const av = a.data[field];
-      const bv = b.data[field];
-      // Emptiness is ranked as the *smallest* value: null < blank < present.
-      // The rank rides the direction flip, so ascending floats empties to the
-      // top (nulls first, then blanks) and descending sinks them to the bottom
-      // (blanks, then nulls last). null and blank are DISTINCT — a null cell is
-      // "no value" and sorts ahead of an empty-string cell.
-      const rank = (v: unknown): number => (v == null ? 0 : v === '' ? 1 : 2);
-      const ar = rank(av);
-      const br = rank(bv);
-      if (ar !== 2 || br !== 2) return (ar - br) * factor;
-      return compareValues(av, bv, type) * factor;
+      // Walk the keys in order; the next one only speaks when the previous ties.
+      for (const k of keys) {
+        const cmp = compareBySortKey(a.data[k.field], b.data[k.field], k.type, k.factor);
+        if (cmp !== 0) return cmp;
+      }
+      return 0;
     });
     return arr;
   }
@@ -1030,8 +1085,11 @@ export class DataTable extends LitElement {
    * Pass `null` to evaluate against ALL per-column filters.
    */
   private rowsFacetedFor(focusField: string | null): Row[] {
+    const unfilterable = new Set(
+      this.columns.filter((c) => c.filterable === false).map((c) => c.field),
+    );
     const active = Object.entries(this.filters).filter(
-      ([f, q]) => q && q.trim().length > 0 && f !== focusField,
+      ([f, q]) => q && q.trim().length > 0 && f !== focusField && !unfilterable.has(f),
     );
     if (active.length === 0) return this.rows;
     return this.rows.filter((r) => active.every(([f, q]) => matchesColumnFilter(r.data[f], q)));
@@ -1320,8 +1378,14 @@ export class DataTable extends LitElement {
           <tr>
             ${cols.map((c) => {
               const canSort = c.sortable !== false;
-              const sorted = this.sortColumn === c.field && this.sortDir;
+              const canFilter = c.filterable !== false;
+              const sortAt = this.sortSpecs.findIndex((s) => s.field === c.field);
+              const spec = sortAt >= 0 ? this.sortSpecs[sortAt] : undefined;
+              const sorted = spec ? (spec.asc ? 'asc' : 'desc') : null;
               const icon = !canSort ? '' : sorted === 'asc' ? '▲' : sorted === 'desc' ? '▼' : '⇅';
+              // The key's position, shown only when more than one column sorts —
+              // with a single key the number would be noise.
+              const rankLabel = this.sortSpecs.length > 1 && sortAt >= 0 ? String(sortAt + 1) : '';
               const typeClass = `t-${c.type}`;
               const isSrc = this.dragSourceField === c.field;
               const isTgt = this.dropTargetField === c.field;
@@ -1334,21 +1398,28 @@ export class DataTable extends LitElement {
               const tip =
                 (c.description ? `${c.description}\n` : '') +
                 (c.units ? `Units: ${c.units}\n` : '') +
-                `${c.field} — ${canSort ? 'click to sort, ' : 'not sortable · '}drag to reorder`;
+                `${c.field} — ${canSort ? 'click to sort, shift-click to add a sort level, ' : 'not sortable · '}drag to reorder` +
+                (canFilter ? '' : ' · not filterable');
               return html`
                 <th
                   class=${`${typeClass}${sorted ? ' sorted' : ''}${isSrc ? ' drag-source' : ''}${edgeClass}${canSort ? '' : ' no-sort'}`}
                   title=${tip}
-                  @click=${() => canSort && this.toggleSort(c.field)}
+                  @click=${(e: MouseEvent) => canSort && this.toggleSort(c.field, e.shiftKey)}
                   @dragover=${(e: DragEvent) =>
                     this.onColDragOver(e, c.field, e.currentTarget as HTMLElement)}
                   @dragleave=${() => this.onColDragLeave(c.field)}
                   @drop=${(e: DragEvent) => this.onColDrop(e, c.field)}
                 >
                   <div class="col-head">
+                    <!-- The grip, sort arrow and funnel glyph are decoration: a
+                         Material Icons glyph is its own ligature text, so without
+                         aria-hidden a header's accessible name reads
+                         "drag_indicator a filter_list" and every column looks
+                         alike to a screen reader (and to a by-name query). -->
                     <span
                       class="col-grip mi sm"
                       title="Drag to reorder column"
+                      aria-hidden="true"
                       draggable="true"
                       @click=${(e: Event) => e.stopPropagation()}
                       @dragstart=${(e: DragEvent) => this.onColDragStart(e, c.field)}
@@ -1362,14 +1433,21 @@ export class DataTable extends LitElement {
                       >${c.label}${c.units
                         ? html`<span class="col-units"> (${c.units})</span>`
                         : ''}</span
-                    ><span class="sort-icon">${icon}</span>
-                    <button
-                      class=${`funnel${this.filters[c.field] ? ' active' : ''}`}
-                      title="Filter by value"
-                      @click=${(e: Event) => this.openFilterPicker(e, c.field)}
+                    ><span class="sort-icon" aria-hidden="true"
+                      >${icon}${rankLabel
+                        ? html`<span class="sort-rank">${rankLabel}</span>`
+                        : nothing}</span
                     >
-                      <span class="mi sm">filter_list</span>
-                    </button>
+                    ${canFilter
+                      ? html`<button
+                          class=${`funnel${this.filters[c.field] ? ' active' : ''}`}
+                          title="Filter by value"
+                          aria-label=${`Filter ${c.label || c.field}`}
+                          @click=${(e: Event) => this.openFilterPicker(e, c.field)}
+                        >
+                          <span class="mi sm" aria-hidden="true">filter_list</span>
+                        </button>`
+                      : ''}
                   </div>
                   <span
                     class="col-resize"
@@ -1389,6 +1467,7 @@ export class DataTable extends LitElement {
           </tr>
           <tr class="filter-row">
             ${cols.map((c) => {
+              if (c.filterable === false) return html`<th></th>`;
               const opts = suggestions.get(c.field) ?? [];
               return html`
                 <th>
@@ -1420,14 +1499,23 @@ export class DataTable extends LitElement {
               <tr>
                 ${cols.map(
                   (c) =>
-                    html`<td class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}`}>
+                    html`<td
+                      class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}${cellStateClass(r, c)}`}
+                      title=${cellTooltip(r, c)}
+                    >
                       ${this.renderCell(r, c)}
                     </td>`,
                 )}
                 <td>
-                  <button class="danger" title="Delete row" @click=${() => this.deleteRow(r.id)}>
-                    <span class="mi sm">delete</span>
-                  </button>
+                  ${this.readOnly
+                    ? nothing
+                    : html`<button
+                        class="danger"
+                        title="Delete row"
+                        @click=${() => this.deleteRow(r.id)}
+                      >
+                        <span class="mi sm">delete</span>
+                      </button>`}
                 </td>
               </tr>
             `,
@@ -1444,20 +1532,41 @@ export class DataTable extends LitElement {
 }
 
 /**
- * Visual-emptiness check for a rendered `<td>`. Used by `markEmptyCells` to
- * decide whether to apply the `is-null` highlight. A cell is empty iff it
- * shows no text, no image, and every input it contains is empty (checkboxes
- * excluded — they're meaningful in both states).
+ * The ` is-null` / ` is-invalid` suffix for a cell's `<td>` class, from the STORED
+ * value — so the marking holds whatever renderer the column has, including one
+ * that draws a checkbox or an image for an empty value.
+ *
+ * A scripted column is exempt: its display is computed by the script, so an empty
+ * stored value is normal there and pink would flag every row.
  */
-function isCellEmpty(td: Element): boolean {
-  if ((td.textContent ?? '').trim() !== '') return false;
-  if (td.querySelector('img')) return false;
-  const inputs = td.querySelectorAll('input');
-  for (const inp of Array.from(inputs)) {
-    if (inp.type === 'checkbox') return false;
-    if (inp.value !== '') return false;
-  }
-  return true;
+/**
+ * Longest tooltip we hand a cell. Past a few hundred characters a native
+ * tooltip is unreadable anyway, and the browser truncates it at its own
+ * (undocumented) limit — better to cut it ourselves with a visible ellipsis.
+ */
+const MAX_TOOLTIP_CHARS = 500;
+
+/**
+ * The `title` for a cell: its full stored value, because a column narrower than
+ * its content shows only an ellipsis and there is otherwise no way to read the
+ * rest without widening the column or clicking in.
+ *
+ * A scripted column is skipped — what it shows is computed, so its stored value
+ * would explain nothing. An empty cell gets no tooltip.
+ */
+function cellTooltip(row: Row, col: ColumnSpec): string {
+  if (col.script) return '';
+  const v = row.data[col.field];
+  if (v == null) return '';
+  const text = typeof v === 'string' ? v : String(v);
+  if (text.trim() === '') return '';
+  return text.length > MAX_TOOLTIP_CHARS ? `${text.slice(0, MAX_TOOLTIP_CHARS)}…` : text;
+}
+
+function cellStateClass(row: Row, col: ColumnSpec): string {
+  if (col.script) return '';
+  const state = cellState(row.data[col.field], col.type);
+  return state === 'empty' ? ' is-null' : state === 'invalid' ? ' is-invalid' : '';
 }
 
 /** Returns a human-readable rejection reason, or null if value is acceptable. */
@@ -1519,9 +1628,45 @@ function isNonEmptyButUnparsed(raw: unknown, parsed: string): boolean {
   return parsed === '';
 }
 
+/**
+ * One sort key applied to one pair of rows, direction included. Extracted from
+ * `sortedRows` so several keys can be walked in priority order.
+ *
+ * Emptiness is ranked as the *smallest* value: null < blank < present. The rank
+ * rides the direction flip, so ascending floats empties to the top (nulls first,
+ * then blanks) and descending sinks them to the bottom. null and blank are
+ * DISTINCT — a null cell is "no value" and sorts ahead of an empty string.
+ */
+function compareBySortKey(
+  av: unknown,
+  bv: unknown,
+  type: ColumnType,
+  factor: number,
+): number {
+  const rank = (v: unknown): number => (v == null ? 0 : v === '' ? 1 : 2);
+  const ar = rank(av);
+  const br = rank(bv);
+  if (ar !== 2 || br !== 2) return (ar - br) * factor;
+  return compareValues(av, bv, type) * factor;
+}
+
+/**
+ * The sort keys of a table or view instance: the `sortBy` list when present,
+ * else the single legacy `sortColumn`/`sortAsc` pair (a workspace written before
+ * multi-sort, or a view whose sort bar still sets one column).
+ */
+function readSortSpecs(rec: {
+  sortBy?: SortSpec[] | undefined;
+  sortColumn?: string | undefined;
+  sortAsc?: boolean | undefined;
+}): SortSpec[] {
+  if (rec.sortBy?.length) return rec.sortBy.map((s) => ({ field: s.field, asc: s.asc !== false }));
+  if (!rec.sortColumn) return [];
+  return [{ field: rec.sortColumn, asc: rec.sortAsc !== false }];
+}
+
 // Compares two PRESENT (non-empty) values by column type. Empty handling is
-// the caller's job — `sortedRows` sinks blanks to the bottom regardless of
-// sort direction, before this runs.
+// the caller's job — `compareBySortKey` deals with blanks before this runs.
 function compareValues(a: unknown, b: unknown, type: ColumnType): number {
   switch (type) {
     case 'number': {

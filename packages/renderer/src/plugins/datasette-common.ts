@@ -14,17 +14,117 @@
 import type { DatasetteRef, MetadataTablePatch, TableRef } from './datasette-client.js';
 import { fetchDatabaseNames, fetchTablesForDb, probeSingleTable } from './datasette-client.js';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
-import type { TableInfo } from '@easydb/shared';
+import type { HostApi, TableInfo } from '@easydb/shared';
 
 export type FetchFn = (url: string, opts?: unknown) => Promise<Response>;
 
 /** Instance base without its scheme, for messages the user reads. */
 export const host = (base: string): string => base.replace(/^https?:\/\//, '');
 
-export const SETTINGS = {
-  maxImportRows: 10_000, // safety cap on a single table's import
-  pageSize: 1000, // _size per page hop (fixed size for uniform cursor paging)
-};
+// -- Settings ---------------------------------------------------------------
+//
+// One shared "Datasette" settings tab for both `datasette-import` and
+// `datasette-connect` — same pluginId, same keys, so either plugin's `init`
+// can register it and both read the same resolved values.
+
+/** Shared settings-tab id for both Datasette plugins. */
+export const DATASETTE_SETTINGS_ID = 'datasette';
+
+export const DEFAULT_MAX_IMPORT_ROWS = 10_000; // safety cap on a single table's import; 0 = unlimited
+export const DEFAULT_PAGE_SIZE = 1000; // _size per page hop (fixed size for uniform cursor paging)
+export const DEFAULT_CONNECT_MAX_ROWS = 10_000; // row cap for a single live-connected table's materialisation
+export const DEFAULT_RETRY_WAIT_SECONDS = 60; // wait before auto-resuming a rate-limited import
+
+export interface DatasetteSettings {
+  /** Max rows imported per table. 0 = unlimited — see {@link importRowCap}. */
+  maxImportRows: number;
+  /** Rows requested per page hop; the instance clamps this to its own max_returned_rows. */
+  pageSize: number;
+  /** Row cap for a single live connected table's materialisation. */
+  connectMaxRows: number;
+  /** Wait (seconds) before auto-resuming an import paused by rate limiting. */
+  retryWaitSeconds: number;
+}
+
+/**
+ * Register the one shared "Datasette" settings tab. Both plugins call this
+ * from `init` — `registerSettings` just overwrites the same map entry
+ * (keyed by pluginId) with identical field specs, so calling it twice is a
+ * harmless no-op either way, regardless of load order.
+ */
+export function registerDatasetteSettings(api: HostApi): void {
+  api.ui.registerSettings(DATASETTE_SETTINGS_ID, 'Datasette', [
+    {
+      key: 'maxImportRows',
+      label: 'Max import rows per table',
+      type: 'number',
+      default: DEFAULT_MAX_IMPORT_ROWS,
+      scope: 'workspace',
+      description: 'Max rows imported per table. 0 = unlimited.',
+    },
+    {
+      key: 'pageSize',
+      label: 'Page size',
+      type: 'number',
+      default: DEFAULT_PAGE_SIZE,
+      scope: 'workspace',
+      description:
+        'Rows requested per page hop while paging a table (the instance clamps this to its own max_returned_rows).',
+    },
+    {
+      key: 'connectMaxRows',
+      label: 'Connected table row cap',
+      type: 'number',
+      default: DEFAULT_CONNECT_MAX_ROWS,
+      scope: 'workspace',
+      description: 'Row cap for a single live connected table.',
+    },
+    {
+      key: 'retryWaitSeconds',
+      label: 'Rate-limit retry wait (seconds)',
+      type: 'number',
+      default: DEFAULT_RETRY_WAIT_SECONDS,
+      scope: 'workspace',
+      description: "Wait before resuming an import paused by the instance's rate limiting.",
+    },
+  ]);
+}
+
+/** `v` coerced to a finite integer `>= min`; `fallback` otherwise. */
+function validatedNumber(v: unknown, fallback: number, min: number): number {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) && n >= min ? Math.floor(n) : fallback;
+}
+
+/**
+ * Resolve the four Datasette settings, validating each against the
+ * registered defaults — a missing, non-numeric, or out-of-range stored value
+ * falls back to the default rather than propagating NaN/negative values into
+ * the paging math.
+ */
+export async function getDatasetteSettings(api: HostApi): Promise<DatasetteSettings> {
+  const [maxImportRows, pageSize, connectMaxRows, retryWaitSeconds] = await Promise.all([
+    api.settings.get<number>(DATASETTE_SETTINGS_ID, 'maxImportRows'),
+    api.settings.get<number>(DATASETTE_SETTINGS_ID, 'pageSize'),
+    api.settings.get<number>(DATASETTE_SETTINGS_ID, 'connectMaxRows'),
+    api.settings.get<number>(DATASETTE_SETTINGS_ID, 'retryWaitSeconds'),
+  ]);
+  return {
+    maxImportRows: validatedNumber(maxImportRows, DEFAULT_MAX_IMPORT_ROWS, 0),
+    pageSize: validatedNumber(pageSize, DEFAULT_PAGE_SIZE, 1),
+    connectMaxRows: validatedNumber(connectMaxRows, DEFAULT_CONNECT_MAX_ROWS, 1),
+    retryWaitSeconds: validatedNumber(retryWaitSeconds, DEFAULT_RETRY_WAIT_SECONDS, 1),
+  };
+}
+
+/**
+ * Internal-arithmetic form of `maxImportRows`: 0 (unlimited) becomes a cap
+ * large enough that `rowCap - fetched` in the paging loop never goes negative
+ * before the instance itself runs out of rows.
+ */
+export function importRowCap(maxImportRows: number): number {
+  return maxImportRows === 0 ? Number.MAX_SAFE_INTEGER : maxImportRows;
+}
 
 /** Human-facing Datasette table URL (`base/db/table`). */
 export function datasetteTableUrl(base: string, db: string, table: string): string {
@@ -71,7 +171,7 @@ export function uniqueTableName(taken: Set<string>, name: string): string {
 export async function resolveChosenTables(
   fetchFn: FetchFn,
   ref: DatasetteRef,
-  verb: 'Import' | 'Connect',
+  verb: 'Import' | 'Connect' | 'Reference',
   opts: { skipPicker?: boolean | undefined } = {},
 ): Promise<TableRef[] | null> {
   if (ref.db && ref.table) {

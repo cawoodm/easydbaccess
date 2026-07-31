@@ -37,6 +37,16 @@ class CellLink extends HTMLElement {
    * cancelled edit from being saved by its own trailing blur.
    */
   private _editor: HTMLInputElement | null = null;
+  /**
+   * The cell's STORED value, set by the host only on a scripted column — there
+   * `value` is what the script computed. Null means "no separate raw value", so
+   * the editor edits `value` as it always did.
+   *
+   * The two differ because a script result is derived: the anchor must show the
+   * computed URL, while the pencil has to open the text the script works from,
+   * which is the only thing an edit can be written back to.
+   */
+  private _raw: string | null = null;
 
   set value(v: unknown) {
     const s = v == null ? '' : String(v);
@@ -47,6 +57,18 @@ class CellLink extends HTMLElement {
   }
   get value(): string {
     return this._value;
+  }
+
+  set rawValue(v: unknown) {
+    const s = v == null ? '' : String(v);
+    if (this._raw === s) return;
+    this._raw = s;
+    // Only an open editor shows this value, so a fresh raw value while the cell
+    // is displaying its link changes nothing on screen.
+    if (this._editing) this.render();
+  }
+  get rawValue(): string {
+    return this._raw ?? this._value;
   }
 
   connectedCallback() {
@@ -111,7 +133,9 @@ class CellLink extends HTMLElement {
     } else {
       const input = document.createElement('input');
       input.type = 'text';
-      input.value = v;
+      // Edit the stored value, which on a scripted column is not what the cell
+      // displays. `rawValue` falls back to `value` for every ordinary column.
+      input.value = this.rawValue;
       input.style.cssText =
         'width:100%;box-sizing:border-box;border:0;background:transparent;font:inherit;padding:0';
       input.addEventListener('change', () => {
@@ -151,8 +175,11 @@ class CellLink extends HTMLElement {
   }
 
   private commit(v: string) {
-    const changed = v !== this._value;
-    this._value = v;
+    const changed = v !== this.rawValue;
+    // On a scripted column `_value` belongs to the script — the host re-runs it
+    // after the write and sets a fresh `value`. Only the raw value is ours.
+    if (this._raw === null) this._value = v;
+    else this._raw = v;
     this._editing = false;
     // Re-render on our own. The host writes the stored value back through the
     // `value` setter, but that setter early-returns when the value is unchanged

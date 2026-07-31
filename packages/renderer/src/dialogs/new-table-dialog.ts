@@ -1,13 +1,15 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import type { ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
+import type { ColumnEditorActionSpec, ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 import { makeDialogDraggable } from './draggable.js';
+import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
 import { buildColumnSpec, type ColumnRow } from './column-row.js';
+import { renameRowFields, type FieldRename } from '../table/column-merge.js';
 
 const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'datetime'];
 
@@ -15,10 +17,10 @@ const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'date
  * Dual-purpose dialog: creates new tables and edits the columns of existing
  * ones. Open mode is chosen by the optional tableId argument to open().
  *
- * Edit mode keeps existing field names intact by default (renames are
- * destructive — they would require re-keying every row's data object).
- * Renaming is still allowed if you really want it, but the warning text
- * below the columns spells out what happens.
+ * Edit mode keeps existing field names intact by default. Renaming a field
+ * is allowed; on save every row's `data` object is re-keyed (see
+ * `renameRowFields` in `table/column-merge.ts`) so existing values follow
+ * the field to its new name.
  */
 @customElement('new-table-dialog')
 export class NewTableDialog extends LitElement {
@@ -37,6 +39,16 @@ export class NewTableDialog extends LitElement {
         font-size: 0.85rem;
         color: #374151;
       }
+      /* A checkbox reads as one line with its text, not stacked above it. */
+      label.inline {
+        flex-direction: row;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      label.inline input[type='checkbox'] {
+        width: auto;
+        margin: 0;
+      }
       input,
       select {
         font: inherit;
@@ -51,7 +63,9 @@ export class NewTableDialog extends LitElement {
       .col-header,
       .col-row {
         display: grid;
-        grid-template-columns: 1.25rem 1fr 1fr 7rem 7rem 1.5rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem;
+        grid-template-columns:
+          1.25rem 1fr 1fr 7rem 7rem 1.5rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem
+          1.5rem;
         gap: 0.4rem;
         align-items: center;
       }
@@ -213,6 +227,8 @@ export class NewTableDialog extends LitElement {
   @state() private editTableId: string | null = null;
   @state() private name = '';
   @state() private tableTitle = '';
+  /** Table-level read-only flag (`Table.readonly`) — no editors, no add/delete row. */
+  @state() private tableReadonly = false;
   @state() private columns: ColumnRow[] = [];
   @state() private errorMsg = '';
   /** Non-error banner (e.g. "a refresh found new columns — review them"). */
@@ -228,6 +244,12 @@ export class NewTableDialog extends LitElement {
    * boolean, color, image, link) and any plugin-registered ones land here.
    */
   @state() private rendererOptions: string[] = [];
+  /**
+   * Plugin-registered buttons that rewrite the columns being edited (e.g. the
+   * auto-renderer's "Guess renderers"). Snapshotted on open, like the renderer
+   * options above.
+   */
+  @state() private columnActions: ColumnEditorActionSpec[] = [];
   private rendererSubUnsub?: (() => void) | undefined;
 
   private dialogEl: HTMLDialogElement | null = null;
@@ -236,6 +258,8 @@ export class NewTableDialog extends LitElement {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
     const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
+    // Half-defined columns must not be lost to a reload — see dirty-guard.
+    if (this.dialogEl) watchDialogDirty('columns-editor', this.dialogEl);
   }
 
   /**
@@ -252,8 +276,10 @@ export class NewTableDialog extends LitElement {
     const ctxForRenderers = await getContext();
     this.rendererOptions = [...ctxForRenderers.registries.cellRenderers.keys()].sort();
     this.rendererSubUnsub?.();
+    this.columnActions = [...ctxForRenderers.registries.columnEditorActions];
     this.rendererSubUnsub = ctxForRenderers.events.on('app:ready', () => {
       this.rendererOptions = [...ctxForRenderers.registries.cellRenderers.keys()].sort();
+      this.columnActions = [...ctxForRenderers.registries.columnEditorActions];
     });
     if (tableId) {
       const ctx = await getContext();
@@ -263,6 +289,7 @@ export class NewTableDialog extends LitElement {
       this.editTableId = tableId;
       this.name = t.name;
       this.tableTitle = t.title ?? '';
+      this.tableReadonly = !!t.readonly;
       this.columns = t.columns.map((c) => ({
         field: c.field,
         label: c.label,
@@ -273,6 +300,8 @@ export class NewTableDialog extends LitElement {
         unique: c.unique,
         notnull: c.notnull,
         hidden: c.hidden,
+        sortable: c.sortable,
+        filterable: c.filterable,
         origField: c.field,
         orig: c,
       }));
@@ -286,6 +315,7 @@ export class NewTableDialog extends LitElement {
       this.editTableId = null;
       this.name = '';
       this.tableTitle = '';
+      this.tableReadonly = false;
       this.columns = [
         { field: 'name', label: 'Name', type: 'string' },
         { field: 'note', label: 'Note', type: 'string' },
@@ -373,6 +403,43 @@ export class NewTableDialog extends LitElement {
   }
 
   /**
+   * Run a plugin's column-editor action on the current draft and take its result
+   * back into the editor. Nothing is saved: the user sees the change in the rows
+   * and still has to press Save (or close the dialog to drop it).
+   *
+   * The action gets the draft as ColumnSpecs, so it never has to know about the
+   * editor's row shape. Coming back, each returned spec is matched to its row by
+   * FIELD NAME — an action edits columns, it does not reorder or add them, and
+   * matching by name keeps a row's `orig`/`origField` (the rename tracking and
+   * the untouched-fields base) intact.
+   */
+  private async runColumnAction(action: ColumnEditorActionSpec): Promise<void> {
+    this.errorMsg = '';
+    const ctx = await getContext();
+    try {
+      const next = await action.run(ctx.api, {
+        columns: this.columns.map((c) => buildColumnSpec(c)),
+        ...(this.editTableId ? { tableId: this.editTableId } : {}),
+      });
+      if (!next) return;
+      const byField = new Map(next.map((c) => [c.field, c]));
+      this.columns = this.columns.map((row) => {
+        const spec = byField.get(row.field);
+        if (!spec) return row;
+        return {
+          ...row,
+          label: spec.label ?? row.label,
+          type: spec.type ?? row.type,
+          renderer: spec.renderer,
+          script: spec.script,
+        };
+      });
+    } catch (err) {
+      this.errorMsg = `${action.label} failed: ${(err as Error).message}`;
+    }
+  }
+
+  /**
    * Open the script-editor modal for the column at `idx`. Resolves to a
    * patched column row (or no-op on cancel). The dialog is mounted as a
    * sibling of this dialog in `<app-shell>`'s shadow root, so the static
@@ -429,9 +496,9 @@ export class NewTableDialog extends LitElement {
     const title = this.tableTitle.trim();
     // buildColumnSpec spreads each row's `orig` ColumnSpec (when hydrated from
     // a saved table) as the base, so fields the editor doesn't own — default,
-    // width, description, units, sortable — survive the save instead of being
-    // dropped. See column-row.ts for why clearing a field must explicitly
-    // delete it rather than just skip setting it.
+    // width, description, units — survive the save instead of being dropped.
+    // See column-row.ts for why clearing a field must explicitly delete it
+    // rather than just skip setting it.
     const columns: ColumnSpec[] = this.columns.map(buildColumnSpec);
 
     if (this.mode === 'edit' && this.editTableId) {
@@ -477,9 +544,15 @@ export class NewTableDialog extends LitElement {
         (f) => !savedFields.has(f),
       );
 
-      // Patch the saved table; row data isn't migrated. If a field was
-      // renamed, downstream cells will read undefined and display as empty.
-      const patch: Partial<Table> = { name, title, columns, updatedAt: Date.now() };
+      // Patch the saved table; renamed fields are re-keyed in every row's
+      // `data` below so existing values follow the field to its new name.
+      const patch: Partial<Table> = {
+        name,
+        title,
+        columns,
+        readonly: this.tableReadonly,
+        updatedAt: Date.now(),
+      };
       // Only persist the deleted-columns list when it carries meaning (there's
       // something tracked, or we're clearing a previously-tracked set).
       if (deletedColumns.length > 0 || prevDeleted.length > 0) {
@@ -494,11 +567,20 @@ export class NewTableDialog extends LitElement {
       // them. Renamed columns keep their `origField`, so they're excluded here;
       // only true deletions are purged. Skip rows that carry none of the fields.
       const purgeFields = removedNow.filter((f) => !savedFields.has(f));
-      if (purgeFields.length > 0) {
+      // Renamed fields must be re-keyed too, or the new column reads undefined
+      // and the old value lingers under the stale key forever. Apply renames
+      // before purges so a renamed-then-purged field can never collide.
+      const renames = this.fieldRenames();
+      if (purgeFields.length > 0 || renames.length > 0) {
         const rows = await ctx.store.rows(tableId).find();
         for (const r of rows) {
           let touched = false;
-          const data = { ...r.data };
+          let data = { ...r.data };
+          const renamed = renameRowFields(data, renames);
+          if (renamed) {
+            data = renamed;
+            touched = true;
+          }
           for (const f of purgeFields) {
             if (f in data) {
               delete data[f];
@@ -540,13 +622,22 @@ export class NewTableDialog extends LitElement {
     if (this.previewRows.length === 0) {
       return html`<div class="preview"><div class="empty">No rows to preview.</div></div>`;
     }
+    // The preview rows are keyed by the field names as SAVED, but the columns
+    // below read the names the user has typed. Re-key a copy exactly the way
+    // `submit` will on save, so a pending rename previews its real values
+    // instead of an empty column (and its constraints are checked against them).
+    const renames = this.fieldRenames();
+    const previewRows =
+      renames.length > 0
+        ? this.previewRows.map((r) => ({ ...r, data: renameRowFields(r.data, renames) ?? r.data }))
+        : this.previewRows;
     // Precompute duplicate maps for any unique column so per-row checks are O(1).
     const duplicateSets = new Map<string, Set<unknown>>();
     for (const c of this.columns) {
       if (!c.unique) continue;
       const seen = new Set<unknown>();
       const dups = new Set<unknown>();
-      for (const r of this.previewRows) {
+      for (const r of previewRows) {
         const v = r.data[c.field];
         if (v == null || v === '') continue;
         if (seen.has(v)) dups.add(v);
@@ -569,7 +660,7 @@ export class NewTableDialog extends LitElement {
             </tr>
           </thead>
           <tbody>
-            ${this.previewRows.map(
+            ${previewRows.map(
               (r) => html`
                 <tr>
                   ${visible.map((c) => {
@@ -588,11 +679,22 @@ export class NewTableDialog extends LitElement {
     `;
   }
 
+  /**
+   * Pending field renames: the draft's `origField` (the name as SAVED) paired
+   * with the name the user has typed. One source of truth for all three
+   * consumers — the save-time row re-key, the live preview's re-key, and the
+   * hint below the column list — so they can never disagree about what counts
+   * as a rename. Empty in `new` mode, where no row data exists yet.
+   */
+  private fieldRenames(): FieldRename[] {
+    if (this.mode !== 'edit') return [];
+    return this.columns
+      .filter((c) => c.origField && c.origField !== c.field.trim())
+      .map((c) => ({ from: c.origField as string, to: c.field.trim() }));
+  }
+
   private renameDetected(): boolean {
-    return (
-      this.mode === 'edit' &&
-      this.columns.some((c) => c.origField && c.origField !== c.field.trim())
-    );
+    return this.fieldRenames().length > 0;
   }
 
   override render() {
@@ -630,6 +732,17 @@ export class NewTableDialog extends LitElement {
                 @input=${(e: Event) => (this.tableTitle = (e.target as HTMLInputElement).value)}
               />
             </label>
+            <label class="inline">
+              <input
+                type="checkbox"
+                data-testid="table-readonly"
+                .checked=${this.tableReadonly}
+                @change=${(e: Event) =>
+                  (this.tableReadonly = (e.target as HTMLInputElement).checked)}
+              />
+              Read-only
+              <span style="color:#9ca3af">(show values, no editing or add/delete row)</span>
+            </label>
 
             <div class="columns">
               <div class="col-header">
@@ -643,6 +756,8 @@ export class NewTableDialog extends LitElement {
                 <span class="flag-label" title="Unique">U</span>
                 <span class="flag-label" title="Not null">!</span>
                 <span class="flag-label" title="Visible">👁</span>
+                <span class="flag-label" title="Sortable">⇅</span>
+                <span class="flag-label" title="Filterable (includes search)">⚲</span>
                 <span></span>
                 <span></span>
                 <span></span>
@@ -757,6 +872,28 @@ export class NewTableDialog extends LitElement {
                           this.patchColumn(i, { hidden: !(e.target as HTMLInputElement).checked })}
                       />
                     </span>
+                    <span class="flag">
+                      <input
+                        type="checkbox"
+                        title="Sortable — uncheck to disable sorting on this column"
+                        .checked=${c.sortable !== false}
+                        @change=${(e: Event) =>
+                          this.patchColumn(i, {
+                            sortable: (e.target as HTMLInputElement).checked ? undefined : false,
+                          })}
+                      />
+                    </span>
+                    <span class="flag">
+                      <input
+                        type="checkbox"
+                        title="Filterable — uncheck to disable filtering and search on this column"
+                        .checked=${c.filterable !== false}
+                        @change=${(e: Event) =>
+                          this.patchColumn(i, {
+                            filterable: (e.target as HTMLInputElement).checked ? undefined : false,
+                          })}
+                      />
+                    </span>
                     <button
                       type="button"
                       class="icon-btn"
@@ -789,11 +926,20 @@ export class NewTableDialog extends LitElement {
             </div>
 
             <button type="button" class="add" @click=${this.addColumn}>+ Add column</button>
+            ${this.columnActions.map(
+              (a) => html`<button
+                type="button"
+                class="add"
+                title=${a.tooltip ?? a.label}
+                @click=${() => void this.runColumnAction(a)}
+              >
+                ${a.label}
+              </button>`,
+            )}
 
             ${this.renameDetected()
               ? html`<div class="hint">
-                  Renamed fields will appear empty for existing rows — the row data isn't migrated
-                  automatically.
+                  Existing rows are re-keyed on save, so renamed fields keep their data.
                 </div>`
               : ''}
             ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''}
@@ -886,8 +1032,6 @@ function scanConstraintViolations(specs: ColumnSpec[], rows: Row[]): string[] {
   }
   return out;
 }
-
-
 
 declare global {
   interface HTMLElementTagNameMap {
