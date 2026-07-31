@@ -22,7 +22,10 @@ export interface ProjectionCandidate {
 }
 
 export interface ProjectionDialogOpts {
+  /** Tables offered as JOIN sources (excludes the base). */
   candidates: ProjectionCandidate[];
+  /** New mode: the fixed base (first source) — the table the editor launched from. */
+  base?: ProjectionCandidate | undefined;
   /** Edit mode: prefill from an existing projection. */
   initial?: { name: string; spec: ProjectionSpec } | undefined;
   /** Persist the projection; throw to keep the dialog open with an inline error. */
@@ -155,13 +158,16 @@ export class ProjectionDialog extends LitElement {
     this.onSave = opts.onSave;
     this.error = '';
     this.editing = !!opts.initial;
-    if (opts.initial) this.loadFrom(opts.initial.name, opts.initial.spec);
-    else {
-      this.name = '';
-      this.sources = [];
-      this.columns = [];
-      // Seed the base source with the first candidate, if any.
-      if (this.candidates[0]) this.addSource(this.candidates[0].id);
+    this.name = '';
+    this.sources = [];
+    this.columns = [];
+    if (opts.initial) {
+      this.loadFrom(opts.initial.name, opts.initial.spec);
+    } else if (opts.base) {
+      // The base table is fixed (it's the table the button launched from); seed
+      // it as source 0. The user only picks join tables from `candidates`.
+      this.name = `${opts.base.name} view`;
+      this.addCandidateAsSource(opts.base);
     }
     void this.updateComplete.then(() => this.dialogEl?.showModal());
   }
@@ -197,7 +203,10 @@ export class ProjectionDialog extends LitElement {
 
   private addSource(tableId: string): void {
     const cand = this.candidates.find((c) => c.id === tableId);
-    if (!cand) return;
+    if (cand) this.addCandidateAsSource(cand);
+  }
+
+  private addCandidateAsSource(cand: ProjectionCandidate): void {
     const alias = this.nextAlias();
     const isBase = this.sources.length === 0;
     const src: EdSource = {

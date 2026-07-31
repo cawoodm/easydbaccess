@@ -98,7 +98,9 @@ test.describe('projections', () => {
     await addRow(page, soloId, { name: 'only-row' });
     await waitForPanel(page, soloId);
 
-    await page.getByRole('button', { name: 'New Projection' }).click();
+    // New Projection is a per-table footer button: launching it from Solo makes
+    // Solo the base, so no source picking is needed for a single-source view.
+    await page.locator(`#${panelDomId(soloId)}`).getByRole('button', { name: 'New Projection' }).click();
 
     const dialog = page.locator('projection-dialog');
     await expect(dialog.locator('dialog')).toBeVisible();
