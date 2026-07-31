@@ -775,6 +775,9 @@ function normalizeColumn(c: unknown): ColumnSpec {
   };
   if (renderer) spec.renderer = renderer;
   if (typeof o.script === 'string') spec.script = o.script;
+  // Preserve the read-only flag so a dumped Projection's computed / joined
+  // columns come back non-editable (dump-export writes the whole column).
+  if (o.readonly === true) spec.readonly = true;
   return spec;
 }
 

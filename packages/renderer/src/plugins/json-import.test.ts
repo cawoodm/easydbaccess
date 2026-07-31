@@ -453,3 +453,27 @@ describe('isWorkspaceDump', () => {
     expect(isWorkspaceDump({ name: 'T', columns: [] })).toBe(false);
   });
 });
+
+describe('parsedToTables: native table columns', () => {
+  it('preserves renderer, script, and the readonly flag (Projection round-trip)', () => {
+    const dump = {
+      tables: [
+        {
+          name: 'Staff',
+          columns: [
+            { field: 'name', label: 'Name', type: 'string' },
+            { field: 'dept', label: 'Dept', type: 'string', readonly: true },
+            { field: 'greeting', label: 'Greeting', type: 'string', script: 'function render(r){return r.name;}' },
+          ],
+          rows: [],
+          source: { type: 'projection', config: { version: 1, sources: [], columns: [] } },
+        },
+      ],
+    };
+    const [t] = parsedToTables(dump, 'fallback');
+    expect(t?.columns[0]).toEqual({ field: 'name', label: 'Name', type: 'string' });
+    expect(t?.columns[1]?.readonly).toBe(true);
+    expect(t?.columns[2]?.script).toContain('render');
+    expect(t?.source?.type).toBe('projection');
+  });
+});
