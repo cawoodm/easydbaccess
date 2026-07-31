@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectionSpec, Row } from '@easydb/shared';
-import { computeProjection, resolveWritability, writebackTarget } from './projection-compute.js';
+import {
+  computeProjection,
+  guessJoinKeys,
+  resolveWritability,
+  writebackTarget,
+} from './projection-compute.js';
 
 const row = (id: string, data: Record<string, unknown>, updatedAt = 1): Row => ({
   id,
@@ -98,6 +103,37 @@ describe('computeProjection', () => {
       columns: [{ field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'a', field: 'name' } }],
     };
     expect(computeProjection(spec, {})).toEqual([]);
+  });
+});
+
+describe('guessJoinKeys', () => {
+  it('matches the FK convention: new table id = earlier <table>Id', () => {
+    expect(
+      guessJoinKeys({ tableName: 'Dept', fields: ['id', 'label', 'budget'] }, [
+        { alias: 'p', tableName: 'People', fields: ['name', 'deptId'] },
+      ]),
+    ).toEqual({ thisField: 'id', otherAlias: 'p', otherField: 'deptId' });
+  });
+
+  it('matches a shared foreign-key-shaped column on both sides', () => {
+    expect(
+      guessJoinKeys({ tableName: 'Orders', fields: ['id', 'customerId', 'total'] }, [
+        { alias: 'c', tableName: 'Customers', fields: ['customerId', 'name'] },
+      ]),
+    ).toEqual({ thisField: 'customerId', otherAlias: 'c', otherField: 'customerId' });
+  });
+
+  it('does not guess on a bare id = id, nor when nothing matches', () => {
+    expect(
+      guessJoinKeys({ tableName: 'A', fields: ['id', 'x'] }, [
+        { alias: 'b', tableName: 'B', fields: ['id', 'y'] },
+      ]),
+    ).toBeNull();
+    expect(
+      guessJoinKeys({ tableName: 'A', fields: ['foo'] }, [
+        { alias: 'b', tableName: 'B', fields: ['bar'] },
+      ]),
+    ).toBeNull();
   });
 });
 

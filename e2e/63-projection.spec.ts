@@ -127,4 +127,45 @@ test.describe('projections', () => {
       )
       .toEqual([{ name: 'only-row' }]);
   });
+
+  test('adding a join preselects sensible keys, so the join works without picking fields', async ({
+    page,
+  }) => {
+    // Create Dept first, People last, so People's panel is on top and its
+    // footer button isn't covered by another window.
+    const deptId = await createTable(page, 'Dept', [{ field: 'id' }, { field: 'label' }]);
+    await bulkAddRows(page, deptId, [{ id: 'd1', label: 'Sales' }]);
+    const peopleId = await createTable(page, 'People', [{ field: 'name' }, { field: 'deptId' }]);
+    await bulkAddRows(page, peopleId, [{ name: 'Alice', deptId: 'd1' }]);
+    await waitForPanel(page, peopleId);
+
+    // Launch from People (the base), add Dept as a join, and Save WITHOUT ever
+    // touching the join-key selects — the heuristic must have preselected them
+    // (People.deptId = Dept.id), or buildSpec would reject the blank keys.
+    await page.locator(`#${panelDomId(peopleId)}`).getByRole('button', { name: 'New Projection' }).click();
+    const dialog = page.locator('projection-dialog');
+    await expect(dialog.locator('dialog')).toBeVisible();
+    await dialog.locator('#add-src').selectOption({ label: 'Dept' });
+    await dialog.getByRole('button', { name: '+ Join table' }).click();
+    await dialog.locator('input').first().fill('Staff');
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ctx = (window as any).__easydb;
+          const all = await ctx.store.tables.find({ workspaceId: ctx.workspaceId });
+          const p = all.find(
+            (t: { source?: { type?: string }; name: string }) =>
+              t.source?.type === 'projection' && t.name === 'Staff',
+          );
+          if (!p) return null;
+          const rows = await ctx.store.rows(p.id).find();
+          return rows.map((r: { data: Record<string, unknown> }) => r.data);
+        }),
+      )
+      // The join resolved Alice → Sales purely from the preselected keys.
+      .toEqual([expect.objectContaining({ name: 'Alice', label: 'Sales' })]);
+  });
 });

@@ -13,6 +13,7 @@ import { customElement, state } from 'lit/decorators.js';
 import type { ColumnSpec, ColumnType, ProjectionSpec } from '@easydb/shared';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
+import { guessJoinKeys } from '../plugins/projection-compute.js';
 
 /** A table the projection can draw from. */
 export interface ProjectionCandidate {
@@ -209,12 +210,31 @@ export class ProjectionDialog extends LitElement {
   private addCandidateAsSource(cand: ProjectionCandidate): void {
     const alias = this.nextAlias();
     const isBase = this.sources.length === 0;
+    let join: EdJoin | undefined;
+    if (!isBase) {
+      // Preselect the join keys from field-name heuristics (FK conventions,
+      // shared xId columns) so the user usually just confirms rather than picks.
+      const guess = guessJoinKeys(
+        { tableName: cand.name, fields: cand.columns.map((c) => c.field) },
+        this.sources.map((s) => ({
+          alias: s.alias,
+          tableName: s.tableName,
+          fields: s.columns.map((c) => c.field),
+        })),
+      );
+      join = {
+        type: 'left',
+        thisField: guess?.thisField ?? cand.columns[0]?.field ?? '',
+        otherAlias: guess?.otherAlias ?? this.sources[0]?.alias ?? '',
+        otherField: guess?.otherField ?? '',
+      };
+    }
     const src: EdSource = {
       alias,
       tableId: cand.id,
       tableName: cand.name,
       columns: cand.columns,
-      ...(isBase ? {} : { join: { type: 'left', thisField: cand.columns[0]?.field ?? '', otherAlias: this.sources[0]?.alias ?? '', otherField: '' } }),
+      ...(join ? { join } : {}),
     };
     this.sources = [...this.sources, src];
     // Add this source's columns to the selection (included by default).

@@ -134,6 +134,79 @@ export function resolveWritability(spec: ProjectionSpec): Set<string> {
   return writable;
 }
 
+// -- Join-key guessing (editor convenience) -------------------------------
+
+/** One already-introduced source, for scoring a new source's join against it. */
+export interface JoinColumnsRef {
+  alias: string;
+  tableName: string;
+  fields: string[];
+}
+
+/** A preselected equijoin: this new source's `thisField` = `otherAlias`.`otherField`. */
+export interface GuessedJoin {
+  thisField: string;
+  otherAlias: string;
+  otherField: string;
+}
+
+const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+const singular = (s: string): string => (s.endsWith('s') && s.length > 1 ? s.slice(0, -1) : s);
+
+/**
+ * Score how likely two fields form a join key (0 = no signal). Recognises:
+ *  - a shared foreign-key-shaped column on both sides (`customerId` = `customerId`),
+ *  - the classic FK convention: one side `id`, the other `<thatTable>Id`
+ *    (`Dept.id` = `People.deptId`).
+ * A bare `id` = `id` scores 0 — joining unrelated tables on `id` is almost
+ * always wrong, so we would rather not preselect it.
+ */
+function scoreJoinPair(nf: string, nTable: string, ef: string, eTable: string): number {
+  const n = norm(nf);
+  const e = norm(ef);
+  if (!n || !e) return 0;
+  if (n === e) {
+    if (n === 'id') return 0;
+    return n.endsWith('id') ? 9 : 7; // shared "customerId" strong; shared "name" plausible
+  }
+  // fk(idField, idTable, fkField): idField is a table's `id`, fkField a
+  // `<idTable>Id`-shaped reference to it on the other side.
+  const fk = (idField: string, idTable: string, fkField: string): number => {
+    if (idField !== 'id') return 0;
+    if (!fkField.endsWith('id') || fkField.length <= 2) return 0;
+    const prefix = fkField.slice(0, -2); // "deptid" -> "dept"
+    const t = norm(idTable);
+    if (prefix === t || prefix === singular(t) || singular(prefix) === singular(t)) return 9;
+    return 5; // "somethingId" vs "id" with no table-name match — weaker
+  };
+  return Math.max(fk(n, nTable, e), fk(e, eTable, n));
+}
+
+/**
+ * Guess the equijoin keys for a newly-added source against the already-chosen
+ * ones, so the editor preselects sensible fields instead of blanks. Returns the
+ * highest-scoring pair, or null when nothing looks like a key.
+ */
+export function guessJoinKeys(
+  newSource: { tableName: string; fields: string[] },
+  earlierSources: JoinColumnsRef[],
+): GuessedJoin | null {
+  let best: GuessedJoin | null = null;
+  let bestScore = 0;
+  for (const es of earlierSources) {
+    for (const nf of newSource.fields) {
+      for (const ef of es.fields) {
+        const s = scoreJoinPair(nf, newSource.tableName, ef, es.tableName);
+        if (s > bestScore) {
+          bestScore = s;
+          best = { thisField: nf, otherAlias: es.alias, otherField: ef };
+        }
+      }
+    }
+  }
+  return best;
+}
+
 /** Where a base-source cell edit is written, or null when the column is read-only. */
 export interface WritebackTarget {
   /** Base source row id (parsed from the `${baseRowId}#${ordinal}` output id). */
