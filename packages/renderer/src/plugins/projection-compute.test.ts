@@ -215,6 +215,20 @@ describe('inheritColumns', () => {
     expect(inheritColumns(spec, sources, existing).find((c) => c.field === 'dept')?.readonly).toBe(true);
   });
 
+  it('keeps the table’s existing column ORDER and appends new ones', () => {
+    // The user dragged `dept` in front of `name` in the grid; re-saving the join
+    // must not shuffle it back to spec order.
+    const existing = [
+      { field: 'dept', label: 'Dept', type: 'string' as const },
+      { field: 'name', label: 'Full name', type: 'string' as const },
+    ];
+    expect(inheritColumns(spec, sources, existing).map((c) => c.field)).toEqual([
+      'dept',
+      'name',
+      'calc', // newly selected, appended
+    ]);
+  });
+
   it('honours a column deleted with the column editor', () => {
     const cols = inheritColumns(spec, sources, [], ['dept']);
     expect(cols.map((c) => c.field)).toEqual(['name', 'calc']);

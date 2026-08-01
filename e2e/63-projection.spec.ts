@@ -130,6 +130,51 @@ test.describe('projections', () => {
     await expect(page.locator('projection-dialog dialog')).toBeVisible();
   });
 
+  test('Edit Join offers source fields the projection left out, and adding one inherits its settings', async ({
+    page,
+  }) => {
+    const peopleId = await createTable(page, 'People', [{ field: 'name' }, { field: 'deptId' }]);
+    const deptId = await createTable(page, 'Dept', [{ field: 'id' }, { field: 'label' }]);
+    await bulkAddRows(page, peopleId, [{ name: 'Bob', deptId: 'd1' }]);
+    await bulkAddRows(page, deptId, [{ id: 'd1', label: 'Sales' }]);
+    // Give Dept's `id` a distinctive setting to prove inheritance on add.
+    await page.evaluate(async (id) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      const t = await ctx.store.tables.findOne(id);
+      await ctx.store.tables.patch(id, {
+        columns: t.columns.map((c: { field: string }) =>
+          c.field === 'id' ? { ...c, label: 'Dept code', renderer: 'link', width: 175 } : c,
+        ),
+        updatedAt: Date.now(),
+      });
+    }, deptId);
+
+    // The projection selects People.name and Dept.label — NOT Dept.id.
+    const projId = await createProjection(page, peopleId, deptId);
+    await waitForPanel(page, projId);
+    await page.locator(`#${panelDomId(projId)}`).getByRole('button', { name: 'Edit Join' }).click();
+    const dialog = page.locator('projection-dialog');
+    await expect(dialog.locator('dialog')).toBeVisible();
+
+    // Every source field is offered, including the unselected `id` and `deptId`.
+    const unticked = dialog.locator('label.tick input:not(:checked)');
+    await expect(unticked).toHaveCount(2);
+    // Exact match: a substring "id" would also hit People's "deptId" pill.
+    await dialog.locator('label.tick:has(.tick-name:text-is("id"))').locator('input').check();
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+
+    // The added column arrives with the source column's own settings copied.
+    await expect
+      .poll(async () => {
+        const t = (await readTable(page, projId)) as {
+          columns: Array<{ field: string; label: string; renderer?: string; width?: number }>;
+        };
+        return t.columns.find((c) => c.label === 'Dept code') ?? null;
+      })
+      .toMatchObject({ label: 'Dept code', renderer: 'link', width: 175 });
+  });
+
   test('the New Projection button creates a working projection through the editor', async ({
     page,
   }) => {

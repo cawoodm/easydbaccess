@@ -65,6 +65,74 @@ describe('specToEditor → editorToSpec round-trip', () => {
   });
 });
 
+describe('specToEditor offers every source field', () => {
+  /** A spec that selects only ONE of People's two fields. */
+  const partial: ProjectionSpec = {
+    version: 1,
+    sources: [{ alias: 'p', tableName: 'People', tableId: 'p1' }],
+    columns: [{ field: 'name', from: { kind: 'source', alias: 'p', field: 'name' } }],
+  };
+
+  it('lists unselected source fields as unticked, so they can be added later', () => {
+    const model = specToEditor('X', partial, [people]);
+    expect(model.columns.map((c) => [c.field, c.include])).toEqual([
+      ['name', true],
+      ['deptId', false], // was never in the projection — now offered
+    ]);
+  });
+
+  it('offers a field the source table gained after the projection was made', () => {
+    const grown: ProjectionCandidate = {
+      ...people,
+      columns: [...people.columns, { field: 'email', label: 'Email', type: 'string' }],
+    };
+    const model = specToEditor('X', partial, [grown]);
+    expect(model.columns.find((c) => c.field === 'email')).toMatchObject({ include: false });
+  });
+
+  it('adds nothing to the spec until one is ticked', () => {
+    // Loading and saving untouched must not silently widen the projection.
+    const untouched = editorToSpec(specToEditor('X', partial, [people]));
+    expect(untouched.ok).toBe(true);
+    if (!untouched.ok) return;
+    expect(untouched.spec.columns).toEqual(partial.columns);
+
+    const model = specToEditor('X', partial, [people]);
+    const ticked = editorToSpec({
+      ...model,
+      columns: model.columns.map((c) => (c.field === 'deptId' ? { ...c, include: true } : c)),
+    });
+    expect(ticked.ok).toBe(true);
+    if (!ticked.ok) return;
+    expect(ticked.spec.columns.map((c) => c.field)).toEqual(['name', 'deptid']);
+  });
+
+  it('keeps a selected column visible when its source field has vanished', () => {
+    const gone: ProjectionCandidate = { id: 'p1', name: 'People', columns: [] };
+    const model = specToEditor('X', partial, [gone]);
+    expect(model.columns).toHaveLength(1);
+    expect(model.columns[0]).toMatchObject({ field: 'name', include: true });
+  });
+
+  it('offers each copy of a repeated table separately', () => {
+    const spec: ProjectionSpec = {
+      version: 1,
+      sources: [
+        { alias: 'a', tableName: 'People', tableId: 'p1' },
+        { alias: 'b', tableName: 'People', tableId: 'p1', join: { type: 'left', on: [{ field: 'name', eqAlias: 'a', eqField: 'name' }] } },
+      ],
+      columns: [{ field: 'name', from: { kind: 'source', alias: 'a', field: 'name' } }],
+    };
+    const model = specToEditor('X', spec, [people]);
+    expect(model.columns.map((c) => [c.alias, c.field, c.include])).toEqual([
+      ['a', 'name', true],
+      ['a', 'deptId', false],
+      ['b', 'name', false],
+      ['b', 'deptId', false],
+    ]);
+  });
+});
+
 describe('editorToSpec: output field names', () => {
   it('keeps an existing output field verbatim across an edit', () => {
     // The table's ColumnSpec, filters, sort and any View template are keyed by

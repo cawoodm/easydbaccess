@@ -136,12 +136,45 @@ export function specToEditor(
     return src;
   });
 
-  const columns: EdColumn[] = spec.columns.map((c) => {
+  const fromSpec: EdColumn[] = spec.columns.map((c) => {
     const base = { include: true, outField: c.field, label: c.label ?? c.field };
     return c.from.kind === 'source'
       ? { ...base, alias: c.from.alias, field: c.from.field, computed: false }
       : { ...base, script: c.from.script, computed: true };
   });
+
+  // Offer EVERY field of every source, not just the ones already selected —
+  // otherwise a column left out at creation (or added to the source table since)
+  // could never be picked up again. Selected ones keep their `outField`; the rest
+  // come in unticked, ready to be added.
+  const columns: EdColumn[] = [];
+  const claimed = new Set<EdColumn>();
+  sources.forEach((s, i) => {
+    const repeat = sources.slice(0, i).filter((o) => o.tableName === s.tableName).length;
+    for (const col of s.columns) {
+      const mine = fromSpec.filter(
+        (c) => !c.computed && c.alias === s.alias && c.field === col.field && !claimed.has(c),
+      );
+      if (mine.length > 0) {
+        for (const m of mine) {
+          claimed.add(m);
+          columns.push(m);
+        }
+      } else {
+        columns.push({
+          include: false,
+          alias: s.alias,
+          field: col.field,
+          computed: false,
+          label: repeat > 0 ? `${col.label} (${s.alias})` : col.label,
+        });
+      }
+    }
+  });
+  // A selected column whose source no longer offers that field (renamed away, or
+  // an unresolvable source) still has to be visible so it can be un-ticked.
+  for (const c of fromSpec) if (!c.computed && !claimed.has(c)) columns.push(c);
+  for (const c of fromSpec) if (c.computed) columns.push(c);
 
   return { name, sources, columns, original: spec };
 }

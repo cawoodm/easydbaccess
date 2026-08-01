@@ -172,10 +172,22 @@ export function inheritColumns(
   const writable = resolveWritability(spec);
   const byField = new Map(existing.map((c) => [c.field, c] as const));
   const deleted = new Set(deletedColumns);
-  const out: ColumnSpec[] = [];
 
+  // Keep the ORDER the table already has — columns are drag-reorderable in the
+  // grid, and re-saving the join must not shuffle them back. Newly-selected
+  // columns are appended in spec order.
+  const specByField = new Map<string, ProjectionColumn>();
   for (const c of spec.columns) {
-    if (deleted.has(c.field)) continue; // removed with the column editor
+    if (!deleted.has(c.field) && !specByField.has(c.field)) specByField.set(c.field, c);
+  }
+  const order: string[] = [];
+  for (const e of existing) if (specByField.has(e.field) && !order.includes(e.field)) order.push(e.field);
+  for (const f of specByField.keys()) if (!order.includes(f)) order.push(f);
+
+  const out: ColumnSpec[] = [];
+  for (const field of order) {
+    const c = specByField.get(field);
+    if (!c) continue;
     const kept = byField.get(c.field);
     let col: ColumnSpec;
     if (kept) {
