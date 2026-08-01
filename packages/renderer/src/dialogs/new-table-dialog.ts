@@ -571,7 +571,11 @@ export class NewTableDialog extends LitElement {
       // and the old value lingers under the stale key forever. Apply renames
       // before purges so a renamed-then-purged field can never collide.
       const renames = this.fieldRenames();
-      if (purgeFields.length > 0 || renames.length > 0) {
+      // Only LOCAL rows can be rewritten. A source-backed table's rows are
+      // derived or remote (a projection computes them; Datasette owns them), so
+      // there is nothing here to re-key — and attempting it would throw from a
+      // read-only row collection and abort the rest of the save.
+      if (!existingTable?.source && (purgeFields.length > 0 || renames.length > 0)) {
         const rows = await ctx.store.rows(tableId).find();
         for (const r of rows) {
           let touched = false;

@@ -16,7 +16,7 @@
 
 import type { ColumnSpec, HostApi, PluginModule, ProjectionSpec, Table } from '@easydb/shared';
 import { cryptoUUID, slugTable } from '../util/ids.js';
-import { presentationFromBase, resolveWritability } from './projection-compute.js';
+import { inheritColumns, presentationFromBase, resolveWritability } from './projection-compute.js';
 import { createProjectionCollection } from './projection-collection.js';
 import '../dialogs/projection-dialog.js';
 import { ProjectionDialog, type ProjectionCandidate } from '../dialogs/projection-dialog.js';
@@ -52,32 +52,41 @@ export function init(api: HostApi): void {
     onClick: (a, { tableId }) => void openProjectionEditor(a, { baseTableId: tableId }),
   });
 
+  // A projection window gets its OWN footer button for the join — the ordinary
+  // "Edit columns" button next to it opens the normal column editor, because a
+  // projection's columns behave like any table's once inherited.
   api.ui.registerTableButton({
     id: 'projection:edit',
-    label: 'Edit Projection',
-    icon: 'table_view',
-    tooltip: 'Edit this projection’s sources and columns',
+    label: 'Edit Join',
+    icon: 'call_merge',
+    tooltip: 'Edit this projection’s sources, joins and which columns it includes',
     visible: (table) => table.source?.type === 'projection',
     onClick: (a, { tableId }) => void openProjectionEditor(a, { editTableId: tableId }),
   });
-
-  // The panel footer's "Edit columns" reroutes here for projection tables.
-  document.addEventListener('easydb:edit-projection', (e) => {
-    const id = (e as CustomEvent<{ tableId: string }>).detail?.tableId;
-    if (id) void openProjectionEditor(api, { editTableId: id });
-  });
 }
 
-/** Compile a spec into the Table's stored `columns` (script/hidden/readonly flags). */
-function compileColumns(spec: ProjectionSpec): ColumnSpec[] {
-  const writable = resolveWritability(spec);
-  return spec.columns.map((c) => {
-    const col: ColumnSpec = { field: c.field, label: c.label, type: c.type };
-    if (c.from.kind === 'script') col.script = c.from.script;
-    if (c.hidden) col.hidden = true;
-    if (!writable.has(c.field)) col.readonly = true;
-    return col;
-  });
+/**
+ * The projection table's `columns`: each one's settings are inherited from the
+ * source table the first time it appears, and are the user's from then on (see
+ * `inheritColumns`). Resolves each source by name so the freshest column
+ * definitions are copied.
+ */
+async function columnsForSpec(
+  api: HostApi,
+  workspaceId: string,
+  spec: ProjectionSpec,
+  existing: ColumnSpec[],
+  deletedColumns: string[],
+): Promise<ColumnSpec[]> {
+  const all = await api.store.tables.find({ workspaceId });
+  const byName = new Map<string, Table>();
+  for (const t of all) if (!byName.has(t.name)) byName.set(t.name, t);
+  const sourceColumnsByAlias: Record<string, ColumnSpec[]> = {};
+  for (const s of spec.sources) {
+    const hinted = s.tableId ? all.find((t) => t.id === s.tableId && t.name === s.tableName) : undefined;
+    sourceColumnsByAlias[s.alias] = (hinted ?? byName.get(s.tableName))?.columns ?? [];
+  }
+  return inheritColumns(spec, sourceColumnsByAlias, existing, deletedColumns);
 }
 
 /**
@@ -132,7 +141,13 @@ function makeOnSave(
   base?: Table,
 ): (name: string, spec: ProjectionSpec) => Promise<void> {
   return async (name, spec) => {
-    const columns = compileColumns(spec);
+    const columns = await columnsForSpec(
+      api,
+      workspaceId,
+      spec,
+      editing?.columns ?? [],
+      editing?.deletedColumns ?? [],
+    );
     const tableReadonly = resolveWritability(spec).size === 0;
     const source: Table['source'] = {
       type: 'projection',

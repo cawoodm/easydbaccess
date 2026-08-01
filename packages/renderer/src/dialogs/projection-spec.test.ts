@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectionSpec } from '@easydb/shared';
 import {
+  addComputedToModel,
   addSourceToModel,
   editorToSpec,
   removeSourceFromModel,
@@ -35,9 +36,10 @@ const richSpec: ProjectionSpec = {
       },
     },
   ],
+  // The spec carries only the mapping; presentation lives on the table.
   columns: [
-    { field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'p', field: 'name' } },
-    { field: 'dept', label: 'Dept', type: 'string', from: { kind: 'source', alias: 'd', field: 'label' } },
+    { field: 'name', from: { kind: 'source', alias: 'p', field: 'name' } },
+    { field: 'dept', from: { kind: 'source', alias: 'd', field: 'label' } },
   ],
   filters: { name: 'Al' },
 };
@@ -64,25 +66,36 @@ describe('specToEditor → editorToSpec round-trip', () => {
 });
 
 describe('editorToSpec: output field names', () => {
-  it('keeps the existing output field when a label is renamed', () => {
+  it('keeps an existing output field verbatim across an edit', () => {
+    // The table's ColumnSpec, filters, sort and any View template are keyed by
+    // the output field, so it must survive re-saving the join untouched.
     const model = specToEditor('X', richSpec, [people, dept]);
-    const columns = model.columns.map((c) => (c.label === 'Name' ? { ...c, label: 'Full Name' } : c));
-    const built = editorToSpec({ ...model, columns });
+    const built = editorToSpec(model);
     expect(built.ok).toBe(true);
     if (!built.ok) return;
-    const col = built.spec.columns[0];
-    // Downstream state (width / hidden / sort / filters / views) is keyed by
-    // `field`, so only the label may change.
-    expect(col?.field).toBe('name');
-    expect(col?.label).toBe('Full Name');
+    expect(built.spec.columns.map((c) => c.field)).toEqual(['name', 'dept']);
   });
 
-  it('mints a slug for a genuinely new column', () => {
+  it('names a new column after its SOURCE field, and carries no presentation', () => {
     const model = addSourceToModel({ name: 'X', sources: [], columns: [] }, people);
     const built = editorToSpec(model);
     expect(built.ok).toBe(true);
     if (!built.ok) return;
     expect(built.spec.columns.map((c) => c.field)).toEqual(['name', 'deptid']);
+    // No label/type/hidden — those are inherited onto the table's own columns.
+    expect(built.spec.columns[0]).toEqual({
+      field: 'name',
+      from: { kind: 'source', alias: 'a', field: 'name' },
+    });
+  });
+
+  it('names computed columns without needing a label', () => {
+    let model = addSourceToModel({ name: 'X', sources: [], columns: [] }, people);
+    model = addComputedToModel(addComputedToModel(model));
+    const built = editorToSpec(model);
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.spec.columns.slice(-2).map((c) => c.field)).toEqual(['computed', 'computed_2']);
   });
 });
 
@@ -130,8 +143,11 @@ describe('joining the same table more than once', () => {
     const built = editorToSpec(build());
     expect(built.ok).toBe(true);
     if (!built.ok) return;
-    const titles = built.spec.columns.filter((c) => c.label.startsWith('Title'));
-    expect(titles.map((c) => c.label)).toEqual(['Title', 'Title (c)']);
+    // Picker labels disambiguate the repeat; the spec itself carries only fields.
+    const labels = build()
+      .columns.filter((c) => c.field === 'title')
+      .map((c) => c.label);
+    expect(labels).toEqual(['Title', 'Title (c)']);
     // Output field names stay unique too, so downstream state cannot collide.
     expect(new Set(built.spec.columns.map((c) => c.field)).size).toBe(built.spec.columns.length);
   });
@@ -140,57 +156,6 @@ describe('joining the same table more than once', () => {
     const pruned = removeSourceFromModel(build(), 'b');
     expect(pruned.sources.map((s) => s.alias)).toEqual(['a', 'c']);
     expect(editorToSpec(pruned).ok).toBe(true);
-  });
-});
-
-describe('hidden columns', () => {
-  it('copies a hidden source column into the projection as hidden', () => {
-    const withHidden: ProjectionCandidate = {
-      id: 'p1',
-      name: 'People',
-      columns: [
-        { field: 'name', label: 'name', type: 'string' },
-        { field: 'secret', label: 'secret', type: 'string', hidden: true },
-      ],
-    };
-    const built = editorToSpec(addSourceToModel({ name: 'X', sources: [], columns: [] }, withHidden));
-    expect(built.ok).toBe(true);
-    if (!built.ok) return;
-    // Both columns are present; only the hidden one is flagged.
-    expect(built.spec.columns.map((c) => [c.field, c.hidden ?? false])).toEqual([
-      ['name', false],
-      ['secret', true],
-    ]);
-  });
-
-  it('hides rowid even when the source table still shows it', () => {
-    // A Datasette table imported before rowid was hidden at the source.
-    const legacy: ProjectionCandidate = {
-      id: 'd9',
-      name: 'Legacy',
-      columns: [
-        { field: 'rowid', label: 'Rowid', type: 'number' },
-        { field: 'title', label: 'Title', type: 'string' },
-      ],
-    };
-    const built = editorToSpec(addSourceToModel({ name: 'X', sources: [], columns: [] }, legacy));
-    expect(built.ok).toBe(true);
-    if (!built.ok) return;
-    expect(built.spec.columns.find((c) => c.field === 'rowid')?.hidden).toBe(true);
-    expect(built.spec.columns.find((c) => c.field === 'title')?.hidden).toBeUndefined();
-  });
-
-  it('survives an edit round-trip', () => {
-    const spec: ProjectionSpec = {
-      version: 1,
-      // `tableId` is the resolution hint the editor refreshes from the candidate.
-      sources: [{ alias: 'p', tableName: 'People', tableId: 'p1' }],
-      columns: [
-        { field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'p', field: 'name' } },
-        { field: 'rowid', label: 'Rowid', type: 'number', hidden: true, from: { kind: 'source', alias: 'p', field: 'rowid' } },
-      ],
-    };
-    expect(roundTrip(spec)).toEqual(spec);
   });
 });
 

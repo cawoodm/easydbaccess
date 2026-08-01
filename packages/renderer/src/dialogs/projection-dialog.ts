@@ -1,16 +1,21 @@
 // packages/renderer/src/dialogs/projection-dialog.ts
 //
-// Editor for a Projection (a virtual table / database view / JOIN). Builds a
-// `ProjectionSpec`: a base table, optional JOINs (inner/left, equijoin), and a
-// selected/renamed column list including optional computed (script) columns.
+// Editor for a Projection's STRUCTURE (a virtual table / database view / JOIN):
+// a base table, optional JOINs (inner/left, equijoin), which columns to include,
+// and the script behind any computed column.
+//
+// Deliberately NOT a column editor. Labels, types, renderers, widths and the
+// rest are inherited from the source table when a column first appears and are
+// then edited with the ordinary column editor, exactly as on any table — so this
+// dialog stays small and there is one place to learn.
 //
 // Pure UI: the candidate tables and an `onSave(name, spec)` callback are passed
-// in via `open()`, so the dialog imports no store — the projection plugin
-// compiles the spec into `Table.columns` and writes it.
+// in via `open()`, so the dialog imports no store — the projection plugin turns
+// the spec into the table's columns and writes it.
 
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import type { ColumnType, ProjectionSpec } from '@easydb/shared';
+import type { ProjectionSpec } from '@easydb/shared';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 import {
@@ -27,9 +32,6 @@ import {
 } from './projection-spec.js';
 
 export type { ProjectionCandidate };
-
-/** Offered in each column's type picker; drives coercion / sort / SQL typing. */
-const COLUMN_TYPES: ColumnType[] = ['string', 'number', 'date', 'datetime', 'boolean'];
 
 export interface ProjectionDialogOpts {
   /** Tables offered as JOIN sources (excludes the base). */
@@ -199,52 +201,71 @@ export class ProjectionDialog extends LitElement {
         letter-spacing: 0.04em;
       }
 
-      /* -- columns --------------------------------------------------------- */
-      .cols {
-        display: grid;
+      /* -- columns: a dense tick list per source --------------------------- */
+      .col-group {
+        display: flex;
+        flex-direction: column;
         gap: 0.3rem;
       }
-      .col-header,
-      .col-row {
-        display: grid;
-        grid-template-columns: 1.25rem minmax(0, 10rem) minmax(0, 1fr) 7rem 1.5rem;
-        gap: 0.45rem;
+      .group-head {
+        display: flex;
         align-items: center;
+        gap: 0.4rem;
+        font-size: 0.78rem;
+        color: #6b7280;
       }
-      .col-header {
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: #9ca3af;
-        padding-bottom: 0.15rem;
-        border-bottom: 1px solid #f3f4f6;
-        /* The body scrolls once a projection has a few sources, so keep the
-           column headings in view above the list. */
-        position: sticky;
-        top: -0.1rem;
-        background: white;
-        z-index: 1;
+      .group-name {
+        font-weight: 600;
+        color: #374151;
       }
-      .col-row input[type='checkbox'] {
+      button.link-btn {
+        background: none;
+        border: 0;
+        padding: 0;
+        font: inherit;
+        font-size: 0.75rem;
+        color: #2563eb;
+        cursor: pointer;
+        text-decoration: underline;
+      }
+      .ticks {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.25rem 0.4rem;
+      }
+      /* Each column is a compact pill, so a wide table costs a couple of rows
+         instead of one row per column. */
+      label.tick {
+        flex-direction: row;
+        align-items: center;
+        gap: 0.3rem;
+        font-size: 0.8rem;
+        color: #111827;
+        border: 1px solid #e5e7eb;
+        border-radius: 1rem;
+        padding: 0.1rem 0.5rem 0.1rem 0.35rem;
+        background: #f9fafb;
+        cursor: pointer;
+        max-width: 14rem;
+      }
+      label.tick:hover {
+        border-color: #cbd5e1;
+      }
+      label.tick input {
         margin: 0;
-        justify-self: center;
       }
-      /* An unselected column stays legible but visibly out of the projection. */
-      .col-row.excluded .src-ref,
-      .col-row.excluded input,
-      .col-row.excluded select {
-        opacity: 0.5;
-      }
-      .src-ref {
+      label.tick .tick-name {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 0.74rem;
-        color: #6b7280;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      label.tick.off {
+        opacity: 0.55;
+        background: transparent;
+      }
       .chip {
-        justify-self: start;
         font-size: 0.68rem;
         font-weight: 600;
         text-transform: uppercase;
@@ -254,13 +275,24 @@ export class ProjectionDialog extends LitElement {
         border-radius: 0.2rem;
         padding: 0.1rem 0.35rem;
       }
+      .computed-row {
+        display: grid;
+        grid-template-columns: 1.1rem minmax(0, 1fr) 1.3rem;
+        gap: 0.4rem;
+        align-items: start;
+      }
+      .computed-row.off {
+        opacity: 0.55;
+      }
+      .computed-row input[type='checkbox'] {
+        margin: 0.4rem 0 0;
+      }
       textarea.script {
-        grid-column: 2 / -1;
         width: 100%;
         box-sizing: border-box;
-        min-height: 3.4rem;
+        min-height: 2.9rem;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 0.76rem;
+        font-size: 0.75rem;
       }
 
       .err {
@@ -474,19 +506,12 @@ export class ProjectionDialog extends LitElement {
             <section>
               <div class="section-head">
                 <h3>Columns</h3>
-                <span class="hint">Tick the columns to include, and rename them freely.</span>
+                <span class="hint">
+                  Tick what the projection includes. Labels, types and formatting are
+                  inherited from the source and edited with “Edit columns”.
+                </span>
               </div>
-              <div class="cols">
-                <div class="col-header">
-                  <span></span><span>Source</span><span>Label</span><span>Type</span><span></span>
-                </div>
-                ${this.columns.map((c, i) => this.renderColumn(c, i))}
-              </div>
-              <div class="add-row">
-                <button type="button" class="ghost sm" @click=${() => this.addComputed()}>
-                  + Computed column
-                </button>
-              </div>
+              ${this.sources.map((s) => this.renderSourceColumns(s))} ${this.renderComputedColumns()}
             </section>
 
             <div class="err">${this.error}</div>
@@ -558,62 +583,97 @@ export class ProjectionDialog extends LitElement {
     `;
   }
 
-  private renderColumn(c: EdColumn, i: number) {
-    const set = (patch: Partial<EdColumn>) => {
-      this.columns = this.columns.map((x, j) => (j === i ? { ...x, ...patch } : x));
-    };
-    const label = c.label || c.field || 'column';
+  /** One source's columns as a dense wrapping row of tick-boxes. */
+  private renderSourceColumns(s: EdSource) {
+    const mine = this.columns
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => !c.computed && c.alias === s.alias);
+    if (mine.length === 0) return nothing;
+    const allOn = mine.every(({ c }) => c.include);
     return html`
-      <div class="col-row ${c.include ? '' : 'excluded'}">
-        <input
-          type="checkbox"
-          .checked=${c.include}
-          aria-label=${`Include ${label}`}
-          @change=${(e: Event) => set({ include: (e.target as HTMLInputElement).checked })}
-        />
-        ${c.computed
-          ? html`<span class="chip">computed</span>`
-          : html`<span class="src-ref" title=${`${c.alias}.${c.field}`}>
-              ${c.alias}.${c.field}
-            </span>`}
-        <input
-          .value=${c.label}
-          aria-label=${`Label for ${label}`}
-          @input=${(e: Event) => set({ label: (e.target as HTMLInputElement).value })}
-        />
-        <select
-          aria-label=${`Type of ${label}`}
-          .value=${c.type}
-          @change=${(e: Event) => set({ type: (e.target as HTMLSelectElement).value as ColumnType })}
-        >
-          ${COLUMN_TYPES.map(
-            (t) => html`<option value=${t} ?selected=${t === c.type}>${t}</option>`,
+      <div class="col-group">
+        <div class="group-head">
+          <code class="alias">${s.alias}</code>
+          <span class="group-name">${s.tableName}</span>
+          <button
+            type="button"
+            class="link-btn"
+            @click=${() => {
+              const want = !allOn;
+              const idx = new Set(mine.map(({ i }) => i));
+              this.columns = this.columns.map((c, j) =>
+                idx.has(j) ? { ...c, include: want } : c,
+              );
+            }}
+          >
+            ${allOn ? 'none' : 'all'}
+          </button>
+        </div>
+        <div class="ticks">
+          ${mine.map(
+            ({ c, i }) => html`
+              <label class="tick ${c.include ? '' : 'off'}" title=${`${c.alias}.${c.field}`}>
+                <input
+                  type="checkbox"
+                  .checked=${c.include}
+                  @change=${(e: Event) => this.setColumn(i, { include: (e.target as HTMLInputElement).checked })}
+                />
+                <span class="tick-name">${c.field}</span>
+              </label>
+            `,
           )}
-        </select>
-        ${c.computed
-          ? html`<button
-              type="button"
-              class="icon-btn"
-              title="Remove this computed column"
-              aria-label=${`Remove ${label}`}
-              @click=${() => {
-                this.columns = this.columns.filter((_, j) => j !== i);
-              }}
-            >
-              ×
-            </button>`
-          : html`<span></span>`}
-        ${c.computed
-          ? html`<textarea
-              class="script"
-              aria-label=${`Script for ${label}`}
-              spellcheck="false"
-              .value=${c.script ?? ''}
-              @input=${(e: Event) => set({ script: (e.target as HTMLTextAreaElement).value })}
-            ></textarea>`
-          : nothing}
+        </div>
       </div>
     `;
+  }
+
+  /** Computed columns: a tick, the script, and a remove — no naming here. */
+  private renderComputedColumns() {
+    const computed = this.columns.map((c, i) => ({ c, i })).filter(({ c }) => c.computed);
+    return html`
+      <div class="col-group">
+        <div class="group-head">
+          <span class="chip">computed</span>
+          <button type="button" class="link-btn" @click=${() => this.addComputed()}>+ add</button>
+        </div>
+        ${computed.length === 0
+          ? html`<span class="hint">None. A computed column derives its value from the row.</span>`
+          : computed.map(
+              ({ c, i }) => html`
+                <div class="computed-row ${c.include ? '' : 'off'}">
+                  <input
+                    type="checkbox"
+                    .checked=${c.include}
+                    aria-label="Include computed column"
+                    @change=${(e: Event) => this.setColumn(i, { include: (e.target as HTMLInputElement).checked })}
+                  />
+                  <textarea
+                    class="script"
+                    aria-label="Computed column script"
+                    spellcheck="false"
+                    .value=${c.script ?? ''}
+                    @input=${(e: Event) => this.setColumn(i, { script: (e.target as HTMLTextAreaElement).value })}
+                  ></textarea>
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    title="Remove this computed column"
+                    aria-label="Remove computed column"
+                    @click=${() => {
+                      this.columns = this.columns.filter((_, j) => j !== i);
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              `,
+            )}
+      </div>
+    `;
+  }
+
+  private setColumn(i: number, patch: Partial<EdColumn>): void {
+    this.columns = this.columns.map((x, j) => (j === i ? { ...x, ...patch } : x));
   }
 }
 

@@ -4,6 +4,7 @@ import {
   computeProjection,
   guessJoinKeys,
   hasProjectionCycle,
+  inheritColumns,
   presentationFromBase,
   resolveWritability,
   writebackTarget,
@@ -135,6 +136,109 @@ describe('computeProjection', () => {
       columns: [{ field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'a', field: 'name' } }],
     };
     expect(computeProjection(spec, {})).toEqual([]);
+  });
+});
+
+describe('inheritColumns', () => {
+  const spec: ProjectionSpec = {
+    version: 1,
+    sources: [
+      { alias: 'p', tableName: 'People' },
+      { alias: 'd', tableName: 'Dept', join: { type: 'left', on: [{ field: 'id', eqAlias: 'p', eqField: 'deptId' }] } },
+    ],
+    columns: [
+      { field: 'name', from: { kind: 'source', alias: 'p', field: 'name' } },
+      { field: 'dept', from: { kind: 'source', alias: 'd', field: 'label' } },
+      { field: 'calc', from: { kind: 'script', script: 'function render(r){return 1;}' } },
+    ],
+  };
+  const sources = {
+    p: [
+      // A fully-decorated source column: every setting must come along.
+      {
+        field: 'name',
+        label: 'Full name',
+        type: 'string' as const,
+        renderer: 'link',
+        width: 240,
+        description: 'Their name',
+        units: '',
+        max: 80,
+        notnull: true,
+        filterable: false,
+      },
+      { field: 'deptId', label: 'Dept ID', type: 'string' as const },
+    ],
+    d: [{ field: 'label', label: 'Department', type: 'string' as const, hidden: true, width: 120 }],
+  };
+
+  it('copies every setting from the source column, under the output field name', () => {
+    const [name] = inheritColumns(spec, sources);
+    expect(name).toEqual({
+      field: 'name', // the OUTPUT field, not the source's
+      label: 'Full name',
+      type: 'string',
+      renderer: 'link',
+      width: 240,
+      description: 'Their name',
+      units: '',
+      max: 80,
+      notnull: true,
+      filterable: false,
+    });
+  });
+
+  it('inherits a hidden source column as hidden', () => {
+    const dept = inheritColumns(spec, sources).find((c) => c.field === 'dept');
+    expect(dept?.hidden).toBe(true);
+    expect(dept?.width).toBe(120);
+  });
+
+  it('marks non-writable columns read-only and leaves the base column editable', () => {
+    const cols = inheritColumns(spec, sources);
+    expect(cols.find((c) => c.field === 'name')?.readonly).toBeUndefined();
+    expect(cols.find((c) => c.field === 'dept')?.readonly).toBe(true); // joined
+    expect(cols.find((c) => c.field === 'calc')?.readonly).toBe(true); // computed
+    expect(cols.find((c) => c.field === 'calc')?.script).toContain('render');
+  });
+
+  it('keeps the user’s own edits — inheritance happens once', () => {
+    const existing = [
+      { field: 'name', label: 'Renamed by hand', type: 'number' as const, renderer: 'color', width: 99 },
+    ];
+    const name = inheritColumns(spec, sources, existing).find((c) => c.field === 'name');
+    expect(name).toMatchObject({ label: 'Renamed by hand', type: 'number', renderer: 'color', width: 99 });
+  });
+
+  it('re-asserts read-only even on a column the user edited', () => {
+    const existing = [{ field: 'dept', label: 'Dept', type: 'string' as const, readonly: false }];
+    expect(inheritColumns(spec, sources, existing).find((c) => c.field === 'dept')?.readonly).toBe(true);
+  });
+
+  it('honours a column deleted with the column editor', () => {
+    const cols = inheritColumns(spec, sources, [], ['dept']);
+    expect(cols.map((c) => c.field)).toEqual(['name', 'calc']);
+  });
+
+  it('falls back to a bare column when the source table is gone', () => {
+    const cols = inheritColumns(spec, {});
+    expect(cols.find((c) => c.field === 'name')).toEqual({
+      field: 'name',
+      label: 'name',
+      type: 'string',
+    });
+  });
+
+  it('hides rowid inherited from a table that still shows it', () => {
+    const rowidSpec: ProjectionSpec = {
+      version: 1,
+      sources: [{ alias: 'p', tableName: 'T' }],
+      columns: [{ field: 'rowid', from: { kind: 'source', alias: 'p', field: 'rowid' } }],
+    };
+    const cols = inheritColumns(rowidSpec, {
+      p: [{ field: 'rowid', label: 'Rowid', type: 'number' as const }],
+    });
+    expect(cols[0]?.hidden).toBe(true);
   });
 });
 

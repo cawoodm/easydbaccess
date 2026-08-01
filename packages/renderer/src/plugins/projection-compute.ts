@@ -9,6 +9,7 @@
 // See docs/superpowers/specs/2026-07-31-projection-virtual-tables-design.md.
 
 import type {
+  ColumnSpec,
   ProjectionColumn,
   ProjectionSource,
   ProjectionSpec,
@@ -17,6 +18,7 @@ import type {
   Table,
 } from '@easydb/shared';
 import { runColumnScript } from '../util/column-script.js';
+import { isInternalField } from '../util/internal-fields.js';
 
 /** Rows of each source table, keyed by the source's `alias`. */
 export type SourceRowsByAlias = Record<string, Row[]>;
@@ -139,6 +141,63 @@ export function resolveWritability(spec: ProjectionSpec): Set<string> {
     if (col.from.kind === 'source' && col.from.alias === baseAlias) writable.add(col.field);
   }
   return writable;
+}
+
+// -- Inheriting column settings from the source tables ---------------------
+
+/**
+ * Build the projection table's `columns`, inheriting each column's settings from
+ * the source table it comes from — ONCE, when the column first appears.
+ *
+ * The split of responsibilities:
+ *  - the SPEC decides which columns exist and where their values come from;
+ *  - the TABLE's `columns` carry everything about how they look (label, type,
+ *    renderer, width, hidden, description, units, constraints).
+ *
+ * So a column is seeded with a full copy of the source column and is the user's
+ * from then on: `existing` always wins, which is what lets the ordinary column
+ * editor work on a projection exactly as it does on a table. A field the user
+ * deleted there (recorded in `deletedColumns`) stays gone.
+ *
+ * `readonly` is the one setting the projection keeps asserting: a computed or
+ * secondary-source column has no unambiguous write target, so it cannot become
+ * editable however the table is edited.
+ */
+export function inheritColumns(
+  spec: ProjectionSpec,
+  sourceColumnsByAlias: Record<string, ColumnSpec[]>,
+  existing: ColumnSpec[] = [],
+  deletedColumns: string[] = [],
+): ColumnSpec[] {
+  const writable = resolveWritability(spec);
+  const byField = new Map(existing.map((c) => [c.field, c] as const));
+  const deleted = new Set(deletedColumns);
+  const out: ColumnSpec[] = [];
+
+  for (const c of spec.columns) {
+    if (deleted.has(c.field)) continue; // removed with the column editor
+    const kept = byField.get(c.field);
+    let col: ColumnSpec;
+    if (kept) {
+      col = { ...kept };
+    } else if (c.from.kind === 'source') {
+      const from = c.from;
+      const source = (sourceColumnsByAlias[from.alias] ?? []).find((sc) => sc.field === from.field);
+      // Copy the WHOLE source column (renderer, width, hidden, units, …), then
+      // re-point it at this projection's output field name.
+      col = source
+        ? { ...source, field: c.field }
+        : { field: c.field, label: c.label ?? c.field, type: c.type ?? 'string' };
+      if (isInternalField(from.field)) col.hidden = true;
+    } else {
+      col = { field: c.field, label: c.label ?? c.field, type: c.type ?? 'string' };
+      col.script = c.from.script;
+    }
+    if (!writable.has(c.field)) col.readonly = true;
+    else delete col.readonly;
+    out.push(col);
+  }
+  return out;
 }
 
 // -- Carrying the base table's presentation over ---------------------------

@@ -9,13 +9,11 @@
 
 import type {
   ColumnSpec,
-  ColumnType,
   ProjectionColumn,
   ProjectionSource,
   ProjectionSpec,
 } from '@easydb/shared';
 import { guessJoinKeys } from '../plugins/projection-compute.js';
-import { isInternalField } from '../util/internal-fields.js';
 
 /** A table the projection can draw from. */
 export interface ProjectionCandidate {
@@ -46,10 +44,15 @@ export interface EdSource {
   extraOn?: Array<{ field: string; eqAlias: string; eqField: string }>;
 }
 
+/**
+ * One row of the editor's column picker. Deliberately carries no presentation:
+ * the projection dialog only decides WHICH columns exist and, for a computed
+ * column, the script behind it. Labels, types, renderers and the rest are
+ * inherited from the source table and edited afterwards with the ordinary
+ * column editor.
+ */
 export interface EdColumn {
   include: boolean;
-  label: string;
-  type: ColumnType;
   /** Source columns: which source, and its stored field. */
   alias?: string;
   field?: string;
@@ -57,17 +60,13 @@ export interface EdColumn {
   script?: string;
   computed: boolean;
   /**
-   * Present in the projection but not shown in the grid — copied from the source
-   * column, so a column the user hid on the base table stays hidden here.
-   */
-  hidden?: boolean;
-  /**
    * The EXISTING output field name, when this column came from a saved spec.
-   * Reused verbatim on save so renaming a label never renames the field —
-   * column width / hidden / sort, `filters`, and View templates are all keyed
-   * by it, and would silently detach.
+   * Reused verbatim on save: the table's ColumnSpec, `filters`, sort and any
+   * View template are keyed by it and would silently detach if it changed.
    */
   outField?: string;
+  /** Display-only, for the picker's row label. Never written to the spec. */
+  label?: string;
 }
 
 export interface EditorModel {
@@ -138,11 +137,10 @@ export function specToEditor(
   });
 
   const columns: EdColumn[] = spec.columns.map((c) => {
-    const base = { include: true, label: c.label, type: c.type, outField: c.field };
-    const withHidden = c.hidden ? { ...base, hidden: true } : base;
+    const base = { include: true, outField: c.field, label: c.label ?? c.field };
     return c.from.kind === 'source'
-      ? { ...withHidden, alias: c.from.alias, field: c.from.field, computed: false }
-      : { ...withHidden, script: c.from.script, computed: true };
+      ? { ...base, alias: c.from.alias, field: c.from.field, computed: false }
+      : { ...base, script: c.from.script, computed: true };
   });
 
   return { name, sources, columns, original: spec };
@@ -202,24 +200,17 @@ export function addSourceToModel(model: EditorModel, cand: ProjectionCandidate):
     sources: [...model.sources, src],
     columns: [
       ...model.columns,
-      ...cand.columns.map((col) => {
-        const ed: EdColumn = {
+      ...cand.columns.map(
+        (col): EdColumn => ({
           include: true,
-          // A second copy of the same table would otherwise contribute a set of
-          // identically-labelled columns; qualify the repeats with their alias so
-          // the two "Title"s are tellable apart. The first copy stays clean.
-          label: repeat > 0 ? `${col.label} (${alias})` : col.label,
-          type: col.type,
           alias,
           field: col.field,
           computed: false,
-        };
-        // Carry the source table's own presentation over: a column the user hid
-        // there stays hidden here. Storage plumbing (`rowid`) defaults to hidden
-        // even on a table that still shows it.
-        if (col.hidden || isInternalField(col.field)) ed.hidden = true;
-        return ed;
-      }),
+          // Shown in the picker only. A repeat of the same table is qualified by
+          // its alias so the two "Title" rows are tellable apart.
+          label: repeat > 0 ? `${col.label} (${alias})` : col.label,
+        }),
+      ),
     ],
   };
 }
@@ -256,13 +247,7 @@ export function addComputedToModel(model: EditorModel): EditorModel {
     ...model,
     columns: [
       ...model.columns,
-      {
-        include: true,
-        label: 'computed',
-        type: 'string',
-        script: 'function render(row) {\n  return "";\n}',
-        computed: true,
-      },
+      { include: true, computed: true, label: 'computed', script: 'function render(row) {\n  return "";\n}' },
     ],
   };
 }
@@ -298,24 +283,17 @@ export function editorToSpec(model: EditorModel): BuildResult {
   const used = new Set<string>();
   const outColumns: ProjectionColumn[] = [];
   for (const c of chosen) {
-    // Keep an existing output field name; only mint one for a NEW column.
+    // Keep an existing output field name; only mint one for a NEW column, from
+    // the SOURCE field (there is no label to derive it from any more).
     let field: string;
     if (c.outField && !used.has(c.outField)) {
       field = c.outField;
       used.add(field);
     } else {
-      field = uniqueField(c.label, used);
+      field = uniqueField(c.computed ? 'computed' : (c.field ?? 'col'), used);
     }
-    const label = c.label.trim() || field;
-    const hidden = c.hidden ? { hidden: true } : {};
     if (c.computed) {
-      outColumns.push({
-        field,
-        label,
-        type: c.type,
-        ...hidden,
-        from: { kind: 'script', script: c.script ?? '' },
-      });
+      outColumns.push({ field, from: { kind: 'script', script: c.script ?? '' } });
       continue;
     }
     const alias = c.alias;
@@ -323,16 +301,10 @@ export function editorToSpec(model: EditorModel): BuildResult {
     if (!alias || !srcField || !aliases.has(alias)) {
       return {
         ok: false,
-        error: `Column "${c.label}" belongs to a table that is no longer part of this projection.`,
+        error: `Column "${c.label ?? c.field}" belongs to a table that is no longer part of this projection.`,
       };
     }
-    outColumns.push({
-      field,
-      label,
-      type: c.type,
-      ...hidden,
-      from: { kind: 'source', alias, field: srcField },
-    });
+    outColumns.push({ field, from: { kind: 'source', alias, field: srcField } });
   }
 
   const sources: ProjectionSource[] = model.sources.map((s) => {

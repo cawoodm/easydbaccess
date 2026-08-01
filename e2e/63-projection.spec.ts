@@ -1,5 +1,13 @@
 import { test, expect } from './fixtures.js';
-import { addRow, bulkAddRows, createTable, panelDomId, readRows, waitForPanel } from './helpers.js';
+import {
+  addRow,
+  bulkAddRows,
+  createTable,
+  panelDomId,
+  readRows,
+  readTable,
+  waitForPanel,
+} from './helpers.js';
 
 /**
  * Projections — virtual tables whose rows are derived (a database view / JOIN)
@@ -45,8 +53,8 @@ async function createProjection(
               },
             ],
             columns: [
-              { field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'p', field: 'name' } },
-              { field: 'dept', label: 'Dept', type: 'string', from: { kind: 'source', alias: 'd', field: 'label' } },
+              { field: 'name', from: { kind: 'source', alias: 'p', field: 'name' } },
+              { field: 'dept', from: { kind: 'source', alias: 'd', field: 'label' } },
             ],
           },
         },
@@ -89,6 +97,37 @@ test.describe('projections', () => {
 
     // The joined column is still just text — no input carrying 'Sales'.
     await expect(panel.locator('data-table tbody tr td input')).toHaveCount(1);
+  });
+
+  test('Edit columns opens the ordinary column editor; Edit Join opens the join editor', async ({
+    page,
+  }) => {
+    const peopleId = await createTable(page, 'People', [{ field: 'name' }, { field: 'deptId' }]);
+    const deptId = await createTable(page, 'Dept', [{ field: 'id' }, { field: 'label' }]);
+    await bulkAddRows(page, peopleId, [{ name: 'Bob', deptId: 'd1' }]);
+    await bulkAddRows(page, deptId, [{ id: 'd1', label: 'Sales' }]);
+    const projId = await createProjection(page, peopleId, deptId);
+    await waitForPanel(page, projId);
+    const footer = page.locator(`#${panelDomId(projId)}`);
+
+    // "Edit columns" → the SAME editor tables use, and saving it sticks.
+    await footer.getByRole('button', { name: 'Columns' }).click();
+    const colEditor = page.locator('new-table-dialog dialog');
+    await expect(colEditor).toBeVisible();
+    const labelInput = page.locator('new-table-dialog .col-row input').nth(1);
+    await labelInput.fill('Renamed by hand');
+    await page.locator('new-table-dialog').getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(colEditor).toBeHidden();
+    await expect
+      .poll(async () => {
+        const t = await readTable(page, projId);
+        return (t as { columns: Array<{ label: string }> }).columns.map((c) => c.label);
+      })
+      .toContain('Renamed by hand');
+
+    // "Edit Join" → the projection editor, a separate button.
+    await footer.getByRole('button', { name: 'Edit Join' }).click();
+    await expect(page.locator('projection-dialog dialog')).toBeVisible();
   });
 
   test('the New Projection button creates a working projection through the editor', async ({
@@ -162,15 +201,21 @@ test.describe('projections', () => {
     await dialog.locator('#proj-name').fill('Staff view');
     await dialog.getByRole('button', { name: 'Save', exact: true }).click();
 
-    const proj = await page.evaluate(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ctx = (window as any).__easydb;
-      const all = await ctx.store.tables.find({ workspaceId: ctx.workspaceId });
-      return all.find(
-        (t: { source?: { type?: string }; name: string }) =>
-          t.source?.type === 'projection' && t.name === 'Staff view',
-      );
-    });
+    const readProj = () =>
+      page.evaluate(async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctx = (window as any).__easydb;
+        const all = await ctx.store.tables.find({ workspaceId: ctx.workspaceId });
+        return (
+          all.find(
+            (t: { source?: { type?: string }; name: string }) =>
+              t.source?.type === 'projection' && t.name === 'Staff view',
+          ) ?? null
+        );
+      });
+    // Save → inherit columns → insert settles over a couple of ticks.
+    await expect.poll(async () => Boolean(await readProj())).toBe(true);
+    const proj = await readProj();
 
     // Hidden column and rowid both carried over as hidden; sort + filter copied.
     const hidden = (proj.columns as Array<{ field: string; hidden?: boolean }>)
@@ -235,9 +280,9 @@ test.describe('projections', () => {
           return rows.map((r: { data: Record<string, unknown> }) => r.data);
         }),
       )
-      // Both sides of the self-join resolved: the TIL and its similar TIL.
-      // The repeated table's column is labelled "Title (c)" → field `title_c`.
-      .toEqual([expect.objectContaining({ title: 'Apache bench', title_c: 'Escaping SQL' })]);
+      // Both sides of the self-join resolved: the TIL and its similar TIL. New
+      // columns are named after their SOURCE field, so the repeat is `title_2`.
+      .toEqual([expect.objectContaining({ title: 'Apache bench', title_2: 'Escaping SQL' })]);
   });
 
   test('adding a join preselects sensible keys, so the join works without picking fields', async ({
