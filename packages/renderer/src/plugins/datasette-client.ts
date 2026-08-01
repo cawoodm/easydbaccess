@@ -107,6 +107,55 @@ export function buildTableUrl(
   return u.toString();
 }
 
+/**
+ * Build the next page's URL from a raw `next` TOKEN, carrying `_next` as the only
+ * `_`-prefixed param.
+ *
+ * `buildTableUrl` merges `ref.query` — the params from the URL the user pasted —
+ * so a source URL that already carried `_size` would reintroduce it here and make
+ * the request two-`_`-params wide. datasette.io's Cloudflare WAF challenges any
+ * `.json` request like that (see fetchTableMeta), which is the exact thing this
+ * path exists to avoid. Non-underscore params (real filters like `country=AFG`)
+ * are kept — dropping those would silently widen the query.
+ */
+export function buildTokenPageUrl(ref: DatasetteRef, token: string): string {
+  const kept: Record<string, string> = {};
+  for (const [k, v] of Object.entries(ref.query)) if (!k.startsWith('_')) kept[k] = v;
+  return buildTableUrl({ ...ref, query: kept }, { _next: token });
+}
+
+/**
+ * Re-point a server-advertised cursor URL at the origin we actually requested.
+ *
+ * Datasette builds `next_url` from what IT thinks its address is. Behind a
+ * TLS-terminating proxy (Fly, Heroku, a reverse proxy…) it does not know the
+ * request arrived over https, so it advertises **`http://…`** — e.g.
+ * til.simonwillison.net returns
+ * `"next_url": "http://til.simonwillison.net/tils/similarities.json?_next=…"`.
+ *
+ * Fetching that from an https page is blocked outright as mixed content, and the
+ * browser reports it as an opaque `TypeError` ("Load failed" / "Failed to
+ * fetch") — so paging died on page two and the stored resume cursor stayed
+ * un-fetchable forever. Keeping the server's path + query but OUR scheme (and
+ * port) fixes it, and normalising a stored cursor the same way heals an import
+ * that is already stuck.
+ *
+ * Returns null when the cursor points at a different host: a paging cursor that
+ * hops hosts is not paging, and following it would fetch somewhere else entirely.
+ */
+export function normaliseCursorUrl(candidate: string, requestedUrl: string): string | null {
+  try {
+    const req = new URL(requestedUrl);
+    const next = new URL(candidate, req);
+    if (next.hostname.toLowerCase() !== req.hostname.toLowerCase()) return null;
+    next.protocol = req.protocol;
+    next.port = req.port;
+    return next.toString();
+  } catch {
+    return null;
+  }
+}
+
 /** Ensure a URL (e.g. a next_url) carries the given params without overwriting. */
 export function ensureParams(urlStr: string, params: Record<string, string | number>): string {
   const u = new URL(urlStr);
@@ -773,7 +822,12 @@ export async function fetchRows(
     _size: pageSize,
     ...(opts.extraParams || {}),
   };
-  let url: string | null = opts.startUrl ?? buildTableUrl(ref, baseParams);
+  const firstUrl = buildTableUrl(ref, baseParams);
+  // A stored resume cursor gets the same treatment, so an import already stuck on
+  // an http:// cursor recovers on the next refresh instead of failing forever.
+  let url: string | null = opts.startUrl
+    ? (normaliseCursorUrl(opts.startUrl, firstUrl) ?? opts.startUrl)
+    : firstUrl;
   const rows: Array<Record<string, unknown>> = [];
   let truncated = false;
   let hasMore = false;
@@ -814,12 +868,14 @@ export async function fetchRows(
     // any `.json` request with two or more `_`-prefixed params; see
     // fetchTableMeta). Subsequent pages fall back to Datasette's default page
     // size, which is fine — we accumulate rows to the cap regardless.
-    const nextPage =
-      info.nextUrl != null
-        ? info.nextUrl
-        : info.nextToken != null
-          ? buildTableUrl(ref, { _next: info.nextToken })
-          : null;
+    // A server-built next_url is re-pointed at the origin we actually requested
+    // (see normaliseCursorUrl — an http:// cursor from a TLS-terminated instance
+    // is blocked as mixed content). If it is unusable, fall back to rebuilding
+    // from the raw token rather than giving up on paging.
+    const cursorUrl: string | null =
+      info.nextUrl != null ? normaliseCursorUrl(info.nextUrl, url) : null;
+    const nextPage: string | null =
+      cursorUrl ?? (info.nextToken != null ? buildTokenPageUrl(ref, info.nextToken) : null);
 
     // Keep paging while there's a cursor, we're under the cap, and the page
     // actually returned rows (the last guard prevents a pathological loop on a

@@ -6,6 +6,8 @@ import {
   parseDatasetteUrl,
   classifyPage,
   fetchRows,
+  normaliseCursorUrl,
+  buildTokenPageUrl,
   inferColumnsFromRows,
   refineColumnTypes,
   mapColumns,
@@ -215,6 +217,94 @@ describe('classifyPage against the real datasette.io response', () => {
       { id: 1, name: 'Alice' },
       { id: 2, name: 'Bob' },
     ]);
+  });
+});
+
+describe('normaliseCursorUrl', () => {
+  const requested = 'https://til.simonwillison.net/tils/similarities.json?_size=1000';
+
+  it('upgrades an http:// cursor from a TLS-terminated instance to our scheme', () => {
+    // Verbatim from til.simonwillison.net: Datasette sits behind Fly, so it does
+    // not know the request was https and advertises next_url as http://. An https
+    // page cannot fetch that (mixed content is blocked → opaque "Load failed").
+    expect(
+      normaliseCursorUrl(
+        'http://til.simonwillison.net/tils/similarities.json?_next=django_pytest-django~2Emd%2Cgithub-actions_postgresq-service-container~2Emd',
+        requested,
+      ),
+    ).toBe(
+      'https://til.simonwillison.net/tils/similarities.json?_next=django_pytest-django~2Emd%2Cgithub-actions_postgresq-service-container~2Emd',
+    );
+  });
+
+  it('leaves an already-correct cursor alone and resolves a relative one', () => {
+    expect(normaliseCursorUrl('https://til.simonwillison.net/x.json?_next=t', requested)).toBe(
+      'https://til.simonwillison.net/x.json?_next=t',
+    );
+    expect(normaliseCursorUrl('/tils/similarities.json?_next=t', requested)).toBe(
+      'https://til.simonwillison.net/tils/similarities.json?_next=t',
+    );
+  });
+
+  it('refuses a cursor that hops to another host', () => {
+    expect(normaliseCursorUrl('https://evil.test/x.json?_next=t', requested)).toBeNull();
+    expect(normaliseCursorUrl('not a url', 'also not a url')).toBeNull();
+  });
+});
+
+describe('buildTokenPageUrl', () => {
+  it('carries _next alone, keeping real filters but dropping pasted _ params', () => {
+    // A pasted `?_size=1000` would otherwise ride along and make the request
+    // two-`_`-params wide, which datasette.io's WAF challenges.
+    const ref = parseDatasetteUrl(
+      'https://til.simonwillison.net/tils/similarities?_size=1000&country=AFG',
+    );
+    const url = new URL(buildTokenPageUrl(ref, 'tok'));
+    expect(url.searchParams.get('_next')).toBe('tok');
+    expect(url.searchParams.has('_size')).toBe(false);
+    expect(url.searchParams.get('country')).toBe('AFG');
+  });
+});
+
+describe('fetchRows with a TLS-terminated instance (http next_url)', () => {
+  const httpsRef = () => parseDatasetteUrl('https://til.example/tils/similarities');
+  const page1 = {
+    rows: [{ id: 'a', other_id: 'b', score: 1 }],
+    // Exactly what a Fly-hosted Datasette sends: an http:// cursor.
+    next_url: 'http://til.example/tils/similarities.json?_next=tok',
+    next: 'tok',
+    columns: ['id', 'other_id', 'score'],
+  };
+  const page2 = { rows: [{ id: 'c', other_id: 'd', score: 2 }], next_url: null, next: null };
+
+  it('follows the cursor over https, so paging does not die on page two', async () => {
+    const seen: string[] = [];
+    const fetchFn = vi.fn((url: string) => {
+      seen.push(url);
+      // Mixed content never reaches the network: model the browser's block.
+      if (url.startsWith('http://')) return Promise.reject(new TypeError('Load failed'));
+      return jsonRes(url.includes('_next=') ? page2 : page1);
+    });
+
+    const out = await fetchRows(fetchFn, httpsRef());
+
+    expect(out.rows).toHaveLength(2);
+    expect(out.error).toBeUndefined();
+    expect(seen.every((u) => u.startsWith('https://'))).toBe(true);
+  });
+
+  it('heals a stored http:// resume cursor instead of failing forever', async () => {
+    const fetchFn = vi.fn((url: string) => {
+      if (url.startsWith('http://')) return Promise.reject(new TypeError('Load failed'));
+      return jsonRes(page2);
+    });
+
+    const out = await fetchRows(fetchFn, httpsRef(), {
+      startUrl: 'http://til.example/tils/similarities.json?_next=tok',
+    });
+
+    expect(out.rows).toHaveLength(1);
+    expect(out.error).toBeUndefined();
   });
 });
 
