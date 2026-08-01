@@ -152,17 +152,36 @@ export function specToEditor(
 export function addSourceToModel(model: EditorModel, cand: ProjectionCandidate): EditorModel {
   const alias = nextAlias(model.sources);
   const isBase = model.sources.length === 0;
+  // How many times this table is already a source. A table may be joined more
+  // than once (a self-join), so repeats get disambiguated labels below.
+  const repeat = model.sources.filter((s) => s.tableName === cand.name).length;
   let join: EdJoin | undefined;
   if (!isBase) {
     // Preselect the keys from field-name heuristics (FK conventions, shared xId
-    // columns) so the user usually just confirms rather than picks.
+    // columns, primary-key ↔ reference) so the user usually just confirms rather
+    // than picks. Keys already consumed by another join are avoided, so joining
+    // the same table twice lands on a different key each time.
+    const usedKeys = model.sources.flatMap((s) =>
+      s.join
+        ? [
+            { alias: s.join.otherAlias, field: s.join.otherField },
+            ...(s.extraOn ?? []).map((k) => ({ alias: k.eqAlias, field: k.eqField })),
+          ]
+        : [],
+    );
     const guess = guessJoinKeys(
-      { tableName: cand.name, fields: cand.columns.map((c) => c.field) },
+      {
+        tableName: cand.name,
+        fields: cand.columns.map((c) => c.field),
+        pks: cand.columns.filter((c) => c.unique).map((c) => c.field),
+      },
       model.sources.map((s) => ({
         alias: s.alias,
         tableName: s.tableName,
         fields: s.columns.map((c) => c.field),
+        pks: s.columns.filter((c) => c.unique).map((c) => c.field),
       })),
+      usedKeys,
     );
     join = {
       type: 'left',
@@ -186,7 +205,10 @@ export function addSourceToModel(model: EditorModel, cand: ProjectionCandidate):
       ...cand.columns.map((col) => {
         const ed: EdColumn = {
           include: true,
-          label: col.label,
+          // A second copy of the same table would otherwise contribute a set of
+          // identically-labelled columns; qualify the repeats with their alias so
+          // the two "Title"s are tellable apart. The first copy stays clean.
+          label: repeat > 0 ? `${col.label} (${alias})` : col.label,
           type: col.type,
           alias,
           field: col.field,

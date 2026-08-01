@@ -86,6 +86,63 @@ describe('editorToSpec: output field names', () => {
   });
 });
 
+describe('joining the same table more than once', () => {
+  // Simon Willison's TIL shape: `similarities` references `til` twice.
+  const similarities: ProjectionCandidate = {
+    id: 's1',
+    name: 'similarities',
+    columns: [
+      { field: 'id', label: 'Id', type: 'string' },
+      { field: 'other_id', label: 'Other Id', type: 'string' },
+      { field: 'score', label: 'Score', type: 'number' },
+    ],
+  };
+  const til: ProjectionCandidate = {
+    id: 't1',
+    name: 'til',
+    columns: [
+      { field: 'path', label: 'Path', type: 'string', unique: true },
+      { field: 'title', label: 'Title', type: 'string' },
+    ],
+  };
+
+  function build() {
+    let model = addSourceToModel({ name: 'Similar TILs', sources: [], columns: [] }, similarities);
+    model = addSourceToModel(model, til); // b
+    model = addSourceToModel(model, til); // c — the same table again
+    return model;
+  }
+
+  it('adds two sources for one table, each with its own alias and join key', () => {
+    const built = editorToSpec(build());
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const [base, left, right] = built.spec.sources;
+    expect([base?.alias, left?.alias, right?.alias]).toEqual(['a', 'b', 'c']);
+    expect(left?.tableName).toBe('til');
+    expect(right?.tableName).toBe('til');
+    // Each join lands on a DIFFERENT reference column of the base.
+    expect(left?.join?.on).toEqual([{ field: 'path', eqAlias: 'a', eqField: 'id' }]);
+    expect(right?.join?.on).toEqual([{ field: 'path', eqAlias: 'a', eqField: 'other_id' }]);
+  });
+
+  it('disambiguates the repeated table’s column labels and output fields', () => {
+    const built = editorToSpec(build());
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const titles = built.spec.columns.filter((c) => c.label.startsWith('Title'));
+    expect(titles.map((c) => c.label)).toEqual(['Title', 'Title (c)']);
+    // Output field names stay unique too, so downstream state cannot collide.
+    expect(new Set(built.spec.columns.map((c) => c.field)).size).toBe(built.spec.columns.length);
+  });
+
+  it('removing one copy leaves the other intact', () => {
+    const pruned = removeSourceFromModel(build(), 'b');
+    expect(pruned.sources.map((s) => s.alias)).toEqual(['a', 'c']);
+    expect(editorToSpec(pruned).ok).toBe(true);
+  });
+});
+
 describe('hidden columns', () => {
   it('copies a hidden source column into the projection as hidden', () => {
     const withHidden: ProjectionCandidate = {

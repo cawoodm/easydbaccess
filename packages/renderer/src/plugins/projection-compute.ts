@@ -266,6 +266,8 @@ export interface JoinColumnsRef {
   alias: string;
   tableName: string;
   fields: string[];
+  /** Fields that identify a row (a primary key), when the source reports them. */
+  pks?: string[] | undefined;
 }
 
 /** A preselected equijoin: this new source's `thisField` = `otherAlias`.`otherField`. */
@@ -278,20 +280,39 @@ export interface GuessedJoin {
 const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 const singular = (s: string): string => (s.endsWith('s') && s.length > 1 ? s.slice(0, -1) : s);
 
+/** A field looks like it REFERENCES another table's key: `id`, `other_id`, … */
+const looksLikeRef = (f: string): boolean => f === 'id' || f.endsWith('id');
+
+/** One side of a candidate key pair. */
+interface KeySide {
+  table: string;
+  field: string;
+  isPk: boolean;
+}
+
 /**
  * Score how likely two fields form a join key (0 = no signal). Recognises:
  *  - a shared foreign-key-shaped column on both sides (`customerId` = `customerId`),
  *  - the classic FK convention: one side `id`, the other `<thatTable>Id`
- *    (`Dept.id` = `People.deptId`).
- * A bare `id` = `id` scores 0 — joining unrelated tables on `id` is almost
- * always wrong, so we would rather not preselect it.
+ *    (`Dept.id` = `People.deptId`),
+ *  - a primary key paired with a reference-shaped field, which is what catches a
+ *    key NOT called `id` (`til.path` = `similarities.other_id`).
+ *
+ * Two guards keep it from preselecting nonsense:
+ *  - a bare `id` = `id` scores 0 — joining unrelated tables on `id` is almost
+ *    always wrong;
+ *  - the SAME table on both sides only matches on a real FK signal, never on an
+ *    identical column name. In a self-join every column name matches itself, so
+ *    `b.path = c.path` carries no information and would join each row to itself.
  */
-function scoreJoinPair(nf: string, nTable: string, ef: string, eTable: string): number {
-  const n = norm(nf);
-  const e = norm(ef);
+function scoreJoinPair(a: KeySide, b: KeySide): number {
+  const n = norm(a.field);
+  const e = norm(b.field);
   if (!n || !e) return 0;
+  const sameTable = norm(a.table) === norm(b.table);
+
   if (n === e) {
-    if (n === 'id') return 0;
+    if (sameTable || n === 'id') return 0;
     return n.endsWith('id') ? 9 : 7; // shared "customerId" strong; shared "name" plausible
   }
   // fk(idField, idTable, fkField): idField is a table's `id`, fkField a
@@ -304,32 +325,57 @@ function scoreJoinPair(nf: string, nTable: string, ef: string, eTable: string): 
     if (prefix === t || prefix === singular(t) || singular(prefix) === singular(t)) return 9;
     return 5; // "somethingId" vs "id" with no table-name match — weaker
   };
-  return Math.max(fk(n, nTable, e), fk(e, eTable, n));
+  const byConvention = Math.max(fk(n, a.table, e), fk(e, b.table, n));
+  if (byConvention > 0) return byConvention;
+
+  // A primary key on one side, a reference-shaped field on the other. Weaker
+  // than the naming conventions above, so those still win when both apply.
+  if (a.isPk && looksLikeRef(e)) return 6;
+  if (b.isPk && looksLikeRef(n)) return 6;
+  return 0;
 }
 
 /**
  * Guess the equijoin keys for a newly-added source against the already-chosen
  * ones, so the editor preselects sensible fields instead of blanks. Returns the
  * highest-scoring pair, or null when nothing looks like a key.
+ *
+ * `usedKeys` are the earlier-source fields existing joins already consume. They
+ * are only considered if nothing unused scores, so joining the same table twice
+ * picks a DIFFERENT key each time — `similarities.id` for the first `til`, then
+ * `similarities.other_id` for the second.
  */
 export function guessJoinKeys(
-  newSource: { tableName: string; fields: string[] },
+  newSource: { tableName: string; fields: string[]; pks?: string[] | undefined },
   earlierSources: JoinColumnsRef[],
+  usedKeys: Array<{ alias: string; field: string }> = [],
 ): GuessedJoin | null {
-  let best: GuessedJoin | null = null;
-  let bestScore = 0;
-  for (const es of earlierSources) {
-    for (const nf of newSource.fields) {
-      for (const ef of es.fields) {
-        const s = scoreJoinPair(nf, newSource.tableName, ef, es.tableName);
-        if (s > bestScore) {
-          bestScore = s;
-          best = { thisField: nf, otherAlias: es.alias, otherField: ef };
+  const used = new Set(usedKeys.map((k) => `${k.alias} ${k.field}`));
+  const newPks = new Set(newSource.pks ?? []);
+
+  const bestOf = (skipUsed: boolean): GuessedJoin | null => {
+    let best: GuessedJoin | null = null;
+    let bestScore = 0;
+    for (const es of earlierSources) {
+      const esPks = new Set(es.pks ?? []);
+      for (const nf of newSource.fields) {
+        for (const ef of es.fields) {
+          if (skipUsed && used.has(`${es.alias} ${ef}`)) continue;
+          const s = scoreJoinPair(
+            { table: newSource.tableName, field: nf, isPk: newPks.has(nf) },
+            { table: es.tableName, field: ef, isPk: esPks.has(ef) },
+          );
+          if (s > bestScore) {
+            bestScore = s;
+            best = { thisField: nf, otherAlias: es.alias, otherField: ef };
+          }
         }
       }
     }
-  }
-  return best;
+    return best;
+  };
+
+  return bestOf(true) ?? bestOf(false);
 }
 
 /** Where a base-source cell edit is written, or null when the column is read-only. */

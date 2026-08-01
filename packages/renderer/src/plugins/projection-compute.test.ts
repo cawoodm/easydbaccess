@@ -98,6 +98,36 @@ describe('computeProjection', () => {
     expect(out[0]?.data.full).toBe('Bob Smith');
   });
 
+  it('joins the SAME table twice (a self-join: similarities → til → til)', () => {
+    const spec: ProjectionSpec = {
+      version: 1,
+      sources: [
+        { alias: 's', tableName: 'similarities' },
+        { alias: 'l', tableName: 'til', join: { type: 'left', on: [{ field: 'path', eqAlias: 's', eqField: 'id' }] } },
+        { alias: 'r', tableName: 'til', join: { type: 'left', on: [{ field: 'path', eqAlias: 's', eqField: 'other_id' }] } },
+      ],
+      columns: [
+        { field: 'title', label: 'Title', type: 'string', from: { kind: 'source', alias: 'l', field: 'title' } },
+        { field: 'similar', label: 'Similar', type: 'string', from: { kind: 'source', alias: 'r', field: 'title' } },
+        { field: 'score', label: 'Score', type: 'number', from: { kind: 'source', alias: 's', field: 'score' } },
+      ],
+    };
+    // The same rows are supplied for both `til` aliases — that is what the
+    // provider does when two sources resolve to one table.
+    const til = [
+      row('t1', { path: 'a.md', title: 'Apache bench' }),
+      row('t2', { path: 'b.md', title: 'Escaping SQL' }),
+    ];
+    const out = computeProjection(spec, {
+      s: [row('s1', { id: 'a.md', other_id: 'b.md', score: 0.74 })],
+      l: til,
+      r: til,
+    });
+    expect(out.map((r) => r.data)).toEqual([
+      { title: 'Apache bench', similar: 'Escaping SQL', score: 0.74 },
+    ]);
+  });
+
   it('returns nothing when the base source has no rows', () => {
     const spec: ProjectionSpec = {
       version: 1,
@@ -224,6 +254,38 @@ describe('guessJoinKeys', () => {
         { alias: 'c', tableName: 'Customers', fields: ['customerId', 'name'] },
       ]),
     ).toEqual({ thisField: 'customerId', otherAlias: 'c', otherField: 'customerId' });
+  });
+
+  it('pairs a primary key with a reference-shaped field when the key is not called id', () => {
+    // Simon Willison's TIL database: `til` is keyed by `path`, and
+    // `similarities` references it twice (`id`, `other_id`).
+    expect(
+      guessJoinKeys({ tableName: 'til', fields: ['path', 'title'], pks: ['path'] }, [
+        { alias: 'a', tableName: 'similarities', fields: ['id', 'other_id', 'score'] },
+      ]),
+    ).toEqual({ thisField: 'path', otherAlias: 'a', otherField: 'id' });
+  });
+
+  it('picks a different key for the second join onto the same table', () => {
+    const til = { tableName: 'til', fields: ['path', 'title'], pks: ['path'] };
+    const earlier = [
+      { alias: 'a', tableName: 'similarities', fields: ['id', 'other_id', 'score'] },
+      // The first `til` join already consumed `a.id`.
+      { alias: 'b', tableName: 'til', fields: ['path', 'title'], pks: ['path'] },
+    ];
+    expect(guessJoinKeys(til, earlier, [{ alias: 'a', field: 'id' }])).toEqual({
+      thisField: 'path',
+      otherAlias: 'a',
+      otherField: 'other_id',
+    });
+  });
+
+  it('never joins a repeated table to itself on the same column', () => {
+    // `b.path = c.path` would match every row to itself and is pure noise.
+    const guess = guessJoinKeys({ tableName: 'til', fields: ['path', 'title'], pks: ['path'] }, [
+      { alias: 'b', tableName: 'til', fields: ['path', 'title'], pks: ['path'] },
+    ]);
+    expect(guess).toBeNull();
   });
 
   it('does not guess on a bare id = id, nor when nothing matches', () => {

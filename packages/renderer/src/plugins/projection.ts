@@ -111,8 +111,10 @@ async function openProjectionEditor(
   if (!baseTable) return;
   dlg.open({
     base: toCand(baseTable),
-    // Join candidates: every table except the base (which is already source 0).
-    candidates: all.filter((t) => t.id !== baseTable.id).map(toCand),
+    // Every table is a join candidate — INCLUDING the base, so a table can be
+    // joined more than once (a self-join: `a → b → a`, or `a → a`). Each pick
+    // becomes its own source with its own alias.
+    candidates: all.map(toCand),
     onSave: makeOnSave(api, workspaceId, null, baseTable),
   });
 }
