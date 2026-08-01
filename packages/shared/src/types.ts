@@ -145,6 +145,12 @@ export interface ProjectionSpec {
    * shape (`Record<field, substring>`), applied to the joined rows.
    */
   filters?: Record<string, string> | undefined;
+  /**
+   * Cap on how many rows the projection yields (TOP N), applied after the join
+   * and filters. Absent or ≤ 0 ⇒ every row. Mirrors `ViewInstance.limit`, and is
+   * what the SQL export renders as `SELECT TOP n`.
+   */
+  limit?: number | undefined;
 }
 
 /** One table participating in a projection: the base, or a JOIN onto it. */

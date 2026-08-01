@@ -1,4 +1,5 @@
-import type { ColumnSpec, ColumnType, HostApi, PluginModule, Row, Table } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, HostApi, PluginModule, ProjectionSpec, Row, Table } from '@easydb/shared';
+import { buildProjectionSelect } from './projection-sql.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'sql-export',
@@ -62,42 +63,58 @@ export async function serializeWorkspaceAsSql(api: HostApi): Promise<string> {
  * (Raw vs. Visible Data; see `../export/table-file.js`).
  */
 export function serializeTableAsSql(table: Table, rows: Row[]): string {
-  const lines: string[] = [
-    `-- easyDBAccess table export`,
-    `-- table:    ${table.name}`,
-    `-- exported: ${new Date().toISOString()}`,
-    ``,
-    `BEGIN;`,
-    ``,
-    renderTable(table, rows),
-    ``,
-    `COMMIT;`,
-    ``,
-  ];
+  // A projection is a QUERY, not stored data: export the SELECT that defines it
+  // (join, filters and row cap included) rather than a dump of derived rows.
+  const projection = projectionSelectFor(table);
+  if (projection) return projection;
+
+  const lines: string[] = [`-- easyDBAccess table export`, `-- table:    ${table.name}`, `-- exported: ${new Date().toISOString()}`, ``, `BEGIN;`, ``, renderTable(table, rows), ``, `COMMIT;`, ``];
   return lines.join('\n');
+}
+
+/**
+ * The `.sql` body for a projection table, or null when `table` is not one.
+ *
+ * Source aliases are mapped to the SQL table names the rest of this exporter
+ * uses (`sanitizeIdent(code || name)`), so the SELECT lines up with the
+ * `CREATE TABLE`s in a whole-workspace dump.
+ */
+export function projectionSelectFor(table: Table): string | null {
+  if (table.source?.type !== 'projection') return null;
+  const spec = table.source.config as unknown as ProjectionSpec | undefined;
+  if (!spec || !Array.isArray(spec.sources)) return null;
+
+  const tableNames: Record<string, string> = {};
+  for (const s of spec.sources) tableNames[s.alias] = sanitizeIdent(s.tableName);
+  const orderBy = spec.sources.length > 0 && table.sortBy && table.sortBy.length > 0 ? table.sortBy : table.sortColumn ? [{ field: table.sortColumn, asc: table.sortAsc ?? true }] : undefined;
+
+  const select = buildProjectionSelect(spec, {
+    tableNames,
+    limitStyle: 'top',
+    ...(orderBy ? { orderBy } : {}),
+  });
+  return [
+    `-- easyDBAccess projection export`,
+    `-- projection: ${table.name}`,
+    `-- exported:   ${new Date().toISOString()}`,
+    `--`,
+    `-- A projection is a derived (virtual) table: this is the query behind it,`,
+    `-- reading the source tables by name.`,
+    ``,
+    select,
+  ].join('\n');
 }
 
 function renderTable(table: Table, rows: Row[]): string {
   const tableName = sanitizeIdent(table.code || table.name || `table_${table.id}`);
-  const colDefs = [
-    `  "__id" TEXT PRIMARY KEY`,
-    ...table.columns.map((c) => `  ${renderColumnDef(c)}`),
-  ];
-  const out: string[] = [
-    `DROP TABLE IF EXISTS "${tableName}";`,
-    `CREATE TABLE "${tableName}" (`,
-    colDefs.join(',\n'),
-    `);`,
-  ];
+  const colDefs = [`  "__id" TEXT PRIMARY KEY`, ...table.columns.map((c) => `  ${renderColumnDef(c)}`)];
+  const out: string[] = [`DROP TABLE IF EXISTS "${tableName}";`, `CREATE TABLE "${tableName}" (`, colDefs.join(',\n'), `);`];
 
   if (rows.length > 0) {
     const fields = ['__id', ...table.columns.map((c) => c.field)];
     const colList = fields.map((f) => `"${sanitizeIdent(f)}"`).join(', ');
     for (const r of rows) {
-      const values = [
-        sqlLiteral(r.id),
-        ...table.columns.map((c) => sqlLiteral(r.data[c.field], c.type)),
-      ];
+      const values = [sqlLiteral(r.id), ...table.columns.map((c) => sqlLiteral(r.data[c.field], c.type))];
       out.push(`INSERT INTO "${tableName}" (${colList}) VALUES (${values.join(', ')});`);
     }
   }

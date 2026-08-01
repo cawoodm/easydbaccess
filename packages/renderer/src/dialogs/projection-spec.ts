@@ -7,12 +7,7 @@
 //
 // DOM-free on purpose — no Lit, no store.
 
-import type {
-  ColumnSpec,
-  ProjectionColumn,
-  ProjectionSource,
-  ProjectionSpec,
-} from '@easydb/shared';
+import type { ColumnSpec, ProjectionColumn, ProjectionSource, ProjectionSpec } from '@easydb/shared';
 import { guessJoinKeys } from '../plugins/projection-compute.js';
 
 /** A table the projection can draw from. */
@@ -73,6 +68,8 @@ export interface EditorModel {
   name: string;
   sources: EdSource[];
   columns: EdColumn[];
+  /** Row cap (TOP N). Absent ⇒ every row. */
+  limit?: number | undefined;
   /**
    * The spec this model was loaded from. Kept so fields the editor does not
    * model (e.g. `filters`) survive a save instead of being dropped.
@@ -80,9 +77,7 @@ export interface EditorModel {
   original?: ProjectionSpec;
 }
 
-export type BuildResult =
-  | { ok: true; name: string; spec: ProjectionSpec }
-  | { ok: false; error: string };
+export type BuildResult = { ok: true; name: string; spec: ProjectionSpec } | { ok: false; error: string };
 
 /** Slugify a label into an output field name, unique within the spec. */
 export function uniqueField(label: string, used: Set<string>): string {
@@ -108,14 +103,9 @@ export function nextAlias(sources: EdSource[]): string {
 }
 
 /** Load a saved spec into the editor model. */
-export function specToEditor(
-  name: string,
-  spec: ProjectionSpec,
-  candidates: ProjectionCandidate[],
-): EditorModel {
+export function specToEditor(name: string, spec: ProjectionSpec, candidates: ProjectionCandidate[]): EditorModel {
   const sources: EdSource[] = spec.sources.map((s) => {
-    const cand =
-      candidates.find((c) => c.name === s.tableName) ?? candidates.find((c) => c.id === s.tableId);
+    const cand = candidates.find((c) => c.name === s.tableName) ?? candidates.find((c) => c.id === s.tableId);
     const src: EdSource = {
       alias: s.alias,
       tableId: cand?.id ?? s.tableId ?? '',
@@ -138,9 +128,7 @@ export function specToEditor(
 
   const fromSpec: EdColumn[] = spec.columns.map((c) => {
     const base = { include: true, outField: c.field, label: c.label ?? c.field };
-    return c.from.kind === 'source'
-      ? { ...base, alias: c.from.alias, field: c.from.field, computed: false }
-      : { ...base, script: c.from.script, computed: true };
+    return c.from.kind === 'source' ? { ...base, alias: c.from.alias, field: c.from.field, computed: false } : { ...base, script: c.from.script, computed: true };
   });
 
   // Offer EVERY field of every source, not just the ones already selected —
@@ -152,9 +140,7 @@ export function specToEditor(
   sources.forEach((s, i) => {
     const repeat = sources.slice(0, i).filter((o) => o.tableName === s.tableName).length;
     for (const col of s.columns) {
-      const mine = fromSpec.filter(
-        (c) => !c.computed && c.alias === s.alias && c.field === col.field && !claimed.has(c),
-      );
+      const mine = fromSpec.filter((c) => !c.computed && c.alias === s.alias && c.field === col.field && !claimed.has(c));
       if (mine.length > 0) {
         for (const m of mine) {
           claimed.add(m);
@@ -176,7 +162,7 @@ export function specToEditor(
   for (const c of fromSpec) if (!c.computed && !claimed.has(c)) columns.push(c);
   for (const c of fromSpec) if (c.computed) columns.push(c);
 
-  return { name, sources, columns, original: spec };
+  return { name, sources, columns, ...(spec.limit ? { limit: spec.limit } : {}), original: spec };
 }
 
 /** Append a source (base if the model is empty, else a JOIN with guessed keys). */
@@ -192,14 +178,7 @@ export function addSourceToModel(model: EditorModel, cand: ProjectionCandidate):
     // columns, primary-key ↔ reference) so the user usually just confirms rather
     // than picks. Keys already consumed by another join are avoided, so joining
     // the same table twice lands on a different key each time.
-    const usedKeys = model.sources.flatMap((s) =>
-      s.join
-        ? [
-            { alias: s.join.otherAlias, field: s.join.otherField },
-            ...(s.extraOn ?? []).map((k) => ({ alias: k.eqAlias, field: k.eqField })),
-          ]
-        : [],
-    );
+    const usedKeys = model.sources.flatMap((s) => (s.join ? [{ alias: s.join.otherAlias, field: s.join.otherField }, ...(s.extraOn ?? []).map((k) => ({ alias: k.eqAlias, field: k.eqField }))] : []));
     const guess = guessJoinKeys(
       {
         tableName: cand.name,
@@ -278,10 +257,7 @@ export function removeSourceFromModel(model: EditorModel, alias: string): Editor
 export function addComputedToModel(model: EditorModel): EditorModel {
   return {
     ...model,
-    columns: [
-      ...model.columns,
-      { include: true, computed: true, label: 'computed', script: 'function render(row) {\n  return "";\n}' },
-    ],
+    columns: [...model.columns, { include: true, computed: true, label: 'computed', script: 'function render(row) {\n  return "";\n}' }],
   };
 }
 
@@ -346,10 +322,7 @@ export function editorToSpec(model: EditorModel): BuildResult {
     if (s.join) {
       out.join = {
         type: s.join.type,
-        on: [
-          { field: s.join.thisField, eqAlias: s.join.otherAlias, eqField: s.join.otherField },
-          ...(s.extraOn ?? []),
-        ],
+        on: [{ field: s.join.thisField, eqAlias: s.join.otherAlias, eqField: s.join.otherField }, ...(s.extraOn ?? [])],
       };
     }
     return out;
@@ -363,5 +336,9 @@ export function editorToSpec(model: EditorModel): BuildResult {
     sources,
     columns: outColumns,
   };
+  // The editor owns the limit, so an emptied field must CLEAR a stored one
+  // rather than letting the spread carry it forward.
+  if (model.limit != null && model.limit > 0) spec.limit = Math.floor(model.limit);
+  else delete spec.limit;
   return { ok: true, name, spec };
 }

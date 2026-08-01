@@ -175,6 +175,43 @@ test.describe('projections', () => {
       .toMatchObject({ label: 'Dept code', renderer: 'link', width: 175 });
   });
 
+  test('a row limit caps the projection (TOP N)', async ({ page }) => {
+    const id = await createTable(page, 'Many', [{ field: 'name' }]);
+    await bulkAddRows(page, id, [
+      { name: 'a' },
+      { name: 'b' },
+      { name: 'c' },
+      { name: 'd' },
+      { name: 'e' },
+    ]);
+    await waitForPanel(page, id);
+
+    await page.locator(`#${panelDomId(id)}`).getByRole('button', { name: 'New Projection' }).click();
+    const dialog = page.locator('projection-dialog');
+    await expect(dialog.locator('dialog')).toBeVisible();
+    await dialog.locator('#proj-name').fill('Top two');
+    await dialog.locator('#proj-limit').fill('2');
+    await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ctx = (window as any).__easydb;
+          const all = await ctx.store.tables.find({ workspaceId: ctx.workspaceId });
+          const p = all.find(
+            (t: { source?: { type?: string }; name: string }) => t.source?.type === 'projection' && t.name === 'Top two',
+          );
+          if (!p) return null;
+          return {
+            limit: (p.source.config as { limit?: number }).limit,
+            rows: (await ctx.store.rows(p.id).find()).length,
+          };
+        }),
+      )
+      .toEqual({ limit: 2, rows: 2 });
+  });
+
   test('the New Projection button creates a working projection through the editor', async ({
     page,
   }) => {

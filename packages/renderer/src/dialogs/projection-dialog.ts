@@ -132,6 +132,18 @@ export class ProjectionDialog extends LitElement {
       .add-row select {
         max-width: 14rem;
       }
+      /* Name takes the space; the row cap is a narrow field beside it. */
+      .head-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 7rem;
+        gap: 0.6rem;
+        align-items: end;
+      }
+      @media (max-width: 640px) {
+        .head-row {
+          grid-template-columns: 1fr;
+        }
+      }
 
       /* -- sources --------------------------------------------------------- */
       .sources {
@@ -335,6 +347,8 @@ export class ProjectionDialog extends LitElement {
   ];
 
   @state() private name = '';
+  /** Held as a string so the field can be blank (= no limit). */
+  @state() private limit = '';
   @state() private sources: EdSource[] = [];
   @state() private columns: EdColumn[] = [];
   @state() private error = '';
@@ -367,6 +381,7 @@ export class ProjectionDialog extends LitElement {
     this.editing = !!opts.initial;
     this.originalSpec = null;
     this.name = '';
+    this.limit = '';
     this.sources = [];
     this.columns = [];
     if (opts.initial) {
@@ -382,10 +397,12 @@ export class ProjectionDialog extends LitElement {
 
   /** The editor state as one model, for the pure transforms in projection-spec. */
   private modelOf(): EditorModel {
+    const n = Number(this.limit);
     return {
       name: this.name,
       sources: this.sources,
       columns: this.columns,
+      ...(this.limit.trim() !== '' && Number.isFinite(n) && n > 0 ? { limit: Math.floor(n) } : {}),
       ...(this.originalSpec ? { original: this.originalSpec } : {}),
     };
   }
@@ -394,6 +411,7 @@ export class ProjectionDialog extends LitElement {
     this.name = m.name;
     this.sources = m.sources;
     this.columns = m.columns;
+    this.limit = m.limit != null && m.limit > 0 ? String(m.limit) : '';
   }
 
   private loadFrom(name: string, spec: ProjectionSpec): void {
@@ -419,9 +437,7 @@ export class ProjectionDialog extends LitElement {
   }
 
   private patchSource(alias: string, patch: Partial<EdJoin>): void {
-    this.sources = this.sources.map((s) =>
-      s.alias === alias && s.join ? { ...s, join: { ...s.join, ...patch } } : s,
-    );
+    this.sources = this.sources.map((s) => (s.alias === alias && s.join ? { ...s, join: { ...s.join, ...patch } } : s));
   }
 
   private buildSpec(): { name: string; spec: ProjectionSpec } | null {
@@ -466,14 +482,24 @@ export class ProjectionDialog extends LitElement {
             </div>
           </div>
           <div class="dialog-body">
-            <label>
-              Name
-              <input
-                id="proj-name"
-                .value=${this.name}
-                @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)}
-              />
-            </label>
+            <div class="head-row">
+              <label>
+                Name
+                <input id="proj-name" .value=${this.name} @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)} />
+              </label>
+              <label>
+                Row limit
+                <input
+                  id="proj-limit"
+                  type="number"
+                  min="0"
+                  placeholder="all"
+                  .value=${this.limit}
+                  title="Cap the number of rows (TOP N). Blank or 0 shows every row."
+                  @input=${(e: Event) => (this.limit = (e.target as HTMLInputElement).value)}
+                />
+              </label>
+            </div>
 
             <section>
               <div class="section-head">
@@ -489,27 +515,20 @@ export class ProjectionDialog extends LitElement {
                   type="button"
                   class="ghost sm"
                   @click=${() => {
-                    const sel = this.shadowRoot?.getElementById(
-                      'add-src',
-                    ) as HTMLSelectElement | null;
+                    const sel = this.shadowRoot?.getElementById('add-src') as HTMLSelectElement | null;
                     if (sel?.value) this.addSource(sel.value);
                   }}
                 >
                   ${base ? '+ Join table' : '+ Base table'}
                 </button>
-                ${base
-                  ? html`<span class="hint">A table may be joined more than once.</span>`
-                  : nothing}
+                ${base ? html`<span class="hint">A table may be joined more than once.</span>` : nothing}
               </div>
             </section>
 
             <section>
               <div class="section-head">
                 <h3>Columns</h3>
-                <span class="hint">
-                  Tick what the projection includes. Labels, types and formatting are
-                  inherited from the source and edited with “Edit columns”.
-                </span>
+                <span class="hint"> Tick what the projection includes. Labels, types and formatting are inherited from the source and edited with “Edit columns”. </span>
               </div>
               ${this.sources.map((s) => this.renderSourceColumns(s))} ${this.renderComputedColumns()}
             </section>
@@ -529,32 +548,16 @@ export class ProjectionDialog extends LitElement {
           <span class="name">${s.tableName}</span>
           <code class="alias" title="Alias used by the join keys below">${s.alias}</code>
           <span class="spacer"></span>
-          ${isBase
-            ? nothing
-            : html`<button
-                type="button"
-                class="icon-btn"
-                title="Remove this join"
-                aria-label="Remove ${s.tableName}"
-                @click=${() => this.removeSource(s.alias)}
-              >
-                ×
-              </button>`}
+          ${isBase ? nothing : html`<button type="button" class="icon-btn" title="Remove this join" aria-label="Remove ${s.tableName}" @click=${() => this.removeSource(s.alias)}>×</button>`}
         </div>
         ${s.join
           ? html`<div class="join-grid">
-              <select
-                .value=${s.join.type}
-                @change=${(e: Event) => this.patchSource(s.alias, { type: (e.target as HTMLSelectElement).value as 'inner' | 'left' })}
-              >
+              <select .value=${s.join.type} @change=${(e: Event) => this.patchSource(s.alias, { type: (e.target as HTMLSelectElement).value as 'inner' | 'left' })}>
                 <option value="left">LEFT JOIN</option>
                 <option value="inner">INNER JOIN</option>
               </select>
               <span class="kw">ON</span>
-              <select
-                .value=${s.join.thisField}
-                @change=${(e: Event) => this.patchSource(s.alias, { thisField: (e.target as HTMLSelectElement).value })}
-              >
+              <select .value=${s.join.thisField} @change=${(e: Event) => this.patchSource(s.alias, { thisField: (e.target as HTMLSelectElement).value })}>
                 ${s.columns.map((col) => html`<option value=${col.field} ?selected=${col.field === s.join?.thisField}>${s.alias}.${col.field}</option>`)}
               </select>
               <span class="kw">=</span>
@@ -567,13 +570,7 @@ export class ProjectionDialog extends LitElement {
               >
                 ${this.aliasesBefore(s.alias).flatMap((os) =>
                   os.columns.map(
-                    (col) =>
-                      html`<option
-                        value=${`${os.alias}.${col.field}`}
-                        ?selected=${os.alias === s.join?.otherAlias && col.field === s.join?.otherField}
-                      >
-                        ${os.alias}.${col.field}
-                      </option>`,
+                    (col) => html`<option value=${`${os.alias}.${col.field}`} ?selected=${os.alias === s.join?.otherAlias && col.field === s.join?.otherField}>${os.alias}.${col.field}</option>`,
                   ),
                 )}
               </select>
@@ -585,9 +582,7 @@ export class ProjectionDialog extends LitElement {
 
   /** One source's columns as a dense wrapping row of tick-boxes. */
   private renderSourceColumns(s: EdSource) {
-    const mine = this.columns
-      .map((c, i) => ({ c, i }))
-      .filter(({ c }) => !c.computed && c.alias === s.alias);
+    const mine = this.columns.map((c, i) => ({ c, i })).filter(({ c }) => !c.computed && c.alias === s.alias);
     if (mine.length === 0) return nothing;
     const allOn = mine.every(({ c }) => c.include);
     return html`
@@ -601,9 +596,7 @@ export class ProjectionDialog extends LitElement {
             @click=${() => {
               const want = !allOn;
               const idx = new Set(mine.map(({ i }) => i));
-              this.columns = this.columns.map((c, j) =>
-                idx.has(j) ? { ...c, include: want } : c,
-              );
+              this.columns = this.columns.map((c, j) => (idx.has(j) ? { ...c, include: want } : c));
             }}
           >
             ${allOn ? 'none' : 'all'}
@@ -613,11 +606,7 @@ export class ProjectionDialog extends LitElement {
           ${mine.map(
             ({ c, i }) => html`
               <label class="tick ${c.include ? '' : 'off'}" title=${`${c.alias}.${c.field}`}>
-                <input
-                  type="checkbox"
-                  .checked=${c.include}
-                  @change=${(e: Event) => this.setColumn(i, { include: (e.target as HTMLInputElement).checked })}
-                />
+                <input type="checkbox" .checked=${c.include} @change=${(e: Event) => this.setColumn(i, { include: (e.target as HTMLInputElement).checked })} />
                 <span class="tick-name">${c.field}</span>
               </label>
             `,
@@ -641,12 +630,7 @@ export class ProjectionDialog extends LitElement {
           : computed.map(
               ({ c, i }) => html`
                 <div class="computed-row ${c.include ? '' : 'off'}">
-                  <input
-                    type="checkbox"
-                    .checked=${c.include}
-                    aria-label="Include computed column"
-                    @change=${(e: Event) => this.setColumn(i, { include: (e.target as HTMLInputElement).checked })}
-                  />
+                  <input type="checkbox" .checked=${c.include} aria-label="Include computed column" @change=${(e: Event) => this.setColumn(i, { include: (e.target as HTMLInputElement).checked })} />
                   <textarea
                     class="script"
                     aria-label="Computed column script"

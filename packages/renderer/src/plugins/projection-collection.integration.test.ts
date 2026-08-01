@@ -116,7 +116,8 @@ describe('createProjectionCollection', () => {
     const rows = await coll.find();
     expect(rows.map((r) => r.data)).toEqual([
       { name: 'Bob', dept: 'Sales' },
-      { name: 'Sue', dept: undefined },
+      // Unmatched left join → null (SQL NULL), so the rows match the SQL export.
+      { name: 'Sue', dept: null },
     ]);
     expect(rows.map((r) => r.id)).toEqual(['pa#0', 'pb#0']);
     expect(rows.every((r) => r.tableId === 'proj')).toBe(true);

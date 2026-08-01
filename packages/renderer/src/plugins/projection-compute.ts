@@ -8,15 +8,7 @@
 //
 // See docs/superpowers/specs/2026-07-31-projection-virtual-tables-design.md.
 
-import type {
-  ColumnSpec,
-  ProjectionColumn,
-  ProjectionSource,
-  ProjectionSpec,
-  Row,
-  SortSpec,
-  Table,
-} from '@easydb/shared';
+import type { ColumnSpec, ProjectionColumn, ProjectionSource, ProjectionSpec, Row, SortSpec, Table } from '@easydb/shared';
 import { runColumnScript } from '../util/column-script.js';
 import { isInternalField } from '../util/internal-fields.js';
 
@@ -45,9 +37,7 @@ export function computeProjection(spec: ProjectionSpec, sourceRows: SourceRowsBy
     const join = src.join;
     const next: Combo[] = [];
     for (const combo of combos) {
-      const matches = join
-        ? rows.filter((r) => join.on.every((k) => keyEqual(r.data[k.field], combo[k.eqAlias]?.data[k.eqField])))
-        : [];
+      const matches = join ? rows.filter((r) => join.on.every((k) => keyEqual(r.data[k.field], combo[k.eqAlias]?.data[k.eqField]))) : [];
       if (matches.length > 0) {
         for (const m of matches) next.push({ ...combo, [src.alias]: m });
       } else if (join?.type === 'left') {
@@ -60,7 +50,11 @@ export function computeProjection(spec: ProjectionSpec, sourceRows: SourceRowsBy
 
   const result: Row[] = [];
   const ordinalByBase = new Map<string, number>();
+  // TOP N: applied AFTER the join and filters, so the cap counts rows the user
+  // would actually see (the SQL export renders the same thing as SELECT TOP n).
+  const limit = spec.limit != null && spec.limit > 0 ? spec.limit : Infinity;
   for (const combo of combos) {
+    if (result.length >= limit) break;
     const baseRow = combo[base.alias];
     if (!baseRow) continue; // base is always present
     const data = buildRowData(spec.columns, combo);
@@ -86,7 +80,12 @@ export function computeProjection(spec: ProjectionSpec, sourceRows: SourceRowsBy
 function buildRowData(columns: ProjectionColumn[], combo: Combo): Record<string, unknown> {
   const data: Record<string, unknown> = {};
   for (const col of columns) {
-    if (col.from.kind === 'source') data[col.field] = combo[col.from.alias]?.data[col.from.field];
+    if (col.from.kind !== 'source') continue;
+    const value = combo[col.from.alias]?.data[col.from.field];
+    // `null`, not `undefined`, for a column with no value — an unmatched LEFT
+    // JOIN is SQL NULL, so the rows match the exported SELECT exactly, and null
+    // survives JSON export / sync where an undefined key is dropped entirely.
+    data[col.field] = value === undefined ? null : value;
   }
   for (const col of columns) {
     if (col.from.kind === 'script') {
@@ -163,12 +162,7 @@ export function resolveWritability(spec: ProjectionSpec): Set<string> {
  * secondary-source column has no unambiguous write target, so it cannot become
  * editable however the table is edited.
  */
-export function inheritColumns(
-  spec: ProjectionSpec,
-  sourceColumnsByAlias: Record<string, ColumnSpec[]>,
-  existing: ColumnSpec[] = [],
-  deletedColumns: string[] = [],
-): ColumnSpec[] {
+export function inheritColumns(spec: ProjectionSpec, sourceColumnsByAlias: Record<string, ColumnSpec[]>, existing: ColumnSpec[] = [], deletedColumns: string[] = []): ColumnSpec[] {
   const writable = resolveWritability(spec);
   const byField = new Map(existing.map((c) => [c.field, c] as const));
   const deleted = new Set(deletedColumns);
@@ -197,9 +191,7 @@ export function inheritColumns(
       const source = (sourceColumnsByAlias[from.alias] ?? []).find((sc) => sc.field === from.field);
       // Copy the WHOLE source column (renderer, width, hidden, units, …), then
       // re-point it at this projection's output field name.
-      col = source
-        ? { ...source, field: c.field }
-        : { field: c.field, label: c.label ?? c.field, type: c.type ?? 'string' };
+      col = source ? { ...source, field: c.field } : { field: c.field, label: c.label ?? c.field, type: c.type ?? 'string' };
       if (isInternalField(from.field)) col.hidden = true;
     } else {
       col = { field: c.field, label: c.label ?? c.field, type: c.type ?? 'string' };
@@ -252,12 +244,7 @@ export function presentationFromBase(spec: ProjectionSpec, base: Table): Carried
   const map = baseFieldToOutput(spec);
   const out: CarriedPresentation = {};
 
-  const baseSort: SortSpec[] =
-    base.sortBy && base.sortBy.length > 0
-      ? base.sortBy
-      : base.sortColumn
-        ? [{ field: base.sortColumn, asc: base.sortAsc ?? true }]
-        : [];
+  const baseSort: SortSpec[] = base.sortBy && base.sortBy.length > 0 ? base.sortBy : base.sortColumn ? [{ field: base.sortColumn, asc: base.sortAsc ?? true }] : [];
   const sortBy: SortSpec[] = [];
   for (const key of baseSort) {
     const field = map.get(key.field);
@@ -287,11 +274,7 @@ export function presentationFromBase(spec: ProjectionSpec, base: Table): Carried
 // -- Cycle detection -------------------------------------------------------
 
 /** Resolve a spec source to a table: by name, with `tableId` as a hint only. */
-function resolveSource(
-  s: ProjectionSource,
-  byId: Map<string, Table>,
-  byName: Map<string, Table>,
-): Table | undefined {
+function resolveSource(s: ProjectionSource, byId: Map<string, Table>, byName: Map<string, Table>): Table | undefined {
   if (s.tableId) {
     const hit = byId.get(s.tableId);
     if (hit && hit.name === s.tableName) return hit;
@@ -432,10 +415,7 @@ export function guessJoinKeys(
       for (const nf of newSource.fields) {
         for (const ef of es.fields) {
           if (skipUsed && used.has(`${es.alias} ${ef}`)) continue;
-          const s = scoreJoinPair(
-            { table: newSource.tableName, field: nf, isPk: newPks.has(nf) },
-            { table: es.tableName, field: ef, isPk: esPks.has(ef) },
-          );
+          const s = scoreJoinPair({ table: newSource.tableName, field: nf, isPk: newPks.has(nf) }, { table: es.tableName, field: ef, isPk: esPks.has(ef) });
           if (s > bestScore) {
             bestScore = s;
             best = { thisField: nf, otherAlias: es.alias, otherField: ef };
@@ -461,11 +441,7 @@ export interface WritebackTarget {
  * Resolve an edit to output cell (`rowId`, `field`) to its base-row write
  * target, or null when the column cannot be written back.
  */
-export function writebackTarget(
-  spec: ProjectionSpec,
-  rowId: string,
-  field: string,
-): WritebackTarget | null {
+export function writebackTarget(spec: ProjectionSpec, rowId: string, field: string): WritebackTarget | null {
   if (!resolveWritability(spec).has(field)) return null;
   const col = spec.columns.find((c) => c.field === field);
   if (!col || col.from.kind !== 'source') return null;

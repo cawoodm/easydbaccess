@@ -1,14 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectionSpec, Row, Table } from '@easydb/shared';
-import {
-  computeProjection,
-  guessJoinKeys,
-  hasProjectionCycle,
-  inheritColumns,
-  presentationFromBase,
-  resolveWritability,
-  writebackTarget,
-} from './projection-compute.js';
+import { computeProjection, guessJoinKeys, hasProjectionCycle, inheritColumns, presentationFromBase, resolveWritability, writebackTarget } from './projection-compute.js';
 
 const row = (id: string, data: Record<string, unknown>, updatedAt = 1): Row => ({
   id,
@@ -70,7 +62,8 @@ describe('computeProjection', () => {
     expect(out).toEqual([
       { id: 'c1#0', tableId: '', data: { name: 'Bob', amt: 10 }, updatedAt: 1 },
       { id: 'c1#1', tableId: '', data: { name: 'Bob', amt: 20 }, updatedAt: 1 },
-      { id: 'c2#0', tableId: '', data: { name: 'Sue', amt: undefined }, updatedAt: 1 },
+      // An unmatched left join is null (SQL NULL), never undefined.
+      { id: 'c2#0', tableId: '', data: { name: 'Sue', amt: null }, updatedAt: 1 },
     ]);
   });
 
@@ -115,18 +108,13 @@ describe('computeProjection', () => {
     };
     // The same rows are supplied for both `til` aliases — that is what the
     // provider does when two sources resolve to one table.
-    const til = [
-      row('t1', { path: 'a.md', title: 'Apache bench' }),
-      row('t2', { path: 'b.md', title: 'Escaping SQL' }),
-    ];
+    const til = [row('t1', { path: 'a.md', title: 'Apache bench' }), row('t2', { path: 'b.md', title: 'Escaping SQL' })];
     const out = computeProjection(spec, {
       s: [row('s1', { id: 'a.md', other_id: 'b.md', score: 0.74 })],
       l: til,
       r: til,
     });
-    expect(out.map((r) => r.data)).toEqual([
-      { title: 'Apache bench', similar: 'Escaping SQL', score: 0.74 },
-    ]);
+    expect(out.map((r) => r.data)).toEqual([{ title: 'Apache bench', similar: 'Escaping SQL', score: 0.74 }]);
   });
 
   it('returns nothing when the base source has no rows', () => {
@@ -203,9 +191,7 @@ describe('inheritColumns', () => {
   });
 
   it('keeps the user’s own edits — inheritance happens once', () => {
-    const existing = [
-      { field: 'name', label: 'Renamed by hand', type: 'number' as const, renderer: 'color', width: 99 },
-    ];
+    const existing = [{ field: 'name', label: 'Renamed by hand', type: 'number' as const, renderer: 'color', width: 99 }];
     const name = inheritColumns(spec, sources, existing).find((c) => c.field === 'name');
     expect(name).toMatchObject({ label: 'Renamed by hand', type: 'number', renderer: 'color', width: 99 });
   });
@@ -271,9 +257,7 @@ describe('presentationFromBase', () => {
   const spec: ProjectionSpec = {
     version: 1,
     sources: [{ alias: 'p', tableName: 'People' }],
-    columns: [
-      { field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'p', field: 'fullname' } },
-    ],
+    columns: [{ field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'p', field: 'fullname' } }],
   };
 
   it('translates sort keys to the projection output fields', () => {
@@ -295,10 +279,7 @@ describe('presentationFromBase', () => {
   });
 
   it('drops sort/filter keys whose column was not selected', () => {
-    const out = presentationFromBase(
-      spec,
-      baseTable({ sortBy: [{ field: 'deptId', asc: true }], filters: { deptId: 'd1' } }),
-    );
+    const out = presentationFromBase(spec, baseTable({ sortBy: [{ field: 'deptId', asc: true }], filters: { deptId: 'd1' } }));
     expect(out.sortBy).toBeUndefined();
     expect(out.filters).toBeUndefined();
   });
@@ -359,29 +340,29 @@ describe('hasProjectionCycle', () => {
 
 describe('guessJoinKeys', () => {
   it('matches the FK convention: new table id = earlier <table>Id', () => {
-    expect(
-      guessJoinKeys({ tableName: 'Dept', fields: ['id', 'label', 'budget'] }, [
-        { alias: 'p', tableName: 'People', fields: ['name', 'deptId'] },
-      ]),
-    ).toEqual({ thisField: 'id', otherAlias: 'p', otherField: 'deptId' });
+    expect(guessJoinKeys({ tableName: 'Dept', fields: ['id', 'label', 'budget'] }, [{ alias: 'p', tableName: 'People', fields: ['name', 'deptId'] }])).toEqual({
+      thisField: 'id',
+      otherAlias: 'p',
+      otherField: 'deptId',
+    });
   });
 
   it('matches a shared foreign-key-shaped column on both sides', () => {
-    expect(
-      guessJoinKeys({ tableName: 'Orders', fields: ['id', 'customerId', 'total'] }, [
-        { alias: 'c', tableName: 'Customers', fields: ['customerId', 'name'] },
-      ]),
-    ).toEqual({ thisField: 'customerId', otherAlias: 'c', otherField: 'customerId' });
+    expect(guessJoinKeys({ tableName: 'Orders', fields: ['id', 'customerId', 'total'] }, [{ alias: 'c', tableName: 'Customers', fields: ['customerId', 'name'] }])).toEqual({
+      thisField: 'customerId',
+      otherAlias: 'c',
+      otherField: 'customerId',
+    });
   });
 
   it('pairs a primary key with a reference-shaped field when the key is not called id', () => {
     // Simon Willison's TIL database: `til` is keyed by `path`, and
     // `similarities` references it twice (`id`, `other_id`).
-    expect(
-      guessJoinKeys({ tableName: 'til', fields: ['path', 'title'], pks: ['path'] }, [
-        { alias: 'a', tableName: 'similarities', fields: ['id', 'other_id', 'score'] },
-      ]),
-    ).toEqual({ thisField: 'path', otherAlias: 'a', otherField: 'id' });
+    expect(guessJoinKeys({ tableName: 'til', fields: ['path', 'title'], pks: ['path'] }, [{ alias: 'a', tableName: 'similarities', fields: ['id', 'other_id', 'score'] }])).toEqual({
+      thisField: 'path',
+      otherAlias: 'a',
+      otherField: 'id',
+    });
   });
 
   it('picks a different key for the second join onto the same table', () => {
@@ -400,23 +381,13 @@ describe('guessJoinKeys', () => {
 
   it('never joins a repeated table to itself on the same column', () => {
     // `b.path = c.path` would match every row to itself and is pure noise.
-    const guess = guessJoinKeys({ tableName: 'til', fields: ['path', 'title'], pks: ['path'] }, [
-      { alias: 'b', tableName: 'til', fields: ['path', 'title'], pks: ['path'] },
-    ]);
+    const guess = guessJoinKeys({ tableName: 'til', fields: ['path', 'title'], pks: ['path'] }, [{ alias: 'b', tableName: 'til', fields: ['path', 'title'], pks: ['path'] }]);
     expect(guess).toBeNull();
   });
 
   it('does not guess on a bare id = id, nor when nothing matches', () => {
-    expect(
-      guessJoinKeys({ tableName: 'A', fields: ['id', 'x'] }, [
-        { alias: 'b', tableName: 'B', fields: ['id', 'y'] },
-      ]),
-    ).toBeNull();
-    expect(
-      guessJoinKeys({ tableName: 'A', fields: ['foo'] }, [
-        { alias: 'b', tableName: 'B', fields: ['bar'] },
-      ]),
-    ).toBeNull();
+    expect(guessJoinKeys({ tableName: 'A', fields: ['id', 'x'] }, [{ alias: 'b', tableName: 'B', fields: ['id', 'y'] }])).toBeNull();
+    expect(guessJoinKeys({ tableName: 'A', fields: ['foo'] }, [{ alias: 'b', tableName: 'B', fields: ['bar'] }])).toBeNull();
   });
 });
 
