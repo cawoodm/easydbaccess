@@ -20,12 +20,17 @@ export interface ProjectionSqlOpts {
   /** Source alias → the SQL table name it reads from. */
   tableNames: Record<string, string>;
   /**
-   * How to cap rows. `top` emits `SELECT TOP n` (SQL Server / HANA / Sybase) and
-   * is the default the export uses; `limit` emits a trailing `LIMIT n`
-   * (SQLite / PostgreSQL / MySQL).
+   * How to cap rows:
+   *  - `limit` (default) — a trailing `LIMIT n`. What the export emits, because
+   *    it is the only spelling that runs on BOTH targets this exporter promises
+   *    (PostgreSQL and SQLite — see the header `serializeWorkspaceAsSql` writes).
+   *  - `fetch` — `FETCH FIRST n ROWS ONLY`, the strict SQL:2008 form. Standard,
+   *    and supported by PostgreSQL / DB2 / Oracle / SQL Server 2012+ — but NOT
+   *    by SQLite.
+   *  - `top` — `SELECT TOP n` (SQL Server / HANA / Sybase).
    */
-  limitStyle?: 'top' | 'limit';
-  /** ORDER BY keys, named by OUTPUT field — makes a TOP n deterministic. */
+  limitStyle?: 'limit' | 'fetch' | 'top';
+  /** ORDER BY keys, named by OUTPUT field — makes a row cap deterministic. */
   orderBy?: SortSpec[] | undefined;
 }
 
@@ -54,7 +59,7 @@ function columnExpr(spec: ProjectionSpec, outField: string): { expr: string; com
 export function buildProjectionSelect(spec: ProjectionSpec, opts: ProjectionSqlOpts): string {
   const base = spec.sources[0];
   if (!base) return '-- projection has no source table; nothing to select.\n';
-  const style = opts.limitStyle ?? 'top';
+  const style = opts.limitStyle ?? 'limit';
   const limit = spec.limit != null && spec.limit > 0 ? Math.floor(spec.limit) : null;
 
   // -- SELECT list ---------------------------------------------------------
@@ -116,6 +121,6 @@ export function buildProjectionSelect(spec: ProjectionSpec, opts: ProjectionSqlO
     .filter((s): s is string => s !== null);
   if (order.length > 0) lines.push(`ORDER BY ${order.join(', ')}`);
 
-  const tail = limit != null && style === 'limit' ? `\nLIMIT ${limit}` : '';
+  const tail = limit == null ? '' : style === 'limit' ? `\nLIMIT ${limit}` : style === 'fetch' ? `\nFETCH FIRST ${limit} ROWS ONLY` : ''; // 'top' already went into the SELECT clause
   return `${lines.join('\n')}${tail};\n${notes.length > 0 ? `${notes.join('\n')}\n` : ''}`;
 }

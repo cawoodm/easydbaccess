@@ -88,9 +88,13 @@ export function projectionSelectFor(table: Table): string | null {
   for (const s of spec.sources) tableNames[s.alias] = sanitizeIdent(s.tableName);
   const orderBy = spec.sources.length > 0 && table.sortBy && table.sortBy.length > 0 ? table.sortBy : table.sortColumn ? [{ field: table.sortColumn, asc: table.sortAsc ?? true }] : undefined;
 
+  // ANSI-flavoured, matching the rest of this exporter: double-quoted
+  // identifiers and a trailing `LIMIT n` — the row-cap spelling that runs on
+  // both targets the dump promises. (`FETCH FIRST n ROWS ONLY` is the stricter
+  // SQL:2008 form but SQLite rejects it; `TOP n` is SQL Server / HANA.)
   const select = buildProjectionSelect(spec, {
     tableNames,
-    limitStyle: 'top',
+    limitStyle: 'limit',
     ...(orderBy ? { orderBy } : {}),
   });
   return [
@@ -100,6 +104,10 @@ export function projectionSelectFor(table: Table): string | null {
     `--`,
     `-- A projection is a derived (virtual) table: this is the query behind it,`,
     `-- reading the source tables by name.`,
+    `-- Compatible with PostgreSQL and SQLite. For MySQL run`,
+    `--   SET sql_mode='ANSI_QUOTES';`,
+    `-- before executing. For SQL Server / HANA, replace the trailing LIMIT n`,
+    `-- with SELECT TOP n.`,
     ``,
     select,
   ].join('\n');

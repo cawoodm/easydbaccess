@@ -11,9 +11,9 @@ import { serializeTableAsSql } from './sql-export.js';
  * `computeProjection` row-for-row. That is the only way to know the export
  * faithfully represents the join rather than merely looking plausible.
  *
- * The export emits `SELECT TOP n` (SQL Server / HANA), which SQLite cannot parse,
- * so execution uses the same builder's `limitStyle: 'limit'` rendering. The TOP
- * spelling itself is asserted separately, on the string.
+ * The export is ANSI-flavoured (double-quoted identifiers, a trailing `LIMIT n`),
+ * which SQLite runs as-is — so these tests execute exactly what the export emits.
+ * The other dialects the builder can render are asserted on the string.
  */
 
 // `node:sqlite` is newer than Vite's builtin-module list, so a static import is
@@ -57,13 +57,9 @@ function computed(spec: ProjectionSpec): Array<Record<string, unknown>> {
   return computeProjection(spec, { p: asRows(people), d: asRows(depts) }).map((r) => r.data);
 }
 
-/** Run the SELECT (LIMIT flavour, so SQLite can parse it) and return plain rows. */
-function executed(spec: ProjectionSpec, orderBy?: ProjectionSpec['filters'] extends never ? never : undefined) {
-  void orderBy;
-  const sql = buildProjectionSelect(spec, {
-    tableNames: { p: 'People', d: 'Dept' },
-    limitStyle: 'limit',
-  });
+/** Run exactly what the export emits, and return the rows SQLite gives back. */
+function executed(spec: ProjectionSpec) {
+  const sql = buildProjectionSelect(spec, { tableNames: { p: 'People', d: 'Dept' } });
   const d = db();
   try {
     return d
@@ -156,18 +152,26 @@ describe('the exported SELECT reproduces the projection', () => {
 });
 
 describe('buildProjectionSelect: SQL text', () => {
-  it('renders the row cap as SELECT TOP n by default', () => {
-    const sql = buildProjectionSelect({ ...leftJoin, limit: 5 }, { tableNames: { p: 'People', d: 'Dept' } });
-    expect(sql).toContain('SELECT TOP 5');
-    expect(sql).not.toContain('LIMIT');
+  const names = { p: 'People', d: 'Dept' };
+
+  it('renders the row cap as a trailing LIMIT n by default (ANSI-flavoured)', () => {
+    const sql = buildProjectionSelect({ ...leftJoin, limit: 5 }, { tableNames: names });
+    expect(sql).toContain('LIMIT 5');
+    expect(sql).not.toContain('TOP');
   });
 
-  it('renders LIMIT n when asked, and neither without a cap', () => {
-    const names = { p: 'People', d: 'Dept' };
-    expect(buildProjectionSelect({ ...leftJoin, limit: 5 }, { tableNames: names, limitStyle: 'limit' })).toContain('LIMIT 5');
+  it('can also render the SQL:2008 FETCH FIRST and the SQL Server TOP forms', () => {
+    expect(buildProjectionSelect({ ...leftJoin, limit: 5 }, { tableNames: names, limitStyle: 'fetch' })).toContain('FETCH FIRST 5 ROWS ONLY');
+    const top = buildProjectionSelect({ ...leftJoin, limit: 5 }, { tableNames: names, limitStyle: 'top' });
+    expect(top).toContain('SELECT TOP 5');
+    expect(top).not.toContain('LIMIT');
+  });
+
+  it('emits no cap at all without a limit', () => {
     const none = buildProjectionSelect(leftJoin, { tableNames: names });
     expect(none).not.toContain('TOP');
     expect(none).not.toContain('LIMIT');
+    expect(none).not.toContain('FETCH');
   });
 
   it('aliases every source and spells out the join', () => {
@@ -221,7 +225,7 @@ describe('serializeTableAsSql for a projection table', () => {
   it('exports the query behind the projection, not a dump of derived rows', () => {
     const sql = serializeTableAsSql(projTable, []);
     expect(sql).toContain('-- projection: Staff by Dept');
-    expect(sql).toContain('SELECT TOP 10');
+    expect(sql).toContain('LIMIT 10');
     expect(sql).toContain('FROM "People" AS "p"');
     expect(sql).toContain('ORDER BY "p"."name" ASC');
     // No CREATE TABLE / INSERT: a projection stores nothing.
@@ -235,6 +239,6 @@ describe('serializeTableAsSql for a projection table', () => {
     const sql = serializeTableAsSql(plain, [{ id: 'r1', tableId: 'x', data: { name: 'Alice', dept: 'Sales' }, updatedAt: 0 }]);
     expect(sql).toContain('CREATE TABLE "people"');
     expect(sql).toContain('INSERT INTO "people"');
-    expect(sql).not.toContain('SELECT TOP');
+    expect(sql).not.toContain('LIMIT');
   });
 });

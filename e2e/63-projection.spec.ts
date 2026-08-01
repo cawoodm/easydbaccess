@@ -175,7 +175,7 @@ test.describe('projections', () => {
       .toMatchObject({ label: 'Dept code', renderer: 'link', width: 175 });
   });
 
-  test('a row limit caps the projection (TOP N)', async ({ page }) => {
+  test('a row limit caps the projection', async ({ page }) => {
     const id = await createTable(page, 'Many', [{ field: 'name' }]);
     await bulkAddRows(page, id, [
       { name: 'a' },
