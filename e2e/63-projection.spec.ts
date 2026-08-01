@@ -105,7 +105,7 @@ test.describe('projections', () => {
     const dialog = page.locator('projection-dialog');
     await expect(dialog.locator('dialog')).toBeVisible();
     // Base source (the only candidate) is auto-seeded with its columns selected.
-    await dialog.locator('input').first().fill('Solo view');
+    await dialog.locator('#proj-name').fill('Solo view');
     await dialog.getByRole('button', { name: 'Save', exact: true }).click();
 
     // A projection table was created and its provider computes the source rows.
@@ -159,7 +159,7 @@ test.describe('projections', () => {
     await page.locator(`#${panelDomId(id)}`).getByRole('button', { name: 'New Projection' }).click();
     const dialog = page.locator('projection-dialog');
     await expect(dialog.locator('dialog')).toBeVisible();
-    await dialog.locator('input').first().fill('Staff view');
+    await dialog.locator('#proj-name').fill('Staff view');
     await dialog.getByRole('button', { name: 'Save', exact: true }).click();
 
     const proj = await page.evaluate(async () => {
@@ -217,7 +217,7 @@ test.describe('projections', () => {
       await dialog.locator('#add-src').selectOption({ label: 'til' });
       await dialog.getByRole('button', { name: '+ Join table' }).click();
     }
-    await dialog.locator('input').first().fill('Similar TILs');
+    await dialog.locator('#proj-name').fill('Similar TILs');
     await dialog.getByRole('button', { name: 'Save', exact: true }).click();
 
     await expect
@@ -259,7 +259,7 @@ test.describe('projections', () => {
     await expect(dialog.locator('dialog')).toBeVisible();
     await dialog.locator('#add-src').selectOption({ label: 'Dept' });
     await dialog.getByRole('button', { name: '+ Join table' }).click();
-    await dialog.locator('input').first().fill('Staff');
+    await dialog.locator('#proj-name').fill('Staff');
     await dialog.getByRole('button', { name: 'Save', exact: true }).click();
 
     await expect
