@@ -366,12 +366,17 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
 
   const panelEl = document.getElementById(panelId);
 
-  // Inject the core per-window search box into the titlebar controlbar (next to
-  // min/max/close), keyed by the view INSTANCE id so a view's search filters the
-  // view's rows independently of the underlying table window's search.
+  // Inject the core per-window search box into the titlebar controlbar, keyed
+  // by the view INSTANCE id so a view's search filters the view's rows
+  // independently of the underlying table window's search.
+  //
+  // APPENDED, so it sits at the very right of a view's header — past the
+  // window buttons — rather than in front of them as it does on a table
+  // window. Filtering is the control a view is used through, and the far
+  // corner is the easiest target to hit.
   const search = document.createElement('panel-search');
   (search as HTMLElement & { tableId: string }).tableId = inst.id;
-  panelEl?.querySelector('.jsPanel-controlbar')?.prepend(search);
+  panelEl?.querySelector('.jsPanel-controlbar')?.append(search);
 
   drainReveal(inst.id);
 }

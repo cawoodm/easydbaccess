@@ -1148,3 +1148,48 @@ test.describe('views: sort, field search, standard templates', () => {
     await expect(dlg.locator('ul.list li', { hasText: 'RSS Feed' })).toHaveCount(1);
   });
 });
+
+test.describe('view header layout', () => {
+  test('the filter/search control sits at the very right of the view header', async ({ page }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ title: 'Alpha', url: 'https://example.com/a' }]);
+
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    const dlg = page.locator('views-dialog dialog');
+    await dlg
+      .locator('ul.list li', { hasText: 'RSS Feed' })
+      .getByRole('button', { name: 'Use' })
+      .click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+
+    const bar = page.locator('[id^="view-panel-"].jsPanel .jsPanel-controlbar');
+    await expect(bar.locator('panel-search')).toHaveCount(1);
+
+    // Last child of the controlbar, which is itself the last thing in the
+    // header — so it is the rightmost control there is, past Close.
+    const lastIsSearch = await bar.evaluate(
+      (el) => el.lastElementChild?.tagName.toLowerCase() === 'panel-search',
+    );
+    expect(lastIsSearch).toBe(true);
+
+    // And visibly so: further right than the close button.
+    const searchBox = (await bar.locator('panel-search').boundingBox())!;
+    const closeBox = (await bar.locator('button[title="Close"]').boundingBox())!;
+    expect(searchBox.x).toBeGreaterThan(closeBox.x);
+  });
+
+  test('a TABLE window keeps its search in front of the window buttons', async ({ page }) => {
+    // Only views moved; the table header is deliberately unchanged.
+    const id = await createTable(page, 'Plain', [{ field: 'a' }]);
+    await waitForPanel(page, id);
+
+    const bar = page.locator(`#${panelDomId(id)} .jsPanel-controlbar`);
+    const searchBox = (await bar.locator('panel-search').boundingBox())!;
+    const closeBox = (await bar.locator('button[title="Close"]').boundingBox())!;
+    expect(searchBox.x).toBeLessThan(closeBox.x);
+  });
+});
