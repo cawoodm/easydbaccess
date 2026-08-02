@@ -37,7 +37,13 @@ export function init(api: HostApi): void {
   if (typeof api.registerRowSource === 'function') {
     api.registerRowSource({
       type: 'projection',
-      create: (table) => createProjectionCollection(api.store, table),
+      create: (table) => {
+        // First use of this projection is the last moment its stored `readonly`
+        // flags can be wrong without the user noticing — they are about to look
+        // at it. Idempotent, so a no-op for anything already correct.
+        void healProjectionTable(api, table);
+        return createProjectionCollection(api.store, table);
+      },
     });
   }
 
@@ -63,6 +69,56 @@ export function init(api: HostApi): void {
     visible: (table) => table.source?.type === 'projection',
     onClick: (a, { tableId }) => void openProjectionEditor(a, { editTableId: tableId }),
   });
+}
+
+/**
+ * Bring existing projections in line with the current writability rule.
+ *
+ * `ColumnSpec.readonly` on a projection is derived from the spec, never set by
+ * hand — `inheritColumns` overwrites it every time — but it is only recomputed
+ * when a projection is created or its join re-saved. Joined columns used to be
+ * read-only unconditionally, so every projection already in a workspace still
+ * carries that flag and would stay uneditable until the user happened to open
+ * Edit Join and press Save. Recomputing it once at load fixes them in place.
+ *
+ * Idempotent, and it writes only when something actually differs.
+ */
+async function healProjectionTable(api: HostApi, t: Table): Promise<void> {
+  if (t.source?.type !== 'projection') return;
+  const spec = t.source.config as unknown as ProjectionSpec | undefined;
+  if (!spec || !Array.isArray(spec.sources)) return;
+  const writable = resolveWritability(spec);
+  const columns = t.columns.map((c) => {
+    const shouldBeReadonly = !writable.has(c.field);
+    if (shouldBeReadonly === (c.readonly === true)) return c;
+    if (shouldBeReadonly) return { ...c, readonly: true };
+    const next = { ...c };
+    delete next.readonly;
+    return next;
+  });
+  const tableReadonly = writable.size === 0;
+  const unchanged = columns.every((c, i) => c === t.columns[i]) && (t.readonly ?? false) === tableReadonly;
+  if (unchanged) return;
+  await api.store.tables.patch(t.id, { columns, readonly: tableReadonly, updatedAt: Date.now() });
+}
+
+/** Repair every projection in the workspace. */
+async function healProjectionWritability(api: HostApi): Promise<void> {
+  const workspaceId = api.workspaceId();
+  if (!workspaceId) return;
+  for (const t of await api.store.tables.find({ workspaceId })) await healProjectionTable(api, t);
+}
+
+/**
+ * Run once the app is up: repair projections saved under the old rule.
+ *
+ * The per-table heal in `registerRowSource` covers the ones that arrive LATER —
+ * pulled by sync from a device on an older build, restored from a dump, or made
+ * by the SQL/Datasette importers — which a one-shot sweep at startup would
+ * never see.
+ */
+export async function load(api: HostApi): Promise<void> {
+  await healProjectionWritability(api);
 }
 
 /**

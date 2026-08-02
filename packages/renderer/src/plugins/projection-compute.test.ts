@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectionSpec, Row, Table } from '@easydb/shared';
-import { computeProjection, guessJoinKeys, hasProjectionCycle, inheritColumns, presentationFromBase, resolveWritability, writebackTarget } from './projection-compute.js';
+import { computeProjection, computeProjectionRows, guessJoinKeys, hasProjectionCycle, inheritColumns, presentationFromBase, resolveWritability, writebackTarget } from './projection-compute.js';
 
 const row = (id: string, data: Record<string, unknown>, updatedAt = 1): Row => ({
   id,
@@ -182,10 +182,11 @@ describe('inheritColumns', () => {
     expect(dept?.width).toBe(120);
   });
 
-  it('marks non-writable columns read-only and leaves the base column editable', () => {
+  it('leaves every source column editable and marks only computed ones read-only', () => {
     const cols = inheritColumns(spec, sources);
     expect(cols.find((c) => c.field === 'name')?.readonly).toBeUndefined();
-    expect(cols.find((c) => c.field === 'dept')?.readonly).toBe(true); // joined
+    // A JOINED column is editable: the join knows the row it read it from.
+    expect(cols.find((c) => c.field === 'dept')?.readonly).toBeUndefined();
     expect(cols.find((c) => c.field === 'calc')?.readonly).toBe(true); // computed
     expect(cols.find((c) => c.field === 'calc')?.script).toContain('render');
   });
@@ -196,9 +197,15 @@ describe('inheritColumns', () => {
     expect(name).toMatchObject({ label: 'Renamed by hand', type: 'number', renderer: 'color', width: 99 });
   });
 
-  it('re-asserts read-only even on a column the user edited', () => {
-    const existing = [{ field: 'dept', label: 'Dept', type: 'string' as const, readonly: false }];
-    expect(inheritColumns(spec, sources, existing).find((c) => c.field === 'dept')?.readonly).toBe(true);
+  it('re-derives read-only rather than trusting what is stored, in both directions', () => {
+    // `readonly` on a projection column is spec-derived, never user-owned, so a
+    // stale value from an older rule must be corrected — a computed column
+    // stored as editable becomes read-only…
+    const staleEditable = [{ field: 'calc', label: 'Calc', type: 'string' as const, readonly: false }];
+    expect(inheritColumns(spec, sources, staleEditable).find((c) => c.field === 'calc')?.readonly).toBe(true);
+    // …and a joined column stored as read-only becomes editable.
+    const staleReadonly = [{ field: 'dept', label: 'Dept', type: 'string' as const, readonly: true }];
+    expect(inheritColumns(spec, sources, staleReadonly).find((c) => c.field === 'dept')?.readonly).toBeUndefined();
   });
 
   it('keeps the table’s existing column ORDER and appends new ones', () => {
@@ -405,16 +412,97 @@ describe('writeback', () => {
     ],
   };
 
-  it('resolveWritability lists only base-source, non-script output fields', () => {
-    expect(resolveWritability(spec)).toEqual(new Set(['name']));
+  it('resolveWritability lists every source field, and no script field', () => {
+    expect(resolveWritability(spec)).toEqual(new Set(['name', 'dept']));
   });
 
   it('writebackTarget maps a base-source cell to its base row + stored field', () => {
-    expect(writebackTarget(spec, 'r1#2', 'name')).toEqual({ baseRowId: 'r1', field: 'fullname' });
+    expect(writebackTarget(spec, 'r1#2', 'name')).toEqual({ alias: 'a', rowId: 'r1', field: 'fullname' });
   });
 
-  it('writebackTarget refuses secondary-source and computed columns', () => {
-    expect(writebackTarget(spec, 'r1#0', 'dept')).toBeNull();
+  it('writebackTarget refuses a computed column, and a joined one with no matched row', () => {
     expect(writebackTarget(spec, 'r1#0', 'calc')).toBeNull();
+    // No provenance and not the base source: nothing says which row it is.
+    expect(writebackTarget(spec, 'r1#0', 'dept')).toBeNull();
+  });
+});
+
+describe('writeback targets: a joined column knows exactly which row it came from', () => {
+  const spec: ProjectionSpec = {
+    version: 1,
+    sources: [
+      { alias: 'p', tableName: 'People' },
+      { alias: 'd', tableName: 'Dept', join: { type: 'left', on: [{ field: 'id', eqAlias: 'p', eqField: 'deptId' }] } },
+    ],
+    columns: [
+      { field: 'who', from: { kind: 'source', alias: 'p', field: 'name' } },
+      { field: 'dept', from: { kind: 'source', alias: 'd', field: 'label' } },
+      { field: 'shout', from: { kind: 'script', script: 'function render(r){return String(r.who).toUpperCase()}' } },
+    ],
+  };
+
+  const people = [
+    { id: 'p1', tableId: 'P', data: { name: 'Alice', deptId: 'd1' }, updatedAt: 0 },
+    { id: 'p2', tableId: 'P', data: { name: 'Bob', deptId: 'nope' }, updatedAt: 0 },
+  ];
+  const depts = [{ id: 'd1', tableId: 'D', data: { id: 'd1', label: 'Sales' }, updatedAt: 0 }];
+
+  it('marks every source column writable, and only computed ones read-only', () => {
+    // The join is 1:1 on the keys, so "dept" has exactly one cell behind it —
+    // there was never a reason for it to be read-only.
+    expect([...resolveWritability(spec)].sort()).toEqual(['dept', 'who']);
+  });
+
+  it('records which source row fed each output row', () => {
+    const { rows, provenance } = computeProjectionRows(spec, { p: people, d: depts });
+    expect(rows.map((r) => r.id)).toEqual(['p1#0', 'p2#0']);
+    expect(provenance.get('p1#0')).toEqual({ p: 'p1', d: 'd1' });
+    // Bob matched no department, so there is no `d` row to point at.
+    expect(provenance.get('p2#0')).toEqual({ p: 'p2' });
+  });
+
+  it('routes a joined-column edit to the JOINED table row, not the base one', () => {
+    const { provenance } = computeProjectionRows(spec, { p: people, d: depts });
+    expect(writebackTarget(spec, 'p1#0', 'dept', provenance.get('p1#0'))).toEqual({
+      alias: 'd',
+      rowId: 'd1',
+      field: 'label',
+    });
+    expect(writebackTarget(spec, 'p1#0', 'who', provenance.get('p1#0'))).toEqual({
+      alias: 'p',
+      rowId: 'p1',
+      field: 'name',
+    });
+  });
+
+  it('refuses a joined-column edit on a row where the join matched nothing', () => {
+    const { provenance } = computeProjectionRows(spec, { p: people, d: depts });
+    expect(writebackTarget(spec, 'p2#0', 'dept', provenance.get('p2#0'))).toBeNull();
+    // …while the base column on the same row is still perfectly writable.
+    expect(writebackTarget(spec, 'p2#0', 'who', provenance.get('p2#0'))?.rowId).toBe('p2');
+  });
+
+  it('never resolves a computed column', () => {
+    const { provenance } = computeProjectionRows(spec, { p: people, d: depts });
+    expect(writebackTarget(spec, 'p1#0', 'shout', provenance.get('p1#0'))).toBeNull();
+  });
+
+  it('still resolves a BASE column without provenance, from the row id alone', () => {
+    // That path predates provenance; it must not get more fragile.
+    expect(writebackTarget(spec, 'p1#0', 'who', undefined)).toEqual({ alias: 'p', rowId: 'p1', field: 'name' });
+    expect(writebackTarget(spec, 'p1#0', 'dept', undefined)).toBeNull();
+  });
+
+  it('keeps each fan-out row pointing at its OWN joined row', () => {
+    // One base row matching two departments: the two output rows must not both
+    // write to the same place.
+    const two = [
+      { id: 'd1', tableId: 'D', data: { id: 'd1', label: 'Sales' }, updatedAt: 0 },
+      { id: 'd2', tableId: 'D', data: { id: 'd1', label: 'Support' }, updatedAt: 0 },
+    ];
+    const { rows, provenance } = computeProjectionRows(spec, { p: [people[0]!], d: two });
+    expect(rows.map((r) => r.id)).toEqual(['p1#0', 'p1#1']);
+    expect(writebackTarget(spec, 'p1#0', 'dept', provenance.get('p1#0'))?.rowId).toBe('d1');
+    expect(writebackTarget(spec, 'p1#1', 'dept', provenance.get('p1#1'))?.rowId).toBe('d2');
   });
 });

@@ -18,14 +18,40 @@ export type SourceRowsByAlias = Record<string, Row[]>;
 /** One joined tuple: alias → the contributing source row (undefined on an unmatched left join). */
 type Combo = Record<string, Row | undefined>;
 
+/** Which source row fed one output row, per alias. */
+export type RowProvenance = Record<string, string>;
+
+export interface ComputedProjection {
+  rows: Row[];
+  /**
+   * Output row id → the id of the row each source contributed to it.
+   *
+   * This is what makes a JOINED column editable. The output id
+   * `${baseRowId}#${ordinal}` names the base row and nothing else, so without
+   * this the only cell an edit could be traced back to was a base-table one —
+   * every joined column had to be read-only even when the join was 1:1 on both
+   * primary keys. The join already knows exactly which row it took each value
+   * from; recording it costs one map and removes the whole restriction.
+   *
+   * An alias is ABSENT for a row where a left join matched nothing: there is no
+   * row there to write to, which the writer reports rather than guessing.
+   */
+  provenance: Map<string, RowProvenance>;
+}
+
 /**
  * Compute a projection's rows. Each output row's id is `${baseRowId}#${ordinal}`
  * so a left-join fan-out stays unique yet every row traces back to exactly one
- * base row (that is what makes unambiguous writeback possible).
+ * base row.
  */
 export function computeProjection(spec: ProjectionSpec, sourceRows: SourceRowsByAlias): Row[] {
+  return computeProjectionRows(spec, sourceRows).rows;
+}
+
+/** {@link computeProjection}, plus the per-row provenance a writer needs. */
+export function computeProjectionRows(spec: ProjectionSpec, sourceRows: SourceRowsByAlias): ComputedProjection {
   const base = spec.sources[0];
-  if (!base) return [];
+  if (!base) return { rows: [], provenance: new Map() };
   const baseRows = sourceRows[base.alias] ?? [];
 
   // Build the join, starting from the base rows and folding in each JOIN source.
@@ -49,6 +75,7 @@ export function computeProjection(spec: ProjectionSpec, sourceRows: SourceRowsBy
   }
 
   const result: Row[] = [];
+  const provenance = new Map<string, RowProvenance>();
   const ordinalByBase = new Map<string, number>();
   // TOP N: applied AFTER the join and filters, so the cap counts rows the user
   // would actually see (the SQL export renders the same thing as SELECT TOP n).
@@ -61,14 +88,18 @@ export function computeProjection(spec: ProjectionSpec, sourceRows: SourceRowsBy
     if (!passesFilters(data, spec.filters)) continue;
     const ordinal = ordinalByBase.get(baseRow.id) ?? 0;
     ordinalByBase.set(baseRow.id, ordinal + 1);
+    const id = `${baseRow.id}#${ordinal}`;
+    const from: RowProvenance = {};
+    for (const [alias, row] of Object.entries(combo)) if (row) from[alias] = row.id;
+    provenance.set(id, from);
     result.push({
-      id: `${baseRow.id}#${ordinal}`,
+      id,
       tableId: '', // stamped with the projection's id by the `rows()` store view
       data,
       updatedAt: maxUpdatedAt(combo),
     });
   }
-  return result;
+  return { rows: result, provenance };
 }
 
 /**
@@ -127,17 +158,26 @@ function maxUpdatedAt(combo: Combo): number {
 }
 
 /**
- * The output fields that can be written back: a `source` column bound to the
- * BASE source. Secondary-source columns (join fan-out / null) and computed
- * columns are read-only. Used both to compile `ColumnSpec.readonly` at save time
- * and to gate writes at runtime.
+ * The output fields that can be written back: every `source` column, whichever
+ * source it reads from. Only COMPUTED columns are inherently read-only — a
+ * script's output has no cell behind it to store.
+ *
+ * Joined columns used to be excluded on the grounds that they had no
+ * unambiguous write target. That was a property of how a row identified itself,
+ * not of joins: the output id names the base row only. The join knows precisely
+ * which row it took each value from, and `ComputedProjection.provenance` now
+ * carries it, so "which row does this cell live in" has an exact answer for
+ * every source.
+ *
+ * What CANNOT be decided here is per-ROW: a left join that matched nothing has
+ * no row to write to. That is checked at write time, where the row is known —
+ * see `writebackTarget`.
  */
 export function resolveWritability(spec: ProjectionSpec): Set<string> {
-  const baseAlias = spec.sources[0]?.alias;
+  const aliases = new Set(spec.sources.map((s) => s.alias));
   const writable = new Set<string>();
-  if (!baseAlias) return writable;
   for (const col of spec.columns) {
-    if (col.from.kind === 'source' && col.from.alias === baseAlias) writable.add(col.field);
+    if (col.from.kind === 'source' && aliases.has(col.from.alias)) writable.add(col.field);
   }
   return writable;
 }
@@ -427,21 +467,39 @@ export function guessJoinKeys(
 
 /** Where a base-source cell edit is written, or null when the column is read-only. */
 export interface WritebackTarget {
-  /** Base source row id (parsed from the `${baseRowId}#${ordinal}` output id). */
-  baseRowId: string;
-  /** The stored field on the base row (the source field, not the output field). */
+  /** The source this cell lives in, by spec alias. */
+  alias: string;
+  /** That source row's id. */
+  rowId: string;
+  /** The stored field on it (the SOURCE field, not the output field). */
   field: string;
 }
 
+/** The base row id encoded in an output id (`${baseRowId}#${ordinal}`). */
+export function baseRowIdOf(outputRowId: string): string {
+  const hash = outputRowId.lastIndexOf('#');
+  return hash >= 0 ? outputRowId.slice(0, hash) : outputRowId;
+}
+
 /**
- * Resolve an edit to output cell (`rowId`, `field`) to its base-row write
- * target, or null when the column cannot be written back.
+ * Resolve an edit to the output cell (`rowId`, `outField`) to the exact source
+ * row and field it should be written to, or null when there is none.
+ *
+ * `provenance` is that row's entry from {@link ComputedProjection}. The base
+ * source falls back to the id encoded in `rowId`, so a base-column edit still
+ * resolves even if provenance is unavailable — that path predates it and must
+ * not become more fragile than it was.
  */
-export function writebackTarget(spec: ProjectionSpec, rowId: string, field: string): WritebackTarget | null {
-  if (!resolveWritability(spec).has(field)) return null;
-  const col = spec.columns.find((c) => c.field === field);
+export function writebackTarget(spec: ProjectionSpec, rowId: string, outField: string, provenance?: RowProvenance | undefined): WritebackTarget | null {
+  const col = spec.columns.find((c) => c.field === outField);
   if (!col || col.from.kind !== 'source') return null;
-  const hash = rowId.lastIndexOf('#');
-  const baseRowId = hash >= 0 ? rowId.slice(0, hash) : rowId;
-  return { baseRowId, field: col.from.field };
+  const alias = col.from.alias;
+  if (!spec.sources.some((s) => s.alias === alias)) return null;
+
+  const isBase = spec.sources[0]?.alias === alias;
+  const sourceRowId = provenance?.[alias] ?? (isBase ? baseRowIdOf(rowId) : undefined);
+  // A left join that matched nothing: the cell is empty because there is no row
+  // there, so there is nowhere to put the edit.
+  if (!sourceRowId) return null;
+  return { alias, rowId: sourceRowId, field: col.from.field };
 }

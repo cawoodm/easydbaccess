@@ -67,7 +67,7 @@ async function createProjection(
 }
 
 test.describe('projections', () => {
-  test('a projection joins its sources, edits its base column, and locks the joined column', async ({
+  test('a projection joins its sources, and BOTH the base and joined columns are editable', async ({
     page,
   }) => {
     const peopleId = await createTable(page, 'People', [{ field: 'name' }, { field: 'deptId' }]);
@@ -79,24 +79,29 @@ test.describe('projections', () => {
     await waitForPanel(page, projId);
     const panel = page.locator(`#${panelDomId(projId)}`);
 
-    // The joined value shows, and the base value shows.
-    await expect(panel.getByText('Sales')).toBeVisible();
-
-    // Exactly one editable input in the row: the base-source `name`. The
-    // read-only `dept` renders as plain text (no editor).
+    // BOTH cells get an editor — so the joined value is shown by its input's
+    // value, not as a text node. The join knows which row each value came from,
+    // so there is nothing ambiguous about writing either of them back.
     const inputs = panel.locator('data-table tbody tr td input');
-    await expect(inputs).toHaveCount(1);
-    await expect(inputs.first()).toHaveValue('Bob');
+    await expect(inputs).toHaveCount(2);
+    await expect(inputs.nth(0)).toHaveValue('Bob');
+    await expect(inputs.nth(1)).toHaveValue('Sales');
 
     // Editing the base column writes back to the underlying People row.
-    await inputs.first().fill('Robert');
-    await inputs.first().dispatchEvent('change');
+    await inputs.nth(0).fill('Robert');
+    await inputs.nth(0).dispatchEvent('change');
     await expect
       .poll(async () => (await readRows(page, peopleId))[0]?.data.name)
       .toBe('Robert');
 
-    // The joined column is still just text — no input carrying 'Sales'.
-    await expect(panel.locator('data-table tbody tr td input')).toHaveCount(1);
+    // Editing the JOINED column writes back to the Dept row it came from —
+    // and leaves People alone.
+    await panel.locator('data-table tbody tr td input').nth(1).fill('Revenue');
+    await panel.locator('data-table tbody tr td input').nth(1).dispatchEvent('change');
+    await expect
+      .poll(async () => (await readRows(page, deptId))[0]?.data.label)
+      .toBe('Revenue');
+    expect((await readRows(page, peopleId))[0]?.data.name).toBe('Robert');
   });
 
   test('Edit columns opens the ordinary column editor; Edit Join opens the join editor', async ({

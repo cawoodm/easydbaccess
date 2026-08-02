@@ -8,6 +8,8 @@ function memStore(): {
   store: DataStore;
   addTable: (t: Table) => void;
   addRow: (r: Row) => void;
+  /** The stored data of one row, whichever table it lives in. */
+  rowData: (id: string) => Promise<Record<string, unknown> | undefined>;
   removeTable: (id: string) => void;
 } {
   const tables: Table[] = [];
@@ -70,6 +72,7 @@ function memStore(): {
       rows.push(r);
       notifyRows();
     },
+    rowData: (id) => Promise.resolve(rows.find((r) => r.id === id)?.data),
     /** Drop a table AND its rows, the way deleting one in the UI does. */
     removeTable: (id) => {
       const ti = tables.findIndex((t) => t.id === id);
@@ -91,7 +94,17 @@ const localTable = (id: string, name: string, columns: Table['columns'] = []): T
   updatedAt: 0,
 });
 
-function projectionTable(): Table {
+function projectionTable(variant?: 'computed'): Table {
+  const columns: unknown[] = [
+    { field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'p', field: 'name' } },
+    { field: 'dept', label: 'Dept', type: 'string', from: { kind: 'source', alias: 'd', field: 'label' } },
+  ];
+  if (variant === 'computed') {
+    columns.push({
+      field: 'shout',
+      from: { kind: 'script', script: 'function render(r){return String(r.name).toUpperCase()}' },
+    });
+  }
   return {
     ...localTable('proj', 'People x Dept'),
     source: {
@@ -102,24 +115,21 @@ function projectionTable(): Table {
           { alias: 'p', tableName: 'People' },
           { alias: 'd', tableName: 'Dept', join: { type: 'left', on: [{ field: 'id', eqAlias: 'p', eqField: 'deptId' }] } },
         ],
-        columns: [
-          { field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'p', field: 'name' } },
-          { field: 'dept', label: 'Dept', type: 'string', from: { kind: 'source', alias: 'd', field: 'label' } },
-        ],
+        columns,
       },
     },
   };
 }
 
 describe('createProjectionCollection', () => {
-  function setup() {
+  function setup(variant?: 'computed') {
     const mem = memStore();
     mem.addTable(localTable('p1', 'People'));
     mem.addTable(localTable('d1', 'Dept'));
     mem.addRow({ id: 'pa', tableId: 'p1', data: { name: 'Bob', deptId: 'x' }, updatedAt: 1 });
     mem.addRow({ id: 'pb', tableId: 'p1', data: { name: 'Sue', deptId: 'y' }, updatedAt: 1 });
     mem.addRow({ id: 'dx', tableId: 'd1', data: { id: 'x', label: 'Sales' }, updatedAt: 1 });
-    const table = projectionTable();
+    const table = projectionTable(variant);
     mem.addTable(table);
     return { mem, coll: createProjectionCollection(mem.store, table) };
   }
@@ -200,13 +210,59 @@ describe('createProjectionCollection', () => {
     unsub();
   });
 
-  it('rejects a patch that touches only read-only (secondary/computed) columns', async () => {
-    const { coll } = setup();
-    // The grid never gives a read-only cell an editor (see data-table), so a
-    // patch reaching the collection with no writable field is a genuine misuse.
-    await expect(coll.patch('pa#0', { data: { dept: 'Marketing' } })).rejects.toBeInstanceOf(
+  it('writes a JOINED column back to the joined table, not the base one', async () => {
+    const { mem, coll } = setup();
+    await coll.patch('pa#0', { data: { name: 'Bob', dept: 'Marketing' } });
+
+    // The edit landed on the Dept row the join actually read from…
+    expect(await mem.rowData('dx')).toEqual({ id: 'x', label: 'Marketing' });
+    // …and the base row is untouched.
+    expect(await mem.rowData('pa')).toEqual({ name: 'Bob', deptId: 'x' });
+  });
+
+  it('does not silently drop a joined edit when the patch also carries base fields', async () => {
+    // The reported bug. A grid patch is the WHOLE row, so the base fields were
+    // "writable", the write reported success, and the joined edit vanished.
+    const { mem, coll } = setup();
+    await coll.patch('pa#0', { data: { name: 'Bob', dept: 'Ops' } });
+    expect(await mem.rowData('dx')).toEqual({ id: 'x', label: 'Ops' });
+  });
+
+  it('refuses a joined edit on a row whose join matched nothing, and says why', async () => {
+    const { mem, coll } = setup();
+    // Sue's department does not exist, so `dept` is empty — there is no row to
+    // put the value in, and inventing one is not this code's business.
+    await expect(coll.patch('pb#0', { data: { name: 'Sue', dept: 'Marketing' } })).rejects.toThrow(
+      /no matching "Dept" row/,
+    );
+    expect(await mem.rowData('pb')).toEqual({ name: 'Sue', deptId: 'y' });
+  });
+
+  it('refuses an edit to a computed column instead of pretending it saved', async () => {
+    const { mem, coll } = setup('computed');
+    await expect(coll.patch('pa#0', { data: { name: 'Bob', shout: 'NOPE' } })).rejects.toBeInstanceOf(
       ProjectionReadOnlyError,
     );
+    await expect(coll.patch('pa#0', { data: { name: 'Bob', shout: 'NOPE' } })).rejects.toThrow(
+      /computed by a script/,
+    );
+    expect(await mem.rowData('pa')).toEqual({ name: 'Bob', deptId: 'x' });
+  });
+
+  it('accepts a patch that changes nothing, without writing', async () => {
+    // A grid re-sends the whole row on blur; an unchanged computed column in
+    // that payload is noise, not an attempt to edit it.
+    const { mem, coll } = setup('computed');
+    const before = await mem.rowData('pa');
+    await expect(coll.patch('pa#0', { data: { name: 'Bob', dept: 'Sales', shout: 'BOB' } })).resolves.toBeTruthy();
+    expect(await mem.rowData('pa')).toEqual(before);
+  });
+
+  it('still writes a base column to the base row', async () => {
+    const { mem, coll } = setup();
+    await coll.patch('pa#0', { data: { name: 'Robert', dept: 'Sales' } });
+    expect(await mem.rowData('pa')).toEqual({ name: 'Robert', deptId: 'x' });
+    expect(await mem.rowData('dx')).toEqual({ id: 'x', label: 'Sales' });
   });
 });
 
