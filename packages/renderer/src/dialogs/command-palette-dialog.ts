@@ -5,7 +5,7 @@ import type { CommandSpec, HostApi } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { focusTableWindow } from '../window-mgr/jspanel-manager.js';
-import { focusViewWindow } from '../window-mgr/view-window-manager.js';
+import { revealViewWindow } from '../window-mgr/view-window-manager.js';
 import {
   RECENT_GROUP,
   RECENT_SETTING,
@@ -221,10 +221,11 @@ export class CommandPaletteDialog extends LitElement {
         icon: 'view_quilt',
         haystack: `${v.name} go to view`.toLowerCase(),
         run: async () => {
-          // Open it if it's closed (the view-window manager reacts to `open`),
-          // then front it if it was already open.
-          await api.store.viewInstances.patch(v.id, { open: true, updatedAt: Date.now() });
-          focusViewWindow(v.id);
+          // One call for both cases: opens a closed view and fronts an already
+          // open one. Patching `open` and fronting straight after used to miss
+          // the closed case — the panel is created by the store subscription,
+          // which had not run yet, so there was nothing to front.
+          await revealViewWindow(v.id);
         },
       });
     }

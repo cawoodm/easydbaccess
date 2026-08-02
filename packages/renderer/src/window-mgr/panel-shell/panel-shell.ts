@@ -18,6 +18,7 @@
  *  - dblclick-to-maximize and status-dependent cursors — no panel-titlebar.ts.
  */
 import { MIN_H, MIN_W } from '../geometry.js';
+import { isMobileViewport } from '../../util/viewport.js';
 import { dragRect, resizeRect, type Edge, type Rect } from './geometry-math.js';
 import {
   initialState,
@@ -65,6 +66,13 @@ export type PanelShellEl = HTMLDivElement & {
   setHeaderTitle(title: string): void;
   setHeaderLogo(svg: string): void;
   persistFlags(): { minimized: boolean; maximized: boolean };
+  /**
+   * Move the panel to the middle of what the user can currently SEE, clamped
+   * inside it. Not the middle of the canvas — the canvas is pan/zoomed and is
+   * far larger than the viewport, so canvas-centre is usually off-screen.
+   * A no-op while maximized (already filling) or minimized (docked).
+   */
+  centerInViewport(): void;
 };
 
 /** Titlebar contents where a drag or dblclick must NOT start. */
@@ -277,6 +285,26 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
     el.style.transform = `translate(${-s.x / s.scale}px, ${-s.y / s.scale}px) scale(${1 / s.scale})`;
   }
 
+  /**
+   * The rect, in CANVAS coordinates, that covers exactly the VISIBLE area —
+   * i.e. the box a maximized panel occupies, expressed as an ordinary rect.
+   *
+   * Same three numbers `applyMaxFill` uses, solved the other way: the fill
+   * element sits at 0,0 sized to the container and is then counter-transformed
+   * by `translate(-x/s, -y/s) scale(1/s)`, so its canvas-space box is that
+   * origin at that size divided by the scale.
+   */
+  function visibleRect(): Rect {
+    const s = opts.viewport?.getState() ?? { x: 0, y: 0, scale: 1 };
+    const scale = s.scale || 1;
+    return {
+      x: -s.x / scale,
+      y: -s.y / scale,
+      w: opts.container.clientWidth / scale,
+      h: opts.container.clientHeight / scale,
+    };
+  }
+
   function enterMaximized(): void {
     applyMaxFill();
     unsubViewport ??= opts.viewport?.subscribe(applyMaxFill) ?? null;
@@ -361,6 +389,13 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
       case 'normalized':
         if (from === 'smallified')
           normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
+        // Restoring a maximized panel on a phone must NOT shrink it back to the
+        // rect it had before. There is no resize handle on a touch screen, so a
+        // window that returns to 480x520 is stuck that way with no way to grow
+        // it again. Keep the size it just had — Restore still means something
+        // (the panel becomes movable and stops tracking the canvas), it simply
+        // does not take the screen back.
+        else if (from === 'maximized' && isMobileViewport()) normalRect = visibleRect();
         applyRect(normalRect);
         break;
       case 'closed':
@@ -409,6 +444,21 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
     logo.innerHTML = svg;
     const barLogo = bar?.querySelector('.jsPanel-headerlogo');
     if (barLogo) barLogo.innerHTML = svg;
+  };
+  el.centerInViewport = () => {
+    if (state.status !== 'normalized' && state.status !== 'smallified') return;
+    const vis = visibleRect();
+    // A panel bigger than the viewport is pinned to the top-left corner rather
+    // than centred to a negative offset, which would push its titlebar — the
+    // only way to move it — off the top of the screen.
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    applyRect({
+      x: vis.x + Math.max(0, (vis.w - w) / 2),
+      y: vis.y + Math.max(0, (vis.h - h) / 2),
+      w,
+      h,
+    });
   };
   el.persistFlags = () => persistFlags(state);
   registry.add(el);
