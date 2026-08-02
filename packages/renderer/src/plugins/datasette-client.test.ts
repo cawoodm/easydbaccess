@@ -64,11 +64,7 @@ describe('parseTableList', () => {
   it('reads { tables: [{ name, count, hidden, primary_keys }] } and carries the db through', () => {
     const json = {
       database: 'fixtures',
-      tables: [
-        { name: 'facetable', count: 15, hidden: false, primary_keys: ['id'] },
-        { name: 'searchable_fts', count: 3, hidden: true },
-        { name: 'no_count' },
-      ],
+      tables: [{ name: 'facetable', count: 15, hidden: false, primary_keys: ['id'] }, { name: 'searchable_fts', count: 3, hidden: true }, { name: 'no_count' }],
     };
     expect(parseTableList(json, 'fixtures')).toEqual([
       { db: 'fixtures', table: 'facetable', count: 15, hidden: false, pks: ['id'] },
@@ -86,16 +82,13 @@ describe('parseTableList', () => {
 });
 
 describe('discoverTables', () => {
-  const jsonRes = (body: unknown): Promise<Response> =>
-    Promise.resolve({ json: () => Promise.resolve(body) } as unknown as Response);
+  const jsonRes = (body: unknown): Promise<Response> => Promise.resolve({ json: () => Promise.resolve(body) } as unknown as Response);
 
   it('returns just the table for a table URL (no network)', async () => {
     const fetchFn = vi.fn();
     const ref = parseDatasetteUrl('https://x.datasette.io/fixtures/facetable');
     const out = await discoverTables(fetchFn, ref);
-    expect(out).toEqual([
-      { db: 'fixtures', table: 'facetable', count: null, hidden: false, pks: [] },
-    ]);
+    expect(out).toEqual([{ db: 'fixtures', table: 'facetable', count: null, hidden: false, pks: [] }]);
     expect(fetchFn).not.toHaveBeenCalled();
   });
 
@@ -111,9 +104,7 @@ describe('discoverTables', () => {
     });
     const ref = parseDatasetteUrl('https://x.datasette.io/fixtures');
     const out = await discoverTables(fetchFn, ref);
-    expect(out).toEqual([
-      { db: 'fixtures', table: 'facetable', count: 15, hidden: false, pks: [] },
-    ]);
+    expect(out).toEqual([{ db: 'fixtures', table: 'facetable', count: 15, hidden: false, pks: [] }]);
   });
 
   it('walks every database for an instance URL', async () => {
@@ -177,13 +168,10 @@ const GPP_PAGE2 = {
   ok: true,
   next: null, // exhausted
   truncated: false,
-  rows: [
-    { rowid: 3, country: 'AFG', name: 'Kandahar JOL', capacity_mw: 10.0, primary_fuel: 'Solar' },
-  ],
+  rows: [{ rowid: 3, country: 'AFG', name: 'Kandahar JOL', capacity_mw: 10.0, primary_fuel: 'Solar' }],
 };
 
-const jsonRes = (body: unknown): Promise<Response> =>
-  Promise.resolve({ json: () => Promise.resolve(body) } as unknown as Response);
+const jsonRes = (body: unknown): Promise<Response> => Promise.resolve({ json: () => Promise.resolve(body) } as unknown as Response);
 
 describe('classifyPage against the real datasette.io response', () => {
   it('detects "more available" from the `next` token even without `next_url`', () => {
@@ -228,23 +216,14 @@ describe('normaliseCursorUrl', () => {
     // Verbatim from til.simonwillison.net: Datasette sits behind Fly, so it does
     // not know the request was https and advertises next_url as http://. An https
     // page cannot fetch that (mixed content is blocked → opaque "Load failed").
-    expect(
-      normaliseCursorUrl(
-        'http://til.simonwillison.net/tils/similarities.json?_next=django_pytest-django~2Emd%2Cgithub-actions_postgresq-service-container~2Emd',
-        requested,
-      ),
-    ).toBe(
+    expect(normaliseCursorUrl('http://til.simonwillison.net/tils/similarities.json?_next=django_pytest-django~2Emd%2Cgithub-actions_postgresq-service-container~2Emd', requested)).toBe(
       'https://til.simonwillison.net/tils/similarities.json?_next=django_pytest-django~2Emd%2Cgithub-actions_postgresq-service-container~2Emd',
     );
   });
 
   it('leaves an already-correct cursor alone and resolves a relative one', () => {
-    expect(normaliseCursorUrl('https://til.simonwillison.net/x.json?_next=t', requested)).toBe(
-      'https://til.simonwillison.net/x.json?_next=t',
-    );
-    expect(normaliseCursorUrl('/tils/similarities.json?_next=t', requested)).toBe(
-      'https://til.simonwillison.net/tils/similarities.json?_next=t',
-    );
+    expect(normaliseCursorUrl('https://til.simonwillison.net/x.json?_next=t', requested)).toBe('https://til.simonwillison.net/x.json?_next=t');
+    expect(normaliseCursorUrl('/tils/similarities.json?_next=t', requested)).toBe('https://til.simonwillison.net/tils/similarities.json?_next=t');
   });
 
   it('refuses a cursor that hops to another host', () => {
@@ -257,9 +236,7 @@ describe('buildTokenPageUrl', () => {
   it('carries _next alone, keeping real filters but dropping pasted _ params', () => {
     // A pasted `?_size=1000` would otherwise ride along and make the request
     // two-`_`-params wide, which datasette.io's WAF challenges.
-    const ref = parseDatasetteUrl(
-      'https://til.simonwillison.net/tils/similarities?_size=1000&country=AFG',
-    );
+    const ref = parseDatasetteUrl('https://til.simonwillison.net/tils/similarities?_size=1000&country=AFG');
     const url = new URL(buildTokenPageUrl(ref, 'tok'));
     expect(url.searchParams.get('_next')).toBe('tok');
     expect(url.searchParams.has('_size')).toBe(false);
@@ -353,11 +330,7 @@ describe('fetchRows follows the `next` token', () => {
         status,
         json: () => Promise.resolve(body),
       } as unknown as Response);
-    const fetchFn = vi.fn((url: string) =>
-      url.includes('_next=')
-        ? errRes(429, { ok: false, error: 'rate limited' })
-        : jsonRes(GPP_PAGE1),
-    );
+    const fetchFn = vi.fn((url: string) => (url.includes('_next=') ? errRes(429, { ok: false, error: 'rate limited' }) : jsonRes(GPP_PAGE1)));
     const ref = parseDatasetteUrl(GPP_URL);
 
     const out = await fetchRows(fetchFn, ref);
@@ -390,9 +363,7 @@ describe('fetchRows follows the `next` token', () => {
         status,
         json: () => Promise.resolve(body),
       } as unknown as Response);
-    const fetchFn = vi.fn((url: string) =>
-      url.includes('_next=') ? errRes(429, { ok: false, error: 'rl' }) : jsonRes(GPP_PAGE1),
-    );
+    const fetchFn = vi.fn((url: string) => (url.includes('_next=') ? errRes(429, { ok: false, error: 'rl' }) : jsonRes(GPP_PAGE1)));
     const ref = parseDatasetteUrl(GPP_URL);
 
     const out = await fetchRows(fetchFn, ref);
@@ -437,15 +408,7 @@ describe('inferColumnsFromRows (fallback when ?_extra= gives no schema)', () => 
   it('derives ordered, typed columns from the real global-power-plants rows', () => {
     const cols = inferColumnsFromRows(GPP_PAGE1.rows);
     // Order preserved (union of keys, first-seen order).
-    expect(cols.map((c) => c.field)).toEqual([
-      'rowid',
-      'country',
-      'country_long',
-      'name',
-      'capacity_mw',
-      'primary_fuel',
-      'commissioning_year',
-    ]);
+    expect(cols.map((c) => c.field)).toEqual(['rowid', 'country', 'country_long', 'name', 'capacity_mw', 'primary_fuel', 'commissioning_year']);
     const byField = Object.fromEntries(cols.map((c) => [c.field, c]));
     expect(byField.rowid!.type).toBe('number');
     expect(byField.capacity_mw!.type).toBe('number');
@@ -473,19 +436,7 @@ const GPP_META = {
   next: null,
   truncated: false,
   rows: [],
-  columns: [
-    'rowid',
-    'country',
-    'country_long',
-    'name',
-    'gppd_idnr',
-    'capacity_mw',
-    'latitude',
-    'longitude',
-    'primary_fuel',
-    'commissioning_year',
-    'year_of_capacity_data',
-  ],
+  columns: ['rowid', 'country', 'country_long', 'name', 'gppd_idnr', 'capacity_mw', 'latitude', 'longitude', 'primary_fuel', 'commissioning_year', 'year_of_capacity_data'],
 };
 
 describe('mapColumns / fetchTableMeta against the bare-name schema response', () => {
@@ -617,10 +568,7 @@ describe('response carrying count + primary_keys but no columns key', () => {
 
   it('fetchTableMeta still surfaces the count, with typed=false and no columns', async () => {
     const fetchFn = vi.fn((_url: string) => jsonRes(ET_EXTRA));
-    const meta = await fetchTableMeta(
-      fetchFn,
-      parseDatasetteUrl('https://datasette.io/legislators/executive_terms'),
-    );
+    const meta = await fetchTableMeta(fetchFn, parseDatasetteUrl('https://datasette.io/legislators/executive_terms'));
     expect(meta.count).toBe(131);
     expect(meta.pks).toEqual([]);
     expect(meta.columns).toEqual([]);
@@ -628,9 +576,7 @@ describe('response carrying count + primary_keys but no columns key', () => {
   });
 
   it("columns then come from row inference (the importer's empty-schema path)", () => {
-    const byField = Object.fromEntries(
-      inferColumnsFromRows(ET_EXTRA.rows).map((c) => [c.field, c.type]),
-    );
+    const byField = Object.fromEntries(inferColumnsFromRows(ET_EXTRA.rows).map((c) => [c.field, c.type]));
     expect(byField.rowid).toBe('number');
     expect(byField.executive_id).toBe('number');
     expect(byField.start).toBe('datetime');
@@ -647,13 +593,9 @@ describe('response carrying count + primary_keys but no columns key', () => {
 describe('discovery failure diagnostics', () => {
   it('turns a fetch rejection (CORS/offline) into an actionable message', async () => {
     const fetchFn = vi.fn(() => Promise.reject(new TypeError('Load failed')));
-    await expect(
-      fetchTablesForDb(fetchFn, 'https://latest.datasette.io', 'fixtures'),
-    ).rejects.toThrow(/--cors/);
+    await expect(fetchTablesForDb(fetchFn, 'https://latest.datasette.io', 'fixtures')).rejects.toThrow(/--cors/);
     // And it names the URL it couldn't reach.
-    await expect(
-      fetchTablesForDb(fetchFn, 'https://latest.datasette.io', 'fixtures'),
-    ).rejects.toThrow(/latest\.datasette\.io\/fixtures\.json/);
+    await expect(fetchTablesForDb(fetchFn, 'https://latest.datasette.io', 'fixtures')).rejects.toThrow(/latest\.datasette\.io\/fixtures\.json/);
   });
 
   it('surfaces an HTTP error status (e.g. a redirect to a non-CORS URL, or 404)', async () => {
@@ -804,8 +746,7 @@ describe('fetchTableCount', () => {
 });
 
 describe('testConnection', () => {
-  const respond = (url: string, bodies: Record<string, unknown>) =>
-    jsonRes(url.includes('/-/actor.json') ? bodies.actor : bodies.versions);
+  const respond = (url: string, bodies: Record<string, unknown>) => jsonRes(url.includes('/-/actor.json') ? bodies.actor : bodies.versions);
 
   it('resolves writable=true when a token authenticates (actor present)', async () => {
     const seen: Array<{ url: string; opts: any }> = [];
@@ -872,10 +813,7 @@ describe('withAuthFetch', () => {
   });
 
   it('returns the fn unchanged when there is no token', () => {
-    const base = ((): Promise<Response> => Promise.resolve({} as Response)) as unknown as (
-      url: string,
-      opts?: any,
-    ) => Promise<Response>;
+    const base = ((): Promise<Response> => Promise.resolve({} as Response)) as unknown as (url: string, opts?: any) => Promise<Response>;
     expect(withAuthFetch(base, undefined)).toBe(base);
   });
 });
@@ -935,9 +873,7 @@ describe('extractTableMetadata + applyTableMetadata (default sort)', () => {
   });
 
   it('ignores a default sort naming a column that is not present', () => {
-    const { patch } = applyTableMetadata({ columns: {}, units: {}, sort: 'ghost' }, [
-      { field: 'name', label: 'Name', type: 'string' as const },
-    ]);
+    const { patch } = applyTableMetadata({ columns: {}, units: {}, sort: 'ghost' }, [{ field: 'name', label: 'Name', type: 'string' as const }]);
     expect(patch.sortColumn).toBeUndefined();
   });
 });
@@ -969,10 +905,7 @@ describe('applyTableMetadata (sortable_columns)', () => {
     { field: 'b', label: 'B', type: 'string' as const },
   ];
   it('marks columns outside the allowlist as not sortable', () => {
-    const { columns } = applyTableMetadata(
-      { columns: {}, units: {}, sortableColumns: ['a'] },
-      cols,
-    );
+    const { columns } = applyTableMetadata({ columns: {}, units: {}, sortableColumns: ['a'] }, cols);
     expect(columns.find((c) => c.field === 'a')!.sortable).toBe(true);
     expect(columns.find((c) => c.field === 'b')!.sortable).toBe(false);
   });
@@ -1046,8 +979,7 @@ describe('probeSingleTable', () => {
 });
 
 describe('discoverViews', () => {
-  const jsonRes = (body: unknown): Promise<Response> =>
-    Promise.resolve({ json: () => Promise.resolve(body) } as unknown as Response);
+  const jsonRes = (body: unknown): Promise<Response> => Promise.resolve({ json: () => Promise.resolve(body) } as unknown as Response);
 
   const VIEW_SQL = 'CREATE VIEW v AS SELECT a.x AS x FROM t a';
 

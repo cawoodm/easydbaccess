@@ -23,6 +23,7 @@ import * as htmlRender from '../plugins/html-render.js';
 import * as cellLink from '../plugins/cell-link.js';
 import * as autoRenderer from '../plugins/auto-renderer.js';
 import * as deleteTable from '../plugins/delete-table.js';
+import * as tableCopy from '../plugins/table-copy.js';
 import * as importData from '../plugins/import-data.js';
 import * as autoSync from '../plugins/auto-sync.js';
 import * as views from '../plugins/views.js';
@@ -75,6 +76,7 @@ const modules: PluginModule[] = [
   cellLink,
   autoRenderer,
   deleteTable,
+  tableCopy,
   importData,
   autoSync,
   views,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HostApi, ProjectionSpec, Table } from '@easydb/shared';
 import { parseViewList } from './datasette-client.js';
-import { createProjectionsForViews } from './datasette-views.js';
+import { createProjectionsForViews, runViewImport, viewTableUrl } from './datasette-views.js';
 
 describe('parseViewList', () => {
   it('reads the string array Datasette returns', () => {
@@ -22,8 +22,10 @@ describe('parseViewList', () => {
 /** A store double: records inserts, answers `tables.find()` from what exists. */
 function fakeApi(tables: Table[]) {
   const inserted: Table[] = [];
+  const toasts: string[] = [];
   const api = {
     workspaceId: () => 'ws',
+    ui: { dialogs: { toast: (m: string) => toasts.push(m) } },
     store: {
       tables: {
         find: () => Promise.resolve([...tables, ...inserted]),
@@ -34,7 +36,7 @@ function fakeApi(tables: Table[]) {
       },
     },
   } as unknown as HostApi;
-  return { api, inserted };
+  return { api, inserted, toasts };
 }
 
 const table = (name: string, fields: string[]): Table => ({
@@ -115,5 +117,43 @@ describe('createProjectionsForViews', () => {
     const res = await createProjectionsForViews(api, 'ws', []);
     expect(res).toEqual({ created: [], skipped: [], found: 0 });
     expect(inserted).toEqual([]);
+  });
+});
+
+describe('importing views as snapshot TABLES instead of projections', () => {
+  const views = [
+    { db: 'mydb', name: 'article_authors', sql: 'CREATE VIEW article_authors AS SELECT a.x AS x FROM articles a' },
+    { db: 'my db', name: 'odd name', sql: 'CREATE VIEW "odd name" AS SELECT a.x AS x FROM articles a' },
+  ];
+
+  it('points the table importer at the view’s own endpoint', () => {
+    // Datasette serves a view exactly like a table, so the ordinary importer
+    // handles it — paging, progress and all.
+    expect(viewTableUrl('https://x.datasette.io', views[0]!)).toBe('https://x.datasette.io/mydb/article_authors');
+  });
+
+  it('encodes a database or view name with spaces', () => {
+    expect(viewTableUrl('https://x.datasette.io', views[1]!)).toBe('https://x.datasette.io/my%20db/odd%20name');
+  });
+
+  it('runs the table importer, and creates no projections, in table mode', async () => {
+    const { api, inserted } = fakeApi([]);
+    const urls: string[][] = [];
+    await runViewImport(api, 'https://x.datasette.io', views, 'table', async (u) => {
+      urls.push(u);
+    });
+    expect(urls).toEqual([['https://x.datasette.io/mydb/article_authors', 'https://x.datasette.io/my%20db/odd%20name']]);
+    expect(inserted).toEqual([]);
+  });
+
+  it('creates projections, and calls no table importer, in projection mode', async () => {
+    const { api, inserted } = fakeApi([table('mydb/articles', ['x'])]);
+    let calls = 0;
+    await runViewImport(api, 'https://x.datasette.io', [views[0]!], 'projection', async () => {
+      calls += 1;
+    });
+    expect(calls).toBe(0);
+    expect(inserted.map((t) => t.name)).toEqual(['mydb/article_authors']);
+    expect(inserted[0]!.source?.type).toBe('projection');
   });
 });

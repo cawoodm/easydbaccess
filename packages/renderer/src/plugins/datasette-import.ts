@@ -33,7 +33,7 @@ import {
   type DatasetteRef,
   type MetadataTablePatch,
 } from './datasette-client.js';
-import { importDatasetteViews, offerViewImport, reportViewImport } from './datasette-views.js';
+import { askViewImportMode, findViews, offerViewImport, runViewImport } from './datasette-views.js';
 import {
   type DatasetteSettings,
   getDatasetteSettings,
@@ -132,21 +132,31 @@ export function init(api: HostApi): void {
     },
   });
 
-  // Views on their own, for a workspace whose tables are already imported.
+  // Views on their own — as live projections over tables already imported, or
+  // as snapshot tables of their own.
   api.ui.registerUrlSource({
     id: 'datasette-views',
-    label: 'Datasette views (as projections)…',
+    label: 'Datasette views…',
     async run(api, { url }) {
       const input =
         url ||
         (await api.ui.dialogs.prompt(
-          `Datasette database URL — its SQL views become Projections over the tables you have already imported.\n\ne.g. ${EXAMPLE}`,
+          `Datasette database URL — its SQL views can come in as live Projections over the tables you already imported, or as snapshot tables.\n\ne.g. ${EXAMPLE}`,
           '',
           'Import Datasette views',
         ));
       if (!input) return;
       try {
-        reportViewImport(api, await importDatasetteViews(api, input));
+        const views = await findViews(api, input);
+        if (!views || views.length === 0) {
+          await api.ui.dialogs.alert('That Datasette database defines no views.', 'Datasette views');
+          return;
+        }
+        const mode = await askViewImportMode(api, views, 'This database defines');
+        if (!mode) return;
+        await runViewImport(api, parseDatasetteUrl(input).base, views, mode, (urls) =>
+          importViewsAsTables(api, urls, {}),
+        );
       } catch (err) {
         await api.ui.dialogs.alert((err as Error)?.message ?? String(err), 'Datasette views');
       }
@@ -334,10 +344,26 @@ export async function importDatasette(
   // allowed to turn a successful table import into a failure.
   if (imported > 0 && !opts.skipViews) {
     try {
-      await offerViewImport(api, input);
+      await offerViewImport(api, input, (urls) => importViewsAsTables(api, urls, opts));
     } catch {
       /* the tables landed; an optional extra must not report as a failure */
     }
+  }
+}
+
+/**
+ * Import each view URL as an ordinary snapshot table.
+ *
+ * Datasette serves a view exactly like a table, so this is just the normal
+ * table import pointed at the view's endpoint — it gets the same paging,
+ * progress bar, collision prompt and row cap. `skipViews` stops the recursion:
+ * these ARE the views.
+ */
+async function importViewsAsTables(api: HostApi, urls: string[], opts: DatasetteImportOpts): Promise<void> {
+  for (const url of urls) {
+    // Each URL names ONE view, so the table picker never appears anyway; what
+    // matters is `skipViews`, which stops the recursion — these ARE the views.
+    await importDatasette(api, url, { ...opts, skipViews: true });
   }
 }
 

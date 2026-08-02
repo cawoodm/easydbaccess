@@ -101,6 +101,7 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
   `csv-export`, `dump-export`, `sql-export`, `gist-sync`, `server-sync`,
   `cell-color`, `cell-image`, `cell-link`, `cell-date`, `cell-datetime`,
   `cell-boolean`, `auto-renderer`, `html-preview`, `html-render`, `delete-table`,
+  `table-copy`,
   `import-data`, `auto-sync`, `views`, `settings`, `url-source`,
   `datasette-import` (+ `datasette-views`), `datasette-connect`, `connect-menu`,
   `projection`, `command-palette-button`. Don't add a feature to

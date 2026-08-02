@@ -123,35 +123,80 @@ export function reportViewImport(api: HostApi, res: ImportViewsResult): void {
 }
 
 /**
+ * The `.json` endpoint for one view. Datasette serves a view exactly like a
+ * table, so this URL feeds straight into the ordinary table importer — paging,
+ * progress bar, column inference and all.
+ */
+export function viewTableUrl(base: string, v: ViewRef): string {
+  return `${base}/${encodeURIComponent(v.db)}/${encodeURIComponent(v.name)}`;
+}
+
+/**
+ * How the user wants a database's views brought in.
+ *  - `projection` — live: the view's QUERY becomes a projection over the
+ *    imported tables, and re-computes whenever they change.
+ *  - `table`      — a snapshot: the view's ROWS become an ordinary local table,
+ *    frozen at import time and yours to edit.
+ * The two are genuinely different things, which is why this asks rather than
+ * picking one. A view whose SQL is too complex to model can still be imported
+ * as a table, so the snapshot is also the fallback.
+ */
+export type ViewImportMode = 'projection' | 'table';
+
+/** Views defined at `input`, or null when the instance will not tell us. */
+export async function findViews(api: HostApi, input: string): Promise<ViewRef[] | null> {
+  try {
+    return await discoverViews((u) => api.backend.fetch(u), parseDatasetteUrl(input));
+  } catch (err) {
+    if (err instanceof DatasetteError) return null; // SQL endpoint off
+    throw err;
+  }
+}
+
+/** Ask how to bring `views` in. Null when the user declines. */
+export async function askViewImportMode(api: HostApi, views: ViewRef[], lead: string): Promise<ViewImportMode | null> {
+  const names = views
+    .slice(0, 5)
+    .map((v) => v.name)
+    .join(', ');
+  const choice = await api.ui.dialogs.choice(
+    `${lead} ${views.length} view${views.length === 1 ? '' : 's'} (${names}${views.length > 5 ? ', …' : ''}).\n\n` + `A view is a query rather than stored rows, so it can come in either way.`,
+    ['As projections (live)', 'As tables (snapshot)'],
+    'Datasette views',
+  );
+  if (!choice) return null;
+  return choice.startsWith('As projections') ? 'projection' : 'table';
+}
+
+/**
  * Offer to import a database's views right after its tables landed — the only
  * moment the tables a view reads are guaranteed to exist.
  *
  * Silent when there are no views, and silent when the instance will not answer
  * the SQL query that lists them: an import that otherwise succeeded must not
  * end on an error about an optional extra.
+ *
+ * `importAsTables` is injected rather than imported: the table importer lives
+ * in `datasette-import.ts`, which already imports this module, and taking the
+ * dependency back would make that a cycle.
  */
-export async function offerViewImport(api: HostApi, input: string): Promise<void> {
-  const ref = parseDatasetteUrl(input);
-  let views: ViewRef[];
-  try {
-    views = await discoverViews((u) => api.backend.fetch(u), ref);
-  } catch (err) {
-    if (err instanceof DatasetteError) return; // SQL endpoint off — not worth a dialog
-    throw err;
+export async function offerViewImport(api: HostApi, input: string, importAsTables: (urls: string[]) => Promise<void>): Promise<void> {
+  const views = await findViews(api, input);
+  if (!views || views.length === 0) return;
+
+  const mode = await askViewImportMode(api, views, 'This database also defines');
+  if (!mode) return;
+  await runViewImport(api, parseDatasetteUrl(input).base, views, mode, importAsTables);
+}
+
+/** Carry out a chosen mode over an already-discovered set of views. */
+export async function runViewImport(api: HostApi, base: string, views: ViewRef[], mode: ViewImportMode, importAsTables: (urls: string[]) => Promise<void>): Promise<void> {
+  if (mode === 'table') {
+    // The table importer emits its own per-batch summary, so this path stays
+    // quiet rather than adding a second one.
+    await importAsTables(views.map((v) => viewTableUrl(base, v)));
+    return;
   }
-  if (views.length === 0) return;
-
-  const names = views
-    .slice(0, 5)
-    .map((v) => v.name)
-    .join(', ');
-  const ok = await api.ui.dialogs.confirm(
-    `This database also defines ${views.length} view${views.length === 1 ? '' : 's'} (${names}${views.length > 5 ? ', …' : ''}).\n\n` +
-      `A view is a query, not stored rows, so it imports as a Projection over the tables you just imported. Import them?`,
-    'Datasette views',
-  );
-  if (!ok) return;
-
   const workspaceId = api.workspaceId();
   if (!workspaceId) return;
   reportViewImport(api, await createProjectionsForViews(api, workspaceId, views));
