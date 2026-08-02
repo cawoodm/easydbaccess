@@ -226,7 +226,10 @@ describe('serializeTableAsSql for a projection table', () => {
     const sql = serializeTableAsSql(projTable, []);
     expect(sql).toContain('-- projection: Staff by Dept');
     expect(sql).toContain('LIMIT 10');
-    expect(sql).toContain('FROM "People" AS "p"');
+    // The SQL identifier is the one `renderTable` declares for that source
+    // table (its slug/code), not the display name — otherwise the exported
+    // query would not run against the exported dump.
+    expect(sql).toContain('FROM "people" AS "p"');
     expect(sql).toContain('ORDER BY "p"."name" ASC');
     // No CREATE TABLE / INSERT: a projection stores nothing.
     expect(sql).not.toContain('CREATE TABLE');

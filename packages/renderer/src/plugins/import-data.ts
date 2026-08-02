@@ -34,13 +34,14 @@ import { resolveChosenTables } from './datasette-common.js';
 import { importDatasette } from './datasette-import.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 import { isWorkspaceDump, restoreWorkspaceDump } from './json-import.js';
+import { hasSqlProjections, reportSqlRestore, restoreSqlScript } from './sql-import.js';
 import { fetchImportTextWithBar, filenameFromUrl } from '../import/fetch-source.js';
 import { runImport, type RunImportResult } from '../import/import-kernel.js';
 import { refreshFromOrigin } from '../import/refresh.js';
 import type { ImportTarget } from '../import/land-tables.js';
 
 /** How a URL should be imported. `auto` is resolved to a concrete kind on submit. */
-type ImportKind = 'auto' | 'json' | 'csv' | 'datasette';
+type ImportKind = 'auto' | 'json' | 'csv' | 'sql' | 'datasette';
 type ResolvedKind = Exclude<ImportKind, 'auto'>;
 
 interface PredefinedSource {
@@ -191,6 +192,16 @@ async function openImport(api: HostApi, presetKind: ImportKind = 'auto'): Promis
   // The CSV options panel's separator. Only csv reads it.
   const separator = typeof panel.separator === 'string' ? panel.separator : undefined;
   try {
+    // A `.sql` script is two things at once: CREATE TABLE + INSERT is tabular
+    // data the kernel handles, but a SELECT is a PROJECTION — a spec with no
+    // rows of its own, which no table writer can express. A script holding one
+    // goes to `restoreSqlScript`, the same way a `.db.json` workspace dump goes
+    // to `restoreWorkspaceDump` below. Either way the body is read once.
+    if (kind === 'sql') {
+      await importSql(api, { url, file, label, maxRows, mode, target, panel, editHook: editHook });
+      return;
+    }
+
     // Formats that have moved onto the kernel take the WHOLE path through it —
     // reference, upload and URL alike. The kernel owns the listing, the table
     // picker, the row cap, the naming, the collision policy and the write, so
@@ -272,6 +283,73 @@ async function openImport(api: HostApi, presetKind: ImportKind = 'auto'): Promis
       title: 'Import',
     });
   }
+}
+
+/**
+ * Import a `.sql` script. The body is read ONCE here — the projection sniff and
+ * whichever path wins then share it, the same bargain `sniffJson` strikes for
+ * JSON. A script defining projections is restored whole; a plain
+ * CREATE TABLE / INSERT script runs on the kernel like any other format.
+ */
+async function importSql(
+  api: HostApi,
+  opts: {
+    url: string;
+    file: File | undefined;
+    label: string;
+    maxRows: number | undefined;
+    mode: 'copy' | 'reference';
+    target: ImportTarget;
+    panel: Record<string, unknown>;
+    editHook:
+      | ((columns: ColumnSpec[], subject?: string) => Promise<ColumnSpec[] | null>)
+      | undefined;
+  },
+): Promise<void> {
+  const { url, file, label, maxRows, mode, target, panel, editHook } = opts;
+  if (mode === 'reference') {
+    // A reference re-fetches a rows endpoint on every render. A script is
+    // something you RUN once, so there is nothing live to point at.
+    throw new Error(
+      'A .sql script cannot be referenced live — it is a script to run, not a rows endpoint. Import it as a Copy instead.',
+    );
+  }
+
+  const script = file
+    ? await file.text()
+    : await fetchImportTextWithBar(
+        api,
+        url,
+        `Reading ${filenameFromUrl(url)}…`,
+        maxRows != null ? { maxBytes: null } : {},
+      );
+
+  if (hasSqlProjections(script)) {
+    const res = await restoreSqlScript(api, script, {
+      maxRows,
+      target,
+      ...(editHook ? { editColumns: editHook } : {}),
+    });
+    reportSqlRestore(api, res, label);
+    return;
+  }
+
+  const spec = await findKernelImporter('sql');
+  if (!spec) throw new Error('The SQL importer is not installed.');
+  const res = await runImport(
+    api,
+    spec,
+    { kind: 'text', text: script, name: file ? file.name : filenameFromUrl(url) },
+    {
+      mode,
+      target,
+      maxRows,
+      panel,
+      ...(file ? {} : { origin: { type: spec.id, url } }),
+      ...(editHook ? { editColumns: (cols: ColumnSpec[]) => editHook(cols) } : {}),
+    },
+  );
+  reportImport(api, res, label);
 }
 
 /**
@@ -498,6 +576,7 @@ function detectKind(url: string): ResolvedKind {
     // reads as Datasette — at any depth, so instance and database URLs work too.
     const looksDatasette = host.includes('datasette') || hasDatasetteParams;
     if (!hasDatasetteParams && /\.(csv|tsv|tab)$/i.test(u.pathname)) return 'csv';
+    if (!hasDatasetteParams && /\.sql$/i.test(u.pathname)) return 'sql';
     if (!hasDatasetteParams && /\.json$/i.test(u.pathname)) return 'json';
     if (looksDatasette) return 'datasette';
     return 'json';
@@ -559,9 +638,11 @@ interface ImportChoice {
   target: ImportTarget;
 }
 
-/** Resolve a CSV/JSON kind from a filename (uploads have no URL to inspect). */
+/** Resolve a CSV/SQL/JSON kind from a filename (uploads have no URL to inspect). */
 function detectKindFromName(name: string): ResolvedKind {
-  return /\.(csv|tsv|tab)$/i.test(name) ? 'csv' : 'json';
+  if (/\.(csv|tsv|tab)$/i.test(name)) return 'csv';
+  if (/\.sql$/i.test(name)) return 'sql';
+  return 'json';
 }
 
 /**
