@@ -741,6 +741,8 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
     hasMore: boolean;
     truncated: boolean;
     error?: string | undefined;
+    /** Rows whose user-added values could not be carried across the refresh. */
+    droppedUserRows: number;
   };
   let newFields: string[] = [];
   try {
@@ -832,7 +834,7 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
     const deletedRemoteFields = (t.deletedColumns ?? []).filter((f) => remoteFields.has(f));
     const rowColl = api.store.rows(t.id);
     const old = await rowColl.find();
-    const { data: mergedData } = mergeRefreshedRows({
+    const { data: mergedData, droppedUserRows } = mergeRefreshedRows({
       oldRows: old.map((r) => ({ data: r.data })),
       freshRows: rows,
       pks,
@@ -843,7 +845,7 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
     await rowColl.bulkInsert(
       mergedData.map((data) => ({ id: cryptoUUID(), tableId: t.id, data, updatedAt: now })),
     );
-    outcome = { rowCount: mergedData.length, hasMore, truncated, error };
+    outcome = { rowCount: mergedData.length, hasMore, truncated, error, droppedUserRows };
   } finally {
     setTableLoading(t.id, false);
   }
@@ -858,10 +860,18 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
   }
   if (newFields.length > 0)
     parts.push(`${newFields.length} new column${newFields.length === 1 ? '' : 's'}`);
+  // A view (or any table Datasette reports no pk for) is matched on content, so
+  // a row whose remote values changed loses the user's own column values. Say so.
+  if (outcome.droppedUserRows > 0) {
+    parts.push(
+      `${outcome.droppedUserRows} row${outcome.droppedUserRows === 1 ? '' : 's'} changed at the source, ` +
+        `so your own column values for ${outcome.droppedUserRows === 1 ? 'it' : 'them'} could not be carried over`,
+    );
+  }
   const note = parts.length ? ` — ${parts.join(', ')}` : '';
   api.ui.dialogs.toast(`Refreshed ${outcome.rowCount} rows from ${ref.db}/${ref.table}${note}.`, {
     kind:
-      outcome.error || outcome.hasMore || outcome.truncated || newFields.length > 0
+      outcome.error || outcome.hasMore || outcome.truncated || newFields.length > 0 || outcome.droppedUserRows > 0
         ? 'warning'
         : 'success',
     title: 'Refresh',

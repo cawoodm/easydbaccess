@@ -147,11 +147,22 @@ async function refreshImported(api: HostApi, tableId: string): Promise<void> {
     if (res.newFields.length > 0) {
       notes.push(`${res.newFields.length} new column${res.newFields.length === 1 ? '' : 's'}`);
     }
-    if (!res.merged && res.rowCount > 0) notes.push('rows replaced (no primary key to match on)');
+    if (!res.merged && res.rowCount > 0) notes.push('rows replaced (nothing to match them on)');
+    // Losing what the user typed into their own columns is the one refresh
+    // outcome they must never have to discover for themselves.
+    if (res.droppedUserRows > 0) {
+      notes.push(
+        `${res.droppedUserRows} row${res.droppedUserRows === 1 ? '' : 's'} changed at the source, ` +
+          `so your own column values for ${res.droppedUserRows === 1 ? 'it' : 'them'} could not be carried over`,
+      );
+    }
     api.ui.dialogs.toast(
       `Refreshed "${t.name}" (${res.rowCount.toLocaleString()} rows)` +
         `${notes.length ? ` — ${notes.join(', ')}` : ''}.`,
-      { kind: res.newFields.length > 0 ? 'warning' : 'success', title: 'Refresh' },
+      {
+        kind: res.newFields.length > 0 || res.droppedUserRows > 0 ? 'warning' : 'success',
+        title: 'Refresh',
+      },
     );
   } catch (err) {
     api.ui.dialogs.toast(`Couldn't refresh "${t.name}": ${(err as Error).message}`, {
