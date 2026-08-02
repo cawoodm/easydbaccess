@@ -3,6 +3,7 @@ import { SAFE_MODE } from './safe-mode.js';
 import * as csvImport from '../plugins/csv-import.js';
 import * as csvExport from '../plugins/csv-export.js';
 import * as jsonImport from '../plugins/json-import.js';
+import * as sqlImport from '../plugins/sql-import.js';
 import * as connectMenu from '../plugins/connect-menu.js';
 import * as datasetteImport from '../plugins/datasette-import.js';
 import * as datasetteConnect from '../plugins/datasette-connect.js';
@@ -22,10 +23,13 @@ import * as htmlRender from '../plugins/html-render.js';
 import * as cellLink from '../plugins/cell-link.js';
 import * as autoRenderer from '../plugins/auto-renderer.js';
 import * as deleteTable from '../plugins/delete-table.js';
+import * as tableCopy from '../plugins/table-copy.js';
 import * as importData from '../plugins/import-data.js';
 import * as autoSync from '../plugins/auto-sync.js';
 import * as views from '../plugins/views.js';
 import * as settings from '../plugins/settings.js';
+import * as projection from '../plugins/projection.js';
+import * as commandPaletteButton from '../plugins/command-palette-button.js';
 
 /** A built-in plugin paired with its id (mirrors `meta.id`, cheaply reachable without importing every module). */
 export interface BuiltinEntry {
@@ -52,6 +56,7 @@ const modules: PluginModule[] = [
   newTableButton,
   csvImport,
   jsonImport,
+  sqlImport,
   connectMenu,
   datasetteImport,
   datasetteConnect,
@@ -71,9 +76,12 @@ const modules: PluginModule[] = [
   cellLink,
   autoRenderer,
   deleteTable,
+  tableCopy,
   importData,
   autoSync,
   views,
+  projection,
+  commandPaletteButton,
 ];
 
 function requireMeta(p: PluginModule): NonNullable<PluginModule['meta']> {

@@ -10,6 +10,7 @@
 
 import type { ColumnSpec, ColumnType, TableInfo } from '@easydb/shared';
 import { parseColumnFilter } from '../search/column-filter.js';
+import { isInternalField } from '../util/internal-fields.js';
 
 export interface DatasetteRef {
   base: string;
@@ -106,6 +107,55 @@ export function buildTableUrl(
   return u.toString();
 }
 
+/**
+ * Build the next page's URL from a raw `next` TOKEN, carrying `_next` as the only
+ * `_`-prefixed param.
+ *
+ * `buildTableUrl` merges `ref.query` — the params from the URL the user pasted —
+ * so a source URL that already carried `_size` would reintroduce it here and make
+ * the request two-`_`-params wide. datasette.io's Cloudflare WAF challenges any
+ * `.json` request like that (see fetchTableMeta), which is the exact thing this
+ * path exists to avoid. Non-underscore params (real filters like `country=AFG`)
+ * are kept — dropping those would silently widen the query.
+ */
+export function buildTokenPageUrl(ref: DatasetteRef, token: string): string {
+  const kept: Record<string, string> = {};
+  for (const [k, v] of Object.entries(ref.query)) if (!k.startsWith('_')) kept[k] = v;
+  return buildTableUrl({ ...ref, query: kept }, { _next: token });
+}
+
+/**
+ * Re-point a server-advertised cursor URL at the origin we actually requested.
+ *
+ * Datasette builds `next_url` from what IT thinks its address is. Behind a
+ * TLS-terminating proxy (Fly, Heroku, a reverse proxy…) it does not know the
+ * request arrived over https, so it advertises **`http://…`** — e.g.
+ * til.simonwillison.net returns
+ * `"next_url": "http://til.simonwillison.net/tils/similarities.json?_next=…"`.
+ *
+ * Fetching that from an https page is blocked outright as mixed content, and the
+ * browser reports it as an opaque `TypeError` ("Load failed" / "Failed to
+ * fetch") — so paging died on page two and the stored resume cursor stayed
+ * un-fetchable forever. Keeping the server's path + query but OUR scheme (and
+ * port) fixes it, and normalising a stored cursor the same way heals an import
+ * that is already stuck.
+ *
+ * Returns null when the cursor points at a different host: a paging cursor that
+ * hops hosts is not paging, and following it would fetch somewhere else entirely.
+ */
+export function normaliseCursorUrl(candidate: string, requestedUrl: string): string | null {
+  try {
+    const req = new URL(requestedUrl);
+    const next = new URL(candidate, req);
+    if (next.hostname.toLowerCase() !== req.hostname.toLowerCase()) return null;
+    next.protocol = req.protocol;
+    next.port = req.port;
+    return next.toString();
+  } catch {
+    return null;
+  }
+}
+
 /** Ensure a URL (e.g. a next_url) carries the given params without overwriting. */
 export function ensureParams(urlStr: string, params: Record<string, string | number>): string {
   const u = new URL(urlStr);
@@ -197,7 +247,9 @@ export function mapColumns(meta: any): { columns: ColumnSpec[]; pks: string[] } 
     };
     if (d.notnull === true || d.notnull === 1 || isPk) spec.notnull = true;
     if (isPk) spec.unique = true;
-    if (d.hidden === true || d.hidden === 1) spec.hidden = true;
+    // Datasette's own hidden flag, plus storage plumbing (`rowid`) that has to
+    // stay in the row for writes but is not user data.
+    if (d.hidden === true || d.hidden === 1 || isInternalField(field)) spec.hidden = true;
     // Carry a column's SQL default (from column_details) so an added row starts
     // with the same value the database would use.
     if (d.default != null && d.default !== '') spec.default = d.default;
@@ -237,11 +289,16 @@ export function inferColumnsFromRows(rows: Array<Record<string, unknown>>): Colu
       }
     }
   }
-  return fields.map((field) => ({
-    field,
-    label: prettifyLabel(field),
-    type: inferColumnType(rows.map((r) => r[field])),
-  }));
+  return fields.map((field) => {
+    const spec: ColumnSpec = {
+      field,
+      label: prettifyLabel(field),
+      type: inferColumnType(rows.map((r) => r[field])),
+    };
+    // Same rule as `mapColumns`: keep `rowid` in the data, out of sight.
+    if (isInternalField(field)) spec.hidden = true;
+    return spec;
+  });
 }
 
 function inferColumnType(values: unknown[]): ColumnType {
@@ -447,6 +504,109 @@ export async function fetchTablesForDb(
   db: string,
 ): Promise<TableRef[]> {
   return parseTableList(await fetchJson(fetchFn, `${base}/${encodeURIComponent(db)}.json`), db);
+}
+
+/** A SQL view in a Datasette database, with the query that defines it. */
+export interface ViewRef {
+  db: string;
+  name: string;
+  /** The `CREATE VIEW … AS SELECT …` statement, verbatim from sqlite_master. */
+  sql: string;
+}
+
+/**
+ * Parse the `views` key of `/<db>.json` into view names. Datasette returns a
+ * string array; tolerate objects with a `name` (and a future `hidden` flag)
+ * the same way `parseTableList` does.
+ */
+export function parseViewList(json: unknown): string[] {
+  const views = (json as { views?: unknown } | null)?.views;
+  const out: string[] = [];
+  for (const entry of Array.isArray(views) ? views : []) {
+    if (typeof entry === 'string') {
+      out.push(entry);
+      continue;
+    }
+    const o = entry as { name?: unknown; hidden?: unknown } | null;
+    if (o && typeof o.name === 'string' && o.hidden !== true) out.push(o.name);
+  }
+  return out;
+}
+
+/**
+ * Fetch each view's defining SQL from `sqlite_master`.
+ *
+ * There is no Datasette endpoint that exposes a view's definition — `/db.json`
+ * names the views but not their queries — so this goes through the SQL
+ * endpoint. That is a capability an instance can switch off, and plenty do, so
+ * the failure is turned into a sentence the user can act on rather than a bare
+ * 403.
+ *
+ * `_shape` is the ONLY `_`-prefixed param: two of them trip the Cloudflare
+ * challenge described on `fetchTableMeta`, which poisons the whole session.
+ */
+export async function fetchViewDefinitions(fetchFn: FetchFn, base: string, db: string): Promise<ViewRef[]> {
+  const sql = "select name, sql from sqlite_master where type='view' order by name";
+  const url = `${base}/${encodeURIComponent(db)}.json?sql=${encodeURIComponent(sql)}&_shape=array`;
+  let json: unknown;
+  try {
+    json = (await fetchJson(fetchFn, url)) as unknown;
+  } catch (err) {
+    const detail = err instanceof DatasetteError ? err.message : String(err);
+    throw new DatasetteError(
+      {
+        error:
+          `Couldn't read the view definitions from "${db}". Importing views needs the SQL ` +
+          `endpoint, which this instance may have disabled (allow_sql). Its tables can still ` +
+          `be imported normally.\n\n${detail}`,
+      },
+      err instanceof DatasetteError ? err.status : 0,
+    );
+  }
+  const body = (json as { rows?: unknown } | null)?.rows;
+  const rows: unknown[] = Array.isArray(json) ? json : Array.isArray(body) ? body : [];
+  const out: ViewRef[] = [];
+  for (const r of rows) {
+    // `_shape=array` gives objects; a bare `rows` array gives positional pairs.
+    const o = r as { name?: unknown; sql?: unknown } | null;
+    const name = typeof o?.name === 'string' ? o.name : Array.isArray(r) ? r[0] : undefined;
+    const stmt = typeof o?.sql === 'string' ? o.sql : Array.isArray(r) ? r[1] : undefined;
+    if (typeof name === 'string' && typeof stmt === 'string' && stmt.trim()) out.push({ db, name, sql: stmt });
+  }
+  return out;
+}
+
+/**
+ * Discover the views a URL refers to — one database, or every database of an
+ * instance. A table URL narrows to that table's database, since a view lives
+ * beside the tables it reads.
+ *
+ * The database listing is consulted FIRST, and the SQL endpoint is only touched
+ * when that listing actually declares views. Most databases have none, and a
+ * needless `?sql=` request on every import is both a wasted round trip and a
+ * pointless 403 on the many instances that disable SQL — the listing's
+ * `allow_execute_sql` flag is honoured for the same reason.
+ */
+export async function discoverViews(fetchFn: FetchFn, ref: DatasetteRef): Promise<ViewRef[]> {
+  const dbs = ref.db ? [ref.db] : await fetchDatabaseNames(fetchFn, ref.base);
+  const out: ViewRef[] = [];
+  for (const db of dbs) {
+    const listing = await fetchJson(fetchFn, `${ref.base}/${encodeURIComponent(db)}.json`);
+    if (parseViewList(listing).length === 0) continue;
+    if ((listing as { allow_execute_sql?: unknown } | null)?.allow_execute_sql === false) {
+      throw new DatasetteError(
+        {
+          error:
+            `"${db}" defines views, but this instance has SQL queries disabled ` +
+            `(allow_execute_sql), and a view's definition can only be read through them. ` +
+            `Its tables can still be imported normally.`,
+        },
+        403,
+      );
+    }
+    out.push(...(await fetchViewDefinitions(fetchFn, ref.base, db)));
+  }
+  return out;
 }
 
 /**
@@ -765,7 +925,12 @@ export async function fetchRows(
     _size: pageSize,
     ...(opts.extraParams || {}),
   };
-  let url: string | null = opts.startUrl ?? buildTableUrl(ref, baseParams);
+  const firstUrl = buildTableUrl(ref, baseParams);
+  // A stored resume cursor gets the same treatment, so an import already stuck on
+  // an http:// cursor recovers on the next refresh instead of failing forever.
+  let url: string | null = opts.startUrl
+    ? (normaliseCursorUrl(opts.startUrl, firstUrl) ?? opts.startUrl)
+    : firstUrl;
   const rows: Array<Record<string, unknown>> = [];
   let truncated = false;
   let hasMore = false;
@@ -806,12 +971,14 @@ export async function fetchRows(
     // any `.json` request with two or more `_`-prefixed params; see
     // fetchTableMeta). Subsequent pages fall back to Datasette's default page
     // size, which is fine — we accumulate rows to the cap regardless.
-    const nextPage =
-      info.nextUrl != null
-        ? info.nextUrl
-        : info.nextToken != null
-          ? buildTableUrl(ref, { _next: info.nextToken })
-          : null;
+    // A server-built next_url is re-pointed at the origin we actually requested
+    // (see normaliseCursorUrl — an http:// cursor from a TLS-terminated instance
+    // is blocked as mixed content). If it is unusable, fall back to rebuilding
+    // from the raw token rather than giving up on paging.
+    const cursorUrl: string | null =
+      info.nextUrl != null ? normaliseCursorUrl(info.nextUrl, url) : null;
+    const nextPage: string | null =
+      cursorUrl ?? (info.nextToken != null ? buildTokenPageUrl(ref, info.nextToken) : null);
 
     // Keep paging while there's a cursor, we're under the cap, and the page
     // actually returned rows (the last guard prevents a pathological loop on a

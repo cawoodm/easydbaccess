@@ -799,6 +799,10 @@ export class DataTable extends LitElement {
     if (col.script?.trim()) {
       return this.renderScriptedCell(row, col);
     }
+    // A cell is non-editable when the whole table/view is read-only OR the
+    // column itself is flagged `readonly` (e.g. a Projection's computed and
+    // secondary-source columns, which have no unambiguous write target).
+    const cellReadonly = this.readOnly || col.readonly === true;
     // Cell rendering is dispatched by the column's `renderer` attribute, not
     // its data type. If a renderer is registered for the column's chosen
     // name we hand off to its custom element; otherwise the cell falls back to
@@ -827,14 +831,16 @@ export class DataTable extends LitElement {
         .value=${raw ?? ''}
         .column=${col}
         .row=${row.data}
-        .readonly=${this.readOnly}
-        @change=${(e: Event) =>
-          this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
+        .readonly=${cellReadonly}
+        @change=${cellReadonly
+          ? undefined
+          : (e: Event) =>
+              this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
       ></${tag}>`;
     }
     // Read-only never offers an editor: show the value as plain text
     // (dates/booleans formatted) instead of the native <input>.
-    if (this.readOnly) {
+    if (cellReadonly) {
       return this.renderReadonlyCell(col, raw);
     }
     // No renderer set or unknown name — fall back to a native editor. Most

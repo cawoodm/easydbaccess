@@ -145,6 +145,12 @@ export class ScriptEditorDialog extends LitElement {
               computed value instead of the stored one — and the cell becomes read-only. A script
               that throws shows a small error chip in the cell.
             </p>
+            <p class="hint">
+              Besides the JS globals you can call <code>markdownToHtml(text)</code> (also
+              <code>easydb.markdownToHtml</code>) — set this column's renderer to
+              <code>html</code> so the result shows as formatted text rather than as its own
+              source.
+            </p>
             <textarea
               spellcheck="false"
               autofocus

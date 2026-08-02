@@ -54,6 +54,13 @@ export interface ColumnSpec {
    * global search). Absent ⇒ filterable, preserving existing behaviour.
    */
   filterable?: boolean;
+  /**
+   * When true, the grid shows this column without an editor (display value
+   * only). Generalises the existing "scripted cells are read-only" behaviour to
+   * an explicit flag; a Projection sets it on its computed and secondary-source
+   * columns, which cannot be written back. Absent/false ⇒ editable as before.
+   */
+  readonly?: boolean;
 }
 
 /**
@@ -115,6 +122,86 @@ export interface TableSource {
    * Absent/false ⇒ the grid sorts/filters the full snapshot as usual.
    */
   serverQuery?: boolean | undefined;
+}
+
+/**
+ * A "Projection": a virtual table whose rows are DERIVED from one or more other
+ * tables (a database view / JOIN). Stored as the `config` of a table's
+ * `source` descriptor (`source.type === 'projection'`); the `projection`
+ * `RowCollectionProvider` computes the rows on demand and keeps them live.
+ *
+ * The projection's own `Table.columns` are COMPILED from `columns` below at
+ * save time (so the grid, exports and views treat it like any table). The spec
+ * here is the editable source of truth the projection editor round-trips.
+ */
+export interface ProjectionSpec {
+  version: 1;
+  /** FROM + JOINs. `sources[0]` is the base (FROM) table. */
+  sources: ProjectionSource[];
+  /** SELECT list; array order is display order. */
+  columns: ProjectionColumn[];
+  /**
+   * Optional WHERE, keyed by OUTPUT field. Reuses the existing filter-substring
+   * shape (`Record<field, substring>`), applied to the joined rows.
+   */
+  filters?: Record<string, string> | undefined;
+  /**
+   * Cap on how many rows the projection yields (TOP N), applied after the join
+   * and filters. Absent or ≤ 0 ⇒ every row. Mirrors `ViewInstance.limit`, and is
+   * what the SQL export renders as `SELECT TOP n`.
+   */
+  limit?: number | undefined;
+}
+
+/** One table participating in a projection: the base, or a JOIN onto it. */
+export interface ProjectionSource {
+  /** Qualifies this source's columns (e.g. "orders"); unique within the spec. */
+  alias: string;
+  /**
+   * The source table, bound by NAME and by name ONLY.
+   *
+   * There used to be a `tableId` alongside this as a "fast-path hint". It is
+   * gone on purpose. A projection has to survive its source being deleted and
+   * re-imported — the ordinary refresh loop for anything coming from a URL or
+   * a Datasette instance — and a re-imported table is a NEW row with a new id
+   * under the same name. Carrying the old id meant every spec accumulated a
+   * value that was wrong more often than it was right, and any code that
+   * trusted it before falling back to the name silently resolved to nothing.
+   * The name is the contract; renames propagate into the specs that reference
+   * them (see the columns editor's `submit`).
+   */
+  tableName: string;
+  /** Absent for `sources[0]`; present for each JOIN. */
+  join?:
+    | {
+        type: 'inner' | 'left';
+        /**
+         * Equijoin keys: this source's `field` must equal the already-introduced
+         * source `eqAlias`'s `eqField`. Multiple entries are ANDed.
+         */
+        on: Array<{ field: string; eqAlias: string; eqField: string }>;
+      }
+    | undefined;
+}
+
+/**
+ * One output column of a projection (the SELECT list). This says only WHICH
+ * value the column carries — everything about how it LOOKS (label, type,
+ * renderer, width, hidden, constraints) lives on the projection table's own
+ * `columns`, inherited once from the source table and thereafter edited with the
+ * ordinary column editor like any table's.
+ */
+export interface ProjectionColumn {
+  /** Output field name; unique within the spec. Keys the table's ColumnSpec. */
+  field: string;
+  /** Legacy seed values from specs written before presentation moved to the table. */
+  label?: string | undefined;
+  type?: ColumnType | undefined;
+  from:
+    /** A real stored column of a source — the only writeback candidate. */
+    | { kind: 'source'; alias: string; field: string }
+    /** Computed via `function render(row) { … }` — always read-only. */
+    | { kind: 'script'; script: string };
 }
 
 export interface Table {

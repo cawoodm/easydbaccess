@@ -33,6 +33,7 @@ import {
   type DatasetteRef,
   type MetadataTablePatch,
 } from './datasette-client.js';
+import { askViewImportMode, findViews, offerViewImport, runViewImport } from './datasette-views.js';
 import {
   type DatasetteSettings,
   getDatasetteSettings,
@@ -131,18 +132,51 @@ export function init(api: HostApi): void {
     },
   });
 
+  // Views on their own — as live projections over tables already imported, or
+  // as snapshot tables of their own.
+  api.ui.registerUrlSource({
+    id: 'datasette-views',
+    label: 'Datasette views…',
+    async run(api, { url }) {
+      const input =
+        url ||
+        (await api.ui.dialogs.prompt(
+          `Datasette database URL — its SQL views can come in as live Projections over the tables you already imported, or as snapshot tables.\n\ne.g. ${EXAMPLE}`,
+          '',
+          'Import Datasette views',
+        ));
+      if (!input) return;
+      try {
+        const views = await findViews(api, input);
+        if (!views || views.length === 0) {
+          await api.ui.dialogs.alert('That Datasette database defines no views.', 'Datasette views');
+          return;
+        }
+        const mode = await askViewImportMode(api, views, 'This database defines');
+        if (!mode) return;
+        await runViewImport(api, parseDatasetteUrl(input).base, views, mode, (urls) =>
+          importViewsAsTables(api, urls, {}),
+        );
+      } catch (err) {
+        await api.ui.dialogs.alert((err as Error)?.message ?? String(err), 'Datasette views');
+      }
+    },
+  });
+
   api.ui.registerDropHandler(async (event, api) => {
     const text = event.dataTransfer?.getData('text/plain') || '';
     if (!isDatasetteTableUrl(text)) return false;
     event.preventDefault();
-    await runImport(api, text);
+    // A dropped TABLE url is a request for that one table; asking about the
+    // database's views on top of it would be a non-sequitur.
+    await runImport(api, text, { skipViews: true });
     return true;
   });
 }
 
-async function runImport(api: HostApi, input: string): Promise<void> {
+async function runImport(api: HostApi, input: string, opts: DatasetteImportOpts = {}): Promise<void> {
   try {
-    await importDatasette(api, input);
+    await importDatasette(api, input, opts);
   } catch (err) {
     let msg: string;
     if (err instanceof DatasetteError) {
@@ -181,6 +215,12 @@ interface OneResult {
 export interface DatasetteImportOpts {
   /** The user already picked a database, so skip the table checklist. */
   skipTablePicker?: boolean | undefined;
+  /**
+   * Don't offer to import the database's views afterwards. For callers that
+   * are importing one specific table and would find the question a non-sequitur
+   * (a dropped table URL, a refresh).
+   */
+  skipViews?: boolean | undefined;
   /**
    * The dialog's "Limit rows" value, applied PER TABLE. Always further capped
    * by the "Datasette" settings tab's `maxImportRows` (0 there = unlimited, so
@@ -298,6 +338,33 @@ export async function importDatasette(
     failed,
     requested: chosen.length,
   });
+
+  // A database's VIEWS are queries over the tables just imported, so this is
+  // the only moment they can be resolved. Offered, never automatic, and never
+  // allowed to turn a successful table import into a failure.
+  if (imported > 0 && !opts.skipViews) {
+    try {
+      await offerViewImport(api, input, (urls) => importViewsAsTables(api, urls, opts));
+    } catch {
+      /* the tables landed; an optional extra must not report as a failure */
+    }
+  }
+}
+
+/**
+ * Import each view URL as an ordinary snapshot table.
+ *
+ * Datasette serves a view exactly like a table, so this is just the normal
+ * table import pointed at the view's endpoint — it gets the same paging,
+ * progress bar, collision prompt and row cap. `skipViews` stops the recursion:
+ * these ARE the views.
+ */
+async function importViewsAsTables(api: HostApi, urls: string[], opts: DatasetteImportOpts): Promise<void> {
+  for (const url of urls) {
+    // Each URL names ONE view, so the table picker never appears anyway; what
+    // matters is `skipViews`, which stops the recursion — these ARE the views.
+    await importDatasette(api, url, { ...opts, skipViews: true });
+  }
 }
 
 /**
@@ -674,6 +741,8 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
     hasMore: boolean;
     truncated: boolean;
     error?: string | undefined;
+    /** Rows whose user-added values could not be carried across the refresh. */
+    droppedUserRows: number;
   };
   let newFields: string[] = [];
   try {
@@ -765,7 +834,7 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
     const deletedRemoteFields = (t.deletedColumns ?? []).filter((f) => remoteFields.has(f));
     const rowColl = api.store.rows(t.id);
     const old = await rowColl.find();
-    const { data: mergedData } = mergeRefreshedRows({
+    const { data: mergedData, droppedUserRows } = mergeRefreshedRows({
       oldRows: old.map((r) => ({ data: r.data })),
       freshRows: rows,
       pks,
@@ -776,7 +845,7 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
     await rowColl.bulkInsert(
       mergedData.map((data) => ({ id: cryptoUUID(), tableId: t.id, data, updatedAt: now })),
     );
-    outcome = { rowCount: mergedData.length, hasMore, truncated, error };
+    outcome = { rowCount: mergedData.length, hasMore, truncated, error, droppedUserRows };
   } finally {
     setTableLoading(t.id, false);
   }
@@ -791,10 +860,18 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
   }
   if (newFields.length > 0)
     parts.push(`${newFields.length} new column${newFields.length === 1 ? '' : 's'}`);
+  // A view (or any table Datasette reports no pk for) is matched on content, so
+  // a row whose remote values changed loses the user's own column values. Say so.
+  if (outcome.droppedUserRows > 0) {
+    parts.push(
+      `${outcome.droppedUserRows} row${outcome.droppedUserRows === 1 ? '' : 's'} changed at the source, ` +
+        `so your own column values for ${outcome.droppedUserRows === 1 ? 'it' : 'them'} could not be carried over`,
+    );
+  }
   const note = parts.length ? ` — ${parts.join(', ')}` : '';
   api.ui.dialogs.toast(`Refreshed ${outcome.rowCount} rows from ${ref.db}/${ref.table}${note}.`, {
     kind:
-      outcome.error || outcome.hasMore || outcome.truncated || newFields.length > 0
+      outcome.error || outcome.hasMore || outcome.truncated || newFields.length > 0 || outcome.droppedUserRows > 0
         ? 'warning'
         : 'success',
     title: 'Refresh',

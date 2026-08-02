@@ -1,4 +1,6 @@
-import type { ColumnSpec, ColumnType, HostApi, PluginModule, Row, Table } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, HostApi, PluginModule, ProjectionSpec, Row, Table } from '@easydb/shared';
+import { slugTable } from '../util/ids.js';
+import { buildProjectionSelect } from './projection-sql.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'sql-export',
@@ -30,12 +32,20 @@ export async function serializeWorkspaceAsSql(api: HostApi): Promise<string> {
   const wsId = api.workspaceId();
   if (!wsId) throw new Error('sql-export: no active workspace');
 
-  const tables = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
+  const all = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
+  // A projection stores nothing, so it is exported as the SELECT that defines
+  // it — after the tables it reads from, since a view needs them to exist.
+  const tables = all.filter((t) => t.source?.type !== 'projection');
+  const projections = all.filter((t) => t.source?.type === 'projection');
+  // One naming authority for the whole dump: the SELECTs must reference the
+  // very identifiers the CREATE TABLEs declare.
+  const resolve = sqlNameResolver(all);
+
   const lines: string[] = [
     `-- easyDBAccess SQL dump`,
     `-- workspace: ${wsId}`,
     `-- exported:  ${new Date().toISOString()}`,
-    `-- tables:    ${tables.length}`,
+    `-- tables:    ${tables.length}${projections.length > 0 ? ` (+ ${projections.length} projection${projections.length === 1 ? '' : 's'})` : ''}`,
     `-- Compatible with PostgreSQL and SQLite. For MySQL run`,
     `--   SET sql_mode='ANSI_QUOTES';`,
     `-- before executing, or rewrite "ident" to \`ident\`.`,
@@ -50,7 +60,30 @@ export async function serializeWorkspaceAsSql(api: HostApi): Promise<string> {
   }
 
   lines.push(`COMMIT;`, '');
+
+  if (projections.length > 0) {
+    lines.push('', `-- Projections (virtual tables). Each is the query behind one, reading the`, `-- tables above. Run them as-is, or wrap one in CREATE VIEW to keep it.`, '');
+    for (const p of projections) {
+      lines.push(`-- projection: ${p.name}`, projectionSelectBody(p, resolve) ?? '', '');
+    }
+  }
   return lines.join('\n');
+}
+
+/**
+ * Map a table NAME onto the SQL identifier this exporter writes for it.
+ *
+ * `renderTable` names a table after its `code`, while a projection's spec
+ * refers to its sources by `name` — so without this the SELECT referenced
+ * `"My_Table"` while the CREATE TABLE declared `"my_table"`, and the exported
+ * query would not run against the exported dump. Falls back to the slug a
+ * table would have been given, which is what `code` holds for every table this
+ * app creates.
+ */
+function sqlNameResolver(tables: Table[]): (tableName: string) => string {
+  const byName = new Map<string, string>();
+  for (const t of tables) if (!byName.has(t.name)) byName.set(t.name, sanitizeIdent(t.code || t.name));
+  return (name) => byName.get(name) ?? sanitizeIdent(slugTable(name));
 }
 
 /**
@@ -62,42 +95,79 @@ export async function serializeWorkspaceAsSql(api: HostApi): Promise<string> {
  * (Raw vs. Visible Data; see `../export/table-file.js`).
  */
 export function serializeTableAsSql(table: Table, rows: Row[]): string {
-  const lines: string[] = [
-    `-- easyDBAccess table export`,
-    `-- table:    ${table.name}`,
-    `-- exported: ${new Date().toISOString()}`,
-    ``,
-    `BEGIN;`,
-    ``,
-    renderTable(table, rows),
-    ``,
-    `COMMIT;`,
-    ``,
-  ];
+  // A projection is a QUERY, not stored data: export the SELECT that defines it
+  // (join, filters and row cap included) rather than a dump of derived rows.
+  const projection = projectionSelectFor(table);
+  if (projection) return projection;
+
+  const lines: string[] = [`-- easyDBAccess table export`, `-- table:    ${table.name}`, `-- exported: ${new Date().toISOString()}`, ``, `BEGIN;`, ``, renderTable(table, rows), ``, `COMMIT;`, ``];
   return lines.join('\n');
+}
+
+/**
+ * The `.sql` body for a projection table, or null when `table` is not one.
+ *
+ * Source aliases are mapped to the SQL table names the rest of this exporter
+ * uses, so the SELECT lines up with the `CREATE TABLE`s in a whole-workspace
+ * dump. `resolveName` is that mapping; a standalone per-table export has no
+ * workspace to consult and falls back to the slug rule every table follows.
+ */
+export function projectionSelectFor(table: Table, resolveName?: (tableName: string) => string): string | null {
+  const select = projectionSelectBody(table, resolveName);
+  if (select === null) return null;
+  return [
+    `-- easyDBAccess projection export`,
+    `-- projection: ${table.name}`,
+    `-- exported:   ${new Date().toISOString()}`,
+    `--`,
+    `-- A projection is a derived (virtual) table: this is the query behind it,`,
+    `-- reading the source tables by name.`,
+    `-- Compatible with PostgreSQL and SQLite. For MySQL run`,
+    `--   SET sql_mode='ANSI_QUOTES';`,
+    `-- before executing. For SQL Server / HANA, replace the trailing LIMIT n`,
+    `-- with SELECT TOP n.`,
+    ``,
+    select,
+  ].join('\n');
+}
+
+/**
+ * Just the SELECT for a projection table — no header — or null when `table` is
+ * not one. A whole-workspace dump explains projections once in its own section
+ * and labels each with a single `-- projection:` line, so it wants the bare
+ * query; only a standalone per-table export needs the full preamble.
+ */
+export function projectionSelectBody(table: Table, resolveName?: (tableName: string) => string): string | null {
+  if (table.source?.type !== 'projection') return null;
+  const spec = table.source.config as unknown as ProjectionSpec | undefined;
+  if (!spec || !Array.isArray(spec.sources)) return null;
+
+  const nameOf = resolveName ?? ((n: string) => sanitizeIdent(slugTable(n)));
+  const tableNames: Record<string, string> = {};
+  for (const s of spec.sources) tableNames[s.alias] = nameOf(s.tableName);
+  const orderBy = spec.sources.length > 0 && table.sortBy && table.sortBy.length > 0 ? table.sortBy : table.sortColumn ? [{ field: table.sortColumn, asc: table.sortAsc ?? true }] : undefined;
+
+  // ANSI-flavoured, matching the rest of this exporter: double-quoted
+  // identifiers and a trailing `LIMIT n` — the row-cap spelling that runs on
+  // both targets the dump promises. (`FETCH FIRST n ROWS ONLY` is the stricter
+  // SQL:2008 form but SQLite rejects it; `TOP n` is SQL Server / HANA.)
+  return buildProjectionSelect(spec, {
+    tableNames,
+    limitStyle: 'limit',
+    ...(orderBy ? { orderBy } : {}),
+  });
 }
 
 function renderTable(table: Table, rows: Row[]): string {
   const tableName = sanitizeIdent(table.code || table.name || `table_${table.id}`);
-  const colDefs = [
-    `  "__id" TEXT PRIMARY KEY`,
-    ...table.columns.map((c) => `  ${renderColumnDef(c)}`),
-  ];
-  const out: string[] = [
-    `DROP TABLE IF EXISTS "${tableName}";`,
-    `CREATE TABLE "${tableName}" (`,
-    colDefs.join(',\n'),
-    `);`,
-  ];
+  const colDefs = [`  "__id" TEXT PRIMARY KEY`, ...table.columns.map((c) => `  ${renderColumnDef(c)}`)];
+  const out: string[] = [`DROP TABLE IF EXISTS "${tableName}";`, `CREATE TABLE "${tableName}" (`, colDefs.join(',\n'), `);`];
 
   if (rows.length > 0) {
     const fields = ['__id', ...table.columns.map((c) => c.field)];
     const colList = fields.map((f) => `"${sanitizeIdent(f)}"`).join(', ');
     for (const r of rows) {
-      const values = [
-        sqlLiteral(r.id),
-        ...table.columns.map((c) => sqlLiteral(r.data[c.field], c.type)),
-      ];
+      const values = [sqlLiteral(r.id), ...table.columns.map((c) => sqlLiteral(r.data[c.field], c.type))];
       out.push(`INSERT INTO "${tableName}" (${colList}) VALUES (${values.join(', ')});`);
     }
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compileColumnScript, runColumnScript } from './column-script.js';
+import { COLUMN_SCRIPT_HELPERS, compileColumnScript, runColumnScript } from './column-script.js';
 
 describe('runColumnScript', () => {
   it('returns whatever render(row) returns, not just strings', () => {
@@ -72,5 +72,36 @@ describe('compileColumnScript', () => {
 
   it('throws on a syntax error (runColumnScript is what catches it)', () => {
     expect(() => compileColumnScript('function render( {')).toThrow();
+  });
+});
+
+describe('script helpers', () => {
+  it('exposes markdownToHtml by name, so a script can call it directly', () => {
+    const run = runColumnScript('function render(row) { return markdownToHtml(row.notes) }', {
+      notes: '**bold**',
+    });
+    expect(run.ok).toBe(true);
+    if (run.ok) expect(run.value).toBe('<p><strong>bold</strong></p>');
+  });
+
+  it('exposes the same helpers under an `easydb` namespace', () => {
+    const run = runColumnScript('function render(row) { return easydb.markdownToHtml("# h") }', {});
+    expect(run.ok).toBe(true);
+    if (run.ok) expect(run.value).toBe('<h1>h</h1>');
+  });
+
+  it('lists what it injects, so the editor hint cannot drift from the truth', () => {
+    expect(COLUMN_SCRIPT_HELPERS).toContain('markdownToHtml');
+  });
+
+  it('leaves a script that shadows a helper name working on its own version', () => {
+    // The helpers are parameters, so a local declaration wins — a script that
+    // defined its own `markdownToHtml` before must not break.
+    const run = runColumnScript(
+      'function markdownToHtml(s) { return "mine:" + s }\nfunction render(row) { return markdownToHtml("x") }',
+      {},
+    );
+    expect(run.ok).toBe(true);
+    if (run.ok) expect(run.value).toBe('mine:x');
   });
 });
