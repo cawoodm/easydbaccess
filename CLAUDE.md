@@ -102,14 +102,27 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
   `cell-color`, `cell-image`, `cell-link`, `cell-date`, `cell-datetime`,
   `cell-boolean`, `auto-renderer`, `html-preview`, `html-render`, `delete-table`,
   `import-data`, `auto-sync`, `views`, `settings`, `url-source`,
-  `datasette-import`, `datasette-connect`, `connect-menu`, `projection`,
-  `command-palette-button`. Don't add a feature to
+  `datasette-import` (+ `datasette-views`), `datasette-connect`, `connect-menu`,
+  `projection`, `command-palette-button`. Don't add a feature to
   the core if it can be a plugin. (Exception: the Plugin Manager button is core
   chrome in `app-shell.ts`, not a plugin — it opens the manager that governs
   plugins.)
 - `meta.optional = true` marks a built-in as user-toggleable. The Plugin
   Manager dialog surfaces these; disabled state is stored under the synthetic
   key `builtin:<name>` in the `plugins` collection.
+
+## Projections bind to their sources BY NAME
+
+A `ProjectionSpec` source carries `tableName` and nothing else — there is
+deliberately no `tableId`. A projection has to survive its source table being
+deleted and re-imported (the ordinary refresh loop for anything backed by a URL
+or a Datasette instance), and the replacement is a new row with a new id under
+the same name.
+
+The consequence is that a RENAME is the one edit that can break a projection,
+so the columns editor warns before it writes and then carries the references
+across (`table/table-references.ts`, used by `new-table-dialog`'s `submit`).
+View instances bind the same way and are repointed in the same place.
 
 ## The DataStore abstraction (don't bypass it)
 

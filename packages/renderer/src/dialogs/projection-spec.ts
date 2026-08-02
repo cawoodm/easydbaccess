@@ -105,10 +105,10 @@ export function nextAlias(sources: EdSource[]): string {
 /** Load a saved spec into the editor model. */
 export function specToEditor(name: string, spec: ProjectionSpec, candidates: ProjectionCandidate[]): EditorModel {
   const sources: EdSource[] = spec.sources.map((s) => {
-    const cand = candidates.find((c) => c.name === s.tableName) ?? candidates.find((c) => c.id === s.tableId);
+    const cand = candidates.find((c) => c.name === s.tableName);
     const src: EdSource = {
       alias: s.alias,
-      tableId: cand?.id ?? s.tableId ?? '',
+      tableId: cand?.id ?? '',
       tableName: s.tableName,
       columns: cand?.columns ?? [],
     };
@@ -317,8 +317,9 @@ export function editorToSpec(model: EditorModel): BuildResult {
   }
 
   const sources: ProjectionSource[] = model.sources.map((s) => {
+    // `EdSource.tableId` is the EDITOR's handle on the picked candidate; it is
+    // deliberately not written to the spec, which binds by name alone.
     const out: ProjectionSource = { alias: s.alias, tableName: s.tableName };
-    if (s.tableId) out.tableId = s.tableId;
     if (s.join) {
       out.join = {
         type: s.join.type,

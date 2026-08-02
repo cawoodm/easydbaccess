@@ -10,8 +10,67 @@ import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
 import { buildColumnSpec, type ColumnRow } from './column-row.js';
 import { renameRowFields, type FieldRename } from '../table/column-merge.js';
+import { HostDialogs } from './host-dialogs.js';
+import {
+  describeReferences,
+  findTableReferences,
+  repointProjectionSpec,
+  specOf,
+  type TableReferences,
+} from '../table/table-references.js';
 
 const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'datetime'];
+
+/**
+ * Warn before a rename that will move name-based references with it.
+ *
+ * Falls back to the native confirm if the host dialog element is not mounted —
+ * this is a decision the user must actually get to make, so it must not be
+ * skipped just because the shell has not rendered.
+ */
+/**
+ * Carry every name-based reference across to the new name.
+ *
+ * Nothing else will ever repair these links: unlike a delete-and-recreate, the
+ * table does not come back under the old name, so a reference left pointing at
+ * it resolves to nothing for good.
+ */
+async function repointReferences(
+  tableId: string,
+  oldName: string,
+  name: string,
+  refs: TableReferences | null,
+): Promise<void> {
+  const ctx = await getContext();
+  // Views bind by name AND by id, so catch both: one bound by id alone (never
+  // renamed before) still needs its snapshot brought up to date.
+  const insts = (await ctx.store.viewInstances.find()).filter(
+    (vi) => vi.tableId === tableId || vi.tableName === oldName,
+  );
+  for (const vi of insts) {
+    if (vi.tableName !== name) {
+      await ctx.store.viewInstances.patch(vi.id, { tableName: name, updatedAt: Date.now() });
+    }
+  }
+  // Projections name their sources; rewrite the ones that named this table.
+  for (const p of refs?.projections ?? []) {
+    const spec = specOf(p);
+    const next = spec && repointProjectionSpec(spec, oldName, name);
+    if (!next) continue;
+    await ctx.store.tables.patch(p.id, {
+      source: { type: 'projection', config: next as unknown as Record<string, unknown> },
+      updatedAt: Date.now(),
+    });
+  }
+}
+
+function confirmRename(from: string, to: string, what: string): Promise<boolean> {
+  const message =
+    `Renaming "${from}" to "${to}" affects ${what}.\n\n` +
+    `They reference this table by name, so they will be updated to point at "${to}". Continue?`;
+  const host = HostDialogs.instance;
+  return host ? host.confirm(message, 'Rename table') : Promise.resolve(window.confirm(message));
+}
 
 /**
  * Dual-purpose dialog: creates new tables and edits the columns of existing
@@ -544,6 +603,23 @@ export class NewTableDialog extends LitElement {
         (f) => !savedFields.has(f),
       );
 
+      // A rename breaks every name-based reference to this table — projections
+      // bind to their sources by name, and so do view instances. Say what will
+      // be affected BEFORE writing anything, and let the user back out; the
+      // references are then carried across below rather than left dangling.
+      let refs: TableReferences | null = null;
+      if (existingTable && existingTable.name !== name) {
+        const views = (await ctx.store.viewInstances.find()).filter(
+          (v) => v.workspaceId === ctx.workspaceId,
+        );
+        refs = findTableReferences(existingTable.name, workspaceTables, views, tableId);
+        const what = describeReferences(refs);
+        if (what) {
+          const ok = await confirmRename(existingTable.name, name, what);
+          if (!ok) return;
+        }
+      }
+
       // Patch the saved table; renamed fields are re-keyed in every row's
       // `data` below so existing values follow the field to its new name.
       const patch: Partial<Table> = {
@@ -596,16 +672,8 @@ export class NewTableDialog extends LitElement {
           }
         }
       }
-      // Keep dependent view instances connected: a closed view snapshot its
-      // source table's name at creation time, so a rename must propagate or
-      // the view would silently point at a stale name.
       if (oldName !== undefined && oldName !== name) {
-        const insts = (await ctx.store.viewInstances.find()).filter((vi) => vi.tableId === tableId);
-        for (const vi of insts) {
-          if (vi.tableName !== name) {
-            await ctx.store.viewInstances.patch(vi.id, { tableName: name, updatedAt: Date.now() });
-          }
-        }
+        await repointReferences(tableId, oldName, name, refs);
       }
     } else {
       await ctx.store.tables.insert({

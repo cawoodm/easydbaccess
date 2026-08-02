@@ -19,13 +19,12 @@
 //
 // `hasSqlProjections` is how a caller tells the two apart before choosing.
 
-import type { ColumnSpec, HostApi, ImporterSpec, ImportSourceInput, PluginModule, ProjectionSpec, Table } from '@easydb/shared';
+import type { ColumnSpec, HostApi, ImporterSpec, ImportSourceInput, PluginModule, Table } from '@easydb/shared';
 import { filenameFromUrl } from '../import/fetch-source.js';
-import { landCandidate, uniqueTableName, type ImportTarget } from '../import/land-tables.js';
+import { landCandidate, type ImportTarget } from '../import/land-tables.js';
 import { runImport } from '../import/import-kernel.js';
-import { cryptoUUID, slugTable } from '../util/ids.js';
-import { inheritColumns, resolveWritability } from './projection-compute.js';
-import { parseSqlScript, type ParsedSql, type ParsedSqlProjection } from './sql-parse.js';
+import { createProjectionTable } from './projection-create.js';
+import { parseSqlScript, type ParsedSql } from './sql-parse.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'sql-import',
@@ -195,7 +194,16 @@ export async function restoreSqlScript(
   const takenProjectionNames = new Set([...existing.map((t) => t.name), ...result.tables]);
 
   for (const p of parsed.projections) {
-    const created = await createProjection(api, workspaceId, p, { landedAs, byName, byLowerName, taken: takenProjectionNames });
+    const created = await createProjectionTable(api, workspaceId, p, {
+      // Prefer a table this same script just landed (its name may have been
+      // uniqued), then an exact name, then a case-insensitive one — our own
+      // exporter lowercases identifiers, so `People` comes back as `people`.
+      resolve: (n) => {
+        const landed = landedAs.get(n);
+        return (landed ? byName.get(landed) : undefined) ?? byName.get(n) ?? byLowerName.get(n.toLowerCase());
+      },
+      taken: takenProjectionNames,
+    });
     if (!created) {
       result.unsupported.push(`projection "${p.name}" — its source tables are not in this workspace`);
       continue;
@@ -210,56 +218,6 @@ export async function restoreSqlScript(
   }
 
   return result;
-}
-
-/**
- * Turn one parsed projection into a Table carrying its spec. Returns the Table
- * it created, or null when a source table cannot be resolved — a projection
- * over tables that do not exist would render nothing but an empty grid with no
- * hint why, so it is reported instead.
- */
-async function createProjection(
-  api: HostApi,
-  workspaceId: string,
-  parsed: ParsedSqlProjection,
-  ctx: { landedAs: Map<string, string>; byName: Map<string, Table>; byLowerName: Map<string, Table>; taken: Set<string> },
-): Promise<Table | null> {
-  // Re-point every source at the table it actually corresponds to, preferring
-  // one this same script just created.
-  const sources = parsed.spec.sources.map((s) => {
-    const landedName = ctx.landedAs.get(s.tableName);
-    const table = (landedName ? ctx.byName.get(landedName) : undefined) ?? ctx.byName.get(s.tableName) ?? ctx.byLowerName.get(s.tableName.toLowerCase());
-    return { source: s, table, resolvedName: table?.name ?? landedName ?? s.tableName };
-  });
-  if (sources.some((s) => !s.table)) return null;
-
-  const spec: ProjectionSpec = {
-    ...parsed.spec,
-    sources: sources.map(({ source, table, resolvedName }) => ({ ...source, tableName: resolvedName, ...(table ? { tableId: table.id } : {}) })),
-  };
-
-  // Column settings are inherited from the source tables exactly as they are
-  // when a projection is built in the editor — the SQL carries only structure.
-  const sourceColumnsByAlias: Record<string, ColumnSpec[]> = {};
-  for (const { source, table } of sources) sourceColumnsByAlias[source.alias] = table?.columns ?? [];
-  const columns = inheritColumns(spec, sourceColumnsByAlias, [], []);
-
-  const name = uniqueTableName(ctx.taken, parsed.name);
-  const table: Table = {
-    id: cryptoUUID(),
-    workspaceId,
-    name,
-    code: slugTable(name),
-    columns,
-    view: 'table',
-    source: { type: 'projection', config: spec as unknown as Record<string, unknown> },
-    readonly: resolveWritability(spec).size === 0,
-    ...(parsed.sortBy && parsed.sortBy.length > 0 ? { sortBy: parsed.sortBy } : {}),
-    ...(spec.filters ? { filters: spec.filters } : {}),
-    updatedAt: Date.now(),
-  };
-  await api.store.tables.insert(table);
-  return table;
 }
 
 /** One toast describing what a `.sql` script produced — including what it could not. */

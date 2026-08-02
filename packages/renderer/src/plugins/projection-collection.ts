@@ -66,18 +66,19 @@ export function createProjectionCollection(store: DataStore, table: Table): Data
   let tablesSub: Unsubscribe | null = null;
   let queued = false;
 
-  /** alias → source tableId, resolved by NAME (`tableId` is only a hint). */
+  /**
+   * alias → the id of the table that source currently NAMES.
+   *
+   * Re-derived from the live table list on every run rather than remembered:
+   * a source table that is deleted and re-imported comes back under the same
+   * name with a different id, and this projection must follow it there.
+   */
   function mapSourceIds(all: Table[]): Map<string, string> {
     const byName = new Map<string, Table>();
     for (const t of all) if (!byName.has(t.name)) byName.set(t.name, t);
     const map = new Map<string, string>();
     for (const s of spec.sources) {
-      let resolved: Table | undefined;
-      if (s.tableId) {
-        const hit = all.find((t) => t.id === s.tableId);
-        if (hit && hit.name === s.tableName) resolved = hit;
-      }
-      resolved ??= byName.get(s.tableName);
+      const resolved = byName.get(s.tableName);
       if (resolved) map.set(s.alias, resolved.id);
     }
     return map;

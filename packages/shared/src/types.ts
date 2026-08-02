@@ -157,10 +157,20 @@ export interface ProjectionSpec {
 export interface ProjectionSource {
   /** Qualifies this source's columns (e.g. "orders"); unique within the spec. */
   alias: string;
-  /** Bound by NAME so it survives a source being deleted and recreated. */
+  /**
+   * The source table, bound by NAME and by name ONLY.
+   *
+   * There used to be a `tableId` alongside this as a "fast-path hint". It is
+   * gone on purpose. A projection has to survive its source being deleted and
+   * re-imported — the ordinary refresh loop for anything coming from a URL or
+   * a Datasette instance — and a re-imported table is a NEW row with a new id
+   * under the same name. Carrying the old id meant every spec accumulated a
+   * value that was wrong more often than it was right, and any code that
+   * trusted it before falling back to the name silently resolved to nothing.
+   * The name is the contract; renames propagate into the specs that reference
+   * them (see the columns editor's `submit`).
+   */
   tableName: string;
-  /** Fast-path resolution hint only; `tableName` wins if they disagree. */
-  tableId?: string | undefined;
   /** Absent for `sources[0]`; present for each JOIN. */
   join?:
     | {

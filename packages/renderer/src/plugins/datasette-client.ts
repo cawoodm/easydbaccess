@@ -506,6 +506,109 @@ export async function fetchTablesForDb(
   return parseTableList(await fetchJson(fetchFn, `${base}/${encodeURIComponent(db)}.json`), db);
 }
 
+/** A SQL view in a Datasette database, with the query that defines it. */
+export interface ViewRef {
+  db: string;
+  name: string;
+  /** The `CREATE VIEW … AS SELECT …` statement, verbatim from sqlite_master. */
+  sql: string;
+}
+
+/**
+ * Parse the `views` key of `/<db>.json` into view names. Datasette returns a
+ * string array; tolerate objects with a `name` (and a future `hidden` flag)
+ * the same way `parseTableList` does.
+ */
+export function parseViewList(json: unknown): string[] {
+  const views = (json as { views?: unknown } | null)?.views;
+  const out: string[] = [];
+  for (const entry of Array.isArray(views) ? views : []) {
+    if (typeof entry === 'string') {
+      out.push(entry);
+      continue;
+    }
+    const o = entry as { name?: unknown; hidden?: unknown } | null;
+    if (o && typeof o.name === 'string' && o.hidden !== true) out.push(o.name);
+  }
+  return out;
+}
+
+/**
+ * Fetch each view's defining SQL from `sqlite_master`.
+ *
+ * There is no Datasette endpoint that exposes a view's definition — `/db.json`
+ * names the views but not their queries — so this goes through the SQL
+ * endpoint. That is a capability an instance can switch off, and plenty do, so
+ * the failure is turned into a sentence the user can act on rather than a bare
+ * 403.
+ *
+ * `_shape` is the ONLY `_`-prefixed param: two of them trip the Cloudflare
+ * challenge described on `fetchTableMeta`, which poisons the whole session.
+ */
+export async function fetchViewDefinitions(fetchFn: FetchFn, base: string, db: string): Promise<ViewRef[]> {
+  const sql = "select name, sql from sqlite_master where type='view' order by name";
+  const url = `${base}/${encodeURIComponent(db)}.json?sql=${encodeURIComponent(sql)}&_shape=array`;
+  let json: unknown;
+  try {
+    json = (await fetchJson(fetchFn, url)) as unknown;
+  } catch (err) {
+    const detail = err instanceof DatasetteError ? err.message : String(err);
+    throw new DatasetteError(
+      {
+        error:
+          `Couldn't read the view definitions from "${db}". Importing views needs the SQL ` +
+          `endpoint, which this instance may have disabled (allow_sql). Its tables can still ` +
+          `be imported normally.\n\n${detail}`,
+      },
+      err instanceof DatasetteError ? err.status : 0,
+    );
+  }
+  const body = (json as { rows?: unknown } | null)?.rows;
+  const rows: unknown[] = Array.isArray(json) ? json : Array.isArray(body) ? body : [];
+  const out: ViewRef[] = [];
+  for (const r of rows) {
+    // `_shape=array` gives objects; a bare `rows` array gives positional pairs.
+    const o = r as { name?: unknown; sql?: unknown } | null;
+    const name = typeof o?.name === 'string' ? o.name : Array.isArray(r) ? r[0] : undefined;
+    const stmt = typeof o?.sql === 'string' ? o.sql : Array.isArray(r) ? r[1] : undefined;
+    if (typeof name === 'string' && typeof stmt === 'string' && stmt.trim()) out.push({ db, name, sql: stmt });
+  }
+  return out;
+}
+
+/**
+ * Discover the views a URL refers to — one database, or every database of an
+ * instance. A table URL narrows to that table's database, since a view lives
+ * beside the tables it reads.
+ *
+ * The database listing is consulted FIRST, and the SQL endpoint is only touched
+ * when that listing actually declares views. Most databases have none, and a
+ * needless `?sql=` request on every import is both a wasted round trip and a
+ * pointless 403 on the many instances that disable SQL — the listing's
+ * `allow_execute_sql` flag is honoured for the same reason.
+ */
+export async function discoverViews(fetchFn: FetchFn, ref: DatasetteRef): Promise<ViewRef[]> {
+  const dbs = ref.db ? [ref.db] : await fetchDatabaseNames(fetchFn, ref.base);
+  const out: ViewRef[] = [];
+  for (const db of dbs) {
+    const listing = await fetchJson(fetchFn, `${ref.base}/${encodeURIComponent(db)}.json`);
+    if (parseViewList(listing).length === 0) continue;
+    if ((listing as { allow_execute_sql?: unknown } | null)?.allow_execute_sql === false) {
+      throw new DatasetteError(
+        {
+          error:
+            `"${db}" defines views, but this instance has SQL queries disabled ` +
+            `(allow_execute_sql), and a view's definition can only be read through them. ` +
+            `Its tables can still be imported normally.`,
+        },
+        403,
+      );
+    }
+    out.push(...(await fetchViewDefinitions(fetchFn, ref.base, db)));
+  }
+  return out;
+}
+
 /**
  * Discover the importable tables a URL refers to:
  *  - table URL  (db + table) → just that table (count unknown here);

@@ -33,6 +33,7 @@ import {
   type DatasetteRef,
   type MetadataTablePatch,
 } from './datasette-client.js';
+import { importDatasetteViews, offerViewImport, reportViewImport } from './datasette-views.js';
 import {
   type DatasetteSettings,
   getDatasetteSettings,
@@ -131,18 +132,41 @@ export function init(api: HostApi): void {
     },
   });
 
+  // Views on their own, for a workspace whose tables are already imported.
+  api.ui.registerUrlSource({
+    id: 'datasette-views',
+    label: 'Datasette views (as projections)…',
+    async run(api, { url }) {
+      const input =
+        url ||
+        (await api.ui.dialogs.prompt(
+          `Datasette database URL — its SQL views become Projections over the tables you have already imported.\n\ne.g. ${EXAMPLE}`,
+          '',
+          'Import Datasette views',
+        ));
+      if (!input) return;
+      try {
+        reportViewImport(api, await importDatasetteViews(api, input));
+      } catch (err) {
+        await api.ui.dialogs.alert((err as Error)?.message ?? String(err), 'Datasette views');
+      }
+    },
+  });
+
   api.ui.registerDropHandler(async (event, api) => {
     const text = event.dataTransfer?.getData('text/plain') || '';
     if (!isDatasetteTableUrl(text)) return false;
     event.preventDefault();
-    await runImport(api, text);
+    // A dropped TABLE url is a request for that one table; asking about the
+    // database's views on top of it would be a non-sequitur.
+    await runImport(api, text, { skipViews: true });
     return true;
   });
 }
 
-async function runImport(api: HostApi, input: string): Promise<void> {
+async function runImport(api: HostApi, input: string, opts: DatasetteImportOpts = {}): Promise<void> {
   try {
-    await importDatasette(api, input);
+    await importDatasette(api, input, opts);
   } catch (err) {
     let msg: string;
     if (err instanceof DatasetteError) {
@@ -181,6 +205,12 @@ interface OneResult {
 export interface DatasetteImportOpts {
   /** The user already picked a database, so skip the table checklist. */
   skipTablePicker?: boolean | undefined;
+  /**
+   * Don't offer to import the database's views afterwards. For callers that
+   * are importing one specific table and would find the question a non-sequitur
+   * (a dropped table URL, a refresh).
+   */
+  skipViews?: boolean | undefined;
   /**
    * The dialog's "Limit rows" value, applied PER TABLE. Always further capped
    * by the "Datasette" settings tab's `maxImportRows` (0 there = unlimited, so
@@ -298,6 +328,17 @@ export async function importDatasette(
     failed,
     requested: chosen.length,
   });
+
+  // A database's VIEWS are queries over the tables just imported, so this is
+  // the only moment they can be resolved. Offered, never automatic, and never
+  // allowed to turn a successful table import into a failure.
+  if (imported > 0 && !opts.skipViews) {
+    try {
+      await offerViewImport(api, input);
+    } catch {
+      /* the tables landed; an optional extra must not report as a failure */
+    }
+  }
 }
 
 /**

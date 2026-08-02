@@ -10,6 +10,7 @@ import {
   buildTokenPageUrl,
   inferColumnsFromRows,
   refineColumnTypes,
+  discoverViews,
   mapColumns,
   fetchTableMeta,
   extractTableMetadata,
@@ -1041,5 +1042,62 @@ describe('probeSingleTable', () => {
     const ref = parseDatasetteUrl('https://x.datasette.io/mydb');
     await expect(probeSingleTable(fetchFn, ref)).rejects.toThrow();
     expect(fetchFn).not.toHaveBeenCalled();
+  });
+});
+
+describe('discoverViews', () => {
+  const jsonRes = (body: unknown): Promise<Response> =>
+    Promise.resolve({ json: () => Promise.resolve(body) } as unknown as Response);
+
+  const VIEW_SQL = 'CREATE VIEW v AS SELECT a.x AS x FROM t a';
+
+  it('reads each view definition out of sqlite_master', async () => {
+    const seen: string[] = [];
+    const fetchFn = vi.fn((url: string) => {
+      seen.push(url);
+      if (url.includes('sql=')) return jsonRes([{ name: 'v', sql: VIEW_SQL }]);
+      return jsonRes({ tables: [], views: ['v'], allow_execute_sql: true });
+    });
+    const out = await discoverViews(fetchFn, parseDatasetteUrl('https://x.datasette.io/mydb'));
+    expect(out).toEqual([{ db: 'mydb', name: 'v', sql: VIEW_SQL }]);
+    // `_shape` must be the ONLY underscore param — two of them trip the
+    // Cloudflare challenge that poisons the whole session.
+    const sqlUrl = seen.find((u) => u.includes('sql='))!;
+    expect([...new URL(sqlUrl).searchParams.keys()].filter((k) => k.startsWith('_'))).toEqual(['_shape']);
+  });
+
+  it('never touches the SQL endpoint when the listing declares no views', async () => {
+    const seen: string[] = [];
+    const fetchFn = vi.fn((url: string) => {
+      seen.push(url);
+      return jsonRes({ tables: [{ name: 't' }], views: [] });
+    });
+    expect(await discoverViews(fetchFn, parseDatasetteUrl('https://x.datasette.io/mydb'))).toEqual([]);
+    expect(seen).toEqual(['https://x.datasette.io/mydb.json']);
+  });
+
+  it('explains itself when the instance has SQL disabled but does have views', async () => {
+    const fetchFn = vi.fn(() => jsonRes({ views: ['v'], allow_execute_sql: false }));
+    await expect(discoverViews(fetchFn, parseDatasetteUrl('https://x.datasette.io/mydb'))).rejects.toThrow(/allow_execute_sql/);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('walks every database of an instance URL', async () => {
+    const fetchFn = vi.fn((url: string) => {
+      if (url.endsWith('/-/databases.json')) return jsonRes([{ name: 'a' }, { name: 'b' }]);
+      if (url.includes('sql=')) return jsonRes([{ name: 'v', sql: VIEW_SQL }]);
+      return jsonRes({ views: ['v'], allow_execute_sql: true });
+    });
+    const out = await discoverViews(fetchFn, parseDatasetteUrl('https://x.datasette.io'));
+    expect(out.map((v) => v.db)).toEqual(['a', 'b']);
+  });
+
+  it('accepts the positional `rows` shape an older instance returns', async () => {
+    const fetchFn = vi.fn((url: string) => {
+      if (url.includes('sql=')) return jsonRes({ columns: ['name', 'sql'], rows: [['v', VIEW_SQL]] });
+      return jsonRes({ views: ['v'] });
+    });
+    const out = await discoverViews(fetchFn, parseDatasetteUrl('https://x.datasette.io/mydb'));
+    expect(out).toEqual([{ db: 'mydb', name: 'v', sql: VIEW_SQL }]);
   });
 });

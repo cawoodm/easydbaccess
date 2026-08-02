@@ -273,12 +273,8 @@ export function presentationFromBase(spec: ProjectionSpec, base: Table): Carried
 
 // -- Cycle detection -------------------------------------------------------
 
-/** Resolve a spec source to a table: by name, with `tableId` as a hint only. */
-function resolveSource(s: ProjectionSource, byId: Map<string, Table>, byName: Map<string, Table>): Table | undefined {
-  if (s.tableId) {
-    const hit = byId.get(s.tableId);
-    if (hit && hit.name === s.tableName) return hit;
-  }
+/** Resolve a spec source to a table. By NAME — that is the whole binding. */
+function resolveSource(s: ProjectionSource, byName: Map<string, Table>): Table | undefined {
   return byName.get(s.tableName);
 }
 
@@ -305,7 +301,7 @@ export function hasProjectionCycle(rootId: string, tables: Table[]): boolean {
     if (!spec || !Array.isArray(spec.sources)) return false;
     const next = new Set(path).add(id);
     for (const s of spec.sources) {
-      const src = resolveSource(s, byId, byName);
+      const src = resolveSource(s, byName);
       if (src && walk(src.id, next)) return true;
     }
     return false;

@@ -1,13 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectionSpec } from '@easydb/shared';
-import {
-  addComputedToModel,
-  addSourceToModel,
-  editorToSpec,
-  removeSourceFromModel,
-  specToEditor,
-  type ProjectionCandidate,
-} from './projection-spec.js';
+import { addComputedToModel, addSourceToModel, editorToSpec, removeSourceFromModel, specToEditor, type ProjectionCandidate } from './projection-spec.js';
 
 const cand = (id: string, name: string, fields: string[]): ProjectionCandidate => ({
   id,
@@ -22,11 +15,11 @@ const dept = cand('d1', 'Dept', ['id', 'label']);
 const richSpec: ProjectionSpec = {
   version: 1,
   sources: [
-    { alias: 'p', tableName: 'People', tableId: 'p1' },
+    { alias: 'p', tableName: 'People' },
     {
       alias: 'd',
       tableName: 'Dept',
-      tableId: 'd1',
+
       join: {
         type: 'left',
         on: [
@@ -69,7 +62,7 @@ describe('specToEditor offers every source field', () => {
   /** A spec that selects only ONE of People's two fields. */
   const partial: ProjectionSpec = {
     version: 1,
-    sources: [{ alias: 'p', tableName: 'People', tableId: 'p1' }],
+    sources: [{ alias: 'p', tableName: 'People' }],
     columns: [{ field: 'name', from: { kind: 'source', alias: 'p', field: 'name' } }],
   };
 
@@ -118,8 +111,8 @@ describe('specToEditor offers every source field', () => {
     const spec: ProjectionSpec = {
       version: 1,
       sources: [
-        { alias: 'a', tableName: 'People', tableId: 'p1' },
-        { alias: 'b', tableName: 'People', tableId: 'p1', join: { type: 'left', on: [{ field: 'name', eqAlias: 'a', eqField: 'name' }] } },
+        { alias: 'a', tableName: 'People' },
+        { alias: 'b', tableName: 'People', join: { type: 'left', on: [{ field: 'name', eqAlias: 'a', eqField: 'name' }] } },
       ],
       columns: [{ field: 'name', from: { kind: 'source', alias: 'a', field: 'name' } }],
     };
@@ -236,9 +229,7 @@ describe('removeSourceFromModel', () => {
     // Point Extra's join at Dept (b) so it depends on it.
     const withDep = {
       ...model,
-      sources: model.sources.map((s) =>
-        s.alias === 'c' && s.join ? { ...s, join: { ...s.join, otherAlias: 'b' } } : s,
-      ),
+      sources: model.sources.map((s) => (s.alias === 'c' && s.join ? { ...s, join: { ...s.join, otherAlias: 'b' } } : s)),
     };
 
     const pruned = removeSourceFromModel(withDep, 'b');
@@ -257,9 +248,7 @@ describe('editorToSpec: validation', () => {
     // Simulate a dangling alias (what a naive source removal used to leave).
     const broken = {
       ...model,
-      sources: model.sources.map((s) =>
-        s.alias === 'd' && s.join ? { ...s, join: { ...s.join, otherAlias: 'gone' } } : s,
-      ),
+      sources: model.sources.map((s) => (s.alias === 'd' && s.join ? { ...s, join: { ...s.join, otherAlias: 'gone' } } : s)),
     };
     const built = editorToSpec(broken);
     expect(built.ok).toBe(false);
@@ -277,8 +266,6 @@ describe('editorToSpec: validation', () => {
     expect(editorToSpec({ name: ' ', sources: [], columns: [] }).ok).toBe(false);
     expect(editorToSpec({ name: 'X', sources: [], columns: [] }).ok).toBe(false);
     const m = addSourceToModel({ name: 'X', sources: [], columns: [] }, people);
-    expect(editorToSpec({ ...m, columns: m.columns.map((c) => ({ ...c, include: false })) }).ok).toBe(
-      false,
-    );
+    expect(editorToSpec({ ...m, columns: m.columns.map((c) => ({ ...c, include: false })) }).ok).toBe(false);
   });
 });

@@ -4,7 +4,12 @@ import { createProjectionCollection, ProjectionReadOnlyError } from './projectio
 
 // A tiny reactive in-memory store — enough of the DataStore surface for the
 // projection collection (tables.find/subscribe, rows().find/findOne/subscribe/patch).
-function memStore(): { store: DataStore; addTable: (t: Table) => void; addRow: (r: Row) => void } {
+function memStore(): {
+  store: DataStore;
+  addTable: (t: Table) => void;
+  addRow: (r: Row) => void;
+  removeTable: (id: string) => void;
+} {
   const tables: Table[] = [];
   const rows: Row[] = [];
   const tableSubs = new Set<() => void>();
@@ -64,6 +69,14 @@ function memStore(): { store: DataStore; addTable: (t: Table) => void; addRow: (
     addRow: (r) => {
       rows.push(r);
       notifyRows();
+    },
+    /** Drop a table AND its rows, the way deleting one in the UI does. */
+    removeTable: (id) => {
+      const ti = tables.findIndex((t) => t.id === id);
+      if (ti >= 0) tables.splice(ti, 1);
+      for (let i = rows.length - 1; i >= 0; i--) if (rows[i]!.tableId === id) rows.splice(i, 1);
+      notifyRows();
+      notifyTables();
     },
   };
 }
@@ -194,5 +207,64 @@ describe('createProjectionCollection', () => {
     await expect(coll.patch('pa#0', { data: { dept: 'Marketing' } })).rejects.toBeInstanceOf(
       ProjectionReadOnlyError,
     );
+  });
+});
+
+describe('a projection binds to its sources by NAME', () => {
+  /**
+   * The scenario this exists for: a source table is deleted and re-imported —
+   * the ordinary refresh loop for anything backed by a URL or a Datasette
+   * instance. The replacement is a NEW table row with a NEW id under the same
+   * name, and the projection must follow it there. A spec that remembered an
+   * id resolved to nothing and quietly rendered an empty grid.
+   */
+  function setup() {
+    const mem = memStore();
+    mem.addTable(localTable('p1', 'People'));
+    mem.addTable(localTable('d1', 'Dept'));
+    mem.addRow({ id: 'pa', tableId: 'p1', data: { name: 'Bob', deptId: 'x' }, updatedAt: 1 });
+    mem.addRow({ id: 'dx', tableId: 'd1', data: { id: 'x', label: 'Sales' }, updatedAt: 1 });
+    const table = projectionTable();
+    mem.addTable(table);
+    return { mem, coll: createProjectionCollection(mem.store, table) };
+  }
+
+  it('keeps working when a source is deleted and recreated with a new id', async () => {
+    const { mem, coll } = setup();
+    // Subscribed, because that is how the grid holds a projection open — and
+    // the cache is only kept current while something is listening.
+    const seen: unknown[][] = [];
+    const unsub = coll.subscribe((rows) => seen.push(rows.map((r) => r.data.dept)));
+    await vi.waitFor(() => expect(seen[seen.length - 1]).toEqual(['Sales']));
+
+    // Gone: an unresolved source renders the projection empty rather than a
+    // partial join (see `compute`) — the grid says "nothing", not "half".
+    mem.removeTable('d1');
+    await vi.waitFor(() => expect(seen[seen.length - 1]).toEqual([]));
+
+    // Back under the SAME NAME with a different id — a re-import, not the
+    // original row. The projection has to find it again.
+    mem.addTable(localTable('d2-fresh-id', 'Dept'));
+    mem.addRow({ id: 'dx2', tableId: 'd2-fresh-id', data: { id: 'x', label: 'Revenue' }, updatedAt: 2 });
+    await vi.waitFor(() => expect(seen[seen.length - 1]).toEqual(['Revenue']));
+
+    // …and a fresh read agrees with what the subscribers were told.
+    expect((await coll.find()).map((r) => r.data)).toEqual([{ name: 'Bob', dept: 'Revenue' }]);
+    unsub();
+  });
+
+  it('resolves a source that only ever existed under a recreated id', async () => {
+    // No stale id to fall back on: the projection is opened AFTER the swap, so
+    // the name is the only thing that could have found the table.
+    const mem = memStore();
+    mem.addTable(localTable('p1', 'People'));
+    mem.addRow({ id: 'pa', tableId: 'p1', data: { name: 'Bob', deptId: 'x' }, updatedAt: 1 });
+    mem.addTable(localTable('some-other-id', 'Dept'));
+    mem.addRow({ id: 'dz', tableId: 'some-other-id', data: { id: 'x', label: 'Ops' }, updatedAt: 1 });
+    const table = projectionTable();
+    mem.addTable(table);
+
+    const coll = createProjectionCollection(mem.store, table);
+    expect((await coll.find()).map((r) => r.data)).toEqual([{ name: 'Bob', dept: 'Ops' }]);
   });
 });

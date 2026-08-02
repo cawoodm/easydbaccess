@@ -83,8 +83,7 @@ async function columnsForSpec(
   for (const t of all) if (!byName.has(t.name)) byName.set(t.name, t);
   const sourceColumnsByAlias: Record<string, ColumnSpec[]> = {};
   for (const s of spec.sources) {
-    const hinted = s.tableId ? all.find((t) => t.id === s.tableId && t.name === s.tableName) : undefined;
-    sourceColumnsByAlias[s.alias] = (hinted ?? byName.get(s.tableName))?.columns ?? [];
+    sourceColumnsByAlias[s.alias] = byName.get(s.tableName)?.columns ?? [];
   }
   return inheritColumns(spec, sourceColumnsByAlias, existing, deletedColumns);
 }
