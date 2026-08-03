@@ -22,7 +22,14 @@ import { openTableInfoDialog } from '../dialogs/table-info-dialog.js';
 import { initPanZoom, type PanZoomHandle } from './panzoom.js';
 import { createPanel, type PanelShellEl, type ShellViewport } from './panel-shell/panel-shell.js';
 import { queueGeometryWrite } from './geometry-writes.js';
-import { countSuffix, VISIBLE_COUNT_EVENT, type VisibleCountDetail } from './panel-title.js';
+import {
+  countSuffix,
+  importSuffix,
+  IMPORT_PROGRESS_EVENT,
+  VISIBLE_COUNT_EVENT,
+  type ImportProgressDetail,
+  type VisibleCountDetail,
+} from './panel-title.js';
 import { sanitizeGeometry, byAscendingZ } from './geometry.js';
 import { tableKind, isRefreshable, TABLE_KIND_ICONS } from './table-kind.js';
 import { nextFrontZ } from './front-order.js';
@@ -253,8 +260,16 @@ function openPanel(t: Table, ctx: AppContext): void {
   let lastTitle = displayName(t);
   let lastCount = -1;
   let lastTotal = -1;
+  // Set while this table's rows are still being imported. It takes over the
+  // title, because during an import the progress IS the interesting count — and
+  // the titlebar is the only thing a MINIMIZED window shows, which is how a
+  // table imported in the background reports itself.
+  let importing: { rows: number; total: number } | null = null;
   const renderTitle = (): void => {
-    panel.setHeaderTitle(lastTitle + countSuffix(lastCount, lastTotal));
+    panel.setHeaderTitle(
+      lastTitle +
+        (importing ? importSuffix(importing.rows, importing.total) : countSuffix(lastCount, lastTotal)),
+    );
   };
   const onVisibleCount = (e: Event): void => {
     const d = (e as CustomEvent<VisibleCountDetail>).detail;
@@ -263,7 +278,14 @@ function openPanel(t: Table, ctx: AppContext): void {
     lastTotal = d.total;
     renderTitle();
   };
+  const onImportProgress = (e: Event): void => {
+    const d = (e as CustomEvent<ImportProgressDetail>).detail;
+    if (d.tableId !== t.id) return;
+    importing = d.done ? null : { rows: d.rows, total: d.total };
+    renderTitle();
+  };
   document.addEventListener(VISIBLE_COUNT_EVENT, onVisibleCount as EventListener);
+  document.addEventListener(IMPORT_PROGRESS_EVENT, onImportProgress as EventListener);
 
   const unmountContent = (): void => {
     (footer as HTMLElement & { active: boolean }).active = false;
@@ -298,6 +320,7 @@ function openPanel(t: Table, ctx: AppContext): void {
   // data.
   const onPanelClosed = async (): Promise<void> => {
     document.removeEventListener(VISIBLE_COUNT_EVENT, onVisibleCount as EventListener);
+    document.removeEventListener(IMPORT_PROGRESS_EVENT, onImportProgress as EventListener);
     panels.delete(t.id);
     unregisterPanel(t.id);
     // Programmatic close (table deleted/replaced/pulled, or hidden from

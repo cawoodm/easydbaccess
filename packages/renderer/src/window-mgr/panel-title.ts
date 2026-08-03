@@ -36,3 +36,25 @@ export function countSuffix(count: number, total: number): string {
   if (count < 0 || total < 0) return '';
   return count === total ? ` (${total})` : ` (${count}/${total})`;
 }
+
+/** Detail of the `easydb:import-progress` document event. */
+export interface ImportProgressDetail {
+  tableId: string;
+  rows: number;
+  total: number;
+  done?: boolean;
+}
+
+export const IMPORT_PROGRESS_EVENT = 'easydb:import-progress';
+
+/**
+ * Progress suffix while a table's rows are being imported: `" (120,000/609,283
+ * · 20%)"`. It replaces the row-count suffix for the duration, because during an
+ * import the count IS the progress — and it shows on a minimized window too,
+ * since a titlebar is all a minimized window has.
+ */
+export function importSuffix(rows: number, total: number): string {
+  if (total <= 0) return ` (${rows.toLocaleString()})`;
+  const pct = Math.min(100, Math.round((rows / total) * 100));
+  return ` (${rows.toLocaleString()}/${total.toLocaleString()} · ${pct}%)`;
+}

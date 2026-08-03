@@ -14,16 +14,8 @@ import { app, dialog, type BrowserWindow } from 'electron';
 import * as path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { SqliteStore, copyDatabase } from './sqlite-store';
-import { convertToEasydb, suggestConvertedName } from './db-convert';
-import {
-  commitImport,
-  previewImport,
-  probeDatabaseFile,
-  type DatabaseFileKind,
-  type ImportDecision,
-  type ImportedTableResult,
-  type ImportPreview,
-} from './db-import';
+import { prepareConvert, suggestConvertedName } from './db-convert';
+import { commitImport, previewImport, probeDatabaseFile, type DatabaseFileKind, type ImportDecision, type ImportedTableResult, type ImportPreview } from './db-import';
 
 const DEFAULT_DB_NAME = 'easydbaccess.db';
 
@@ -167,9 +159,7 @@ async function pickOpenFile(win: BrowserWindow | null, title: string): Promise<s
  * after the window had already reloaded. The renderer decides what to offer
  * for each (see `plugins/electron-db.ts`).
  */
-export async function pickDatabaseToOpen(
-  win: BrowserWindow | null,
-): Promise<DialogResult<{ path: string; kind: DatabaseFileKind }> | CancelledResult> {
+export async function pickDatabaseToOpen(win: BrowserWindow | null): Promise<DialogResult<{ path: string; kind: DatabaseFileKind }> | CancelledResult> {
   const chosen = await pickOpenFile(win, 'Open easyDBAccess database');
   if (!chosen) return { ok: false, cancelled: true };
   return { ok: true, path: chosen, kind: probeDatabaseFile(chosen) };
@@ -206,9 +196,7 @@ export function switchToDatabase(win: BrowserWindow | null, newPath: string): { 
  * future writes changed, so there is nothing for `app-context.ts` to
  * re-fetch. Reloading anyway would just be a pointless UI flash.
  */
-export async function saveDbAs(
-  win: BrowserWindow | null,
-): Promise<DialogResult<{ path: string }> | CancelledResult> {
+export async function saveDbAs(win: BrowserWindow | null): Promise<DialogResult<{ path: string }> | CancelledResult> {
   const opts = {
     title: 'Save easyDBAccess database as',
     defaultPath: DEFAULT_DB_NAME,
@@ -237,7 +225,8 @@ export async function saveDbAs(
 export async function convertAndOpen(
   win: BrowserWindow | null,
   sourcePath: string,
-): Promise<DialogResult<{ path: string; tables: ImportedTableResult[] }> | CancelledResult> {
+  only?: string[] | undefined,
+): Promise<DialogResult<{ path: string; tables: ImportedTableResult[]; pending: number }> | CancelledResult> {
   const opts = {
     title: 'Save the converted database as',
     defaultPath: suggestConvertedName(sourcePath),
@@ -246,10 +235,13 @@ export async function convertAndOpen(
   const result = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);
   if (result.canceled || !result.filePath) return { ok: false, cancelled: true };
 
-  const converted = convertToEasydb(sourcePath, result.filePath);
-  switchToPath(converted.path);
+  // Structure only — the rows follow after the reload, driven by the renderer
+  // from the note `prepareConvert` leaves in the new file. Converting the whole
+  // file here instead meant ~15 seconds of nothing for `northwind.db`.
+  const prepared = prepareConvert(sourcePath, result.filePath, only);
+  switchToPath(prepared.path);
   win?.reload();
-  return { ok: true, path: converted.path, tables: converted.tables };
+  return { ok: true, path: prepared.path, tables: [], pending: prepared.pending.plan.length };
 }
 
 /**
@@ -264,11 +256,7 @@ export async function convertAndOpen(
  * path: the user already chose a file, it turned out to be a foreign one, and
  * asking them to find it a second time would be absurd.
  */
-export async function importDb(
-  win: BrowserWindow | null,
-  workspaceId: string,
-  sourcePath?: string,
-): Promise<DialogResult<{ path: string; preview: ImportPreview }> | CancelledResult> {
+export async function importDb(win: BrowserWindow | null, workspaceId: string, sourcePath?: string): Promise<DialogResult<{ path: string; preview: ImportPreview }> | CancelledResult> {
   const chosen = sourcePath ?? (await pickOpenFile(win, 'Import a SQLite database'));
   if (!chosen) return { ok: false, cancelled: true };
   const preview = previewImport(chosen, getStore(), workspaceId);
@@ -276,10 +264,6 @@ export async function importDb(
 }
 
 /** Step 2 of Import: write the previewed file's tables/rows, per the caller's collision decisions. */
-export function importDbCommit(
-  sourcePath: string,
-  workspaceId: string,
-  decisions: Record<string, ImportDecision>,
-): ImportedTableResult[] {
+export function importDbCommit(sourcePath: string, workspaceId: string, decisions: Record<string, ImportDecision>): ImportedTableResult[] {
   return commitImport(sourcePath, getStore(), workspaceId, decisions);
 }

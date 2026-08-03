@@ -17,13 +17,7 @@
  */
 
 import { SqliteStore } from './sqlite-store';
-import {
-  commitImport,
-  previewImport,
-  type ImportDecision,
-  type ImportProgress,
-  type ImportedTableResult,
-} from './db-import';
+import { commitImport, prepareImport, previewImport, type ImportDecision, type ImportPlan, type ImportProgress, type ImportedTableResult } from './db-import';
 
 /**
  * The workspace id a converted file gets. `default` is what the renderer's own
@@ -39,44 +33,111 @@ export interface ConvertResult {
 }
 
 /**
- * Writes `destPath` as an easydb workspace holding every table found in
+ * The workspace the renderer will adopt on boot instead of creating one — what
+ * makes the converted file "openable" rather than merely readable.
+ */
+function ensureWorkspace(dest: SqliteStore): void {
+  if (dest.findOne('workspaces', CONVERTED_WORKSPACE_ID)) return;
+  dest.insert('workspaces', {
+    id: CONVERTED_WORKSPACE_ID,
+    name: CONVERTED_WORKSPACE_ID,
+    createdAt: Date.now(),
+    pluginUrls: [],
+  });
+}
+
+/**
+ * Whatever the caller didn't ask for becomes an explicit `skip`, and a view is
+ * skipped unless it was named outright.
+ *
+ * A converted workspace mirrors what the file STORES; a view is derived, and
+ * snapshotting one freezes a stale copy of a query beside the tables it was
+ * computed from. It is also ruinously expensive: converting `northwind.db` with
+ * its views went from 13 objects / 625,890 rows to 30 / 1,909,973, because
+ * several of its views join the 609k-row `Order Details`.
+ */
+function decisionsFor(sourcePath: string, dest: SqliteStore, only: string[] | undefined): Record<string, ImportDecision> {
+  const preview = previewImport(sourcePath, dest, CONVERTED_WORKSPACE_ID);
+  const wanted = only ? new Set(only) : null;
+  const decisions: Record<string, ImportDecision> = {};
+  for (const c of preview.candidates) {
+    const asked = wanted ? wanted.has(c.name) : !c.isView;
+    if (!asked) decisions[c.name] = { action: 'skip' };
+  }
+  return decisions;
+}
+
+/**
+ * Writes `destPath` as an easydb workspace holding the tables found in
  * `sourcePath`. `destPath` must not be an existing easydb file — the caller's
  * save dialog is what confirms overwriting anything.
+ *
+ * `only` narrows the conversion to those source object names; omitting it takes
+ * every table. The renderer always passes it (it asks first, the same way Import
+ * does), but the default matters for callers that have nobody to ask — the tests
+ * and any future headless conversion.
  */
-export function convertToEasydb(
-  sourcePath: string,
-  destPath: string,
-  onProgress?: ((p: ImportProgress) => void) | undefined,
-): ConvertResult {
+export function convertToEasydb(sourcePath: string, destPath: string, onProgress?: ((p: ImportProgress) => void) | undefined, only?: string[] | undefined): ConvertResult {
   const dest = new SqliteStore({ path: destPath });
   try {
-    // The renderer will find and adopt this workspace on boot instead of
-    // creating one, which is what makes the converted file "openable".
-    if (!dest.findOne('workspaces', CONVERTED_WORKSPACE_ID)) {
-      dest.insert('workspaces', {
-        id: CONVERTED_WORKSPACE_ID,
-        name: CONVERTED_WORKSPACE_ID,
-        createdAt: Date.now(),
-        pluginUrls: [],
-      });
-    }
-
-    // Tables only. A converted workspace mirrors what the file STORES; a view
-    // is derived, and snapshotting one would freeze a stale copy of a query
-    // beside the tables it was computed from. It is also ruinously expensive:
-    // converting `northwind.db` with its views went from 13 objects / 625,890
-    // rows to 30 / 1,909,973, because several of its views join the 609k-row
-    // `Order Details`. Someone who wants a view's rows can Import it (that path
-    // offers views deliberately) or Browse the file.
-    const preview = previewImport(sourcePath, dest, CONVERTED_WORKSPACE_ID);
-    const decisions: Record<string, ImportDecision> = {};
-    for (const c of preview.candidates) {
-      if (c.isView) decisions[c.name] = { action: 'skip' };
-    }
-
+    ensureWorkspace(dest);
+    const decisions = decisionsFor(sourcePath, dest, only);
     const results = commitImport(sourcePath, dest, CONVERTED_WORKSPACE_ID, decisions, onProgress);
     // Skipped views would otherwise be reported as converted-with-zero-rows.
     return { path: destPath, tables: results.filter((r) => r.action !== 'skipped') };
+  } finally {
+    dest.close();
+  }
+}
+
+/**
+ * The settings entry a half-finished conversion leaves behind, so the renderer
+ * can pick the row copying up after the reload.
+ *
+ * Convert has to reload the window — the workspace on screen becomes a
+ * different file — and a reload throws away any work in flight. Writing the
+ * remaining plan INTO the new file is what makes phase 2 survive it, and it
+ * survives quitting the app mid-import for the same reason: whoever opens the
+ * file next finds the note and finishes the job.
+ */
+export const PENDING_IMPORT_SETTING = 'electron-db:pendingImport';
+
+export interface PendingImport {
+  /** The foreign file still being read. */
+  sourcePath: string;
+  /** Tables already created (empty) in this file, each waiting for its rows. */
+  plan: ImportPlan['plan'];
+}
+
+export interface PrepareConvertResult {
+  path: string;
+  pending: PendingImport;
+}
+
+/**
+ * Phase 1 of Convert: write `destPath` with the workspace and the chosen tables'
+ * STRUCTURE only, plus a note saying which rows are still owed.
+ *
+ * This exists because the whole-file `convertToEasydb` is not something a user
+ * can be asked to sit through: converting `northwind.db` took 14.8 seconds of
+ * synchronous work with no window, no tables and no progress, and it grows with
+ * the file. Structure alone is ~70ms, so the windows appear at once and the rows
+ * stream in behind them with a percentage each, the same way Import works.
+ */
+export function prepareConvert(sourcePath: string, destPath: string, only?: string[] | undefined): PrepareConvertResult {
+  const dest = new SqliteStore({ path: destPath });
+  try {
+    ensureWorkspace(dest);
+    const decisions = decisionsFor(sourcePath, dest, only);
+    const { plan } = prepareImport(sourcePath, dest, CONVERTED_WORKSPACE_ID, decisions);
+    const pending: PendingImport = { sourcePath, plan };
+    dest.upsert('settings', {
+      key: `${CONVERTED_WORKSPACE_ID}::${PENDING_IMPORT_SETTING}`,
+      workspaceId: CONVERTED_WORKSPACE_ID,
+      name: PENDING_IMPORT_SETTING,
+      value: pending,
+    });
+    return { path: destPath, pending };
   } finally {
     dest.close();
   }

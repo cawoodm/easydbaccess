@@ -23,8 +23,17 @@ import type {
   EasydbDbBridge,
   EasydbImportCandidate,
   EasydbImportDecision,
+  EasydbImportPlanEntry,
   EasydbImportedTableResult,
 } from '../db/data-store-ipc.js';
+import { IMPORT_PROGRESS_EVENT, type ImportProgressDetail } from '../window-mgr/panel-title.js';
+
+/**
+ * Where an unfinished conversion records the rows it still owes. Must match
+ * `PENDING_IMPORT_SETTING` in `packages/electron/src/db-convert.ts` — the two
+ * packages are separate `tsc -b` projects, so this cannot be imported.
+ */
+const PENDING_IMPORT_SETTING = 'electron-db:pendingImport';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'electron-db',
@@ -54,14 +63,21 @@ export function init(api: HostApi): void {
     // only way to learn where a dropped file actually lives.
     const path = bridge.pathForFile(file);
     if (!path) {
-      await api.ui.dialogs.alert(
-        `"${file.name}" could not be located on disk, so it cannot be opened.`,
-        'Database file',
-      );
+      await api.ui.dialogs.alert(`"${file.name}" could not be located on disk, so it cannot be opened.`, 'Database file');
       return true;
     }
     await handleDatabaseFile(api, bridge, path, await bridge.probeDb(path));
     return true;
+  });
+
+  // Relay import progress to the window manager, which puts it in each table's
+  // titlebar — visible whether the window is minimized or open.
+  bridge.onImportProgress((p) => {
+    document.dispatchEvent(
+      new CustomEvent<ImportProgressDetail>(IMPORT_PROGRESS_EVENT, {
+        detail: { tableId: p.tableId, rows: p.rows, total: p.total, ...(p.done ? { done: true } : {}) },
+      }),
+    );
   });
 
   api.ui.registerFooterButton({
@@ -71,8 +87,7 @@ export function init(api: HostApi): void {
     tooltip: 'Open, Save As, or Import a .db file',
     onClick: async (api, ctx) => {
       const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
-      const rect =
-        ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
+      const rect = ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
       const choice = await AnchoredMenu.open(rect, [
         { id: 'open', label: 'Open…', icon: 'folder_open' },
         { id: 'saveAs', label: 'Save As…', icon: 'save' },
@@ -90,6 +105,22 @@ export function init(api: HostApi): void {
         });
       }
     },
+  });
+}
+
+/**
+ * Runs after the workspace is resolved, which `init` cannot rely on — the
+ * pending-import note is a workspace-scoped setting, so it can only be read
+ * here. See `resumePendingImport`.
+ */
+export function load(api: HostApi): void {
+  const bridge = window.easydb?.db;
+  if (!bridge) return;
+  void resumePendingImport(api, bridge).catch((err: unknown) => {
+    api.ui.dialogs.toast(`Finishing the conversion failed: ${(err as Error).message}`, {
+      kind: 'error',
+      title: 'Convert to EDA',
+    });
   });
 }
 
@@ -123,25 +154,13 @@ export async function openFlow(api: HostApi, bridge: EasydbDbBridge): Promise<vo
  * `Open Workspace` is the only branch that needs the file to be ours, which is
  * why the probe runs first; `Browse` and `Import data` work on any SQLite file.
  */
-export async function handleDatabaseFile(
-  api: HostApi,
-  bridge: EasydbDbBridge,
-  path: string,
-  kind: EasydbDatabaseFileKind,
-): Promise<void> {
+export async function handleDatabaseFile(api: HostApi, bridge: EasydbDbBridge, path: string, kind: EasydbDatabaseFileKind): Promise<void> {
   if (kind === 'unreadable') {
-    await api.ui.dialogs.alert(
-      `"${path}" is not a SQLite database — it could not be read.`,
-      'Database file',
-    );
+    await api.ui.dialogs.alert(`"${path}" is not a SQLite database — it could not be read.`, 'Database file');
     return;
   }
 
-  const what = await api.ui.dialogs.choice(
-    `What would you like to do with "${path}"?`,
-    ['Open Workspace', 'Browse .db file', 'Import data'],
-    'Database file',
-  );
+  const what = await api.ui.dialogs.choice(`What would you like to do with "${path}"?`, ['Open Workspace', 'Browse .db file', 'Import data'], 'Database file');
   if (!what) return;
 
   if (what === 'Import data') {
@@ -161,12 +180,7 @@ export async function handleDatabaseFile(
  * at it would add our bookkeeping tables to someone else's database), so the
  * offer becomes Convert or Browse.
  */
-async function openWorkspaceFlow(
-  api: HostApi,
-  bridge: EasydbDbBridge,
-  path: string,
-  kind: EasydbDatabaseFileKind,
-): Promise<void> {
+async function openWorkspaceFlow(api: HostApi, bridge: EasydbDbBridge, path: string, kind: EasydbDatabaseFileKind): Promise<void> {
   if (kind === 'foreign') {
     const choice = await api.ui.dialogs.choice(
       `"${path}" is a SQLite database, but not an easyDBAccess workspace — there is no workspace ` +
@@ -181,8 +195,7 @@ async function openWorkspaceFlow(
   }
 
   const yes = await api.ui.dialogs.confirm(
-    `Open "${path}"?\n\nThis replaces the current workspace view with that file's data. ` +
-      `Nothing is deleted — the file you have open now is left exactly as it is on disk.`,
+    `Open "${path}"?\n\nThis replaces the current workspace view with that file's data. ` + `Nothing is deleted — the file you have open now is left exactly as it is on disk.`,
     'Open workspace',
   );
   if (!yes) return;
@@ -192,19 +205,33 @@ async function openWorkspaceFlow(
 }
 
 /**
- * Convert to EDA. The main process asks where the converted copy goes, writes
- * it, and reloads this window onto it — so there is nothing to render here on
- * success; the reload takes over. Only a cancel returns normally.
+ * Convert to EDA. Which objects first — Convert used to take the whole file
+ * silently, which is wrong for the same reason Import asks: a big file is mostly
+ * things this workspace doesn't want, and converting them costs the time and the
+ * disk. `browseList` is the enumeration to ask from, being read-only and cheap
+ * (it doesn't count a view's rows).
+ *
+ * Then the main process asks where the converted copy goes, writes it, and
+ * reloads this window onto it — so there is nothing to render here on success;
+ * the reload takes over. Only a cancel returns normally.
  */
 async function convertFlow(api: HostApi, bridge: EasydbDbBridge, path: string): Promise<void> {
-  const result = await bridge.convertDb(path);
-  if (!result.ok) return; // cancelled in the save dialog
-  api.ui.dialogs.toast(
-    `Converted "${path}" into "${result.path}" (${result.tables.length} table${
-      result.tables.length === 1 ? '' : 's'
-    }) and opened it.`,
-    { kind: 'success', title: 'Convert to EDA' },
+  const objects = await bridge.browseList(path);
+  if (objects.length === 0) {
+    await api.ui.dialogs.alert(`"${path}" has no tables or views to convert.`, 'Convert to EDA');
+    return;
+  }
+  const picked = await pickObjects(api, objects, 'Convert to EDA', { offerTablesOnly: true });
+  if (picked.length === 0) return;
+
+  const result = await bridge.convertDb(
+    path,
+    picked.map((o) => o.name),
   );
+  // Nothing to report on success: the main process has already switched to the
+  // new file and reloaded this window, so `resumePendingImport` — running in
+  // the fresh page from the note in that file — is what speaks next.
+  if (!result.ok) return; // cancelled in the save dialog
 }
 
 // -- Save As --------------------------------------------------------------
@@ -243,11 +270,7 @@ async function browseFlow(api: HostApi, bridge: EasydbDbBridge, path: string): P
   const picked = await pickObjects(api, objects, 'Browse database');
   if (picked.length === 0) return;
 
-  const taken = new Set(
-    (await api.store.tables.find())
-      .filter((t) => t.workspaceId === workspaceId)
-      .map((t) => t.name.toLowerCase()),
-  );
+  const taken = new Set((await api.store.tables.find()).filter((t) => t.workspaceId === workspaceId).map((t) => t.name.toLowerCase()));
 
   for (const obj of picked) {
     const name = uniqueName(obj.name, taken);
@@ -271,11 +294,10 @@ async function browseFlow(api: HostApi, bridge: EasydbDbBridge, path: string): P
   }
 
   const views = picked.filter((o) => o.kind === 'view').length;
-  api.ui.dialogs.toast(
-    `Browsing ${picked.length} object${picked.length === 1 ? '' : 's'} from "${path}"` +
-      `${views ? ` (${views} view${views === 1 ? '' : 's'})` : ''} — read-only.`,
-    { kind: 'success', title: 'Browse database' },
-  );
+  api.ui.dialogs.toast(`Browsing ${picked.length} object${picked.length === 1 ? '' : 's'} from "${path}"` + `${views ? ` (${views} view${views === 1 ? '' : 's'})` : ''} — read-only.`, {
+    kind: 'success',
+    title: 'Browse database',
+  });
 }
 
 /**
@@ -283,23 +305,22 @@ async function browseFlow(api: HostApi, bridge: EasydbDbBridge, path: string): P
  * versus one-at-a-time is the honest shape available — offering every object
  * individually as well keeps a single table browsable without dragging in the
  * rest of the file.
+ *
+ * `offerTablesOnly` adds a tables-without-the-views option, for Convert: a view
+ * there is snapshotted, and snapshotting `northwind.db`'s views triples the
+ * conversion (625,890 rows to 1,909,973) because several of them join its
+ * 609k-row `Order Details`. Browse doesn't need it — it reads on demand.
  */
-async function pickObjects(
-  api: HostApi,
-  objects: EasydbBrowsableObject[],
-  title: string,
-): Promise<EasydbBrowsableObject[]> {
+async function pickObjects(api: HostApi, objects: EasydbBrowsableObject[], title: string, opts?: { offerTablesOnly?: boolean }): Promise<EasydbBrowsableObject[]> {
   if (objects.length === 1) return objects;
+  const tables = objects.filter((o) => o.kind === 'table');
   const ALL = `All ${objects.length}`;
-  const labels = objects.map(
-    (o) => `${o.name}${o.kind === 'view' ? ' (view)' : ''}${o.rowCount == null ? '' : ` — ${o.rowCount} rows`}`,
-  );
-  const choice = await api.ui.dialogs.choice(
-    `Which tables or views?`,
-    [ALL, ...labels],
-    title,
-  );
+  // Only worth offering when it differs from "All" and isn't empty.
+  const TABLES = opts?.offerTablesOnly && tables.length > 0 && tables.length < objects.length ? `All ${tables.length} table${tables.length === 1 ? '' : 's'} (skip the views)` : null;
+  const labels = objects.map((o) => `${o.name}${o.kind === 'view' ? ' (view)' : ''}${o.rowCount == null ? '' : ` — ${o.rowCount} rows`}`);
+  const choice = await api.ui.dialogs.choice(`Which tables or views?`, [...(TABLES ? [TABLES] : []), ALL, ...labels], title);
   if (!choice) return [];
+  if (choice === TABLES) return tables;
   if (choice === ALL) return objects;
   const index = labels.indexOf(choice);
   const one = objects[index];
@@ -315,11 +336,7 @@ async function pickObjects(
 // clash, once per colliding table, before calling `importDbCommit` to
 // actually write.
 
-export async function importFlow(
-  api: HostApi,
-  bridge: EasydbDbBridge,
-  sourcePath?: string,
-): Promise<void> {
+export async function importFlow(api: HostApi, bridge: EasydbDbBridge, sourcePath?: string): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('no active workspace');
 
@@ -341,11 +358,7 @@ export async function importFlow(
   // case-insensitive rule the rest of the app uses (see `uniqueTableName` in
   // `datasette-common.ts`). Recomputed as a running set so two colliding
   // candidates in the SAME import batch can't rename to the same target.
-  const takenNames = new Set(
-    (await api.store.tables.find())
-      .filter((t) => t.workspaceId === workspaceId)
-      .map((t) => t.name.toLowerCase()),
-  );
+  const takenNames = new Set((await api.store.tables.find()).filter((t) => t.workspaceId === workspaceId).map((t) => t.name.toLowerCase()));
 
   const decisions: Record<string, EasydbImportDecision> = {};
   for (const c of preview.candidates) {
@@ -354,11 +367,7 @@ export async function importFlow(
       continue;
     }
     if (!c.collides) continue;
-    const choice = await api.ui.dialogs.choice(
-      `A table named "${c.name}" already exists in this workspace.`,
-      ['Overwrite', 'Rename', 'Skip'],
-      'Import — table already exists',
-    );
+    const choice = await api.ui.dialogs.choice(`A table named "${c.name}" already exists in this workspace.`, ['Overwrite', 'Rename', 'Skip'], 'Import — table already exists');
     if (!choice || choice === 'Skip') {
       decisions[c.name] = { action: 'skip' };
       continue;
@@ -372,8 +381,78 @@ export async function importFlow(
     decisions[c.name] = { action: 'rename', renameTo };
   }
 
-  const results = await bridge.importDbCommit(picked.path, workspaceId, decisions);
+  // Phase 1: create the chosen tables, empty and minimized. Returns in
+  // milliseconds however big the file is, so the windows appear NOW.
+  const { plan, skipped } = await bridge.importPrepare(picked.path, workspaceId, decisions);
+  if (plan.length === 0) {
+    reportImportResults(api, picked.path, skipped);
+    return;
+  }
+  api.ui.dialogs.toast(`Importing ${plan.length} object${plan.length === 1 ? '' : 's'} from "${picked.path}" — ` + `the windows are there now and fill in as the rows arrive.`, {
+    kind: 'info',
+    title: 'Import database',
+  });
+
+  const results = await runRowPhase(api, bridge, picked.path, plan, skipped);
   reportImportResults(api, picked.path, results);
+}
+
+/**
+ * Phase 2: rows, one table at a time, in the background. Each table's titlebar
+ * shows its own percentage (see `panel-title.ts`); the main process yields
+ * between batches so the app stays usable throughout.
+ *
+ * Shared by Import and by the post-reload half of Convert — the two differ only
+ * in how they came by the plan.
+ */
+async function runRowPhase(api: HostApi, bridge: EasydbDbBridge, sourcePath: string, plan: EasydbImportPlanEntry[], already: EasydbImportedTableResult[] = []): Promise<EasydbImportedTableResult[]> {
+  const results: EasydbImportedTableResult[] = [...already];
+  for (const entry of plan) {
+    try {
+      const rows = await bridge.importRows(sourcePath, entry);
+      results.push({
+        sourceName: entry.sourceName,
+        action: entry.action,
+        finalName: entry.finalName,
+        tableId: entry.tableId,
+        rowCount: rows,
+      });
+    } catch (err) {
+      // One table failing must not abandon the rest — it keeps its structure
+      // and the summary reports what did land.
+      api.ui.dialogs.toast(`"${entry.finalName}" failed: ${(err as Error).message}`, {
+        kind: 'error',
+        title: 'Import database',
+      });
+    }
+  }
+  return results;
+}
+
+/**
+ * Finish a conversion whose rows are still owed.
+ *
+ * Convert writes only the table structures before switching to the new file and
+ * reloading the window (`db-convert.ts`'s `prepareConvert`) — a reload would
+ * throw away any copying in flight, so the remaining plan is left as a note
+ * inside the file instead. This runs on every boot, does nothing when there is
+ * no note, and clears it once the rows are in. Quitting mid-import therefore
+ * resumes on the next launch rather than leaving empty tables behind.
+ */
+export async function resumePendingImport(api: HostApi, bridge: EasydbDbBridge): Promise<void> {
+  const setting = await api.store.settings.findOne(PENDING_IMPORT_SETTING);
+  const pending = setting?.value as { sourcePath?: string; plan?: EasydbImportPlanEntry[] } | undefined;
+  if (!pending?.sourcePath || !pending.plan?.length) return;
+
+  api.ui.dialogs.toast(`Filling ${pending.plan.length} table${pending.plan.length === 1 ? '' : 's'} from "${pending.sourcePath}" — each titlebar shows its own progress.`, {
+    kind: 'info',
+    title: 'Convert to EDA',
+  });
+  const results = await runRowPhase(api, bridge, pending.sourcePath, pending.plan);
+  // Clear the note only after the rows are in, so a crash halfway resumes
+  // rather than silently giving up. A re-run overwrites the same rows.
+  await api.store.settings.remove(PENDING_IMPORT_SETTING);
+  reportImportResults(api, pending.sourcePath, results);
 }
 
 /**
@@ -382,22 +461,17 @@ export async function importFlow(
  * one-at-a-time is what is honestly available, and a single table can be pulled
  * out of a big file without dragging the rest along.
  */
-async function pickCandidates(
-  api: HostApi,
-  candidates: EasydbImportCandidate[],
-): Promise<EasydbImportCandidate[]> {
+async function pickCandidates(api: HostApi, candidates: EasydbImportCandidate[]): Promise<EasydbImportCandidate[]> {
   if (candidates.length === 1) return candidates;
   const ALL = `All ${candidates.length}`;
   const labels = candidates.map(
     (c) =>
-      `${c.name}${c.isView ? ' (view)' : ''} — ${c.rowCount} row${c.rowCount === 1 ? '' : 's'}` +
+      `${c.name}${c.isView ? ' (view)' : ''}` +
+      // -1 = not counted (a view; counting one means running it).
+      (c.rowCount < 0 ? '' : ` — ${c.rowCount.toLocaleString()} row${c.rowCount === 1 ? '' : 's'}`) +
       `${c.collides ? ' ⚠ name in use' : ''}`,
   );
-  const choice = await api.ui.dialogs.choice(
-    'Which tables or views should be imported?',
-    [ALL, ...labels],
-    'Import database',
-  );
+  const choice = await api.ui.dialogs.choice('Which tables or views should be imported?', [ALL, ...labels], 'Import database');
   if (!choice) return [];
   if (choice === ALL) return candidates;
   const one = candidates[labels.indexOf(choice)];
@@ -430,8 +504,5 @@ function reportImportResults(api: HostApi, path: string, results: EasydbImported
     api.ui.dialogs.toast(`Nothing imported from "${path}".`, { kind: 'warning', title: 'Import database' });
     return;
   }
-  api.ui.dialogs.toast(
-    `Imported from "${path}": ${parts.join(', ')} (${totalRows} row${totalRows === 1 ? '' : 's'} total).`,
-    { kind: 'success', title: 'Import database' },
-  );
+  api.ui.dialogs.toast(`Imported from "${path}": ${parts.join(', ')} (${totalRows} row${totalRows === 1 ? '' : 's'} total).`, { kind: 'success', title: 'Import database' });
 }

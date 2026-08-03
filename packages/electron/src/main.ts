@@ -16,17 +16,8 @@
 import { app, BrowserWindow, dialog, session, ipcMain } from 'electron';
 import * as path from 'node:path';
 import { existsSync } from 'node:fs';
-import {
-  getStore,
-  pickDatabaseToOpen,
-  switchToDatabase,
-  saveDbAs,
-  importDb,
-  importDbCommit,
-  convertAndOpen,
-  currentDbInfo,
-} from './db-files';
-import { probeDatabaseFile } from './db-import';
+import { getStore, pickDatabaseToOpen, switchToDatabase, saveDbAs, importDb, importDbCommit, convertAndOpen, currentDbInfo } from './db-files';
+import { prepareImport, importRowsFor, probeDatabaseFile, type ImportPlanEntry } from './db-import';
 import { listBrowsable, readBrowseRows } from './db-browse';
 import type { ColumnSpec } from '@easydb/shared';
 import type { ImportDecision } from './db-import';
@@ -43,10 +34,18 @@ function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Notifies every window that a collection changed — replaces Dexie's liveQuery. */
-function broadcastChanged(coll: string): void {
+/**
+ * Notifies every window that a collection changed — replaces Dexie's liveQuery.
+ *
+ * `scope` narrows it to ONE table's rows. Without it, every subscribed
+ * `rows(tableId)` view re-reads its whole result set, which is quadratic during
+ * a multi-table import: finishing each of `northwind.db`'s 13 tables made all 13
+ * panels re-fetch, and one of them holds 609k rows. An unscoped broadcast still
+ * refreshes everything, which is what every ordinary write wants.
+ */
+function broadcastChanged(coll: string, scope?: string): void {
   for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send('store:changed', coll);
+    win.webContents.send('store:changed', coll, scope);
   }
 }
 
@@ -65,10 +64,7 @@ function handle<Args extends unknown[], R>(channel: string, fn: (...args: Args) 
 }
 
 /** Same as `handle`, but also broadcasts `store:changed` for the mutated collection. */
-function handleMutating<Args extends [string, ...unknown[]], R>(
-  channel: string,
-  fn: (...args: Args) => R,
-): void {
+function handleMutating<Args extends [string, ...unknown[]], R>(channel: string, fn: (...args: Args) => R): void {
   ipcMain.handle(channel, (_event, ...args: unknown[]) => {
     try {
       const result = fn(...(args as Args));
@@ -81,28 +77,14 @@ function handleMutating<Args extends [string, ...unknown[]], R>(
 }
 
 function registerStoreIpc(): void {
-  handle('store:find', (coll: string, query?: Record<string, unknown>) =>
-    getStore().find(coll, query),
-  );
+  handle('store:find', (coll: string, query?: Record<string, unknown>) => getStore().find(coll, query));
   handle('store:findOne', (coll: string, key: string) => getStore().findOne(coll, key));
-  handleMutating('store:insert', (coll: string, doc: Record<string, unknown>) =>
-    getStore().insert(coll, doc),
-  );
-  handleMutating('store:bulkInsert', (coll: string, docs: Record<string, unknown>[]) =>
-    getStore().bulkInsert(coll, docs),
-  );
-  handleMutating('store:upsert', (coll: string, doc: Record<string, unknown>) =>
-    getStore().upsert(coll, doc),
-  );
-  handleMutating(
-    'store:patch',
-    (coll: string, key: string, patch: Record<string, unknown>) =>
-      getStore().patch(coll, key, patch),
-  );
+  handleMutating('store:insert', (coll: string, doc: Record<string, unknown>) => getStore().insert(coll, doc));
+  handleMutating('store:bulkInsert', (coll: string, docs: Record<string, unknown>[]) => getStore().bulkInsert(coll, docs));
+  handleMutating('store:upsert', (coll: string, doc: Record<string, unknown>) => getStore().upsert(coll, doc));
+  handleMutating('store:patch', (coll: string, key: string, patch: Record<string, unknown>) => getStore().patch(coll, key, patch));
   handleMutating('store:remove', (coll: string, key: string) => getStore().remove(coll, key));
-  handleMutating('store:bulkRemove', (coll: string, keys: string[]) =>
-    getStore().bulkRemove(coll, keys),
-  );
+  handleMutating('store:bulkRemove', (coll: string, keys: string[]) => getStore().bulkRemove(coll, keys));
   handle('store:count', (coll: string) => getStore().count(coll));
   handle('db:path', () => getStore().filePath);
 }
@@ -140,38 +122,27 @@ function registerDbFileIpc(): void {
   });
   ipcMain.handle('db:import', async (event, workspaceId: unknown, sourcePath: unknown) => {
     try {
-      return await importDb(
-        BrowserWindow.fromWebContents(event.sender),
-        workspaceId as string,
-        typeof sourcePath === 'string' ? sourcePath : undefined,
-      );
+      return await importDb(BrowserWindow.fromWebContents(event.sender), workspaceId as string, typeof sourcePath === 'string' ? sourcePath : undefined);
     } catch (err) {
       throw new Error(toErrorMessage(err), { cause: err });
     }
   });
-  ipcMain.handle(
-    'db:importCommit',
-    (_event, sourcePath: unknown, workspaceId: unknown, decisions: unknown) => {
-      try {
-        const results = importDbCommit(
-          sourcePath as string,
-          workspaceId as string,
-          decisions as Record<string, ImportDecision>,
-        );
-        // The import wrote new `tables` and `rows` — tell every window so
-        // their subscriptions (and the new panels) pick the fresh data up,
-        // same as any other mutating store call.
-        broadcastChanged('tables');
-        broadcastChanged('rows');
-        return results;
-      } catch (err) {
-        throw new Error(toErrorMessage(err), { cause: err });
-      }
-    },
-  );
-  ipcMain.handle('db:convert', async (event, sourcePath: unknown) => {
+  ipcMain.handle('db:importCommit', (_event, sourcePath: unknown, workspaceId: unknown, decisions: unknown) => {
     try {
-      return await convertAndOpen(BrowserWindow.fromWebContents(event.sender), sourcePath as string);
+      const results = importDbCommit(sourcePath as string, workspaceId as string, decisions as Record<string, ImportDecision>);
+      // The import wrote new `tables` and `rows` — tell every window so
+      // their subscriptions (and the new panels) pick the fresh data up,
+      // same as any other mutating store call.
+      broadcastChanged('tables');
+      broadcastChanged('rows');
+      return results;
+    } catch (err) {
+      throw new Error(toErrorMessage(err), { cause: err });
+    }
+  });
+  ipcMain.handle('db:convert', async (event, sourcePath: unknown, only: unknown) => {
+    try {
+      return await convertAndOpen(BrowserWindow.fromWebContents(event.sender), sourcePath as string, only as string[] | undefined);
     } catch (err) {
       throw new Error(toErrorMessage(err), { cause: err });
     }
@@ -180,12 +151,62 @@ function registerDbFileIpc(): void {
   // `webUtils.getPathForFile`), so there is no picker to run — only the
   // read-only classification Open needs before it offers anything.
   handle('db:probe', (sourcePath: string) => probeDatabaseFile(sourcePath));
+
+  // Phase 1 of an import: create the chosen tables, empty. Cheap at any file
+  // size, so the windows appear at once instead of after the data.
+  ipcMain.handle('db:importPrepare', (_event, sourcePath: unknown, workspaceId: unknown, decisions: unknown) => {
+    try {
+      const result = prepareImport(sourcePath as string, getStore(), workspaceId as string, decisions as Record<string, ImportDecision>);
+      broadcastChanged('tables'); // opens the (minimized, empty) windows
+      return result;
+    } catch (err) {
+      throw new Error(toErrorMessage(err), { cause: err });
+    }
+  });
+
+  /**
+   * Phase 2: one table's rows, in the background.
+   *
+   * The `await` between batches is the point of this handler. `node:sqlite` is
+   * synchronous, so a straight loop would hold the main process for the whole
+   * import and no other `store:*` call could complete — the window would freeze
+   * exactly as it did before. Yielding to the event loop each batch keeps the
+   * app usable while a 600k-row table loads, and lets the progress that was
+   * just sent actually reach the renderer.
+   */
+  ipcMain.handle('db:importRows', async (event, sourcePath: unknown, entry: unknown) => {
+    const store = getStore();
+    const plan = entry as ImportPlanEntry;
+    store.setDurability('bulk');
+    try {
+      let rows = 0;
+      for (const p of importRowsFor(sourcePath as string, store, plan)) {
+        rows = p.rows;
+        event.sender.send('import:progress', { tableId: plan.tableId, ...p });
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      // One broadcast at the end, not per batch: a grid that re-read on every
+      // batch would spend the import re-rendering instead of importing. Scoped
+      // to this table, so the other twelve panels don't re-read too.
+      broadcastChanged('rows', plan.tableId);
+      event.sender.send('import:progress', {
+        tableId: plan.tableId,
+        table: plan.finalName,
+        rows,
+        total: plan.total,
+        done: true,
+      });
+      return rows;
+    } catch (err) {
+      throw new Error(toErrorMessage(err), { cause: err });
+    } finally {
+      store.setDurability('safe');
+    }
+  });
   // Browse reads a file we neither opened nor imported — always read-only, so
   // these two need no confirmation step and no `broadcastChanged`.
   handle('db:browseList', (sourcePath: string) => listBrowsable(sourcePath));
-  handle('db:browseRows', (sourcePath: string, objectName: string, columns: ColumnSpec[]) =>
-    readBrowseRows(sourcePath, objectName, columns),
-  );
+  handle('db:browseRows', (sourcePath: string, objectName: string, columns: ColumnSpec[]) => readBrowseRows(sourcePath, objectName, columns));
   ipcMain.handle('db:current', () => currentDbInfo());
 }
 
@@ -218,7 +239,7 @@ const PRODUCTION_CSP =
   "default-src 'self'; " +
   "script-src 'self' 'unsafe-eval'; " +
   "style-src 'self' 'unsafe-inline'; " +
-  'img-src \'self\' data: blob: https:; ' +
+  "img-src 'self' data: blob: https:; " +
   "font-src 'self' data:; " +
   "connect-src 'self' http: https:";
 
@@ -251,10 +272,7 @@ async function createWindow(): Promise<void> {
     // (--base /easydbaccess/) doesn't collide with the file:// build.
     const indexPath = resolveFrontendIndexPath();
     if (!existsSync(indexPath)) {
-      dialog.showErrorBox(
-        'easyDBAccess — renderer not built',
-        `The renderer bundle is missing:\n  ${indexPath}\n\nBuild it first:\n  npm run build:electron`,
-      );
+      dialog.showErrorBox('easyDBAccess — renderer not built', `The renderer bundle is missing:\n  ${indexPath}\n\nBuild it first:\n  npm run build:electron`);
       app.quit();
       return;
     }

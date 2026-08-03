@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { SqliteStore } from './sqlite-store.js';
 import { BROWSE_ROW_CAP, listBrowsable, readBrowseRows } from './db-browse.js';
-import { convertToEasydb } from './db-convert.js';
+import { convertToEasydb, prepareConvert, PENDING_IMPORT_SETTING } from './db-convert.js';
 
 /**
  * "Browse a .db" — a read-only look at a file we neither open nor import.
@@ -35,9 +35,7 @@ function buildFile(): void {
     CREATE TABLE tags (name TEXT);
     CREATE VIEW popular AS SELECT title, hits FROM bookmarks WHERE hits > 0;
   `);
-  db.exec(
-    "INSERT INTO bookmarks (title, hits, starred) VALUES ('alpha', 7, 1), ('beta', 0, 0), ('gamma', 3, NULL)",
-  );
+  db.exec("INSERT INTO bookmarks (title, hits, starred) VALUES ('alpha', 7, 1), ('beta', 0, 0), ('gamma', 3, NULL)");
   db.close();
 }
 
@@ -46,27 +44,15 @@ describe('listBrowsable', () => {
     buildFile();
     const objects = listBrowsable(dbPath);
 
-    expect(objects.map((o) => `${o.kind}:${o.name}`).sort()).toEqual([
-      'table:bookmarks',
-      'table:tags',
-      'view:popular',
-    ]);
+    expect(objects.map((o) => `${o.kind}:${o.name}`).sort()).toEqual(['table:bookmarks', 'table:tags', 'view:popular']);
 
     const bookmarks = objects.find((o) => o.name === 'bookmarks')!;
     expect(bookmarks.rowCount).toBe(3);
-    expect(bookmarks.columns.map((c) => `${c.field}:${c.type}`)).toEqual([
-      'id:number',
-      'title:string',
-      'hits:number',
-      'starred:boolean',
-    ]);
+    expect(bookmarks.columns.map((c) => `${c.field}:${c.type}`)).toEqual(['id:number', 'title:string', 'hits:number', 'starred:boolean']);
 
     // A view's rows are not counted — running it is the work Browse defers.
     expect(objects.find((o) => o.name === 'popular')!.rowCount).toBeNull();
-    expect(objects.find((o) => o.name === 'popular')!.columns.map((c) => c.field)).toEqual([
-      'title',
-      'hits',
-    ]);
+    expect(objects.find((o) => o.name === 'popular')!.columns.map((c) => c.field)).toEqual(['title', 'hits']);
   });
 
   it('hides our own bookkeeping tables when browsing a file we wrote', () => {
@@ -175,10 +161,7 @@ describe('a mis-stamped file', () => {
     raw.close();
     new SqliteStore({ path: dbPath }).close(); // the stamp the pre-guard Open left
 
-    expect(listBrowsable(dbPath).map((o) => `${o.kind}:${o.name}`)).toEqual([
-      'table:customers',
-      'view:big',
-    ]);
+    expect(listBrowsable(dbPath).map((o) => `${o.kind}:${o.name}`)).toEqual(['table:customers', 'view:big']);
   });
 });
 
@@ -206,5 +189,70 @@ describe('convertToEasydb', () => {
     const store = new SqliteStore({ path: dest });
     expect((store.find('tables') as Array<{ name: string }>).map((t) => t.name)).toEqual(['items']);
     store.close();
+  });
+
+  it('converts only the named objects, so the renderer can ask first', () => {
+    const raw = new DatabaseSync(dbPath);
+    raw.exec(`
+      CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT);
+      CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT);
+    `);
+    raw.exec("INSERT INTO items (name) VALUES ('a')");
+    raw.exec("INSERT INTO notes (body) VALUES ('n')");
+    raw.close();
+
+    const dest = join(dir, 'converted-some.db');
+    const result = convertToEasydb(dbPath, dest, undefined, ['notes']);
+
+    expect(result.tables.map((t) => t.finalName)).toEqual(['notes']);
+  });
+
+  /**
+   * Convert's user-facing path writes STRUCTURE only and leaves a note naming
+   * the rows still owed, because the window reloads onto the new file and a
+   * reload discards work in flight. Converting `northwind.db` whole took 14.8
+   * seconds with nothing on screen; this is what makes the tables appear at once.
+   */
+  it('prepareConvert creates the tables empty and records what is still owed', () => {
+    const raw = new DatabaseSync(dbPath);
+    raw.exec(`CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)`);
+    raw.exec("INSERT INTO items (name) VALUES ('a'), ('b'), ('c')");
+    raw.close();
+
+    const dest = join(dir, 'prepared.db');
+    const result = prepareConvert(dbPath, dest, ['items']);
+
+    expect(result.pending.sourcePath).toBe(dbPath);
+    expect(result.pending.plan.map((e) => e.finalName)).toEqual(['items']);
+    expect(result.pending.plan[0]!.total).toBe(3);
+
+    const store = new SqliteStore({ path: dest });
+    try {
+      // The table exists and is EMPTY — the rows are phase 2's job.
+      const tables = store.find('tables') as Array<{ id: string; name: string }>;
+      expect(tables.map((t) => t.name)).toEqual(['items']);
+      expect(store.find('rows', { tableId: tables[0]!.id })).toEqual([]);
+      // …and the note the renderer picks up after the reload.
+      const note = store.findOne('settings', `default::${PENDING_IMPORT_SETTING}`) as { value: { sourcePath: string } } | null;
+      expect(note?.value.sourcePath).toBe(dbPath);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('takes a view when it is named outright', () => {
+    const raw = new DatabaseSync(dbPath);
+    raw.exec(`
+      CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, qty INTEGER);
+      CREATE VIEW in_stock AS SELECT name FROM items WHERE qty > 0;
+    `);
+    raw.exec("INSERT INTO items (name, qty) VALUES ('a', 1), ('b', 0)");
+    raw.close();
+
+    const dest = join(dir, 'converted-view.db');
+    const result = convertToEasydb(dbPath, dest, undefined, ['in_stock']);
+
+    expect(result.tables.map((t) => t.finalName)).toEqual(['in_stock']);
+    expect(result.tables[0]!.rowCount).toBe(1);
   });
 });

@@ -1,16 +1,4 @@
-import type {
-  ColumnSpec,
-  DataCollection,
-  DataStore,
-  PluginRecord,
-  Row,
-  Setting,
-  Table,
-  Unsubscribe,
-  ViewInstance,
-  ViewTemplate,
-  Workspace,
-} from '@easydb/shared';
+import type { ColumnSpec, DataCollection, DataStore, PluginRecord, Row, Setting, Table, Unsubscribe, ViewInstance, ViewTemplate, Workspace } from '@easydb/shared';
 import { settingId } from './dexie-db.js';
 
 /**
@@ -31,8 +19,13 @@ export interface EasydbStoreBridge {
   remove(coll: string, key: string): Promise<void>;
   bulkRemove(coll: string, keys: string[]): Promise<void>;
   count(coll: string): Promise<number>;
-  /** Subscribes to `store:changed` broadcasts; returns an unsubscribe function. */
-  onChanged(cb: (coll: string) => void): () => void;
+  /**
+   * Subscribes to `store:changed` broadcasts; returns an unsubscribe function.
+   * `scope`, when present, narrows the change to one table's rows (its
+   * `tableId`) so unrelated row views don't re-read — see `broadcastChanged`
+   * in `packages/electron/src/main.ts`.
+   */
+  onChanged(cb: (coll: string, scope?: string) => void): () => void;
   dbPath(): Promise<string>;
 }
 
@@ -105,33 +98,54 @@ export interface EasydbBrowseRow {
   data: Record<string, unknown>;
 }
 
+/** One table created by phase 1 of an import, waiting for its rows. */
+export interface EasydbImportPlanEntry {
+  sourceName: string;
+  finalName: string;
+  tableId: string;
+  sqlTable: string;
+  total: number;
+  kind: 'easydb' | 'foreign';
+  action: 'created' | 'overwritten' | 'renamed';
+}
+
+export interface EasydbImportPlan {
+  plan: EasydbImportPlanEntry[];
+  skipped: EasydbImportedTableResult[];
+}
+
+/** Progress for one table's row import; `done` marks the final message. */
+export interface EasydbImportProgress {
+  tableId: string;
+  table: string;
+  rows: number;
+  total: number;
+  done?: boolean;
+}
+
 export interface EasydbDbBridge {
   openDb(): Promise<EasydbDialogResult<{ path: string; kind: EasydbDatabaseFileKind }>>;
   openDbCommit(newPath: string): Promise<{ ok: true; path: string }>;
   saveDbAs(): Promise<EasydbDialogResult<{ path: string }>>;
   /** `sourcePath` skips the OS picker — used when Open fell through to Import. */
-  importDb(
-    workspaceId: string,
-    sourcePath?: string,
-  ): Promise<EasydbDialogResult<{ path: string; preview: EasydbImportPreview }>>;
-  importDbCommit(
-    sourcePath: string,
-    workspaceId: string,
-    decisions: Record<string, EasydbImportDecision>,
-  ): Promise<EasydbImportedTableResult[]>;
-  /** Write a foreign file's tables into a NEW easydb file and open that; the source is untouched. */
-  convertDb(
-    sourcePath: string,
-  ): Promise<EasydbDialogResult<{ path: string; tables: EasydbImportedTableResult[] }>>;
+  importDb(workspaceId: string, sourcePath?: string): Promise<EasydbDialogResult<{ path: string; preview: EasydbImportPreview }>>;
+  importDbCommit(sourcePath: string, workspaceId: string, decisions: Record<string, EasydbImportDecision>): Promise<EasydbImportedTableResult[]>;
+  /**
+   * Write a foreign file's tables into a NEW easydb file and open that; the
+   * source is untouched. `only` names the source objects to take — omitted
+   * means every table (views excluded).
+   */
+  convertDb(sourcePath: string, only?: string[]): Promise<EasydbDialogResult<{ path: string; tables: EasydbImportedTableResult[]; pending: number }>>;
   /** Classify a path the renderer already has (a dropped file) — no picker involved. */
   probeDb(sourcePath: string): Promise<EasydbDatabaseFileKind>;
+  /** Phase 1: create the chosen tables EMPTY and minimized. Cheap at any file size. */
+  importPrepare(sourcePath: string, workspaceId: string, decisions: Record<string, EasydbImportDecision>): Promise<EasydbImportPlan>;
+  /** Phase 2: fill ONE prepared table, reporting progress via `onImportProgress`. */
+  importRows(sourcePath: string, entry: EasydbImportPlanEntry): Promise<number>;
+  onImportProgress(cb: (p: EasydbImportProgress) => void): () => void;
   /** Tables AND views in a file, read-only — nothing is written to it. */
   browseList(sourcePath: string): Promise<EasydbBrowsableObject[]>;
-  browseRows(
-    sourcePath: string,
-    objectName: string,
-    columns: ColumnSpec[],
-  ): Promise<EasydbBrowseRow[]>;
+  browseRows(sourcePath: string, objectName: string, columns: ColumnSpec[]): Promise<EasydbBrowseRow[]>;
   /** Real filesystem path of a dropped `File` (Electron 32 removed `File.path`); '' when it has none. */
   pathForFile(file: File): string;
   currentDb(): Promise<EasydbCurrentDbInfo>;
@@ -174,6 +188,11 @@ type CollName = 'workspaces' | 'tables' | 'rows' | 'settings' | 'plugins' | 'vie
  *  - Runs once immediately on subscribe (liveQuery's initial emission).
  *  - Re-runs whenever `onChanged` names THIS collection; a broadcast for any
  *    other collection is ignored.
+ *  - `scope` opts this subscription out of broadcasts that name a DIFFERENT
+ *    scope. A `rows(tableId)` view passes its `tableId`, so an import filling
+ *    one table stops making every other open table re-read its rows —
+ *    quadratic work that dominated a 13-table import. A broadcast with no
+ *    scope still reaches every subscriber, which is what an ordinary write is.
  *
  * Every run is an IPC round trip, so two runs can resolve out of order (a
  * slow run started before a fast one can resolve after it). A monotonic
@@ -183,12 +202,7 @@ type CollName = 'workspaces' | 'tables' | 'rows' | 'settings' | 'plugins' | 'vie
  * once a newer run has been kicked off, never delivered late over a fresher
  * state.
  */
-function subscribeToCollection<T>(
-  bridge: EasydbStoreBridge,
-  collName: CollName,
-  query: () => Promise<T[]>,
-  fn: (docs: T[]) => void,
-): Unsubscribe {
+function subscribeToCollection<T>(bridge: EasydbStoreBridge, collName: CollName, query: () => Promise<T[]>, fn: (docs: T[]) => void, scope?: string): Unsubscribe {
   let latest = 0;
   let disposed = false;
   const run = (): void => {
@@ -199,8 +213,12 @@ function subscribeToCollection<T>(
     });
   };
   run();
-  const off = bridge.onChanged((changed) => {
-    if (changed === collName) run();
+  const off = bridge.onChanged((changed, changedScope) => {
+    if (changed !== collName) return;
+    // A scoped broadcast is only for the matching subscription; an unscoped one
+    // is for all of them.
+    if (changedScope && scope && changedScope !== scope) return;
+    run();
   });
   return () => {
     disposed = true;
@@ -215,8 +233,7 @@ function subscribeToCollection<T>(
  * straight through instead of re-filtering client-side.
  */
 function wrapIpc<T>(bridge: EasydbStoreBridge, collName: CollName): DataCollection<T> {
-  const queryAll = (query?: Partial<T>): Promise<T[]> =>
-    bridge.find(collName, query as Record<string, unknown> | undefined) as Promise<T[]>;
+  const queryAll = (query?: Partial<T>): Promise<T[]> => bridge.find(collName, query as Record<string, unknown> | undefined) as Promise<T[]>;
   return {
     find: (query) => queryAll(query),
     async findOne(id) {
@@ -265,10 +282,7 @@ function wrapIpc<T>(bridge: EasydbStoreBridge, collName: CollName): DataCollecti
  * client-side scan.
  */
 function rowsViewIpc(bridge: EasydbStoreBridge, tableId: string): DataCollection<Row> {
-  const queryRows = (query?: Partial<Row>): Promise<Row[]> =>
-    bridge.find('rows', { ...(query as Record<string, unknown> | undefined), tableId }) as Promise<
-      Row[]
-    >;
+  const queryRows = (query?: Partial<Row>): Promise<Row[]> => bridge.find('rows', { ...(query as Record<string, unknown> | undefined), tableId }) as Promise<Row[]>;
   return {
     find: (query) => queryRows(query),
     async findOne(id) {
@@ -302,11 +316,12 @@ function rowsViewIpc(bridge: EasydbStoreBridge, tableId: string): DataCollection
       await bridge.bulkRemove('rows', ids);
     },
     subscribe(fn): Unsubscribe {
-      // Broadcasts are per-COLLECTION ('rows'), not per-table — any write to
-      // any table's rows re-runs this view. `queryRows()` still only ever
-      // returns THIS tableId's rows, so the re-run is coarse but never wrong,
-      // matching the Dexie view's own `liveQuery` re-run granularity.
-      return subscribeToCollection(bridge, 'rows', () => queryRows(), fn);
+      // An ordinary write broadcasts 'rows' with no scope, so any write to any
+      // table re-runs this view — coarse but never wrong, matching the Dexie
+      // view's own `liveQuery` granularity. An import scopes its broadcast to
+      // the table it filled, and passing `tableId` here is what lets the other
+      // open tables sit that one out.
+      return subscribeToCollection(bridge, 'rows', () => queryRows(), fn, tableId);
     },
   };
 }
@@ -341,9 +356,7 @@ function settingsViewIpc(bridge: EasydbStoreBridge, workspaceId: () => string): 
   return {
     find: (query) => queryMine(query),
     async findOne(name) {
-      const doc = (await bridge.findOne('settings', settingId(workspaceId(), name))) as
-        | Setting
-        | undefined;
+      const doc = (await bridge.findOne('settings', settingId(workspaceId(), name))) as Setting | undefined;
       return doc ?? null;
     },
     async insert(doc) {

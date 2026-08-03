@@ -52,6 +52,16 @@ const RESERVED_ROW_COLUMNS = new Set(['_id', '_updatedAt', '_extra']);
 export interface ImportCandidate {
   /** Table name as found in the source (easydb `Table.name`, or the SQL table/view name). */
   name: string;
+  /**
+   * Rows the source reports, or **-1 when not counted** — the same
+   * negative-means-unknown convention `countSuffix` uses.
+   *
+   * A VIEW is never counted: counting one means RUNNING it, and a view over a
+   * big table is expensive (northwind's views join its 609,283-row `Order
+   * Details`, so counting all 17 of them cost 3.5s before the user saw
+   * anything). The progress bar simply shows a running count instead of a
+   * percentage for those.
+   */
   rowCount: number;
   /** Case-insensitive name clash against an existing table in the target workspace. */
   collides: boolean;
@@ -184,7 +194,8 @@ function listForeignCandidates(
   return rows.map((r) => ({
     name: r.name,
     sqlTable: r.name,
-    rowCount: rowCountOf(db, r.name),
+    // -1 for a view: see `ImportCandidate.rowCount`. Counting one runs it.
+    rowCount: r.type === 'view' ? -1 : rowCountOf(db, r.name),
     isView: r.type === 'view',
   }));
 }
@@ -337,6 +348,8 @@ function importEasydbTable(
   candidate: { name: string; sqlTable: string; rowCount: number },
   resolved: { action: 'create' | 'overwrite' | 'rename' | 'skip'; finalName: string },
   onProgress?: ((p: ImportProgress) => void) | undefined,
+  /** Create the table and stop — phase 1 of the two-phase import. */
+  structureOnly = false,
 ): ImportedTableResult {
   if (resolved.action === 'skip') {
     return {
@@ -389,14 +402,75 @@ function importEasydbTable(
   if (existing) targetStore.upsert('tables', table);
   else targetStore.insert('tables', table);
 
-  const rawCols = ['_id', '_updatedAt', '_extra', ...columns.map((c) => c.field)];
-  if (resolved.action === 'overwrite') clearRows(targetStore, tableId);
+  if (structureOnly) {
+    return {
+      sourceName: candidate.name,
+      action: resolved.action === 'create' ? 'created' : resolved.action === 'rename' ? 'renamed' : 'overwritten',
+      finalName: resolved.finalName,
+      tableId,
+      rowCount: 0,
+    };
+  }
 
-  // Streamed, for the same reason as `importForeignTable` — see the comment
-  // there. This path had the identical accumulate-the-whole-table bug.
+  if (resolved.action === 'overwrite') clearRows(targetStore, tableId);
+  let imported = 0;
+  for (const p of easydbRowBatches(src, targetStore, {
+    tableId,
+    sqlTable: candidate.sqlTable,
+    finalName: resolved.finalName,
+    total: candidate.rowCount,
+  })) {
+    imported = p.rows;
+    onProgress?.(p);
+  }
+
+  return {
+    sourceName: candidate.name,
+    action: resolved.action === 'create' ? 'created' : resolved.action === 'rename' ? 'renamed' : 'overwritten',
+    finalName: resolved.finalName,
+    tableId,
+    rowCount: imported,
+  };
+}
+
+// -- Row streaming -----------------------------------------------------------
+//
+// Both row importers are GENERATORS that yield progress after every written
+// batch. One implementation serves two very different callers:
+//
+//  - `commitImport` drains it synchronously (`for (const p of …)`), so its
+//    behaviour and its tests are unchanged.
+//  - the `db:importRows` IPC handler drains it with an `await` between batches,
+//    which returns control to the main process's event loop — so the window
+//    stays responsive and the progress it just sent actually gets drawn.
+//
+// Nothing accumulates in either case: a batch is written as it is read.
+// `readRowBatches` exists precisely so a large table is never fully
+// materialised, and an earlier version built a `docs` array of the whole table
+// first, which drove the main process past 1.4 GB on a 609,283-row table and
+// killed it. Covered by `db-import-streaming.test.ts`.
+
+/** What a row generator needs: where to read from, where to write, how much there is. */
+interface RowStreamTarget {
+  tableId: string;
+  sqlTable: string;
+  finalName: string;
+  total: number;
+}
+
+function* easydbRowBatches(
+  src: DatabaseSyncType,
+  targetStore: SqliteStore,
+  t: RowStreamTarget,
+): Generator<ImportProgress> {
+  const metaRow = src
+    .prepare(`SELECT columns_json FROM ${quoteIdent(`_easydb_meta_${t.sqlTable}`)}`)
+    .get() as { columns_json: string };
+  const columns = JSON.parse(metaRow.columns_json) as ColumnSpec[];
+  const rawCols = ['_id', '_updatedAt', '_extra', ...columns.map((c) => c.field)];
   const fallbackAt = Date.now();
   let imported = 0;
-  for (const batch of readRowBatches(src, candidate.sqlTable, rawCols)) {
+  for (const batch of readRowBatches(src, t.sqlTable, rawCols)) {
     const docs = batch.map((raw) => {
       const data: Record<string, unknown> = {};
       for (const spec of columns) {
@@ -407,23 +481,166 @@ function importEasydbTable(
       if (extraJson) Object.assign(data, JSON.parse(extraJson) as Record<string, unknown>);
       return {
         id: raw._id as string,
-        tableId,
+        tableId: t.tableId,
         data,
         updatedAt: (raw._updatedAt as number) ?? fallbackAt,
       };
     });
     targetStore.bulkInsert('rows', docs);
     imported += docs.length;
-    onProgress?.({ table: resolved.finalName, rows: imported, total: candidate.rowCount });
+    yield { table: t.finalName, rows: imported, total: t.total };
   }
+}
 
-  return {
-    sourceName: candidate.name,
-    action: resolved.action === 'create' ? 'created' : resolved.action === 'rename' ? 'renamed' : 'overwritten',
-    finalName: resolved.finalName,
-    tableId,
-    rowCount: imported,
-  };
+function* foreignRowBatches(
+  src: DatabaseSyncType,
+  targetStore: SqliteStore,
+  t: RowStreamTarget,
+): Generator<ImportProgress> {
+  const info = src.prepare(`PRAGMA table_info(${quoteIdent(t.sqlTable)})`).all() as unknown as RawColumnInfo[];
+  const columns = inferForeignColumns(src, t.sqlTable);
+  // Original (un-renamed) column names, in the same order as `columns` — a
+  // reserved name was renamed by `safeFieldName`, so the two can differ.
+  const sourceFieldNames = info.map((c) => c.name);
+  const importedAt = Date.now(); // one import is one instant, not one per row
+  let imported = 0;
+  for (const batch of readRowBatches(src, t.sqlTable, sourceFieldNames)) {
+    const docs = batch.map((raw) => {
+      const data: Record<string, unknown> = {};
+      for (let i = 0; i < columns.length; i++) {
+        const spec = columns[i]!;
+        const sourceField = sourceFieldNames[i]!;
+        const v = fromRawSqlValue(spec.type, raw[sourceField]);
+        if (v !== null) data[spec.field] = v;
+      }
+      return { id: randomUUID(), tableId: t.tableId, data, updatedAt: importedAt };
+    });
+    targetStore.bulkInsert('rows', docs);
+    imported += docs.length;
+    yield { table: t.finalName, rows: imported, total: t.total };
+  }
+}
+
+// -- Two-phase import: structure first, rows in the background ---------------
+
+/** One table the user asked for: created and empty, waiting for its rows. */
+export interface ImportPlanEntry {
+  sourceName: string;
+  finalName: string;
+  tableId: string;
+  /** The object to read rows from, in the SOURCE file. */
+  sqlTable: string;
+  /** Rows the source reports — the denominator for the progress percentage. */
+  total: number;
+  /** Which read path this table's rows need. */
+  kind: 'easydb' | 'foreign';
+  action: 'created' | 'overwritten' | 'renamed';
+}
+
+export interface ImportPlan {
+  plan: ImportPlanEntry[];
+  /** Objects the user did not choose, reported so the summary can count them. */
+  skipped: ImportedTableResult[];
+}
+
+/**
+ * Phase 1 — create the chosen tables' STRUCTURE and nothing else.
+ *
+ * A handful of statements regardless of how much data the file holds, so the
+ * windows can appear at once (minimized, holding no rows, mounting no grid)
+ * while phase 2 fills them in. This is what stops a big file looking like a
+ * hang: the user sees what they asked for immediately.
+ */
+export function prepareImport(
+  sourcePath: string,
+  targetStore: SqliteStore,
+  workspaceId: string,
+  decisions: Record<string, ImportDecision>,
+): ImportPlan {
+  const src = new DatabaseSync(sourcePath, { readOnly: true });
+  try {
+    const kind: ImportPreview['kind'] = isEasydbFile(src) ? 'easydb' : 'foreign';
+    const raw = kind === 'easydb' ? listEasydbCandidates(src) : listForeignCandidates(src);
+    const existingNames = new Set(
+      (targetStore.find('tables', { workspaceId }) as Array<{ name: string }>).map((t) =>
+        t.name.toLowerCase(),
+      ),
+    );
+    const plan: ImportPlanEntry[] = [];
+    const skipped: ImportedTableResult[] = [];
+    for (const c of raw) {
+      const candidate: ImportCandidate = {
+        name: c.name,
+        rowCount: c.rowCount,
+        collides: existingNames.has(c.name.toLowerCase()),
+      };
+      const resolved = resolveAction(candidate, decisions);
+      const result =
+        kind === 'easydb'
+          ? importEasydbTable(src, targetStore, workspaceId, c, resolved, undefined, true)
+          : importForeignTable(src, targetStore, workspaceId, c, resolved, undefined, true);
+      if (result.action === 'skipped' || !result.tableId) {
+        skipped.push(result);
+        continue;
+      }
+      // Minimized, and cascaded so restoring them does not stack them all at
+      // one spot. A minimized window mounts no grid and reads no rows (see
+      // `jspanel-manager.ts`), which is what keeps phase 1 free: the user sees
+      // every table they asked for without any of them loading.
+      const n = plan.length;
+      targetStore.patch('tables', result.tableId, {
+        windowGeometry: {
+          x: 40 + (n % 10) * 24,
+          y: 40 + (n % 10) * 24,
+          w: 640,
+          h: 360,
+          z: n,
+          minimized: true,
+          maximized: false,
+        },
+      });
+      plan.push({
+        sourceName: result.sourceName,
+        finalName: result.finalName,
+        tableId: result.tableId,
+        sqlTable: c.sqlTable,
+        total: c.rowCount,
+        kind,
+        action: result.action,
+      });
+    }
+    return { plan, skipped };
+  } finally {
+    src.close();
+  }
+}
+
+/**
+ * Phase 2 — the rows for ONE planned table, yielding progress per batch.
+ *
+ * Deliberately a generator, not a plain function: the IPC handler awaits
+ * between batches so the main process's event loop keeps turning, which is what
+ * lets the window stay usable and repaint the progress while a big table loads.
+ */
+export function* importRowsFor(
+  sourcePath: string,
+  targetStore: SqliteStore,
+  entry: ImportPlanEntry,
+): Generator<ImportProgress> {
+  const src = new DatabaseSync(sourcePath, { readOnly: true });
+  try {
+    const target: RowStreamTarget = {
+      tableId: entry.tableId,
+      sqlTable: entry.sqlTable,
+      finalName: entry.finalName,
+      total: entry.total,
+    };
+    if (entry.action === 'overwritten') clearRows(targetStore, entry.tableId);
+    if (entry.kind === 'easydb') yield* easydbRowBatches(src, targetStore, target);
+    else yield* foreignRowBatches(src, targetStore, target);
+  } finally {
+    src.close();
+  }
 }
 
 /** `PRAGMA table_info` row shape. */
@@ -472,6 +689,8 @@ function importForeignTable(
   candidate: { name: string; sqlTable: string; rowCount: number },
   resolved: { action: 'create' | 'overwrite' | 'rename' | 'skip'; finalName: string },
   onProgress?: ((p: ImportProgress) => void) | undefined,
+  /** Create the table and stop — phase 1 of the two-phase import. */
+  structureOnly = false,
 ): ImportedTableResult {
   if (resolved.action === 'skip') {
     return {
@@ -483,11 +702,7 @@ function importForeignTable(
     };
   }
 
-  const info = src.prepare(`PRAGMA table_info(${quoteIdent(candidate.sqlTable)})`).all() as unknown as RawColumnInfo[];
   const columns = inferForeignColumns(src, candidate.sqlTable);
-  // Original (un-renamed) column names, in the same order as `columns`, for
-  // reading raw SQL values — `safeFieldName` may differ from `c.name`.
-  const sourceFieldNames = info.map((c) => c.name);
 
   const existing =
     resolved.action === 'overwrite'
@@ -509,31 +724,26 @@ function importForeignTable(
   if (existing) targetStore.upsert('tables', table);
   else targetStore.insert('tables', table);
 
-  // An overwrite clears first, then streams like any other import.
-  if (resolved.action === 'overwrite') clearRows(targetStore, tableId);
+  if (structureOnly) {
+    return {
+      sourceName: candidate.name,
+      action: resolved.action === 'create' ? 'created' : resolved.action === 'rename' ? 'renamed' : 'overwritten',
+      finalName: resolved.finalName,
+      tableId,
+      rowCount: 0,
+    };
+  }
 
-  // Each batch is written as it is READ. Nothing accumulates: `readRowBatches`
-  // exists precisely so a large table is never fully materialised, and building
-  // a `docs` array of the whole table first threw that away — a 609,283-row
-  // `northwind.db` drove the Electron main process past 1.4 GB and froze the
-  // window, because every row was alive as a JS object before the first insert.
-  // Covered by `db-import-streaming.test.ts`.
-  const importedAt = Date.now(); // one import is one instant, not one per row
+  if (resolved.action === 'overwrite') clearRows(targetStore, tableId);
   let imported = 0;
-  for (const batch of readRowBatches(src, candidate.sqlTable, sourceFieldNames)) {
-    const docs = batch.map((raw) => {
-      const data: Record<string, unknown> = {};
-      for (let i = 0; i < columns.length; i++) {
-        const spec = columns[i]!;
-        const sourceField = sourceFieldNames[i]!;
-        const v = fromRawSqlValue(spec.type, raw[sourceField]);
-        if (v !== null) data[spec.field] = v;
-      }
-      return { id: randomUUID(), tableId, data, updatedAt: importedAt };
-    });
-    targetStore.bulkInsert('rows', docs);
-    imported += docs.length;
-    onProgress?.({ table: resolved.finalName, rows: imported, total: candidate.rowCount });
+  for (const p of foreignRowBatches(src, targetStore, {
+    tableId,
+    sqlTable: candidate.sqlTable,
+    finalName: resolved.finalName,
+    total: candidate.rowCount,
+  })) {
+    imported = p.rows;
+    onProgress?.(p);
   }
 
   return {

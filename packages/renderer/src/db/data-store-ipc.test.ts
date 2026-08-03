@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PluginRecord, Row, Table, Workspace } from '@easydb/shared';
 import { createIpcDataStore, type EasydbStoreBridge } from './data-store-ipc.js';
 
+/* `fakeBridge`'s methods are async only to match the real IPC bridge's shape —
+   an in-memory Map needs nothing awaited. */
+/* eslint-disable require-await */
+
 /**
  * An in-memory stand-in for `window.easydb.store`. Mirrors
  * `SqliteStore`'s document semantics (whole-doc JSON, promoted-column
@@ -10,9 +14,9 @@ import { createIpcDataStore, type EasydbStoreBridge } from './data-store-ipc.js'
  * synchronously by `broadcast()`, same as the real bridge fires
  * `store:changed` once its own write is done.
  */
-function fakeBridge(): EasydbStoreBridge & { broadcast(coll: string): void } {
+function fakeBridge(): EasydbStoreBridge & { broadcast(coll: string, scope?: string): void } {
   const docs = new Map<string, Map<string, Record<string, unknown>>>();
-  const listeners = new Set<(coll: string) => void>();
+  const listeners = new Set<(coll: string, scope?: string) => void>();
 
   const collOf = (coll: string): Map<string, Record<string, unknown>> => {
     let m = docs.get(coll);
@@ -70,8 +74,8 @@ function fakeBridge(): EasydbStoreBridge & { broadcast(coll: string): void } {
     async dbPath() {
       return ':memory:';
     },
-    broadcast(coll: string) {
-      for (const l of [...listeners]) l(coll);
+    broadcast(coll: string, scope?: string) {
+      for (const l of [...listeners]) l(coll, scope);
     },
   };
 }
@@ -225,6 +229,39 @@ describe('createIpcDataStore', () => {
     bridge.broadcast('rows');
     await flush();
     expect(seenT1.at(-1)?.map((r) => r.id)).toEqual(['r1']);
+  });
+
+  /**
+   * An import fills one table at a time and broadcasts per table. Without a
+   * scope, each of those broadcasts re-read EVERY open table's rows — quadratic,
+   * and ruinous when one of them holds 609k rows. A scoped broadcast is for the
+   * named table only; an unscoped one still reaches everybody.
+   */
+  it('a row broadcast scoped to one table leaves the other tables alone', async () => {
+    const bridge = fakeBridge();
+    const store = createIpcDataStore(bridge, () => 'ws1');
+    await store.rows('t1').insert(row('r1', 't1'));
+    await store.rows('t2').insert(row('r2', 't2'));
+
+    const runsT1: number[] = [];
+    const runsT2: number[] = [];
+    store.rows('t1').subscribe((docs) => runsT1.push(docs.length));
+    store.rows('t2').subscribe((docs) => runsT2.push(docs.length));
+    await flush();
+    expect(runsT1).toHaveLength(1);
+    expect(runsT2).toHaveLength(1);
+
+    bridge.broadcast('rows', 't1');
+    await flush();
+    expect(runsT1).toHaveLength(2);
+    expect(runsT2).toHaveLength(1); // untouched — this is the whole point
+
+    // No scope means "something changed, everyone re-read", as every ordinary
+    // write does.
+    bridge.broadcast('rows');
+    await flush();
+    expect(runsT1).toHaveLength(3);
+    expect(runsT2).toHaveLength(2);
   });
 
   it('delivers the newest state even when an earlier re-run resolves later (out-of-order IPC)', async () => {

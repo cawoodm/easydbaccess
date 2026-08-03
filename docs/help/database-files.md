@@ -52,7 +52,7 @@ there is no workspace in it. The app offers two ways forward instead:
 
 | Choice | What happens |
 |---|---|
-| **Convert to EDA** | A **new** file is written that holds the same tables as a workspace, and that new file is opened. The file you picked is not changed. |
+| **Convert to EDA** | The app asks **which tables** to take, then writes a **new** file holding them as a workspace and opens it. The file you picked is not changed. |
 | **Browse** | A read-only look at the file, as above. |
 
 If the file is not a database at all, the app says so and stops.
@@ -60,9 +60,12 @@ If the file is not a database at all, the app says so and stops.
 Nothing is written to the file you picked until you agree to one of those.
 Your current file is also left exactly as it is on disk.
 
-**Convert to EDA copies tables, not views.** A view is a question asked of the
-data, and this app asks such questions with a Projection instead of SQL. Use
-**Browse** or **Import data** if you want the rows a view returns.
+**Convert to EDA leaves views out unless you pick one.** A view is a question
+asked of the data, and this app asks such questions with a Projection instead of
+SQL. Copying a view also copies rows you already have: converting the sample
+`northwind.db` with its views means 1.9 million rows instead of 626 thousand.
+The "skip the views" choice is there for exactly that reason. Use **Browse** or
+**Import data** if you only want to look at what a view returns.
 
 ## Save As
 

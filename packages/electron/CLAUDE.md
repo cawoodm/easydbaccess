@@ -14,7 +14,7 @@ Dexie/IndexedDB.
 | `src/db-files.ts` | The store singleton (open / close / switch, remembered path) and the Open / Save As file operations, including the OS dialogs. |
 | `src/db-import.ts` | Reads **any** SQLite file's `sqlite_master` and imports its tables and views — a two-phase preview-then-commit so the renderer can resolve name collisions first. Also `probeDatabaseFile`, the guard Open needs. |
 | `src/db-browse.ts` | Read-only listing and reading of a file's tables + views, for Browse. Never writes — not even a `-wal`. |
-| `src/db-convert.ts` | Convert to EDA: writes a NEW workspace file from a foreign one, leaving the original alone. |
+| `src/db-convert.ts` | Convert to EDA: writes a NEW workspace file from a foreign one, leaving the original alone. Takes an `only` list of source object names — the renderer asks which, the same as Import does; without it, every table (no views). |
 | `src/preload.ts` | contextBridge surface exposed as `window.easydb`: `{ platform, version, store, db }`. Never the raw `ipcRenderer`. |
 | `scripts/dev.cjs` | Boots `dev:renderer` (Vite) first, then launches Electron with `EASYDB_RENDERER_URL` pointing at it. |
 | `scripts/check-frontend.cjs` | `prestart` guard — fails with a readable message instead of Chromium's "Not allowed to load local resource" when `frontend/index.html` was never built. |

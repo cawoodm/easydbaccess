@@ -5,7 +5,7 @@ import { openFlow } from './electron-db.js';
 
 /* The fakes in `harness` return settled promises without awaiting anything —
    that is what a stub is. */
-/* eslint-disable @typescript-eslint/require-await */
+/* eslint-disable require-await */
 
 /**
  * What the app does with a `.db`, per verdict of the read-only probe.
@@ -31,6 +31,10 @@ interface Recorded {
   committedOpens: string[];
   importedPaths: Array<string | undefined>;
   convertedPaths: string[];
+  /** The object names each convert was narrowed to (`null` = the whole file). */
+  convertedNames: Array<string[] | null>;
+  preparedPaths: string[];
+  importedTableIds: string[];
   browsedPaths: string[];
   inserted: Array<Record<string, unknown>>;
 }
@@ -50,6 +54,9 @@ function harness(opts: {
     committedOpens: [],
     importedPaths: [],
     convertedPaths: [],
+    convertedNames: [],
+    preparedPaths: [],
+    importedTableIds: [],
     browsedPaths: [],
     inserted: [],
   };
@@ -82,11 +89,34 @@ function harness(opts: {
         rowCount: 1,
       },
     ],
-    convertDb: async (sourcePath: string) => {
+    convertDb: async (sourcePath: string, only?: string[]) => {
       rec.convertedPaths.push(sourcePath);
+      rec.convertedNames.push(only ?? null);
       return { ok: true as const, path: `${sourcePath}.eda.db`, tables: [] };
     },
     probeDb: async () => opts.kind,
+    importPrepare: async (sourcePath: string) => {
+      rec.preparedPaths.push(sourcePath);
+      return {
+        plan: [
+          {
+            sourceName: 'bookmarks',
+            finalName: 'bookmarks',
+            tableId: 't1',
+            sqlTable: 'bookmarks',
+            total: 1,
+            kind: 'foreign' as const,
+            action: 'created' as const,
+          },
+        ],
+        skipped: [],
+      };
+    },
+    importRows: async (_sourcePath: string, entry: { tableId: string; total: number }) => {
+      rec.importedTableIds.push(entry.tableId);
+      return entry.total;
+    },
+    onImportProgress: () => () => undefined,
     browseList: async (sourcePath: string) => {
       rec.browsedPaths.push(sourcePath);
       return [
@@ -199,7 +229,7 @@ describe('electron-db — Open Workspace', () => {
     const { api, bridge, rec } = harness({
       kind: 'foreign',
       path: 'C:/northwind.db',
-      choices: ['Open Workspace', 'Convert to EDA'],
+      choices: ['Open Workspace', 'Convert to EDA', 'All 2'],
     });
     await openFlow(api, bridge);
 
@@ -207,6 +237,42 @@ describe('electron-db — Open Workspace', () => {
     expect(rec.choices[1]!.message).toContain('not an easyDBAccess workspace');
     expect(rec.convertedPaths).toEqual(['C:/northwind.db']);
     expect(rec.committedOpens).toEqual([]);
+  });
+
+  it('Convert asks which objects first, and converts only those', async () => {
+    const { api, bridge, rec } = harness({
+      kind: 'foreign',
+      path: 'C:/northwind.db',
+      choices: ['Open Workspace', 'Convert to EDA', 'bookmarks — 3 rows'],
+    });
+    await openFlow(api, bridge);
+
+    expect(rec.choices[2]!.message).toContain('Which tables or views');
+    // The tables-without-the-views shortcut is offered here (Browse doesn't get it).
+    expect(rec.choices[2]!.options).toContain('All 1 table (skip the views)');
+    expect(rec.convertedNames).toEqual([['bookmarks']]);
+  });
+
+  it('Convert can skip the views in one step', async () => {
+    const { api, bridge, rec } = harness({
+      kind: 'foreign',
+      path: 'C:/northwind.db',
+      choices: ['Open Workspace', 'Convert to EDA', 'All 1 table (skip the views)'],
+    });
+    await openFlow(api, bridge);
+
+    expect(rec.convertedNames).toEqual([['bookmarks']]);
+  });
+
+  it('dismissing the which-objects prompt converts nothing', async () => {
+    const { api, bridge, rec } = harness({
+      kind: 'foreign',
+      path: 'C:/northwind.db',
+      choices: ['Open Workspace', 'Convert to EDA', null],
+    });
+    await openFlow(api, bridge);
+
+    expect(rec.convertedPaths).toEqual([]);
   });
 
   it('choosing Browse from that sub-prompt browses the same file', async () => {
@@ -304,5 +370,18 @@ describe('electron-db — Import data', () => {
 
     expect(rec.importedPaths).toEqual(['C:/northwind.db']);
     expect(rec.committedOpens).toEqual([]);
+  });
+
+  it('creates the structure first, then fills it — the file is only picked once', async () => {
+    const { api, bridge, rec } = harness({
+      kind: 'foreign',
+      path: 'C:/northwind.db',
+      choices: ['Import data'],
+    });
+    await openFlow(api, bridge);
+
+    // Phase 1 runs on the already-picked path, phase 2 fills what it created.
+    expect(rec.preparedPaths).toEqual(['C:/northwind.db']);
+    expect(rec.importedTableIds).toEqual(['t1']);
   });
 });

@@ -18,34 +18,30 @@
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { CurrentDbInfo, DialogResult, CancelledResult } from './db-files';
-import type {
-  DatabaseFileKind,
-  ImportDecision,
-  ImportedTableResult,
-  ImportPreview,
-} from './db-import';
+import type { DatabaseFileKind, ImportDecision, ImportedTableResult, ImportPreview } from './db-import';
 import type { BrowsableObject, BrowseRow } from './db-browse';
+import type { ImportPlan, ImportPlanEntry, ImportProgress } from './db-import';
+
+/** `import:progress` payload — an `ImportProgress` plus which table it is about. */
+type ImportProgressEvent = ImportProgress & { tableId: string; done?: boolean };
 
 const store = {
-  find: (coll: string, query?: Record<string, unknown>): Promise<unknown[]> =>
-    ipcRenderer.invoke('store:find', coll, query),
-  findOne: (coll: string, key: string): Promise<unknown | null> =>
-    ipcRenderer.invoke('store:findOne', coll, key),
-  insert: (coll: string, doc: Record<string, unknown>): Promise<unknown> =>
-    ipcRenderer.invoke('store:insert', coll, doc),
-  bulkInsert: (coll: string, docs: Record<string, unknown>[]): Promise<unknown[]> =>
-    ipcRenderer.invoke('store:bulkInsert', coll, docs),
-  upsert: (coll: string, doc: Record<string, unknown>): Promise<unknown> =>
-    ipcRenderer.invoke('store:upsert', coll, doc),
-  patch: (coll: string, key: string, patch: Record<string, unknown>): Promise<unknown> =>
-    ipcRenderer.invoke('store:patch', coll, key, patch),
+  find: (coll: string, query?: Record<string, unknown>): Promise<unknown[]> => ipcRenderer.invoke('store:find', coll, query),
+  findOne: (coll: string, key: string): Promise<unknown | null> => ipcRenderer.invoke('store:findOne', coll, key),
+  insert: (coll: string, doc: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('store:insert', coll, doc),
+  bulkInsert: (coll: string, docs: Record<string, unknown>[]): Promise<unknown[]> => ipcRenderer.invoke('store:bulkInsert', coll, docs),
+  upsert: (coll: string, doc: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('store:upsert', coll, doc),
+  patch: (coll: string, key: string, patch: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('store:patch', coll, key, patch),
   remove: (coll: string, key: string): Promise<void> => ipcRenderer.invoke('store:remove', coll, key),
-  bulkRemove: (coll: string, keys: string[]): Promise<void> =>
-    ipcRenderer.invoke('store:bulkRemove', coll, keys),
+  bulkRemove: (coll: string, keys: string[]): Promise<void> => ipcRenderer.invoke('store:bulkRemove', coll, keys),
   count: (coll: string): Promise<number> => ipcRenderer.invoke('store:count', coll),
-  /** Subscribes to `store:changed` broadcasts; returns an unsubscribe function. */
-  onChanged: (cb: (coll: string) => void): (() => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, coll: string): void => cb(coll);
+  /**
+   * Subscribes to `store:changed` broadcasts; returns an unsubscribe function.
+   * `scope` is set when the change is confined to one table's rows (its
+   * `tableId`) — see `broadcastChanged` in `main.ts`.
+   */
+  onChanged: (cb: (coll: string, scope?: string) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, coll: string, scope?: string): void => cb(coll, scope);
     ipcRenderer.on('store:changed', listener);
     return () => ipcRenderer.removeListener('store:changed', listener);
   },
@@ -68,33 +64,25 @@ const store = {
  * `openDb()`/`saveDbAs()`/`importDb()`/`currentDb()` — see the report for why.
  */
 const db = {
-  openDb: (): Promise<DialogResult<{ path: string; kind: DatabaseFileKind }> | CancelledResult> =>
-    ipcRenderer.invoke('db:open'),
-  openDbCommit: (newPath: string): Promise<{ ok: true; path: string }> =>
-    ipcRenderer.invoke('db:openCommit', newPath),
-  saveDbAs: (): Promise<DialogResult<{ path: string }> | CancelledResult> =>
-    ipcRenderer.invoke('db:saveAs'),
-  importDb: (
-    workspaceId: string,
-    sourcePath?: string,
-  ): Promise<DialogResult<{ path: string; preview: ImportPreview }> | CancelledResult> =>
-    ipcRenderer.invoke('db:import', workspaceId, sourcePath),
-  importDbCommit: (
-    sourcePath: string,
-    workspaceId: string,
-    decisions: Record<string, ImportDecision>,
-  ): Promise<ImportedTableResult[]> =>
+  openDb: (): Promise<DialogResult<{ path: string; kind: DatabaseFileKind }> | CancelledResult> => ipcRenderer.invoke('db:open'),
+  openDbCommit: (newPath: string): Promise<{ ok: true; path: string }> => ipcRenderer.invoke('db:openCommit', newPath),
+  saveDbAs: (): Promise<DialogResult<{ path: string }> | CancelledResult> => ipcRenderer.invoke('db:saveAs'),
+  importDb: (workspaceId: string, sourcePath?: string): Promise<DialogResult<{ path: string; preview: ImportPreview }> | CancelledResult> => ipcRenderer.invoke('db:import', workspaceId, sourcePath),
+  importDbCommit: (sourcePath: string, workspaceId: string, decisions: Record<string, ImportDecision>): Promise<ImportedTableResult[]> =>
     ipcRenderer.invoke('db:importCommit', sourcePath, workspaceId, decisions),
-  convertDb: (
-    sourcePath: string,
-  ): Promise<DialogResult<{ path: string; tables: ImportedTableResult[] }> | CancelledResult> =>
-    ipcRenderer.invoke('db:convert', sourcePath),
-  probeDb: (sourcePath: string): Promise<DatabaseFileKind> =>
-    ipcRenderer.invoke('db:probe', sourcePath),
-  browseList: (sourcePath: string): Promise<BrowsableObject[]> =>
-    ipcRenderer.invoke('db:browseList', sourcePath),
-  browseRows: (sourcePath: string, objectName: string, columns: unknown[]): Promise<BrowseRow[]> =>
-    ipcRenderer.invoke('db:browseRows', sourcePath, objectName, columns),
+  convertDb: (sourcePath: string, only?: string[]): Promise<DialogResult<{ path: string; tables: ImportedTableResult[]; pending: number }> | CancelledResult> => ipcRenderer.invoke('db:convert', sourcePath, only),
+  probeDb: (sourcePath: string): Promise<DatabaseFileKind> => ipcRenderer.invoke('db:probe', sourcePath),
+  importPrepare: (sourcePath: string, workspaceId: string, decisions: Record<string, ImportDecision>): Promise<ImportPlan> =>
+    ipcRenderer.invoke('db:importPrepare', sourcePath, workspaceId, decisions),
+  importRows: (sourcePath: string, entry: ImportPlanEntry): Promise<number> => ipcRenderer.invoke('db:importRows', sourcePath, entry),
+  /** Per-batch import progress for a table. Returns an unsubscribe function. */
+  onImportProgress: (cb: (p: ImportProgressEvent) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, p: ImportProgressEvent): void => cb(p);
+    ipcRenderer.on('import:progress', listener);
+    return () => ipcRenderer.removeListener('import:progress', listener);
+  },
+  browseList: (sourcePath: string): Promise<BrowsableObject[]> => ipcRenderer.invoke('db:browseList', sourcePath),
+  browseRows: (sourcePath: string, objectName: string, columns: unknown[]): Promise<BrowseRow[]> => ipcRenderer.invoke('db:browseRows', sourcePath, objectName, columns),
   /**
    * The real filesystem path of a dropped `File`. `File.path` was removed in
    * Electron 32, so `webUtils.getPathForFile` is the only way to get it — and it
@@ -135,28 +123,20 @@ declare global {
         remove(coll: string, key: string): Promise<void>;
         bulkRemove(coll: string, keys: string[]): Promise<void>;
         count(coll: string): Promise<number>;
-        onChanged(cb: (coll: string) => void): () => void;
+        onChanged(cb: (coll: string, scope?: string) => void): () => void;
         dbPath(): Promise<string>;
       };
       db: {
-        openDb(): Promise<
-          DialogResult<{ path: string; kind: DatabaseFileKind }> | CancelledResult
-        >;
+        openDb(): Promise<DialogResult<{ path: string; kind: DatabaseFileKind }> | CancelledResult>;
         openDbCommit(newPath: string): Promise<{ ok: true; path: string }>;
         saveDbAs(): Promise<DialogResult<{ path: string }> | CancelledResult>;
-        importDb(
-          workspaceId: string,
-          sourcePath?: string,
-        ): Promise<DialogResult<{ path: string; preview: ImportPreview }> | CancelledResult>;
-        importDbCommit(
-          sourcePath: string,
-          workspaceId: string,
-          decisions: Record<string, ImportDecision>,
-        ): Promise<ImportedTableResult[]>;
-        convertDb(
-          sourcePath: string,
-        ): Promise<DialogResult<{ path: string; tables: ImportedTableResult[] }> | CancelledResult>;
+        importDb(workspaceId: string, sourcePath?: string): Promise<DialogResult<{ path: string; preview: ImportPreview }> | CancelledResult>;
+        importDbCommit(sourcePath: string, workspaceId: string, decisions: Record<string, ImportDecision>): Promise<ImportedTableResult[]>;
+        convertDb(sourcePath: string, only?: string[]): Promise<DialogResult<{ path: string; tables: ImportedTableResult[] }> | CancelledResult>;
         probeDb(sourcePath: string): Promise<DatabaseFileKind>;
+        importPrepare(sourcePath: string, workspaceId: string, decisions: Record<string, ImportDecision>): Promise<ImportPlan>;
+        importRows(sourcePath: string, entry: ImportPlanEntry): Promise<number>;
+        onImportProgress(cb: (p: ImportProgressEvent) => void): () => void;
         browseList(sourcePath: string): Promise<BrowsableObject[]>;
         browseRows(sourcePath: string, objectName: string, columns: unknown[]): Promise<BrowseRow[]>;
         pathForFile(file: File): string;
