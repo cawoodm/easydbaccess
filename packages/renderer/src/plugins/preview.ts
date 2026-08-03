@@ -191,6 +191,8 @@ class PreviewCell extends HTMLElement {
       contentSize: { w: 520, h: 400 },
       position: { centerTopOffset: 60 },
       boot: { maximized: isMobileViewport() },
+      // Read-and-dismiss, like a dialog: Escape closes it.
+      closeOnEscape: true,
       minimizeTo: '#easydb-minimized-dock',
       viewport: shellViewport(),
     });

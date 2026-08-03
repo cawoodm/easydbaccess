@@ -8,6 +8,7 @@ import { FilterPopover } from '../chrome/filter-popover.js';
 import '../chrome/filter-combobox.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { matchesColumnFilter } from '../search/column-filter.js';
+import { facetable, facetValues } from '../search/facet-values.js';
 import { runColumnScript } from '../util/column-script.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
@@ -1102,45 +1103,18 @@ export class DataTable extends LitElement {
   }
 
   /**
-   * Decide per-column whether to feed the <filter-combobox> a suggestion
-   * list. Rule: every value in the first 100 rows must stringify to fewer
-   * than 50 characters. Long-text or "description"-style columns are
-   * excluded so the dropdown doesn't fill with multi-line content.
-   *
-   * Returns a Map from column field → sorted unique values (capped at 500).
-   * The value list for each column is FACETED — it reflects only rows that
-   * pass the OTHER columns' filters, so selecting a value in one column
-   * narrows what's available in the others. Drill-down UX.
+   * The suggestion list each <filter-combobox> gets: column field → sorted
+   * unique values. Long-text columns are left out entirely, and each list is
+   * FACETED against the OTHER columns' filters, so picking a value in one column
+   * narrows what the others offer. Drill-down UX. Both rules live in
+   * `search/facet-values.ts`, which a view window's filter chip shares.
    */
   private computeFilterSuggestions(): Map<string, string[]> {
     const out = new Map<string, string[]>();
-    const eligibilitySample = this.rows.slice(0, 100);
-    if (eligibilitySample.length === 0) return out;
-    const MAX_LEN = 50;
-    const MAX_OPTIONS = 500;
     for (const c of this.visibleColumns) {
-      let eligible = true;
-      for (const r of eligibilitySample) {
-        const v = r.data[c.field];
-        if (v == null) continue;
-        const s = typeof v === 'string' ? v : String(v);
-        if (s.length >= MAX_LEN) {
-          eligible = false;
-          break;
-        }
-      }
-      if (!eligible) continue;
-      const seen = new Set<string>();
+      if (!facetable(this.rows, c.field)) continue;
       // Faceted source: rows passing every other column's filter.
-      for (const r of this.rowsFacetedFor(c.field)) {
-        const v = r.data[c.field];
-        if (v == null || v === '') continue;
-        const s = typeof v === 'string' ? v : String(v);
-        if (s.length >= MAX_LEN) continue;
-        seen.add(s);
-        if (seen.size >= MAX_OPTIONS) break;
-      }
-      out.set(c.field, [...seen].sort());
+      out.set(c.field, facetValues(this.rowsFacetedFor(c.field), c.field));
     }
     return out;
   }
