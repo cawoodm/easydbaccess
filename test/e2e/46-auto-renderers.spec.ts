@@ -3,7 +3,7 @@ import { test, expect } from './fixtures.js';
 /**
  * The `auto-renderer` built-in plugin gives freshly imported columns a renderer
  * based on their values: an image URL gets `image`, any other URL gets `link`,
- * markup or long prose gets `html-preview`.
+ * markup or long prose gets `preview`.
  *
  * It listens on `import:after`, so it applies to EVERY importer without any of
  * them knowing about it — that is what makes "regardless of which plugin does
@@ -59,7 +59,7 @@ const PEOPLE_CSV = [
   `Grace,https://example.com/grace,https://img.test/grace.jpg,"${LONG}",2026-03-04,false`,
 ].join('\n');
 
-test('a CSV import picks link, image and html-preview from the values', async ({
+test('a CSV import picks link, image and preview from the values', async ({
   page,
   workspaceId,
 }) => {
@@ -72,7 +72,7 @@ test('a CSV import picks link, image and html-preview from the values', async ({
       name: null, // short plain text — no renderer
       homepage: 'link',
       avatar: 'image',
-      bio: 'html-preview',
+      bio: 'preview',
       joined: 'date', // from the type, which csv-import already did
       active: 'boolean',
     });
@@ -105,7 +105,7 @@ test('a JSON import gets the same treatment, which it used not to get at all', a
       title: null,
       link: 'link',
       thumb: 'image',
-      html: 'html-preview',
+      html: 'preview',
     });
 });
 

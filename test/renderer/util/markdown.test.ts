@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { markdownToHtml } from '../../../packages/renderer/src/util/markdown.js';
+import { looksLikeMarkdown, markdownToHtml } from '../../../packages/renderer/src/util/markdown.js';
 
 describe('markdownToHtml: blocks', () => {
   it('renders headings, paragraphs and a horizontal rule', () => {
@@ -164,5 +164,54 @@ describe('markdownToHtml: edge cases', () => {
 
   it('keeps the indented # as text rather than dropping it', () => {
     expect(markdownToHtml('    brew install x\n    # wait a bit...')).toContain('# wait a bit...');
+  });
+});
+
+describe('looksLikeMarkdown', () => {
+  // The `preview` renderer converts a cell only when this says yes, so a false
+  // positive turns someone's plain prose into markup they never asked for.
+  it.each([
+    ['a heading', '# Title'],
+    ['a heading mid-value', 'intro\n\n## Section'],
+    ['a bullet list', '- one\n- two'],
+    ['an ordered list', '1. first\n2. second'],
+    ['a blockquote', '> quoted'],
+    ['a fenced block', '```js\nconst a = 1;\n```'],
+    ['a thematic break', 'above\n\n---\n\nbelow'],
+    ['bold', 'a **bold** word'],
+    ['strikethrough', 'a ~~struck~~ word'],
+    ['a code span', 'run `npm test` first'],
+    ['a link', 'see [the docs](https://x.dev)'],
+    ['an image', '![alt](https://x.dev/a.png)'],
+    ['a table', '| a | b |\n| --- | --- |\n| 1 | 2 |'],
+  ])('says yes to %s', (_label, src) => {
+    expect(looksLikeMarkdown(src)).toBe(true);
+  });
+
+  it.each([
+    ['plain prose', 'Just a sentence about nothing in particular.'],
+    ['a bare dash', 'sales - marketing'],
+    ['a lone hash', 'issue #42 is open'],
+    ['a multiplication', 'SELECT a*b*c FROM t'],
+    ['a dunder name', 'call __init__ on the class'],
+    ['snake_case', 'the max_chars setting'],
+    ['a chevron log line', '>>> ERROR: disk full'],
+    ['spaced underscores', 'a _ b _ c'],
+    ['a delimiter row with no header', '| --- | --- |'],
+    ['an empty value', ''],
+    ['whitespace', '  \n '],
+  ])('says no to %s', (_label, src) => {
+    expect(looksLikeMarkdown(src)).toBe(false);
+  });
+
+  it('says no to anything that is not a string', () => {
+    expect(looksLikeMarkdown(null)).toBe(false);
+    expect(looksLikeMarkdown(undefined)).toBe(false);
+    expect(looksLikeMarkdown(42)).toBe(false);
+    expect(looksLikeMarkdown({ a: 1 })).toBe(false);
+  });
+
+  it('recognises Markdown with CRLF line endings', () => {
+    expect(looksLikeMarkdown('# Title\r\n\r\nbody')).toBe(true);
   });
 });

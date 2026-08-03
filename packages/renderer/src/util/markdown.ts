@@ -148,6 +148,54 @@ const ALIGN = (spec: string): string => {
 };
 
 /**
+ * Line markers that mean the value IS Markdown. Stricter than the block openers
+ * the converter runs on: each needs real content after the marker, so a lone `#`
+ * or a `>` in ">>> ERROR" does not qualify. The converter can afford to be loose
+ * — it has already been told the value is Markdown — while detection cannot.
+ */
+const MD_BLOCK: readonly RegExp[] = [
+  /^ {0,3}#{1,6}\s+\S/, // heading
+  /^ {0,3}>[ \t]+\S/, // blockquote
+  /^ {0,3}[-*+][ \t]+\S/, // bullet list
+  /^ {0,3}\d+[.)][ \t]+\S/, // ordered list
+  /^ {0,3}(?:```|~~~)/, // fenced code
+  HR_RE, // thematic break
+];
+
+/**
+ * Inline markers that mean the value IS Markdown. Deliberately narrower than
+ * what the converter accepts: `*em*` and `__bold__` are left out, because
+ * `SELECT a*b*c` and `__init__` are ordinary text that would otherwise be read
+ * as Markdown.
+ */
+const MD_INLINE: readonly RegExp[] = [
+  /\*\*(?!\s)[^*\n]+\*\*/, // **bold**
+  /~~(?!\s)[^~\n]+~~/, // ~~strike~~
+  /`[^`\n]+`/, // `code`
+  /!?\[[^\]\n]*\]\([^)\s]+\)/, // [text](url) and ![alt](url)
+];
+
+/**
+ * True when `src` plausibly IS Markdown. Used by the `preview` renderer, which
+ * converts a cell before showing it — so a column of Markdown reads as
+ * formatted text without anyone writing a script for it.
+ *
+ * A false positive turns ordinary prose into markup, so a value counts as
+ * Markdown only on a marker with no plain-text reading: a heading, a list, a
+ * blockquote, a fence, a rule, a table delimiter, `**bold**`, `~~strike~~`,
+ * `` `code` `` or a `[link](url)`. Everything else is text. HTML is not tested
+ * for here — a caller that has both decides which one wins.
+ */
+export function looksLikeMarkdown(src: unknown): boolean {
+  if (typeof src !== 'string' || src.trim() === '') return false;
+  const lines = src.replace(/\r\n?/g, '\n').split('\n');
+  if (lines.some((l) => MD_BLOCK.some((re) => re.test(l)))) return true;
+  if (MD_INLINE.some((re) => re.test(src))) return true;
+  // A delimiter row is only a table with a header row above it.
+  return lines.some((l, i) => i > 0 && DELIM_RE.test(l) && l.includes('-') && (lines[i - 1] ?? '').includes('|'));
+}
+
+/**
  * Convert Markdown to an HTML string.
  *
  * Call it from a column script:

@@ -150,7 +150,7 @@ From `TODO.md`, items that touch this:
   the merged set are all in memory at once. §3.6 gets worse with size, not
   better.
 - **"When importing, automatically apply renderer link for URL fields,
-  html-preview for long text…"** Landed as the `auto-renderer` plugin, which
+  preview for long text…"** Landed as the `auto-renderer` plugin, which
   listens on `import:after`. A REFRESH does not emit that event, so a column a
   refresh discovers still arrives with no renderer while its neighbours have
   one — the gap this note predicted, now narrowed to one event.

@@ -11,6 +11,7 @@ import { ScriptEditorDialog } from './script-editor-dialog.js';
 import { buildColumnSpec, type ColumnRow } from './column-row.js';
 import { renameRowFields, type FieldRename } from '../table/column-merge.js';
 import { HostDialogs } from './host-dialogs.js';
+import { LEGACY_CELL_RENDERERS } from '../plugin-host/registries.js';
 import {
   describeReferences,
   findTableReferences,
@@ -20,6 +21,20 @@ import {
 } from '../table/table-references.js';
 
 const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'datetime'];
+
+/** Registered renderer names worth offering, sorted; legacy aliases dropped. */
+function offerableRenderers(registered: ReadonlyMap<string, string>): string[] {
+  return [...registered.keys()].filter((name) => !LEGACY_CELL_RENDERERS.has(name)).sort();
+}
+
+/**
+ * The names to list for ONE column: the offerable ones, plus whatever the column
+ * already carries. Without that last part a column saved under a renamed
+ * renderer would show "— none —" while still having one.
+ */
+function rendererOptionsFor(offered: readonly string[], current: string | undefined): string[] {
+  return current && !offered.includes(current) ? [...offered, current] : [...offered];
+}
 
 /**
  * Warn before a rename that will move name-based references with it.
@@ -301,6 +316,7 @@ export class NewTableDialog extends LitElement {
    * Snapshot of renderer names registered at open time. Populated from
    * `registries.cellRenderers` keys; built-in renderers (date, datetime,
    * boolean, color, image, link) and any plugin-registered ones land here.
+   * Names kept only for older columns are left out — see LEGACY_CELL_RENDERERS.
    */
   @state() private rendererOptions: string[] = [];
   /**
@@ -333,11 +349,11 @@ export class NewTableDialog extends LitElement {
     // while the dialog is open — a plugin install after dialog open should
     // surface its renderer too. The unsub fires on close().
     const ctxForRenderers = await getContext();
-    this.rendererOptions = [...ctxForRenderers.registries.cellRenderers.keys()].sort();
+    this.rendererOptions = offerableRenderers(ctxForRenderers.registries.cellRenderers);
     this.rendererSubUnsub?.();
     this.columnActions = [...ctxForRenderers.registries.columnEditorActions];
     this.rendererSubUnsub = ctxForRenderers.events.on('app:ready', () => {
-      this.rendererOptions = [...ctxForRenderers.registries.cellRenderers.keys()].sort();
+      this.rendererOptions = offerableRenderers(ctxForRenderers.registries.cellRenderers);
       this.columnActions = [...ctxForRenderers.registries.columnEditorActions];
     });
     if (tableId) {
@@ -892,7 +908,7 @@ export class NewTableDialog extends LitElement {
                       }}
                     >
                       <option value="" ?selected=${!c.renderer}>— none —</option>
-                      ${this.rendererOptions.map(
+                      ${rendererOptionsFor(this.rendererOptions, c.renderer).map(
                         (r) => html`<option value=${r} ?selected=${r === c.renderer}>${r}</option>`,
                       )}
                     </select>

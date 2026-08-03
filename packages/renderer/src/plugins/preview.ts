@@ -2,36 +2,45 @@ import type { HostApi, PluginModule } from '@easydb/shared';
 import { createPanel } from '../window-mgr/panel-shell/panel-shell.js';
 import { shellViewport } from '../window-mgr/jspanel-manager.js';
 import { looksLikeHtml, htmlToPreviewText } from '../util/html-text.js';
+import { looksLikeMarkdown, markdownToHtml } from '../util/markdown.js';
 import { isMobileViewport } from '../util/viewport.js';
-import { iconButton, openHtmlEditor, PENCIL_SVG, popupContainer, POPOUT_SVG } from './html-cell-editor.js';
+import { iconButton, openHtmlEditor, popupContainer, POPOUT_SVG } from './html-cell-editor.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
-  id: 'html-preview',
-  name: 'HTML Preview',
+  id: 'preview',
+  name: 'Preview',
   type: 'cell-renderer',
-  version: '0.3.0',
+  version: '0.4.0',
   description:
-    'Shows a cell\'s HTML as a plain-text preview (first N characters); click to edit the raw HTML in a dialog, or use the popup icon to view the full rendered HTML in a window. Apply by setting a column\'s renderer to "html-preview". For direct in-cell rendering use the "html" renderer instead.',
+    'Shows a long value as a plain-text preview (first N characters); click to edit the source in a dialog, or use the popup icon to open the full value in a window. HTML is shown there as markup, and Markdown is recognised and converted first — so a Markdown column reads as formatted text without a script. Apply by setting a column\'s renderer to "preview". For direct in-cell rendering use the "html" renderer instead.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
-  repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/html-preview.ts',
+  repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/preview.ts',
 };
 
 /** How many characters of the plain text to show inline before truncating.
- *  Configurable via Settings → HTML Preview; read at init and on `app:ready`. */
+ *  Configurable via Settings → Preview; read at init and on `app:ready`. */
 let maxChars = 30;
 
 async function refreshMaxChars(api: HostApi): Promise<void> {
-  const v = await api.settings.get<number>('html-preview', 'maxChars');
+  // Read under the `preview` id. A workspace that set this number while the
+  // plugin was still `html-preview` (to v0.0.281) is back on the default of 30:
+  // `settings.get` resolves the field default, so a value under the old id
+  // cannot be told apart from one that was never set.
+  const v = await api.settings.get<number>('preview', 'maxChars');
   if (typeof v === 'number' && Number.isFinite(v) && v > 0) maxChars = Math.floor(v);
 }
 
 export function init(api: HostApi): void {
-  if (!customElements.get('html-preview-cell')) {
-    customElements.define('html-preview-cell', HtmlPreviewCell);
+  if (!customElements.get('preview-cell')) {
+    customElements.define('preview-cell', PreviewCell);
   }
-  api.ui.registerCellRenderer('html-preview', 'html-preview-cell');
-  api.ui.registerSettings('html-preview', 'HTML Preview', [
+  api.ui.registerCellRenderer('preview', 'preview-cell');
+  // Columns saved before the rename still say `html-preview`, so the old name
+  // stays a working alias. The columns editor hides it — see
+  // LEGACY_CELL_RENDERERS — so it is never offered as a new choice.
+  api.ui.registerCellRenderer('html-preview', 'preview-cell');
+  api.ui.registerSettings('preview', 'Preview', [
     {
       key: 'maxChars',
       label: 'Max characters shown',
@@ -39,7 +48,7 @@ export function init(api: HostApi): void {
       default: 30,
       scope: 'workspace',
       description:
-        'HTML-preview cells show the first N characters of the text; use the popup icon on the right to open the full rendered HTML in a window. Applies to cells rendered after the change (reload to refresh all).',
+        'Preview cells show the first N characters of the text; use the popup icon on the right to open the full value in a window. Applies to cells rendered after the change (reload to refresh all).',
     },
   ]);
   void refreshMaxChars(api);
@@ -49,17 +58,32 @@ export function init(api: HostApi): void {
 let popupSeq = 0;
 
 /**
- * Cell renderer for HTML-valued columns: shows the value's PLAIN TEXT (tags
- * stripped) truncated to `maxChars`, with a small gray popup icon on the right
- * of the column that opens the full RENDERED HTML in a resizable window.
- * Clicking the text opens a dialog to edit the raw HTML. The cell itself never
- * renders arbitrary HTML — only the view popup does.
+ * The value as HTML, or `null` when it is plain text and must not be parsed as
+ * markup.
+ *
+ * Markdown is converted here rather than left to a column script: a Markdown
+ * column is just data, and the value carries enough evidence to recognise
+ * itself — see `looksLikeMarkdown`, which is deliberately strict about that.
+ * Real markup wins the tie and passes through untouched.
  */
-class HtmlPreviewCell extends HTMLElement {
+function asHtml(value: string): string | null {
+  if (looksLikeHtml(value)) return value;
+  if (looksLikeMarkdown(value)) return markdownToHtml(value);
+  return null;
+}
+
+/**
+ * Cell renderer for long values: shows the value's PLAIN TEXT (markup stripped,
+ * Markdown flattened) truncated to `maxChars`, with a small gray popup icon on
+ * the right of the column that opens the full RENDERED value in a resizable
+ * window. Clicking the text opens a dialog to edit the source. The cell itself
+ * never renders arbitrary HTML — only the view popup does.
+ */
+class PreviewCell extends HTMLElement {
   private _value = '';
   /** The STORED cell, set by data-table only on a scripted column. */
   private _source: string | undefined;
-  private _label = 'HTML';
+  private _label = 'Preview';
 
   set value(v: string) {
     const next = v ?? '';
@@ -79,7 +103,7 @@ class HtmlPreviewCell extends HTMLElement {
 
   // data-table binds `.column`; use its label for the popup window title.
   set column(c: { label?: string } | undefined) {
-    this._label = c?.label ?? 'HTML';
+    this._label = c?.label ?? 'Preview';
   }
 
   connectedCallback() {
@@ -92,24 +116,26 @@ class HtmlPreviewCell extends HTMLElement {
       const empty = document.createElement('span');
       empty.style.cssText = 'color:#9ca3af;cursor:text';
       empty.textContent = 'empty';
-      empty.title = 'Click to edit the HTML';
+      empty.title = 'Click to edit';
       empty.addEventListener('click', () => this.openEditor());
       this.append(empty);
       return;
     }
-    // Row layout: truncated HTML on the left, a spacer, then the popup icon
-    // pinned to the right edge of the column.
+    // Row layout: the truncated preview on the left, a spacer, then the popup
+    // icon pinned to the right edge of the column.
     const wrap = document.createElement('span');
     wrap.style.cssText = 'display:flex;align-items:center;gap:0.25rem;width:100%';
 
     const view = document.createElement('span');
-    // Show the HTML's PLAIN TEXT, not the rendered markup — rendering arbitrary
-    // HTML in a grid cell is unpredictable and can be huge. Take the first
-    // `maxChars` characters and ellipsize the rest. Clicking edits the raw HTML
-    // in a dialog; the popup icon (right) views the full rendered HTML.
-    const text = htmlToPreviewText(this._value);
+    // Show the value's PLAIN TEXT, not the rendered markup — rendering arbitrary
+    // HTML in a grid cell is unpredictable and can be huge. Markdown is
+    // converted first so its `#` and `**` markers do not show up as noise in a
+    // line of text. Take the first `maxChars` characters and ellipsize the rest.
+    // Clicking edits the source in a dialog; the popup icon (right) views the
+    // full rendered value.
+    const text = htmlToPreviewText(asHtml(this._value) ?? this._value);
     view.textContent = text.length > maxChars ? text.slice(0, maxChars) + '…' : text;
-    view.title = 'Click to edit the HTML';
+    view.title = 'Click to edit';
     view.style.cssText =
       'flex:0 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:text';
     view.addEventListener('click', (e) => {
@@ -123,7 +149,7 @@ class HtmlPreviewCell extends HTMLElement {
     // Only the popup icon here. The text itself is the edit affordance, so a
     // pencil next to it would be a second button for the same job in a cell
     // that is already one line high.
-    const popout = iconButton(POPOUT_SVG, 'Open the HTML in a window');
+    const popout = iconButton(POPOUT_SVG, 'Open in a window');
     popout.addEventListener('click', (e) => {
       e.stopPropagation();
       this.openWindow();
@@ -136,8 +162,9 @@ class HtmlPreviewCell extends HTMLElement {
   private openWindow() {
     const content = document.createElement('div');
     content.style.cssText = 'padding:0.75rem;overflow:auto;height:100%;box-sizing:border-box';
-    if (looksLikeHtml(this._value)) {
-      content.innerHTML = this._value;
+    const html = asHtml(this._value);
+    if (html !== null) {
+      content.innerHTML = html;
     } else {
       // Plain text: render inside a <pre> using textContent — this preserves
       // newlines/indentation and safely escapes any `<`/`&` in the value,
@@ -150,14 +177,14 @@ class HtmlPreviewCell extends HTMLElement {
       content.append(pre);
     }
     createPanel({
-      id: `easydb-html-popup-${++popupSeq}`,
+      id: `easydb-preview-popup-${++popupSeq}`,
       container: popupContainer(),
       title: this._label,
       color: '#7c3aed',
       content,
       // 520×400 is wider than a phone, so on mobile the popup opened partly
-      // off-screen and had to be panned to be read. Rendered HTML is the one
-      // thing you open this window to LOOK at, so on a narrow viewport it
+      // off-screen and had to be panned to be read. The rendered value is the
+      // one thing you open this window to LOOK at, so on a narrow viewport it
       // starts maximized and fills the canvas. The 520×400 rect is still what
       // Restore returns to, so nothing is lost — it is the opening state that
       // changes, not the window.

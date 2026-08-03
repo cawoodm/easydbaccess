@@ -56,9 +56,11 @@ test('the `easydb` namespace reaches a script too', async ({ page }) => {
   ).toHaveText('em');
 });
 
-test('HTML embedded in the DATA is escaped, not executed', async ({ page }) => {
+test('HTML embedded in the DATA is sanitized, not executed', async ({ page }) => {
   // The markdown comes from a cell, which came from an import — so it is not
-  // trusted, and must never become live markup.
+  // trusted. Since v0.0.281 its tags are SANITIZED rather than escaped: the
+  // formatting a feed body carries survives, while anything that can run is
+  // rebuilt away.
   const id = await createTable(page, 'Unsafe', [
     { field: 'notes' },
     {
@@ -68,14 +70,24 @@ test('HTML embedded in the DATA is escaped, not executed', async ({ page }) => {
     },
   ]);
   await waitForPanel(page, id);
-  await bulkAddRows(page, id, [{ notes: '<img src=x onerror="window.__pwned=1">' }]);
+  await bulkAddRows(page, id, [
+    {
+      notes:
+        '<img src=x onerror="window.__pwned=1">\n\n' +
+        '<p>kept <b>bold</b></p><script>window.__pwned=2</script>',
+    },
+  ]);
 
   const cell = page
     .locator(`#${panelDomId(id)}`)
     .locator('data-table tbody tr td')
     .nth(1);
-  await expect(cell).toContainText('<img src=x');
-  await expect(cell.locator('img')).toHaveCount(0);
+  // The formatting is kept, and so is the image itself…
+  await expect(cell.locator('b')).toHaveText('bold');
+  await expect(cell.locator('img')).toHaveCount(1);
+  // …but neither the event handler nor the script survives to run.
+  await expect(cell.locator('img')).not.toHaveAttribute('onerror', /.*/);
+  await expect(cell.locator('script')).toHaveCount(0);
   expect(await page.evaluate(() => (window as { __pwned?: number }).__pwned)).toBeUndefined();
 });
 

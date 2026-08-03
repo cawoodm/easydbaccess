@@ -1,7 +1,7 @@
 // packages/renderer/src/plugins/html-cell-editor.ts
 //
-// The source editor shared by the two HTML cell renderers (`html` and
-// `html-preview`). Both show a value they cannot be typed into — one renders it
+// The source editor shared by the two markup cell renderers (`html` and
+// `preview`). Both show a value they cannot be typed into — one renders it
 // as markup, the other strips it to one line — so both need the same way in: a
 // pencil that opens the SOURCE in a textarea.
 //

@@ -4,7 +4,7 @@ import { iconButton, openHtmlEditor, PENCIL_SVG } from './html-cell-editor.js';
 // The "html" cell renderer: renders a cell's value directly as HTML, in full,
 // with no truncation and no popup. This is the simple, unguarded option — the
 // markup is trusted to be well-behaved. For a safe, bounded plain-text preview
-// (with a popup for the full HTML) use the separate `html-preview` plugin.
+// (with a popup for the full value) use the separate `preview` plugin.
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'html-render',
@@ -12,7 +12,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   type: 'cell-renderer',
   version: '0.1.0',
   description:
-    'Renders a cell\'s value directly as HTML (unescaped, in full, no popup); a pencil on the right edits the source. Apply by setting a column\'s renderer to "html". For a truncated preview use "html-preview".',
+    'Renders a cell\'s value directly as HTML (unescaped, in full, no popup); a pencil on the right edits the source. Apply by setting a column\'s renderer to "html". For a truncated preview use "preview".',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/html-render.ts',

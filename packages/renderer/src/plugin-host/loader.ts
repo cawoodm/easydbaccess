@@ -18,7 +18,7 @@ import * as cellDatetime from '../plugins/cell-datetime.js';
 import * as cellBoolean from '../plugins/cell-boolean.js';
 import * as cellColor from '../plugins/cell-color.js';
 import * as cellImage from '../plugins/cell-image.js';
-import * as htmlPreview from '../plugins/html-preview.js';
+import * as preview from '../plugins/preview.js';
 import * as htmlRender from '../plugins/html-render.js';
 import * as cellLink from '../plugins/cell-link.js';
 import * as autoRenderer from '../plugins/auto-renderer.js';
@@ -71,7 +71,7 @@ const modules: PluginModule[] = [
   cellBoolean,
   cellColor,
   cellImage,
-  htmlPreview,
+  preview,
   htmlRender,
   cellLink,
   autoRenderer,

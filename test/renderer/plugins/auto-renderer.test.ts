@@ -14,14 +14,14 @@ describe('inferRenderer', () => {
     expect(inferRenderer('string', ['data:image/png;base64,AAAA'])).toBe('image');
   });
 
-  it('picks html-preview for markup', () => {
-    expect(inferRenderer('string', ['plain', '<p>hello <b>there</b></p>'])).toBe('html-preview');
-    expect(inferRenderer('string', ['<br/>'])).toBe('html-preview');
+  it('picks preview for markup', () => {
+    expect(inferRenderer('string', ['plain', '<p>hello <b>there</b></p>'])).toBe('preview');
+    expect(inferRenderer('string', ['<br/>'])).toBe('preview');
   });
 
-  it('picks html-preview for long prose, by average length', () => {
+  it('picks preview for long prose, by average length', () => {
     const long = 'x'.repeat(200);
-    expect(inferRenderer('string', [long, long])).toBe('html-preview');
+    expect(inferRenderer('string', [long, long])).toBe('preview');
     // One long value among short ones does not make the column prose.
     expect(inferRenderer('string', [long, 'a', 'b', 'c', 'd', 'e', 'f', 'g'])).toBeUndefined();
   });
