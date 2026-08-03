@@ -2,7 +2,13 @@
 
 ## 3 Aug 2026
 
+### Features
+
+- ✨ Drop a CSV on a table window to append to it, replace its rows, or make a new table; append opens a column mapper (v0.0.274)
+
 ### Bugs
+
+- 🪲 A file dropped on a table window was ignored, and the browser left the app to open it (v0.0.274)
 
 - 🪲 The unsaved-work prompt could still stop a reload for a moment after the editor was closed (v0.0.272)
 - 🪲 A window that had never been moved reopened at the top-left, and a bit too small, after being minimized (v0.0.272)

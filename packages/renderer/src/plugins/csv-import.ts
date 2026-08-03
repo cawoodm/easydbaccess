@@ -8,6 +8,7 @@ import type {
   TableOrigin,
 } from '@easydb/shared';
 import { filenameFromUrl } from '../import/fetch-source.js';
+import { mapRowsToTarget, type ColumnMapping } from '../import/map-columns.js';
 import { cryptoUUID, slugField } from '../util/ids.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
@@ -41,6 +42,14 @@ export function init(api: HostApi): void {
     if (csvs.length === 0) return false;
 
     event.preventDefault();
+    // Dropped ON a table window? Then the table is the obvious destination, and
+    // asking about columns first would be answering the wrong question. Only for
+    // a single file: "append these three files to this table" needs a mapping per
+    // file, which is more dialogs than a drag gesture should ever open.
+    if (csvs.length === 1) {
+      const handled = await dropOntoTable(api, event, csvs[0]!);
+      if (handled) return true;
+    }
     // A drop used to go straight in, which is right for a clean file and wrong
     // for one with duplicate or unusable headers — the Import dialog has always
     // offered "Edit columns" and a drop had no way to ask for it. One question
@@ -97,6 +106,58 @@ function candidateName(input: ImportSourceInput): string {
  *  reports back the label the user picked. */
 const DROP_DIRECT = 'Import directly';
 const DROP_EDIT = 'Edit columns first';
+
+// Dropping a file ON a table window names its destination, so the question is
+// what to do with that table. The wording matches the Import dialog's Target
+// field, which offers the same three things.
+const ONTO_NEW = 'A new table';
+const ONTO_APPEND = 'Append to this table';
+const ONTO_REPLACE = 'Replace the rows of this table';
+
+/**
+ * Handle a CSV dropped onto an existing table's window. Returns false when the
+ * drop landed anywhere else (the canvas, the chrome), leaving the caller's
+ * ordinary new-table flow to run.
+ *
+ * Append opens the column mapper: the append path matches the file's columns to
+ * the table's BY POSITION, which is right for a file the table came from and
+ * silently wrong for anything else.
+ */
+async function dropOntoTable(api: HostApi, event: DragEvent, file: File): Promise<boolean> {
+  const { tableIdAtNode } = await import('../window-mgr/jspanel-manager.js');
+  const tableId = tableIdAtNode(event.target);
+  if (!tableId) return false;
+  const table = await api.store.tables.findOne(tableId);
+  if (!table) return false;
+  // A read-only table (a live connection, a reference) cannot take rows at all.
+  if (table.readonly === true || table.source != null) {
+    api.ui.dialogs.toast(`"${table.name}" is read-only, so the file was imported as a new table.`, {
+      kind: 'warning',
+      title: 'Import CSV',
+    });
+    return false;
+  }
+
+  const choice = await api.ui.dialogs.choice(
+    `Import "${file.name}" into "${table.name}"?`,
+    [ONTO_APPEND, ONTO_REPLACE, ONTO_NEW],
+    'Import CSV',
+  );
+  if (!choice) return true; // dismissed ⇒ the drop is cancelled, and it was ours
+  if (choice === ONTO_NEW) return false; // fall through to the new-table flow
+
+  const text = await file.text();
+  const mode = choice === ONTO_APPEND ? 'append' : 'overwrite';
+  const opts: CsvImportOpts = { target: { tableId, mode } };
+  if (mode === 'append') {
+    opts.mapFields = async (header, targetCols, sample) => {
+      const { mapColumnsToTable } = await import('../dialogs/column-map-dialog.js');
+      return mapColumnsToTable(header, targetCols, table.name, sample);
+    };
+  }
+  await importCsvText(api, text, file.name, opts);
+  return true;
+}
 
 const importerSpec: ImporterSpec = {
   id: 'csv',
@@ -232,6 +293,28 @@ export interface CsvImportOpts {
    * `.tsv`/`.tab` name rule and auto-detection. Undefined ⇒ keep that order.
    */
   separator?: string | undefined;
+  /**
+   * Where the rows go, decided by the caller. Set when the file was dropped ON a
+   * table window: the destination is that table, whatever it is called, so the
+   * same-name lookup below must not run (and must not offer to create a new
+   * table under a uniquified name).
+   */
+  target?: { tableId: string; mode: 'append' | 'overwrite' } | undefined;
+  /**
+   * Map the file's columns onto the target table's columns before an append.
+   * Receives the file's header, the table's columns and the first data row (so
+   * two similar headers can be told apart), and returns one target field per
+   * incoming column — `''` drops that column. Null cancels the import.
+   *
+   * Absent ⇒ the historical by-position mapping.
+   */
+  mapFields?:
+    | ((
+        header: string[],
+        targetCols: ColumnSpec[],
+        sample: string[],
+      ) => Promise<ColumnMapping | null>)
+    | undefined;
 }
 
 export async function importCsvText(
@@ -248,17 +331,26 @@ export async function importCsvText(
   // rule, which wins over auto-detection inside the parser.
   const separator = opts.separator ?? separatorForName(name);
 
+  // An explicit target (the file was dropped on a table window) settles it. The
+  // name lookup below is only for guessing a destination, and there is nothing
+  // left to guess.
+  const chosen = opts.target ? await api.store.tables.findOne(opts.target.tableId) : null;
   // If a table with this name already exists in the workspace, ask the user
   // what to do: append rows, overwrite (clear + insert), or create a new
   // table under a unique name.
-  const existing = (await api.store.tables.find()).find(
-    (t) => t.workspaceId === workspaceId && t.name === baseName,
-  );
+  const existing =
+    chosen ??
+    (await api.store.tables.find()).find(
+      (t) => t.workspaceId === workspaceId && t.name === baseName,
+    );
 
   let targetId: string;
   let mode: 'new' | 'append' | 'overwrite';
 
-  if (existing) {
+  if (chosen && opts.target) {
+    mode = opts.target.mode;
+    targetId = chosen.id;
+  } else if (existing) {
     const choice = await api.ui.dialogs.choice(
       `A table named "${baseName}" already exists in this workspace.`,
       ['Append rows', 'Overwrite rows', 'Create as new table'],
@@ -329,18 +421,23 @@ export async function importCsvText(
   } else {
     // append + overwrite: existing columns are preserved (widths, types,
     // renderers, constraints — all of it). CSV cells map to existing
-    // columns by position, then coerce through each column's declared type.
+    // columns by position, then coerce through each column's declared type —
+    // unless the caller supplies a mapping (see `mapFields`).
     const targetCols = existing!.columns;
     const raw = parseCsvRaw(text, { maxRows: opts.maxRows, separator });
     const rawRows = opts.maxRows != null ? raw.rows.slice(0, opts.maxRows) : raw.rows;
-    docs = rawRows.map((cells) => {
-      const data: Record<string, unknown> = {};
-      for (let i = 0; i < targetCols.length; i++) {
-        const col = targetCols[i]!;
-        data[col.field] = coerce(cells[i] ?? '', col.type);
-      }
-      return { id: cryptoUUID(), tableId: targetId, data, updatedAt: Date.now() };
-    });
+    let mapping: ColumnMapping = targetCols.map((c) => c.field);
+    if (opts.mapFields) {
+      const chosenMapping = await opts.mapFields(raw.header, targetCols, raw.rows[0] ?? []);
+      if (chosenMapping === null) return; // user cancelled the mapper
+      mapping = chosenMapping;
+    }
+    docs = mapRowsToTarget(rawRows, targetCols, mapping, coerce).map((data) => ({
+      id: cryptoUUID(),
+      tableId: targetId,
+      data,
+      updatedAt: Date.now(),
+    }));
     if (mode === 'overwrite') {
       // Wipe existing rows; keep the table id (panel position) AND its
       // columns (widths, renderers, etc. survive).

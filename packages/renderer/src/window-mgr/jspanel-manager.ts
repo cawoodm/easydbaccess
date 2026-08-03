@@ -542,3 +542,20 @@ async function deleteTableCascade(tableId: string, ctx: AppContext): Promise<voi
 function cssSafe(s: string): string {
   return s.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
+
+/**
+ * The table whose window contains `node`, or null when `node` is anywhere else
+ * (the canvas, the chrome, a view window).
+ *
+ * Asks the panel map rather than parsing the DOM id: `cssSafe` is lossy, so a
+ * `panel-<id>` attribute cannot be turned back into the table id it came from.
+ * Used by the drop handlers to tell "dropped on THIS table" from "dropped on the
+ * app".
+ */
+export function tableIdAtNode(node: EventTarget | null): string | null {
+  if (!(node instanceof Node)) return null;
+  for (const [tableId, shell] of panels) {
+    if (shell.contains(node)) return tableId;
+  }
+  return null;
+}
