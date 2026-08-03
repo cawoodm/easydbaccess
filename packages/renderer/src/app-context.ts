@@ -1,5 +1,6 @@
 import type { DataStore, EventBus, HostApi, RowSourceCtx, Table } from '@easydb/shared';
 import { createDataStore, createRoutedDataStore, getDb } from './db/index.js';
+import { createIpcDataStore } from './db/data-store-ipc.js';
 import { createEventBus } from './events/bus.js';
 import { createRegistries, type Registries } from './plugin-host/registries.js';
 import { createHostApi } from './plugin-host/api-factory.js';
@@ -24,12 +25,19 @@ export function getContext(): Promise<AppContext> {
 }
 
 async function init(): Promise<AppContext> {
-  const db = await getDb();
   // Settings are workspace-scoped, but the active workspace is resolved further
   // down using this very store — so the store reads the id through this holder,
   // which is filled before any settings access happens.
   let activeWorkspaceId = '';
-  const baseStore = createDataStore(db, () => activeWorkspaceId);
+  // Electron exposes a `window.easydb.store` bridge to the main-process
+  // SqliteStore (see `db/data-store-ipc.ts`); everywhere else (browser, or
+  // Electron before that bridge lands) keeps using Dexie/IndexedDB. Only
+  // `getDb()` — and the Dexie database it opens — is skipped on the IPC path;
+  // nothing downstream (routing, workspace resolution, plugin host) branches
+  // on which one is active.
+  const baseStore = window.easydb?.store
+    ? createIpcDataStore(window.easydb.store, () => activeWorkspaceId)
+    : createDataStore(await getDb(), () => activeWorkspaceId);
   const events = createEventBus();
   const registries = createRegistries();
 

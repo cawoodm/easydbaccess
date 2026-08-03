@@ -8,11 +8,11 @@ Lit web components + Dexie + Vite. The identical bundle runs in the browser
 | Dir | Role |
 |---|---|
 | `src/chrome/` | App-shell, panel chrome (`panel-footer`, `panel-search`), workspace selector, table list, filter popover/combobox, material-icon-css helper. No business logic — just lays out registered slot contents. |
-| `src/db/` | Dexie setup (`dexie-db.ts`) and the `DataStore` wrapper (`data-store-dexie.ts`) that hides Dexie from plugins. |
+| `src/db/` | Dexie setup (`dexie-db.ts`) and the `DataStore` wrapper (`data-store-dexie.ts`) that hides Dexie from plugins. `data-store-ipc.ts` is the second implementation of that same wrapper, used only under Electron, where it proxies to the main-process SQLite store. |
 | `src/dialogs/` | Promise-returning host dialogs (`host-dialogs.ts` — alert/prompt/confirm/choice), `toast-host.ts`, `new-table-dialog`, `csv-paste-dialog`, `plugin-manager-dialog`, `draggable.ts` helper. |
 | `src/events/` | The typed event bus (`AppEvents` from shared). |
 | `src/plugin-host/` | `loader.ts` (built-in plugin list + lifecycle), `url-loader.ts` (URL-fetched plugins with localStorage cache), `registries.ts` (slot lists), `api-factory.ts` (`HostApi` constructor). |
-| `src/plugins/` | Built-in plugins. **Each one IS a plugin** — same contract as URL-loaded modules. Current roster: `new-table-button`, `csv-import`, `json-import`, `csv-export`, `dump-export`, `sql-export`, `gist-sync`, `server-sync` (+ `server-sync-core`), `auto-sync`, `cell-color`, `cell-image`, `cell-link`, `cell-date`, `cell-datetime`, `cell-boolean`, `auto-renderer`, `import-data`, `views`, `settings`. (The Plugin Manager button is **core**, not a plugin — see `app-shell.ts`. The URL-loadable demo plugins under `public/plugins/` — `header-clock`, `cell-image-url`, `cell-email` — are separate from these bundled built-ins.) |
+| `src/plugins/` | Built-in plugins. **Each one IS a plugin** — same contract as URL-loaded modules. Current roster: `new-table-button`, `csv-import`, `json-import`, `csv-export`, `dump-export`, `sql-export`, `gist-sync`, `server-sync` (+ `server-sync-core`), `auto-sync`, `cell-color`, `cell-image`, `cell-link`, `cell-date`, `cell-datetime`, `cell-boolean`, `auto-renderer`, `import-data`, `views`, `settings`, `electron-db` (registers nothing outside the Electron build). (The Plugin Manager button is **core**, not a plugin — see `app-shell.ts`. The URL-loadable demo plugins under `public/plugins/` — `header-clock`, `cell-image-url`, `cell-email` — are separate from these bundled built-ins.) |
 | `src/views/` | The **View system**: `view-render.ts` (pure token-substitution + filter/sort helpers) and the `<view-window>` element that renders one `ViewInstance` read-only. A View Template (`viewTemplates`, workspace-global) is header/row/footer HTML; blank row HTML ⇒ a read-only columns table, else the row HTML repeats per row with `$TOKEN` → column substitution. A View Instance (`viewInstances`, per-table) snapshots the table's sort/filter/visible-columns + the token→column map and opens in its own floating panel window. Managed via the footer "Views" button → `dialogs/views-dialog.ts`. **Window management is core** — see `window-mgr/view-window-manager.ts`; the `views` plugin only seeds templates and adds the button. |
 | `src/table/` | `<data-table>` element. Cell rendering looks up `registries.cellRenderers` first, falls back to the built-in switch. |
 | `src/window-mgr/` | Core window management (behaviour, geometry, persistence, boot-restore) for ALL panels — plugins never touch the window system directly. Windows are floating panels from the in-repo `panel-shell/` module (jsPanel4 was removed in v0.0.221). `jspanel-manager.ts` (historical name) opens one panel per Table (geometry on `Table.windowGeometry`) and owns the canvas pan/zoom; `view-window-manager.ts` opens one panel per open `ViewInstance` (geometry on `ViewInstance.windowGeometry`, driven by the `open` flag), mirroring it; maximize-fill is built into the shell; `panzoom.ts` drives the canvas transform. |
@@ -24,7 +24,9 @@ Lit web components + Dexie + Vite. The identical bundle runs in the browser
 
 `app-context.ts:init()` runs once on first `getContext()`:
 
-1. Open Dexie → wrap in `DataStore`.
+1. Build the `DataStore`: `window.easydb?.store` present (Electron) → the IPC
+   store; otherwise open Dexie and wrap that. Nothing downstream branches on
+   which one won.
 2. Resolve workspace (URL `?space=` → existing → create `default`).
 3. Build `HostApi` from store + events + registries.
 4. `loadBuiltinPlugins(api)` — runs every `init()` synchronously, returns a
@@ -55,12 +57,15 @@ requires a reload because the registry contract has no `unregister` story.
 ## Dexie is hidden from plugins
 
 Plugins must never import from `dexie`. They receive `DataStore` from
-`@easydb/shared`, which is satisfied by `data-store-dexie.ts`. When adding a
-new collection:
+`@easydb/shared`, which is satisfied by `data-store-dexie.ts` in the browser
+and by `data-store-ipc.ts` under Electron. When adding a new collection:
 
 1. TS type in `packages/shared/src/types.ts`
 2. Dexie schema + typed accessor in `src/db/dexie-db.ts`
 3. Plugin-facing wrapper in `src/db/data-store-dexie.ts`
+4. The same collection in `src/db/data-store-ipc.ts` and in
+   `packages/electron/src/sqlite-store.ts` — a collection the SQLite store
+   doesn't know about throws there, it doesn't degrade quietly
 
 `store.rows(tableId)` returns a *view* over the single `rows` Dexie table —
 `tableId` is auto-injected on insert and used as the `where('tableId').equals(...)`

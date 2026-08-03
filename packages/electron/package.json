@@ -9,17 +9,20 @@
   "scripts": {
     "dev": "node scripts/dev.cjs",
     "build": "tsc -b --force",
+    "prestart": "node scripts/check-frontend.cjs",
     "start": "electron .",
-    "package": "electron-builder --config electron-builder.json"
+    "package": "electron-builder --config electron-builder.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@easydb/shared": "file:../shared",
     "@easydb/server": "file:../server"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
+    "electron": "^43.2.0",
     "electron-builder": "^25.0.0",
     "typescript": "^5.6.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "vitest": "^2.0.0"
   }
 }
