@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ A view's filter chip is `field = value` now, in the same bar as the sort: the field cycles = / ≠ / off, the value opens a checklist of the field's other values (v0.0.291)
 - ✨ Esc closes a preview popup or its source editor, like it closes a dialog (v0.0.289)
 - ✨ A view's filter chip lists the field's other values, so a second value can be OR-ed in by clicking (v0.0.289)
 - ✨ A column filter takes `AND`: `!NULL AND Biden` needs both, and `OR` spells out the comma (v0.0.288)

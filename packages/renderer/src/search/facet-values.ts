@@ -71,3 +71,45 @@ export function facetValues(
   }
   return [...seen].sort();
 }
+
+/** One value of a field, with how many of the faceted rows carry it. */
+export interface FacetCount {
+  value: string;
+  count: number;
+}
+
+/**
+ * The same faceted list as {@link facetValues}, but counted and ordered for a
+ * value PICKER: commonest first, ties alphabetical, plus how many rows are blank
+ * (null / empty / whitespace) — the picker shows those as one "(Blanks)" entry.
+ *
+ * A `boolean` column always lists both sides, in `true`, `false` order, even
+ * when the rows carry only one of them: a column of all-true rows would
+ * otherwise leave no way to filter for false. A count of 0 says none are there.
+ * Any other stored spelling (`yes`, `1`) keeps its own entry below.
+ */
+export function facetCounts(
+  rows: readonly HasData[],
+  field: string,
+  opts?: { type?: string | undefined },
+): { values: FacetCount[]; blanks: number } {
+  const counts = new Map<string, number>();
+  let blanks = 0;
+  for (const r of rows) {
+    const v = r.data[field];
+    if (v == null || asText(v).trim() === '') {
+      blanks++;
+      continue;
+    }
+    const s = asText(v);
+    counts.set(s, (counts.get(s) ?? 0) + 1);
+  }
+  let values = [...counts.entries()]
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+  if (opts?.type === 'boolean') {
+    const domain = ['true', 'false'].map((value) => ({ value, count: counts.get(value) ?? 0 }));
+    values = [...domain, ...values.filter((v) => v.value !== 'true' && v.value !== 'false')];
+  }
+  return { values, blanks };
+}

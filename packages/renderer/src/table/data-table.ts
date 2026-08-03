@@ -8,7 +8,7 @@ import { FilterPopover } from '../chrome/filter-popover.js';
 import '../chrome/filter-combobox.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { matchesColumnFilter } from '../search/column-filter.js';
-import { facetable, facetValues } from '../search/facet-values.js';
+import { facetable, facetCounts, facetValues } from '../search/facet-values.js';
 import { runColumnScript } from '../util/column-script.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
@@ -1023,30 +1023,11 @@ export class DataTable extends LitElement {
     // Faceted: count values only across rows that pass every OTHER column's
     // filter — so a column's own dropdown isn't pre-narrowed by what's
     // already typed in that column's filter, but other filters do narrow it.
-    const counts = new Map<string, number>();
-    let blanks = 0;
-    for (const r of this.rowsFacetedFor(field)) {
-      const v = r.data[field];
-      // Null / empty / whitespace cells collapse into the single "(Blanks)" entry.
-      if (v == null || String(v).trim() === '') {
-        blanks++;
-        continue;
-      }
-      const s = String(v);
-      counts.set(s, (counts.get(s) ?? 0) + 1);
-    }
-    let values = [...counts.entries()]
-      .map(([value, count]) => ({ value, count }))
-      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
-    // A boolean column has a known domain, so both sides are always listed (in
-    // that order) even when the rows carry only one of them — a column of
-    // all-true rows would otherwise give you no way to filter for false. A
-    // count of 0 says none are there. Any other stored spelling (`yes`, `1`)
-    // keeps its own entry below.
-    if (this.columns.find((c) => c.field === field)?.type === 'boolean') {
-      const domain = ['true', 'false'].map((value) => ({ value, count: counts.get(value) ?? 0 }));
-      values = [...domain, ...values.filter((v) => v.value !== 'true' && v.value !== 'false')];
-    }
+    // The counting rules (blanks, order, the boolean domain) live in
+    // `search/facet-values.ts`, which a view window's filter chip shares.
+    const { values, blanks } = facetCounts(this.rowsFacetedFor(field), field, {
+      type: this.columns.find((c) => c.field === field)?.type,
+    });
     // Toggles apply live while the popover stays open (multi-value tri-state);
     // the promise only reports dismissal or an explicit Clear.
     const result = await popover.open(

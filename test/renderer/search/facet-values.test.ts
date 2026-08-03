@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   facetable,
+  facetCounts,
   facetValues,
   FACET_MAX_LEN,
 } from '../../../packages/renderer/src/search/facet-values.js';
@@ -63,5 +64,37 @@ describe('facetValues', () => {
 
   it('returns nothing for a field no row carries', () => {
     expect(facetValues(rows('a'), 'missing')).toEqual([]);
+  });
+});
+
+describe('facetCounts', () => {
+  it('counts each value and orders commonest first, ties alphabetical', () => {
+    const r = rows('b', 'a', 'b', 'c', 'a', 'b');
+    expect(facetCounts(r, 'tag').values).toEqual([
+      { value: 'b', count: 3 },
+      { value: 'a', count: 2 },
+      { value: 'c', count: 1 },
+    ]);
+  });
+
+  it('collects blanks separately — null, empty and whitespace all count', () => {
+    const r = rows('a', null, '', '   ', undefined);
+    const { values, blanks } = facetCounts(r, 'tag');
+    expect(values).toEqual([{ value: 'a', count: 1 }]);
+    expect(blanks).toBe(4);
+  });
+
+  it('always lists both sides of a boolean, in true/false order', () => {
+    // A column of all-true rows would otherwise leave no way to filter for false.
+    const { values } = facetCounts(rows(true, true), 'tag', { type: 'boolean' });
+    expect(values).toEqual([
+      { value: 'true', count: 2 },
+      { value: 'false', count: 0 },
+    ]);
+  });
+
+  it('keeps another spelling of a boolean as its own entry, below the domain', () => {
+    const { values } = facetCounts(rows(true, 'yes'), 'tag', { type: 'boolean' });
+    expect(values.map((v) => v.value)).toEqual(['true', 'false', 'yes']);
   });
 });
