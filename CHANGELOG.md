@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 3 Aug 2026
+
+### Bugs
+
+- 🪲 A collapsed window reopened at the default size and position, and no longer collapsed (v0.0.268)
+
 ## 2 Aug 2026
 
 ### Features

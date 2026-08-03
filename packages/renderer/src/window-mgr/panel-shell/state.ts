@@ -13,12 +13,19 @@ export interface ShellState {
 }
 
 /** Boot state from stored WindowGeometry flags. minimized+maximized means:
- * the user minimized a maximized window last session. */
-export function initialState(boot?: { minimized?: boolean; maximized?: boolean }): ShellState {
+ * the user minimized a maximized window last session. `smallified` is checked
+ * last: it only ever applies to a panel that is otherwise normalized (the
+ * transition below refuses to smallify anything else). */
+export function initialState(boot?: {
+  minimized?: boolean;
+  maximized?: boolean;
+  smallified?: boolean;
+}): ShellState {
   if (boot?.minimized) {
     return { status: 'minimized', restoreStatus: boot.maximized ? 'maximized' : 'normalized' };
   }
   if (boot?.maximized) return { status: 'maximized', restoreStatus: 'normalized' };
+  if (boot?.smallified) return { status: 'smallified', restoreStatus: 'normalized' };
   return { status: 'normalized', restoreStatus: 'normalized' };
 }
 
@@ -48,11 +55,18 @@ export function transition(s: ShellState, a: PanelAction): ShellState {
 /**
  * The flags writeGeometry persists. A minimized-was-maximized panel keeps
  * maximized=true so a reload restores it maximized (e2e 08 asserts this).
+ * `smallified` is exclusive with both: a panel can only collapse from
+ * normalized, and minimizing or maximizing a collapsed one unfolds it.
  */
-export function persistFlags(s: ShellState): { minimized: boolean; maximized: boolean } {
+export function persistFlags(s: ShellState): {
+  minimized: boolean;
+  maximized: boolean;
+  smallified: boolean;
+} {
   return {
     minimized: s.status === 'minimized',
     maximized:
       s.status === 'maximized' || (s.status === 'minimized' && s.restoreStatus === 'maximized'),
+    smallified: s.status === 'smallified',
   };
 }

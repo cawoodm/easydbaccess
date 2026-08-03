@@ -45,6 +45,10 @@ import type { ViewWindow } from '../views/view-window.js';
 // Core header search box — the same component the table windows use.
 import '../chrome/panel-search.js';
 
+/** Opening size of a view window, and the fallback when nothing is stored. */
+const DEFAULT_W = 480;
+const DEFAULT_H = 520;
+
 /** Per-open-view window state: the panel, its element, and title inputs. */
 interface ViewEntry {
   panel: PanelShellEl;
@@ -317,10 +321,14 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     content,
     ...(g
       ? { panelSize: { w: g.w, h: g.h }, position: { x: g.x, y: g.y } }
-      : { contentSize: { w: 480, h: 520 }, position: { centerTopOffset: 60 } }),
+      : { contentSize: { w: DEFAULT_W, h: DEFAULT_H }, position: { centerTopOffset: 60 } }),
     minimizeTo: '#easydb-minimized-dock',
     viewport: shellViewport(),
-    boot: { minimized: g?.minimized === true, maximized: g?.maximized === true },
+    boot: {
+      minimized: g?.minimized === true,
+      maximized: g?.maximized === true,
+      smallified: g?.smallified === true,
+    },
     onmoved: () => void saveGeometry(inst.id),
     onresized: () => void saveGeometry(inst.id),
     // Stamp a monotonic front rank; DOM z stays session-local in the shell but
@@ -411,8 +419,8 @@ async function writeViewFrontOrder(instanceId: string, ctx: AppContext): Promise
     const geom = inst.windowGeometry ?? {
       x: 0,
       y: 0,
-      w: 480,
-      h: 520,
+      w: DEFAULT_W,
+      h: DEFAULT_H,
       z: 0,
       minimized: false,
       maximized: false,
@@ -435,7 +443,7 @@ async function writeViewGeometry(instanceId: string): Promise<void> {
   const el = document.getElementById(panelDomId(instanceId));
   const entry = panels.get(instanceId);
   if (!el || !entry) return;
-  const { minimized, maximized } = entry.panel.persistFlags();
+  const { minimized, maximized, smallified } = entry.panel.persistFlags();
   try {
     const ctx = await getContext();
     const prev = (await ctx.store.viewInstances.findOne(instanceId))?.windowGeometry;
@@ -452,6 +460,13 @@ async function writeViewGeometry(instanceId: string): Promise<void> {
       y = prev.y;
       w = prev.w;
       h = prev.h;
+    } else if (smallified) {
+      // A collapsed panel is its header and nothing else, so only its HEIGHT is
+      // meaningless — it can still be dragged, and the shell refuses to resize
+      // it, so live x/y/w are all honest. Keep the pre-collapse height: the
+      // header-only one is below MIN_H, so `sanitizeGeometry` threw the whole
+      // record away on reload and the window came back at the cascade default.
+      h = prev?.h ?? DEFAULT_H;
     }
     if (x <= -9000) x = prev?.x ?? 40;
     const geom: WindowGeometry = {
@@ -465,6 +480,7 @@ async function writeViewGeometry(instanceId: string): Promise<void> {
       z: prev?.z ?? 0,
       minimized,
       maximized,
+      smallified,
     };
     await ctx.store.viewInstances.patch(instanceId, {
       windowGeometry: geom,

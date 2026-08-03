@@ -46,7 +46,7 @@ export interface PanelShellOptions {
   panelSize?: { w: number; h: number } | undefined;
   position?: { x: number; y: number } | { centerTopOffset: number } | 'center' | undefined;
   minimizeTo?: string | undefined;
-  boot?: { minimized?: boolean; maximized?: boolean } | undefined;
+  boot?: { minimized?: boolean; maximized?: boolean; smallified?: boolean } | undefined;
   viewport?: ShellViewport | undefined;
   onfronted?: (() => void) | undefined;
   onstatuschange?: ((panel: PanelShellEl) => void) | undefined;
@@ -65,7 +65,7 @@ export type PanelShellEl = HTMLDivElement & {
   close(): void;
   setHeaderTitle(title: string): void;
   setHeaderLogo(svg: string): void;
-  persistFlags(): { minimized: boolean; maximized: boolean };
+  persistFlags(): { minimized: boolean; maximized: boolean; smallified: boolean };
   /**
    * Move the panel to the middle of what the user can currently SEE, clamped
    * inside it. Not the middle of the canvas — the canvas is pan/zoomed and is

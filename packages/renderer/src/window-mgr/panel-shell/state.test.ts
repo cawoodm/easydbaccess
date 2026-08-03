@@ -60,15 +60,48 @@ describe('persistFlags', () => {
     expect(persistFlags(transition(norm, 'maximize'))).toEqual({
       minimized: false,
       maximized: true,
+      smallified: false,
     });
     expect(persistFlags(transition(transition(norm, 'maximize'), 'minimize'))).toEqual({
       minimized: true,
       maximized: true,
+      smallified: false,
     });
     expect(persistFlags(transition(norm, 'minimize'))).toEqual({
       minimized: true,
       maximized: false,
+      smallified: false,
     });
-    expect(persistFlags(norm)).toEqual({ minimized: false, maximized: false });
+    expect(persistFlags(norm)).toEqual({
+      minimized: false,
+      maximized: false,
+      smallified: false,
+    });
+  });
+
+  it('reports a collapsed panel, exclusively', () => {
+    const small = transition(initialState(), 'smallify');
+    expect(persistFlags(small)).toEqual({
+      minimized: false,
+      maximized: false,
+      smallified: true,
+    });
+    // Minimizing or maximizing a collapsed panel unfolds it, so the flag drops.
+    expect(persistFlags(transition(small, 'minimize')).smallified).toBe(false);
+    expect(persistFlags(transition(small, 'maximize')).smallified).toBe(false);
+  });
+});
+
+describe('initialState with a stored smallified flag', () => {
+  it('boots collapsed', () => {
+    expect(initialState({ smallified: true })).toEqual({
+      status: 'smallified',
+      restoreStatus: 'normalized',
+    });
+  });
+
+  it('lets minimized and maximized win — they cannot coexist with collapsed', () => {
+    expect(initialState({ minimized: true, smallified: true }).status).toBe('minimized');
+    expect(initialState({ maximized: true, smallified: true }).status).toBe('maximized');
   });
 });

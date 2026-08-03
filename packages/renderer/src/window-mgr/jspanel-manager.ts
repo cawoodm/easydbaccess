@@ -337,8 +337,13 @@ function openPanel(t: Table, ctx: AppContext): void {
       : { contentSize: { w: DEFAULT_W, h: DEFAULT_H }, position: nextCascadePosition() }),
     minimizeTo: '#easydb-minimized-dock',
     viewport: shellViewport(),
-    // ?minimize wins over a saved maximized state — nothing loads rows on boot.
-    boot: { minimized: startMinimized, maximized: !FORCE_MINIMIZED && g?.maximized === true },
+    // ?minimize wins over a saved maximized/collapsed state — nothing loads rows
+    // on boot.
+    boot: {
+      minimized: startMinimized,
+      maximized: !FORCE_MINIMIZED && g?.maximized === true,
+      smallified: !FORCE_MINIMIZED && g?.smallified === true,
+    },
     onmoved: () => void saveGeometry(t.id, ctx),
     onresized: () => void saveGeometry(t.id, ctx),
     // Stamp a monotonic front rank; DOM z stays stable in the shell but the
@@ -442,7 +447,7 @@ async function writeGeometry(tableId: string, ctx: AppContext): Promise<void> {
   if (!el) return;
   const shell = panels.get(tableId);
   const status = shell?.status ?? 'normalized';
-  const flags = shell?.persistFlags() ?? { minimized: false, maximized: false };
+  const flags = shell?.persistFlags() ?? { minimized: false, maximized: false, smallified: false };
   try {
     const t = await ctx.store.tables.findOne(tableId);
     const prev = t?.windowGeometry;
@@ -450,6 +455,7 @@ async function writeGeometry(tableId: string, ctx: AppContext): Promise<void> {
     // whatever was saved (see WINDOWS.md).
     const minimized = FORCE_MINIMIZED ? (prev?.minimized ?? false) : flags.minimized;
     const maximized = FORCE_MINIMIZED ? (prev?.maximized ?? false) : flags.maximized;
+    const smallified = FORCE_MINIMIZED ? (prev?.smallified ?? false) : flags.smallified;
     let x = el.offsetLeft;
     let y = el.offsetTop;
     let w = el.offsetWidth;
@@ -482,6 +488,13 @@ async function writeGeometry(tableId: string, ctx: AppContext): Promise<void> {
         w = DEFAULT_W;
         h = DEFAULT_H;
       }
+    } else if (status === 'smallified') {
+      // A collapsed panel is its header and nothing else, so only its HEIGHT is
+      // meaningless — it can still be dragged, and the shell refuses to resize
+      // it, so live x/y/w are all honest. Keep the pre-collapse height: the
+      // header-only one is below MIN_H, so `sanitizeGeometry` threw the whole
+      // record away on reload and the window came back at the cascade default.
+      h = prev?.h ?? DEFAULT_H;
     }
     if (x <= -9000) x = prev?.x ?? 40;
     const geom: WindowGeometry = {
@@ -493,6 +506,7 @@ async function writeGeometry(tableId: string, ctx: AppContext): Promise<void> {
       z: prev?.z ?? 0,
       minimized,
       maximized,
+      smallified,
     };
     await ctx.store.tables.patch(tableId, {
       windowGeometry: geom,

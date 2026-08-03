@@ -41,8 +41,10 @@ test('a tiled layout survives a reload', async ({ page }) => {
       page.evaluate(async (id) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const t = await (window as any).__easydb.store.tables.findOne(id);
-        const g = t.windowGeometry;
-        return { x: g.x, y: g.y, w: g.w, h: g.h };
+        // Return null rather than throwing while the write is still in flight —
+        // a throw inside expect.poll aborts the poll instead of retrying it.
+        const g = t?.windowGeometry;
+        return g ? { x: g.x, y: g.y, w: g.w, h: g.h } : null;
       }, a),
     )
     .toEqual(before.a);
