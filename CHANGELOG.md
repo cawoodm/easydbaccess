@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ Esc closes a preview popup or its source editor, like it closes a dialog (v0.0.289)
 - ✨ A view's filter chip lists the field's other values, so a second value can be OR-ed in by clicking (v0.0.288)
 - ✨ The `html-preview` cell renderer is called `preview` now, and shows a Markdown value as formatted text by itself (v0.0.282)
 - ✨ The `html` cell renderer has a pencil for the source, so a link inside the cell can be clicked (v0.0.281)
