@@ -65,6 +65,12 @@ export type PanelShellEl = HTMLDivElement & {
   close(): void;
   setHeaderTitle(title: string): void;
   setHeaderLogo(svg: string): void;
+  /**
+   * Repaint the chrome, window and dock bar alike. A table's kind can change
+   * while its window is open (a live connect adds a `source`), and the colour is
+   * how that reads at a glance.
+   */
+  setHeaderColor(color: string): void;
   persistFlags(): { minimized: boolean; maximized: boolean; smallified: boolean };
   /**
    * The rect a geometry writer should STORE: always the panel's normal-state
@@ -86,6 +92,10 @@ export type PanelShellEl = HTMLDivElement & {
    */
   centerInViewport(): void;
 };
+
+/** Chrome colour for a panel whose caller names none. Matches the CSS fallback
+ * in panel-shell.css, so the two cannot drift. */
+const DEFAULT_COLOR = '#01579b';
 
 /** Titlebar contents where a drag or dblclick must NOT start. */
 const INTERACTIVE = 'input, textarea, select, button, a, .jsPanel-controlbar';
@@ -182,7 +192,9 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
   const el = document.createElement('div') as PanelShellEl;
   el.className = 'jsPanel';
   el.id = opts.id;
-  el.style.setProperty('--eda-panel-color', opts.color ?? '#01579b');
+  // One colour for the window AND the bar it docks as — see `setHeaderColor`.
+  let color = opts.color ?? DEFAULT_COLOR;
+  el.style.setProperty('--eda-panel-color', color);
 
   // Header: logo | titlebar(title) | controlbar(smallify min max normalize close)
   const hdr = document.createElement('div');
@@ -340,7 +352,9 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
     const b = document.createElement('div');
     b.className = 'jsPanel-replacement';
     b.id = `${opts.id}-min`;
-    b.style.setProperty('--eda-panel-color', opts.color ?? '#01579b');
+    // The CURRENT colour, not the opening one: a table that gained a `source`
+    // while open is a different kind now, and its bar has to agree.
+    b.style.setProperty('--eda-panel-color', color);
     const bLogo = document.createElement('div');
     bLogo.className = 'jsPanel-headerlogo';
     bLogo.innerHTML = logo.innerHTML;
@@ -456,6 +470,13 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
     logo.innerHTML = svg;
     const barLogo = bar?.querySelector('.jsPanel-headerlogo');
     if (barLogo) barLogo.innerHTML = svg;
+  };
+  el.setHeaderColor = (next: string) => {
+    color = next;
+    el.style.setProperty('--eda-panel-color', color);
+    // A window that is minimized right now paints as its dock bar, so the bar
+    // has to be repainted too — and `color` is remembered for the next one.
+    bar?.style.setProperty('--eda-panel-color', color);
   };
   el.centerInViewport = () => {
     if (state.status !== 'normalized' && state.status !== 'smallified') return;

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { isRefreshable, tableKind } from '../../../packages/renderer/src/window-mgr/table-kind.js';
+import {
+  isRefreshable,
+  PANEL_COLOR_LOCAL,
+  PANEL_COLOR_REFRESHABLE,
+  panelColor,
+  tableKind,
+} from '../../../packages/renderer/src/window-mgr/table-kind.js';
 
 describe('tableKind', () => {
   it('is "normal" for a plain table with neither source nor origin', () => {
@@ -51,5 +57,25 @@ describe('isRefreshable', () => {
     expect(isRefreshable({ origin: { type: 'csv', url: 'https://x/y' } })).toBe(true);
     expect(isRefreshable({ source: { type: 'url', config: {} } })).toBe(true);
     expect(isRefreshable({ source: { type: 'datasette', config: {} } })).toBe(true);
+  });
+});
+
+describe('panelColor', () => {
+  it('gives a plain local table the local colour', () => {
+    expect(panelColor({})).toBe(PANEL_COLOR_LOCAL);
+  });
+
+  it('gives every refreshable kind the same violet', () => {
+    expect(panelColor({ origin: { type: 'csv', url: 'https://x/y' } })).toBe(
+      PANEL_COLOR_REFRESHABLE,
+    );
+    expect(panelColor({ source: { type: 'url', config: {} } })).toBe(PANEL_COLOR_REFRESHABLE);
+    expect(panelColor({ source: { type: 'datasette', config: {} } })).toBe(PANEL_COLOR_REFRESHABLE);
+  });
+
+  it('is the one thing a window and its dock bar both paint from', () => {
+    // Not a CSS class over the window: that is what made a minimized window
+    // change colour. Two different values would be the bug returning.
+    expect(PANEL_COLOR_LOCAL).not.toBe(PANEL_COLOR_REFRESHABLE);
   });
 });

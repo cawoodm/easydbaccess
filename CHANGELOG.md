@@ -9,6 +9,7 @@
 
 ### Bugs
 
+- 🪲 A minimized window changed colour in the dock (v0.0.276)
 - 🪲 A file dropped on a table window was ignored, and the browser left the app to open it (v0.0.274)
 
 - 🪲 The unsaved-work prompt could still stop a reload for a moment after the editor was closed (v0.0.272)

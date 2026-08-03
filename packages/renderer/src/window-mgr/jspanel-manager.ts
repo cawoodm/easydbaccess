@@ -24,7 +24,7 @@ import { createPanel, type PanelShellEl, type ShellViewport } from './panel-shel
 import { queueGeometryWrite } from './geometry-writes.js';
 import { countSuffix, VISIBLE_COUNT_EVENT, type VisibleCountDetail } from './panel-title.js';
 import { sanitizeGeometry, byAscendingZ } from './geometry.js';
-import { tableKind, isRefreshable, TABLE_KIND_ICONS } from './table-kind.js';
+import { tableKind, panelColor, TABLE_KIND_ICONS } from './table-kind.js';
 import { nextFrontZ } from './front-order.js';
 import { registerPanel, unregisterPanel } from './panel-registry.js';
 import { initRestack } from './restack.js';
@@ -335,7 +335,9 @@ function openPanel(t: Table, ctx: AppContext): void {
     container,
     title: lastTitle,
     logo: TABLE_KIND_ICONS[tableKind(t)],
-    color: '#01579b', // jsPanel's old 'primary' theme color
+    // Refreshable tables (source- or origin-backed) read as violet; the shell
+    // paints the window AND its dock bar from this one value.
+    color: panelColor(t),
     content,
     footerToolbar: footer,
     // Saved g.w/g.h come from offsetWidth/Height (total panel size incl.
@@ -378,10 +380,6 @@ function openPanel(t: Table, ctx: AppContext): void {
   const panelEl = document.getElementById(panelId);
   const controlbar = panelEl?.querySelector('.jsPanel-controlbar');
   if (controlbar) controlbar.prepend(search);
-
-  // Refreshable tables (source- or origin-backed) get a distinct panel colour
-  // (see index.html's `.eda-refreshable` rule) — every kind except `normal`.
-  if (isRefreshable(t)) panelEl?.classList.add('eda-refreshable');
 
   // (i) info button in the titlebar — shown only when the table carries
   // descriptive metadata (Datasette description / source / license / about),
@@ -434,7 +432,7 @@ function openPanel(t: Table, ctx: AppContext): void {
     if (kind !== lastKind) {
       lastKind = kind;
       panel.setHeaderLogo(TABLE_KIND_ICONS[kind]);
-      panelEl?.classList.toggle('eda-refreshable', isRefreshable(cur));
+      panel.setHeaderColor(panelColor(cur));
     }
   });
 }
