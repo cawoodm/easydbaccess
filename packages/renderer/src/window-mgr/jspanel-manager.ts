@@ -29,6 +29,7 @@ import { nextFrontZ } from './front-order.js';
 import { registerPanel, unregisterPanel } from './panel-registry.js';
 import { initRestack } from './restack.js';
 import { FORCE_MINIMIZED } from './boot-flags.js';
+import { revealPanel } from './reveal.js';
 
 // Re-exported so existing importers of this module keep working.
 export { FORCE_MINIMIZED };
@@ -93,11 +94,6 @@ export function shellViewport(): ShellViewport {
 }
 
 /**
- * Brings a table's window to the front (restoring it first if minimized).
- * Used by the command palette's "Go to <table>" commands. Returns false when
- * no panel exists for that table id.
- */
-/**
  * Persist every open table panel's current rect. Tile/Cascade move panels by
  * writing inline styles, which no jsPanel callback reports, so without this the
  * arranged layout was lost on the next reload (the stored rect still described
@@ -108,11 +104,17 @@ export async function persistTablePanelGeometry(): Promise<void> {
   await Promise.all([...panels.keys()].map((id) => saveGeometry(id, ctx)));
 }
 
+/**
+ * Show a table's window: restore it if minimized, bring it into view, and front
+ * it. Used by the command palette's "Go to <table>". Always returns true — a
+ * table with no panel is hidden, and un-hiding it opens one.
+ */
 export function focusTableWindow(tableId: string): boolean {
   const p = panels.get(tableId);
   if (p) {
-    if (p.status === 'minimized') p.normalize();
-    p.front();
+    // Restore, bring into view (pan on desktop, fill the screen on a phone) and
+    // front — the same reveal every targeted window gets, see `reveal.ts`.
+    revealPanel(p);
     return true;
   }
   // No panel — the table is hidden (windowGeometry.closed). Un-hide it; the

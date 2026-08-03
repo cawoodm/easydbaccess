@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ "Go to" a table or view now brings its window on screen: the canvas pans to it on desktop, and it fills the screen on a phone (v0.0.275)
 - ✨ Drop a CSV on a table window to append to it, replace its rows, or make a new table; append opens a column mapper (v0.0.274)
 
 ### Bugs

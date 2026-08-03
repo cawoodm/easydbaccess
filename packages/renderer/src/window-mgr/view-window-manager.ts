@@ -36,7 +36,7 @@ import { byAscendingZ } from './geometry.js';
 import { nextFrontZ } from './front-order.js';
 import { registerPanel, unregisterPanel } from './panel-registry.js';
 import { createPanel, type PanelShellEl } from './panel-shell/panel-shell.js';
-import { isMobileViewport } from '../util/viewport.js';
+import { revealPanel } from './reveal.js';
 // Side-effect import registers the <view-window> custom element; the type-only
 // import would otherwise be elided, leaving <view-window> an unupgraded
 // (inline, zero-size) element.
@@ -80,19 +80,8 @@ export async function persistViewWindowGeometry(): Promise<void> {
 export function focusViewWindow(instanceId: string): boolean {
   const entry = panels.get(instanceId);
   if (!entry) return false;
-  const panel = entry.panel;
-  if (panel.status === 'minimized') panel.normalize();
-  if (isMobileViewport()) {
-    // A phone has no room to arrange windows and no way to resize one, so
-    // "show me this view" means "put it on the screen" — all of it.
-    if (panel.status !== 'maximized') panel.maximize();
-  } else {
-    // Bring it where the user is looking. Without this, Open on a view sitting
-    // off-panned or behind another window fronted something invisible, which
-    // read as the button doing nothing at all.
-    panel.centerInViewport();
-  }
-  panel.front();
+  // One reveal behaviour for every window, table or view — see `reveal.ts`.
+  revealPanel(entry.panel);
   return true;
 }
 
