@@ -175,6 +175,39 @@ test.describe('filters', () => {
     await expect(dropdown).toHaveCount(0);
   });
 
+  test('typed filters: AND requires both conditions on one column', async ({ page }) => {
+    // A comma ORs, so two conditions on one column had no spelling. `!NULL AND
+    // Biden` used to parse as one negated token whose term was the literal text
+    // "NULL AND Biden": it matched nothing, excluded nothing, and every row
+    // stayed on screen.
+    const id = await createTable(page, 'Candidates', [{ field: 'headline' }]);
+    await waitForPanel(page, id);
+    for (const headline of ['Biden wins', 'Trump wins', '']) {
+      await addRow(page, id, { headline });
+    }
+
+    const panel = page.locator(`#${panelDomId(id)}`);
+    const rows = panel.locator('data-table tbody tr:not(.spacer):visible');
+    const input = panel.locator('data-table tr.filter-row filter-combobox input').first();
+
+    await input.fill('!NULL AND Biden');
+    await expect(rows).toHaveCount(1);
+    // A plain string cell renders an editable input, so the text is its value.
+    await expect(rows.first().locator('td input').first()).toHaveValue('Biden wins');
+
+    // AND binds tighter than the comma: (Biden AND wins) OR Trump.
+    await input.fill('Biden AND wins,Trump');
+    await expect(rows).toHaveCount(2);
+
+    // OR is a spelled-out comma.
+    await input.fill('Biden OR Trump');
+    await expect(rows).toHaveCount(2);
+
+    // Lowercase is a word, not an operator, so nothing contains this phrase.
+    await input.fill('Biden and Trump');
+    await expect(rows).toHaveCount(0);
+  });
+
   test('popover is portal-mounted (fixed positioning, escapes panel clip)', async ({ page }) => {
     const id = await createTable(page, 'Anchor', [{ field: 'a' }]);
     await waitForPanel(page, id);

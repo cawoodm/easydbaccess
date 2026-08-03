@@ -18,6 +18,22 @@
 //   `!=foo`              → cells that are NOT exactly "foo"
 //   `"Berlin, DE",Zurich` → a value containing a comma must be quoted
 //
+// Two tokens can also be joined with a standalone uppercase `AND`, which is the
+// one thing a comma cannot say — a comma ORs. `OR` is accepted as a spelled-out
+// comma, and `AND` binds tighter, so the shape matches the search box
+// (`text-search.ts`) that users meet first:
+//
+//   `!NULL AND Biden`    → has a value AND contains "Biden"
+//   `^B AND !Bush`       → starts with "B" but is not a Bush
+//   `a AND b,c`          → (a AND b) OR c
+//   `a OR b`             → same as `a,b`
+//
+// Only UPPERCASE `AND`/`OR` standing alone between spaces are operators, so
+// "brand" and "Andrew" are ordinary text, and a term that really contains the
+// word is quoted: `"Salt AND Pepper"`. A comma-separated NEGATIVE token keeps
+// excluding on its own (`Open,!urgent` is "Open but not urgent") — only an
+// explicit `AND` builds a group that must match as a whole.
+//
 // Per-token semantics (case-insensitive):
 //   • plain text        → substring match.
 //   • `^text`           → starts-with match, anchored at the first character.
@@ -48,6 +64,14 @@ export interface FilterToken {
   negate: boolean;
   prefix?: boolean;
   exact?: boolean;
+  /**
+   * This token is joined to the one BEFORE it with `AND`, so the two must match
+   * the same cell together. It describes the separator, not the term, which is
+   * why the flat token list stays the public shape: every existing consumer
+   * (filter popover, view pills, the Datasette query translator) keeps reading
+   * the list it already read, and only the matcher groups it.
+   */
+  and?: boolean;
 }
 
 /** Is a cell value considered empty/null for filtering purposes? */
@@ -63,6 +87,9 @@ function isNullish(value: unknown): boolean {
  * so once one is consumed the other is treated as literal text. A token whose
  * text is empty is dropped, so `a,,b` is just `a` OR `b` — but a lone `!`
  * survives, since it means "has a value".
+ *
+ * A standalone uppercase `AND` / `OR` between tokens is an operator: `OR` reads
+ * as a comma, and `AND` sets `and` on the token that follows it.
  */
 export function parseColumnFilter(raw: string): FilterToken[] {
   const tokens: FilterToken[] = [];
@@ -74,6 +101,7 @@ export function parseColumnFilter(raw: string): FilterToken[] {
   let prefix = false;
   let exact = false;
   let atStart = true; // still eligible to consume a leading `!` / `^` / `=`
+  let pendingAnd = false; // an `AND` was read; it belongs to the NEXT token
 
   const flush = () => {
     const term = hadQuote ? buf : buf.trim();
@@ -81,8 +109,12 @@ export function parseColumnFilter(raw: string): FilterToken[] {
       const token: FilterToken = { term, negate };
       if (prefix) token.prefix = true;
       if (exact) token.exact = true;
+      // Nothing to join to when this is the first token — a leading `AND` is
+      // dropped rather than left dangling for `composeColumnFilter` to emit.
+      if (pendingAnd && tokens.length > 0) token.and = true;
       tokens.push(token);
     }
+    pendingAnd = false;
     buf = '';
     sawText = false;
     quoted = false;
@@ -95,6 +127,18 @@ export function parseColumnFilter(raw: string): FilterToken[] {
 
   for (let i = 0; i < raw.length; i++) {
     const ch = raw[i]!;
+    // An operator needs whitespace in front of it and a token boundary behind,
+    // so `brand` and `Andrew` stay text and only ` AND ` / ` OR ` separate. The
+    // test is case-SENSITIVE, matching the search box: lowercase "and" is a word.
+    if (!quoted && /\s/.test(ch)) {
+      const op = /^\s+(AND|OR)(?=[\s,]|$)/.exec(raw.slice(i));
+      if (op && (sawText || negate)) {
+        flush();
+        pendingAnd = op[1] === 'AND';
+        i += op[0].length - 1;
+        continue;
+      }
+    }
     if (ch === '"') {
       // A quote anywhere in the token opens/closes a quoted run; a doubled
       // quote inside one is an escaped literal.
@@ -140,7 +184,8 @@ export function parseColumnFilter(raw: string): FilterToken[] {
 
 /**
  * Does a term need quoting to survive a `parseColumnFilter` round-trip? A
- * leading `!`, `^` or `=` must be quoted or it would come back as a modifier.
+ * leading `!`, `^` or `=` must be quoted or it would come back as a modifier,
+ * and a term carrying a standalone `AND` / `OR` would come back split in two.
  */
 function needsQuoting(term: string): boolean {
   return (
@@ -150,24 +195,44 @@ function needsQuoting(term: string): boolean {
     term === '' ||
     term.startsWith('!') ||
     term.startsWith('^') ||
-    term.startsWith('=')
+    term.startsWith('=') ||
+    /\s(AND|OR)(?=[\s,]|$)/.test(term)
   );
 }
 
 /** Render tokens back into a filter string, quoting terms that need it. */
 export function composeColumnFilter(tokens: FilterToken[]): string {
-  return tokens
-    .map((t) => {
-      const body =
-        t.term === '' && t.negate
-          ? '' // a bare `!` — "has a value"
-          : needsQuoting(t.term)
-            ? `"${t.term.replace(/"/g, '""')}"`
-            : t.term;
-      const anchor = t.exact ? '=' : t.prefix ? '^' : '';
-      return (t.negate ? '!' : '') + anchor + body;
-    })
-    .join(',');
+  let out = '';
+  tokens.forEach((t, i) => {
+    const body =
+      t.term === '' && t.negate
+        ? '' // a bare `!` — "has a value"
+        : needsQuoting(t.term)
+          ? `"${t.term.replace(/"/g, '""')}"`
+          : t.term;
+    const anchor = t.exact ? '=' : t.prefix ? '^' : '';
+    const text = (t.negate ? '!' : '') + anchor + body;
+    // `and` joins to the token before it, so it cannot open the expression: a
+    // caller that dropped the first token (the view pills do) must not get a
+    // string that starts with " AND ".
+    if (i === 0) out = text;
+    else out += t.and ? ` AND ${text}` : `,${text}`;
+  });
+  return out;
+}
+
+/**
+ * Split the flat token list into AND-groups: a token flagged `and` continues the
+ * group before it, anything else opens a new one.
+ */
+export function groupColumnFilter(tokens: FilterToken[]): FilterToken[][] {
+  const groups: FilterToken[][] = [];
+  for (const t of tokens) {
+    const last = groups[groups.length - 1];
+    if (t.and && last) last.push(t);
+    else groups.push([t]);
+  }
+  return groups;
 }
 
 /** Does `value` satisfy a single filter token? */
@@ -186,16 +251,25 @@ function matchesTerm(value: unknown, token: FilterToken): boolean {
   return token.prefix ? haystack.startsWith(needle) : haystack.includes(needle);
 }
 
+/** Does the cell satisfy every token of one AND-group? */
+function matchesGroup(value: unknown, group: FilterToken[]): boolean {
+  return group.every((t) => (t.negate ? !matchesTerm(value, t) : matchesTerm(value, t)));
+}
+
 /** Does `value` satisfy the per-column filter `rawQuery`? */
 export function matchesColumnFilter(value: unknown, rawQuery: string): boolean {
-  const tokens = parseColumnFilter(rawQuery);
-  if (tokens.length === 0) return true;
+  const groups = groupColumnFilter(parseColumnFilter(rawQuery));
+  if (groups.length === 0) return true;
 
-  // Any excluded term wins outright.
-  for (const t of tokens) {
-    if (t.negate && matchesTerm(value, t)) return false;
+  // A comma-separated NEGATIVE token on its own still excludes outright, which
+  // is what makes `Open,!urgent` mean "Open but not urgent" rather than "Open OR
+  // not-urgent". Only an explicit `AND` puts a negation inside a group, where it
+  // is one condition among several instead of a veto over the whole filter.
+  const vetoes = groups.filter((g) => g.length === 1 && g[0]!.negate);
+  for (const g of vetoes) {
+    if (matchesTerm(value, g[0]!)) return false;
   }
-  const positives = tokens.filter((t) => !t.negate);
-  if (positives.length === 0) return true;
-  return positives.some((t) => matchesTerm(value, t));
+  const required = groups.filter((g) => !(g.length === 1 && g[0]!.negate));
+  if (required.length === 0) return true;
+  return required.some((g) => matchesGroup(value, g));
 }

@@ -162,9 +162,87 @@ describe('parseColumnFilter / composeColumnFilter', () => {
       '!=foo',
       '=foo,=bar',
       '"=x"',
+      '!NULL AND Biden',
+      '^B AND !Bush',
+      'a AND b,c',
+      'a AND b AND c',
+      '"Salt AND Pepper"',
     ]) {
       expect(composeColumnFilter(parseColumnFilter(raw))).toBe(raw);
     }
+  });
+});
+
+describe('AND groups', () => {
+  // A comma ORs, so two substring conditions on one column had no spelling at
+  // all before this: `!NULL AND Biden` parsed as ONE negated token whose term
+  // was the text "NULL AND Biden", which matched nothing and excluded nothing —
+  // the filter silently passed every row.
+  it('requires both sides of an AND', () => {
+    expect(matchesColumnFilter('Biden wins', '!NULL AND Biden')).toBe(true);
+    expect(matchesColumnFilter('Trump wins', '!NULL AND Biden')).toBe(false);
+    expect(matchesColumnFilter('', '!NULL AND Biden')).toBe(false);
+    expect(matchesColumnFilter(null, '!NULL AND Biden')).toBe(false);
+  });
+
+  it('negates inside a group instead of vetoing the whole filter', () => {
+    expect(matchesColumnFilter('Biden', '^B AND !Bush')).toBe(true);
+    expect(matchesColumnFilter('Bush', '^B AND !Bush')).toBe(false);
+    expect(matchesColumnFilter('Obama', '^B AND !Bush')).toBe(false);
+  });
+
+  it('binds AND tighter than a comma', () => {
+    // (a AND b) OR c
+    expect(matchesColumnFilter('a b', 'a AND b,c')).toBe(true);
+    expect(matchesColumnFilter('a', 'a AND b,c')).toBe(false);
+    expect(matchesColumnFilter('c', 'a AND b,c')).toBe(true);
+  });
+
+  it('chains three terms', () => {
+    expect(matchesColumnFilter('a b c', 'a AND b AND c')).toBe(true);
+    expect(matchesColumnFilter('a b', 'a AND b AND c')).toBe(false);
+  });
+
+  it('reads OR as a spelled-out comma', () => {
+    expect(matchesColumnFilter('Sweden', 'Sweden OR Norway')).toBe(true);
+    expect(matchesColumnFilter('Norway', 'Sweden OR Norway')).toBe(true);
+    expect(matchesColumnFilter('Denmark', 'Sweden OR Norway')).toBe(false);
+  });
+
+  it('takes only an uppercase operator standing alone', () => {
+    // Lowercase is a word, and so is an operator glued into one.
+    expect(matchesColumnFilter('a and b', 'a and b')).toBe(true);
+    expect(matchesColumnFilter('brand new', 'brand')).toBe(true);
+    expect(matchesColumnFilter('Andrew', 'Andrew')).toBe(true);
+    // A quoted operator is text again.
+    expect(matchesColumnFilter('Salt AND Pepper', '"Salt AND Pepper"')).toBe(true);
+    expect(matchesColumnFilter('Salt', '"Salt AND Pepper"')).toBe(false);
+  });
+
+  it('flags the joined token, and only the joined one', () => {
+    expect(parseColumnFilter('!NULL AND Biden')).toEqual([
+      { term: 'NULL', negate: true },
+      { term: 'Biden', negate: false, and: true },
+    ]);
+    expect(parseColumnFilter('a OR b')).toEqual([
+      { term: 'a', negate: false },
+      { term: 'b', negate: false },
+    ]);
+  });
+
+  it('survives an operator with nothing to join', () => {
+    // Garbage in, no crash and no dangling operator out.
+    expect(parseColumnFilter('AND b')).toEqual([{ term: 'AND b', negate: false }]);
+    expect(composeColumnFilter(parseColumnFilter('a AND'))).toBe('a');
+    expect(matchesColumnFilter('a', 'a AND')).toBe(true);
+  });
+
+  it('does not change what a comma-separated negative means', () => {
+    // The regression this design had to avoid: `Open,!urgent` is "Open but not
+    // urgent", NOT "Open OR not-urgent".
+    expect(matchesColumnFilter('Open urgent', 'Open,!urgent')).toBe(false);
+    expect(matchesColumnFilter('Open', 'Open,!urgent')).toBe(true);
+    expect(matchesColumnFilter('Spain', '^S,!Spain')).toBe(false);
   });
 });
 

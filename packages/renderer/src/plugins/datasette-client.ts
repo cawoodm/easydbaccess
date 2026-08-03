@@ -380,6 +380,10 @@ export function translateQuery(
     // values would drop the rows the anchored token was meant to add. Send no
     // param for this column and let the client-side filter narrow the page.
     if (tokens.some((t) => t.prefix)) continue;
+    // Same reason for an `AND` group: `!NULL AND Biden` is two conditions on one
+    // column, and Datasette takes one operator per column. The client-side
+    // filter still narrows the page it does return.
+    if (tokens.some((t) => t.and)) continue;
     // Multi-value / negated: include set → __in, exclude set → __notin.
     const include = tokens.filter((t) => !t.negate).map((t) => t.term);
     const exclude = tokens.filter((t) => t.negate).map((t) => t.term);

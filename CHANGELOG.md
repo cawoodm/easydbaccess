@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ A column filter takes `AND`: `!NULL AND Biden` needs both, and `OR` spells out the comma (v0.0.288)
 - ✨ The `html-preview` cell renderer is called `preview` now, and shows a Markdown value as formatted text by itself (v0.0.282)
 - ✨ The `html` cell renderer has a pencil for the source, so a link inside the cell can be clicked (v0.0.281)
 - ✨ The command-palette launcher is an icon button on the header's utility side now, beside search, plugins, help and settings (v0.0.278)
