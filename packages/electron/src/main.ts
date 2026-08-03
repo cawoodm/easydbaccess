@@ -17,7 +17,8 @@ import { app, BrowserWindow, dialog, session, ipcMain } from 'electron';
 import * as path from 'node:path';
 import { existsSync } from 'node:fs';
 import { getStore, pickDatabaseToOpen, switchToDatabase, saveDbAs, importDb, importDbCommit, convertAndOpen, currentDbInfo } from './db-files';
-import { prepareImport, importRowsFor, probeDatabaseFile, type ImportPlanEntry } from './db-import';
+import { prepareImport, probeDatabaseFile, type ImportPlanEntry } from './db-import';
+import { runImport } from './import-runner';
 import { listBrowsable, readBrowseRows } from './db-browse';
 import type { ColumnSpec } from '@easydb/shared';
 import type { ImportDecision } from './db-import';
@@ -168,26 +169,20 @@ function registerDbFileIpc(): void {
   });
 
   /**
-   * Phase 2: one table's rows, in the background.
+   * Phase 2: one table's rows, on a worker thread.
    *
-   * The `await` between batches is the point of this handler. `node:sqlite` is
-   * synchronous, so a straight loop would hold the main process for the whole
-   * import and no other `store:*` call could complete — the window would freeze
-   * exactly as it did before. Yielding to the event loop each batch keeps the
-   * app usable while a 600k-row table loads, and lets the progress that was
-   * just sent actually reach the renderer.
+   * `import-runner.ts` decides between the worker and this thread — the worker
+   * needs WAL to write the file alongside the open connection, and a file that
+   * refused WAL falls back to the in-process loop. Either way this handler only
+   * relays progress, so it never blocks on the copy itself.
    */
   ipcMain.handle('db:importRows', async (event, sourcePath: unknown, entry: unknown) => {
     const store = getStore();
     const plan = entry as ImportPlanEntry;
-    store.setDurability('bulk');
     try {
-      let rows = 0;
-      for (const p of importRowsFor(sourcePath as string, store, plan)) {
-        rows = p.rows;
-        event.sender.send('import:progress', { tableId: plan.tableId, ...p });
-        await new Promise((resolve) => setImmediate(resolve));
-      }
+      const rows = await runImport(sourcePath as string, store, plan, {
+        onProgress: (p) => event.sender.send('import:progress', { tableId: plan.tableId, ...p }),
+      });
       // One broadcast at the end, not per batch: a grid that re-read on every
       // batch would spend the import re-rendering instead of importing. Scoped
       // to this table, so the other twelve panels don't re-read too.
@@ -202,8 +197,6 @@ function registerDbFileIpc(): void {
       return rows;
     } catch (err) {
       throw new Error(toErrorMessage(err), { cause: err });
-    } finally {
-      store.setDurability('safe');
     }
   });
   // Browse reads a file we neither opened nor imported — always read-only, so

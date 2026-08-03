@@ -113,6 +113,45 @@ export class SqliteStore {
    */
   private tune(): void {
     this.db.exec('PRAGMA cache_size = -65536');
+    // WAL lets a SECOND connection write this file while this one keeps reading
+    // it, which is what the import worker needs (`import-runner.ts`): under the
+    // default rollback journal a writer locks the whole database, so every
+    // `store:*` call would block for the length of the import — the freeze the
+    // worker exists to remove.
+    //
+    // Tolerated rather than required: a file on read-only media cannot be
+    // converted, and the store must still open it. The worker checks the mode it
+    // actually got and stays on the main thread if WAL was refused.
+    try {
+      this.db.exec('PRAGMA journal_mode = WAL');
+    } catch {
+      /* keeps whatever mode the file has */
+    }
+    // With two connections, one can find the other mid-write. Waiting briefly
+    // beats surfacing SQLITE_BUSY to the user, and a batch is ~40ms.
+    this.db.exec('PRAGMA busy_timeout = 10000');
+  }
+
+  /** The journal mode actually in force — `wal` once {@link tune} succeeded. */
+  journalMode(): string {
+    const r = this.db.prepare('PRAGMA journal_mode').get() as { journal_mode?: string } | undefined;
+    return String(r?.journal_mode ?? '').toLowerCase();
+  }
+
+  /**
+   * Folds the `-wal` sidecar back into the main file.
+   *
+   * Required before the file is COPIED. In WAL mode a committed row can live in
+   * `<name>.db-wal` and not yet in `<name>.db`, so copying only the `.db` — which
+   * is what Save As does — would silently produce a database missing its most
+   * recent writes.
+   */
+  checkpoint(): void {
+    try {
+      this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    } catch {
+      /* not in WAL, or nothing to fold — either way there is nothing to do */
+    }
   }
 
   /**

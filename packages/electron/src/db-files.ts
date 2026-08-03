@@ -206,6 +206,11 @@ export async function saveDbAs(win: BrowserWindow | null): Promise<DialogResult<
   if (result.canceled || !result.filePath) return { ok: false, cancelled: true };
 
   const from = getStore().filePath;
+  // In WAL mode a committed row can still be sitting in the `-wal` sidecar, and
+  // `copyDatabase` copies only the `.db` — so fold it in first or the copy is
+  // missing its newest writes. Closing usually checkpoints too, but not while
+  // another connection (the import worker) still has the file open.
+  getStore().checkpoint();
   store?.close();
   store = null;
   copyDatabase(from, result.filePath);

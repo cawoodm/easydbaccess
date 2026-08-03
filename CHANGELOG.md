@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ Importing a `.db` runs on a worker thread, so the window stays responsive while it copies (v0.0.289)
 - ✨ Importing or converting a `.db` shows its tables at once and fills each one in with its own percentage (v0.0.286)
 - ✨ Convert to EDA asks which tables to take, with a shortcut that skips the views (v0.0.286)
 - ✨ The `html-preview` cell renderer is called `preview` now, and shows a Markdown value as formatted text by itself (v0.0.282)
