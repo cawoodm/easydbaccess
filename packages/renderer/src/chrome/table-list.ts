@@ -2,7 +2,7 @@ import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { Table } from '@easydb/shared';
 import { getContext } from '../app-context.js';
-import { initWindowManager } from '../window-mgr/jspanel-manager.js';
+import { initWindowManager } from '../window-mgr/table-window-manager.js';
 import { initViewWindowManager } from '../window-mgr/view-window-manager.js';
 
 /**

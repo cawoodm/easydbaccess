@@ -1,5 +1,5 @@
 /**
- * Monotonic front-rank source, SHARED by both table windows (`jspanel-manager.ts`)
+ * Monotonic front-rank source, SHARED by both table windows (`table-window-manager.ts`)
  * and view windows (`view-window-manager.ts`).
  *
  * `Date.now()` alone collides when several panels are fronted within the same

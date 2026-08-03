@@ -8,6 +8,7 @@ import type {
   TableOrigin,
 } from '@easydb/shared';
 import { filenameFromUrl } from '../import/fetch-source.js';
+import { isUnsafeIntegerText } from '../import/big-numbers.js';
 import { mapRowsToTarget, type ColumnMapping } from '../import/map-columns.js';
 import { cryptoUUID, slugField } from '../util/ids.js';
 
@@ -124,7 +125,7 @@ const ONTO_REPLACE = 'Replace the rows of this table';
  * silently wrong for anything else.
  */
 async function dropOntoTable(api: HostApi, event: DragEvent, file: File): Promise<boolean> {
-  const { tableIdAtNode } = await import('../window-mgr/jspanel-manager.js');
+  const { tableIdAtNode } = await import('../window-mgr/table-window-manager.js');
   const tableId = tableIdAtNode(event.target);
   if (!tableId) return false;
   const table = await api.store.tables.findOne(tableId);
@@ -474,7 +475,7 @@ export function parseCsvRaw(
   text: string,
   opts: { maxRows?: number | undefined; separator?: string | undefined } = {},
 ): { header: string[]; rows: string[][] } {
-  const normalized = text.replace(/﻿/, ''); // strip BOM
+  const normalized = text.replace(/\uFEFF/, ''); // strip BOM
   const sep = opts.separator ?? detectSeparator(normalized);
   const all = parseLines(normalized, sep, lineCap(opts.maxRows));
   if (all.length === 0) return { header: [], rows: [] };
@@ -532,7 +533,7 @@ export function parseCsv(
   text: string,
   opts: { maxRows?: number | undefined; separator?: string | undefined } = {},
 ): ParseResult {
-  const normalized = text.replace(/﻿/, ''); // strip BOM
+  const normalized = text.replace(/\uFEFF/, ''); // strip BOM
   const sep = opts.separator ?? detectSeparator(normalized);
   const rows = parseLines(normalized, sep, lineCap(opts.maxRows));
   if (rows.length === 0) return { columns: [], rows: [] };
@@ -746,6 +747,9 @@ function isBool(s: string): boolean {
 function isNumber(s: string): boolean {
   const t = s.trim();
   if (t === '') return false;
+  // An integer past 2^53 cannot round-trip through a JS number, so a column
+  // holding one is TEXT — see import/big-numbers.ts.
+  if (isUnsafeIntegerText(t)) return false;
   const n = Number(t);
   return Number.isFinite(n);
 }
@@ -779,6 +783,11 @@ function coerce(raw: string, type: ColumnType): unknown {
   switch (type) {
     case 'number': {
       if (s === '') return null;
+      // Keep the digits when they do not fit a JS number — the same reason
+      // `isNumber` refuses to infer one. A column typed `number` by hand (or
+      // by a header annotation) still holds such a value as text rather than
+      // rounding it.
+      if (isUnsafeIntegerText(s)) return s;
       const n = Number(s);
       return Number.isFinite(n) ? n : s;
     }

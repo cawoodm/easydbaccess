@@ -10,6 +10,8 @@ import {
   viewRows,
   hasRowHtml,
   addPillValue,
+  cyclePillValue,
+  pillValueState,
   removePillValue,
 } from '../../../packages/renderer/src/views/view-render.js';
 
@@ -176,6 +178,40 @@ describe('view-render', () => {
     it('removePillValue returns empty string when nothing is left', () => {
       expect(removePillValue('=foo', 'foo')).toBe('');
       expect(removePillValue(undefined, 'foo')).toBe('');
+    });
+  });
+
+  describe('pillValueState / cyclePillValue', () => {
+    // What a chip's FIELD button does: = (only this) → ≠ (everything but this)
+    // → off. Three states, because "everything except this" is the other half of
+    // a filter you arrived at by clicking a value.
+    it('reads the state of one value', () => {
+      expect(pillValueState(undefined, 'foo')).toBe('off');
+      expect(pillValueState('=foo', 'foo')).toBe('on');
+      expect(pillValueState('!=foo', 'foo')).toBe('not');
+      expect(pillValueState('=bar', 'foo')).toBe('off');
+    });
+
+    it('reads the state case-insensitively, like the filter matches', () => {
+      expect(pillValueState('=Foo', 'foo')).toBe('on');
+      expect(pillValueState('!=FOO', 'foo')).toBe('not');
+    });
+
+    it('cycles off → on → not → off', () => {
+      expect(cyclePillValue(undefined, 'foo')).toBe('=foo');
+      expect(cyclePillValue('=foo', 'foo')).toBe('!=foo');
+      expect(cyclePillValue('!=foo', 'foo')).toBe('');
+    });
+
+    it('leaves the other values on the same field alone', () => {
+      expect(cyclePillValue('=foo,=bar', 'foo')).toBe('=bar,!=foo');
+      expect(cyclePillValue('=foo,!=bar', 'bar')).toBe('=foo');
+    });
+
+    it('ignores a non-exact token for the same term — that is a different filter', () => {
+      // `^foo` (starts-with) is not the exact-match token a chip owns, so it
+      // survives the cycle rather than being silently rewritten.
+      expect(cyclePillValue('^foo', 'foo')).toBe('^foo,=foo');
     });
   });
 

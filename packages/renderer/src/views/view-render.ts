@@ -204,6 +204,42 @@ export function removePillValue(current: string | undefined, value: string): str
   return composeColumnFilter(tokens);
 }
 
+/** What a pill-filter column string says about ONE value. */
+export type PillValueState = 'on' | 'not' | 'off';
+
+/** Does an exact-match token EXCLUDE `value`, case-insensitively? */
+function isExcludedPillToken(t: FilterToken, value: string): boolean {
+  return t.exact === true && t.negate === true && t.term.toLowerCase() === value.toLowerCase();
+}
+
+/** Is `value` included, excluded, or absent from `current`? */
+export function pillValueState(current: string | undefined, value: string): PillValueState {
+  const tokens = parseColumnFilter(current ?? '');
+  if (tokens.some((t) => isExactPillToken(t, value))) return 'on';
+  if (tokens.some((t) => isExcludedPillToken(t, value))) return 'not';
+  return 'off';
+}
+
+/**
+ * Cycle one value's state in a pill-filter column string: `on` → `not` → `off`
+ * → `on`. Every other value's token is carried through untouched, so cycling
+ * one chip never disturbs the others OR-ed onto the same field.
+ *
+ * This is what clicking a chip's FIELD does. Three states rather than a
+ * checkbox's two, because "show me everything except this" is the other half of
+ * a filter you arrived at by clicking a value — and it was previously
+ * unreachable from a chip at all.
+ */
+export function cyclePillValue(current: string | undefined, value: string): string {
+  const state = pillValueState(current, value);
+  const others = parseColumnFilter(current ?? '').filter(
+    (t) => !isExactPillToken(t, value) && !isExcludedPillToken(t, value),
+  );
+  if (state === 'off') return composeColumnFilter([...others, { term: value, negate: false, exact: true }]);
+  if (state === 'on') return composeColumnFilter([...others, { term: value, negate: true, exact: true }]);
+  return composeColumnFilter(others);
+}
+
 /**
  * Sort by the instance's snapshotted column. Empty values always sink to the
  * bottom (both directions); present values compare numerically when both look

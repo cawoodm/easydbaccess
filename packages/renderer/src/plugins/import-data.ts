@@ -200,8 +200,6 @@ async function openImport(api: HostApi, presetKind: ImportKind = 'auto'): Promis
   const editHook = editColumns
     ? (columns: ColumnSpec[], subject?: string) => editColumnNames(columns, subject)
     : undefined;
-  // The CSV options panel's separator. Only csv reads it.
-  const separator = typeof panel.separator === 'string' ? panel.separator : undefined;
   try {
     // A `.sql` script is two things at once: CREATE TABLE + INSERT is tabular
     // data the kernel handles, but a SELECT is a PROJECTION — a spec with no

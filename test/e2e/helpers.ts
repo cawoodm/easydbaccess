@@ -131,9 +131,34 @@ export async function readRows(page: Page, tableId: string) {
   );
 }
 
+/**
+ * Reads a view-instance record — the counterpart of `readTable` for view
+ * windows, whose geometry (and front rank) lives on `viewInstances`, not on the
+ * table. Specs that front a view need this: the write is asynchronous, so the
+ * only way to know it landed is to read it back.
+ */
+export async function readViewInstance(page: Page, instanceId: string) {
+  return page.evaluate(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async (id) => (window as any).__easydb.store.viewInstances.findOne(id),
+    instanceId,
+  );
+}
+
 /** Returns the jsPanel DOM id derived from a table id (mirrors cssSafe()). */
 export function panelDomId(tableId: string): string {
   return `panel-${tableId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+}
+
+/** Returns the panel DOM id of a view window (mirrors view-window-manager's). */
+export function viewPanelDomId(instanceId: string): string {
+  return `view-panel-${instanceId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+}
+
+/** The view-instance id behind a view panel's DOM id — the inverse of
+ *  `viewPanelDomId`, exact because instance ids are UUIDs. */
+export function viewInstanceIdOf(panelId: string): string {
+  return panelId.replace(/^view-panel-/, '');
 }
 
 /**

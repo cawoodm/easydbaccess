@@ -11,7 +11,7 @@
 // the displayed one, and the change event carries the stored value back.
 
 import { createPanel } from '../window-mgr/panel-shell/panel-shell.js';
-import { shellViewport } from '../window-mgr/jspanel-manager.js';
+import { shellViewport } from '../window-mgr/shell-viewport.js';
 import { isMobileViewport } from '../util/viewport.js';
 
 /** The pan/zoom-transformed canvas viewport that panels mount into. */
@@ -69,6 +69,9 @@ export function openHtmlEditor(title: string, value: string, onSave: (next: stri
     content,
     contentSize: { w: 520, h: 400 },
     position: 'center',
+    // Escape closes the editor — the shell handles it, so it works wherever the
+    // focus sits (the panel chrome, the buttons), not only inside the textarea.
+    closeOnEscape: true,
     // A textarea whose edge you cannot see is hard to type into, and the
     // Save/Cancel buttons sit in the corner a too-wide panel pushes off-screen
     // first. So on a narrow viewport the editor opens maximized. The 520x400
@@ -83,14 +86,12 @@ export function openHtmlEditor(title: string, value: string, onSave: (next: stri
     onSave(ta.value);
     panel.close();
   });
-  // Ctrl+Enter saves, Esc cancels — familiar dialog keys.
+  // Ctrl+Enter saves. Escape cancels through the shell's `closeOnEscape`, which
+  // is why there is no Escape branch here.
   ta.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       save.click();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      panel.close();
     }
   });
   setTimeout(() => ta.focus(), 0);

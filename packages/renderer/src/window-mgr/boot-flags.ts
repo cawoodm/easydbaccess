@@ -2,9 +2,9 @@
 //
 // URL flags that change how windows boot. Read once, at module load.
 //
-// These live in their own module because both `jspanel-manager.ts` (which
+// These live in their own module because both `table-window-manager.ts` (which
 // opens panels) and `restack.ts` (which re-fronts them) need them, and
-// jspanel-manager already imports restack — putting the flag in either of those
+// table-window-manager already imports restack — putting the flag in either of those
 // would make the import cycle.
 
 /**

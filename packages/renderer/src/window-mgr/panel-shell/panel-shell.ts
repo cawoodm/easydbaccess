@@ -47,6 +47,14 @@ export interface PanelShellOptions {
   position?: { x: number; y: number } | { centerTopOffset: number } | 'center' | undefined;
   minimizeTo?: string | undefined;
   boot?: { minimized?: boolean; maximized?: boolean; smallified?: boolean } | undefined;
+  /**
+   * Escape closes this panel. Opt-in, because it must not be true of the panels
+   * the app is BUILT of: a table or view window is where the user works, and Esc
+   * is not how you put your work away. It is right for the short-lived popups a
+   * cell renderer opens — a preview and its source editor, which are read-and-
+   * dismiss, exactly like a dialog.
+   */
+  closeOnEscape?: boolean | undefined;
   viewport?: ShellViewport | undefined;
   onfronted?: (() => void) | undefined;
   onstatuschange?: ((panel: PanelShellEl) => void) | undefined;
@@ -136,7 +144,7 @@ let zSeq = 100;
 /**
  * Next z-index, guaranteed above every panel currently in the DOM. Table
  * panels and view panels are each created by their own manager
- * (`jspanel-manager.ts` / `view-window-manager.ts`) but share this one shell
+ * (`table-window-manager.ts` / `view-window-manager.ts`) but share this one shell
  * module, so scanning the DOM (rather than trusting only the local `zSeq`)
  * keeps their z numbering mutually comparable — a freshly-created/fronted
  * table panel can't end up numerically behind an older view panel, which
@@ -177,6 +185,49 @@ function isTopmost(el: HTMLElement): boolean {
 }
 
 const registry = new Set<PanelShellEl>();
+
+/**
+ * Panels that asked for `closeOnEscape`, and the one document listener that
+ * serves them all.
+ *
+ * One listener, not one per panel: Escape must close exactly ONE panel — the
+ * topmost visible one — and a per-panel listener cannot know whether a panel
+ * above it already claimed the key. Minimized panels are skipped for the same
+ * reason they are skipped when fronting: they are `display:none`, and closing a
+ * window the user cannot see is not what Escape means.
+ */
+const escapable = new Set<PanelShellEl>();
+
+function topmostEscapable(): PanelShellEl | null {
+  let best: PanelShellEl | null = null;
+  for (const p of escapable) {
+    if (p.style.display === 'none') continue;
+    if (!best || Number(p.style.zIndex) > Number(best.style.zIndex)) best = p;
+  }
+  return best;
+}
+
+const onEscapeKey = (e: KeyboardEvent): void => {
+  if (e.key !== 'Escape') return;
+  // Something with a stronger claim on Escape already handled it: an open
+  // <dialog>, the anchored menu, a cell editor, the textarea inside a panel.
+  // Each of those preventDefaults on a capture-phase listener, which runs first.
+  if (e.defaultPrevented) return;
+  const panel = topmostEscapable();
+  if (!panel) return;
+  e.preventDefault();
+  panel.close();
+};
+
+function watchEscape(el: PanelShellEl): void {
+  if (escapable.size === 0) document.addEventListener('keydown', onEscapeKey);
+  escapable.add(el);
+}
+
+function unwatchEscape(el: PanelShellEl): void {
+  if (!escapable.delete(el)) return;
+  if (escapable.size === 0) document.removeEventListener('keydown', onEscapeKey);
+}
 
 /** Open panels, highest z first (matches jsPanel.getPanels()'s order). */
 export function getPanels(): PanelShellEl[] {
@@ -473,6 +524,7 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
     bar?.remove();
     exitMaximized();
     registry.delete(el);
+    unwatchEscape(el);
     el.remove();
     opts.onclosed?.();
   };
@@ -521,11 +573,12 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
     return readRect();
   };
   registry.add(el);
+  if (opts.closeOnEscape) watchEscape(el);
 
   // ---- interactions ----------------------------------------------------
   // Any pointerdown inside the panel fronts it — but only when another panel
   // is actually on top. Fronting unconditionally on every pointerdown fired
-  // `onfronted` (a store write — see stampFrontOrder in jspanel-manager.ts)
+  // `onfronted` (a store write — see stampFrontOrder in table-window-manager.ts)
   // on every click anywhere in the content, including mid-drag on a data-table
   // column-resize handle: the resulting table-record update raced the
   // in-memory column-width freeze the resize was building, so an interior

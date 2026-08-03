@@ -5,8 +5,18 @@ import type { ColumnSpec, Row, ViewInstance, ViewTemplate } from '@easydb/shared
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViewsDialog } from '../dialogs/views-dialog.js';
-import { addPillValue, evaluateRows, hasRowHtml, removePillValue, substituteRow, viewRows } from './view-render.js';
+import {
+  addPillValue,
+  cyclePillValue,
+  evaluateRows,
+  hasRowHtml,
+  removePillValue,
+  substituteRow,
+  viewRows,
+} from './view-render.js';
 import { parseColumnFilter } from '../search/column-filter.js';
+import { facetable, facetCounts } from '../search/facet-values.js';
+import { FilterPopover } from '../chrome/filter-popover.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 // Side-effect import: the template-off mode renders the standard interactive
@@ -124,17 +134,6 @@ export class ViewWindow extends LitElement {
       .eda-filter-pill:hover {
         background: #bae6fd;
       }
-      /* Active pill-filter bar, pinned to the top of the view. */
-      .vw-pillbar {
-        flex: 0 0 auto;
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.35rem;
-        padding: 0.3rem 0.5rem;
-        border-bottom: 1px solid #e5e7eb;
-        background: #f0f9ff;
-      }
       .eda-pill-chip {
         display: inline-flex;
         align-items: center;
@@ -144,6 +143,33 @@ export class ViewWindow extends LitElement {
         background: #e0f2fe;
         color: #0369a1;
         font-size: 0.8rem;
+      }
+      /* A chip is two buttons, because it does two things: the FIELD (with the
+         operator) cycles = / != / off, and the VALUE opens the field's other
+         values as a checklist. */
+      .eda-pill-chip-field,
+      .eda-pill-chip-value {
+        padding: 0;
+        border: none;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      .eda-pill-chip-field {
+        font-weight: 600;
+      }
+      .eda-pill-chip-field:hover,
+      .eda-pill-chip-value:hover {
+        text-decoration: underline;
+      }
+      /* An excluded value reads as excluded at a glance, not only by its ≠. */
+      .eda-pill-chip.not {
+        background: #fee2e2;
+        color: #b91c1c;
+      }
+      .eda-pill-chip.not .eda-pill-chip-remove:hover {
+        background: rgba(185, 28, 28, 0.15);
       }
       .eda-pill-chip-remove {
         display: inline-flex;
@@ -162,12 +188,14 @@ export class ViewWindow extends LitElement {
       .eda-pill-chip-remove:hover {
         background: rgba(3, 105, 161, 0.15);
       }
-      /* Sort toolbar pinned to the top of a template view. */
+      /* One toolbar at the top of a view: the sort controls (template mode) and
+         the active filter chips, which used to sit in a second bar of their own. */
       .vw-sortbar {
         flex: 0 0 auto;
         display: flex;
         align-items: center;
         gap: 0.4rem;
+        flex-wrap: wrap;
         padding: 0.3rem 0.5rem;
         border-bottom: 1px solid #e5e7eb;
         background: #ffffff;
@@ -475,13 +503,91 @@ export class ViewWindow extends LitElement {
     const field = t.getAttribute('data-eda-filter-field');
     const value = t.getAttribute('data-eda-filter-value');
     if (!field || value == null) return;
+    await this.addPill(field, value);
+  };
+
+  /** Add one exact value to a field's pill filter, OR-ed with what is there. */
+  private async addPill(field: string, value: string) {
+    if (!this.instance) return;
     const next = addPillValue(this.instance.pillFilters?.[field], value);
     const pillFilters = { ...(this.instance.pillFilters ?? {}), [field]: next };
     const ctx = await getContext();
     await ctx.store.viewInstances.patch(this.instance.id, { pillFilters, updatedAt: Date.now() });
     this.instance = { ...this.instance, pillFilters };
     this.recompute();
-  };
+  }
+
+  /**
+   * The rows a chip's value list is built from: everything the view shows with
+   * this ONE field's pill filter lifted, the view's own snapshotted filters and
+   * the other fields' pills still applied.
+   *
+   * Lifting the field is the point. With its own filter still on, the only value
+   * left in the rows is the one already selected — which is exactly why the
+   * sibling values were unreachable by clicking.
+   */
+  private rowsFacetedFor(field: string): Row[] {
+    if (!this.instance) return [];
+    const pills = { ...(this.instance.pillFilters ?? {}) };
+    delete pills[field];
+    return viewRows(evaluateRows(this.allRows, this.tableColumns), {
+      ...this.instance,
+      pillFilters: pills,
+    });
+  }
+
+  /** Write a field's whole pill-filter string (the value checklist applies live). */
+  private async setPillFilter(field: string, next: string) {
+    if (!this.instance) return;
+    const pillFilters = { ...(this.instance.pillFilters ?? {}) };
+    if (next.trim() === '') delete pillFilters[field];
+    else pillFilters[field] = next;
+    const ctx = await getContext();
+    await ctx.store.viewInstances.patch(this.instance.id, { pillFilters, updatedAt: Date.now() });
+    this.instance = { ...this.instance, pillFilters };
+    this.recompute();
+  }
+
+  /**
+   * Clicking a chip's FIELD cycles that value: `=` → `≠` → off. The other values
+   * OR-ed onto the same field are untouched.
+   */
+  private async cyclePill(field: string, value: string) {
+    await this.setPillFilter(field, cyclePillValue(this.instance?.pillFilters?.[field], value));
+  }
+
+  /**
+   * Clicking a chip's VALUE opens the field's other values as a CHECKLIST — the
+   * same tri-state popover the grid's funnel uses, so several values can be
+   * included or excluded in one visit. Toggles apply live.
+   *
+   * The list comes from the rows that pass everything EXCEPT this field's own
+   * pill filter. Lifting that one filter is the point: with it applied, the only
+   * value left in the rows is the one already selected, which is why the
+   * siblings could not be reached by clicking at all.
+   */
+  private async openPillValues(field: string, anchor: HTMLElement) {
+    const popover = FilterPopover.instance;
+    if (!popover) return;
+    const rows = this.rowsFacetedFor(field);
+    if (!facetable(rows, field)) return;
+    const type = this.tableColumns.find((c) => c.field === field)?.type;
+    const { values, blanks } = facetCounts(rows, field, { type });
+    if (values.length === 0) return;
+    const result = await popover.open(
+      anchor.getBoundingClientRect(),
+      values,
+      this.instance?.pillFilters?.[field] ?? '',
+      blanks,
+      (next) => void this.setPillFilter(field, next),
+      // A chip's tokens are exact: it came from clicking one cell's value, not
+      // from someone typing a substring.
+      { exact: true },
+    );
+    if (result === null) return;
+    if (typeof result === 'object' && 'clear' in result) await this.setPillFilter(field, '');
+    else if (typeof result === 'string') await this.setPillFilter(field, result);
+  }
 
   /** Remove one pill-filter chip (the `×` in the header bar). Drops the field
    * entirely once its last value is removed. */
@@ -635,9 +741,23 @@ export class ViewWindow extends LitElement {
     </div>`;
   }
 
-  /** Top toolbar (template mode): a sort-column dropdown + direction toggle. */
+  /**
+   * The view's one top toolbar: the sort controls, then the active filter chips.
+   *
+   * The chips used to have a bar of their own directly below this one, which
+   * spent a second row of a window that is often only a few hundred pixels tall
+   * — and put the two controls that narrow a view in two different places. The
+   * sort controls are template-mode only (the grid has sortable headers of its
+   * own), so in grid mode the toolbar is chips alone, and nothing at all when
+   * there are none.
+   */
   private renderSortBar() {
     if (!this.instance) return nothing;
+    const chips = this.renderPillChips();
+    const hasChips = Array.isArray(chips) && chips.length > 0;
+    if (!this.templateOn) {
+      return hasChips ? html`<div class="vw-sortbar">${chips}</div>` : nothing;
+    }
     // Offer every column the source lets us sort by (a provider can mark some
     // unsortable via `sortable: false`).
     const cols = this.tableColumns.filter((c) => c.sortable !== false);
@@ -663,43 +783,61 @@ export class ViewWindow extends LitElement {
       >
         <span class="mi">${asc ? 'arrow_upward' : 'arrow_downward'}</span>
       </button>
+      ${chips}
     </div>`;
   }
 
   /**
-   * The active pill-filter bar, pinned to the top of the view (above the
-   * rendered template). Shows ONLY the `pillFilters` layer — never the
-   * view's underlying/snapshotted `filters` — one chip per token, so two
-   * OR-ed values on the same field (e.g. `tag: foo`, `tag: bar`) get their
-   * own removable chip. Renders nothing when the pill layer is empty.
+   * The active filter chips, one per pill-filter token — so two values OR-ed onto
+   * the same field each get their own chip. Shows ONLY the `pillFilters` layer,
+   * never the view's snapshotted `filters`.
+   *
+   * Each chip is `field <op> value`, and each half is a button: the field (with
+   * its operator) cycles `=` / `≠` / off, the value opens the field's other
+   * values as a checklist, and `×` drops the token.
    */
-  private renderPillBar() {
+  private renderPillChips() {
     const pf = this.instance?.pillFilters;
     if (!pf) return nothing;
-    const chips: Array<{ field: string; value: string }> = [];
+    const chips: Array<{ field: string; value: string; state: 'on' | 'not' }> = [];
     for (const [field, raw] of Object.entries(pf)) {
       if (!raw) continue;
       for (const tok of parseColumnFilter(raw)) {
-        if (tok.term) chips.push({ field, value: tok.term });
+        if (!tok.term) continue;
+        chips.push({ field, value: tok.term, state: tok.negate ? 'not' : 'on' });
       }
     }
-    if (chips.length === 0) return nothing;
-    return html`<div class="vw-pillbar">
-      ${chips.map(
-        (c) => html`<span class="eda-pill-chip">
-          <span class="eda-pill-chip-label">${c.field}: ${c.value}</span>
-          <button
-            type="button"
-            class="eda-pill-chip-remove"
-            aria-label=${`Remove filter ${c.field}: ${c.value}`}
-            title="Remove this filter"
-            @click=${() => void this.removePill(c.field, c.value)}
-          >
-            ×
-          </button>
-        </span>`,
-      )}
-    </div>`;
+    return chips.map(
+      (c) => html`<span class=${`eda-pill-chip${c.state === 'not' ? ' not' : ''}`}>
+        <button
+          type="button"
+          class="eda-pill-chip-field"
+          title=${c.state === 'not'
+            ? `Excluding this value — click to stop filtering on ${c.field}`
+            : `Only this value — click to EXCLUDE it instead`}
+          @click=${() => void this.cyclePill(c.field, c.value)}
+        >
+          ${c.field}${c.state === 'not' ? ' ≠' : ' ='}
+        </button>
+        <button
+          type="button"
+          class="eda-pill-chip-value"
+          title=${`Other values of ${c.field}`}
+          @click=${(e: Event) => void this.openPillValues(c.field, e.currentTarget as HTMLElement)}
+        >
+          ${c.value}
+        </button>
+        <button
+          type="button"
+          class="eda-pill-chip-remove"
+          aria-label=${`Remove filter ${c.field}: ${c.value}`}
+          title="Remove this filter"
+          @click=${() => void this.removePill(c.field, c.value)}
+        >
+          ×
+        </button>
+      </span>`,
+    );
   }
 
   private renderFooter() {
@@ -784,10 +922,10 @@ export class ViewWindow extends LitElement {
             .viewInstanceId=${this.viewInstanceId}
           ></data-table>
         </div>`;
-    // The sort bar rides at the top in template mode; the grid (template-off)
-    // has its own clickable column headers, so it isn't shown there. The pill
-    // bar rides above both — pill filters apply to both modes.
-    return html`${on ? this.renderSortBar() : nothing}${this.renderPillBar()}${body}${this.renderFooter()}`;
+    // One toolbar for both: sort controls in template mode, filter chips in
+    // either (pill filters apply to the grid too). It renders nothing in grid
+    // mode with no chips.
+    return html`${this.renderSortBar()}${body}${this.renderFooter()}`;
   }
 }
 

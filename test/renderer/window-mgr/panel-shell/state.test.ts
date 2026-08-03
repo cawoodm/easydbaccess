@@ -79,6 +79,23 @@ describe('persistFlags', () => {
     });
   });
 
+  it('reports nothing for a closed panel, whatever it was closed from', () => {
+    // A closed panel is not minimized, maximized or collapsed — it is gone. The
+    // reopen path decides how it comes back (`open` on a view instance, the
+    // table list on a table), so a lingering maximized/minimized flag here would
+    // describe a window that no longer exists.
+    const norm = initialState();
+    for (const from of ['maximize', 'minimize', 'smallify'] as const) {
+      const closed = transition(transition(norm, from), 'close');
+      expect(closed.status).toBe('closed');
+      expect(persistFlags(closed)).toEqual({
+        minimized: false,
+        maximized: false,
+        smallified: false,
+      });
+    }
+  });
+
   it('reports a collapsed panel, exclusively', () => {
     const small = transition(initialState(), 'smallify');
     expect(persistFlags(small)).toEqual({

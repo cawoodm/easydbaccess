@@ -4,12 +4,17 @@
 
 ### Features
 
+- ✨ Clicking a column header sorts descending first, then ascending — Settings → Table grid turns it around (v0.0.293)
 - ✨ Importing a `.db` lists its tables and views as checkboxes in separate sections, each with its own all/none; a view can come in as a Projection or as Data (v0.0.292)
 - ✨ Importing a `.db` onto a table that already exists offers Append: the rows are added and the table's own columns are left alone, with a column mapper when the names differ (v0.0.291)
 - ✨ Save As names the file after the workspace (v0.0.291)
+- ✨ A view's filter chip is `field = value` now, in the same bar as the sort: the field cycles = / ≠ / off, the value opens a checklist of the field's other values (v0.0.291)
 - ✨ Workspace files are `.edb` now: drop one to open it, drop a plain `.db` to import its data — no question asked (v0.0.290)
 - ✨ The app opens a workspace named on the command line, and a setting controls whether the last one reopens on startup (v0.0.290)
 - ✨ Importing a `.db` runs on a worker thread, so the window stays responsive while it copies (v0.0.289)
+- ✨ Esc closes a preview popup or its source editor, like it closes a dialog (v0.0.289)
+- ✨ A view's filter chip lists the field's other values, so a second value can be OR-ed in by clicking (v0.0.289)
+- ✨ A column filter takes `AND`: `!NULL AND Biden` needs both, and `OR` spells out the comma (v0.0.288)
 - ✨ Importing or converting a `.db` shows its tables at once and fills each one in with its own percentage (v0.0.286)
 - ✨ Convert to EDA asks which tables to take, with a shortcut that skips the views (v0.0.286)
 - ✨ The `html-preview` cell renderer is called `preview` now, and shows a Markdown value as formatted text by itself (v0.0.282)
@@ -20,6 +25,7 @@
 
 ### Bugs
 
+- 🪲 An id past 2^53 (e.g. 1298624375692894210) was rounded on import — silently a different id (v0.0.292)
 - 🪲 The app crashed on startup after converting a large database: every open window fetched its whole table, 1.9 million rows between them (v0.0.288)
 - 🪲 An unfinished conversion restarted its import on every launch, unprompted and with no way to stop it (v0.0.288)
 - 🪲 The app froze while a `.db` imported — clicks and windows stopped responding until it finished (v0.0.287)
@@ -34,6 +40,18 @@
 - 🪲 A window that had never been moved reopened at the top-left, and a bit too small, after being minimized (v0.0.272)
 - 🪲 A window closed right after a drag could come back open (v0.0.272)
 - 🪲 A collapsed window reopened at the default size and position, and no longer collapsed (v0.0.272)
+
+### Chores
+
+- 🔧 `npm run lint` reported 55 errors of standing debt: untyped Datasette response JSON, dead locals, and rethrows that dropped the original error (v0.0.290)
+
+### Tests
+
+- 🧪 The window-stacking specs waited on fixed sleeps for a view's saved front rank, so a slow write failed them (v0.0.286)
+
+### Chores
+
+- 🔧 The table window manager was still named after jsPanel, and a cell renderer had to import it to read the canvas zoom (v0.0.287)
 
 ## 2 Aug 2026
 

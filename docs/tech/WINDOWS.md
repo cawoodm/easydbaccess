@@ -13,7 +13,7 @@ for where `WindowGeometry` is persisted (`Table.windowGeometry` /
 
 There are two independent, structurally identical managers:
 
-- **`jspanel-manager.ts`** — one floating window per `Table` in the current
+- **`table-window-manager.ts`** — one floating window per `Table` in the current
   workspace, holding a live `<data-table>`.
 - **`view-window-manager.ts`** — one floating window per open `ViewInstance`
   (see `PLUGINS.md`'s Views section), holding a read-only `<view-window>`.
@@ -49,7 +49,7 @@ Several small modules are shared between the two managers:
 - `panel-registry.ts` / `restack.ts` — the cross-kind restack (see Z-order
   below).
 
-## Table windows (`jspanel-manager.ts`)
+## Table windows (`table-window-manager.ts`)
 
 **Boot restore.** On `initWindowManager()`, every table in the current
 workspace is loaded and opened in **ascending saved-`z` order** — so the
@@ -246,9 +246,10 @@ attaches a `ResizeObserver` on the container so a maximized panel also
 re-fits on a plain browser resize or header wrap, with no pan/zoom
 involved. Table and view windows share the exact same code path inside
 `panel-shell.ts` and the exact same live pan/zoom state (exposed via
-`shellViewport()`/`currentPanZoom()` in `jspanel-manager.ts`, so the
-view-window manager, initialized separately, can reuse the table manager's
-canvas instance).
+`shellViewport()`/`currentPanZoom()` in `shell-viewport.ts` — a module of its
+own so that a plugin opening a panel does not have to import a window manager
+to learn the current zoom; the table manager sets the handle, and the
+view-window manager, initialized separately, reuses it).
 
 **Restore-from-dock returns to maximized, if that's where it was minimized
 from.** The shell's status machine (`panel-shell/state.ts`) remembers

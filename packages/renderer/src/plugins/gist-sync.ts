@@ -693,7 +693,7 @@ export async function offerPrune(
   // data stays and only the local connection is dropped. Imported lazily for the
   // same reason as top-progress above — the module registers custom elements, so
   // a static import would break the unit tests' Node environment.
-  const { deleteTable } = await import('../window-mgr/jspanel-manager.js');
+  const { deleteTable } = await import('../window-mgr/table-window-manager.js');
   for (const t of extraTables) await deleteTable(t.id);
   api.ui.dialogs.toast(
     `Deleted ${extraTables.length} table${extraTables.length === 1 ? '' : 's'} and ` +

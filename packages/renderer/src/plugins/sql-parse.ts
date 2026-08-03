@@ -21,6 +21,7 @@
 // own output, which is the only check that matters for our own dumps.
 
 import type { ColumnSpec, ColumnType, ProjectionColumn, ProjectionSource, ProjectionSpec, SortSpec } from '@easydb/shared';
+import { isUnsafeIntegerText } from '../import/big-numbers.js';
 
 export interface ParsedSqlTable {
   name: string;
@@ -213,6 +214,9 @@ export function parseLiteral(raw: string): unknown {
   if (/^true$/i.test(t)) return true;
   if (/^false$/i.test(t)) return false;
   if (/^'[\s\S]*'$/.test(t)) return t.slice(1, -1).replace(/''/g, "'");
+  // An integer past 2^53 stays text: `Number` would round it and the digits of
+  // an id are the id (see import/big-numbers.ts).
+  if (isUnsafeIntegerText(t)) return t;
   if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(t)) return Number(t);
   return t; // an expression we do not evaluate — keep the text
 }

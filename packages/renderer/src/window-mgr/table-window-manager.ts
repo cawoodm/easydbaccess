@@ -19,8 +19,9 @@
 import type { Table, WindowGeometry } from '@easydb/shared';
 import { getContext, type AppContext } from '../app-context.js';
 import { openTableInfoDialog } from '../dialogs/table-info-dialog.js';
-import { initPanZoom, type PanZoomHandle } from './panzoom.js';
-import { createPanel, type PanelShellEl, type ShellViewport } from './panel-shell/panel-shell.js';
+import { initPanZoom } from './panzoom.js';
+import { createPanel, type PanelShellEl } from './panel-shell/panel-shell.js';
+import { setPanZoom, shellViewport } from './shell-viewport.js';
 import { queueGeometryWrite } from './geometry-writes.js';
 import {
   countSuffix,
@@ -81,24 +82,6 @@ const panels = new Map<string, PanelShellEl>();
  */
 const externallyClosed = new Set<string>();
 let initialized = false;
-/** Canvas pan/zoom control. Exposed so view windows can share the same handle
- * to keep a maximized view filling the screen through pan/zoom. */
-let panzoom: PanZoomHandle | null = null;
-
-/** The live canvas pan/zoom handle, or null before the window manager inits. */
-export function currentPanZoom(): PanZoomHandle | null {
-  return panzoom;
-}
-
-/** Pan/zoom hook handed to every shell panel: scale-aware dragging and the
- * maximize counter-transform both read it. Tolerates a not-yet-initialized
- * panzoom (unit boots, view manager races). */
-export function shellViewport(): ShellViewport {
-  return {
-    getState: () => currentPanZoom()?.snapshot() ?? { x: 0, y: 0, scale: 1 },
-    subscribe: (cb) => currentPanZoom()?.subscribe(cb) ?? (() => {}),
-  };
-}
 
 /**
  * Persist every open table panel's current rect. Tile/Cascade move panels by
@@ -163,7 +146,9 @@ export async function initWindowManager(): Promise<void> {
   const outer = document.getElementById('easydb-panels');
   const viewport = document.getElementById('easydb-panels-viewport');
   if (outer && viewport) {
-    panzoom = initPanZoom(outer, viewport);
+    // The handle lives in `shell-viewport.ts`, which is what panels read — see
+    // the note there on why it is not owned by this module.
+    setPanZoom(initPanZoom(outer, viewport));
     // Keep the panel overlay aligned to the REAL header/footer heights instead
     // of a hardcoded 48px. The header grows when its buttons wrap (narrow
     // windows) or with larger fonts/zoom; a stale offset left a maximized

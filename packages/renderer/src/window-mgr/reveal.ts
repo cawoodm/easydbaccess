@@ -3,7 +3,7 @@
 // window. Fronting alone is not enough; a window can be off the panned canvas,
 // behind another, minimized, or docked.
 
-import { currentPanZoom } from './jspanel-manager.js';
+import { currentPanZoom } from './shell-viewport.js';
 import type { PanelShellEl } from './panel-shell/panel-shell.js';
 import { panToReveal } from './reveal-math.js';
 import { isMobileViewport } from '../util/viewport.js';

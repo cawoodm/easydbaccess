@@ -8,6 +8,9 @@ import { FilterPopover } from '../chrome/filter-popover.js';
 import '../chrome/filter-combobox.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { matchesColumnFilter } from '../search/column-filter.js';
+import { facetable, facetCounts, facetValues } from '../search/facet-values.js';
+import { readSortDescFirst } from './grid-settings.js';
+import { nextSortSpecs } from './sort-cycle.js';
 import { runColumnScript } from '../util/column-script.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
@@ -619,7 +622,7 @@ export class DataTable extends LitElement {
     // persists it. A store write can land mid-drag from something else
     // entirely — e.g. this panel getting fronted (a pointerdown anywhere in
     // it, including the resize handle, bumps its z-order — see
-    // jspanel-manager.ts's onfronted) — and re-applying the OLDER `table`
+    // table-window-manager.ts's onfronted) — and re-applying the OLDER `table`
     // record here would overwrite the freeze with widthless columns, so the
     // table never flips to fixed and the drag barely moves anything.
     if (this.resizing == null) this.columns = table.columns;
@@ -922,29 +925,15 @@ export class DataTable extends LitElement {
   /**
    * Cycle one column's sort. Each click walks asc → desc → off for that column.
    *
-   * `additive` (shift-click) keeps the sort keys already in place and works on
-   * this column behind them, so "city, then age descending" is two clicks. A
-   * plain click drops the others — the common case is one column, and having to
-   * clear leftover keys first would be worse than losing them.
+   * The rule itself is `sort-cycle.ts` — pure, so which direction a first click
+   * takes (the `grid:sortDescFirst` setting) is testable without a grid.
    */
   private async toggleSort(field: string, additive = false) {
-    const current = this.sortSpecs.find((s) => s.field === field);
-    const isOnlyKey = this.sortSpecs.length === 1 && this.sortSpecs[0]?.field === field;
-    // A plain click on a column that is NOT already the only key means "sort by
-    // this instead": it becomes the sole ascending key. Only when it is already
-    // alone does the click walk the cycle on to descending and then off —
-    // otherwise dropping the other keys would land on "unsorted" unexpectedly.
-    if (!additive && !isOnlyKey) {
-      this.sortSpecs = [{ field, asc: true }];
-      await this.persistSort(this.sortSpecs);
-      return;
-    }
-    const next: SortSpec[] = additive ? this.sortSpecs.filter((s) => s.field !== field) : [];
-    // asc → desc → gone. An untouched column starts ascending.
-    if (!current) next.push({ field, asc: true });
-    else if (current.asc) next.push({ field, asc: false });
-    // (a descending column simply stays out of `next` — that is the "off" step)
-
+    const ctx = await getContext();
+    const next = nextSortSpecs(this.sortSpecs, field, {
+      additive,
+      descFirst: await readSortDescFirst(ctx.api.settings),
+    });
     this.sortSpecs = next;
     await this.persistSort(next);
   }
@@ -1022,30 +1011,11 @@ export class DataTable extends LitElement {
     // Faceted: count values only across rows that pass every OTHER column's
     // filter — so a column's own dropdown isn't pre-narrowed by what's
     // already typed in that column's filter, but other filters do narrow it.
-    const counts = new Map<string, number>();
-    let blanks = 0;
-    for (const r of this.rowsFacetedFor(field)) {
-      const v = r.data[field];
-      // Null / empty / whitespace cells collapse into the single "(Blanks)" entry.
-      if (v == null || String(v).trim() === '') {
-        blanks++;
-        continue;
-      }
-      const s = String(v);
-      counts.set(s, (counts.get(s) ?? 0) + 1);
-    }
-    let values = [...counts.entries()]
-      .map(([value, count]) => ({ value, count }))
-      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
-    // A boolean column has a known domain, so both sides are always listed (in
-    // that order) even when the rows carry only one of them — a column of
-    // all-true rows would otherwise give you no way to filter for false. A
-    // count of 0 says none are there. Any other stored spelling (`yes`, `1`)
-    // keeps its own entry below.
-    if (this.columns.find((c) => c.field === field)?.type === 'boolean') {
-      const domain = ['true', 'false'].map((value) => ({ value, count: counts.get(value) ?? 0 }));
-      values = [...domain, ...values.filter((v) => v.value !== 'true' && v.value !== 'false')];
-    }
+    // The counting rules (blanks, order, the boolean domain) live in
+    // `search/facet-values.ts`, which a view window's filter chip shares.
+    const { values, blanks } = facetCounts(this.rowsFacetedFor(field), field, {
+      type: this.columns.find((c) => c.field === field)?.type,
+    });
     // Toggles apply live while the popover stays open (multi-value tri-state);
     // the promise only reports dismissal or an explicit Clear.
     const result = await popover.open(
@@ -1102,45 +1072,18 @@ export class DataTable extends LitElement {
   }
 
   /**
-   * Decide per-column whether to feed the <filter-combobox> a suggestion
-   * list. Rule: every value in the first 100 rows must stringify to fewer
-   * than 50 characters. Long-text or "description"-style columns are
-   * excluded so the dropdown doesn't fill with multi-line content.
-   *
-   * Returns a Map from column field → sorted unique values (capped at 500).
-   * The value list for each column is FACETED — it reflects only rows that
-   * pass the OTHER columns' filters, so selecting a value in one column
-   * narrows what's available in the others. Drill-down UX.
+   * The suggestion list each <filter-combobox> gets: column field → sorted
+   * unique values. Long-text columns are left out entirely, and each list is
+   * FACETED against the OTHER columns' filters, so picking a value in one column
+   * narrows what the others offer. Drill-down UX. Both rules live in
+   * `search/facet-values.ts`, which a view window's filter chip shares.
    */
   private computeFilterSuggestions(): Map<string, string[]> {
     const out = new Map<string, string[]>();
-    const eligibilitySample = this.rows.slice(0, 100);
-    if (eligibilitySample.length === 0) return out;
-    const MAX_LEN = 50;
-    const MAX_OPTIONS = 500;
     for (const c of this.visibleColumns) {
-      let eligible = true;
-      for (const r of eligibilitySample) {
-        const v = r.data[c.field];
-        if (v == null) continue;
-        const s = typeof v === 'string' ? v : String(v);
-        if (s.length >= MAX_LEN) {
-          eligible = false;
-          break;
-        }
-      }
-      if (!eligible) continue;
-      const seen = new Set<string>();
+      if (!facetable(this.rows, c.field)) continue;
       // Faceted source: rows passing every other column's filter.
-      for (const r of this.rowsFacetedFor(c.field)) {
-        const v = r.data[c.field];
-        if (v == null || v === '') continue;
-        const s = typeof v === 'string' ? v : String(v);
-        if (s.length >= MAX_LEN) continue;
-        seen.add(s);
-        if (seen.size >= MAX_OPTIONS) break;
-      }
-      out.set(c.field, [...seen].sort());
+      out.set(c.field, facetValues(this.rowsFacetedFor(c.field), c.field));
     }
     return out;
   }

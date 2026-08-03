@@ -194,6 +194,17 @@ export class FilterPopover extends LitElement {
   @state() private states = new Map<string, { state: ValueState; token: FilterToken }>();
   private resolveFn: ((v: string | null | { clear: true }) => void) | null = null;
   private onChange: ((filter: string) => void) | null = null;
+  /**
+   * Whether a value toggled here composes an EXACT token (`=Sweden`) instead of
+   * the default substring one (`Sweden`).
+   *
+   * The caller's layer decides. A grid column filter is a substring match, which
+   * is what someone typing into that box expects. A view's filter CHIP is not
+   * typed — it came from clicking one cell's value — so its tokens are exact,
+   * and this flag is how the picker reads and writes the same shape instead of
+   * adding a second, looser token beside the one already there.
+   */
+  private exactValues = false;
 
   /**
    * Opens the popover anchored to a DOM rect. Toggling a value applies the
@@ -206,10 +217,12 @@ export class FilterPopover extends LitElement {
     current: string,
     blanks = 0,
     onChange?: (filter: string) => void,
+    opts?: { exact?: boolean | undefined },
   ): Promise<string | null | { clear: true }> {
     this.values = values;
     this.blanks = blanks;
     this.onChange = onChange ?? null;
+    this.exactValues = opts?.exact === true;
     // Seed the tri-states from the active filter so re-opening shows what's on.
     this.states = new Map(
       parseColumnFilter(current ?? '').map((t) => [
@@ -229,9 +242,17 @@ export class FilterPopover extends LitElement {
     });
   }
 
-  /** Cycle one value off → on → not → off and apply the recomposed filter. */
-  private cycle(value: string) {
-    const token: FilterToken = { term: value, negate: false };
+  /**
+   * Cycle one value off → on → not → off and apply the recomposed filter.
+   *
+   * `exact` defaults to the layer's setting; the (Blanks) row passes false
+   * explicitly, because bare `NULL` is the grammar's blank-cell match while
+   * `=NULL` would look for the literal text "null".
+   */
+  private cycle(value: string, exact = this.exactValues) {
+    const token: FilterToken = exact
+      ? { term: value, negate: false, exact: true }
+      : { term: value, negate: false };
     const key = keyOf(token);
     const next = new Map(this.states);
     const entry = next.get(key);
@@ -276,8 +297,10 @@ export class FilterPopover extends LitElement {
     const q = this.search.toLowerCase();
     const filtered = this.values.filter((v) => v.value.toLowerCase().includes(q));
     const showBlanks = this.blanks > 0 && '(blanks)'.includes(q);
-    const stateOf = (value: string): ValueState | undefined =>
-      this.states.get(keyOf({ term: value, negate: false }))?.state;
+    const stateOf = (value: string, exact = this.exactValues): ValueState | undefined =>
+      this.states.get(
+        keyOf(exact ? { term: value, negate: false, exact: true } : { term: value, negate: false }),
+      )?.state;
     const box = (state: ValueState | undefined) => html`
       <span class=${`cb${state ? ` ${state}` : ''}`}
         >${state === 'on' ? '✓' : state === 'not' ? '✕' : ''}</span
@@ -315,11 +338,11 @@ export class FilterPopover extends LitElement {
               ? html`
                   <li
                     class="blanks"
-                    title=${rowTitle(stateOf('NULL'))}
-                    @click=${() => this.cycle('NULL')}
+                    title=${rowTitle(stateOf('NULL', false))}
+                    @click=${() => this.cycle('NULL', false)}
                   >
                     <span class="left">
-                      ${box(stateOf('NULL'))}
+                      ${box(stateOf('NULL', false))}
                       <span class="label"><em>(Blanks)</em></span>
                     </span>
                     <span class="count">${this.blanks}</span>

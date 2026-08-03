@@ -15,6 +15,7 @@ import type {
   RowSourceCtx,
   Table,
   Unsubscribe,
+  FetchOpts,
 } from '@easydb/shared';
 import { cryptoUUID } from '../util/ids.js';
 import {
@@ -110,7 +111,7 @@ export function createDatasetteCollection(
   // one is stored — so private instances that require auth to read work too,
   // not only writes. Reads on public instances are unaffected (no token → no
   // header). Resolved per call so a freshly-entered token takes effect.
-  const fetchFn = async (u: string, o?: unknown): Promise<Response> =>
+  const fetchFn = async (u: string, o?: FetchOpts): Promise<Response> =>
     withAuthFetch(baseFetch, await token())(u, o);
 
   function toRow(data: Record<string, unknown>): Row {

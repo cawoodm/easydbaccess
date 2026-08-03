@@ -8,7 +8,7 @@
 // This TypeScript build-in mirrors the runnable, unit-tested reference in
 // ../../../../eda-datasette-plugin/datasette-client.js (21 node --test cases).
 
-import type { ColumnSpec, ColumnType, TableInfo } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, FetchOpts, TableInfo } from '@easydb/shared';
 import { parseColumnFilter } from '../search/column-filter.js';
 import { isInternalField } from '../util/internal-fields.js';
 
@@ -50,17 +50,62 @@ export interface TableMeta {
   raw: unknown;
 }
 
+/**
+ * Readers for response JSON. Every parser below takes `unknown`, because a
+ * Datasette instance is a remote server of an unknown version and its shapes are
+ * exactly what these functions exist to survive. The readers keep the narrowing
+ * in one place instead of spreading field access over an `any`.
+ */
+type JsonObject = Record<string, unknown>;
+
+function asObject(v: unknown): JsonObject | null {
+  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as JsonObject) : null;
+}
+
+/** A field of `v`, or `undefined` when `v` is not an object. */
+function field(v: unknown, name: string): unknown {
+  return asObject(v)?.[name];
+}
+
+function asString(v: unknown): string | null {
+  return typeof v === 'string' ? v : null;
+}
+
+function asNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+function asArray(v: unknown): unknown[] {
+  return Array.isArray(v) ? v : [];
+}
+
+/** The strings of an array field, non-strings dropped. */
+function asStrings(v: unknown): string[] {
+  return asArray(v).filter((x): x is string => typeof x === 'string');
+}
+
+/** The `rows` of a write response, non-object entries dropped. */
+function rowsOf(v: unknown): Array<Record<string, unknown>> {
+  return asArray(field(v, 'rows')).filter((r): r is JsonObject => asObject(r) !== null);
+}
+
+/** Datasette writes SQLite booleans as `true` or `1`. */
+function truthyFlag(v: unknown): boolean {
+  return v === true || v === 1;
+}
+
 /** Error carrying Datasette's uniform {ok:false,error,errors,status} shape. */
 export class DatasetteError extends Error {
   status?: number;
   errors: string[];
-  constructor(body: any, status?: number) {
-    const msg =
-      body?.error || (body?.errors && body.errors.join('; ')) || 'Datasette request failed';
-    super(msg);
+  constructor(body: unknown, status?: number) {
+    const one = asString(field(body, 'error'));
+    const many = asStrings(field(body, 'errors'));
+    super(one ?? (many.length > 0 ? many.join('; ') : null) ?? 'Datasette request failed');
     this.name = 'DatasetteError';
-    this.status = status ?? body?.status;
-    this.errors = body?.errors || (body?.error ? [body.error] : []);
+    const known = status ?? asNumber(field(body, 'status'));
+    if (known !== null && known !== undefined) this.status = known;
+    this.errors = many.length > 0 ? many : one ? [one] : [];
   }
 }
 
@@ -172,18 +217,20 @@ export function ensureParams(urlStr: string, params: Record<string, string | num
  *               send only the token, so we honour either.
  *  - truncated: SQL/query results hard-cap at max_returned_rows with NO cursor.
  */
-export function classifyPage(json: any): PageInfo {
-  const nextUrl = json?.next_url ?? null;
-  const rawNext = json?.next;
+export function classifyPage(json: unknown): PageInfo {
+  const nextUrl = asString(field(json, 'next_url'));
+  const rawNext = field(json, 'next');
   const nextToken = rawNext != null && rawNext !== false ? String(rawNext) : null;
-  const rawRows: unknown[] = Array.isArray(json?.rows) ? json.rows : [];
-  const cols: string[] | null = Array.isArray(json?.columns) ? json.columns : null;
+  const rawRows = asArray(field(json, 'rows'));
+  const cols: string[] | null = Array.isArray(field(json, 'columns'))
+    ? asStrings(field(json, 'columns'))
+    : null;
   // Modern Datasette returns row objects by default; older versions return
   // positional arrays alongside a `columns` list. Normalise arrays to objects
   // so we don't have to send `_shape=objects` (which newer versions reject).
   const rows = rawRows.map((r) =>
     Array.isArray(r) && cols
-      ? Object.fromEntries(cols.map((c, i) => [c, r[i]]))
+      ? Object.fromEntries(cols.map((c, i) => [c, (r as unknown[])[i]]))
       : (r as Record<string, unknown>),
   );
   return {
@@ -191,7 +238,7 @@ export function classifyPage(json: any): PageInfo {
     nextUrl,
     nextToken,
     hasMore: nextUrl != null || nextToken != null,
-    truncated: json?.truncated === true,
+    truncated: field(json, 'truncated') === true,
   };
 }
 
@@ -221,38 +268,48 @@ export function sqliteTypeToEda(sqliteType: string | undefined, name = ''): Colu
  * (?_extra=columns,column_details,primary_keys). Tolerates column_details as
  * either an array of {column|name,...} or an object keyed by column name.
  */
-export function mapColumns(meta: any): { columns: ColumnSpec[]; pks: string[] } {
-  const pks: string[] = Array.isArray(meta?.primary_keys) ? meta.primary_keys.slice() : [];
-  const names: string[] = Array.isArray(meta?.columns) ? meta.columns.slice() : [];
+export function mapColumns(meta: unknown): { columns: ColumnSpec[]; pks: string[] } {
+  const pks: string[] = asStrings(field(meta, 'primary_keys'));
+  const names: string[] = asStrings(field(meta, 'columns'));
 
-  const details: Record<string, any> = {};
-  const cd = meta?.column_details;
+  const details: Record<string, JsonObject> = {};
+  const cd = field(meta, 'column_details');
   if (Array.isArray(cd)) {
-    for (const d of cd) details[d.column ?? d.name] = d;
-  } else if (cd && typeof cd === 'object') {
-    Object.assign(details, cd);
+    for (const entry of cd) {
+      const d = asObject(entry);
+      if (!d) continue;
+      const key = asString(d['column']) ?? asString(d['name']);
+      if (key) details[key] = d;
+    }
+  } else {
+    const byName = asObject(cd);
+    if (byName) {
+      for (const [k, v] of Object.entries(byName)) details[k] = asObject(v) ?? {};
+    }
   }
   for (const n of names) if (!(n in details)) details[n] = {};
   const order = names.length ? names : Object.keys(details);
 
   // `column_details` (PRAGMA table_info) may add these primary-key fields even
   // when the top-level `primary_keys` list is absent, so gather them here too.
-  const columns: ColumnSpec[] = order.map((field) => {
-    const d = details[field] || {};
-    const isPk = d.is_pk === true || d.is_pk === 1 || pks.includes(field);
+  const columns: ColumnSpec[] = order.map((name) => {
+    const d = details[name] ?? {};
+    const isPk = truthyFlag(d['is_pk']) || pks.includes(name);
+    const declaredType = asString(d['sqlite_type']) ?? asString(d['type']) ?? undefined;
     const spec: ColumnSpec = {
-      field,
-      label: prettifyLabel(field),
-      type: sqliteTypeToEda(d.sqlite_type ?? d.type, field),
+      field: name,
+      label: prettifyLabel(name),
+      type: sqliteTypeToEda(declaredType, name),
     };
-    if (d.notnull === true || d.notnull === 1 || isPk) spec.notnull = true;
+    if (truthyFlag(d['notnull']) || isPk) spec.notnull = true;
     if (isPk) spec.unique = true;
     // Datasette's own hidden flag, plus storage plumbing (`rowid`) that has to
     // stay in the row for writes but is not user data.
-    if (d.hidden === true || d.hidden === 1 || isInternalField(field)) spec.hidden = true;
+    if (truthyFlag(d['hidden']) || isInternalField(name)) spec.hidden = true;
     // Carry a column's SQL default (from column_details) so an added row starts
     // with the same value the database would use.
-    if (d.default != null && d.default !== '') spec.default = d.default;
+    const dflt = d['default'];
+    if (dflt != null && dflt !== '') spec.default = dflt as ColumnSpec['default'];
     return spec;
   });
   // Backfill the pk list from column_details when the response didn't carry a
@@ -380,6 +437,10 @@ export function translateQuery(
     // values would drop the rows the anchored token was meant to add. Send no
     // param for this column and let the client-side filter narrow the page.
     if (tokens.some((t) => t.prefix)) continue;
+    // Same reason for an `AND` group: `!NULL AND Biden` is two conditions on one
+    // column, and Datasette takes one operator per column. The client-side
+    // filter still narrows the page it does return.
+    if (tokens.some((t) => t.and)) continue;
     // Multi-value / negated: include set → __in, exclude set → __notin.
     const include = tokens.filter((t) => !t.negate).map((t) => t.term);
     const exclude = tokens.filter((t) => t.negate).map((t) => t.term);
@@ -406,18 +467,17 @@ export interface TableRef {
  * `_memory` scratch database (never has user tables). Tolerates a bare string
  * array and a `{ databases: [...] }` wrapper.
  */
-export function parseDatabaseList(json: any): string[] {
-  const arr = Array.isArray(json) ? json : Array.isArray(json?.databases) ? json.databases : [];
+export function parseDatabaseList(json: unknown): string[] {
+  const arr = Array.isArray(json) ? json : asArray(field(json, 'databases'));
   const routes: string[] = [];
   for (const entry of arr) {
     if (typeof entry === 'string') {
       routes.push(entry);
       continue;
     }
-    if (entry && typeof entry === 'object' && typeof entry.name === 'string') {
-      if (entry.name === '_memory') continue;
-      routes.push(typeof entry.route === 'string' && entry.route ? entry.route : entry.name);
-    }
+    const name = asString(field(entry, 'name'));
+    if (name === null || name === '_memory') continue;
+    routes.push(asString(field(entry, 'route')) || name);
   }
   return routes;
 }
@@ -427,28 +487,29 @@ export function parseDatabaseList(json: any): string[] {
  * returns `{ tables: [{ name, count, hidden }, ...] }`; tolerate a bare array,
  * a string array, and missing count/hidden fields.
  */
-export function parseTableList(json: any, db: string): TableRef[] {
-  const arr = Array.isArray(json) ? json : Array.isArray(json?.tables) ? json.tables : [];
+export function parseTableList(json: unknown, db: string): TableRef[] {
+  const arr = Array.isArray(json) ? json : asArray(field(json, 'tables'));
   const out: TableRef[] = [];
   for (const entry of arr) {
     if (typeof entry === 'string') {
       out.push({ db, table: entry, count: null, hidden: false, pks: [] });
       continue;
     }
-    if (entry && typeof entry === 'object' && typeof entry.name === 'string') {
-      out.push({
-        db,
-        table: entry.name,
-        count: typeof entry.count === 'number' ? entry.count : null,
-        hidden: entry.hidden === true,
-        pks: Array.isArray(entry.primary_keys) ? entry.primary_keys : [],
-      });
-    }
+    const name = asString(field(entry, 'name'));
+    if (name === null) continue;
+    out.push({
+      db,
+      table: name,
+      count: asNumber(field(entry, 'count')),
+      hidden: field(entry, 'hidden') === true,
+      pks: asStrings(field(entry, 'primary_keys')),
+    });
   }
   return out;
 }
 
-type FetchFn = (url: string, opts?: any) => Promise<Response>;
+/** The host's URL fetch (`api.backend.fetch`), which every call here goes through. */
+export type FetchFn = (url: string, opts?: FetchOpts) => Promise<Response>;
 
 /**
  * Fetch a Datasette JSON endpoint with clear failure modes. Turns the three
@@ -458,7 +519,7 @@ type FetchFn = (url: string, opts?: any) => Promise<Response>;
  *  - it completes with an HTTP error status (redirect-to-non-CORS, 404, 500);
  *  - it returns Datasette's `{ ok:false, error }` envelope.
  */
-async function fetchJson(fetchFn: FetchFn, url: string): Promise<any> {
+async function fetchJson(fetchFn: FetchFn, url: string): Promise<unknown> {
   let res: Response;
   try {
     res = await fetchFn(url);
@@ -487,8 +548,8 @@ async function fetchJson(fetchFn: FetchFn, url: string): Promise<any> {
       res.status,
     );
   }
-  const json: any = await res.json();
-  if (json && json.ok === false) throw new DatasetteError(json, res.status);
+  const json: unknown = await res.json();
+  if (field(json, 'ok') === false) throw new DatasetteError(json, res.status);
   return json;
 }
 
@@ -649,21 +710,21 @@ export async function discoverTables(fetchFn: FetchFn, ref: DatasetteRef): Promi
  */
 export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promise<TableMeta> {
   const detailsUrl = buildTableUrl(ref, { _extra: 'column_details' });
-  const json: any = await fetchJson(fetchFn, detailsUrl);
+  const json: unknown = await fetchJson(fetchFn, detailsUrl);
   let { columns, pks } = mapColumns(json);
-  let typed = !!json && json.column_details != null;
-  let count: number | null = json?.count ?? null;
-  let countTruncated = json?.count_truncated === true;
+  let typed = field(json, 'column_details') != null;
+  let count: number | null = asNumber(field(json, 'count'));
+  let countTruncated = field(json, 'count_truncated') === true;
   let raw: unknown = json;
 
   if (columns.length === 0) {
     // Instance doesn't support column_details — recover the names separately.
     const colsUrl = buildTableUrl(ref, { _extra: 'columns' });
-    const cjson: any = await fetchJson(fetchFn, colsUrl);
+    const cjson: unknown = await fetchJson(fetchFn, colsUrl);
     ({ columns, pks } = mapColumns(cjson));
-    typed = !!cjson && cjson.column_details != null; // still false here
-    count = cjson?.count ?? count;
-    countTruncated = cjson?.count_truncated === true || countTruncated;
+    typed = field(cjson, 'column_details') != null; // still false here
+    count = asNumber(field(cjson, 'count')) ?? count;
+    countTruncated = field(cjson, 'count_truncated') === true || countTruncated;
     raw = cjson;
   }
   return { columns, pks, count, countTruncated, typed, raw };
@@ -719,54 +780,64 @@ export interface DatasetteTableMetadata {
  * (Datasette applies attribution top-down). Pure — no I/O.
  */
 export function extractTableMetadata(
-  metaJson: any,
+  metaJson: unknown,
   db: string | null,
   table: string | null,
 ): DatasetteTableMetadata {
-  const root = metaJson && typeof metaJson === 'object' ? metaJson : {};
+  const root = asObject(metaJson) ?? {};
+  const dbBlock = db ? (asObject(field(root['databases'], db)) ?? {}) : {};
+  const tables = asObject(dbBlock['tables']) ?? {};
   const t =
-    (db && table && root.databases?.[db]?.tables?.[table]) ||
-    (db && table && root.databases?.[db]?.tables?.[table.toLowerCase()]) ||
+    (table ? asObject(tables[table]) : null) ??
+    (table ? asObject(tables[table.toLowerCase()]) : null) ??
     {};
   // Attribution falls back to the database and then top level.
-  const dbBlock = (db && root.databases?.[db]) || {};
-  const attr = (key: string): string | undefined => t[key] ?? dbBlock[key] ?? root[key];
+  const attr = (key: string): string | null =>
+    asString(t[key]) ?? asString(dbBlock[key]) ?? asString(root[key]);
 
   const out: DatasetteTableMetadata = { columns: {}, units: {} };
-  if (typeof t.sort === 'string') out.sort = t.sort;
-  if (typeof t.sort_desc === 'string') out.sortDesc = t.sort_desc;
-  if (typeof t.size === 'number') out.size = t.size;
-  if (Array.isArray(t.sortable_columns)) out.sortableColumns = t.sortable_columns.slice();
-  if (typeof t.label_column === 'string') out.labelColumn = t.label_column;
-  if (t.hidden === true) out.hidden = true;
-  if (typeof t.description === 'string') out.description = t.description;
-  if (typeof t.description_html === 'string') out.descriptionHtml = t.description_html;
+  const sort = asString(t['sort']);
+  if (sort !== null) out.sort = sort;
+  const sortDesc = asString(t['sort_desc']);
+  if (sortDesc !== null) out.sortDesc = sortDesc;
+  const size = asNumber(t['size']);
+  if (size !== null) out.size = size;
+  if (Array.isArray(t['sortable_columns'])) out.sortableColumns = asStrings(t['sortable_columns']);
+  const labelColumn = asString(t['label_column']);
+  if (labelColumn !== null) out.labelColumn = labelColumn;
+  if (t['hidden'] === true) out.hidden = true;
+  const description = asString(t['description']);
+  if (description !== null) out.description = description;
+  const descriptionHtml = asString(t['description_html']);
+  if (descriptionHtml !== null) out.descriptionHtml = descriptionHtml;
   const src = attr('source');
   const srcUrl = attr('source_url');
   const lic = attr('license');
   const licUrl = attr('license_url');
   const abt = attr('about');
   const abtUrl = attr('about_url');
-  if (typeof src === 'string') out.source = src;
-  if (typeof srcUrl === 'string') out.sourceUrl = srcUrl;
-  if (typeof lic === 'string') out.license = lic;
-  if (typeof licUrl === 'string') out.licenseUrl = licUrl;
-  if (typeof abt === 'string') out.about = abt;
-  if (typeof abtUrl === 'string') out.aboutUrl = abtUrl;
-  if (t.columns && typeof t.columns === 'object') {
-    for (const [k, v] of Object.entries(t.columns)) if (typeof v === 'string') out.columns[k] = v;
+  if (src !== null) out.source = src;
+  if (srcUrl !== null) out.sourceUrl = srcUrl;
+  if (lic !== null) out.license = lic;
+  if (licUrl !== null) out.licenseUrl = licUrl;
+  if (abt !== null) out.about = abt;
+  if (abtUrl !== null) out.aboutUrl = abtUrl;
+  const colLabels = asObject(t['columns']);
+  if (colLabels) {
+    for (const [k, v] of Object.entries(colLabels)) if (typeof v === 'string') out.columns[k] = v;
   }
-  if (t.units && typeof t.units === 'object') {
-    for (const [k, v] of Object.entries(t.units)) if (typeof v === 'string') out.units[k] = v;
+  const units = asObject(t['units']);
+  if (units) {
+    for (const [k, v] of Object.entries(units)) if (typeof v === 'string') out.units[k] = v;
   }
   return out;
 }
 
 /** Per-instance metadata cache — `/-/metadata.json` is one blob for all tables. */
-const instanceMetaCache = new Map<string, Promise<any>>();
+const instanceMetaCache = new Map<string, Promise<unknown>>();
 
 /** Fetch (and cache) an instance's `/-/metadata.json`; `{}` if unavailable. */
-export async function fetchInstanceMetadata(fetchFn: FetchFn, base: string): Promise<any> {
+export async function fetchInstanceMetadata(fetchFn: FetchFn, base: string): Promise<unknown> {
   let p = instanceMetaCache.get(base);
   if (!p) {
     // No `_`-prefixed params, so this is safe against the datasette.io Cloudflare
@@ -939,7 +1010,7 @@ export async function fetchRows(
   let resumeUrl: string | undefined;
 
   while (url) {
-    let json: any;
+    let json: unknown;
     try {
       json = await fetchJson(fetchFn, url);
     } catch (err) {
@@ -1030,7 +1101,7 @@ async function postWrite(
   url: string,
   body: unknown,
   token?: string,
-): Promise<any> {
+): Promise<unknown> {
   let res: Response;
   try {
     res = await fetchFn(url, {
@@ -1056,8 +1127,8 @@ async function postWrite(
       res.status,
     );
   }
-  const json: any = await res.json();
-  if (json && json.ok === false) throw new DatasetteError(json, res.status);
+  const json: unknown = await res.json();
+  if (field(json, 'ok') === false) throw new DatasetteError(json, res.status);
   return json;
 }
 
@@ -1074,7 +1145,7 @@ export async function insertRows(
     { rows, return: true },
     opts.token,
   );
-  return Array.isArray(json?.rows) ? json.rows : [];
+  return rowsOf(json);
 }
 
 /** Update one row by tilde-encoded PK with the changed fields; returns the row. */
@@ -1091,8 +1162,9 @@ export async function updateRowByPk(
     { update: changes, return: true },
     opts.token,
   );
-  if (json && typeof json.row === 'object' && json.row) return json.row;
-  return Array.isArray(json?.rows) && json.rows[0] ? json.rows[0] : null;
+  const one = asObject(field(json, 'row'));
+  if (one) return one;
+  return rowsOf(json)[0] ?? null;
 }
 
 /** Delete one row by tilde-encoded PK. */
@@ -1118,7 +1190,7 @@ export async function upsertRows(
     { rows, return: true },
     opts.token,
   );
-  return Array.isArray(json?.rows) ? json.rows : [];
+  return rowsOf(json);
 }
 
 // -- Connection / capability -------------------------------------------------
@@ -1128,7 +1200,7 @@ export async function fetchPrimaryKeys(fetchFn: FetchFn, ref: DatasetteRef): Pro
   // Single `_`-param only — see fetchTableMeta for why `_size` is not added.
   const url = buildTableUrl(ref, { _extra: 'primary_keys' });
   const json = await fetchJson(fetchFn, url);
-  return Array.isArray(json?.primary_keys) ? json.primary_keys : [];
+  return asStrings(field(json, 'primary_keys'));
 }
 
 /**
@@ -1146,8 +1218,8 @@ export async function fetchTableCount(
   try {
     const json = await fetchJson(fetchFn, buildTableUrl(ref, { _extra: 'count' }));
     return {
-      count: typeof json?.count === 'number' ? json.count : null,
-      truncated: json?.count_truncated === true,
+      count: asNumber(field(json, 'count')),
+      truncated: field(json, 'count_truncated') === true,
     };
   } catch {
     return { count: null, truncated: false };
@@ -1186,13 +1258,14 @@ export async function testConnection(
         error: `HTTP ${vres.status}`,
       };
     }
-    const vjson: any = await vres.json();
-    const version = vjson?.datasette?.version ?? vjson?.version ?? null;
+    const vjson: unknown = await vres.json();
+    const version =
+      asString(field(field(vjson, 'datasette'), 'version')) ?? asString(field(vjson, 'version'));
     let actor: Record<string, unknown> | null = null;
     try {
       const ares = await fetchFn(`${base}/-/actor.json`, init);
-      const ajson: any = await ares.json();
-      actor = ajson?.actor ?? null;
+      const ajson: unknown = await ares.json();
+      actor = asObject(field(ajson, 'actor'));
     } catch {
       /* actor endpoint optional */
     }

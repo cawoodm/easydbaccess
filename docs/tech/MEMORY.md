@@ -60,7 +60,7 @@ Nothing shrinks a single table's footprint. The existing mitigations are
 about **how many tables are loaded at once**, not how much of one table is:
 
 - **Minimizing unmounts the grid.** `onstatuschange` in
-  [`window-mgr/jspanel-manager.ts`](../../packages/renderer/src/window-mgr/jspanel-manager.ts)
+  [`window-mgr/table-window-manager.ts`](../../packages/renderer/src/window-mgr/table-window-manager.ts)
   detaches `<data-table>` entirely when a panel minimizes and mounts a fresh
   one when it's expanded again — so a minimized table holds no rows and no
   store subscription. A table that _boots_ already minimized never mounts a
@@ -78,7 +78,7 @@ about **how many tables are loaded at once**, not how much of one table is:
 - **`?minimize`** — a boot flag that forces every table to open minimized
   regardless of its saved geometry, so a workspace full of huge tables can
   be opened without any of them fetching. Implemented on the `importers`
-  branch (`jspanel-manager.ts`'s `FORCE_MINIMIZED` constant), not yet merged.
+  branch (`table-window-manager.ts`'s `FORCE_MINIMIZED` constant), not yet merged.
 - **True windowed/lazy paging** — fetch-on-scroll with sort/filter pushed to
   the server, so a 100k-row remote table never has more than a page or two
   resident. Designed but no code written: see

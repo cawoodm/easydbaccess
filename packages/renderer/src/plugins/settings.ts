@@ -1,5 +1,6 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { parseSecrets, readSecretsText, writeSecretsText } from '../db/user-settings.js';
+import { GRID_SETTINGS_ID } from '../table/grid-settings.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'settings',
@@ -17,6 +18,18 @@ export const meta: NonNullable<PluginModule['meta']> = {
 };
 
 export function init(api: HostApi): void {
+  api.ui.registerSettings(GRID_SETTINGS_ID, 'Table grid', [
+    {
+      key: 'sortDescFirst',
+      label: 'Sort descending first',
+      type: 'boolean',
+      default: true,
+      scope: 'workspace',
+      description:
+        'Clicking a column header sorts descending, then ascending, then off. Turn this off to start ascending. Dates, scores and counts are usually read from the high end down, which took two clicks before.',
+    },
+  ]);
+
   api.ui.registerHeaderButton({
     id: 'settings:open',
     label: 'Settings',

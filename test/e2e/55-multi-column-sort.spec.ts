@@ -5,6 +5,9 @@ import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js
  * Shift-clicking a header adds a sort level behind the ones already active, so
  * "city, then age descending" is two clicks. A plain click still replaces the
  * whole sort — one column is the common case.
+ *
+ * A first click sorts DESCENDING (`grid:sortDescFirst`, on by default — see
+ * table/sort-cycle.ts), so the ascending steps below are the SECOND click.
  */
 
 /** The visible cell text per row, in DOM order. */
@@ -37,7 +40,8 @@ test('shift-click adds a second sort key; a plain click replaces the sort', asyn
       .locator(`#${panelDomId(id)} data-table thead th`)
       .filter({ has: page.locator('.col-label', { hasText: new RegExp(`^${field}$`) }) });
 
-  // Primary: city ascending.
+  // Primary: city ascending — the second click, since the first is descending.
+  await header('city').click();
   await header('city').click();
   await expect.poll(() => gridRows(page, id).then((r) => r.map((c) => c[0]))).toEqual([
     'Aarau',
@@ -48,8 +52,7 @@ test('shift-click adds a second sort key; a plain click replaces the sort', asyn
 
   // Secondary: age descending, added with shift — city order is kept and the
   // ties inside each city are broken by age.
-  await header('age').click({ modifiers: ['Shift'] }); // asc
-  await header('age').click({ modifiers: ['Shift'] }); // → desc
+  await header('age').click({ modifiers: ['Shift'] }); // desc, first click
   await expect
     .poll(() => gridRows(page, id).then((r) => r.map((c) => `${c[0]}:${c[1]}`)))
     .toEqual(['Aarau:40', 'Aarau:10', 'Bern:30', 'Bern:20']);
@@ -77,16 +80,16 @@ test('shift-click adds a second sort key; a plain click replaces the sort', asyn
   await expect(header('city').locator('.sort-rank')).toHaveText('1');
   await expect(header('age').locator('.sort-rank')).toHaveText('2');
 
-  // A plain click on age drops the city key: age alone, ascending, and no rank
+  // A plain click on age drops the city key: age alone, descending, and no rank
   // numbers because a single key needs none.
   await header('age').click();
   await expect
     .poll(() => gridRows(page, id).then((r) => r.map((c) => c[1])))
-    .toEqual(['10', '20', '30', '40']);
+    .toEqual(['40', '30', '20', '10']);
   await expect(page.locator(`#${panelDomId(id)} data-table .sort-rank`)).toHaveCount(0);
 
-  // A third click on the same column turns sorting off (asc → desc → off).
-  await header('age').click(); // desc
+  // A third click on the same column turns sorting off (desc → asc → off).
+  await header('age').click(); // asc
   await header('age').click(); // off
   await expect
     .poll(() =>
