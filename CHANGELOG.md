@@ -14,6 +14,7 @@
 
 ### Bugs
 
+- 🪲 The app froze while a `.db` imported — clicks and windows stopped responding until it finished (v0.0.287)
 - 🪲 Converting a `.db` left the app with no window for 15 seconds, and every table that finished importing made all the others re-read their rows (v0.0.286)
 - 🪲 Every click inside a window re-ordered the windows while a minimized one sat above it; a second finger hijacked a drag or resize (v0.0.283)
 - 🪲 A column script's Markdown output showed its HTML tags as text when the cell already held HTML (v0.0.281)

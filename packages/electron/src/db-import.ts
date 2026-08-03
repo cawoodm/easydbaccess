@@ -36,13 +36,60 @@ import type { SqliteStore } from './sqlite-store';
 const { DatabaseSync } = require('node:sqlite') as { DatabaseSync: typeof DatabaseSyncType };
 
 /**
- * Rows read from the source file and written to the target in one batch
- * (`bulkInsert`). Measured on 400,000 rows with `synchronous = OFF`: 500 rows
- * took 21.4s, 2000 took 6.0s, 5000 took 5.3s, 20000 took 2.6s — while peak RSS
- * climbed from 142 MB to 320 MB, since a batch is alive as JS objects while it
- * is written. 2000 keeps most of the speed at a fraction of the memory.
+ * How long one batch may hold the process before yielding.
+ *
+ * `node:sqlite` is synchronous, so a batch blocks whichever thread runs it for
+ * its whole duration. In the main process that is the thread answering the
+ * renderer's `store:*` IPC, and a fixed 2000-row batch measured 99.7% duty
+ * cycle over a `northwind.db` import: median 127ms blocked, p99 526ms, worst
+ * 1344ms. Every click and every subscription re-read queued behind that, which
+ * is what "the UI hangs" was.
+ *
+ * A row count cannot bound this — cost per row varies with the table's width
+ * and its column types, so the same 2000 rows is 30ms for one table and 1.3s
+ * for another. A TIME budget bounds it directly, and `BatchPacer` converts the
+ * budget into a row count from what the last batch actually cost.
  */
-const BATCH_SIZE = 2000;
+const BATCH_SLICE_MS = 40;
+
+/**
+ * Batch-size bounds. The floor keeps the per-batch overhead (a statement
+ * prepare and a progress message) from dominating; the ceiling caps memory,
+ * since a batch is alive as JS objects while it is written — at 2000 rows peak
+ * RSS was already 320 MB on a 400k-row table.
+ */
+const MIN_BATCH_ROWS = 100;
+const MAX_BATCH_ROWS = 4000;
+const INITIAL_BATCH_ROWS = 500;
+
+/**
+ * Chooses how many rows the next batch should carry so it costs about
+ * {@link BATCH_SLICE_MS}.
+ *
+ * Each new size is the average of the current one and what the last batch's
+ * measured cost-per-row implies. Averaging rather than jumping straight to the
+ * implied size damps the oscillation a single anomalous batch would otherwise
+ * cause — a WAL checkpoint or a GC pause makes one batch look ten times more
+ * expensive than the table really is.
+ */
+export class BatchPacer {
+  private rows = INITIAL_BATCH_ROWS;
+
+  size(): number {
+    return this.rows;
+  }
+
+  /** Feed back what a batch of `rows` rows actually cost. */
+  observe(rows: number, elapsedMs: number): void {
+    if (rows <= 0) return;
+    // Sub-millisecond batches would divide by zero and imply an infinite size;
+    // treating them as 1ms just means "grow", which the clamp then bounds.
+    const perRow = Math.max(elapsedMs, 1) / rows;
+    const implied = Math.round(BATCH_SLICE_MS / perRow);
+    const next = Math.round((this.rows + implied) / 2);
+    this.rows = Math.min(MAX_BATCH_ROWS, Math.max(MIN_BATCH_ROWS, next));
+  }
+}
 
 /** Reserved column names on every SqliteStore rows table — see `sqlite-store.ts`'s `writeTableNoTx`. */
 const RESERVED_ROW_COLUMNS = new Set(['_id', '_updatedAt', '_extra']);
@@ -82,9 +129,7 @@ export interface ImportPreview {
 
 /** True when `_easydb_tables` exists — the app's bookkeeping has touched this file. */
 function hasEasydbStamp(db: DatabaseSyncType): boolean {
-  const row = db
-    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_easydb_tables'`)
-    .get();
+  const row = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_easydb_tables'`).get();
   return row !== undefined;
 }
 
@@ -118,9 +163,7 @@ function countForeignObjects(db: DatabaseSyncType): number {
  */
 function isEasydbFile(db: DatabaseSyncType): boolean {
   if (!hasEasydbStamp(db)) return false;
-  const registered = (
-    db.prepare(`SELECT COUNT(*) AS n FROM _easydb_tables`).get() as { n: number }
-  ).n;
+  const registered = (db.prepare(`SELECT COUNT(*) AS n FROM _easydb_tables`).get() as { n: number }).n;
   if (registered > 0) return true;
   return countForeignObjects(db) === 0;
 }
@@ -179,9 +222,7 @@ function listEasydbCandidates(db: DatabaseSyncType): Array<{ name: string; sqlTa
  * nature, which is also what makes it safe to treat one exactly like a table
  * from here on.
  */
-function listForeignCandidates(
-  db: DatabaseSyncType,
-): Array<{ name: string; sqlTable: string; rowCount: number; isView: boolean }> {
+function listForeignCandidates(db: DatabaseSyncType): Array<{ name: string; sqlTable: string; rowCount: number; isView: boolean }> {
   const rows = db
     .prepare(
       `SELECT name, type FROM sqlite_master
@@ -206,20 +247,12 @@ function listForeignCandidates(
  * Opened `readOnly` so previewing a file never creates a `-journal`/`-wal`
  * sidecar next to someone else's database.
  */
-export function previewImport(
-  sourcePath: string,
-  targetStore: SqliteStore,
-  workspaceId: string,
-): ImportPreview {
+export function previewImport(sourcePath: string, targetStore: SqliteStore, workspaceId: string): ImportPreview {
   const src = new DatabaseSync(sourcePath, { readOnly: true });
   try {
     const kind: ImportPreview['kind'] = isEasydbFile(src) ? 'easydb' : 'foreign';
     const raw = kind === 'easydb' ? listEasydbCandidates(src) : listForeignCandidates(src);
-    const existingNames = new Set(
-      (targetStore.find('tables', { workspaceId }) as Array<{ name: string }>).map((t) =>
-        t.name.toLowerCase(),
-      ),
-    );
+    const existingNames = new Set((targetStore.find('tables', { workspaceId }) as Array<{ name: string }>).map((t) => t.name.toLowerCase()));
     return {
       kind,
       candidates: raw.map((c) => ({
@@ -288,29 +321,30 @@ export function fromRawSqlValue(columnType: ColumnSpec['type'], raw: unknown): u
   return decodeValue(columnType, raw);
 }
 
-/** Streams `sqlTable`'s rows out of `db` in batches, so a large table is never fully materialised. */
-function* readRowBatches(
-  db: DatabaseSyncType,
-  sqlTable: string,
-  columns: string[],
-): Generator<Array<Record<string, unknown>>> {
+/**
+ * Streams `sqlTable`'s rows out of `db` in batches, so a large table is never
+ * fully materialised. `pacer` decides each batch's size from what the previous
+ * one cost the caller — see {@link BatchPacer}.
+ */
+function* readRowBatches(db: DatabaseSyncType, sqlTable: string, columns: string[], pacer: BatchPacer): Generator<Array<Record<string, unknown>>> {
   const stmt = db.prepare(`SELECT ${columns.map(quoteIdent).join(', ')} FROM ${quoteIdent(sqlTable)}`);
   let batch: Array<Record<string, unknown>> = [];
+  let limit = pacer.size();
   for (const row of stmt.iterate()) {
     batch.push(row);
-    if (batch.length >= BATCH_SIZE) {
+    if (batch.length >= limit) {
       yield batch;
       batch = [];
+      // Re-read AFTER the yield: the consumer has just written that batch and
+      // told the pacer what it cost.
+      limit = pacer.size();
     }
   }
   if (batch.length > 0) yield batch;
 }
 
 /** Resolves what to do for one source table, given the caller's decisions map (keyed by source name). */
-function resolveAction(
-  candidate: ImportCandidate,
-  decisions: Record<string, ImportDecision>,
-): { action: 'create' | 'overwrite' | 'rename' | 'skip'; finalName: string } {
+function resolveAction(candidate: ImportCandidate, decisions: Record<string, ImportDecision>): { action: 'create' | 'overwrite' | 'rename' | 'skip'; finalName: string } {
   const decision = decisions[candidate.name];
   // An explicit skip wins whether or not the name collides. `decisions` started
   // out as purely collision resolution, but two callers now use it to say "not
@@ -361,17 +395,13 @@ function importEasydbTable(
     };
   }
 
-  const metaRow = src
-    .prepare(`SELECT columns_json, table_json FROM ${quoteIdent(`_easydb_meta_${candidate.sqlTable}`)}`)
-    .get() as { columns_json: string; table_json: string };
+  const metaRow = src.prepare(`SELECT columns_json, table_json FROM ${quoteIdent(`_easydb_meta_${candidate.sqlTable}`)}`).get() as { columns_json: string; table_json: string };
   const columns = JSON.parse(metaRow.columns_json) as ColumnSpec[];
   const tableRest = JSON.parse(metaRow.table_json) as Record<string, unknown>;
 
   const existing =
     resolved.action === 'overwrite'
-      ? ((targetStore.find('tables', { workspaceId }) as Array<{ id: string; name: string }>).find(
-          (t) => t.name.toLowerCase() === candidate.name.toLowerCase(),
-        ) ?? null)
+      ? ((targetStore.find('tables', { workspaceId }) as Array<{ id: string; name: string }>).find((t) => t.name.toLowerCase() === candidate.name.toLowerCase()) ?? null)
       : null;
 
   const tableId = existing?.id ?? randomUUID();
@@ -458,19 +488,15 @@ interface RowStreamTarget {
   total: number;
 }
 
-function* easydbRowBatches(
-  src: DatabaseSyncType,
-  targetStore: SqliteStore,
-  t: RowStreamTarget,
-): Generator<ImportProgress> {
-  const metaRow = src
-    .prepare(`SELECT columns_json FROM ${quoteIdent(`_easydb_meta_${t.sqlTable}`)}`)
-    .get() as { columns_json: string };
+function* easydbRowBatches(src: DatabaseSyncType, targetStore: SqliteStore, t: RowStreamTarget): Generator<ImportProgress> {
+  const metaRow = src.prepare(`SELECT columns_json FROM ${quoteIdent(`_easydb_meta_${t.sqlTable}`)}`).get() as { columns_json: string };
   const columns = JSON.parse(metaRow.columns_json) as ColumnSpec[];
   const rawCols = ['_id', '_updatedAt', '_extra', ...columns.map((c) => c.field)];
   const fallbackAt = Date.now();
   let imported = 0;
-  for (const batch of readRowBatches(src, t.sqlTable, rawCols)) {
+  const pacer = new BatchPacer();
+  for (const batch of readRowBatches(src, t.sqlTable, rawCols, pacer)) {
+    const startedAt = Date.now();
     const docs = batch.map((raw) => {
       const data: Record<string, unknown> = {};
       for (const spec of columns) {
@@ -487,16 +513,15 @@ function* easydbRowBatches(
       };
     });
     targetStore.bulkInsert('rows', docs);
+    // Timed around the mapping AND the insert, because both run on the thread
+    // this is trying not to block.
+    pacer.observe(docs.length, Date.now() - startedAt);
     imported += docs.length;
     yield { table: t.finalName, rows: imported, total: t.total };
   }
 }
 
-function* foreignRowBatches(
-  src: DatabaseSyncType,
-  targetStore: SqliteStore,
-  t: RowStreamTarget,
-): Generator<ImportProgress> {
+function* foreignRowBatches(src: DatabaseSyncType, targetStore: SqliteStore, t: RowStreamTarget): Generator<ImportProgress> {
   const info = src.prepare(`PRAGMA table_info(${quoteIdent(t.sqlTable)})`).all() as unknown as RawColumnInfo[];
   const columns = inferForeignColumns(src, t.sqlTable);
   // Original (un-renamed) column names, in the same order as `columns` — a
@@ -504,7 +529,9 @@ function* foreignRowBatches(
   const sourceFieldNames = info.map((c) => c.name);
   const importedAt = Date.now(); // one import is one instant, not one per row
   let imported = 0;
-  for (const batch of readRowBatches(src, t.sqlTable, sourceFieldNames)) {
+  const pacer = new BatchPacer();
+  for (const batch of readRowBatches(src, t.sqlTable, sourceFieldNames, pacer)) {
+    const startedAt = Date.now();
     const docs = batch.map((raw) => {
       const data: Record<string, unknown> = {};
       for (let i = 0; i < columns.length; i++) {
@@ -516,6 +543,7 @@ function* foreignRowBatches(
       return { id: randomUUID(), tableId: t.tableId, data, updatedAt: importedAt };
     });
     targetStore.bulkInsert('rows', docs);
+    pacer.observe(docs.length, Date.now() - startedAt);
     imported += docs.length;
     yield { table: t.finalName, rows: imported, total: t.total };
   }
@@ -551,21 +579,12 @@ export interface ImportPlan {
  * while phase 2 fills them in. This is what stops a big file looking like a
  * hang: the user sees what they asked for immediately.
  */
-export function prepareImport(
-  sourcePath: string,
-  targetStore: SqliteStore,
-  workspaceId: string,
-  decisions: Record<string, ImportDecision>,
-): ImportPlan {
+export function prepareImport(sourcePath: string, targetStore: SqliteStore, workspaceId: string, decisions: Record<string, ImportDecision>): ImportPlan {
   const src = new DatabaseSync(sourcePath, { readOnly: true });
   try {
     const kind: ImportPreview['kind'] = isEasydbFile(src) ? 'easydb' : 'foreign';
     const raw = kind === 'easydb' ? listEasydbCandidates(src) : listForeignCandidates(src);
-    const existingNames = new Set(
-      (targetStore.find('tables', { workspaceId }) as Array<{ name: string }>).map((t) =>
-        t.name.toLowerCase(),
-      ),
-    );
+    const existingNames = new Set((targetStore.find('tables', { workspaceId }) as Array<{ name: string }>).map((t) => t.name.toLowerCase()));
     const plan: ImportPlanEntry[] = [];
     const skipped: ImportedTableResult[] = [];
     for (const c of raw) {
@@ -576,9 +595,7 @@ export function prepareImport(
       };
       const resolved = resolveAction(candidate, decisions);
       const result =
-        kind === 'easydb'
-          ? importEasydbTable(src, targetStore, workspaceId, c, resolved, undefined, true)
-          : importForeignTable(src, targetStore, workspaceId, c, resolved, undefined, true);
+        kind === 'easydb' ? importEasydbTable(src, targetStore, workspaceId, c, resolved, undefined, true) : importForeignTable(src, targetStore, workspaceId, c, resolved, undefined, true);
       if (result.action === 'skipped' || !result.tableId) {
         skipped.push(result);
         continue;
@@ -622,11 +639,7 @@ export function prepareImport(
  * between batches so the main process's event loop keeps turning, which is what
  * lets the window stay usable and repaint the progress while a big table loads.
  */
-export function* importRowsFor(
-  sourcePath: string,
-  targetStore: SqliteStore,
-  entry: ImportPlanEntry,
-): Generator<ImportProgress> {
+export function* importRowsFor(sourcePath: string, targetStore: SqliteStore, entry: ImportPlanEntry): Generator<ImportProgress> {
   const src = new DatabaseSync(sourcePath, { readOnly: true });
   try {
     const target: RowStreamTarget = {
@@ -706,9 +719,7 @@ function importForeignTable(
 
   const existing =
     resolved.action === 'overwrite'
-      ? ((targetStore.find('tables', { workspaceId }) as Array<{ id: string; name: string }>).find(
-          (t) => t.name.toLowerCase() === candidate.name.toLowerCase(),
-        ) ?? null)
+      ? ((targetStore.find('tables', { workspaceId }) as Array<{ id: string; name: string }>).find((t) => t.name.toLowerCase() === candidate.name.toLowerCase()) ?? null)
       : null;
 
   const tableId = existing?.id ?? randomUUID();
@@ -773,11 +784,7 @@ export function commitImport(
   try {
     const kind: ImportPreview['kind'] = isEasydbFile(src) ? 'easydb' : 'foreign';
     const raw = kind === 'easydb' ? listEasydbCandidates(src) : listForeignCandidates(src);
-    const existingNames = new Set(
-      (targetStore.find('tables', { workspaceId }) as Array<{ name: string }>).map((t) =>
-        t.name.toLowerCase(),
-      ),
-    );
+    const existingNames = new Set((targetStore.find('tables', { workspaceId }) as Array<{ name: string }>).map((t) => t.name.toLowerCase()));
     // Durability off for the import: the destination is a fresh file (Convert) or
     // tables the user can re-import, and an interrupted import has to be redone
     // anyway — so waiting for a flush per commit buys nothing. Worth 3.5x on the
@@ -791,11 +798,7 @@ export function commitImport(
         collides: existingNames.has(c.name.toLowerCase()),
       };
       const resolved = resolveAction(candidate, decisions);
-      results.push(
-        kind === 'easydb'
-          ? importEasydbTable(src, targetStore, workspaceId, c, resolved, onProgress)
-          : importForeignTable(src, targetStore, workspaceId, c, resolved, onProgress),
-      );
+      results.push(kind === 'easydb' ? importEasydbTable(src, targetStore, workspaceId, c, resolved, onProgress) : importForeignTable(src, targetStore, workspaceId, c, resolved, onProgress));
     }
     return results;
   } finally {
