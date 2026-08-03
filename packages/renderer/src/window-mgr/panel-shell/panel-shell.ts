@@ -136,7 +136,7 @@ let zSeq = 100;
 /**
  * Next z-index, guaranteed above every panel currently in the DOM. Table
  * panels and view panels are each created by their own manager
- * (`jspanel-manager.ts` / `view-window-manager.ts`) but share this one shell
+ * (`table-window-manager.ts` / `view-window-manager.ts`) but share this one shell
  * module, so scanning the DOM (rather than trusting only the local `zSeq`)
  * keeps their z numbering mutually comparable — a freshly-created/fronted
  * table panel can't end up numerically behind an older view panel, which
@@ -525,7 +525,7 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
   // ---- interactions ----------------------------------------------------
   // Any pointerdown inside the panel fronts it — but only when another panel
   // is actually on top. Fronting unconditionally on every pointerdown fired
-  // `onfronted` (a store write — see stampFrontOrder in jspanel-manager.ts)
+  // `onfronted` (a store write — see stampFrontOrder in table-window-manager.ts)
   // on every click anywhere in the content, including mid-drag on a data-table
   // column-resize handle: the resulting table-record update raced the
   // in-memory column-width freeze the resize was building, so an interior

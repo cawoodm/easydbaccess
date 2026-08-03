@@ -5,7 +5,7 @@ import { fetchGistFileContent, offerPrune } from '../../../packages/renderer/src
 // offerPrune reaches the window manager through a dynamic import; the real module
 // registers custom elements and cannot load in this Node environment.
 const deleteTable = vi.fn();
-vi.mock('../../../packages/renderer/src/window-mgr/jspanel-manager.js', () => ({
+vi.mock('../../../packages/renderer/src/window-mgr/table-window-manager.js', () => ({
   deleteTable: (id: string) => deleteTable(id),
 }));
 

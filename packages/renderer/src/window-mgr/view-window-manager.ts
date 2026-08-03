@@ -1,10 +1,10 @@
 /**
  * Core window manager for View windows, running on the in-repo panel shell
  * (`panel-shell/panel-shell.ts`) — the same shell table windows run on
- * (`jspanel-manager.ts`).
+ * (`table-window-manager.ts`).
  *
  * View windows are managed by the CORE, exactly like table windows are managed
- * by `jspanel-manager.ts` — window behaviour (drag/resize/maximize), geometry,
+ * by `table-window-manager.ts` — window behaviour (drag/resize/maximize), geometry,
  * persistence, and boot-time restore are core responsibilities, NOT the `views`
  * plugin's. The plugin only owns data + intent: it seeds templates and the
  * dialog flips a `ViewInstance.open` flag. This manager reacts to that flag,
@@ -22,13 +22,13 @@
  * orders views AMONG THEMSELVES, though — restoring the relative order
  * BETWEEN a table and a view is a deliberately separate, cross-manager
  * concern; see `restack.ts` (this manager stays independent of
- * `jspanel-manager.ts` except for the shared `shellViewport()` adapter, which
+ * `table-window-manager.ts` except for the shared `shellViewport()` adapter, which
  * both kinds use so a maximized panel of either kind fills the same canvas).
  */
 
 import type { Table, ViewInstance, WindowGeometry } from '@easydb/shared';
 import { getContext, type AppContext } from '../app-context.js';
-import { shellViewport } from './jspanel-manager.js';
+import { shellViewport } from './shell-viewport.js';
 import { queueGeometryWrite } from './geometry-writes.js';
 import { countSuffix, VISIBLE_COUNT_EVENT, type VisibleCountDetail } from './panel-title.js';
 import { VIEW_ICON } from './table-kind.js';
@@ -392,7 +392,7 @@ function closePanel(instanceId: string): void {
 
 /**
  * Save a "front rank" into windowGeometry.z, exactly like the table window
- * manager's `stampFrontOrder` (see its comment in `jspanel-manager.ts`) —
+ * manager's `stampFrontOrder` (see its comment in `table-window-manager.ts`) —
  * `nextFrontZ()` is the SAME shared counter, so a table and a view fronted
  * moments apart still compare correctly in the merged restack.
  */

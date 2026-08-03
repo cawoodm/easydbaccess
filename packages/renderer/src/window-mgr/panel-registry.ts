@@ -1,7 +1,7 @@
 /**
  * Cross-manager panel lookup for the global restack pass (`restack.ts`).
  *
- * Table windows (`jspanel-manager.ts`) and view windows
+ * Table windows (`table-window-manager.ts`) and view windows
  * (`view-window-manager.ts`) each register/unregister their shell panel's
  * `front()` here as panels open/close, so the restack can front both kinds
  * without the two managers importing each other (they're deliberately kept

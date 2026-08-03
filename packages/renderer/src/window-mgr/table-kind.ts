@@ -3,7 +3,7 @@
 // Single source of truth for classifying a table's "kind" from its
 // `source`/`origin` fields, plus the small inline SVGs shown at the far left
 // of its panel titlebar (the panel shell's `headerLogo` slot — see
-// jspanel-manager.ts and view-window-manager.ts). `dialogs/table-info-dialog.ts`'s
+// table-window-manager.ts and view-window-manager.ts). `dialogs/table-info-dialog.ts`'s
 // `describeProvenance()` classifies via `tableKind()` too, so the (i) dialog's
 // prose and the titlebar icon can never drift apart.
 

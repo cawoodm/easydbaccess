@@ -14,7 +14,8 @@
  * callback reports, and then ask both window managers to persist the result —
  * an arranged layout used to be lost on the next reload.
  */
-import { currentPanZoom, persistTablePanelGeometry } from './jspanel-manager.js';
+import { persistTablePanelGeometry } from './table-window-manager.js';
+import { currentPanZoom } from './shell-viewport.js';
 import { persistViewWindowGeometry } from './view-window-manager.js';
 import { getPanels, type PanelShellEl } from './panel-shell/panel-shell.js';
 import { eligibleForArrange, tileSlots } from './tile-layout.js';

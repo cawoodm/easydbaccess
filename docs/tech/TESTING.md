@@ -49,7 +49,7 @@ without spinning up a browser. Examples scattered through this codebase:
 
 | Test file | What it isolates |
 |---|---|
-| `window-mgr/geometry.test.ts` | `sanitizeGeometry()` — corrupt-geometry detection, extracted out of `jspanel-manager.ts` (see `WINDOWS.md`) |
+| `window-mgr/geometry.test.ts` | `sanitizeGeometry()` — corrupt-geometry detection, extracted out of `table-window-manager.ts` (see `WINDOWS.md`) |
 | `window-mgr/panzoom.test.ts` | The pan/zoom transform math (`panBy`, `zoomAround`, `clampScale`) — no DOM, just coordinate arithmetic |
 | `window-mgr/panel-title.test.ts` | `countSuffix()` — the `"(12)"` / `"(3/12)"` title formatting |
 | `table/column-merge.test.ts` | Column-schema merge logic used by the column editor |

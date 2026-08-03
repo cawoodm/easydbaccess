@@ -1,5 +1,5 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
-import { deleteTable } from '../window-mgr/jspanel-manager.js';
+import { deleteTable } from '../window-mgr/table-window-manager.js';
 
 // Closing a table window now only HIDES it (the record and rows are kept, and
 // it's reopened from the command palette). This plugin provides the explicit,

@@ -3,7 +3,7 @@
  * in one merged ascending-z order.
  *
  * Table windows and view windows are opened by two independent managers
- * (`jspanel-manager.ts`, `view-window-manager.ts`), each via its own liveQuery
+ * (`table-window-manager.ts`, `view-window-manager.ts`), each via its own liveQuery
  * subscription. Sorting tables among themselves (or views among themselves)
  * cannot restore "windows as they were" — the relative order between a table
  * and a view is decided by whichever manager's subscription happens to create
@@ -40,7 +40,7 @@ export async function initRestack(): Promise<void> {
  * Re-front every open, non-minimized panel (table or view) in ascending
  * saved-z order. Panels open asynchronously (liveQuery), so retry until every
  * expected panel is registered — mirrors the retry loop this replaces in
- * `jspanel-manager.ts`.
+ * `table-window-manager.ts`.
  */
 export async function restackAll(): Promise<void> {
   // Nothing to re-front under `?minimize`: every panel was opened minimized,

@@ -11,7 +11,7 @@
 // the displayed one, and the change event carries the stored value back.
 
 import { createPanel } from '../window-mgr/panel-shell/panel-shell.js';
-import { shellViewport } from '../window-mgr/jspanel-manager.js';
+import { shellViewport } from '../window-mgr/shell-viewport.js';
 import { isMobileViewport } from '../util/viewport.js';
 
 /** The pan/zoom-transformed canvas viewport that panels mount into. */

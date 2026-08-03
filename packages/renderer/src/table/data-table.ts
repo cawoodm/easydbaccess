@@ -619,7 +619,7 @@ export class DataTable extends LitElement {
     // persists it. A store write can land mid-drag from something else
     // entirely — e.g. this panel getting fronted (a pointerdown anywhere in
     // it, including the resize handle, bumps its z-order — see
-    // jspanel-manager.ts's onfronted) — and re-applying the OLDER `table`
+    // table-window-manager.ts's onfronted) — and re-applying the OLDER `table`
     // record here would overwrite the freeze with widthless columns, so the
     // table never flips to fixed and the drag barely moves anything.
     if (this.resizing == null) this.columns = table.columns;

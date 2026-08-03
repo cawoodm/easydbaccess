@@ -1,6 +1,6 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { createPanel } from '../window-mgr/panel-shell/panel-shell.js';
-import { shellViewport } from '../window-mgr/jspanel-manager.js';
+import { shellViewport } from '../window-mgr/shell-viewport.js';
 import { looksLikeHtml, htmlToPreviewText } from '../util/html-text.js';
 import { looksLikeMarkdown, markdownToHtml } from '../util/markdown.js';
 import { isMobileViewport } from '../util/viewport.js';

@@ -124,7 +124,7 @@ const ONTO_REPLACE = 'Replace the rows of this table';
  * silently wrong for anything else.
  */
 async function dropOntoTable(api: HostApi, event: DragEvent, file: File): Promise<boolean> {
-  const { tableIdAtNode } = await import('../window-mgr/jspanel-manager.js');
+  const { tableIdAtNode } = await import('../window-mgr/table-window-manager.js');
   const tableId = tableIdAtNode(event.target);
   if (!tableId) return false;
   const table = await api.store.tables.findOne(tableId);

@@ -1,7 +1,7 @@
 // packages/renderer/src/window-mgr/panel-title.ts
 //
 // Shared helpers for the row-count suffix shown in panel titlebars — used by
-// both the table window manager (`jspanel-manager.ts`) and the view window
+// both the table window manager (`table-window-manager.ts`) and the view window
 // manager (`view-window-manager.ts`) so tables and views format their counts
 // identically.
 

@@ -10,7 +10,7 @@ import {
 } from './helpers.js';
 
 /**
- * Table windows (`jspanel-manager.ts`) and view windows (`view-window-manager.ts`)
+ * Table windows (`table-window-manager.ts`) and view windows (`view-window-manager.ts`)
  * are two independent managers, each with its own liveQuery subscription. A
  * saved z only reproduced the order WITHIN one manager's own boot loop — the
  * relative order BETWEEN a table and a view was decided by whichever manager

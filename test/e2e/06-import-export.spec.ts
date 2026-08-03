@@ -411,7 +411,7 @@ test.describe('import / export', () => {
     const parsed = JSON.parse(serialized) as { tables: Array<{ name: string }> };
     expect(parsed.tables.map((t) => t.name).sort()).toEqual(['Alpha', 'Bravo']);
 
-    // Don't wipe — closing panels would fire jspanel-manager's "Delete?"
+    // Don't wipe — closing panels would fire the table window manager's "Delete?"
     // confirm dialog and clash with the import prompt. Instead, navigate to
     // a fresh workspace, which gives us an empty target without touching
     // the source workspace's panels.

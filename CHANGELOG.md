@@ -27,6 +27,10 @@
 
 - 🧪 The window-stacking specs waited on fixed sleeps for a view's saved front rank, so a slow write failed them (v0.0.286)
 
+### Chores
+
+- 🔧 The table window manager was still named after jsPanel, and a cell renderer had to import it to read the canvas zoom (v0.0.287)
+
 ## 2 Aug 2026
 
 ### Features
