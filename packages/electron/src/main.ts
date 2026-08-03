@@ -77,7 +77,10 @@ function handleMutating<Args extends [string, ...unknown[]], R>(channel: string,
 }
 
 function registerStoreIpc(): void {
-  handle('store:find', (coll: string, query?: Record<string, unknown>) => getStore().find(coll, query));
+  handle('store:find', (coll: string, query?: Record<string, unknown>, limit?: number) => getStore().find(coll, query, limit));
+  // Paired with a capped `store:find`, so a grid can say "20,000 of 609,283"
+  // instead of silently presenting a truncated table as the whole thing.
+  handle('store:countRows', (tableId: string) => getStore().countRowsIn(tableId));
   handle('store:findOne', (coll: string, key: string) => getStore().findOne(coll, key));
   handleMutating('store:insert', (coll: string, doc: Record<string, unknown>) => getStore().insert(coll, doc));
   handleMutating('store:bulkInsert', (coll: string, docs: Record<string, unknown>[]) => getStore().bulkInsert(coll, docs));
@@ -288,6 +291,21 @@ async function createWindow(): Promise<void> {
 
     await win.loadFile(indexPath);
   }
+}
+
+/**
+ * Opt-in CDP endpoint, for measuring the app rather than guessing about it.
+ *
+ * Some questions can only be answered against the running app — "is the UI
+ * responsive while a 600k-row import runs" is one, since it depends on how the
+ * renderer, the IPC and the synchronous SQLite writes interleave. With this set,
+ * a Playwright/CDP client can attach and drive `window.easydb` directly, which
+ * also sidesteps the native file dialogs a scripted test cannot click.
+ *
+ * Off unless asked for: it opens an unauthenticated debugging port.
+ */
+if (process.env.EASYDB_DEVTOOLS_PORT) {
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.EASYDB_DEVTOOLS_PORT);
 }
 
 app.on('window-all-closed', () => {

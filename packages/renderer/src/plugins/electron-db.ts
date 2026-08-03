@@ -92,12 +92,16 @@ export function init(api: HostApi): void {
         { id: 'open', label: 'Open…', icon: 'folder_open' },
         { id: 'saveAs', label: 'Save As…', icon: 'save' },
         { id: 'import', label: 'Import…', icon: 'file_download' },
+        // Only while there is something to stop — an import of a big file runs
+        // for tens of seconds, and it must not be a one-way door.
+        ...(isImporting() ? [{ id: 'stop', label: 'Stop importing', icon: 'cancel' }] : []),
       ]);
       if (!choice) return;
       try {
         if (choice === 'open') await openFlow(api, bridge);
         else if (choice === 'saveAs') await saveAsFlow(api, bridge);
         else if (choice === 'import') await importFlow(api, bridge);
+        else if (choice === 'stop') cancelImport();
       } catch (err) {
         api.ui.dialogs.toast(`${choice} failed: ${(err as Error).message}`, {
           kind: 'error',
@@ -407,50 +411,106 @@ export async function importFlow(api: HostApi, bridge: EasydbDbBridge, sourcePat
  */
 async function runRowPhase(api: HostApi, bridge: EasydbDbBridge, sourcePath: string, plan: EasydbImportPlanEntry[], already: EasydbImportedTableResult[] = []): Promise<EasydbImportedTableResult[]> {
   const results: EasydbImportedTableResult[] = [...already];
-  for (const entry of plan) {
-    try {
-      const rows = await bridge.importRows(sourcePath, entry);
-      results.push({
-        sourceName: entry.sourceName,
-        action: entry.action,
-        finalName: entry.finalName,
-        tableId: entry.tableId,
-        rowCount: rows,
-      });
-    } catch (err) {
-      // One table failing must not abandon the rest — it keeps its structure
-      // and the summary reports what did land.
-      api.ui.dialogs.toast(`"${entry.finalName}" failed: ${(err as Error).message}`, {
-        kind: 'error',
-        title: 'Import database',
-      });
+  importInFlight = { cancelled: false };
+  const token = importInFlight;
+  try {
+    for (const entry of plan) {
+      // Checked between tables, which is the only safe place to stop: a table is
+      // filled by one main-process call, and abandoning it midway would leave a
+      // partly-filled table that nothing records as incomplete.
+      if (token.cancelled) {
+        api.ui.dialogs.toast(`Stopped. ${results.length} of ${plan.length} table${plan.length === 1 ? '' : 's'} were filled; the rest are still empty.`, {
+          kind: 'warning',
+          title: 'Import database',
+        });
+        break;
+      }
+      try {
+        const rows = await bridge.importRows(sourcePath, entry);
+        results.push({
+          sourceName: entry.sourceName,
+          action: entry.action,
+          finalName: entry.finalName,
+          tableId: entry.tableId,
+          rowCount: rows,
+        });
+      } catch (err) {
+        // One table failing must not abandon the rest — it keeps its structure
+        // and the summary reports what did land.
+        api.ui.dialogs.toast(`"${entry.finalName}" failed: ${(err as Error).message}`, {
+          kind: 'error',
+          title: 'Import database',
+        });
+      }
     }
+  } finally {
+    if (importInFlight === token) importInFlight = null;
   }
   return results;
 }
 
 /**
- * Finish a conversion whose rows are still owed.
+ * Set while rows are being copied, so the user can stop a long import — a
+ * 600k-row file takes tens of seconds and starting one must not be a
+ * commitment. Null when nothing is running.
+ */
+let importInFlight: { cancelled: boolean } | null = null;
+
+/** True when rows are being copied right now. */
+export function isImporting(): boolean {
+  return importInFlight !== null;
+}
+
+/** Asks the running import to stop after the table it is on. */
+export function cancelImport(): void {
+  if (importInFlight) importInFlight.cancelled = true;
+}
+
+/**
+ * Offer to finish a conversion whose rows are still owed.
  *
  * Convert writes only the table structures before switching to the new file and
  * reloading the window (`db-convert.ts`'s `prepareConvert`) — a reload would
  * throw away any copying in flight, so the remaining plan is left as a note
- * inside the file instead. This runs on every boot, does nothing when there is
- * no note, and clears it once the rows are in. Quitting mid-import therefore
- * resumes on the next launch rather than leaving empty tables behind.
+ * inside the file instead.
+ *
+ * It ASKS. An earlier version just started copying, and that made the app
+ * unusable: any conversion that didn't finish — the window closed, the app
+ * crashed — left the note behind, so every subsequent launch immediately began
+ * a minutes-long import of hundreds of thousands of rows, with no prompt, no
+ * progress the user had asked for, and no way to stop it. Recovering from an
+ * interruption must not itself be something you cannot get out of.
+ *
+ * Dismissing the prompt (Escape) leaves the note alone, so the offer returns
+ * next launch; only "leave them empty" discards it.
  */
 export async function resumePendingImport(api: HostApi, bridge: EasydbDbBridge): Promise<void> {
   const setting = await api.store.settings.findOne(PENDING_IMPORT_SETTING);
   const pending = setting?.value as { sourcePath?: string; plan?: EasydbImportPlanEntry[] } | undefined;
   if (!pending?.sourcePath || !pending.plan?.length) return;
 
-  api.ui.dialogs.toast(`Filling ${pending.plan.length} table${pending.plan.length === 1 ? '' : 's'} from "${pending.sourcePath}" — each titlebar shows its own progress.`, {
-    kind: 'info',
-    title: 'Convert to EDA',
-  });
+  const tables = pending.plan.length;
+  const rowsOwed = pending.plan.reduce((n, e) => n + (e.total > 0 ? e.total : 0), 0);
+  const CONTINUE = 'Fill them in now';
+  const DISCARD = 'Leave them empty';
+  const choice = await api.ui.dialogs.choice(
+    `${tables} table${tables === 1 ? '' : 's'} in this workspace ${tables === 1 ? 'is' : 'are'} still empty — ` +
+      `${tables === 1 ? 'its' : 'their'} rows were being copied from "${pending.sourcePath}" when the app last ` +
+      `stopped.\n\n${rowsOwed > 0 ? `About ${rowsOwed.toLocaleString()} rows are left. ` : ''}` +
+      `Copying can be stopped from the Database menu once it starts.`,
+    [CONTINUE, DISCARD],
+    'Unfinished import',
+  );
+  if (choice !== CONTINUE) {
+    // Only an explicit "no" throws the note away — a dismissed prompt asks again
+    // next launch rather than silently abandoning the rows.
+    if (choice === DISCARD) await api.store.settings.remove(PENDING_IMPORT_SETTING);
+    return;
+  }
+
   const results = await runRowPhase(api, bridge, pending.sourcePath, pending.plan);
-  // Clear the note only after the rows are in, so a crash halfway resumes
-  // rather than silently giving up. A re-run overwrites the same rows.
+  // Clear the note only after the rows are in, so a crash halfway offers to
+  // resume rather than silently giving up. A re-run overwrites the same rows.
   await api.store.settings.remove(PENDING_IMPORT_SETTING);
   reportImportResults(api, pending.sourcePath, results);
 }

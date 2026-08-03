@@ -516,7 +516,7 @@ describe('SqliteStore — tables: remove drops both SQL objects', () => {
 });
 
 describe('SqliteStore — rows: view semantics', () => {
-  it('find(rows, {tableId}) returns only that table\'s rows — two tables never bleed', () => {
+  it("find(rows, {tableId}) returns only that table's rows — two tables never bleed", () => {
     const store = new SqliteStore({ path: dbPath });
     store.insert('tables', baseTable({ id: 'tA', name: 'a' }));
     store.insert('tables', baseTable({ id: 'tB', name: 'b' }));
@@ -544,9 +544,7 @@ describe('SqliteStore — rows: view semantics', () => {
 
   it('insert(rows) into an unregistered tableId throws a clear error', () => {
     const store = new SqliteStore({ path: dbPath });
-    expect(() => store.insert('rows', { id: 'r1', tableId: 'ghost', data: {}, updatedAt: 1 })).toThrow(
-      /ghost/,
-    );
+    expect(() => store.insert('rows', { id: 'r1', tableId: 'ghost', data: {}, updatedAt: 1 })).toThrow(/ghost/);
     store.close();
   });
 
@@ -748,5 +746,49 @@ describe('copyDatabase', () => {
 
     // Sanity: the copy is a real independent file, not a symlink/alias.
     expect(readFileSync(copyPath).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * A grid asks for its whole table the moment it mounts, and the reply crosses
+ * IPC as one structured-clone payload. Unbounded, that killed the app: a
+ * workspace converted from `northwind.db` restored 18 open windows wanting
+ * 1,893,366 rows between them and crashed on boot before drawing anything.
+ */
+describe('find("rows") row cap', () => {
+  it('returns at most `limit` rows, while the count stays truthful', () => {
+    const store = new SqliteStore({ path: dbPath });
+    try {
+      const table = store.insert('tables', {
+        id: 'big',
+        workspaceId: 'ws',
+        name: 'Big',
+        columns: [{ field: 'n', label: 'n', type: 'number' }],
+        view: 'table',
+        updatedAt: 1,
+      }) as { id: string };
+      store.bulkInsert(
+        'rows',
+        Array.from({ length: 250 }, (_, i) => ({ id: `r${i}`, tableId: table.id, data: { n: i }, updatedAt: 1 })),
+      );
+
+      expect(store.find('rows', { tableId: table.id }, 100)).toHaveLength(100);
+      // No cap still means everything — an ordinary caller is unaffected.
+      expect(store.find('rows', { tableId: table.id })).toHaveLength(250);
+      // The cap must not leak into the count, or a truncated view would report
+      // itself as complete.
+      expect(store.countRowsIn(table.id)).toBe(250);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('reports 0 for a table id it does not know', () => {
+    const store = new SqliteStore({ path: dbPath });
+    try {
+      expect(store.countRowsIn('nope')).toBe(0);
+    } finally {
+      store.close();
+    }
   });
 });

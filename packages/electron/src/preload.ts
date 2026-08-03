@@ -26,7 +26,8 @@ import type { ImportPlan, ImportPlanEntry, ImportProgress } from './db-import';
 type ImportProgressEvent = ImportProgress & { tableId: string; done?: boolean };
 
 const store = {
-  find: (coll: string, query?: Record<string, unknown>): Promise<unknown[]> => ipcRenderer.invoke('store:find', coll, query),
+  find: (coll: string, query?: Record<string, unknown>, limit?: number): Promise<unknown[]> => ipcRenderer.invoke('store:find', coll, query, limit),
+  countRows: (tableId: string): Promise<number> => ipcRenderer.invoke('store:countRows', tableId),
   findOne: (coll: string, key: string): Promise<unknown | null> => ipcRenderer.invoke('store:findOne', coll, key),
   insert: (coll: string, doc: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('store:insert', coll, doc),
   bulkInsert: (coll: string, docs: Record<string, unknown>[]): Promise<unknown[]> => ipcRenderer.invoke('store:bulkInsert', coll, docs),
@@ -70,7 +71,8 @@ const db = {
   importDb: (workspaceId: string, sourcePath?: string): Promise<DialogResult<{ path: string; preview: ImportPreview }> | CancelledResult> => ipcRenderer.invoke('db:import', workspaceId, sourcePath),
   importDbCommit: (sourcePath: string, workspaceId: string, decisions: Record<string, ImportDecision>): Promise<ImportedTableResult[]> =>
     ipcRenderer.invoke('db:importCommit', sourcePath, workspaceId, decisions),
-  convertDb: (sourcePath: string, only?: string[]): Promise<DialogResult<{ path: string; tables: ImportedTableResult[]; pending: number }> | CancelledResult> => ipcRenderer.invoke('db:convert', sourcePath, only),
+  convertDb: (sourcePath: string, only?: string[]): Promise<DialogResult<{ path: string; tables: ImportedTableResult[]; pending: number }> | CancelledResult> =>
+    ipcRenderer.invoke('db:convert', sourcePath, only),
   probeDb: (sourcePath: string): Promise<DatabaseFileKind> => ipcRenderer.invoke('db:probe', sourcePath),
   importPrepare: (sourcePath: string, workspaceId: string, decisions: Record<string, ImportDecision>): Promise<ImportPlan> =>
     ipcRenderer.invoke('db:importPrepare', sourcePath, workspaceId, decisions),
@@ -114,7 +116,8 @@ declare global {
       platform: 'electron';
       version: string;
       store: {
-        find(coll: string, query?: Record<string, unknown>): Promise<unknown[]>;
+        find(coll: string, query?: Record<string, unknown>, limit?: number): Promise<unknown[]>;
+        countRows(tableId: string): Promise<number>;
         findOne(coll: string, key: string): Promise<unknown | null>;
         insert(coll: string, doc: Record<string, unknown>): Promise<unknown>;
         bulkInsert(coll: string, docs: Record<string, unknown>[]): Promise<unknown[]>;

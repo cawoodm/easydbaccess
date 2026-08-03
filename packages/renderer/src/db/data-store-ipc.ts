@@ -10,7 +10,10 @@ import { settingId } from './dexie-db.js';
  * Keep the two in sync if the preload surface changes.
  */
 export interface EasydbStoreBridge {
-  find(coll: string, query?: Record<string, unknown>): Promise<unknown[]>;
+  /** `limit` caps rows per table; see `findRows` in the main-process store. */
+  find(coll: string, query?: Record<string, unknown>, limit?: number): Promise<unknown[]>;
+  /** True row count for one table, without fetching any of them. */
+  countRows?(tableId: string): Promise<number>;
   findOne(coll: string, key: string): Promise<unknown | null>;
   insert(coll: string, doc: Record<string, unknown>): Promise<unknown>;
   bulkInsert(coll: string, docs: Record<string, unknown>[]): Promise<unknown[]>;
@@ -281,8 +284,25 @@ function wrapIpc<T>(bridge: EasydbStoreBridge, collName: CollName): DataCollecti
  * is a promoted column there, so filtering by it is a real SQL WHERE, not a
  * client-side scan.
  */
+/**
+ * Most rows a single table view will pull over IPC.
+ *
+ * Unbounded crashed the app. A grid asks for its whole table the moment it
+ * mounts, and the reply crosses IPC as one structured-clone payload: a workspace
+ * converted from `northwind.db` restored 18 open windows wanting 1,893,366 rows
+ * between them, three of the tables holding 609,283 each, and the app died on
+ * boot before drawing anything. The renderer also filters and sorts in memory,
+ * so a table this size was never going to be workable there whole.
+ *
+ * 20,000 is chosen to be far above any table a person scrolls and far below what
+ * hurts: it clones in well under a second. The true total still comes from
+ * `countRows`, so a truncated view reports itself as truncated rather than
+ * quietly passing 20,000 rows off as the whole table.
+ */
+export const ROW_FETCH_CAP = 20_000;
+
 function rowsViewIpc(bridge: EasydbStoreBridge, tableId: string): DataCollection<Row> {
-  const queryRows = (query?: Partial<Row>): Promise<Row[]> => bridge.find('rows', { ...(query as Record<string, unknown> | undefined), tableId }) as Promise<Row[]>;
+  const queryRows = (query?: Partial<Row>): Promise<Row[]> => bridge.find('rows', { ...(query as Record<string, unknown> | undefined), tableId }, ROW_FETCH_CAP) as Promise<Row[]>;
   return {
     find: (query) => queryRows(query),
     async findOne(id) {

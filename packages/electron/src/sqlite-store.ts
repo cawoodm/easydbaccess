@@ -19,19 +19,8 @@
  */
 
 import { copyFileSync } from 'node:fs';
-import type {
-  DatabaseSync as DatabaseSyncType,
-  SQLInputValue,
-  StatementSync as StatementSyncType,
-} from 'node:sqlite';
-import {
-  decodeValue,
-  encodeValue,
-  quoteIdent,
-  sanitizeTableName,
-  sqlAffinity,
-  type ColumnSpec,
-} from '@easydb/shared';
+import type { DatabaseSync as DatabaseSyncType, SQLInputValue, StatementSync as StatementSyncType } from 'node:sqlite';
+import { decodeValue, encodeValue, quoteIdent, sanitizeTableName, sqlAffinity, type ColumnSpec } from '@easydb/shared';
 
 // node:sqlite is a Node 22.5+ builtin (unflagged on Electron 43's bundled
 // Node 24.18.0). Vite (used by vitest to run this package's tests) doesn't
@@ -163,9 +152,9 @@ export class SqliteStore {
 
   // -- public API ---------------------------------------------------------
 
-  find(coll: string, query?: Record<string, unknown>): unknown[] {
+  find(coll: string, query?: Record<string, unknown>, limit?: number): unknown[] {
     if (coll === 'tables') return this.findTables(query);
-    if (coll === 'rows') return this.findRows(query);
+    if (coll === 'rows') return this.findRows(query, limit);
     return this.findDocs(coll, query);
   }
 
@@ -173,9 +162,7 @@ export class SqliteStore {
     if (coll === 'tables') return this.readTableDoc(key);
     if (coll === 'rows') return this.findOneRow(key);
     docPk(coll);
-    const row = this.db
-      .prepare(`SELECT doc FROM _easydb_docs WHERE coll = ? AND key = ?`)
-      .get(coll, key) as { doc: string } | undefined;
+    const row = this.db.prepare(`SELECT doc FROM _easydb_docs WHERE coll = ? AND key = ?`).get(coll, key) as { doc: string } | undefined;
     return row ? (JSON.parse(row.doc) as unknown) : null;
   }
 
@@ -244,18 +231,11 @@ export class SqliteStore {
         const allCols = ['_id', '_updatedAt', '_extra', ...columns.map((c) => c.field)];
         target = {
           columns,
-          stmt: this.db.prepare(
-            `INSERT INTO ${quoteIdent(sqlTable)} (${allCols.map(quoteIdent).join(', ')}) VALUES (${allCols
-              .map(() => '?')
-              .join(', ')})`,
-          ),
+          stmt: this.db.prepare(`INSERT INTO ${quoteIdent(sqlTable)} (${allCols.map(quoteIdent).join(', ')}) VALUES (${allCols.map(() => '?').join(', ')})`),
         };
         targets.set(tableId, target);
       }
-      const { values, extraJson } = this.encodeRowColumns(
-        target.columns,
-        (doc.data as Record<string, unknown>) ?? {},
-      );
+      const { values, extraJson } = this.encodeRowColumns(target.columns, (doc.data as Record<string, unknown>) ?? {});
       const updatedAt = typeof doc.updatedAt === 'number' ? doc.updatedAt : null;
       target.stmt.run(...sqlParams([id, updatedAt, extraJson, ...values]));
     }
@@ -312,9 +292,7 @@ export class SqliteStore {
     }
     if (coll === 'rows') return this.countRows();
     docPk(coll);
-    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM _easydb_docs WHERE coll = ?`).get(
-      coll,
-    ) as { n: number };
+    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM _easydb_docs WHERE coll = ?`).get(coll) as { n: number };
     return row.n;
   }
 
@@ -370,11 +348,7 @@ export class SqliteStore {
     return docs;
   }
 
-  private writeDocNoTx(
-    mode: 'insert' | 'upsert',
-    coll: string,
-    doc: Record<string, unknown>,
-  ): unknown {
+  private writeDocNoTx(mode: 'insert' | 'upsert', coll: string, doc: Record<string, unknown>): unknown {
     const pk = docPk(coll);
     const key = doc[pk];
     if (typeof key !== 'string') {
@@ -383,9 +357,7 @@ export class SqliteStore {
     const workspaceId = typeof doc.workspaceId === 'string' ? doc.workspaceId : null;
     const json = JSON.stringify(doc);
     if (mode === 'insert') {
-      this.db
-        .prepare(`INSERT INTO _easydb_docs (coll, key, workspaceId, doc) VALUES (?, ?, ?, ?)`)
-        .run(...sqlParams([coll, key, workspaceId, json]));
+      this.db.prepare(`INSERT INTO _easydb_docs (coll, key, workspaceId, doc) VALUES (?, ?, ?, ?)`).run(...sqlParams([coll, key, workspaceId, json]));
     } else {
       this.db
         .prepare(
@@ -429,23 +401,15 @@ export class SqliteStore {
   }
 
   private readColumnsJson(sqlTable: string): ColumnSpec[] {
-    const row = this.db
-      .prepare(`SELECT columns_json FROM ${quoteIdent(this.metaTableName(sqlTable))}`)
-      .get() as { columns_json: string } | undefined;
+    const row = this.db.prepare(`SELECT columns_json FROM ${quoteIdent(this.metaTableName(sqlTable))}`).get() as { columns_json: string } | undefined;
     return row ? (JSON.parse(row.columns_json) as ColumnSpec[]) : [];
   }
 
   /** Reconstructs a full `Table` doc (table_json + parsed columns) for a registered id. */
   private readTableDoc(id: string): unknown | null {
-    const reg = this.db.prepare(`SELECT sql_table FROM _easydb_tables WHERE id = ?`).get(id) as
-      | { sql_table: string }
-      | undefined;
+    const reg = this.db.prepare(`SELECT sql_table FROM _easydb_tables WHERE id = ?`).get(id) as { sql_table: string } | undefined;
     if (!reg) return null;
-    const metaRow = this.db
-      .prepare(
-        `SELECT columns_json, table_json FROM ${quoteIdent(this.metaTableName(reg.sql_table))}`,
-      )
-      .get() as { columns_json: string; table_json: string } | undefined;
+    const metaRow = this.db.prepare(`SELECT columns_json, table_json FROM ${quoteIdent(this.metaTableName(reg.sql_table))}`).get() as { columns_json: string; table_json: string } | undefined;
     if (!metaRow) return null;
     const tableRest = JSON.parse(metaRow.table_json) as Record<string, unknown>;
     const columns = JSON.parse(metaRow.columns_json) as ColumnSpec[];
@@ -458,9 +422,7 @@ export class SqliteStore {
         id: string;
       }>
     ).map((r) => r.id);
-    let docs = ids
-      .map((id) => this.readTableDoc(id))
-      .filter((d): d is Record<string, unknown> => d !== null);
+    let docs = ids.map((id) => this.readTableDoc(id)).filter((d): d is Record<string, unknown> => d !== null);
     const entries = Object.entries(query ?? {});
     if (entries.length > 0) docs = docs.filter((d) => matchesAll(d, entries));
     return docs;
@@ -477,9 +439,7 @@ export class SqliteStore {
     if (typeof id !== 'string') {
       throw new Error(`SqliteStore.${mode}: "tables" doc is missing its primary key "id"`);
     }
-    const existing = this.db.prepare(`SELECT sql_table FROM _easydb_tables WHERE id = ?`).get(
-      id,
-    ) as { sql_table: string } | undefined;
+    const existing = this.db.prepare(`SELECT sql_table FROM _easydb_tables WHERE id = ?`).get(id) as { sql_table: string } | undefined;
     if (mode === 'insert' && existing) {
       throw new Error(`SqliteStore.insert: "tables" doc with id "${id}" already exists`);
     }
@@ -497,29 +457,17 @@ export class SqliteStore {
       this.db.prepare(`UPDATE _easydb_tables SET name = ? WHERE id = ?`).run(name, id);
     } else {
       sqlTable = this.resolveSqlTableName(sanitizeTableName(name));
-      const nextOrdinal = (
-        this.db
-          .prepare(`SELECT COALESCE(MAX(ordinal), -1) + 1 AS next FROM _easydb_tables`)
-          .get() as { next: number }
-      ).next;
-      this.db.exec(
-        `CREATE TABLE ${quoteIdent(sqlTable)} (_id TEXT PRIMARY KEY, _updatedAt INTEGER, _extra TEXT)`,
-      );
-      this.db.exec(
-        `CREATE TABLE ${quoteIdent(this.metaTableName(sqlTable))} (columns_json TEXT NOT NULL, table_json TEXT NOT NULL)`,
-      );
-      this.db
-        .prepare(`INSERT INTO _easydb_tables (id, name, sql_table, ordinal) VALUES (?, ?, ?, ?)`)
-        .run(...sqlParams([id, name, sqlTable, nextOrdinal]));
+      const nextOrdinal = (this.db.prepare(`SELECT COALESCE(MAX(ordinal), -1) + 1 AS next FROM _easydb_tables`).get() as { next: number }).next;
+      this.db.exec(`CREATE TABLE ${quoteIdent(sqlTable)} (_id TEXT PRIMARY KEY, _updatedAt INTEGER, _extra TEXT)`);
+      this.db.exec(`CREATE TABLE ${quoteIdent(this.metaTableName(sqlTable))} (columns_json TEXT NOT NULL, table_json TEXT NOT NULL)`);
+      this.db.prepare(`INSERT INTO _easydb_tables (id, name, sql_table, ordinal) VALUES (?, ?, ?, ?)`).run(...sqlParams([id, name, sqlTable, nextOrdinal]));
     }
 
     this.reconcileColumnsNoTx(sqlTable, columns);
 
     const metaTable = this.metaTableName(sqlTable);
     this.db.exec(`DELETE FROM ${quoteIdent(metaTable)}`);
-    this.db
-      .prepare(`INSERT INTO ${quoteIdent(metaTable)} (columns_json, table_json) VALUES (?, ?)`)
-      .run(...sqlParams([JSON.stringify(columns), JSON.stringify(tableRest)]));
+    this.db.prepare(`INSERT INTO ${quoteIdent(metaTable)} (columns_json, table_json) VALUES (?, ?)`).run(...sqlParams([JSON.stringify(columns), JSON.stringify(tableRest)]));
 
     return this.readTableDoc(id);
   }
@@ -544,17 +492,13 @@ export class SqliteStore {
     const existing = new Set(info.map((c) => c.name));
     for (const spec of columns) {
       if (existing.has(spec.field)) continue;
-      this.db.exec(
-        `ALTER TABLE ${quoteIdent(sqlTable)} ADD COLUMN ${quoteIdent(spec.field)} ${sqlAffinity(spec.type)}`,
-      );
+      this.db.exec(`ALTER TABLE ${quoteIdent(sqlTable)} ADD COLUMN ${quoteIdent(spec.field)} ${sqlAffinity(spec.type)}`);
       existing.add(spec.field);
     }
   }
 
   private removeTableNoTx(id: string): void {
-    const reg = this.db.prepare(`SELECT sql_table FROM _easydb_tables WHERE id = ?`).get(id) as
-      | { sql_table: string }
-      | undefined;
+    const reg = this.db.prepare(`SELECT sql_table FROM _easydb_tables WHERE id = ?`).get(id) as { sql_table: string } | undefined;
     if (!reg) return;
     this.db.exec(`DROP TABLE IF EXISTS ${quoteIdent(reg.sql_table)}`);
     this.db.exec(`DROP TABLE IF EXISTS ${quoteIdent(this.metaTableName(reg.sql_table))}`);
@@ -564,15 +508,11 @@ export class SqliteStore {
   // -- `rows`: one physical rows table per registered `tables` id ----------
 
   private allRegisteredTables(): Array<{ id: string; sql_table: string }> {
-    return this.db
-      .prepare(`SELECT id, sql_table FROM _easydb_tables ORDER BY ordinal`)
-      .all() as Array<{ id: string; sql_table: string }>;
+    return this.db.prepare(`SELECT id, sql_table FROM _easydb_tables ORDER BY ordinal`).all() as Array<{ id: string; sql_table: string }>;
   }
 
   private resolveRowsTable(tableId: string): string {
-    const row = this.db.prepare(`SELECT sql_table FROM _easydb_tables WHERE id = ?`).get(
-      tableId,
-    ) as { sql_table: string } | undefined;
+    const row = this.db.prepare(`SELECT sql_table FROM _easydb_tables WHERE id = ?`).get(tableId) as { sql_table: string } | undefined;
     if (!row) throw new Error(`SqliteStore: unknown tableId "${tableId}" for collection "rows"`);
     return row.sql_table;
   }
@@ -584,10 +524,7 @@ export class SqliteStore {
    * schemaless, so a row carrying a field the column list doesn't (yet, or
    * no longer) know about would otherwise lose it silently on the round trip.
    */
-  private encodeRowColumns(
-    columns: ColumnSpec[],
-    data: Record<string, unknown>,
-  ): { cols: string[]; values: unknown[]; extraJson: string | null } {
+  private encodeRowColumns(columns: ColumnSpec[], data: Record<string, unknown>): { cols: string[]; values: unknown[]; extraJson: string | null } {
     const known = new Set(columns.map((c) => c.field));
     const cols: string[] = [];
     const values: unknown[] = [];
@@ -630,21 +567,30 @@ export class SqliteStore {
     };
   }
 
-  private findRows(query?: Record<string, unknown>): unknown[] {
+  /**
+   * `limit` caps how many rows are decoded and returned, per table.
+   *
+   * Unbounded was not survivable. A grid asks for its table's rows the moment it
+   * mounts, and the answer crosses IPC as one structured-clone payload: a
+   * workspace converted from `northwind.db` restored 18 open windows wanting
+   * 1,893,366 rows between them — three tables of 609,283 — and the app died on
+   * boot before showing anything. The cap is what makes a big table openable at
+   * all; the caller pairs it with `count` to report the true total.
+   */
+  private findRows(query?: Record<string, unknown>, limit?: number): unknown[] {
     const entries = Object.entries(query ?? {});
     const tableIdEntry = entries.find(([k]) => k === 'tableId');
     const remaining = entries.filter(([k]) => k !== 'tableId');
 
-    const tables = tableIdEntry
-      ? this.allRegisteredTables().filter((t) => t.id === tableIdEntry[1])
-      : this.allRegisteredTables();
+    const tables = tableIdEntry ? this.allRegisteredTables().filter((t) => t.id === tableIdEntry[1]) : this.allRegisteredTables();
 
+    // Applied in SQL, not after decoding: decoding is the expensive half (JSON
+    // per row), so a LIMIT that only trimmed the result would save nothing.
+    const cap = limit != null && limit > 0 ? ` LIMIT ${Math.floor(limit)}` : '';
     let result: unknown[] = [];
     for (const t of tables) {
       const columns = this.readColumnsJson(t.sql_table);
-      const raws = this.db.prepare(`SELECT * FROM ${quoteIdent(t.sql_table)}`).all() as Array<
-        Record<string, unknown>
-      >;
+      const raws = this.db.prepare(`SELECT * FROM ${quoteIdent(t.sql_table)}${cap}`).all() as Array<Record<string, unknown>>;
       for (const raw of raws) result.push(this.decodeRow(t.id, columns, raw));
     }
     if (remaining.length > 0) {
@@ -653,11 +599,20 @@ export class SqliteStore {
     return result;
   }
 
+  /**
+   * Rows in ONE registered table, without decoding any of them. Distinct from
+   * the private `countRows()` below, which totals every table for `count('rows')`.
+   */
+  countRowsIn(tableId: string): number {
+    const t = this.allRegisteredTables().find((x) => x.id === tableId);
+    if (!t) return 0;
+    const r = this.db.prepare(`SELECT COUNT(*) AS n FROM ${quoteIdent(t.sql_table)}`).get() as { n: number };
+    return r.n;
+  }
+
   private findOneRow(id: string): unknown | null {
     for (const t of this.allRegisteredTables()) {
-      const raw = this.db.prepare(`SELECT * FROM ${quoteIdent(t.sql_table)} WHERE _id = ?`).get(
-        id,
-      ) as Record<string, unknown> | undefined;
+      const raw = this.db.prepare(`SELECT * FROM ${quoteIdent(t.sql_table)} WHERE _id = ?`).get(id) as Record<string, unknown> | undefined;
       if (raw) {
         const columns = this.readColumnsJson(t.sql_table);
         return this.decodeRow(t.id, columns, raw);
@@ -688,10 +643,7 @@ export class SqliteStore {
     }
     const sqlTable = this.resolveRowsTable(tableId);
     const columns = this.readColumnsJson(sqlTable);
-    const { cols, values, extraJson } = this.encodeRowColumns(
-      columns,
-      (doc.data as Record<string, unknown>) ?? {},
-    );
+    const { cols, values, extraJson } = this.encodeRowColumns(columns, (doc.data as Record<string, unknown>) ?? {});
     const updatedAt = typeof doc.updatedAt === 'number' ? doc.updatedAt : null;
     const allCols = ['_id', '_updatedAt', '_extra', ...cols];
     const placeholders = allCols.map(() => '?').join(', ');
@@ -702,14 +654,8 @@ export class SqliteStore {
             .map((c) => `${quoteIdent(c)} = excluded.${quoteIdent(c)}`)
             .join(', ')}`
         : '';
-    this.db
-      .prepare(
-        `INSERT INTO ${quoteIdent(sqlTable)} (${allCols.map(quoteIdent).join(', ')}) VALUES (${placeholders})${conflictClause}`,
-      )
-      .run(...sqlParams([id, updatedAt, extraJson, ...values]));
-    const raw = this.db.prepare(`SELECT * FROM ${quoteIdent(sqlTable)} WHERE _id = ?`).get(
-      id,
-    ) as Record<string, unknown>;
+    this.db.prepare(`INSERT INTO ${quoteIdent(sqlTable)} (${allCols.map(quoteIdent).join(', ')}) VALUES (${placeholders})${conflictClause}`).run(...sqlParams([id, updatedAt, extraJson, ...values]));
+    const raw = this.db.prepare(`SELECT * FROM ${quoteIdent(sqlTable)} WHERE _id = ?`).get(id) as Record<string, unknown>;
     return this.decodeRow(tableId, columns, raw);
   }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HostApi, Table } from '@easydb/shared';
 import type { EasydbDatabaseFileKind, EasydbDbBridge } from '../../../packages/renderer/src/db/data-store-ipc.js';
-import { openFlow } from '../../../packages/renderer/src/plugins/electron-db.js';
+import { openFlow, resumePendingImport } from '../../../packages/renderer/src/plugins/electron-db.js';
 
 /* The fakes in `harness` return settled promises without awaiting anything —
    that is what a stub is. */
@@ -37,6 +37,26 @@ interface Recorded {
   importedTableIds: string[];
   browsedPaths: string[];
   inserted: Array<Record<string, unknown>>;
+  settingsRemoved: string[];
+}
+
+/** Must match `PENDING_IMPORT_SETTING` in the plugin. */
+const PENDING = 'electron-db:pendingImport';
+
+/** A pending-import note, as `prepareConvert` leaves it in a converted file. */
+function note(tables: number, total = 100): { sourcePath: string; plan: unknown[] } {
+  return {
+    sourcePath: 'C:/northwind.db',
+    plan: Array.from({ length: tables }, (_, i) => ({
+      sourceName: `t${i}`,
+      finalName: `t${i}`,
+      tableId: `id${i}`,
+      sqlTable: `t${i}`,
+      total,
+      kind: 'foreign' as const,
+      action: 'created' as const,
+    })),
+  };
 }
 
 function harness(opts: {
@@ -45,6 +65,8 @@ function harness(opts: {
   /** Answers for successive `choice` prompts, in order. */
   choices?: Array<string | null>;
   confirmAnswer?: boolean;
+  /** An unfinished conversion's note, if this workspace has one. */
+  pending?: { sourcePath: string; plan: unknown[] };
 }): { api: HostApi; bridge: EasydbDbBridge; rec: Recorded } {
   const rec: Recorded = {
     alerts: [],
@@ -59,6 +81,7 @@ function harness(opts: {
     importedTableIds: [],
     browsedPaths: [],
     inserted: [],
+    settingsRemoved: [],
   };
   const answers = [...(opts.choices ?? [])];
 
@@ -138,6 +161,10 @@ function harness(opts: {
           rec.inserted.push(doc);
           return doc;
         },
+      },
+      settings: {
+        findOne: async (name: string) => (name === PENDING && opts.pending ? { name, value: opts.pending } : null),
+        remove: async (name: string) => void rec.settingsRemoved.push(name),
       },
     },
     ui: {
@@ -383,5 +410,87 @@ describe('electron-db — Import data', () => {
     // Phase 1 runs on the already-picked path, phase 2 fills what it created.
     expect(rec.preparedPaths).toEqual(['C:/northwind.db']);
     expect(rec.importedTableIds).toEqual(['t1']);
+  });
+});
+
+/**
+ * An interrupted conversion leaves a note naming the rows it still owes. Acting
+ * on it WITHOUT asking made the app unusable: any conversion that didn't finish
+ * — window closed, app crashed — meant every subsequent launch immediately began
+ * a minutes-long import, unprompted and unstoppable. Recovering from an
+ * interruption must not be something the user cannot get out of.
+ */
+describe('electron-db — an unfinished import', () => {
+  it('never starts copying without asking', async () => {
+    const { api, bridge, rec } = harness({
+      kind: 'easydb',
+      path: 'C:/converted.db',
+      pending: note(13),
+      choices: [null], // the prompt is dismissed
+    });
+    await resumePendingImport(api, bridge);
+
+    expect(rec.choices).toHaveLength(1);
+    expect(rec.importedTableIds).toEqual([]);
+  });
+
+  it('says how much is left, and that it can be stopped', async () => {
+    const { api, bridge, rec } = harness({
+      kind: 'easydb',
+      path: 'C:/converted.db',
+      pending: note(2, 1000),
+      choices: [null],
+    });
+    await resumePendingImport(api, bridge);
+
+    expect(rec.choices[0]!.message).toContain('C:/northwind.db');
+    expect(rec.choices[0]!.message).toContain((2000).toLocaleString());
+    expect(rec.choices[0]!.message).toMatch(/stopped/i);
+  });
+
+  it('fills the tables in when asked to', async () => {
+    const { api, bridge, rec } = harness({
+      kind: 'easydb',
+      path: 'C:/converted.db',
+      pending: note(3),
+      choices: ['Fill them in now'],
+    });
+    await resumePendingImport(api, bridge);
+
+    expect(rec.importedTableIds).toEqual(['id0', 'id1', 'id2']);
+    expect(rec.settingsRemoved).toEqual([PENDING]); // the note is done with
+  });
+
+  it('discarding drops the note, so the offer does not come back', async () => {
+    const { api, bridge, rec } = harness({
+      kind: 'easydb',
+      path: 'C:/converted.db',
+      pending: note(3),
+      choices: ['Leave them empty'],
+    });
+    await resumePendingImport(api, bridge);
+
+    expect(rec.importedTableIds).toEqual([]);
+    expect(rec.settingsRemoved).toEqual([PENDING]);
+  });
+
+  it('a dismissed prompt keeps the note, so it can be offered again', async () => {
+    const { api, bridge, rec } = harness({
+      kind: 'easydb',
+      path: 'C:/converted.db',
+      pending: note(3),
+      choices: [null],
+    });
+    await resumePendingImport(api, bridge);
+
+    expect(rec.settingsRemoved).toEqual([]);
+  });
+
+  it('does nothing at all when there is no note', async () => {
+    const { api, bridge, rec } = harness({ kind: 'easydb', path: 'C:/plain.db' });
+    await resumePendingImport(api, bridge);
+
+    expect(rec.choices).toEqual([]);
+    expect(rec.importedTableIds).toEqual([]);
   });
 });

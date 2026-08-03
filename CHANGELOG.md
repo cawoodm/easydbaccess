@@ -14,6 +14,8 @@
 
 ### Bugs
 
+- 🪲 The app crashed on startup after converting a large database: every open window fetched its whole table, 1.9 million rows between them (v0.0.288)
+- 🪲 An unfinished conversion restarted its import on every launch, unprompted and with no way to stop it (v0.0.288)
 - 🪲 The app froze while a `.db` imported — clicks and windows stopped responding until it finished (v0.0.287)
 - 🪲 Converting a `.db` left the app with no window for 15 seconds, and every table that finished importing made all the others re-read their rows (v0.0.286)
 - 🪲 Every click inside a window re-ordered the windows while a minimized one sat above it; a second finger hijacked a drag or resize (v0.0.283)
