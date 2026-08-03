@@ -23,6 +23,10 @@
 - 🪲 A window closed right after a drag could come back open (v0.0.272)
 - 🪲 A collapsed window reopened at the default size and position, and no longer collapsed (v0.0.272)
 
+### Tests
+
+- 🧪 The window-stacking specs waited on fixed sleeps for a view's saved front rank, so a slow write failed them (v0.0.286)
+
 ## 2 Aug 2026
 
 ### Features
