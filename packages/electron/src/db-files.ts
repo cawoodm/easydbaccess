@@ -14,6 +14,7 @@ import { app, dialog, type BrowserWindow } from 'electron';
 import * as path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { SqliteStore, copyDatabase } from './sqlite-store';
+import { convertToEasydb, suggestConvertedName } from './db-convert';
 import {
   commitImport,
   previewImport,
@@ -225,6 +226,31 @@ export async function saveDbAs(
 }
 
 // -- Import -----------------------------------------------------------------
+
+// -- Convert -----------------------------------------------------------------
+
+/**
+ * Asks where to put the converted copy, writes it (`db-convert.ts`), then makes
+ * it the active file and reloads — the same "the workspace on screen is now a
+ * different file" move as Open, so it ends the same way.
+ */
+export async function convertAndOpen(
+  win: BrowserWindow | null,
+  sourcePath: string,
+): Promise<DialogResult<{ path: string; tables: ImportedTableResult[] }> | CancelledResult> {
+  const opts = {
+    title: 'Save the converted database as',
+    defaultPath: suggestConvertedName(sourcePath),
+    filters: [{ name: 'SQLite database', extensions: ['db'] }],
+  };
+  const result = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);
+  if (result.canceled || !result.filePath) return { ok: false, cancelled: true };
+
+  const converted = convertToEasydb(sourcePath, result.filePath);
+  switchToPath(converted.path);
+  win?.reload();
+  return { ok: true, path: converted.path, tables: converted.tables };
+}
 
 /**
  * Step 1 of Import: pick a file, then PREVIEW it (table names, row counts,

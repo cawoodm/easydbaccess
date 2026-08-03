@@ -23,8 +23,12 @@ import {
   saveDbAs,
   importDb,
   importDbCommit,
+  convertAndOpen,
   currentDbInfo,
 } from './db-files';
+import { probeDatabaseFile } from './db-import';
+import { listBrowsable, readBrowseRows } from './db-browse';
+import type { ColumnSpec } from '@easydb/shared';
 import type { ImportDecision } from './db-import';
 
 const isDev = !!process.env.EASYDB_RENDERER_URL;
@@ -164,6 +168,23 @@ function registerDbFileIpc(): void {
         throw new Error(toErrorMessage(err), { cause: err });
       }
     },
+  );
+  ipcMain.handle('db:convert', async (event, sourcePath: unknown) => {
+    try {
+      return await convertAndOpen(BrowserWindow.fromWebContents(event.sender), sourcePath as string);
+    } catch (err) {
+      throw new Error(toErrorMessage(err), { cause: err });
+    }
+  });
+  // A dropped file arrives with a path the renderer already has (via
+  // `webUtils.getPathForFile`), so there is no picker to run — only the
+  // read-only classification Open needs before it offers anything.
+  handle('db:probe', (sourcePath: string) => probeDatabaseFile(sourcePath));
+  // Browse reads a file we neither opened nor imported — always read-only, so
+  // these two need no confirmation step and no `broadcastChanged`.
+  handle('db:browseList', (sourcePath: string) => listBrowsable(sourcePath));
+  handle('db:browseRows', (sourcePath: string, objectName: string, columns: ColumnSpec[]) =>
+    readBrowseRows(sourcePath, objectName, columns),
   );
   ipcMain.handle('db:current', () => currentDbInfo());
 }

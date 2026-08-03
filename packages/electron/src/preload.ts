@@ -16,7 +16,7 @@
  * would silently misbehave here instead of failing typecheck.
  */
 
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { CurrentDbInfo, DialogResult, CancelledResult } from './db-files';
 import type {
   DatabaseFileKind,
@@ -24,6 +24,7 @@ import type {
   ImportedTableResult,
   ImportPreview,
 } from './db-import';
+import type { BrowsableObject, BrowseRow } from './db-browse';
 
 const store = {
   find: (coll: string, query?: Record<string, unknown>): Promise<unknown[]> =>
@@ -84,6 +85,29 @@ const db = {
     decisions: Record<string, ImportDecision>,
   ): Promise<ImportedTableResult[]> =>
     ipcRenderer.invoke('db:importCommit', sourcePath, workspaceId, decisions),
+  convertDb: (
+    sourcePath: string,
+  ): Promise<DialogResult<{ path: string; tables: ImportedTableResult[] }> | CancelledResult> =>
+    ipcRenderer.invoke('db:convert', sourcePath),
+  probeDb: (sourcePath: string): Promise<DatabaseFileKind> =>
+    ipcRenderer.invoke('db:probe', sourcePath),
+  browseList: (sourcePath: string): Promise<BrowsableObject[]> =>
+    ipcRenderer.invoke('db:browseList', sourcePath),
+  browseRows: (sourcePath: string, objectName: string, columns: unknown[]): Promise<BrowseRow[]> =>
+    ipcRenderer.invoke('db:browseRows', sourcePath, objectName, columns),
+  /**
+   * The real filesystem path of a dropped `File`. `File.path` was removed in
+   * Electron 32, so `webUtils.getPathForFile` is the only way to get it — and it
+   * has to run here, in the preload, because the renderer has no `electron`
+   * module. Returns '' for a File that has no path (e.g. one built in JS).
+   */
+  pathForFile: (file: File): string => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return '';
+    }
+  },
   currentDb: (): Promise<CurrentDbInfo> => ipcRenderer.invoke('db:current'),
 };
 
@@ -129,6 +153,13 @@ declare global {
           workspaceId: string,
           decisions: Record<string, ImportDecision>,
         ): Promise<ImportedTableResult[]>;
+        convertDb(
+          sourcePath: string,
+        ): Promise<DialogResult<{ path: string; tables: ImportedTableResult[] }> | CancelledResult>;
+        probeDb(sourcePath: string): Promise<DatabaseFileKind>;
+        browseList(sourcePath: string): Promise<BrowsableObject[]>;
+        browseRows(sourcePath: string, objectName: string, columns: unknown[]): Promise<BrowseRow[]>;
+        pathForFile(file: File): string;
         currentDb(): Promise<CurrentDbInfo>;
       };
     };

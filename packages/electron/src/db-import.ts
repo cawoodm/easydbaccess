@@ -44,11 +44,18 @@ const RESERVED_ROW_COLUMNS = new Set(['_id', '_updatedAt', '_extra']);
 // -- Preview ---------------------------------------------------------------
 
 export interface ImportCandidate {
-  /** Table name as found in the source (easydb `Table.name`, or the SQL table name). */
+  /** Table name as found in the source (easydb `Table.name`, or the SQL table/view name). */
   name: string;
   rowCount: number;
   /** Case-insensitive name clash against an existing table in the target workspace. */
   collides: boolean;
+  /**
+   * Whether the source object is a SQL VIEW. Importing one snapshots the rows
+   * it currently returns into an ordinary local table — the view definition
+   * itself does not travel, because this app expresses a derived table as a
+   * projection, not as SQL.
+   */
+  isView?: boolean;
 }
 
 export interface ImportPreview {
@@ -57,12 +64,49 @@ export interface ImportPreview {
   candidates: ImportCandidate[];
 }
 
-/** True when the source file is one this app wrote (has an `_easydb_tables` registry). */
-function isEasydbFile(db: DatabaseSyncType): boolean {
+/** True when `_easydb_tables` exists — the app's bookkeeping has touched this file. */
+function hasEasydbStamp(db: DatabaseSyncType): boolean {
   const row = db
     .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_easydb_tables'`)
     .get();
   return row !== undefined;
+}
+
+/** How many objects in the file are the user's own — not `sqlite_*`, not `_easydb*`. */
+function countForeignObjects(db: DatabaseSyncType): number {
+  const r = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM sqlite_master
+       WHERE type IN ('table', 'view')
+         AND name NOT LIKE 'sqlite_%'
+         AND name NOT LIKE '\\_easydb%' ESCAPE '\\'`,
+    )
+    .get() as { n: number };
+  return r.n;
+}
+
+/**
+ * True when the file really is an easyDBAccess workspace — i.e. its registry
+ * can be trusted as the list of tables.
+ *
+ * The stamp alone is not enough. Before the Open guard existed, pointing the
+ * store at any SQLite file created `_easydb_docs` + `_easydb_tables` in it and
+ * left the registry EMPTY, so the file ends up stamped while every one of its
+ * real tables is unregistered. Such a file must not be treated as a workspace:
+ * opening it shows nothing, and importing it would take the metadata path and
+ * find zero tables to import — both silent, both wrong.
+ *
+ * A brand-new easydb file also has an empty registry, and that one MUST still
+ * count as ours. What separates them is unregistered data: an empty workspace
+ * holds no other objects, a mis-stamped file is full of them.
+ */
+function isEasydbFile(db: DatabaseSyncType): boolean {
+  if (!hasEasydbStamp(db)) return false;
+  const registered = (
+    db.prepare(`SELECT COUNT(*) AS n FROM _easydb_tables`).get() as { n: number }
+  ).n;
+  if (registered > 0) return true;
+  return countForeignObjects(db) === 0;
 }
 
 /** What a picked file turns out to be. `unreadable` = not a SQLite database at all. */
@@ -112,16 +156,31 @@ function listEasydbCandidates(db: DatabaseSyncType): Array<{ name: string; sqlTa
   return rows.map((r) => ({ name: r.name, sqlTable: r.sql_table, rowCount: rowCountOf(db, r.sql_table) }));
 }
 
+/**
+ * Tables AND views. A view is importable: its current result set snapshots into
+ * an ordinary local table. The view DEFINITION does not travel — a derived
+ * table is a projection in this app, not SQL — so the import is a snapshot by
+ * nature, which is also what makes it safe to treat one exactly like a table
+ * from here on.
+ */
 function listForeignCandidates(
   db: DatabaseSyncType,
-): Array<{ name: string; sqlTable: string; rowCount: number }> {
+): Array<{ name: string; sqlTable: string; rowCount: number; isView: boolean }> {
   const rows = db
     .prepare(
-      `SELECT name FROM sqlite_master
-       WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_easydb%' ESCAPE '\\'`,
+      `SELECT name, type FROM sqlite_master
+       WHERE type IN ('table', 'view')
+         AND name NOT LIKE 'sqlite_%'
+         AND name NOT LIKE '\\_easydb%' ESCAPE '\\'
+       ORDER BY type, name`,
     )
-    .all() as Array<{ name: string }>;
-  return rows.map((r) => ({ name: r.name, sqlTable: r.name, rowCount: rowCountOf(db, r.name) }));
+    .all() as Array<{ name: string; type: 'table' | 'view' }>;
+  return rows.map((r) => ({
+    name: r.name,
+    sqlTable: r.name,
+    rowCount: rowCountOf(db, r.name),
+    isView: r.type === 'view',
+  }));
 }
 
 /**
@@ -150,6 +209,7 @@ export function previewImport(
         name: c.name,
         rowCount: c.rowCount,
         collides: existingNames.has(c.name.toLowerCase()),
+        ...('isView' in c && c.isView ? { isView: true } : {}),
       })),
     };
   } finally {
@@ -187,7 +247,7 @@ function safeFieldName(name: string): string {
 }
 
 /** Base64-encodes a BLOB value read back from `node:sqlite` (a `Uint8Array`) — see `columnTypeFromSqlType`. */
-function fromRawSqlValue(columnType: ColumnSpec['type'], raw: unknown): unknown {
+export function fromRawSqlValue(columnType: ColumnSpec['type'], raw: unknown): unknown {
   if (raw === null || raw === undefined) return null;
   if (raw instanceof Uint8Array) return Buffer.from(raw).toString('base64');
   return decodeValue(columnType, raw);
@@ -349,7 +409,7 @@ function prettifyLabel(field: string): string {
  * never a column value, so nothing is lost by also keeping the source's PK
  * visible as ordinary data.
  */
-function inferForeignColumns(src: DatabaseSyncType, sqlTable: string): ColumnSpec[] {
+export function inferForeignColumns(src: DatabaseSyncType, sqlTable: string): ColumnSpec[] {
   const info = src.prepare(`PRAGMA table_info(${quoteIdent(sqlTable)})`).all() as unknown as RawColumnInfo[];
   return info.map((c) => {
     const field = safeFieldName(c.name);

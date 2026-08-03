@@ -12,7 +12,9 @@ Dexie/IndexedDB.
 | `src/main.ts` | App entry. Creates the BrowserWindow, picks dev vs prod loader, registers the `store:*` and `db:*` IPC handlers, applies the production CSP, handles `window-all-closed` / `activate`. |
 | `src/sqlite-store.ts` | The store itself. User tables become real SQL tables; everything else lives in `_easydb_docs`. See "Storage layout" below. |
 | `src/db-files.ts` | The store singleton (open / close / switch, remembered path) and the Open / Save As file operations, including the OS dialogs. |
-| `src/db-import.ts` | Reads **any** SQLite file's `sqlite_master` and imports its tables — a two-phase preview-then-commit so the renderer can resolve name collisions first. Also `probeDatabaseFile`, the guard Open needs. |
+| `src/db-import.ts` | Reads **any** SQLite file's `sqlite_master` and imports its tables and views — a two-phase preview-then-commit so the renderer can resolve name collisions first. Also `probeDatabaseFile`, the guard Open needs. |
+| `src/db-browse.ts` | Read-only listing and reading of a file's tables + views, for Browse. Never writes — not even a `-wal`. |
+| `src/db-convert.ts` | Convert to EDA: writes a NEW workspace file from a foreign one, leaving the original alone. |
 | `src/preload.ts` | contextBridge surface exposed as `window.easydb`: `{ platform, version, store, db }`. Never the raw `ipcRenderer`. |
 | `scripts/dev.cjs` | Boots `dev:renderer` (Vite) first, then launches Electron with `EASYDB_RENDERER_URL` pointing at it. |
 | `scripts/check-frontend.cjs` | `prestart` guard — fails with a readable message instead of Chromium's "Not allowed to load local resource" when `frontend/index.html` was never built. |
@@ -20,15 +22,24 @@ Dexie/IndexedDB.
 
 Design: [`.claude/plans/2026-07-31-electron-sqlite-storage.md`](../../.claude/plans/2026-07-31-electron-sqlite-storage.md).
 
-**Open and Import are not interchangeable.** Import takes any SQLite file;
-Open takes only a file this app wrote. Opening is not a read-only act — the
-store's constructor runs `CREATE TABLE IF NOT EXISTS _easydb_docs` /
-`_easydb_tables` — so pointing it at a stranger's database would add two tables
-to it and then show an empty workspace, there being no registry rows to list.
+**Open, Browse and Import are not interchangeable.** Browse and Import take any
+SQLite file; Open takes only a file this app wrote. Opening is not a read-only
+act — the store's constructor runs `CREATE TABLE IF NOT EXISTS _easydb_docs` /
+`_easydb_tables` — so pointing it at a stranger's database adds two tables to it
+and then shows an empty workspace, there being no registry rows to list.
 `probeDatabaseFile` therefore runs first, read-only, and `pickDatabaseToOpen`
-returns its verdict as `kind`; the renderer offers Import for a `foreign` file
-(reusing the already-picked path, so nobody hunts for it twice) and says so
-plainly for an `unreadable` one.
+returns its verdict as `kind`; the renderer (`plugins/electron-db.ts`) offers
+Convert or Browse for a `foreign` file and says so plainly for an `unreadable`
+one. Design: [`2026-08-03-open-db-three-ways.md`](../../.claude/plans/2026-08-03-open-db-three-ways.md).
+
+**The stamp alone does not make a file ours.** `isEasydbFile` requires the
+registry to be *usable*: some rows in it, OR no unregistered user objects in the
+file. A file the pre-guard Open had already stamped carries `_easydb_tables`
+with nothing in it over all of its real tables — a real `northwind.db` did, with
+13 tables and 17 views — and testing only for the stamp made Open show a blank
+workspace and made Import find zero tables, both silently. A brand-new easydb
+file also has an empty registry and must still count as ours; unregistered data
+sitting alongside is what separates the two.
 
 ## Storage layout
 

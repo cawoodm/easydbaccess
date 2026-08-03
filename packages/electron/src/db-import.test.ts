@@ -307,3 +307,58 @@ describe('probeDatabaseFile', () => {
     expect(existsSync(`${sourcePath}-journal`)).toBe(false);
   });
 });
+
+/**
+ * A stamped-but-empty file. Before the Open guard, pointing the store at any
+ * SQLite file added `_easydb_docs`/`_easydb_tables` to it and left the registry
+ * empty — so the file looks like ours while all its data is unregistered. Real
+ * case: a `northwind.db` that opened as a blank workspace over 13 tables and
+ * 17 views.
+ */
+describe('a file stamped with our bookkeeping but holding unregistered data', () => {
+  function buildStamped(): void {
+    const raw = new DatabaseSync(sourcePath);
+    raw.exec('CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT)');
+    raw.exec("INSERT INTO customers (name) VALUES ('acme'), ('globex')");
+    raw.close();
+    new SqliteStore({ path: sourcePath }).close(); // the stamp
+  }
+
+  it('is NOT treated as a workspace, so Open offers Convert/Browse instead of a blank window', () => {
+    buildStamped();
+    expect(probeDatabaseFile(sourcePath)).toBe('foreign');
+  });
+
+  it('imports its real tables instead of finding nothing', () => {
+    buildStamped();
+    const target = new SqliteStore({ path: targetPath });
+    const preview = previewImport(sourcePath, target, 'ws1');
+
+    // The bug: the metadata path would read the empty registry and report none.
+    expect(preview.kind).toBe('foreign');
+    expect(preview.candidates).toEqual([{ name: 'customers', rowCount: 2, collides: false }]);
+
+    const results = commitImport(sourcePath, target, 'ws1', {});
+    expect(results[0]).toMatchObject({ sourceName: 'customers', action: 'created', rowCount: 2 });
+    target.close();
+  });
+
+  it('a genuinely EMPTY easydb file is still ours — an empty registry alone is not the signal', () => {
+    new SqliteStore({ path: sourcePath }).close();
+    expect(probeDatabaseFile(sourcePath)).toBe('easydb');
+  });
+
+  it('a normal easydb file with tables is still ours', () => {
+    const s = new SqliteStore({ path: sourcePath });
+    s.insert('tables', {
+      id: 't1',
+      workspaceId: 'ws1',
+      name: 'notes',
+      columns: [{ field: 'body', label: 'Body', type: 'string' }],
+      view: 'table',
+      updatedAt: 1,
+    });
+    s.close();
+    expect(probeDatabaseFile(sourcePath)).toBe('easydb');
+  });
+});

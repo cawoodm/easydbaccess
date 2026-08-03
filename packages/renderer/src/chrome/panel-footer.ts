@@ -98,6 +98,13 @@ export class PanelFooter extends LitElement {
   @state() private rowCount = 0;
   @state() private tableButtons: TableButtonSpec[] = [];
   @state() private table: Table | null = null;
+  /**
+   * Row-source types whose provider declared `schemaEditable: false` — their
+   * schema is owned elsewhere, so the column editor is hidden. Snapshotted from
+   * the registry rather than hard-coding provider names here, so core chrome
+   * stays ignorant of which plugins exist.
+   */
+  @state() private fixedSchemaSources: Set<string> = new Set();
   private unsubRows?: (() => void) | undefined;
   private unsubTables?: () => void;
   // Synchronous guard so an `active` toggle + connectedCallback can't
@@ -108,7 +115,11 @@ export class PanelFooter extends LitElement {
     super.connectedCallback();
     const ctx = await getContext();
     this.tableButtons = [...ctx.registries.tableButtons];
-    ctx.events.on('app:ready', () => (this.tableButtons = [...ctx.registries.tableButtons]));
+    this.fixedSchemaSources = collectFixedSchemaSources(ctx.registries.rowSources);
+    ctx.events.on('app:ready', () => {
+      this.tableButtons = [...ctx.registries.tableButtons];
+      this.fixedSchemaSources = collectFixedSchemaSources(ctx.registries.rowSources);
+    });
     // Track this table's record (cheap; no row fetch) so per-table button
     // visibility (e.g. a backend Refresh button) reacts to source changes.
     this.table = (await ctx.store.tables.findOne(this.tableId)) ?? null;
@@ -181,6 +192,18 @@ export class PanelFooter extends LitElement {
     }
   };
 
+  /**
+   * Whether this table's columns can be edited here. A `readonly` LOCAL table
+   * still can — that flag is toggled inside the column editor itself (v0.0.216),
+   * so hiding on `readonly` would lock the user out of undoing it. Only a row
+   * source that declared `schemaEditable: false` (its schema lives in a file or
+   * a remote we do not own) removes the button.
+   */
+  private get schemaEditable(): boolean {
+    const type = this.table?.source?.type;
+    return !type || !this.fixedSchemaSources.has(type);
+  }
+
   override render() {
     return html`
       ${this.table?.readonly
@@ -188,9 +211,11 @@ export class PanelFooter extends LitElement {
         : html`<button title="Add a blank row" aria-label="Add row" @click=${this.addRow}>
             <span class="mi sm">add</span>
           </button>`}
-      <button title="Edit columns" aria-label="Columns" @click=${this.editColumns}>
-        <span class="mi sm">view_column</span>
-      </button>
+      ${this.schemaEditable
+        ? html`<button title="Edit columns" aria-label="Columns" @click=${this.editColumns}>
+            <span class="mi sm">view_column</span>
+          </button>`
+        : nothing}
       ${this.tableButtons
         .filter((b) => !b.visible || (this.table != null && b.visible(this.table)))
         .map(
@@ -233,4 +258,18 @@ declare global {
   interface HTMLElementTagNameMap {
     'panel-footer': PanelFooter;
   }
+}
+
+/**
+ * The row-source types whose provider opted out of schema editing. Pulled from
+ * the registry so this core chrome never names a plugin.
+ */
+function collectFixedSchemaSources(
+  rowSources: Map<string, { schemaEditable?: boolean | undefined }>,
+): Set<string> {
+  const out = new Set<string>();
+  for (const [type, provider] of rowSources) {
+    if (provider.schemaEditable === false) out.add(type);
+  }
+  return out;
 }

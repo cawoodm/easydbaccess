@@ -1,4 +1,5 @@
 import type {
+  ColumnSpec,
   DataCollection,
   DataStore,
   PluginRecord,
@@ -41,6 +42,8 @@ export interface EasydbImportCandidate {
   rowCount: number;
   /** Case-insensitive name clash against an existing table in the target workspace. */
   collides: boolean;
+  /** A SQL VIEW: importing snapshots the rows it returns now; the definition doesn't travel. */
+  isView?: boolean;
 }
 
 export interface EasydbImportPreview {
@@ -88,6 +91,20 @@ type EasydbDialogResult<T> = ({ ok: true } & T) | { ok: false; cancelled: true }
  */
 export type EasydbDatabaseFileKind = 'easydb' | 'foreign' | 'unreadable';
 
+/** One table or view offered by "Browse .db file" (`packages/electron/src/db-browse.ts`). */
+export interface EasydbBrowsableObject {
+  name: string;
+  kind: 'table' | 'view';
+  /** Null for a view — counting one means running it, which Browse defers. */
+  rowCount: number | null;
+  columns: ColumnSpec[];
+}
+
+export interface EasydbBrowseRow {
+  id: string;
+  data: Record<string, unknown>;
+}
+
 export interface EasydbDbBridge {
   openDb(): Promise<EasydbDialogResult<{ path: string; kind: EasydbDatabaseFileKind }>>;
   openDbCommit(newPath: string): Promise<{ ok: true; path: string }>;
@@ -102,6 +119,21 @@ export interface EasydbDbBridge {
     workspaceId: string,
     decisions: Record<string, EasydbImportDecision>,
   ): Promise<EasydbImportedTableResult[]>;
+  /** Write a foreign file's tables into a NEW easydb file and open that; the source is untouched. */
+  convertDb(
+    sourcePath: string,
+  ): Promise<EasydbDialogResult<{ path: string; tables: EasydbImportedTableResult[] }>>;
+  /** Classify a path the renderer already has (a dropped file) — no picker involved. */
+  probeDb(sourcePath: string): Promise<EasydbDatabaseFileKind>;
+  /** Tables AND views in a file, read-only — nothing is written to it. */
+  browseList(sourcePath: string): Promise<EasydbBrowsableObject[]>;
+  browseRows(
+    sourcePath: string,
+    objectName: string,
+    columns: ColumnSpec[],
+  ): Promise<EasydbBrowseRow[]>;
+  /** Real filesystem path of a dropped `File` (Electron 32 removed `File.path`); '' when it has none. */
+  pathForFile(file: File): string;
   currentDb(): Promise<EasydbCurrentDbInfo>;
 }
 

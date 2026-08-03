@@ -153,6 +153,17 @@ export interface RowCollectionProvider {
   /** Matched against `TableSource.type`. */
   type: string;
   create(table: Table, ctx: RowSourceCtx): DataCollection<Row>;
+  /**
+   * False ⇒ this table's schema is owned elsewhere and the chrome hides the
+   * column editor for it (e.g. a read-only browse of a file we do not own).
+   * Absent/true ⇒ the editor shows, as for every other table.
+   *
+   * `Table.readonly` deliberately does NOT imply this. A readonly LOCAL table
+   * must keep its column editor — that is where the readonly flag is toggled
+   * (v0.0.216) — so hiding on `readonly` alone would trap the user out of
+   * un-protecting their own table.
+   */
+  schemaEditable?: boolean | undefined;
 }
 
 /** Re-export so downstream code can import the descriptor from the contract. */

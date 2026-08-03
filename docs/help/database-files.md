@@ -14,9 +14,27 @@ The **Database** button in the footer opens a small menu:
 
 | Menu item | What it does |
 |---|---|
-| **Open…** | Close the current file and show the data from another file. |
+| **Open…** | Pick a `.db` file and choose what to do with it (see below). |
 | **Save As…** | Save a copy of the current file somewhere else. |
-| **Import…** | Add the tables from another database into the workspace you have open now. |
+| **Import…** | Add tables from another database into the workspace you have open now. |
+
+You can also **drag a `.db` file onto the window**. That asks the same question
+as **Open…** — the two are the same path.
+
+## Three things you can do with a .db file
+
+When you pick or drop a database file, the app asks which one you want:
+
+| Choice | What you get |
+|---|---|
+| **Open Workspace** | That file becomes your workspace. Your tables, rows and window layout come from it, and your changes go into it. |
+| **Browse .db file** | A read-only look. Every table **and every view** in the file opens as a window. Nothing is written, to the file or to your workspace. |
+| **Import data** | Copy tables or views into the workspace you have open now. You choose which ones. |
+
+**Browse** is the safe choice for a file you did not make. The rows are read
+from the file when you look at them, so the file is not changed at all — not
+even a little. You cannot edit the values and there is no **Edit columns**
+button, because the shape of the data belongs to that file, not to you.
 
 ## Your data is a real database
 
@@ -24,18 +42,27 @@ The `.db` file is not a private format. Each of your tables is a real table
 in the file, so other programs can read it — for example DB Browser for
 SQLite, or Datasette. This is also why **Import…** can work at all.
 
-## Open
+## Open Workspace
 
-**Open…** shows a file picker. It then asks you to confirm, and names the
-file you picked.
+Only a file that easyDBAccess wrote can be a workspace. The app asks you to
+confirm, names the file, and then shows its data.
 
-Open only accepts a file that easyDBAccess wrote. If you pick some other
-SQLite file, the app tells you so and offers to **import** its tables
-instead — it keeps the file you picked, so you do not have to find it again.
-If the file is not a database at all, the app says that too.
+If you pick some other SQLite file, it cannot be opened as a workspace —
+there is no workspace in it. The app offers two ways forward instead:
+
+| Choice | What happens |
+|---|---|
+| **Convert to EDA** | A **new** file is written that holds the same tables as a workspace, and that new file is opened. The file you picked is not changed. |
+| **Browse** | A read-only look at the file, as above. |
+
+If the file is not a database at all, the app says so and stops.
 
 Nothing is written to the file you picked until you agree to one of those.
 Your current file is also left exactly as it is on disk.
+
+**Convert to EDA copies tables, not views.** A view is a question asked of the
+data, and this app asks such questions with a Projection instead of SQL. Use
+**Browse** or **Import data** if you want the rows a view returns.
 
 ## Save As
 
@@ -47,8 +74,12 @@ in your file manager. Both work, because the file is the data.
 
 ## Import
 
-**Import…** reads any SQLite file and adds its tables to the workspace you
-have open. It first shows what it found, so nothing is written yet.
+**Import…** reads any SQLite file and adds its tables **and views** to the
+workspace you have open. It first shows what it found and asks which ones you
+want, so nothing is written yet.
+
+Importing a view copies the rows it returns right now into a normal table. The
+view itself does not come along — see the note above about Projections.
 
 If a table name is already used in your workspace, the app asks you what to
 do — once per table:
