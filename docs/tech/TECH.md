@@ -28,9 +28,9 @@ plugin registry.
 | Renderer build | [Vite](https://vitejs.dev/) (dev server on port `5190`) |
 | State / DB | [RxDB](https://rxdb.info/) — schema-validated reactive collections |
 | Browser storage | IndexedDB via the RxDB **Dexie** adapter |
-| Desktop storage | SQLite via `better-sqlite3` (Phase 8) |
+| Desktop storage | SQLite via the built-in **`node:sqlite`** in the Electron main process — no native binding to rebuild per platform. The renderer reaches it over IPC; the workspace is a real `.db` file the user opens and saves. |
 | Backend | [Hono](https://hono.dev/) on `@hono/node-server`, ESM, Node ≥ 24 |
-| Desktop shell | Electron 33 with contextIsolation, sandbox, no nodeIntegration |
+| Desktop shell | Electron 43 with contextIsolation, sandbox, no nodeIntegration (43 is also what makes `node:sqlite` available unflagged) |
 | Windows | in-repo panel shell (`window-mgr/panel-shell/`) for draggable in-app panels |
 | Icons | `material-icons` |
 | Reactivity | RxJS (transitively via RxDB) |
@@ -49,7 +49,8 @@ easyDBAccess/
 │   ├── shared/      types, RxDB schemas, plugin-api contract  (pure TS, zero deps)
 │   ├── renderer/    Lit chrome + RxDB + plugin host           (browser + Electron renderer)
 │   ├── server/      Hono app, sync routes, storage adapters   (standalone + in-process)
-│   └── electron/    desktop shell (BrowserWindow + preload)
+│   └── electron/    desktop shell (BrowserWindow + preload) AND desktop
+│                    storage (node:sqlite store, .db file operations)
 ├── plugins-examples/  reference plugins loaded by URL
 ├── docs/
 │   ├── tech/          architecture notes (this file, SYNCH.md, etc.)
@@ -67,8 +68,8 @@ adapter and sync target change.
 
 | Mode | Renderer | Local storage | Backend | Sync target |
 |---|---|---|---|---|
-| **Browser** | Lit + Vite bundle | RxDB-Dexie (IndexedDB) | none locally | optional remote Hono |
-| **Electron** | Same Lit bundle in renderer process | RxDB-IPC → main-process RxDB-SQLite *(Phase 8)* | Hono **in-process** in main | optional remote Hono |
+| **Browser** | Lit + Vite bundle | Dexie (IndexedDB) | none locally | optional remote Hono |
+| **Electron** | Same Lit bundle in renderer process | `data-store-ipc.ts` over IPC → main-process `node:sqlite` store, in a user-chosen `.db` file **(landed)** | Hono in-process *(not wired yet)* | optional remote Hono |
 | **Hosted Hono** | n/a | filesystem (one JSON per workspace) or SQLite | Hono | central peer for multi-device |
 
 The **same** Hono code in [`packages/server`](../../packages/server) runs both
@@ -81,13 +82,15 @@ fetchFn, ... })` is the single entry point, parameterized by a
 ```
 Browser                Electron renderer        Electron main / Node server
 ┌────────────────┐    ┌────────────────┐       ┌──────────────────────┐
-│ Lit chrome     │    │ Lit chrome     │       │ better-sqlite3       │
-│ RxDB (Dexie)   │─HTTP→ RxDB (IPC)    │─IPC──→│ RxDB-storage         │
-│ Plugin runtime │    │ Plugin runtime │       │ Hono server:         │
-│ Plugins .js    │    │ Plugins .js    │       │  /sync (pull/push)   │
-└────────────────┘    └────────────────┘       │  /fetch (URL proxy)  │
-                                               │  /plugins/registry   │
+│ Lit chrome     │    │ Lit chrome     │       │ node:sqlite store    │
+│ Dexie          │─HTTP→ data-store-   │─IPC──→│  → a user-chosen .db │
+│ (IndexedDB)    │    │ ipc.ts         │       │ Hono server:         │
+│ Plugin runtime │    │ Plugin runtime │       │  /sync (pull/push)   │
+│ Plugins .js    │    │ Plugins .js    │       │  /fetch (URL proxy)  │
+└────────────────┘    └────────────────┘       │  /plugins/registry   │
                                                └──────────────────────┘
+                          (the Hono half does not run in Electron's main
+                           process yet — only the store does)
                                                           ↑
                               multi-device sync via HTTP to a hosted instance
                               of the same Hono server.

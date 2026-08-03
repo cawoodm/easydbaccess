@@ -118,6 +118,7 @@ defaults to enabled but **can** be turned off by the user.
 | `import-data` | importer | | Header "Import" button — a URL/file dialog with curated sample sources (Northwind JSON, a public CSV, Datasette examples) that runs `csv-import` and `json-import` through the import kernel and still routes Datasette to `datasette-import`; recognises a native `.db.json` dump and offers to restore the workspace instead of importing its tables; adds a per-table Refresh button for CSV/JSON snapshot origins. | `registerHeaderButton`, `registerTableButton` |
 | `auto-sync` | sync | | Background timer (1 min) that silently pushes local changes to the configured sync server and prompts to pull when the server has diverged. Shares its config with `server-sync` via `api.settings`. | `load()` (timer) |
 | `views` | ui | | The View system: workspace-global HTML templates (header/row/footer with `$TOKEN` substitution) rendered read-only per table in their own windows, with auto-mapped tokens and an optional row limit; seeds a default "RSS Feed" template. Footer "Views" button opens the manager dialog; window lifecycle itself is core, not plugin, code. | `registerTableButton`, `load()` (template seeding) |
+| `electron-db` | ui | | Footer "Database" button → an anchored Open… / Save As… / Import… menu for `.db` files. **Electron-only, and silent about it:** `init()` returns immediately when `window.easydb?.db` is absent, so the browser build gets no button, no menu entry and no error. Open only accepts a file this app wrote and offers Import for a foreign one; Import previews first and asks Overwrite / Rename / Skip per colliding table. See `STORAGE.md` and `ELECTRON.md`. | `registerFooterButton` |
 
 ## Cell Renderers
 
@@ -319,8 +320,15 @@ Reference or a row-capped import, which do not buffer the whole body to keep.
 ## Exporters
 
 Exporters serialize a table (or the whole workspace) out through
-`api.backend.saveFile`, which triggers a browser download today and will
-route through a native save dialog once Electron's Phase 8 lands.
+`api.backend.saveFile`, which triggers a browser download — **still true
+inside Electron**, even though the `.db` file operations there already use
+`dialog.showSaveDialog` (see `ELECTRON.md`). Routing `saveFile` through that
+same bridge is the leftover half of Phase 8; exporters need no change when it
+lands, since they only ever call `api.backend.saveFile`.
+
+Note that exporting is not the same thing as the desktop app's Save As: an
+exporter writes CSV / JSON / SQL *text*, while Save As copies the live SQLite
+file (the `electron-db` plugin, above).
 
 ### csv-export
 

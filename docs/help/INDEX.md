@@ -16,6 +16,8 @@ built, see the [developer docs](../tech/INDEX.md) instead.
 - [Editing Cells & Renderers](editing-cells.md) — links, images, colors,
   HTML, custom renderers
 - [Views](views.md) — read-only, styled layouts of your data
+- [Database Files](database-files.md) — open, save and import `.db` files
+  (desktop app only)
 - [Sharing & Sync](sharing-and-sync.md) — export, your own server, GitHub
   Gist
 - [Settings](settings.md) — fields, workspace vs. device scope, secrets

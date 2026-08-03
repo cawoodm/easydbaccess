@@ -16,8 +16,9 @@ npm run test:e2e:ui  # same, with Playwright's interactive UI
 ## Unit tests (Vitest) — one package at a time
 
 `npm run test` is `npm run test --workspaces --if-present`: each package
-runs its own `vitest run` independently (`packages/shared` has no test
-script — it's pure types, nothing to unit-test).
+runs its own `vitest run` independently — `packages/renderer`,
+`packages/server` and `packages/electron` (`packages/shared` has no test
+script; it's pure types, nothing to unit-test).
 
 ### `packages/renderer` — pure functions extracted for testability
 
@@ -39,6 +40,8 @@ without spinning up a browser. Examples scattered through this codebase:
 | `plugins/datasette-client.test.ts`, `plugins/datasette-collection.test.ts` | Datasette URL parsing, paging, column inference |
 | `plugins/read-url.test.ts` | CORS-friendly URL rewriting |
 | `db/routed-data-store.test.ts` | The row-source routing seam (see `STORAGE.md`) — verifies it's a strict no-op for tables with no `source` |
+| `db/data-store-ipc.test.ts` | The Electron-side `DataStore`: that it satisfies the same `DataCollection<T>` contract over a fake IPC bridge, injects `tableId` on `rows(id)` writes, and re-runs subscriptions on a `store:changed` broadcast |
+| `plugins/electron-db.test.ts` | The Open / Import decision tree with a fake `window.easydb.db` bridge — a `foreign` file offers Import instead of opening, an `unreadable` one is reported, and collisions map to Overwrite / Rename / Skip. The OS file dialog can't be scripted, so the flows are exported for exactly this |
 
 None of these import Lit, Dexie, or the panel shell. When you're about to add logic
 to a `.ts` file that's mostly DOM glue, ask whether the actual *decision*
@@ -60,6 +63,32 @@ app via `@hono/node-server` on an ephemeral port (`port: 0`), against a
 `fetch()` calls, including reading a real SSE stream body for the
 `/sync/:id/stream` route. Nothing about `createServer`/`StoreAdapter` is
 mocked; see `SERVER.md` for what's actually being exercised here.
+
+### `packages/electron` — the real store, real files, no Electron runtime
+
+`packages/electron/vitest.config.ts` sets `pool: 'forks'`, for the same
+reason the server's does: these suites open real SQLite databases through
+`node:sqlite`. What makes them possible at all is that the store is **pure
+Node** — `sqlite-store.ts`, `db-import.ts` and `sql-mapping.ts` never import
+`electron`, so vitest exercises them directly with no BrowserWindow, no
+`app`, and no display. The pieces that genuinely need Electron (the OS file
+dialogs in `db-files.ts`) are the pieces left to manual testing; the decision
+logic in front of them is tested from the renderer side instead
+(`plugins/electron-db.test.ts` above).
+
+Each test gets a **real temp file** via `mkdtempSync`, deliberately not
+`:memory:` — the behaviour under test includes closing a store and reopening
+the same file.
+
+| Suite | Tests | What it covers |
+|---|---|---|
+| `sqlite-store.test.ts` | 42 | The schema is created idempotently and survives close/reopen; a user table becomes a real SQL table whose DDL matches its columns; unsafe names are sanitized; `ColumnSpec[]` round-trips verbatim (`renderer`, `hidden`, `width` and all); an unknown collection throws instead of degrading; name collisions and `_extra` overflow |
+| `db-import.test.ts` | 13 | Importing a **foreign** database — `ColumnSpec`s inferred via `columnTypeFromSqlType`, BLOB/NULL/empty/zero values survive, an empty file doesn't crash — plus Overwrite / Rename / Skip against a colliding local table, a re-import of our own file recovering the exact `ColumnSpec`s affinity alone never could, fresh ids on import, and `probeDatabaseFile`'s three verdicts |
+| `sql-mapping.test.ts` | 23 | The shared mapping in `@easydb/shared`: `quoteIdent` escaping, `sanitizeTableName`, `sqlAffinity` per `ColumnType`, and `encodeValue`/`decodeValue` round-trips |
+
+That last suite covers `packages/shared/src/sql-mapping.ts`, which the
+**server's** `storage/sqlite-store.ts` imports too — so the one convention
+that keeps a `.db` written by either side identical has one set of tests.
 
 ## End-to-end tests (Playwright) — the real app, driven two ways
 
@@ -132,6 +161,13 @@ rendering section). A test that wants to type into a cell needs to pass
 - **Added a server route or storage adapter behavior?** Add it to
   `packages/server/test/*.e2e.test.ts` — boot the real app, hit it over
   real HTTP, don't mock `StoreAdapter`.
+- **Changed the desktop store, `.db` import, or the SQL mapping?** Add it to
+  `packages/electron/src/*.test.ts` against a `mkdtempSync` temp file — no
+  Electron runtime needed, because none of those modules import `electron`.
+  Keep it that way: put anything that needs `dialog`/`app`/`BrowserWindow` in
+  `db-files.ts`, and test the decision in front of it from the renderer side.
 - **Added or changed user-visible behavior** (a new button, a dialog flow,
   a rendering change)? That's `e2e/`, in whichever numbered spec already
   covers the feature area, or a new one if it doesn't fit an existing file.
+  Electron-only UI is the exception — Playwright drives the browser build, so
+  cover it with a fake-bridge unit test as `plugins/electron-db.test.ts` does.

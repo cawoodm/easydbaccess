@@ -11,7 +11,8 @@ terse contributor-facing version, the
 [storage design](../../.claude/plans/2026-07-31-electron-sqlite-storage.md)
 for why the file is laid out the way it is, and the
 [rewrite plan](../../.claude/plans/2026-05-21-rewrite-architecture.md) (Phase 8)
-for the original design rationale.
+for the original design rationale. The user-facing side of the `.db`
+operations is [`help/database-files.md`](../help/database-files.md).
 
 ## What's actually running today
 
