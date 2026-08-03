@@ -13,6 +13,7 @@
 // plain text everywhere can switch the guessing off in the Plugin Manager.
 
 import type { ColumnSpec, ColumnType, HostApi, PluginModule } from '@easydb/shared';
+import { looksLikeImage } from '../util/image-source.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'auto-renderer',
@@ -46,7 +47,14 @@ function isHttpUrl(s: string): boolean {
 
 function isImageValue(s: string): boolean {
   if (/^data:image\//i.test(s)) return true;
-  return isHttpUrl(s) && IMAGE_EXT.test(s);
+  // A URL has to LOOK like an image — `imageSrcFrom` would take any URL, which
+  // is right once a column is set to `image` but far too eager for guessing.
+  if (isHttpUrl(s)) return IMAGE_EXT.test(s);
+  // A photo column out of a database is neither a URI nor a URL: it is the
+  // image's BYTES, as a SQL hex literal or base64. `looksLikeImage` decides from
+  // the bytes themselves, so a text column full of hexadecimal is not mistaken
+  // for one.
+  return looksLikeImage(s);
 }
 
 /**

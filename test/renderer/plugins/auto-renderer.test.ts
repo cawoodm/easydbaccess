@@ -92,3 +92,21 @@ describe('withInferredRenderers', () => {
     expect(withInferredRenderers(extra, rows).at(-1)?.renderer).toBeUndefined();
   });
 });
+
+describe('inferRenderer — image bytes, not just image URLs', () => {
+  // A photo column read out of a database (northwind's Employees.Photo) holds
+  // the JPEG itself, as a SQL hex literal.
+  const JPEG_HEX = "X'ffd8ffe000104a464946'";
+
+  it('picks image for a column of SQL blob literals', () => {
+    expect(inferRenderer('string', [JPEG_HEX, JPEG_HEX])).toBe('image');
+  });
+
+  it('leaves a column of ordinary hexadecimal text alone', () => {
+    expect(inferRenderer('string', ['deadbeef', 'cafebabe'])).toBeUndefined();
+  });
+
+  it('still refuses a non-image URL', () => {
+    expect(inferRenderer('string', ['https://example.com/page'])).toBe('link');
+  });
+});
