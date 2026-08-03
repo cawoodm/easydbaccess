@@ -18,7 +18,12 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 import type { CurrentDbInfo, DialogResult, CancelledResult } from './db-files';
-import type { ImportDecision, ImportedTableResult, ImportPreview } from './db-import';
+import type {
+  DatabaseFileKind,
+  ImportDecision,
+  ImportedTableResult,
+  ImportPreview,
+} from './db-import';
 
 const store = {
   find: (coll: string, query?: Record<string, unknown>): Promise<unknown[]> =>
@@ -62,7 +67,7 @@ const store = {
  * `openDb()`/`saveDbAs()`/`importDb()`/`currentDb()` — see the report for why.
  */
 const db = {
-  openDb: (): Promise<DialogResult<{ path: string }> | CancelledResult> =>
+  openDb: (): Promise<DialogResult<{ path: string; kind: DatabaseFileKind }> | CancelledResult> =>
     ipcRenderer.invoke('db:open'),
   openDbCommit: (newPath: string): Promise<{ ok: true; path: string }> =>
     ipcRenderer.invoke('db:openCommit', newPath),
@@ -70,8 +75,9 @@ const db = {
     ipcRenderer.invoke('db:saveAs'),
   importDb: (
     workspaceId: string,
+    sourcePath?: string,
   ): Promise<DialogResult<{ path: string; preview: ImportPreview }> | CancelledResult> =>
-    ipcRenderer.invoke('db:import', workspaceId),
+    ipcRenderer.invoke('db:import', workspaceId, sourcePath),
   importDbCommit: (
     sourcePath: string,
     workspaceId: string,
@@ -109,11 +115,14 @@ declare global {
         dbPath(): Promise<string>;
       };
       db: {
-        openDb(): Promise<DialogResult<{ path: string }> | CancelledResult>;
+        openDb(): Promise<
+          DialogResult<{ path: string; kind: DatabaseFileKind }> | CancelledResult
+        >;
         openDbCommit(newPath: string): Promise<{ ok: true; path: string }>;
         saveDbAs(): Promise<DialogResult<{ path: string }> | CancelledResult>;
         importDb(
           workspaceId: string,
+          sourcePath?: string,
         ): Promise<DialogResult<{ path: string; preview: ImportPreview }> | CancelledResult>;
         importDbCommit(
           sourcePath: string,

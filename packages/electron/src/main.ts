@@ -134,9 +134,13 @@ function registerDbFileIpc(): void {
       throw new Error(toErrorMessage(err), { cause: err });
     }
   });
-  ipcMain.handle('db:import', async (event, workspaceId: unknown) => {
+  ipcMain.handle('db:import', async (event, workspaceId: unknown, sourcePath: unknown) => {
     try {
-      return await importDb(BrowserWindow.fromWebContents(event.sender), workspaceId as string);
+      return await importDb(
+        BrowserWindow.fromWebContents(event.sender),
+        workspaceId as string,
+        typeof sourcePath === 'string' ? sourcePath : undefined,
+      );
     } catch (err) {
       throw new Error(toErrorMessage(err), { cause: err });
     }

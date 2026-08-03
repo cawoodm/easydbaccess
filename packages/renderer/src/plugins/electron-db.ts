@@ -58,15 +58,43 @@ export function init(api: HostApi): void {
 
 // -- Open ---------------------------------------------------------------------
 //
-// `bridge.openDb()` only runs the OS file picker (no side effects); the
-// actual switch — which replaces the whole workspace view — only happens
-// after the user confirms IN-APP, naming the exact file just picked. See
-// `db-files.ts`'s `pickDatabaseToOpen`/`switchToDatabase` for the main-side
-// half of this split.
+// `bridge.openDb()` only runs the OS file picker and CLASSIFIES what was
+// picked (no side effects); the actual switch — which replaces the whole
+// workspace view — only happens after the user confirms IN-APP, naming the
+// exact file just picked. See `db-files.ts`'s
+// `pickDatabaseToOpen`/`switchToDatabase` for the main-side half of this split.
+//
+// Only a file this app wrote can be OPENED. A foreign SQLite database has no
+// `_easydb_tables` registry, so opening it would show an empty workspace AND
+// add our two bookkeeping tables to someone else's file. Its tables can still
+// be IMPORTED, so that is what we offer — reusing the already-picked path
+// instead of making the user find the file again.
 
-async function openFlow(api: HostApi, bridge: EasydbDbBridge): Promise<void> {
+/** Exported for `electron-db.test.ts` — the OS file dialog can't be scripted, so the
+ * branch is tested with a fake bridge instead of by clicking the real app. */
+export async function openFlow(api: HostApi, bridge: EasydbDbBridge): Promise<void> {
   const picked = await bridge.openDb();
   if (!picked.ok) return; // cancelled in the OS dialog
+
+  if (picked.kind === 'unreadable') {
+    await api.ui.dialogs.alert(
+      `"${picked.path}" is not a SQLite database — it could not be read.`,
+      'Open database',
+    );
+    return;
+  }
+
+  if (picked.kind === 'foreign') {
+    const choice = await api.ui.dialogs.choice(
+      `"${picked.path}" is a SQLite database, but not one easyDBAccess wrote — there is no workspace ` +
+        `in it to open.\n\nIts tables can be imported into the workspace you have open now instead.`,
+      ['Import its tables', 'Cancel'],
+      'Open database',
+    );
+    if (choice === 'Import its tables') await importFlow(api, bridge, picked.path);
+    return;
+  }
+
   const yes = await api.ui.dialogs.confirm(
     `Open "${picked.path}"?\n\nThis replaces the current workspace view with that file's data. ` +
       `Nothing is deleted — the file you have open now is left exactly as it is on disk.`,
@@ -103,11 +131,15 @@ async function saveAsFlow(api: HostApi, bridge: EasydbDbBridge): Promise<void> {
 // clash, once per colliding table, before calling `importDbCommit` to
 // actually write.
 
-async function importFlow(api: HostApi, bridge: EasydbDbBridge): Promise<void> {
+export async function importFlow(
+  api: HostApi,
+  bridge: EasydbDbBridge,
+  sourcePath?: string,
+): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('no active workspace');
 
-  const picked = await bridge.importDb(workspaceId);
+  const picked = await bridge.importDb(workspaceId, sourcePath);
   if (!picked.ok) return; // cancelled in the OS dialog
   const { preview } = picked;
   if (preview.candidates.length === 0) {

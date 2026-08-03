@@ -12,13 +12,23 @@ Dexie/IndexedDB.
 | `src/main.ts` | App entry. Creates the BrowserWindow, picks dev vs prod loader, registers the `store:*` and `db:*` IPC handlers, applies the production CSP, handles `window-all-closed` / `activate`. |
 | `src/sqlite-store.ts` | The store itself. User tables become real SQL tables; everything else lives in `_easydb_docs`. See "Storage layout" below. |
 | `src/db-files.ts` | The store singleton (open / close / switch, remembered path) and the Open / Save As file operations, including the OS dialogs. |
-| `src/db-import.ts` | Reads **any** SQLite file's `sqlite_master` and imports its tables — a two-phase preview-then-commit so the renderer can resolve name collisions first. |
+| `src/db-import.ts` | Reads **any** SQLite file's `sqlite_master` and imports its tables — a two-phase preview-then-commit so the renderer can resolve name collisions first. Also `probeDatabaseFile`, the guard Open needs. |
 | `src/preload.ts` | contextBridge surface exposed as `window.easydb`: `{ platform, version, store, db }`. Never the raw `ipcRenderer`. |
 | `scripts/dev.cjs` | Boots `dev:renderer` (Vite) first, then launches Electron with `EASYDB_RENDERER_URL` pointing at it. |
 | `scripts/check-frontend.cjs` | `prestart` guard — fails with a readable message instead of Chromium's "Not allowed to load local resource" when `frontend/index.html` was never built. |
 | `electron-builder.json` | Packaging config (out of scope for code edits — bumped via the publish scripts at repo root). |
 
 Design: [`.claude/plans/2026-07-31-electron-sqlite-storage.md`](../../.claude/plans/2026-07-31-electron-sqlite-storage.md).
+
+**Open and Import are not interchangeable.** Import takes any SQLite file;
+Open takes only a file this app wrote. Opening is not a read-only act — the
+store's constructor runs `CREATE TABLE IF NOT EXISTS _easydb_docs` /
+`_easydb_tables` — so pointing it at a stranger's database would add two tables
+to it and then show an empty workspace, there being no registry rows to list.
+`probeDatabaseFile` therefore runs first, read-only, and `pickDatabaseToOpen`
+returns its verdict as `kind`; the renderer offers Import for a `foreign` file
+(reusing the already-picked path, so nobody hunts for it twice) and says so
+plainly for an `unreadable` one.
 
 ## Storage layout
 

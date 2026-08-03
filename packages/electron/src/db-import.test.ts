@@ -1,11 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { SqliteStore } from './sqlite-store.js';
-import { commitImport, previewImport } from './db-import.js';
+import { commitImport, previewImport, probeDatabaseFile } from './db-import.js';
 
 /**
  * Unit tests for "Import a .db" (see `db-import.ts`'s doc comment). Two
@@ -262,5 +262,48 @@ describe('previewImport / commitImport — a file WRITTEN BY SqliteStore itself'
     const results = commitImport(sourcePath, target, 'ws-target', {});
     expect(results[0]!.tableId).not.toBe('source-id-1');
     target.close();
+  });
+});
+
+/**
+ * The guard behind "Open…". Open must not touch a file it cannot use: opening
+ * a store on one CREATEs `_easydb_docs`/`_easydb_tables` in it, so a foreign
+ * database would gain two tables and still show an empty workspace.
+ */
+describe('probeDatabaseFile', () => {
+  it('recognises a file this app wrote', () => {
+    const s = new SqliteStore({ path: sourcePath });
+    s.close();
+    expect(probeDatabaseFile(sourcePath)).toBe('easydb');
+  });
+
+  it('recognises a SQLite file written by anything else as foreign', () => {
+    const db = new DatabaseSync(sourcePath);
+    db.exec('CREATE TABLE bookmarks (id INTEGER PRIMARY KEY, title TEXT)');
+    db.close();
+    expect(probeDatabaseFile(sourcePath)).toBe('foreign');
+  });
+
+  it('reports a file that is not a database at all as unreadable', () => {
+    writeFileSync(sourcePath, 'this is not a database\n', 'utf-8');
+    expect(probeDatabaseFile(sourcePath)).toBe('unreadable');
+  });
+
+  it('reports a path that does not exist as unreadable', () => {
+    expect(probeDatabaseFile(join(dir, 'no-such-file.db'))).toBe('unreadable');
+  });
+
+  it('leaves a foreign file byte-for-byte untouched — no schema, no sidecars', () => {
+    const db = new DatabaseSync(sourcePath);
+    db.exec('CREATE TABLE bookmarks (id INTEGER PRIMARY KEY, title TEXT)');
+    db.exec("INSERT INTO bookmarks VALUES (1,'hello')");
+    db.close();
+    const before = readFileSync(sourcePath);
+
+    expect(probeDatabaseFile(sourcePath)).toBe('foreign');
+
+    expect(readFileSync(sourcePath).equals(before)).toBe(true);
+    expect(existsSync(`${sourcePath}-wal`)).toBe(false);
+    expect(existsSync(`${sourcePath}-journal`)).toBe(false);
   });
 });

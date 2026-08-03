@@ -81,11 +81,22 @@ type EasydbDialogResult<T> = ({ ok: true } & T) | { ok: false; cancelled: true }
  * above — the renderer and electron packages are separate `tsc -b` projects,
  * so this can't just import electron's own ambient types.
  */
+/**
+ * What a picked file turned out to be (`packages/electron/src/db-import.ts`'s
+ * `probeDatabaseFile`). Only `easydb` can be opened; the other two are why
+ * Open asks before doing anything.
+ */
+export type EasydbDatabaseFileKind = 'easydb' | 'foreign' | 'unreadable';
+
 export interface EasydbDbBridge {
-  openDb(): Promise<EasydbDialogResult<{ path: string }>>;
+  openDb(): Promise<EasydbDialogResult<{ path: string; kind: EasydbDatabaseFileKind }>>;
   openDbCommit(newPath: string): Promise<{ ok: true; path: string }>;
   saveDbAs(): Promise<EasydbDialogResult<{ path: string }>>;
-  importDb(workspaceId: string): Promise<EasydbDialogResult<{ path: string; preview: EasydbImportPreview }>>;
+  /** `sourcePath` skips the OS picker — used when Open fell through to Import. */
+  importDb(
+    workspaceId: string,
+    sourcePath?: string,
+  ): Promise<EasydbDialogResult<{ path: string; preview: EasydbImportPreview }>>;
   importDbCommit(
     sourcePath: string,
     workspaceId: string,

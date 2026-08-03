@@ -81,7 +81,16 @@ The store lives in the main process, not the renderer:
 |---|---|
 | [`src/sqlite-store.ts`](../../packages/electron/src/sqlite-store.ts) | The store. User tables are real SQL tables; documents (`workspaces`, `settings`, `plugins`, `viewTemplates`, `viewInstances`) live in `_easydb_docs`. |
 | [`src/db-files.ts`](../../packages/electron/src/db-files.ts) | Store singleton (open / switch / remembered path) and the Open / Save As dialogs. |
-| [`src/db-import.ts`](../../packages/electron/src/db-import.ts) | Imports **any** SQLite file by reading its `sqlite_master` — not only files easyDBAccess wrote. |
+| [`src/db-import.ts`](../../packages/electron/src/db-import.ts) | Imports **any** SQLite file by reading its `sqlite_master` — not only files easyDBAccess wrote. `probeDatabaseFile` classifies a picked file read-only. |
+
+**Open takes only our own files; Import takes any.** Opening a database is not
+a read-only act — the store's constructor creates `_easydb_docs` and
+`_easydb_tables` — so Open on a stranger's `.db` would add two tables to it and
+show an empty workspace. `pickDatabaseToOpen` therefore probes first and
+reports `kind`: `easydb` opens after the usual confirmation, `foreign` is
+offered as an import of the same file, and `unreadable` (not a SQLite database
+at all) is reported as such. Nothing is written until the user has agreed to
+one of those.
 
 The renderer side is [`db/data-store-ipc.ts`](../../packages/renderer/src/db/data-store-ipc.ts),
 selected in `app-context.ts` when `window.easydb?.store` exists. The

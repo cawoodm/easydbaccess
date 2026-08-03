@@ -65,6 +65,40 @@ function isEasydbFile(db: DatabaseSyncType): boolean {
   return row !== undefined;
 }
 
+/** What a picked file turns out to be. `unreadable` = not a SQLite database at all. */
+export type DatabaseFileKind = 'easydb' | 'foreign' | 'unreadable';
+
+/**
+ * Classifies `sourcePath` without writing to it — the guard "Open…" needs.
+ *
+ * Opening a store on a file is not a read-only act: `SqliteStore`'s
+ * constructor runs `CREATE TABLE IF NOT EXISTS _easydb_docs/_easydb_tables`,
+ * so pointing it at someone else's database silently adds two tables to it
+ * and then shows an empty workspace (no `_easydb_tables` rows to list). This
+ * probe runs FIRST, `readOnly` so it leaves no `-wal`/`-journal` sidecar
+ * either, and lets the caller offer Import instead of quietly mangling the
+ * file.
+ *
+ * A non-SQLite file usually survives `new DatabaseSync()` and only fails on
+ * the first read, so the classification query is what actually decides
+ * `unreadable`.
+ */
+export function probeDatabaseFile(sourcePath: string): DatabaseFileKind {
+  let db: DatabaseSyncType | null = null;
+  try {
+    db = new DatabaseSync(sourcePath, { readOnly: true });
+    return isEasydbFile(db) ? 'easydb' : 'foreign';
+  } catch {
+    return 'unreadable';
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* never opened, or already closed by the failing read */
+    }
+  }
+}
+
 function rowCountOf(db: DatabaseSyncType, sqlTable: string): number {
   const r = db.prepare(`SELECT COUNT(*) AS n FROM ${quoteIdent(sqlTable)}`).get() as { n: number };
   return r.n;

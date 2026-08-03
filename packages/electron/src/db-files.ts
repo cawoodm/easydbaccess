@@ -17,6 +17,8 @@ import { SqliteStore, copyDatabase } from './sqlite-store';
 import {
   commitImport,
   previewImport,
+  probeDatabaseFile,
+  type DatabaseFileKind,
   type ImportDecision,
   type ImportedTableResult,
   type ImportPreview,
@@ -153,13 +155,23 @@ async function pickOpenFile(win: BrowserWindow | null, title: string): Promise<s
 // renderer can even compose that confirm message. A single do-it-all call
 // (as Save As gets away with, having no such confirmation) can't fit that.
 
-/** Step 1 of Open: just the OS file picker — no side effects yet. */
+/**
+ * Step 1 of Open: the OS file picker plus a read-only classification of what
+ * was picked — no side effects yet.
+ *
+ * `kind` is what stops Open from being destructive on the wrong file. Only an
+ * `easydb` file has tables this app can list; `switchToDatabase` on a
+ * `foreign` one would ADD our two bookkeeping tables to a stranger's database
+ * and then show an empty workspace, and on an `unreadable` one it would fail
+ * after the window had already reloaded. The renderer decides what to offer
+ * for each (see `plugins/electron-db.ts`).
+ */
 export async function pickDatabaseToOpen(
   win: BrowserWindow | null,
-): Promise<DialogResult<{ path: string }> | CancelledResult> {
+): Promise<DialogResult<{ path: string; kind: DatabaseFileKind }> | CancelledResult> {
   const chosen = await pickOpenFile(win, 'Open easyDBAccess database');
   if (!chosen) return { ok: false, cancelled: true };
-  return { ok: true, path: chosen };
+  return { ok: true, path: chosen, kind: probeDatabaseFile(chosen) };
 }
 
 /**
@@ -221,12 +233,17 @@ export async function saveDbAs(
  * Rename / Skip, matching `datasette-connect.ts`'s convention for a name
  * clash) needs a user decision that only the renderer can prompt for — see
  * `db-import.ts`'s doc comment for the full reasoning.
+ *
+ * `sourcePath` skips the picker. That's for the Open-fell-through-to-Import
+ * path: the user already chose a file, it turned out to be a foreign one, and
+ * asking them to find it a second time would be absurd.
  */
 export async function importDb(
   win: BrowserWindow | null,
   workspaceId: string,
+  sourcePath?: string,
 ): Promise<DialogResult<{ path: string; preview: ImportPreview }> | CancelledResult> {
-  const chosen = await pickOpenFile(win, 'Import a SQLite database');
+  const chosen = sourcePath ?? (await pickOpenFile(win, 'Import a SQLite database'));
   if (!chosen) return { ok: false, cancelled: true };
   const preview = previewImport(chosen, getStore(), workspaceId);
   return { ok: true, path: chosen, preview };
