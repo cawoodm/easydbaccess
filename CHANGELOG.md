@@ -4,6 +4,7 @@
 
 ### Bugs
 
+- 🪲 The unsaved-work prompt could still stop a reload for a moment after the editor was closed (v0.0.270)
 - 🪲 A window that had never been moved reopened at the top-left, and a bit too small, after being minimized (v0.0.269)
 - 🪲 A window closed right after a drag could come back open (v0.0.269)
 - 🪲 A collapsed window reopened at the default size and position, and no longer collapsed (v0.0.268)
