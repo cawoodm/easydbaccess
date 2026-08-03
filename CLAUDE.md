@@ -23,21 +23,21 @@ standalone Hono server with `/sync`, `/fetch`, `/plugins/registry`). Phase 7
 All scripts run from the repo root (`npm` workspaces). Node ≥24 required
 (`engines.node`); the server's `process.loadEnvFile` and Electron 33 expect it.
 
-| Command                    | What it does                                                                                                                                                                             |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm install`              | Install all workspace dependencies.                                                                                                                                                      |
-| `npm run dev:renderer`     | Vite dev server at **`http://localhost:5190`** (port chosen to avoid clashing with the legacy `minniDBMax` on `:5173`).                                                                  |
-| `npm run dev:server`       | `tsx watch` for the Hono server (`packages/server/src/standalone.ts`), defaults to port 3000.                                                                                            |
-| `npm run dev:electron`     | Vite + Electron with live reload (`scripts/dev.cjs` boots renderer first, then launches Electron pointed at it).                                                                         |
-| `npm run build`            | Build every workspace that defines a `build` script.                                                                                                                                     |
-| `npm run typecheck`        | `tsc -b` across all project references. Run this before claiming work is done.                                                                                                           |
-| `npm run lint`             | ESLint over `packages/`.                                                                                                                                                                 |
-| `npm run test`             | Vitest unit + integration suites (per package; the server package has e2e-style HTTP tests).                                                                                             |
-| `npm run test:e2e`         | Playwright suite under `e2e/` (13 specs covering dialogs, table, columns editor, cells, import/export, filters, window manager, auto-sync, sql-export, backend proxy, plugins registry). |
-| `npm run test:e2e:ui`      | Same, with Playwright's interactive UI.                                                                                                                                                  |
-| `npm run format`           | Prettier across `packages/`.                                                                                                                                                             |
-| `npm run package:electron` | `package-electron.ps1 -Installer` — builds renderer + electron, runs `electron-builder` for the Windows installer.                                                                       |
-| `npm run publish`          | `publish.ps1` — release script.                                                                                                                                                          |
+| Command                    | What it does                                                                                                                                                                                  |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm install`              | Install all workspace dependencies.                                                                                                                                                           |
+| `npm run dev:renderer`     | Vite dev server at **`http://localhost:5190`** (port chosen to avoid clashing with the legacy `minniDBMax` on `:5173`).                                                                       |
+| `npm run dev:server`       | `tsx watch` for the Hono server (`packages/server/src/standalone.ts`), defaults to port 3000.                                                                                                 |
+| `npm run dev:electron`     | Vite + Electron with live reload (`scripts/dev.cjs` boots renderer first, then launches Electron pointed at it).                                                                              |
+| `npm run build`            | Build every workspace that defines a `build` script.                                                                                                                                          |
+| `npm run typecheck`        | `tsc -b` across all project references, then `test/tsconfig.json` for the suites. Run this before claiming work is done.                                                                      |
+| `npm run lint`             | ESLint over `packages/` and `test/` (`test/e2e/` is ignored — see `eslint.config.mjs`).                                                                                                       |
+| `npm run test`             | One Vitest run over `test/renderer/` + `test/server/` (the server suites are e2e-style HTTP tests).                                                                                           |
+| `npm run test:e2e`         | Playwright suite under `test/e2e/` (79 specs covering dialogs, table, columns editor, cells, import/export, filters, window manager, auto-sync, sql-export, backend proxy, plugins registry). |
+| `npm run test:e2e:ui`      | Same, with Playwright's interactive UI.                                                                                                                                                       |
+| `npm run format`           | Prettier across `packages/` and `test/`.                                                                                                                                                      |
+| `npm run package:electron` | `package-electron.ps1 -Installer` — builds renderer + electron, runs `electron-builder` for the Windows installer.                                                                            |
+| `npm run publish`          | `publish.ps1` — release script.                                                                                                                                                               |
 
 The `dev` script chains renderer + server with `&`; on Windows prefer running
 `dev:renderer` and `dev:server` in separate terminals.
@@ -186,6 +186,18 @@ Don't "fix" these without checking the plan section first:
   fallback. Native `dialog.showSaveDialog` lands with Phase 8.
 - **Migration from v1 minniDBMax localStorage** — Phase 9.
 
+## Every test lives in root `test/`
+
+No test file sits next to the code it covers. `test/renderer/` and
+`test/server/` mirror the source tree of their package, so a new test for
+`packages/renderer/src/util/ids.ts` goes to `test/renderer/util/ids.test.ts`
+and imports the module by relative source path
+(`../../../packages/renderer/src/util/ids.js`). Playwright specs go in
+`test/e2e/`. Both runners are driven from the repo root — one
+`vitest.config.ts` (`test/**/*.test.ts`) and `playwright.config.ts`
+(`testDir: './test/e2e'`); the packages have no `test` script of their own.
+See `docs/tech/TESTING.md`.
+
 ## Servers
 
 To make testing easier we need each branch on a stable port. The convention is:
@@ -207,7 +219,7 @@ with `RENDERER_PORT=<n>`.
 The **e2e backing Hono server** gets a per-branch port the same way, from
 `resolveServerPort()` in that file: the renderer port **+ 1000** (main 6190,
 todos1 6191, todos2 6192). `playwright.config.ts` starts the server on it and
-`e2e/server-url.ts` hands the matching URL to the specs, so two worktrees can
+`test/e2e/server-url.ts` hands the matching URL to the specs, so two worktrees can
 run `npm run test:e2e` simultaneously — with a single shared port, the first
 server to start locked the others out of the auto-sync / backend-proxy /
 plugins-registry specs, because its `CORS_ORIGINS` only named its own
