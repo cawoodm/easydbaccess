@@ -25,24 +25,30 @@ route stores workspace *snapshots* (JSON blobs), not a live copy of this
 data; see `SYNCH.md`.
 
 ```
-Plugin
-  │  (never touches Dexie or IPC directly)
-  ▼
-DataStore  ──  packages/shared/src/plugin-api.ts (the contract)
-  │
-  ├─ browser ─────────────────────────┐   └─ Electron ──────────────────────┐
-  ▼                                   │   ▼                                 │
-data-store-dexie.ts                   │  data-store-ipc.ts                  │
-  │  wraps each Dexie table           │   │  same DataCollection<T>,         │
-  │  in DataCollection<T>             │   │  each call an IPC round trip     │
-  ▼                                   │   ▼                                 │
-dexie-db.ts — one Dexie() instance,   │  preload.ts (contextBridge)         │
-one IndexedDB database "easydb"       │   │  window.easydb.store            │
-  │                                   │   ▼                                 │
-  ▼                                   │  electron/src/sqlite-store.ts       │
-IndexedDB — persists across reloads,  │   │  main process, node:sqlite      │
-scoped to the origin                  │   ▼                                 │
-                                      │  a .db file the user chose          │
+                              Plugin
+                                │  (never touches Dexie or IPC directly)
+                                ▼
+                            DataStore
+                 packages/shared/src/plugin-api.ts — the contract
+                                │
+             ┌──────────────────┴──────────────────┐
+        browser                               Electron
+             │                                     │
+             ▼                                     ▼
+   data-store-dexie.ts                     data-store-ipc.ts
+   wraps each Dexie table                  same DataCollection<T>,
+   in DataCollection<T>                    each call an IPC round trip
+             │                                     │
+             ▼                                     ▼
+   dexie-db.ts                             preload.ts (contextBridge)
+   one Dexie() instance, one               window.easydb.store
+   IndexedDB database "easydb"                     │
+             │                                     ▼
+             ▼                             electron/src/sqlite-store.ts
+   IndexedDB — persists across             main process, node:sqlite
+   reloads, scoped to the origin                   │
+                                                   ▼
+                                           a .db file the user chose
 ```
 
 The `DataStore` abstraction below is what makes those two interchangeable:
