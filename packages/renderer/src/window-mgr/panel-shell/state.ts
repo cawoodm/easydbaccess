@@ -6,10 +6,17 @@
 export type PanelStatus = 'normalized' | 'minimized' | 'maximized' | 'smallified' | 'closed';
 export type PanelAction = 'minimize' | 'maximize' | 'normalize' | 'smallify' | 'close';
 
+/**
+ * Readonly on purpose: every status change goes through `transition`, which
+ * returns a NEW state, and the shell reassigns its whole `state` variable. A
+ * `state.status = …` written anywhere else would skip `applyStatusDom` and
+ * `onstatuschange`, leaving the DOM and the store describing a status the panel
+ * no longer has.
+ */
 export interface ShellState {
-  status: PanelStatus;
+  readonly status: PanelStatus;
   /** Where leaving `minimized` lands: maximized when the panel went down maximized. */
-  restoreStatus: 'normalized' | 'maximized';
+  readonly restoreStatus: 'normalized' | 'maximized';
 }
 
 /** Boot state from stored WindowGeometry flags. minimized+maximized means:

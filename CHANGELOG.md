@@ -11,6 +11,7 @@
 
 ### Bugs
 
+- 🪲 Every click inside a window re-ordered the windows while a minimized one sat above it; a second finger hijacked a drag or resize (v0.0.283)
 - 🪲 A photo column read out of a database showed "no image": the renderer took only URLs and data URIs, never the image's own bytes (v0.0.277)
 - 🪲 A minimized window changed colour in the dock (v0.0.276)
 - 🪲 A file dropped on a table window was ignored, and the browser left the app to open it (v0.0.274)

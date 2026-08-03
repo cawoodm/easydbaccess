@@ -12,7 +12,10 @@ export interface Rect {
   h: number;
 }
 
-export type Edge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+/** Every resizable edge and corner, in the order the shell creates its zones. */
+export const EDGES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as const;
+
+export type Edge = (typeof EDGES)[number];
 
 export function dragRect(start: Rect, dx: number, dy: number, scale: number): Rect {
   const s = scale > 0 ? scale : 1;

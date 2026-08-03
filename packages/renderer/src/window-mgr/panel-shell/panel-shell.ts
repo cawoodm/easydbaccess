@@ -19,7 +19,7 @@
  */
 import { MIN_H, MIN_W } from '../geometry.js';
 import { isMobileViewport } from '../../util/viewport.js';
-import { dragRect, resizeRect, type Edge, type Rect } from './geometry-math.js';
+import { dragRect, EDGES, resizeRect, type Edge, type Rect } from './geometry-math.js';
 import {
   initialState,
   persistFlags,
@@ -157,12 +157,21 @@ function nextZ(): number {
   return zSeq;
 }
 
-/** Whether `el` already has the highest z-index among every panel in the DOM
- * (both registries — see `nextZ()`), i.e. fronting it would be a no-op. */
+/**
+ * Whether `el` is the highest VISIBLE panel (both registries — see `nextZ()`),
+ * i.e. fronting it would be a no-op.
+ *
+ * Minimized panels are skipped. A minimized panel keeps the z-index it went
+ * down with while being `display:none`, so counting it made the panel the user
+ * is actually clicking look buried: every pointerdown fronted, and fronting
+ * writes the front order to the store (`stampFrontOrder`), which is the churn
+ * this check exists to prevent.
+ */
 function isTopmost(el: HTMLElement): boolean {
   const mine = Number(el.style.zIndex);
   for (const other of document.querySelectorAll<HTMLElement>('.jsPanel')) {
-    if (other !== el && Number(other.style.zIndex) > mine) return false;
+    if (other === el || other.style.display === 'none') continue;
+    if (Number(other.style.zIndex) > mine) return false;
   }
   return true;
 }
@@ -242,11 +251,17 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
   }
 
   el.append(hdr, contentHost, ftr);
-  for (const edge of ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as Edge[]) {
-    const z = document.createElement('div');
-    z.className = 'eda-resize';
-    z.dataset['edge'] = edge;
-    el.append(z);
+  // Zone → edge is kept in this list, not read back from `dataset` at drag time:
+  // a dataset read is `string | undefined` and needed an `as Edge` cast, which
+  // would have hidden a typo in the edge names from the compiler. The `data-edge`
+  // attribute stays for the stylesheet (cursor + hit area per edge).
+  const resizeZones: Array<{ zone: HTMLElement; edge: Edge }> = [];
+  for (const edge of EDGES) {
+    const zone = document.createElement('div');
+    zone.className = 'eda-resize';
+    zone.dataset['edge'] = edge;
+    el.append(zone);
+    resizeZones.push({ zone, edge });
   }
   el.style.zIndex = String(nextZ());
   opts.container.append(el);
@@ -525,6 +540,12 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
   );
 
   // Drag by header, logo, and footer. Unclamped by design.
+  //
+  // Every move/up handler below is scoped to the pointer that STARTED the
+  // gesture. A second finger landing on the same handle mid-drag is a different
+  // pointerId, and its moves used to be read as the first finger's — the panel
+  // jumped to wherever the delta between them put it, and the second finger's
+  // `pointerup` ended the drag while the first was still down.
   const wireDrag = (handle: HTMLElement): void => {
     handle.addEventListener('pointerdown', (e: PointerEvent) => {
       if (e.button !== 0) return;
@@ -532,16 +553,19 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
       if (state.status === 'maximized' || state.status === 'minimized') return;
       const startRect = readRect();
       const scale = opts.viewport?.getState().scale ?? 1;
+      const id = e.pointerId;
       const sx = e.clientX;
       const sy = e.clientY;
       let moved = false;
       const onMove = (ev: PointerEvent): void => {
+        if (ev.pointerId !== id) return;
         moved = true;
         const r = dragRect(startRect, ev.clientX - sx, ev.clientY - sy, scale);
         el.style.left = `${r.x}px`;
         el.style.top = `${r.y}px`;
       };
-      const onUp = (): void => {
+      const onUp = (ev: PointerEvent): void => {
+        if (ev.pointerId !== id) return;
         handle.removeEventListener('pointermove', onMove);
         handle.removeEventListener('pointerup', onUp);
         handle.removeEventListener('pointercancel', onUp);
@@ -557,24 +581,26 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
   wireDrag(logo);
   wireDrag(ftr);
 
-  // Resize from the edge/corner zones.
-  for (const zone of el.querySelectorAll<HTMLElement>('.eda-resize')) {
+  // Resize from the edge/corner zones. Same pointerId scoping as the drag above.
+  for (const { zone, edge } of resizeZones) {
     zone.addEventListener('pointerdown', (e: PointerEvent) => {
       if (e.button !== 0) return;
       if (state.status !== 'normalized') return;
-      const edge = zone.dataset['edge'] as Edge;
       const startRect = readRect();
       const scale = opts.viewport?.getState().scale ?? 1;
+      const id = e.pointerId;
       const sx = e.clientX;
       const sy = e.clientY;
       let moved = false;
       const onMove = (ev: PointerEvent): void => {
+        if (ev.pointerId !== id) return;
         moved = true;
         applyRect(
           resizeRect(startRect, edge, ev.clientX - sx, ev.clientY - sy, scale, MIN_W, MIN_H),
         );
       };
-      const onUp = (): void => {
+      const onUp = (ev: PointerEvent): void => {
+        if (ev.pointerId !== id) return;
         zone.removeEventListener('pointermove', onMove);
         zone.removeEventListener('pointerup', onUp);
         zone.removeEventListener('pointercancel', onUp);
