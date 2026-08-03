@@ -1,5 +1,13 @@
 import { test, expect, type Page } from './fixtures.js';
-import { bulkAddRows, createTable, panelDomId, readTable, waitForPanel } from './helpers.js';
+import {
+  bulkAddRows,
+  createTable,
+  panelDomId,
+  readTable,
+  readViewInstance,
+  viewInstanceIdOf,
+  waitForPanel,
+} from './helpers.js';
 
 /**
  * Table windows (`jspanel-manager.ts`) and view windows (`view-window-manager.ts`)
@@ -45,10 +53,16 @@ test.describe('window stacking across tables and views', () => {
     await expect
       .poll(() => page.evaluate(() => document.querySelectorAll('[id^="view-panel-"]').length))
       .toBeGreaterThan(before);
-    return page.evaluate(() => {
+    const panelId = await page.evaluate(() => {
       const panels = [...document.querySelectorAll('[id^="view-panel-"]')];
       return panels[panels.length - 1]!.id;
     });
+    // The panel exists before its <view-window> mounts, and a caller that fronts
+    // the panel immediately would race that mount. Scoping the wait to THIS
+    // panel's id keeps it unambiguous with several views open — the reason the
+    // count poll above cannot simply wait on `page.locator('view-window')`.
+    await page.locator(`#${panelId} view-window`).waitFor();
+    return panelId;
   }
 
   async function zIndexOf(page: Page, domId: string): Promise<number> {
@@ -63,6 +77,27 @@ test.describe('window stacking across tables and views', () => {
       const el = document.getElementById(id) as HTMLElement & { front?: () => void };
       el?.front?.();
     }, domId);
+  }
+
+  /** The front rank a view window has PERSISTED, 0 before its first front. */
+  async function storedViewZ(page: Page, viewPanelId: string): Promise<number> {
+    const inst = await readViewInstance(page, viewInstanceIdOf(viewPanelId));
+    return inst?.windowGeometry?.z ?? 0;
+  }
+
+  /**
+   * Front a view AND wait for its front-rank write to land.
+   *
+   * The write is asynchronous, and these tests reload to check the restored
+   * order — so a front whose rank never reached the store is a front that never
+   * happened, and the next front would out-rank it in the wrong direction. The
+   * rank is a session-monotonic counter, so "landed" is "greater than the rank it
+   * had before" (a fixed sleep used to stand in for this).
+   */
+  async function frontView(page: Page, viewPanelId: string): Promise<void> {
+    const before = await storedViewZ(page, viewPanelId);
+    await front(page, viewPanelId);
+    await expect.poll(() => storedViewZ(page, viewPanelId)).toBeGreaterThan(before);
   }
 
   async function makeTableAndView(
@@ -123,10 +158,7 @@ test.describe('window stacking across tables and views', () => {
     await expect
       .poll(async () => (await readTable(page, tableId))?.windowGeometry?.z ?? 0)
       .toBeGreaterThan(0);
-    await front(page, viewPanelId);
-    // Give the view's own async front-rank write a moment to persist before
-    // reloading (no store helper for view instances in e2e/helpers.ts yet).
-    await page.waitForTimeout(200);
+    await frontView(page, viewPanelId);
 
     await page.reload();
     await page.waitForFunction(
@@ -174,10 +206,7 @@ test.describe('window stacking across tables and views', () => {
     await expect
       .poll(async () => (await readTable(page, tableBId))?.windowGeometry?.z ?? 0)
       .toBeGreaterThan(0);
-    await front(page, viewPanelId);
-    // No store helper for view instances in e2e/helpers.ts — give the view's
-    // own async front-rank write a moment to persist (mirrors the test above).
-    await page.waitForTimeout(200);
+    await frontView(page, viewPanelId);
     await front(page, tableAPanelId);
     await expect
       .poll(async () => (await readTable(page, tableAId))?.windowGeometry?.z ?? 0)
@@ -225,16 +254,12 @@ test.describe('window stacking across tables and views', () => {
     const tableAPanelId = panelDomId(tableAId);
 
     // Front bottom → top: the lower view, then the table, then the upper view.
-    await front(page, viewLowerPanelId);
-    // No store helper for view instances in e2e/helpers.ts — give the view's
-    // own async front-rank write a moment to persist before the next front.
-    await page.waitForTimeout(200);
+    await frontView(page, viewLowerPanelId);
     await front(page, tableAPanelId);
     await expect
       .poll(async () => (await readTable(page, tableAId))?.windowGeometry?.z ?? 0)
       .toBeGreaterThan(0);
-    await front(page, viewUpperPanelId);
-    await page.waitForTimeout(200);
+    await frontView(page, viewUpperPanelId);
 
     await page.reload();
     await page.waitForFunction(

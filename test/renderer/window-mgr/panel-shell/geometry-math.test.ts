@@ -15,6 +15,10 @@ describe('dragRect', () => {
   });
   it('treats a non-positive scale as 1', () => {
     expect(dragRect(start, 10, 0, 0).x).toBe(110);
+    // A negative scale would MIRROR the drag — the panel would run away from the
+    // pointer. The panzoom state should never hold one, so this is the guard for
+    // when it does, not a supported mode.
+    expect(dragRect(start, 10, 0, -2).x).toBe(110);
   });
 });
 
@@ -36,7 +40,21 @@ describe('resizeRect', () => {
     expect(r.w).toBe(200);
     expect(r.x).toBe(300); // x + (startW - clampedW): the east edge stays put
   });
+  it('clamps BOTH axes at a corner and pins both stationary edges', () => {
+    // Dragging the nw corner past the minimum on both axes at once: the panel
+    // stops at minW x minH, and the two edges the user is NOT dragging (east and
+    // south) must not move — a clamp that forgot to re-derive x/y would slide the
+    // whole panel down-right instead.
+    const r = resizeRect(start, 'nw', 380, 290, 1, 200, 100);
+    expect(r).toEqual({ x: 300, y: 250, w: 200, h: 100 });
+    expect(r.x + r.w).toBe(start.x + start.w); // east edge held
+    expect(r.y + r.h).toBe(start.y + start.h); // south edge held
+  });
   it('divides deltas by the canvas scale', () => {
     expect(resizeRect(start, 'e', 50, 0, 2, 200, 100).w).toBe(425);
+  });
+  it('treats a non-positive scale as 1, rather than mirroring the resize', () => {
+    expect(resizeRect(start, 'e', 50, 0, 0, 200, 100).w).toBe(450);
+    expect(resizeRect(start, 'e', 50, 0, -2, 200, 100).w).toBe(450);
   });
 });
