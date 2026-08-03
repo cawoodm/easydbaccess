@@ -12,15 +12,10 @@
 - 🪲 A photo column read out of a database showed "no image": the renderer took only URLs and data URIs, never the image's own bytes (v0.0.277)
 - 🪲 A minimized window changed colour in the dock (v0.0.276)
 - 🪲 A file dropped on a table window was ignored, and the browser left the app to open it (v0.0.274)
-
 - 🪲 The unsaved-work prompt could still stop a reload for a moment after the editor was closed (v0.0.272)
 - 🪲 A window that had never been moved reopened at the top-left, and a bit too small, after being minimized (v0.0.272)
 - 🪲 A window closed right after a drag could come back open (v0.0.272)
 - 🪲 A collapsed window reopened at the default size and position, and no longer collapsed (v0.0.272)
-
-### Chores
-
-- 🔧 Every test now lives in the root `test/` folder, run by one Vitest config and one Playwright config (v0.0.268)
 
 ## 2 Aug 2026
 
