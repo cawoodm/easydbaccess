@@ -36,6 +36,7 @@ import { byAscendingZ } from './geometry.js';
 import { nextFrontZ } from './front-order.js';
 import { registerPanel, unregisterPanel } from './panel-registry.js';
 import { createPanel, type PanelShellEl } from './panel-shell/panel-shell.js';
+import { isMobileViewport } from '../util/viewport.js';
 // Side-effect import registers the <view-window> custom element; the type-only
 // import would otherwise be elided, leaving <view-window> an unupgraded
 // (inline, zero-size) element.
@@ -61,25 +62,79 @@ interface ViewEntry {
 
 const panels = new Map<string, ViewEntry>();
 
-/**
- * Brings an already-open view window to the front (restoring it if minimized).
- * The command palette's "Go to view" command patches `open: true` first (which
- * opens a closed view via the reactive reconcile below); this fronts one that
- * is already open. Returns false if no window is currently open for that id.
- */
 /** The view-window half of `persistTablePanelGeometry` — see its comment. */
 export async function persistViewWindowGeometry(): Promise<void> {
   await Promise.all([...panels.keys()].map((id) => saveGeometry(id)));
 }
 
+/**
+ * Show an ALREADY-OPEN view window: restore it if minimized, put it where the
+ * user is looking (or fill the screen on a phone), and front it. Returns false
+ * when no window is open for that id — callers that also need to OPEN one want
+ * `revealViewWindow` instead.
+ */
 export function focusViewWindow(instanceId: string): boolean {
   const entry = panels.get(instanceId);
   if (!entry) return false;
   const panel = entry.panel;
   if (panel.status === 'minimized') panel.normalize();
+  if (isMobileViewport()) {
+    // A phone has no room to arrange windows and no way to resize one, so
+    // "show me this view" means "put it on the screen" — all of it.
+    if (panel.status !== 'maximized') panel.maximize();
+  } else {
+    // Bring it where the user is looking. Without this, Open on a view sitting
+    // off-panned or behind another window fronted something invisible, which
+    // read as the button doing nothing at all.
+    panel.centerInViewport();
+  }
   panel.front();
   return true;
 }
+
+/**
+ * Instances asked for before their window existed. `openPanel` drains this as
+ * it creates each panel, so "open this view" works whether the view was already
+ * open, minimized, or closed — the closed case has to wait for the store
+ * subscription to reconcile, and polling for the panel would race it.
+ */
+const pendingReveal = new Set<string>();
+
+/**
+ * Show a view: front it, restore it if minimized, put it where the user is
+ * looking (or fill the screen on mobile) — opening its window first if it is
+ * not open yet.
+ *
+ * This is what the Views dialog's "Open" button and the command palette both
+ * want. Flipping `ViewInstance.open` alone is not enough: for a view that is
+ * ALREADY open the flag does not change, so the reconcile has nothing to do and
+ * the click appeared to do nothing.
+ */
+export async function revealViewWindow(instanceId: string): Promise<void> {
+  if (focusViewWindow(instanceId)) return;
+  pendingReveal.add(instanceId);
+  const ctx = await getContext();
+  const inst = await ctx.store.viewInstances.findOne(instanceId);
+  if (!inst) {
+    pendingReveal.delete(instanceId);
+    return;
+  }
+  // Already flagged open but with no window (mid-boot, or another device's
+  // flag): the reconcile will not fire for an unchanged flag, so open it here.
+  if (inst.open) {
+    openPanel(inst, ctx);
+    drainReveal(instanceId);
+    return;
+  }
+  await ctx.store.viewInstances.patch(instanceId, { open: true, updatedAt: Date.now() });
+}
+
+/** Focus a freshly-created panel if something asked for it before it existed. */
+function drainReveal(instanceId: string): void {
+  if (!pendingReveal.delete(instanceId)) return;
+  focusViewWindow(instanceId);
+}
+
 let initialized = false;
 
 /** Render a view panel's titlebar: "<name> (<count>)" / "(<visible>/<total>)". */
@@ -311,12 +366,19 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
 
   const panelEl = document.getElementById(panelId);
 
-  // Inject the core per-window search box into the titlebar controlbar (next to
-  // min/max/close), keyed by the view INSTANCE id so a view's search filters the
-  // view's rows independently of the underlying table window's search.
+  // Inject the core per-window search box into the titlebar controlbar, keyed
+  // by the view INSTANCE id so a view's search filters the view's rows
+  // independently of the underlying table window's search.
+  //
+  // APPENDED, so it sits at the very right of a view's header — past the
+  // window buttons — rather than in front of them as it does on a table
+  // window. Filtering is the control a view is used through, and the far
+  // corner is the easiest target to hit.
   const search = document.createElement('panel-search');
   (search as HTMLElement & { tableId: string }).tableId = inst.id;
-  panelEl?.querySelector('.jsPanel-controlbar')?.prepend(search);
+  panelEl?.querySelector('.jsPanel-controlbar')?.append(search);
+
+  drainReveal(inst.id);
 }
 
 function closePanel(instanceId: string): void {

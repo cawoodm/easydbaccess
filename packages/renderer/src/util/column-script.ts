@@ -14,27 +14,59 @@
 // Trust model: the plugin host already lets user-supplied code do anything in
 // the page, so a column script is no worse. The user authored it by clicking the
 // pencil in the column editor.
+//
+// Besides `row`, a script can call the helpers listed in `HELPERS` below —
+// currently `markdownToHtml(value)`. See its own module for why that one
+// escapes HTML rather than passing it through.
+
+import { markdownToHtml } from './markdown.js';
 
 /** Outcome of one script run — never throws, so a broken script stays local. */
 export type ScriptRun =
   | { ok: true; value: unknown }
   | { ok: false; label: string; message: string };
 
-const compiled = new Map<string, (row: unknown) => unknown>();
+/**
+ * Helpers a column script can call by name, on top of the JS globals.
+ *
+ * They are passed as ARGUMENTS to the compiled wrapper rather than hung on
+ * `window`: the script sees them as ordinary in-scope identifiers, nothing
+ * leaks to the rest of the page, and this stays the single list of what a
+ * script may rely on.
+ *
+ * `easydb` is the same set as a namespace, so a script can feature-detect
+ * (`typeof easydb?.markdownToHtml === 'function'`) and so future helpers cost
+ * a property rather than another parameter.
+ */
+const HELPERS = { markdownToHtml } as const;
+const HELPER_NAMES = Object.keys(HELPERS);
+
+/** What a column script receives besides `row`. Exported for the docs/editor. */
+export const COLUMN_SCRIPT_HELPERS: ReadonlyArray<string> = HELPER_NAMES;
+
+type Compiled = (row: unknown, ...helpers: unknown[]) => unknown;
+
+const compiled = new Map<string, Compiled>();
 
 /**
- * Compile a script body to `(row) => unknown`, memoized per unique source so a
- * table of 10 000 rows compiles once. Throws on a syntax error.
+ * Compile a script body to `(row, …helpers) => unknown`, memoized per unique
+ * source so a table of 10 000 rows compiles once. Throws on a syntax error.
  */
-export function compileColumnScript(src: string): (row: unknown) => unknown {
+export function compileColumnScript(src: string): Compiled {
   const cached = compiled.get(src);
   if (cached) return cached;
   // The user's body defines `render`; we then call it with the bound row.
   // Wrapping in a function lets them also use `const` declarations, `Date`,
-  // `Math` and so on, scoped to the call.
-  const fn = new Function('row', `${src}\nreturn render(row);`) as (row: unknown) => unknown;
+  // `Math` and so on, scoped to the call — and puts the helpers in scope for
+  // the body AND for `render`, which closes over them.
+  const fn = new Function('row', ...HELPER_NAMES, 'easydb', `${src}\nreturn render(row);`) as Compiled;
   compiled.set(src, fn);
   return fn;
+}
+
+/** The helper arguments, in the order `compileColumnScript` declares them. */
+function helperArgs(): unknown[] {
+  return [...HELPER_NAMES.map((n) => HELPERS[n as keyof typeof HELPERS]), HELPERS];
 }
 
 /**
@@ -44,14 +76,14 @@ export function compileColumnScript(src: string): (row: unknown) => unknown {
  */
 export function runColumnScript(src: string | undefined, row: unknown): ScriptRun {
   if (!src || !src.trim()) return { ok: false, label: 'no script', message: '' };
-  let fn: (row: unknown) => unknown;
+  let fn: Compiled;
   try {
     fn = compileColumnScript(src);
   } catch (err) {
     return { ok: false, label: 'compile error', message: errorMessage(err) };
   }
   try {
-    return { ok: true, value: fn(row) };
+    return { ok: true, value: fn(row, ...helperArgs()) };
   } catch (err) {
     return { ok: false, label: 'runtime error', message: errorMessage(err) };
   }

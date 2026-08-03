@@ -20,14 +20,15 @@
 // drives a per-window progress bar and a resumable paged read that the kernel
 // cannot express yet.
 //
-// Note on primary keys: `mergeRefreshedRows` needs `origin.pks` to match old
-// rows to fresh ones. Only Datasette records them today, so a CSV/JSON refresh
-// still falls back to replacing the rows — but it now re-discovers columns and
-// respects `deletedColumns`, which is the part that was silently wrong.
+// Note on primary keys: a real `origin.pks` is the strongest way to match old
+// rows to fresh ones, and only Datasette records one. Without it
+// `mergeRefreshedRows` matches on the row's remote CONTENT instead, which is
+// what keeps a CSV/JSON snapshot's user-added columns alive across a refresh —
+// see that module for what content matching can and cannot recognise.
 
 import type { ColumnSpec, HostApi, ImporterSpec, Row, Table } from '@easydb/shared';
 import { reconcileColumns } from '../table/column-merge.js';
-import { mergeRefreshedRows } from '../table/refresh-merge.js';
+import { mergeRefreshedRows, type MergeStrategy } from '../table/refresh-merge.js';
 import { cryptoUUID } from '../util/ids.js';
 import { fetchImportTextWithBar } from './fetch-source.js';
 
@@ -35,8 +36,12 @@ export interface RefreshResult {
   rowCount: number;
   /** Columns the source has that the table did not, now appended. */
   newFields: string[];
-  /** True when rows were matched by primary key rather than replaced wholesale. */
+  /** True when rows were matched (by key or by content) rather than replaced. */
   merged: boolean;
+  /** Which rule matched them — see `mergeRefreshedRows`. */
+  strategy: MergeStrategy;
+  /** Rows whose user-added values could not be carried across. */
+  droppedUserRows: number;
 }
 
 /**
@@ -104,7 +109,7 @@ export async function refreshFromOrigin(
 
   const rowColl = api.store.rows(table.id);
   const old = await rowColl.find();
-  const { data, merged } = mergeRefreshedRows({
+  const { data, merged, strategy, droppedUserRows } = mergeRefreshedRows({
     oldRows: old.map((r) => ({ data: r.data })),
     freshRows,
     pks,
@@ -125,5 +130,5 @@ export async function refreshFromOrigin(
   }));
   await rowColl.bulkInsert(docs);
 
-  return { rowCount: docs.length, newFields, merged };
+  return { rowCount: docs.length, newFields, merged, strategy, droppedUserRows };
 }

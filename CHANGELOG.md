@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## 2 Aug 2026
+
+### Features
+
+- ✨ Projections: virtual tables that JOIN real tables — a join editor with FK-name preselect, self-joins, inherited column settings, and a row limit; joined columns are editable and write back to their own table (v0.0.265)
+- ✨ Import `.sql` scripts as tables and projections (v0.0.258); import a Datasette view as a snapshot table, and copy any table or projection (v0.0.262)
+- ✨ A markdown helper for column scripts, and projections bind to their base by name so a recreated table reconnects (v0.0.260)
+- ✨ A command palette launcher (`>`) button in the header (v0.0.247)
+- ✨ The column editor's read-only flag now works per column, and the data table honors it (v0.0.241)
+
+### Bugs
+
+- 🪲 A refresh clobbered the user's own column values when the source had no primary key (v0.0.263)
+- 🪲 On mobile a restored window lost its size, and "Open" on a view did not show it (v0.0.261); the HTML preview and editor now open maximized there (v0.0.259)
+- 🪲 Datasette paging followed the server's scheme instead of the requested one, breaking https-proxied cursors (v0.0.255)
+- 🪲 The Edit Join dialog offered only the selected fields instead of every source field (v0.0.254)
+- 🪲 The view header's filter control sat mid-header instead of at the far right (v0.0.264)
+- 🪲 Restoring a JSON dump dropped the read-only flag on columns (v0.0.244)
+
 ## 31 Jul 2026
 
 ### Features

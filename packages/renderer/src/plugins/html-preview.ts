@@ -2,6 +2,7 @@ import type { HostApi, PluginModule } from '@easydb/shared';
 import { createPanel } from '../window-mgr/panel-shell/panel-shell.js';
 import { shellViewport } from '../window-mgr/jspanel-manager.js';
 import { looksLikeHtml, htmlToPreviewText } from '../util/html-text.js';
+import { isMobileViewport } from '../util/viewport.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'html-preview',
@@ -162,8 +163,15 @@ class HtmlPreviewCell extends HTMLElement {
       title: this._label,
       color: '#7c3aed',
       content,
+      // 520×400 is wider than a phone, so on mobile the popup opened partly
+      // off-screen and had to be panned to be read. Rendered HTML is the one
+      // thing you open this window to LOOK at, so on a narrow viewport it
+      // starts maximized and fills the canvas. The 520×400 rect is still what
+      // Restore returns to, so nothing is lost — it is the opening state that
+      // changes, not the window.
       contentSize: { w: 520, h: 400 },
       position: { centerTopOffset: 60 },
+      boot: { maximized: isMobileViewport() },
       minimizeTo: '#easydb-minimized-dock',
       viewport: shellViewport(),
     });
@@ -200,6 +208,11 @@ class HtmlPreviewCell extends HTMLElement {
       content,
       contentSize: { w: 520, h: 400 },
       position: 'center',
+      // Same reasoning as the view popup above — and more pressing here,
+      // because a textarea you cannot see the edge of is hard to type into,
+      // and the Save/Cancel buttons sit at its bottom-right, the corner a
+      // too-wide panel pushes off-screen first.
+      boot: { maximized: isMobileViewport() },
       minimizeTo: '#easydb-minimized-dock',
       viewport: shellViewport(),
     });

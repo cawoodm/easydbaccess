@@ -25,3 +25,6 @@ TODO.md
 TODO.*
 .claude
 AGENT_PERMISSIONS.md
+
+# Local-only Playwright override (points at a preinstalled Chromium)
+pw.local.config.ts

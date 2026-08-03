@@ -5,6 +5,7 @@ import { getContext } from '../app-context.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 import { extractTokens } from '../views/view-render.js';
+import { revealViewWindow } from '../window-mgr/view-window-manager.js';
 
 /**
  * Open the Views manager for a table (mounted lazily into <body>). Pass
@@ -258,12 +259,14 @@ export class ViewsDialog extends LitElement {
   // -- instances --------------------------------------------------------------
 
   private async openInstance(id: string): Promise<void> {
-    // Flip the persisted `open` flag; the core view-window manager reacts by
-    // opening (and later restoring) the window. The dialog owns intent, not
-    // window management.
-    const ctx = await getContext();
-    await ctx.store.viewInstances.patch(id, { open: true, updatedAt: Date.now() });
+    // The dialog owns intent, not window management — `revealViewWindow` is the
+    // core manager's "show me this view": it flips the persisted `open` flag
+    // when the window is closed, and fronts / restores / positions it either
+    // way. Flipping the flag here directly was the bug: for a view that was
+    // ALREADY open the flag did not change, so the reconcile had nothing to do
+    // and Open looked broken.
     this.close();
+    await revealViewWindow(id);
   }
 
   /** Edit an existing instance: rename it and/or re-map its template tokens. */

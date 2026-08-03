@@ -121,8 +121,56 @@ test('a refresh keeps a column the user added, and never re-adds a deleted one',
   const after = await snapshot(page, workspaceId);
   // `pop` stays gone — a deleted column is not resurrected by a refresh.
   expect(after?.fields).not.toContain('pop');
-  // The user's column survives the reload. Without primary keys on the origin
-  // the rows are replaced rather than matched, so the VALUES cannot be carried
-  // over — but the column itself must not disappear.
   expect(after?.fields).toContain('note');
+  // …and so do the VALUES the user typed into it. A CSV origin records no
+  // primary key, so the rows are matched on their remote content instead —
+  // see `mergeRefreshedRows`.
+  expect(after?.rows.map((r) => r.note).sort()).toEqual(['seen Bern', 'seen Zug']);
+});
+
+test('what the user typed into their own column survives a refresh', async ({
+  page,
+  workspaceId,
+}) => {
+  // The reported bug, end to end: import a snapshot, add a field, fill it in,
+  // press Refresh — and find the typing gone.
+  await serve(page, V1);
+  await importCsv(page);
+  await expect.poll(async () => (await snapshot(page, workspaceId))?.rows.length).toBe(2);
+  const before = await snapshot(page, workspaceId);
+
+  await page.evaluate(
+    async ([tableId]) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__easydb.store;
+      const t = await store.tables.findOne(tableId);
+      await store.tables.patch(tableId, {
+        columns: [...t.columns, { field: 'rating', label: 'Rating', type: 'string' }],
+        updatedAt: Date.now(),
+      });
+      const rows = await store.rows(tableId).find();
+      for (const r of rows) {
+        await store.rows(tableId).patch(r.id, { data: { ...r.data, rating: `${r.data.city}!` } });
+      }
+    },
+    [before!.id] as const,
+  );
+
+  // Refresh against a body with an EXTRA row. The extra row proves the refresh
+  // actually re-read the source — without it this test would pass even if the
+  // button did nothing at all — while the two original rows are untouched at
+  // the source, so there is no excuse for losing what the user typed on them.
+  await serve(page, V1 + 'Chur,37000\n');
+  await clickRefresh(page);
+
+  await expect.poll(async () => (await snapshot(page, workspaceId))?.rows.length).toBe(3);
+
+  const after = await snapshot(page, workspaceId);
+  // The user's values stayed with THEIR rows…
+  expect(after?.rows.filter((r) => r.rating).map((r) => `${r.city}=${r.rating}`).sort()).toEqual([
+    'Bern=Bern!',
+    'Zug=Zug!',
+  ]);
+  // …and the new row arrived with none, since there was nothing local to carry.
+  expect(after?.rows.find((r) => r.city === 'Chur')?.rating).toBeUndefined();
 });

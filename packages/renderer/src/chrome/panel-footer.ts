@@ -160,10 +160,12 @@ export class PanelFooter extends LitElement {
   }
 
   private editColumns() {
+    // Every table — projections included — edits its columns here. A projection
+    // inherits its column settings from its sources once and then owns them, so
+    // the ordinary editor is the right tool; its join is edited from the
+    // separate "Edit Join" button the projection plugin registers.
     document.dispatchEvent(
-      new CustomEvent('easydb:edit-columns', {
-        detail: { tableId: this.tableId },
-      }),
+      new CustomEvent('easydb:edit-columns', { detail: { tableId: this.tableId } }),
     );
   }
 
