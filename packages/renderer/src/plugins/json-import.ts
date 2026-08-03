@@ -127,7 +127,9 @@ const importerSpec: ImporterSpec = {
     try {
       parsed = JSON.parse(text);
     } catch (err) {
-      throw new Error(`Invalid JSON in ${fallback}: ${(err as Error).message}`);
+      throw new Error(`Invalid JSON in ${fallback}: ${(err as Error).message}`, {
+        cause: err,
+      });
     }
     const tables = parsedToTables(parsed, fallback);
     return tables.map((t) => ({

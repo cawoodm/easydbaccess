@@ -11,12 +11,13 @@
 //
 // The wire protocol lives in `datasette-client.ts`; this is the layer above it.
 
-import type { DatasetteRef, MetadataTablePatch, TableRef } from './datasette-client.js';
+import type { DatasetteRef, FetchFn, MetadataTablePatch, TableRef } from './datasette-client.js';
 import { fetchDatabaseNames, fetchTablesForDb, probeSingleTable } from './datasette-client.js';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
 import type { HostApi, TableInfo } from '@easydb/shared';
 
-export type FetchFn = (url: string, opts?: unknown) => Promise<Response>;
+// One definition, in the module that owns the wire protocol.
+export type { FetchFn } from './datasette-client.js';
 
 /** Instance base without its scheme, for messages the user reads. */
 export const host = (base: string): string => base.replace(/^https?:\/\//, '');

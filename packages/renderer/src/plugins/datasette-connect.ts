@@ -206,7 +206,7 @@ export async function connectDatasette(api: HostApi, input: string, token: strin
   } catch (err) {
     const detail =
       err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
-    throw new Error(`Couldn't read tables from ${host(ref.base)}: ${detail}`);
+    throw new Error(`Couldn't read tables from ${host(ref.base)}: ${detail}`, { cause: err });
   }
   if (chosen === null) return; // cancelled
   if (chosen.length === 0) {

@@ -37,7 +37,6 @@ import { askViewImportMode, findViews, offerViewImport, runViewImport } from './
 import {
   type DatasetteSettings,
   getDatasetteSettings,
-  host,
   importRowCap,
   registerDatasetteSettings,
   resolveChosenTables,
@@ -744,7 +743,10 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
     /** Rows whose user-added values could not be carried across the refresh. */
     droppedUserRows: number;
   };
-  let newFields: string[] = [];
+  // Assigned inside the try below, like `outcome`. No initializer: this block has
+  // a `finally` and no `catch`, so the code that reads these only runs when the
+  // try completed — an initial value would never be read.
+  let newFields: string[];
   try {
     // Schema first (best-effort) — gives the progress-bar denominator and the
     // authoritative column names/types when the instance supports `?_extra=`.
@@ -904,7 +906,7 @@ async function resumeImport(api: HostApi, tableId: string): Promise<void> {
   const target = total && total > 0 ? Math.min(total, rowCap) : 0;
 
   setTableLoading(tableId, true, target > 0 ? Math.min(1, base / target) : undefined);
-  let added = 0;
+  let added: number;
   let outcome: { error?: string | undefined; nextUrl?: string | undefined };
   try {
     const res = await fetchRows(fetchFn, ref, {

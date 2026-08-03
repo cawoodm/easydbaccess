@@ -133,6 +133,7 @@ export async function fetchImportText(
         `Could not reach ${urlHost(target)} — no response. The server may be down, ` +
           `blocking cross-origin (CORS) requests, or the transfer may have failed ` +
           `(e.g. a very large file). [${(err as Error).message}]`,
+        { cause: err },
       );
     }
     if (!res.ok) {
@@ -158,6 +159,7 @@ export async function fetchImportText(
     } catch (err) {
       throw new Error(
         `Failed reading the response body from ${urlHost(target)}: ${(err as Error).message}`,
+        { cause: err },
       );
     }
   };

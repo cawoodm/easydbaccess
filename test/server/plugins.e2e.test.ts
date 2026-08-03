@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { serve, type ServerType } from '@hono/node-server';
 import { createServer } from '../../packages/server/src/index.js';
 import { createStore } from '../../packages/server/src/storage/factory.js';

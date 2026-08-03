@@ -148,6 +148,9 @@ describe('parseCsv: type inference', () => {
   it('an explicit header type annotation overrides inference', () => {
     const { columns, rows } = parseCsv('id:ID:string\n007\n042\n');
     expect(columns[0]).toMatchObject({ field: 'id', type: 'string' });
+    // The annotation has to reach the VALUES, not only the column meta: a
+    // leading-zero id that came out as a number would have lost its zero.
+    expect(rows).toEqual([{ id: '007' }, { id: '042' }]);
     // Without the annotation these bare-integer strings would still infer to
     // "string" anyway (isDate rejects them) — use a value that WOULD infer
     // differently to prove the annotation, not the inference, is in control.

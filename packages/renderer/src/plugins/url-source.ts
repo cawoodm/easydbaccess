@@ -213,7 +213,9 @@ export function createUrlCollection(table: Table, ctx: RowSourceCtx): DataCollec
     try {
       res = await ctx.backend.fetch(target);
     } catch (err) {
-      throw new Error(`Could not reach ${url}: ${(err as Error)?.message ?? String(err)}`);
+      throw new Error(`Could not reach ${url}: ${(err as Error)?.message ?? String(err)}`, {
+        cause: err,
+      });
     }
     if (!res.ok) {
       throw new Error(`Could not load ${url}: HTTP ${res.status} ${res.statusText}`);
@@ -223,6 +225,7 @@ export function createUrlCollection(table: Table, ctx: RowSourceCtx): DataCollec
     } catch (err) {
       throw new Error(
         `Could not read response from ${url}: ${(err as Error)?.message ?? String(err)}`,
+        { cause: err },
       );
     }
   }
@@ -248,6 +251,7 @@ export function createUrlCollection(table: Table, ctx: RowSourceCtx): DataCollec
     } catch (err) {
       throw new Error(
         `Could not parse ${format.toUpperCase()} from ${url}: ${(err as Error)?.message ?? String(err)}`,
+        { cause: err },
       );
     }
   }

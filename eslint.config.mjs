@@ -63,6 +63,23 @@ export default [
       // meant to be on — without it those directives are dead and ESLint
       // reports each one as unused.
       'no-console': 'error',
+      // Make the `_name` convention the codebase already writes actually mean
+      // something. A callback that must accept a parameter positionally but has
+      // no use for it (`(_url, opts) => …`), or a rest-destructure that exists
+      // to DROP a key (`const { renderer: _drop, ...rest } = col`), is not dead
+      // code — the underscore is the author saying so. Names without the
+      // underscore are still errors, which is what caught the four genuinely
+      // unused ones this rule was turned on for.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          destructuredArrayIgnorePattern: '^_',
+          ignoreRestSiblings: true,
+        },
+      ],
     },
   },
   {

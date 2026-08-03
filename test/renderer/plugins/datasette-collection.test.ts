@@ -1,14 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import type { DataCollection, RowSourceCtx, Setting, Table } from '@easydb/shared';
+import type { DataCollection, FetchOpts, RowSourceCtx, Setting, Table } from '@easydb/shared';
 import {
   createDatasetteCollection,
   SourceReadOnlyError,
   tokenSettingKey,
 } from '../../../packages/renderer/src/plugins/datasette-collection.js';
 
+/**
+ * Readers for a recorded call's options. `FetchOpts` has every field optional
+ * (a GET passes none), so these say once what each assertion means: the body was
+ * sent as JSON, and the header may be absent.
+ */
+function sentBody(call: { opts?: FetchOpts | undefined }): unknown {
+  return JSON.parse(String(call.opts?.body ?? 'null'));
+}
+
+function sentAuth(call: { opts?: FetchOpts | undefined }): string | undefined {
+  return call.opts?.headers?.['Authorization'];
+}
+
 /** A fake RowSourceCtx that records fetch calls + emitted events. */
-function makeCtx(responder: (call: { url: string; opts: any }) => unknown) {
-  const calls: Array<{ url: string; opts: any }> = [];
+function makeCtx(responder: (call: { url: string; opts?: FetchOpts | undefined }) => unknown) {
+  const calls: Array<{ url: string; opts?: FetchOpts | undefined }> = [];
   const events: Array<{ name: string; payload: unknown }> = [];
   const store = new Map<string, unknown>();
 
@@ -20,7 +33,7 @@ function makeCtx(responder: (call: { url: string; opts: any }) => unknown) {
 
   const ctx = {
     backend: {
-      fetch: (url: string, opts?: any) => {
+      fetch: (url: string, opts?: FetchOpts) => {
         calls.push({ url, opts });
         return Promise.resolve({
           ok: true,
@@ -64,7 +77,7 @@ function sourcedTable(writable: boolean): Table {
   };
 }
 
-const upd = (calls: Array<{ url: string; opts: any }>) => calls.find((c) => c.url.includes('/-/'))!;
+const upd = (calls: Array<{ url: string; opts?: FetchOpts | undefined }>) => calls.find((c) => c.url.includes('/-/'))!;
 
 describe('createDatasetteCollection — read', () => {
   it('maps rows to Row records keyed by the tilde-encoded primary key', async () => {
@@ -139,8 +152,8 @@ describe('createDatasetteCollection — writes', () => {
 
     const call = upd(calls);
     expect(call.url).toBe('https://x.datasette.io/db/t/5/-/update');
-    expect(call.opts.headers.Authorization).toBe('Bearer dstok_ABC');
-    expect(JSON.parse(call.opts.body)).toEqual({ update: { name: 'b', qty: 99 }, return: true }); // id (pk) stripped
+    expect(sentAuth(call)).toBe('Bearer dstok_ABC');
+    expect(sentBody(call)).toEqual({ update: { name: 'b', qty: 99 }, return: true }); // id (pk) stripped
     expect(row.id).toBe('5');
     expect(row.data).toEqual({ id: 5, name: 'b', qty: 99 });
     expect(events.some((e) => e.name === 'row:updated')).toBe(true);
@@ -157,7 +170,7 @@ describe('createDatasetteCollection — writes', () => {
     const row = await coll.insert({ id: 'tmp', tableId: 't1', data: { name: 'z' }, updatedAt: 0 });
 
     const call = calls.find((c) => c.url.endsWith('/-/insert'))!;
-    expect(JSON.parse(call.opts.body)).toEqual({ rows: [{ name: 'z' }], return: true });
+    expect(sentBody(call)).toEqual({ rows: [{ name: 'z' }], return: true });
     expect(row.id).toBe('9'); // from the server's returned row, not 'tmp'
     expect(events.some((e) => e.name === 'row:created')).toBe(true);
   });
@@ -169,8 +182,8 @@ describe('createDatasetteCollection — writes', () => {
     await coll.remove('7');
 
     const call = calls.find((c) => c.url.endsWith('/7/-/delete'))!;
-    expect(call.opts.method).toBe('POST');
-    expect(JSON.parse(call.opts.body)).toEqual({});
+    expect(call.opts?.method).toBe('POST');
+    expect(sentBody(call)).toEqual({});
     expect(events.some((e) => e.name === 'row:deleted')).toBe(true);
   });
 
@@ -179,7 +192,7 @@ describe('createDatasetteCollection — writes', () => {
     const coll = createDatasetteCollection(sourcedTable(true), ctx);
     await coll.remove('1');
     const call = calls.find((c) => c.url.endsWith('/1/-/delete'))!;
-    expect(call.opts.headers.Authorization).toBeUndefined();
+    expect(sentAuth(call)).toBeUndefined();
   });
 });
 
@@ -194,7 +207,7 @@ describe('createDatasetteCollection — authenticated reads (private instances)'
     const coll = createDatasetteCollection(sourcedTable(false), ctx); // reads work even read-only
     await coll.find();
     const read = calls.find((c) => c.url.includes('/db/t.json'))!;
-    expect(read.opts?.headers?.Authorization).toBe('Bearer dstok_R');
+    expect(sentAuth(read)).toBe('Bearer dstok_R');
   });
 
   it('sends no auth header on reads when no token is stored', async () => {
@@ -202,6 +215,6 @@ describe('createDatasetteCollection — authenticated reads (private instances)'
     const coll = createDatasetteCollection(sourcedTable(false), ctx);
     await coll.find();
     const read = calls.find((c) => c.url.includes('/db/t.json'))!;
-    expect(read.opts?.headers?.Authorization).toBeUndefined();
+    expect(sentAuth(read)).toBeUndefined();
   });
 });

@@ -474,7 +474,7 @@ export function parseCsvRaw(
   text: string,
   opts: { maxRows?: number | undefined; separator?: string | undefined } = {},
 ): { header: string[]; rows: string[][] } {
-  const normalized = text.replace(/﻿/, ''); // strip BOM
+  const normalized = text.replace(/\uFEFF/, ''); // strip BOM
   const sep = opts.separator ?? detectSeparator(normalized);
   const all = parseLines(normalized, sep, lineCap(opts.maxRows));
   if (all.length === 0) return { header: [], rows: [] };
@@ -532,7 +532,7 @@ export function parseCsv(
   text: string,
   opts: { maxRows?: number | undefined; separator?: string | undefined } = {},
 ): ParseResult {
-  const normalized = text.replace(/﻿/, ''); // strip BOM
+  const normalized = text.replace(/\uFEFF/, ''); // strip BOM
   const sep = opts.separator ?? detectSeparator(normalized);
   const rows = parseLines(normalized, sep, lineCap(opts.maxRows));
   if (rows.length === 0) return { columns: [], rows: [] };

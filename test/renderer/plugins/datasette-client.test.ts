@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { FetchOpts } from '@easydb/shared';
 import {
   parseDatabaseList,
   parseTableList,
@@ -613,12 +614,25 @@ describe('discovery failure diagnostics', () => {
   });
 });
 
+/**
+ * Readers for a recorded call's options. `FetchOpts` has every field optional
+ * (a GET passes none), so these say once what each assertion means: the body was
+ * sent as JSON, and the header may be absent.
+ */
+function sentBody(call: { opts?: FetchOpts | undefined }): unknown {
+  return JSON.parse(String(call.opts?.body ?? 'null'));
+}
+
+function sentAuth(call: { opts?: FetchOpts | undefined }): string | undefined {
+  return call.opts?.headers?.['Authorization'];
+}
+
 // --- Write API helpers ------------------------------------------------------
 // Mapping verified live against latest.datasette.io/ephemeral (datasette 1.0a37).
 
-function recordingFetch(responder: (call: { url: string; opts: any }) => unknown) {
-  const calls: Array<{ url: string; opts: any }> = [];
-  const fn = (url: string, opts?: any) => {
+function recordingFetch(responder: (call: { url: string; opts?: FetchOpts | undefined }) => unknown) {
+  const calls: Array<{ url: string; opts?: FetchOpts | undefined }> = [];
+  const fn = (url: string, opts?: FetchOpts) => {
     calls.push({ url, opts });
     return Promise.resolve({
       ok: true,
@@ -637,10 +651,10 @@ describe('write helpers', () => {
     const out = await insertRows(fn, WREF, [{ name: 'a' }], { token: 'dstok_X' });
     expect(out).toEqual([{ id: 1, name: 'a' }]);
     expect(calls[0]!.url).toBe('https://x.datasette.io/db/t/-/insert');
-    expect(calls[0]!.opts.method).toBe('POST');
-    expect(calls[0]!.opts.headers.Authorization).toBe('Bearer dstok_X');
-    expect(calls[0]!.opts.headers['Content-Type']).toBe('application/json');
-    expect(JSON.parse(calls[0]!.opts.body)).toEqual({ rows: [{ name: 'a' }], return: true });
+    expect(calls[0]!.opts?.method).toBe('POST');
+    expect(sentAuth(calls[0]!)).toBe('Bearer dstok_X');
+    expect(calls[0]!.opts?.headers?.['Content-Type']).toBe('application/json');
+    expect(sentBody(calls[0]!)).toEqual({ rows: [{ name: 'a' }], return: true });
   });
 
   it('updateRowByPk PUTs the changed fields to /<pk>/-/update and returns the row', async () => {
@@ -651,7 +665,7 @@ describe('write helpers', () => {
     const row = await updateRowByPk(fn, WREF, '5', { name: 'b', qty: 99 }, { token: 'dstok_Y' });
     expect(row).toEqual({ id: 5, name: 'b', qty: 99 });
     expect(calls[0]!.url).toBe('https://x.datasette.io/db/t/5/-/update');
-    expect(JSON.parse(calls[0]!.opts.body)).toEqual({
+    expect(sentBody(calls[0]!)).toEqual({
       update: { name: 'b', qty: 99 },
       return: true,
     });
@@ -667,25 +681,25 @@ describe('write helpers', () => {
     const { fn, calls } = recordingFetch(() => ({ ok: true }));
     await deleteRowByPk(fn, WREF, '7', { token: 'dstok_Z' });
     expect(calls[0]!.url).toBe('https://x.datasette.io/db/t/7/-/delete');
-    expect(calls[0]!.opts.method).toBe('POST');
-    expect(JSON.parse(calls[0]!.opts.body)).toEqual({});
+    expect(calls[0]!.opts?.method).toBe('POST');
+    expect(sentBody(calls[0]!)).toEqual({});
   });
 
   it('upsertRows POSTs to /-/upsert', async () => {
     const { fn, calls } = recordingFetch(() => ({ ok: true, rows: [{ id: 1 }] }));
     await upsertRows(fn, WREF, [{ id: 1, name: 'a' }]);
     expect(calls[0]!.url).toBe('https://x.datasette.io/db/t/-/upsert');
-    expect(JSON.parse(calls[0]!.opts.body)).toEqual({ rows: [{ id: 1, name: 'a' }], return: true });
+    expect(sentBody(calls[0]!)).toEqual({ rows: [{ id: 1, name: 'a' }], return: true });
   });
 
   it('omits Authorization when no token is given', async () => {
     const { fn, calls } = recordingFetch(() => ({ ok: true, rows: [] }));
     await insertRows(fn, WREF, [{ name: 'a' }]);
-    expect(calls[0]!.opts.headers.Authorization).toBeUndefined();
+    expect(sentAuth(calls[0]!)).toBeUndefined();
   });
 
   it('throws a DatasetteError with status + message on {ok:false}', async () => {
-    const fn = (_url: string, _opts?: any) =>
+    const fn = (_url: string, _opts?: FetchOpts) =>
       Promise.resolve({
         ok: false,
         status: 403,
@@ -749,8 +763,8 @@ describe('testConnection', () => {
   const respond = (url: string, bodies: Record<string, unknown>) => jsonRes(url.includes('/-/actor.json') ? bodies.actor : bodies.versions);
 
   it('resolves writable=true when a token authenticates (actor present)', async () => {
-    const seen: Array<{ url: string; opts: any }> = [];
-    const fetchFn = (url: string, opts?: any) => {
+    const seen: Array<{ url: string; opts?: FetchOpts | undefined }> = [];
+    const fetchFn = (url: string, opts?: FetchOpts) => {
       seen.push({ url, opts });
       return respond(url, {
         versions: { datasette: { version: '1.0a37' } },
@@ -761,7 +775,7 @@ describe('testConnection', () => {
     expect(status).toMatchObject({ reachable: true, version: '1.0a37', writable: true });
     expect(status.actor).toEqual({ id: 'root' });
     // The token rode on the Authorization header.
-    expect(seen[0]!.opts.headers.Authorization).toBe('Bearer dstok_X');
+    expect(sentAuth(seen[0]!)).toBe('Bearer dstok_X');
   });
 
   it('resolves read-only (writable=false) with no token', async () => {
@@ -786,8 +800,8 @@ describe('testConnection', () => {
 
 describe('withAuthFetch', () => {
   it('injects a Bearer header and preserves existing opts/headers', async () => {
-    const seen: Array<{ url: string; opts: any }> = [];
-    const base = (url: string, opts?: any) => {
+    const seen: Array<{ url: string; opts?: FetchOpts | undefined }> = [];
+    const base = (url: string, opts?: FetchOpts) => {
       seen.push({ url, opts });
       return Promise.resolve({} as Response);
     };
@@ -795,25 +809,28 @@ describe('withAuthFetch', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
-    expect(seen[0]!.opts.method).toBe('POST');
-    expect(seen[0]!.opts.headers).toEqual({
+    expect(seen[0]!.opts?.method).toBe('POST');
+    expect(seen[0]!.opts?.headers).toEqual({
       'Content-Type': 'application/json',
       Authorization: 'Bearer dstok_X',
     });
   });
 
   it('adds a headers object even when the call passed no opts (e.g. GET reads)', async () => {
-    const seen: Array<{ url: string; opts: any }> = [];
-    const base = (url: string, opts?: any) => {
+    const seen: Array<{ url: string; opts?: FetchOpts | undefined }> = [];
+    const base = (url: string, opts?: FetchOpts) => {
       seen.push({ url, opts });
       return Promise.resolve({} as Response);
     };
     await withAuthFetch(base, 'dstok_X')('u');
-    expect(seen[0]!.opts.headers.Authorization).toBe('Bearer dstok_X');
+    expect(sentAuth(seen[0]!)).toBe('Bearer dstok_X');
   });
 
   it('returns the fn unchanged when there is no token', () => {
-    const base = ((): Promise<Response> => Promise.resolve({} as Response)) as unknown as (url: string, opts?: any) => Promise<Response>;
+    const base = ((): Promise<Response> => Promise.resolve({} as Response)) as unknown as (
+      url: string,
+      opts?: FetchOpts,
+    ) => Promise<Response>;
     expect(withAuthFetch(base, undefined)).toBe(base);
   });
 });
