@@ -152,6 +152,9 @@ export interface EasydbDbBridge {
   /** Real filesystem path of a dropped `File` (Electron 32 removed `File.path`); '' when it has none. */
   pathForFile(file: File): string;
   currentDb(): Promise<EasydbCurrentDbInfo>;
+  /** Whether the last workspace reopens on startup (default true) — app-level, not per workspace. */
+  autoLoadLast?(): Promise<boolean>;
+  setAutoLoadLast?(on: boolean): Promise<void>;
 }
 
 declare global {

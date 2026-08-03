@@ -143,9 +143,15 @@ export function prepareConvert(sourcePath: string, destPath: string, only?: stri
   }
 }
 
-/** `foo.sqlite` → `foo.eda.db` — the name the save dialog offers. */
+/**
+ * `foo.sqlite` → `foo.edb` — the name the save dialog offers.
+ *
+ * `.edb` marks a SQLite file carrying our metadata, so a later drag-and-drop
+ * knows it is a workspace to OPEN rather than data to import. The old suggestion
+ * was `foo.eda.db`, which read as a plain `.db` and got offered for import.
+ */
 export function suggestConvertedName(sourcePath: string): string {
   const base = sourcePath.replace(/\\/g, '/').split('/').pop() ?? 'database';
-  const stem = base.replace(/\.(db|sqlite|sqlite3)$/i, '');
-  return `${stem}.eda.db`;
+  const stem = base.replace(/\.(edb|db|sqlite|sqlite3)$/i, '');
+  return `${stem}.edb`;
 }

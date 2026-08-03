@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HostApi, Table } from '@easydb/shared';
 import type { EasydbDatabaseFileKind, EasydbDbBridge } from '../../../packages/renderer/src/db/data-store-ipc.js';
-import { openFlow, resumePendingImport } from '../../../packages/renderer/src/plugins/electron-db.js';
+import { handleDroppedFile, openFlow, resumePendingImport } from '../../../packages/renderer/src/plugins/electron-db.js';
 
 /* The fakes in `harness` return settled promises without awaiting anything —
    that is what a stub is. */
@@ -492,5 +492,54 @@ describe('electron-db — an unfinished import', () => {
 
     expect(rec.choices).toEqual([]);
     expect(rec.importedTableIds).toEqual([]);
+  });
+});
+
+/**
+ * A dropped file's EXTENSION decides what happens, with no question asked: `.edb`
+ * carries our metadata and opens as a workspace, anything else is somebody else's
+ * data and goes to Import. The three-way prompt this replaced was asked on every
+ * drop, when the answer was already implied by which file the user reached for.
+ */
+describe('electron-db — a dropped file routes by extension', () => {
+  it('a .edb opens as a workspace, asking only to confirm', async () => {
+    const { api, bridge, rec } = harness({ kind: 'easydb', path: 'C:/sales.edb', confirmAnswer: true });
+    await handleDroppedFile(api, bridge, 'C:/sales.edb', true);
+
+    // No "what would you like to do" — straight to the Open confirmation.
+    expect(rec.choices).toEqual([]);
+    expect(rec.confirms).toHaveLength(1);
+    expect(rec.committedOpens).toEqual(['C:/sales.edb']);
+  });
+
+  it('declining that confirmation opens nothing', async () => {
+    const { api, bridge, rec } = harness({ kind: 'easydb', path: 'C:/sales.edb', confirmAnswer: false });
+    await handleDroppedFile(api, bridge, 'C:/sales.edb', true);
+
+    expect(rec.committedOpens).toEqual([]);
+  });
+
+  it('a plain .db goes straight to Import, with no prompt about what to do', async () => {
+    const { api, bridge, rec } = harness({ kind: 'foreign', path: 'C:/northwind.db' });
+    await handleDroppedFile(api, bridge, 'C:/northwind.db', false);
+
+    // Only the which-objects picker, never the three-way question.
+    expect(rec.choices.every((c) => !c.options.includes('Open Workspace'))).toBe(true);
+    expect(rec.importedPaths).toEqual(['C:/northwind.db']);
+    expect(rec.committedOpens).toEqual([]);
+  });
+
+  it('a .edb that is NOT one is never opened — it says so and offers what it can', async () => {
+    const { api, bridge, rec } = harness({
+      kind: 'foreign',
+      path: 'C:/mislabelled.edb',
+      choices: [null], // dismiss the fallback offer
+    });
+    await handleDroppedFile(api, bridge, 'C:/mislabelled.edb', true);
+
+    // Opening it would add our bookkeeping tables to someone else's file.
+    expect(rec.committedOpens).toEqual([]);
+    expect(rec.toasts.some((t) => /does not contain one/.test(t))).toBe(true);
+    expect(rec.choices[0]!.options).toEqual(['Open Workspace', 'Browse .db file', 'Import data']);
   });
 });

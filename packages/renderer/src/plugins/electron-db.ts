@@ -47,15 +47,28 @@ export const meta: NonNullable<PluginModule['meta']> = {
 };
 
 /** Extensions the drop handler claims — the same set the OS file dialogs filter on. */
-const DB_EXTENSIONS = /\.(db|sqlite|sqlite3)$/i;
+const DB_EXTENSIONS = /\.(edb|db|sqlite|sqlite3)$/i;
+
+/**
+ * A workspace file, by name. `.edb` is a SQLite database carrying our metadata;
+ * a plain `.db` is somebody else's data.
+ *
+ * This is what lets a drop act instead of asking. The extension states the user's
+ * INTENT — `.edb` means "open my workspace", `.db` means "take the data out of
+ * this" — and the probe still verifies the file really is what it claims before
+ * anything opens, so a mislabelled file falls back to the offer rather than being
+ * trusted. Must match `WORKSPACE_EXTENSION` in `packages/electron/src/db-files.ts`;
+ * the two packages are separate `tsc -b` projects, so it cannot be imported.
+ */
+const WORKSPACE_EXTENSION = /\.edb$/i;
 
 export function init(api: HostApi): void {
   const bridge = window.easydb?.db;
   if (!bridge) return; // browser build — no bridge, no UI, nothing to do
 
-  // Dropping a .db asks the SAME question the menu's Open… asks, via
-  // `handleDatabaseFile`. Returning false for anything else leaves the CSV/JSON
-  // drop handlers to it.
+  // A dropped file's EXTENSION decides what happens, with no question asked:
+  // `.edb` is a workspace to open, anything else is data to import. Returning
+  // false for a non-database leaves the CSV/JSON drop handlers to it.
   api.ui.registerDropHandler(async (event) => {
     const file = [...(event.dataTransfer?.files ?? [])].find((f) => DB_EXTENSIONS.test(f.name));
     if (!file) return false;
@@ -66,7 +79,7 @@ export function init(api: HostApi): void {
       await api.ui.dialogs.alert(`"${file.name}" could not be located on disk, so it cannot be opened.`, 'Database file');
       return true;
     }
-    await handleDatabaseFile(api, bridge, path, await bridge.probeDb(path));
+    await handleDroppedFile(api, bridge, path, WORKSPACE_EXTENSION.test(file.name));
     return true;
   });
 
@@ -148,6 +161,36 @@ export async function openFlow(api: HostApi, bridge: EasydbDbBridge): Promise<vo
   const picked = await bridge.openDb();
   if (!picked.ok) return; // cancelled in the OS dialog
   await handleDatabaseFile(api, bridge, picked.path, picked.kind);
+}
+
+/**
+ * A dropped file, routed by what its name claims it is.
+ *
+ * No prompt: `.edb` opens, everything else imports. The three-way question this
+ * replaces was asked on every drop, and the answer was already implied by which
+ * file the user reached for.
+ *
+ * The probe still runs for a workspace, because the extension is only a claim. A
+ * `.edb` that is not ours cannot be opened — pointing the store at it would add
+ * our bookkeeping tables to someone else's file — so that case falls through to
+ * the Convert/Browse offer instead of failing or, worse, succeeding.
+ */
+export async function handleDroppedFile(api: HostApi, bridge: EasydbDbBridge, path: string, claimsWorkspace: boolean): Promise<void> {
+  if (!claimsWorkspace) {
+    await importFlow(api, bridge, path);
+    return;
+  }
+  const kind = await bridge.probeDb(path);
+  if (kind === 'easydb') {
+    await openWorkspaceFlow(api, bridge, path, kind);
+    return;
+  }
+  // Named like a workspace but isn't one — say so, then offer what CAN be done.
+  api.ui.dialogs.toast(`"${path}" is named as a workspace but does not contain one.`, {
+    kind: 'warning',
+    title: 'Open workspace',
+  });
+  await handleDatabaseFile(api, bridge, path, kind);
 }
 
 /**

@@ -16,7 +16,7 @@
 import { app, BrowserWindow, dialog, session, ipcMain } from 'electron';
 import * as path from 'node:path';
 import { existsSync } from 'node:fs';
-import { getStore, pickDatabaseToOpen, switchToDatabase, saveDbAs, importDb, importDbCommit, convertAndOpen, currentDbInfo } from './db-files';
+import { getStore, pickDatabaseToOpen, switchToDatabase, saveDbAs, importDb, importDbCommit, convertAndOpen, currentDbInfo, autoLoadLastWorkspace, setAutoLoadLastWorkspace } from './db-files';
 import { prepareImport, probeDatabaseFile, type ImportPlanEntry } from './db-import';
 import { runImport } from './import-runner';
 import { listBrowsable, readBrowseRows } from './db-browse';
@@ -204,6 +204,10 @@ function registerDbFileIpc(): void {
   handle('db:browseList', (sourcePath: string) => listBrowsable(sourcePath));
   handle('db:browseRows', (sourcePath: string, objectName: string, columns: ColumnSpec[]) => readBrowseRows(sourcePath, objectName, columns));
   ipcMain.handle('db:current', () => currentDbInfo());
+  // Startup behaviour, not a workspace setting: it is read before any workspace
+  // is open, so it cannot live in the file whose opening it governs.
+  handle('db:autoLoadLast', () => autoLoadLastWorkspace());
+  handle('db:setAutoLoadLast', (on: boolean) => setAutoLoadLastWorkspace(on));
 }
 
 registerDbFileIpc();

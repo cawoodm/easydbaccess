@@ -99,6 +99,9 @@ const db = {
     }
   },
   currentDb: (): Promise<CurrentDbInfo> => ipcRenderer.invoke('db:current'),
+  /** Whether the last workspace reopens on startup (default true). */
+  autoLoadLast: (): Promise<boolean> => ipcRenderer.invoke('db:autoLoadLast'),
+  setAutoLoadLast: (on: boolean): Promise<void> => ipcRenderer.invoke('db:setAutoLoadLast', on),
 };
 
 contextBridge.exposeInMainWorld('easydb', {
@@ -144,6 +147,8 @@ declare global {
         browseRows(sourcePath: string, objectName: string, columns: unknown[]): Promise<BrowseRow[]>;
         pathForFile(file: File): string;
         currentDb(): Promise<CurrentDbInfo>;
+        autoLoadLast(): Promise<boolean>;
+        setAutoLoadLast(on: boolean): Promise<void>;
       };
     };
   }

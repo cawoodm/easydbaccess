@@ -93,7 +93,11 @@ async function main() {
   // require('electron') from a Node process resolves to the path of the
   // packaged Electron binary.
   const electronBinary = require('electron');
-  const electron = spawn(electronBinary, ['.'], {
+  // Anything after `--` is forwarded to the app, so a workspace can be opened by
+  // argument in dev exactly as a packaged build would:
+  //   npm run dev:electron -- C:/data/sales.edb
+  const forwarded = process.argv.slice(2);
+  const electron = spawn(electronBinary, ['.', ...forwarded], {
     cwd: PKG_DIR,
     stdio: 'inherit',
     env: { ...process.env, EASYDB_RENDERER_URL: RENDERER_URL },

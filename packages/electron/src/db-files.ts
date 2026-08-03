@@ -17,7 +17,17 @@ import { SqliteStore, copyDatabase } from './sqlite-store';
 import { prepareConvert, suggestConvertedName } from './db-convert';
 import { commitImport, previewImport, probeDatabaseFile, type DatabaseFileKind, type ImportDecision, type ImportedTableResult, type ImportPreview } from './db-import';
 
+/**
+ * The app's own workspace file, used when nothing else is chosen.
+ *
+ * Still `.db` for existing installs — renaming it would orphan every workspace
+ * already on disk. New files the user names get `.edb` (see
+ * `DEFAULT_WORKSPACE_NAME` and `suggestConvertedName`).
+ */
 const DEFAULT_DB_NAME = 'easydbaccess.db';
+
+/** What Save As offers for a brand-new workspace file. */
+const DEFAULT_WORKSPACE_NAME = 'easydbaccess.edb';
 
 /**
  * Remembers the last-opened `.db` path across restarts. Deliberately a tiny
@@ -47,6 +57,77 @@ interface PersistedLocation {
 }
 
 /**
+ * A workspace file — one carrying our metadata — versus a plain SQLite database.
+ *
+ * The extension is a claim, not proof: `probeDatabaseFile` still decides what a
+ * file really is before anything is opened. What the extension buys is knowing
+ * the user's INTENT without asking. Dropping `sales.edb` means "open my
+ * workspace"; dropping `sales.db` means "take the data out of this". Asking
+ * which, every time, was noise.
+ */
+export const WORKSPACE_EXTENSION = 'edb';
+
+/** Plain SQLite databases — data to import, not workspaces to open. */
+export const PLAIN_DB_EXTENSIONS = ['db', 'sqlite', 'sqlite3'];
+
+export function isWorkspaceFileName(name: string): boolean {
+  return name.toLowerCase().endsWith(`.${WORKSPACE_EXTENSION}`);
+}
+
+/**
+ * Whether the last workspace opens by itself on startup.
+ *
+ * Lives beside the remembered path rather than inside a workspace, for the same
+ * chicken-and-egg reason: it is consulted BEFORE any file is opened, so it cannot
+ * be stored in the file whose opening it governs. Defaults to true — the app
+ * picking up where it left off is what almost everyone wants, and the setting
+ * exists for the case where a huge workspace makes that the wrong default.
+ */
+function readAutoLoadLast(): boolean {
+  try {
+    const raw = readFileSync(locationFilePath(), 'utf-8');
+    const parsed = JSON.parse(raw) as { autoLoadLastWorkspace?: unknown };
+    return parsed.autoLoadLastWorkspace !== false;
+  } catch {
+    return true;
+  }
+}
+
+export function autoLoadLastWorkspace(): boolean {
+  return readAutoLoadLast();
+}
+
+export function setAutoLoadLastWorkspace(on: boolean): void {
+  let current: Record<string, unknown> = {};
+  try {
+    current = JSON.parse(readFileSync(locationFilePath(), 'utf-8')) as Record<string, unknown>;
+  } catch {
+    /* no config yet */
+  }
+  mkdirSync(app.getPath('userData'), { recursive: true });
+  writeFileSync(locationFilePath(), JSON.stringify({ ...current, autoLoadLastWorkspace: on }), 'utf-8');
+}
+
+/**
+ * A workspace file named on the command line — `easyDBAccess sales.edb`.
+ *
+ * Takes precedence over both the remembered path and the auto-load setting: an
+ * explicit argument is the least ambiguous instruction the app can receive.
+ * Electron's argv carries the app path (and, in dev, a bare `.`) before any user
+ * argument, so this looks for the first thing that names a file that exists
+ * rather than trusting a position.
+ */
+export function workspaceFromArgv(argv: readonly string[]): string | null {
+  for (const arg of argv.slice(1)) {
+    if (arg.startsWith('-') || arg === '.') continue;
+    if (!isWorkspaceFileName(arg)) continue;
+    const resolved = path.resolve(arg);
+    if (existsSync(resolved)) return resolved;
+  }
+  return null;
+}
+
+/**
  * Reads the persisted path. Falls back to the default — silently, but the
  * caller gets `fellBack: true` so the UI can say so — when there is no
  * location file yet (first run), it's corrupt, or the remembered file was
@@ -70,8 +151,16 @@ function readPersistedLocation(): PersistedLocation {
 }
 
 function persistLocation(dbPath: string): void {
+  // Merged, not overwritten: this file also carries `autoLoadLastWorkspace`, and
+  // rewriting it wholesale silently reset that setting on the next Open.
+  let current: Record<string, unknown> = {};
+  try {
+    current = JSON.parse(readFileSync(locationFilePath(), 'utf-8')) as Record<string, unknown>;
+  } catch {
+    /* no config yet */
+  }
   mkdirSync(app.getPath('userData'), { recursive: true });
-  writeFileSync(locationFilePath(), JSON.stringify({ path: dbPath }), 'utf-8');
+  writeFileSync(locationFilePath(), JSON.stringify({ ...current, path: dbPath }), 'utf-8');
 }
 
 // -- The switchable store singleton ----------------------------------------
@@ -83,6 +172,23 @@ let fellBackToDefault = false;
 /** Resolves (once) which path the store should live at — from disk the first time, then in-memory. */
 function ensurePath(): string {
   if (currentPath) return currentPath;
+  // An explicit `easyDBAccess sales.edb` wins over everything remembered, and
+  // becomes the remembered path so a later launch without the argument reopens it.
+  const fromArgv = workspaceFromArgv(process.argv);
+  if (fromArgv) {
+    currentPath = fromArgv;
+    fellBackToDefault = false;
+    persistLocation(fromArgv);
+    return currentPath;
+  }
+  // Turned off, the app starts on its own default file instead of reopening
+  // whatever was last used — which is the point of the setting for someone whose
+  // last workspace is large.
+  if (!readAutoLoadLast()) {
+    currentPath = defaultDbPath();
+    fellBackToDefault = false;
+    return currentPath;
+  }
   const resolved = readPersistedLocation();
   currentPath = resolved.path;
   fellBackToDefault = resolved.fellBack;
@@ -124,7 +230,10 @@ export function currentDbInfo(): CurrentDbInfo {
 // -- Dialog helpers ----------------------------------------------------------
 
 const DB_FILE_FILTERS = [
-  { name: 'SQLite database', extensions: ['db', 'sqlite', 'sqlite3'] },
+  // Workspaces first: Open is for workspaces, and a plain `.db` cannot be opened
+  // as one (it has no workspace in it) — it can only be imported or browsed.
+  { name: 'easyDBAccess workspace', extensions: [WORKSPACE_EXTENSION] },
+  { name: 'SQLite database', extensions: PLAIN_DB_EXTENSIONS },
   { name: 'All Files', extensions: ['*'] },
 ];
 
@@ -199,8 +308,8 @@ export function switchToDatabase(win: BrowserWindow | null, newPath: string): { 
 export async function saveDbAs(win: BrowserWindow | null): Promise<DialogResult<{ path: string }> | CancelledResult> {
   const opts = {
     title: 'Save easyDBAccess database as',
-    defaultPath: DEFAULT_DB_NAME,
-    filters: [{ name: 'SQLite database', extensions: ['db'] }],
+    defaultPath: DEFAULT_WORKSPACE_NAME,
+    filters: [{ name: 'easyDBAccess workspace', extensions: [WORKSPACE_EXTENSION] }],
   };
   const result = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);
   if (result.canceled || !result.filePath) return { ok: false, cancelled: true };
@@ -235,7 +344,7 @@ export async function convertAndOpen(
   const opts = {
     title: 'Save the converted database as',
     defaultPath: suggestConvertedName(sourcePath),
-    filters: [{ name: 'SQLite database', extensions: ['db'] }],
+    filters: [{ name: 'easyDBAccess workspace', extensions: [WORKSPACE_EXTENSION] }],
   };
   const result = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);
   if (result.canceled || !result.filePath) return { ok: false, cancelled: true };

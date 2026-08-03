@@ -4,6 +4,8 @@
 
 ### Features
 
+- ✨ Workspace files are `.edb` now: drop one to open it, drop a plain `.db` to import its data — no question asked (v0.0.290)
+- ✨ The app opens a workspace named on the command line, and a setting controls whether the last one reopens on startup (v0.0.290)
 - ✨ Importing a `.db` runs on a worker thread, so the window stays responsive while it copies (v0.0.289)
 - ✨ Importing or converting a `.db` shows its tables at once and fills each one in with its own percentage (v0.0.286)
 - ✨ Convert to EDA asks which tables to take, with a shortcut that skips the views (v0.0.286)
