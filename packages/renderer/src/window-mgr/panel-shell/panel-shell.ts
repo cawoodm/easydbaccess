@@ -67,6 +67,18 @@ export type PanelShellEl = HTMLDivElement & {
   setHeaderLogo(svg: string): void;
   persistFlags(): { minimized: boolean; maximized: boolean; smallified: boolean };
   /**
+   * The rect a geometry writer should STORE: always the panel's normal-state
+   * box, in canvas coordinates, never the parked / filled / collapsed one.
+   *
+   * The shell is the only thing that knows it. A writer reading the live DOM box
+   * gets the header-only height of a collapsed panel or the container-filling one
+   * of a maximized panel; a writer falling back to an opening-size constant gets
+   * a CONTENT size where a PANEL size (chrome included) belongs, which is how a
+   * fresh never-moved window that was minimized reloaded at 0,0 several pixels
+   * too small.
+   */
+  persistRect(): { x: number; y: number; w: number; h: number };
+  /**
    * Move the panel to the middle of what the user can currently SEE, clamped
    * inside it. Not the middle of the canvas — the canvas is pan/zoomed and is
    * far larger than the viewport, so canvas-centre is usually off-screen.
@@ -461,6 +473,17 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
     });
   };
   el.persistFlags = () => persistFlags(state);
+  el.persistRect = () => {
+    // A collapsed panel can still be dragged, so its x/y are live; only the
+    // height belongs to the pre-collapse rect.
+    if (state.status === 'smallified') {
+      return { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
+    }
+    // Parked: minimized sets display:none and maximized fills the container, so
+    // the live box describes neither the panel's normal position nor its size.
+    if (state.status === 'minimized' || state.status === 'maximized') return { ...normalRect };
+    return readRect();
+  };
   registry.add(el);
 
   // ---- interactions ----------------------------------------------------

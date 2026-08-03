@@ -298,27 +298,33 @@ function openPanel(t: Table, ctx: AppContext): void {
   // data.
   const onPanelClosed = async (): Promise<void> => {
     document.removeEventListener(VISIBLE_COUNT_EVENT, onVisibleCount as EventListener);
+    // The rect has to be read BEFORE the panel leaves the map: the queued write
+    // below runs after any in-flight drag save, by which time there is no shell
+    // left to ask.
+    const rect = panels.get(t.id)?.persistRect();
     panels.delete(t.id);
     unregisterPanel(t.id);
     // Programmatic close (table deleted/replaced/pulled, or hidden from
     // another tab) — the store already reflects the intended state, so don't
     // re-hide it.
     if (externallyClosed.delete(t.id)) return;
-    // User closed the window: persist it as hidden, preserving geometry.
-    const cur = await ctx.store.tables.findOne(t.id);
-    if (!cur) return;
-    const geom = cur.windowGeometry ?? {
-      x: 60,
-      y: 60,
-      w: 720,
-      h: 360,
-      z: 1,
-      minimized: false,
-      maximized: false,
-    };
-    await ctx.store.tables.patch(t.id, {
-      windowGeometry: { ...geom, closed: true },
-      updatedAt: Date.now(),
+    // User closed the window: persist it as hidden, preserving geometry. Queued
+    // like every other geometry write — a drag that lands as the window closes
+    // would otherwise patch the whole geometry object on top of this one and
+    // drop `closed`, leaving a window the user shut still open on reload.
+    await queueGeometryWrite(`table:${t.id}`, async () => {
+      const cur = await ctx.store.tables.findOne(t.id);
+      if (!cur) return;
+      const geom = cur.windowGeometry ?? {
+        ...(rect ?? { x: 60, y: 60, w: DEFAULT_W, h: DEFAULT_H }),
+        z: 1,
+        minimized: false,
+        maximized: false,
+      };
+      await ctx.store.tables.patch(t.id, {
+        windowGeometry: { ...geom, closed: true },
+        updatedAt: Date.now(),
+      });
     });
   };
 
@@ -443,11 +449,20 @@ function saveGeometry(tableId: string, ctx: AppContext): Promise<void> {
 }
 
 async function writeGeometry(tableId: string, ctx: AppContext): Promise<void> {
-  const el = document.getElementById(`panel-${cssSafe(tableId)}`);
-  if (!el) return;
   const shell = panels.get(tableId);
-  const status = shell?.status ?? 'normalized';
+  const el = shell ?? document.getElementById(`panel-${cssSafe(tableId)}`);
+  if (!el) return;
   const flags = shell?.persistFlags() ?? { minimized: false, maximized: false, smallified: false };
+  // The shell owns "which rect belongs in the store" — minimized, maximized and
+  // collapsed panels all have a live box that describes something other than
+  // their normal geometry (see `persistRect`). Without a shell (the panel is
+  // gone from the map) the element's own box is the best we have.
+  const rect = shell?.persistRect() ?? {
+    x: el.offsetLeft,
+    y: el.offsetTop,
+    w: el.offsetWidth,
+    h: el.offsetHeight,
+  };
   try {
     const t = await ctx.store.tables.findOne(tableId);
     const prev = t?.windowGeometry;
@@ -456,52 +471,8 @@ async function writeGeometry(tableId: string, ctx: AppContext): Promise<void> {
     const minimized = FORCE_MINIMIZED ? (prev?.minimized ?? false) : flags.minimized;
     const maximized = FORCE_MINIMIZED ? (prev?.maximized ?? false) : flags.maximized;
     const smallified = FORCE_MINIMIZED ? (prev?.smallified ?? false) : flags.smallified;
-    let x = el.offsetLeft;
-    let y = el.offsetTop;
-    let w = el.offsetWidth;
-    let h = el.offsetHeight;
-    // While minimized the shell sets display:none (no longer the old
-    // left:-9999 parking); while maximized it fills the container. In neither
-    // state does the live rect describe the panel's normal geometry, so keep
-    // the last-stored rect instead. The sentinel guard below is now dead code
-    // (nothing parks off-screen at that x anymore) but stays harmless.
-    //
-    // Key off the LIVE status, not the flags above: under `?minimize` those
-    // flags carry the saved values, but the panel really is parked (hidden),
-    // so reading its rect would write x/y/w/h of a hidden window.
-    const parked = status === 'minimized' || status === 'maximized';
-    if (parked) {
-      if (prev) {
-        x = prev.x;
-        y = prev.y;
-        w = prev.w;
-        h = prev.h;
-      } else {
-        // Nothing stored yet (e.g. a fresh panel maximized before it was ever
-        // saved normalized) — there's no honest rect to record, but the
-        // minimized/maximized FLAGS still must land, so fall back to the same
-        // placeholder rect writeFrontOrder uses rather than dropping the write
-        // entirely (that silently lost the flags whenever this was the very
-        // first geometry write for a panel).
-        x = 0;
-        y = 0;
-        w = DEFAULT_W;
-        h = DEFAULT_H;
-      }
-    } else if (status === 'smallified') {
-      // A collapsed panel is its header and nothing else, so only its HEIGHT is
-      // meaningless — it can still be dragged, and the shell refuses to resize
-      // it, so live x/y/w are all honest. Keep the pre-collapse height: the
-      // header-only one is below MIN_H, so `sanitizeGeometry` threw the whole
-      // record away on reload and the window came back at the cascade default.
-      h = prev?.h ?? DEFAULT_H;
-    }
-    if (x <= -9000) x = prev?.x ?? 40;
     const geom: WindowGeometry = {
-      x,
-      y,
-      w,
-      h,
+      ...rect,
       // Preserve the front-order timestamp written by stampFrontOrder.
       z: prev?.z ?? 0,
       minimized,
@@ -534,11 +505,11 @@ async function writeFrontOrder(tableId: string, ctx: AppContext): Promise<void> 
   try {
     const t = await ctx.store.tables.findOne(tableId);
     if (!t) return;
+    // Nothing stored yet: take the panel's own rect rather than a constant. The
+    // old placeholder used the CONTENT size as if it were the PANEL size, so a
+    // window whose first-ever write was this one restored at 0,0 and too small.
     const geom = t.windowGeometry ?? {
-      x: 0,
-      y: 0,
-      w: 720,
-      h: 360,
+      ...(panels.get(tableId)?.persistRect() ?? { x: 0, y: 0, w: DEFAULT_W, h: DEFAULT_H }),
       z: 0,
       minimized: false,
       maximized: false,

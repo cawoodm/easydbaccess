@@ -416,11 +416,15 @@ async function writeViewFrontOrder(instanceId: string, ctx: AppContext): Promise
   try {
     const inst = await ctx.store.viewInstances.findOne(instanceId);
     if (!inst) return;
+    // Nothing stored yet: the panel's own rect, not a constant — the opening
+    // constants are a CONTENT size, and this field holds a PANEL size.
     const geom = inst.windowGeometry ?? {
-      x: 0,
-      y: 0,
-      w: DEFAULT_W,
-      h: DEFAULT_H,
+      ...(panels.get(instanceId)?.panel.persistRect() ?? {
+        x: 0,
+        y: 0,
+        w: DEFAULT_W,
+        h: DEFAULT_H,
+      }),
       z: 0,
       minimized: false,
       maximized: false,
@@ -440,40 +444,18 @@ function saveGeometry(instanceId: string): Promise<void> {
 }
 
 async function writeViewGeometry(instanceId: string): Promise<void> {
-  const el = document.getElementById(panelDomId(instanceId));
   const entry = panels.get(instanceId);
-  if (!el || !entry) return;
+  if (!entry) return;
   const { minimized, maximized, smallified } = entry.panel.persistFlags();
+  // The shell decides which rect belongs in the store: a minimized panel is
+  // display:none, a maximized one fills the container, and a collapsed one is
+  // header-height, so none of their live boxes describe normal geometry.
+  const rect = entry.panel.persistRect();
   try {
     const ctx = await getContext();
     const prev = (await ctx.store.viewInstances.findOne(instanceId))?.windowGeometry;
-    // Only the normalized rect is meaningful; while minimized the shell parks
-    // the panel off-DOM (display:none) and while maximized it fills the
-    // container, so in those states keep the last-stored normal rect and only
-    // flip the flag.
-    let x = el.offsetLeft;
-    let y = el.offsetTop;
-    let w = el.offsetWidth;
-    let h = el.offsetHeight;
-    if ((minimized || maximized) && prev) {
-      x = prev.x;
-      y = prev.y;
-      w = prev.w;
-      h = prev.h;
-    } else if (smallified) {
-      // A collapsed panel is its header and nothing else, so only its HEIGHT is
-      // meaningless — it can still be dragged, and the shell refuses to resize
-      // it, so live x/y/w are all honest. Keep the pre-collapse height: the
-      // header-only one is below MIN_H, so `sanitizeGeometry` threw the whole
-      // record away on reload and the window came back at the cascade default.
-      h = prev?.h ?? DEFAULT_H;
-    }
-    if (x <= -9000) x = prev?.x ?? 40;
     const geom: WindowGeometry = {
-      x,
-      y,
-      w,
-      h,
+      ...rect,
       // Preserve the front-order rank written by stampViewFrontOrder — a
       // geometry save (drag/resize/status-change) must not clobber it back to
       // 0, or the window's stacking position would be forgotten on reload.
