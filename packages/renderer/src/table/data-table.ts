@@ -146,6 +146,17 @@ export class DataTable extends LitElement {
          re-flows live on resize; the full value stays in the title tooltip.
          A concrete cap (not max-width:0) is used so a lone link column can't
          collapse to zero width. */
+      /* A cell whose content is a RENDERER ELEMENT: the element sizes itself from
+         its content, and overflow:hidden does not shrink an element's intrinsic
+         width — so a long value pushed the whole COLUMN wide and the table
+         scrolled sideways instead of ellipsizing. That is what "auto ellipsis
+         works until we have a renderer" meant. Capping the cell (the same trick
+         as a link cell, and for the same reason) gives the element a bounded box
+         to clip inside, so the ellipsis follows the column again. An explicitly
+         resized column sets width, which takes over from this cap. */
+      td.has-renderer {
+        max-width: 40ch;
+      }
       td.r-link {
         max-width: 40ch;
         overflow: hidden;
@@ -1456,7 +1467,9 @@ export class DataTable extends LitElement {
                 ${cols.map(
                   (c) =>
                     html`<td
-                      class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}${cellStateClass(r, c)}`}
+                      class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}${
+                        c.renderer && this.cellRenderers?.get(c.renderer) ? ' has-renderer' : ''
+                      }${cellStateClass(r, c)}`}
                       title=${cellTooltip(r, c)}
                     >
                       ${this.renderCell(r, c)}
