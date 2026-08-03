@@ -13,6 +13,7 @@ import type {
   WindowGeometry,
 } from '@easydb/shared';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
+import { quoteBigIntegers } from '../import/big-numbers.js';
 import { runImport } from '../import/import-kernel.js';
 import { rowRekeyer } from '../table/column-merge.js';
 import { filenameFromUrl } from '../import/fetch-source.js';
@@ -125,7 +126,7 @@ const importerSpec: ImporterSpec = {
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(text);
+      parsed = JSON.parse(quoteBigIntegers(text));
     } catch (err) {
       throw new Error(`Invalid JSON in ${fallback}: ${(err as Error).message}`, {
         cause: err,
@@ -186,7 +187,7 @@ async function importJsonFile(api: HostApi, file: File): Promise<void> {
   const text = await file.text();
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(quoteBigIntegers(text));
   } catch (err) {
     api.events.emit('plugin:error', {
       url: 'json-import',
@@ -251,7 +252,7 @@ export async function restoreWorkspaceDump(
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(quoteBigIntegers(text));
   } catch (err) {
     api.events.emit('plugin:error', {
       url: 'json-import',

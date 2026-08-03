@@ -8,6 +8,7 @@ import type {
   TableOrigin,
 } from '@easydb/shared';
 import { filenameFromUrl } from '../import/fetch-source.js';
+import { isUnsafeIntegerText } from '../import/big-numbers.js';
 import { mapRowsToTarget, type ColumnMapping } from '../import/map-columns.js';
 import { cryptoUUID, slugField } from '../util/ids.js';
 
@@ -746,6 +747,9 @@ function isBool(s: string): boolean {
 function isNumber(s: string): boolean {
   const t = s.trim();
   if (t === '') return false;
+  // An integer past 2^53 cannot round-trip through a JS number, so a column
+  // holding one is TEXT — see import/big-numbers.ts.
+  if (isUnsafeIntegerText(t)) return false;
   const n = Number(t);
   return Number.isFinite(n);
 }
@@ -779,6 +783,11 @@ function coerce(raw: string, type: ColumnType): unknown {
   switch (type) {
     case 'number': {
       if (s === '') return null;
+      // Keep the digits when they do not fit a JS number — the same reason
+      // `isNumber` refuses to infer one. A column typed `number` by hand (or
+      // by a header annotation) still holds such a value as text rather than
+      // rounding it.
+      if (isUnsafeIntegerText(s)) return s;
       const n = Number(s);
       return Number.isFinite(n) ? n : s;
     }

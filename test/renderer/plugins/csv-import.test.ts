@@ -255,3 +255,33 @@ describe('TSV support', () => {
     expect(stripDelimitedExt('my.data.tsv')).toBe('my.data');
   });
 });
+
+describe('integers too big for a JS number', () => {
+  // A snowflake id: `Number('1298624375692894210')` is …894200, so importing it
+  // as a number silently changes the id. Such a column is text.
+  const BIG = '1298624375692894210';
+
+  it('types a column of big ids as string and keeps every digit', () => {
+    const { columns, rows } = parseCsv(`id\n${BIG}\n9007199254740993\n`);
+    expect(columns[0]).toMatchObject({ field: 'id', type: 'string' });
+    expect(rows.map((r) => r.id)).toEqual([BIG, '9007199254740993']);
+  });
+
+  it('still types ordinary integers as number', () => {
+    const { columns, rows } = parseCsv('n\n1\n9007199254740991\n');
+    expect(columns[0]).toMatchObject({ type: 'number' });
+    expect(rows.map((r) => r.n)).toEqual([1, 9007199254740991]);
+  });
+
+  it('keeps the digits even when the header pins the column to number', () => {
+    const { rows } = parseCsv(`id:ID:number\n${BIG}\n`);
+    expect(rows[0]!.id).toBe(BIG);
+  });
+
+  it('one big id in a column of small ones makes the whole column text', () => {
+    // Mixed is the common case (ids grow over time) and a per-cell decision
+    // would give one column two types.
+    const { columns } = parseCsv(`id\n1\n${BIG}\n`);
+    expect(columns[0]).toMatchObject({ type: 'string' });
+  });
+});

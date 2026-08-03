@@ -16,6 +16,7 @@
 
 ### Bugs
 
+- 🪲 An id past 2^53 (e.g. 1298624375692894210) was rounded on import — silently a different id (v0.0.292)
 - 🪲 Every click inside a window re-ordered the windows while a minimized one sat above it; a second finger hijacked a drag or resize (v0.0.283)
 - 🪲 A column script's Markdown output showed its HTML tags as text when the cell already held HTML (v0.0.281)
 - 🪲 Editing an HTML cell on a scripted column saved the computed output over the stored source (v0.0.281)
