@@ -452,7 +452,12 @@ export class AppShell extends LitElement {
     // treatment; the footer distinguishes primary vs slot.
     if (b.variant === 'secondary') {
       return html`
-        <button class="icon-btn" title=${b.tooltip ?? b.label} @click=${() => this.runSlot(b)}>
+        <button
+          class="icon-btn"
+          title=${b.tooltip ?? b.label}
+          aria-label=${b.tooltip ?? b.label}
+          @click=${() => this.runSlot(b)}
+        >
           ${renderButtonIcon(b.icon)}
         </button>
       `;
@@ -477,7 +482,7 @@ export class AppShell extends LitElement {
             target="_blank"
             rel="noopener"
             title="View the changelog on GitHub"
-            ><span class="version">v0.0.277</span></a
+            ><span class="version">v0.0.278</span></a
           ></strong
         >
         ${this.headerButtons
