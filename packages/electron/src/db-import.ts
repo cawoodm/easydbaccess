@@ -125,6 +125,12 @@ export interface ImportCandidate {
    * schema it is mapping FROM.
    */
   columns?: string[];
+  /**
+   * A view's `CREATE VIEW … AS SELECT …`. Present only for views, and only so one
+   * can be imported as a PROJECTION — the query itself, recomputed from the
+   * tables it reads — instead of a snapshot of today's rows.
+   */
+  sql?: string;
 }
 
 export interface ImportPreview {
@@ -246,16 +252,16 @@ function easydbColumnNames(db: DatabaseSyncType, sqlTable: string): string[] {
  * nature, which is also what makes it safe to treat one exactly like a table
  * from here on.
  */
-function listForeignCandidates(db: DatabaseSyncType): Array<{ name: string; sqlTable: string; rowCount: number; isView: boolean; columns: string[] }> {
+function listForeignCandidates(db: DatabaseSyncType): Array<{ name: string; sqlTable: string; rowCount: number; isView: boolean; columns: string[]; sql: string }> {
   const rows = db
     .prepare(
-      `SELECT name, type FROM sqlite_master
+      `SELECT name, type, sql FROM sqlite_master
        WHERE type IN ('table', 'view')
          AND name NOT LIKE 'sqlite_%'
          AND name NOT LIKE '\\_easydb%' ESCAPE '\\'
        ORDER BY type, name`,
     )
-    .all() as Array<{ name: string; type: 'table' | 'view' }>;
+    .all() as Array<{ name: string; type: 'table' | 'view'; sql: string | null }>;
   return rows.map((r) => ({
     name: r.name,
     sqlTable: r.name,
@@ -265,6 +271,10 @@ function listForeignCandidates(db: DatabaseSyncType): Array<{ name: string; sqlT
     // Names only, and cheap (`PRAGMA table_info`): enough for the renderer to
     // offer an append mapping without a second round trip for the schema.
     columns: columnNamesOf(db, r.name),
+    // A view's own `CREATE VIEW … AS SELECT …`. Carried so a view can be imported
+    // as a PROJECTION — the query, recomputed — rather than only as a snapshot of
+    // the rows it returns now. `sql-parse.ts` turns it into a ProjectionSpec.
+    sql: r.type === 'view' ? (r.sql ?? '') : '',
   }));
 }
 
@@ -301,6 +311,7 @@ export function previewImport(sourcePath: string, targetStore: SqliteStore, work
         // offered), but carried for every candidate rather than making the
         // renderer ask again once the user picks Append.
         ...('columns' in c && c.columns.length > 0 ? { columns: c.columns } : {}),
+        ...('sql' in c && typeof c.sql === 'string' && c.sql.length > 0 ? { sql: c.sql } : {}),
       })),
     };
   } finally {

@@ -62,11 +62,19 @@ function runInWorker(sourcePath: string, store: SqliteStore, entry: ImportPlanEn
     const worker = new Worker(workerPath(), { workerData: job });
     let rows = 0;
     let settled = false;
+    /**
+     * Settle only once the thread is really gone.
+     *
+     * `terminate()` is asynchronous, and until it resolves the worker still holds
+     * its SQLite connection — so resolving first let the caller carry on while the
+     * file was still open. That surfaced as an EPERM deleting the database, and
+     * would surface in the app as the next import contending with a thread nobody
+     * is waiting for any more.
+     */
     const finish = (fn: () => void): void => {
       if (settled) return;
       settled = true;
-      void worker.terminate();
-      fn();
+      void worker.terminate().then(fn, fn);
     };
 
     // Cancellation kills the thread. Its transaction is per batch, so what has

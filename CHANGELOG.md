@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ Importing a `.db` lists its tables and views as checkboxes in separate sections, each with its own all/none; a view can come in as a Projection or as Data (v0.0.292)
 - ✨ Importing a `.db` onto a table that already exists offers Append: the rows are added and the table's own columns are left alone, with a column mapper when the names differ (v0.0.291)
 - ✨ Save As names the file after the workspace (v0.0.291)
 - ✨ Workspace files are `.edb` now: drop one to open it, drop a plain `.db` to import its data — no question asked (v0.0.290)

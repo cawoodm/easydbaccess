@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { HostApi, Table } from '@easydb/shared';
 import type { EasydbDatabaseFileKind, EasydbDbBridge } from '../../../packages/renderer/src/db/data-store-ipc.js';
-import { handleDroppedFile, openFlow, resumePendingImport } from '../../../packages/renderer/src/plugins/electron-db.js';
+import { handleDroppedFile, importDeps, openFlow, resumePendingImport } from '../../../packages/renderer/src/plugins/electron-db.js';
+
+/**
+ * The real picker is a Lit dialog and needs a DOM; these suites run under plain
+ * Node. The stub takes every candidate, as data — the modes themselves are the
+ * dialog's own business (`table-select-dialog.ts`), not this module's.
+ */
+importDeps.pickCandidates = async (_api, candidates) => candidates.map((candidate) => ({ candidate, mode: 'data' as const }));
 
 /* The fakes in `harness` return settled promises without awaiting anything —
    that is what a stub is. */

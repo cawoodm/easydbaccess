@@ -42,6 +42,8 @@ export interface EasydbImportCandidate {
   isView?: boolean;
   /** The source object's own column names, in its order — what an append maps FROM. */
   columns?: string[];
+  /** A view's `CREATE VIEW … AS SELECT …` — what lets it be imported as a projection. */
+  sql?: string;
 }
 
 export interface EasydbImportPreview {

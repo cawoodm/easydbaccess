@@ -395,11 +395,18 @@ export async function importFlow(api: HostApi, bridge: EasydbDbBridge, sourcePat
     return;
   }
 
-  // Which of them. Anything not chosen is passed to the commit as an explicit
-  // `skip`, so the main process imports exactly what the user picked.
-  const chosen = await pickCandidates(api, preview.candidates);
-  if (chosen.length === 0) return;
+  // Which of them, and for a view HOW. Anything not chosen is passed to the
+  // commit as an explicit `skip`, so the main process imports exactly what the
+  // user picked.
+  const pickedObjects = await importDeps.pickCandidates(api, preview.candidates);
+  if (pickedObjects.length === 0) return;
+  // A view taken as a projection is not imported at all — no rows are copied.
+  // Its QUERY becomes a projection over the tables in this workspace, once they
+  // exist, which is what `asProjections` below does after the import.
+  const asProjections = pickedObjects.filter((p) => p.mode === 'projection');
+  const chosen = pickedObjects.filter((p) => p.mode !== 'projection').map((p) => p.candidate);
   const chosenNames = new Set(chosen.map((c) => c.name));
+  if (chosen.length === 0 && asProjections.length === 0) return;
 
   // Local table names, for proposing a unique rename target — same
   // case-insensitive rule the rest of the app uses (see `uniqueTableName` in
@@ -448,6 +455,74 @@ export async function importFlow(api: HostApi, bridge: EasydbDbBridge, sourcePat
 
   const results = await runRowPhase(api, bridge, picked.path, plan, skipped);
   reportImportResults(api, picked.path, results);
+  // AFTER the rows: a projection resolves its sources by NAME, so the tables it
+  // reads have to be in the workspace before it is created.
+  if (asProjections.length > 0) await createViewProjections(api, workspaceId, asProjections);
+}
+
+/**
+ * Turn each chosen view's `CREATE VIEW … AS SELECT …` into a Projection.
+ *
+ * A view is a query, and this app's equivalent of a query over tables is a
+ * projection — not a table of copied rows. So the view's SQL goes through the
+ * same parser a `.sql` import uses (`sql-parse.ts`), and the resulting spec
+ * through the same creator (`projection-create.ts`). `datasette-views.ts` does
+ * exactly this for a Datasette instance; this is the same route for a local file.
+ *
+ * A view whose SQL the parser cannot model — an aggregate, a subquery, a window
+ * function — is reported rather than half-created, with the suggestion that names
+ * the alternative that does work.
+ */
+async function createViewProjections(api: HostApi, workspaceId: string, picked: PickedCandidate[]): Promise<void> {
+  const [{ parseSqlScript }, { createProjectionTable }] = await Promise.all([import('./sql-parse.js'), import('./projection-create.js')]);
+
+  const created: string[] = [];
+  const failed: Array<{ name: string; why: string }> = [];
+  // Re-read per projection: one created here can be the source of the next, and
+  // the tables the import just made have to be visible.
+  for (const { candidate } of picked) {
+    const sql = candidate.sql ?? '';
+    if (!sql) {
+      failed.push({ name: candidate.name, why: 'its definition could not be read' });
+      continue;
+    }
+    const parsed = parseSqlScript(sql);
+    const projection = parsed.projections[0];
+    if (!projection) {
+      failed.push({ name: candidate.name, why: parsed.unsupported[0] ?? 'its SELECT could not be modelled as a projection' });
+      continue;
+    }
+    const pool = (await api.store.tables.find()).filter((t) => t.workspaceId === workspaceId);
+    const byLower = new Map(pool.map((t) => [t.name.toLowerCase(), t] as const));
+    const table = await createProjectionTable(
+      api,
+      workspaceId,
+      { name: candidate.name, spec: projection.spec, ...(projection.sortBy ? { sortBy: projection.sortBy } : {}) },
+      { resolve: (n) => byLower.get(n.toLowerCase()), taken: pool.map((t) => t.name) },
+    );
+    if (!table) {
+      const missing = projection.spec.sources.map((src) => src.tableName).join(', ');
+      failed.push({ name: candidate.name, why: `it reads tables this workspace does not have (${missing}) — import them too` });
+      continue;
+    }
+    created.push(table.name);
+  }
+
+  if (created.length > 0) {
+    api.ui.dialogs.toast(`Created ${created.length} projection${created.length === 1 ? '' : 's'} from views: ${created.join(', ')}.`, {
+      kind: 'success',
+      title: 'Import database',
+    });
+  }
+  if (failed.length > 0) {
+    api.ui.dialogs.toast(
+      `${failed.length} view${failed.length === 1 ? '' : 's'} could not become a projection — ${failed.map((f) => `${f.name}: ${f.why}`).join('; ')}. Import them as Data instead.`,
+      {
+        kind: 'warning',
+        title: 'Import database',
+      },
+    );
+  }
 }
 
 /**
@@ -564,27 +639,54 @@ export async function resumePendingImport(api: HostApi, bridge: EasydbDbBridge):
   reportImportResults(api, pending.sourcePath, results);
 }
 
+/** One picked object: the candidate, plus how a view should arrive. */
+interface PickedCandidate {
+  candidate: EasydbImportCandidate;
+  mode?: 'projection' | 'data' | undefined;
+}
+
 /**
- * Which tables/views to import. Shares the shape of `pickObjects` (Browse's
- * picker) rather than a bespoke dialog: `Dialogs.choice` is one-of, so "all" or
- * one-at-a-time is what is honestly available, and a single table can be pulled
- * out of a big file without dragging the rest along.
+ * Which tables and views to import, and for each view whether it arrives as a
+ * projection or as data.
+ *
+ * A real multi-select dialog (`table-select-dialog.ts`, the one a JSON or
+ * Datasette import already uses) rather than `Dialogs.choice`: choice is one-of,
+ * so a big file could only be taken whole or one object at a time. Tables and
+ * views get their own sections with their own all/none, because they are
+ * different things — a view holds no rows of its own, and picking one means
+ * choosing how it should come in.
  */
-async function pickCandidates(api: HostApi, candidates: EasydbImportCandidate[]): Promise<EasydbImportCandidate[]> {
-  if (candidates.length === 1) return candidates;
-  const ALL = `All ${candidates.length}`;
-  const labels = candidates.map(
-    (c) =>
-      `${c.name}${c.isView ? ' (view)' : ''}` +
-      // -1 = not counted (a view; counting one means running it).
-      (c.rowCount < 0 ? '' : ` — ${c.rowCount.toLocaleString()} row${c.rowCount === 1 ? '' : 's'}`) +
-      `${c.collides ? ' ⚠ name in use' : ''}`,
-  );
-  const choice = await api.ui.dialogs.choice('Which tables or views should be imported?', [ALL, ...labels], 'Import database');
-  if (!choice) return [];
-  if (choice === ALL) return candidates;
-  const one = candidates[labels.indexOf(choice)];
-  return one ? [one] : [];
+/**
+ * The seam the tests replace.
+ *
+ * `pickCandidates` opens a Lit dialog, so it needs a DOM. The suites for this
+ * module run under plain Node (there is no jsdom in this repo), and threading an
+ * optional picker down through `openFlow` -> `handleDatabaseFile` -> `importFlow`
+ * would put a test-only parameter on three production signatures. One overridable
+ * binding is the smaller price.
+ */
+export const importDeps = {
+  pickCandidates: (api: HostApi, candidates: EasydbImportCandidate[]): Promise<PickedCandidate[]> => pickCandidates(api, candidates),
+};
+
+async function pickCandidates(api: HostApi, candidates: EasydbImportCandidate[]): Promise<PickedCandidate[]> {
+  const { chooseDatabaseObjects } = await import('../dialogs/table-select-dialog.js');
+  const items = candidates.map((c) => ({
+    name: c.name,
+    // -1 means "not counted" (a view — counting one means running it), which the
+    // dialog shows as no count rather than as "-1 rows".
+    size: c.rowCount < 0 ? null : c.rowCount,
+    kind: c.isView ? ('view' as const) : ('table' as const),
+    ...(c.collides ? { detail: '⚠ name already in use' } : {}),
+  }));
+  const chosen = await chooseDatabaseObjects(items, {
+    title: 'Import database',
+    message: 'Tables bring their rows. A view can come in as a Projection — its query, recomputed — or as Data, a snapshot you can edit.',
+    confirmLabel: 'Import',
+    offerViewModes: true,
+  });
+  if (!chosen) return [];
+  return chosen.map((c) => ({ candidate: candidates[c.index]!, mode: c.mode }));
 }
 
 /**
