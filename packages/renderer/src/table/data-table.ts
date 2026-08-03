@@ -1223,6 +1223,13 @@ export class DataTable extends LitElement {
     // `pointercancel` with NO following `pointerup`. Without this, `resizing`
     // latches forever and the `applyTable` guard above then drops every
     // store→grid column update for the rest of this element's life.
+    //
+    // Cancel runs the SAME handler as a normal release, so the width the drag
+    // had reached is committed rather than rolled back. That is deliberate: the
+    // grid has already been rendering that width for the whole drag, and every
+    // column was frozen at pointerdown, so "undoing" it would need the pre-drag
+    // snapshot kept alive purely to spring the column back — a jump the user
+    // did not ask for after an interruption they did not cause.
     window.addEventListener('pointercancel', onUp);
   }
 

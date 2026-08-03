@@ -265,9 +265,13 @@ export class AppShell extends LitElement {
 
   override connectedCallback() {
     super.connectedCallback();
-    this.addEventListener('dragover', this.onDragOver);
-    this.addEventListener('dragleave', this.onDragLeave);
-    this.addEventListener('drop', this.onDrop);
+    // On the DOCUMENT, not on this element: the floating windows live in
+    // `#easydb-panels`, which is a SIBLING of <app-shell>, so a file dropped on a
+    // table window never bubbled here at all — the browser just navigated away
+    // to the dropped file. The drag-over highlight still belongs to the shell.
+    document.addEventListener('dragover', this.onDragOver);
+    document.addEventListener('dragleave', this.onDragLeave);
+    document.addEventListener('drop', this.onDrop);
     // Panels live in light DOM (#easydb-panels), outside this shell's shadow,
     // so we listen on the document root to receive their bubbling events.
     document.addEventListener('easydb:edit-columns', this.onEditColumns as EventListener);
@@ -283,9 +287,9 @@ export class AppShell extends LitElement {
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    this.removeEventListener('dragover', this.onDragOver);
-    this.removeEventListener('dragleave', this.onDragLeave);
-    this.removeEventListener('drop', this.onDrop);
+    document.removeEventListener('dragover', this.onDragOver);
+    document.removeEventListener('dragleave', this.onDragLeave);
+    document.removeEventListener('drop', this.onDrop);
     document.removeEventListener('easydb:edit-columns', this.onEditColumns as EventListener);
     document.removeEventListener('easydb:open-new-table', this.onOpenNewTable);
     document.removeEventListener('easydb:open-csv-paste', this.onOpenCsvPaste);
@@ -402,7 +406,10 @@ export class AppShell extends LitElement {
   };
 
   private onDragLeave = (e: DragEvent) => {
-    if (e.relatedTarget && this.contains(e.relatedTarget as Node)) return;
+    // Still inside the app (including the panels overlay, which is a SIBLING of
+    // this element) ⇒ the drag has not left, it only crossed a boundary.
+    const to = e.relatedTarget as Node | null;
+    if (to && (this.contains(to) || panelsOverlay()?.contains(to))) return;
     this.classList.remove('drag-over');
   };
 
@@ -445,7 +452,12 @@ export class AppShell extends LitElement {
     // treatment; the footer distinguishes primary vs slot.
     if (b.variant === 'secondary') {
       return html`
-        <button class="icon-btn" title=${b.tooltip ?? b.label} @click=${() => this.runSlot(b)}>
+        <button
+          class="icon-btn"
+          title=${b.tooltip ?? b.label}
+          aria-label=${b.tooltip ?? b.label}
+          @click=${() => this.runSlot(b)}
+        >
           ${renderButtonIcon(b.icon)}
         </button>
       `;
@@ -470,7 +482,7 @@ export class AppShell extends LitElement {
             target="_blank"
             rel="noopener"
             title="View the changelog on GitHub"
-            ><span class="version">v0.0.277</span></a
+            ><span class="version">v0.0.286</span></a
           ></strong
         >
         ${this.headerButtons
@@ -563,6 +575,11 @@ const BASE_DOCUMENT_TITLE = document.title;
 function syncDocumentTitle(workspaceTitle: string): void {
   const t = workspaceTitle.trim();
   document.title = t ? `${t} — ${BASE_DOCUMENT_TITLE}` : BASE_DOCUMENT_TITLE;
+}
+
+/** The floating-window overlay — a sibling of `<app-shell>`, not a child. */
+function panelsOverlay(): HTMLElement | null {
+  return document.getElementById('easydb-panels');
 }
 
 function hasFiles(e: DragEvent): boolean {

@@ -19,7 +19,7 @@
  */
 import { MIN_H, MIN_W } from '../geometry.js';
 import { isMobileViewport } from '../../util/viewport.js';
-import { dragRect, resizeRect, type Edge, type Rect } from './geometry-math.js';
+import { dragRect, EDGES, resizeRect, type Edge, type Rect } from './geometry-math.js';
 import {
   initialState,
   persistFlags,
@@ -46,7 +46,7 @@ export interface PanelShellOptions {
   panelSize?: { w: number; h: number } | undefined;
   position?: { x: number; y: number } | { centerTopOffset: number } | 'center' | undefined;
   minimizeTo?: string | undefined;
-  boot?: { minimized?: boolean; maximized?: boolean } | undefined;
+  boot?: { minimized?: boolean; maximized?: boolean; smallified?: boolean } | undefined;
   viewport?: ShellViewport | undefined;
   onfronted?: (() => void) | undefined;
   onstatuschange?: ((panel: PanelShellEl) => void) | undefined;
@@ -65,7 +65,25 @@ export type PanelShellEl = HTMLDivElement & {
   close(): void;
   setHeaderTitle(title: string): void;
   setHeaderLogo(svg: string): void;
-  persistFlags(): { minimized: boolean; maximized: boolean };
+  /**
+   * Repaint the chrome, window and dock bar alike. A table's kind can change
+   * while its window is open (a live connect adds a `source`), and the colour is
+   * how that reads at a glance.
+   */
+  setHeaderColor(color: string): void;
+  persistFlags(): { minimized: boolean; maximized: boolean; smallified: boolean };
+  /**
+   * The rect a geometry writer should STORE: always the panel's normal-state
+   * box, in canvas coordinates, never the parked / filled / collapsed one.
+   *
+   * The shell is the only thing that knows it. A writer reading the live DOM box
+   * gets the header-only height of a collapsed panel or the container-filling one
+   * of a maximized panel; a writer falling back to an opening-size constant gets
+   * a CONTENT size where a PANEL size (chrome included) belongs, which is how a
+   * fresh never-moved window that was minimized reloaded at 0,0 several pixels
+   * too small.
+   */
+  persistRect(): { x: number; y: number; w: number; h: number };
   /**
    * Move the panel to the middle of what the user can currently SEE, clamped
    * inside it. Not the middle of the canvas — the canvas is pan/zoomed and is
@@ -74,6 +92,10 @@ export type PanelShellEl = HTMLDivElement & {
    */
   centerInViewport(): void;
 };
+
+/** Chrome colour for a panel whose caller names none. Matches the CSS fallback
+ * in panel-shell.css, so the two cannot drift. */
+const DEFAULT_COLOR = '#01579b';
 
 /** Titlebar contents where a drag or dblclick must NOT start. */
 const INTERACTIVE = 'input, textarea, select, button, a, .jsPanel-controlbar';
@@ -135,12 +157,21 @@ function nextZ(): number {
   return zSeq;
 }
 
-/** Whether `el` already has the highest z-index among every panel in the DOM
- * (both registries — see `nextZ()`), i.e. fronting it would be a no-op. */
+/**
+ * Whether `el` is the highest VISIBLE panel (both registries — see `nextZ()`),
+ * i.e. fronting it would be a no-op.
+ *
+ * Minimized panels are skipped. A minimized panel keeps the z-index it went
+ * down with while being `display:none`, so counting it made the panel the user
+ * is actually clicking look buried: every pointerdown fronted, and fronting
+ * writes the front order to the store (`stampFrontOrder`), which is the churn
+ * this check exists to prevent.
+ */
 function isTopmost(el: HTMLElement): boolean {
   const mine = Number(el.style.zIndex);
   for (const other of document.querySelectorAll<HTMLElement>('.jsPanel')) {
-    if (other !== el && Number(other.style.zIndex) > mine) return false;
+    if (other === el || other.style.display === 'none') continue;
+    if (Number(other.style.zIndex) > mine) return false;
   }
   return true;
 }
@@ -170,7 +201,9 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
   const el = document.createElement('div') as PanelShellEl;
   el.className = 'jsPanel';
   el.id = opts.id;
-  el.style.setProperty('--eda-panel-color', opts.color ?? '#01579b');
+  // One colour for the window AND the bar it docks as — see `setHeaderColor`.
+  let color = opts.color ?? DEFAULT_COLOR;
+  el.style.setProperty('--eda-panel-color', color);
 
   // Header: logo | titlebar(title) | controlbar(smallify min max normalize close)
   const hdr = document.createElement('div');
@@ -218,11 +251,17 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
   }
 
   el.append(hdr, contentHost, ftr);
-  for (const edge of ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as Edge[]) {
-    const z = document.createElement('div');
-    z.className = 'eda-resize';
-    z.dataset['edge'] = edge;
-    el.append(z);
+  // Zone → edge is kept in this list, not read back from `dataset` at drag time:
+  // a dataset read is `string | undefined` and needed an `as Edge` cast, which
+  // would have hidden a typo in the edge names from the compiler. The `data-edge`
+  // attribute stays for the stylesheet (cursor + hit area per edge).
+  const resizeZones: Array<{ zone: HTMLElement; edge: Edge }> = [];
+  for (const edge of EDGES) {
+    const zone = document.createElement('div');
+    zone.className = 'eda-resize';
+    zone.dataset['edge'] = edge;
+    el.append(zone);
+    resizeZones.push({ zone, edge });
   }
   el.style.zIndex = String(nextZ());
   opts.container.append(el);
@@ -328,7 +367,9 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
     const b = document.createElement('div');
     b.className = 'jsPanel-replacement';
     b.id = `${opts.id}-min`;
-    b.style.setProperty('--eda-panel-color', opts.color ?? '#01579b');
+    // The CURRENT colour, not the opening one: a table that gained a `source`
+    // while open is a different kind now, and its bar has to agree.
+    b.style.setProperty('--eda-panel-color', color);
     const bLogo = document.createElement('div');
     bLogo.className = 'jsPanel-headerlogo';
     bLogo.innerHTML = logo.innerHTML;
@@ -445,6 +486,13 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
     const barLogo = bar?.querySelector('.jsPanel-headerlogo');
     if (barLogo) barLogo.innerHTML = svg;
   };
+  el.setHeaderColor = (next: string) => {
+    color = next;
+    el.style.setProperty('--eda-panel-color', color);
+    // A window that is minimized right now paints as its dock bar, so the bar
+    // has to be repainted too — and `color` is remembered for the next one.
+    bar?.style.setProperty('--eda-panel-color', color);
+  };
   el.centerInViewport = () => {
     if (state.status !== 'normalized' && state.status !== 'smallified') return;
     const vis = visibleRect();
@@ -461,6 +509,17 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
     });
   };
   el.persistFlags = () => persistFlags(state);
+  el.persistRect = () => {
+    // A collapsed panel can still be dragged, so its x/y are live; only the
+    // height belongs to the pre-collapse rect.
+    if (state.status === 'smallified') {
+      return { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
+    }
+    // Parked: minimized sets display:none and maximized fills the container, so
+    // the live box describes neither the panel's normal position nor its size.
+    if (state.status === 'minimized' || state.status === 'maximized') return { ...normalRect };
+    return readRect();
+  };
   registry.add(el);
 
   // ---- interactions ----------------------------------------------------
@@ -481,6 +540,12 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
   );
 
   // Drag by header, logo, and footer. Unclamped by design.
+  //
+  // Every move/up handler below is scoped to the pointer that STARTED the
+  // gesture. A second finger landing on the same handle mid-drag is a different
+  // pointerId, and its moves used to be read as the first finger's — the panel
+  // jumped to wherever the delta between them put it, and the second finger's
+  // `pointerup` ended the drag while the first was still down.
   const wireDrag = (handle: HTMLElement): void => {
     handle.addEventListener('pointerdown', (e: PointerEvent) => {
       if (e.button !== 0) return;
@@ -488,16 +553,19 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
       if (state.status === 'maximized' || state.status === 'minimized') return;
       const startRect = readRect();
       const scale = opts.viewport?.getState().scale ?? 1;
+      const id = e.pointerId;
       const sx = e.clientX;
       const sy = e.clientY;
       let moved = false;
       const onMove = (ev: PointerEvent): void => {
+        if (ev.pointerId !== id) return;
         moved = true;
         const r = dragRect(startRect, ev.clientX - sx, ev.clientY - sy, scale);
         el.style.left = `${r.x}px`;
         el.style.top = `${r.y}px`;
       };
-      const onUp = (): void => {
+      const onUp = (ev: PointerEvent): void => {
+        if (ev.pointerId !== id) return;
         handle.removeEventListener('pointermove', onMove);
         handle.removeEventListener('pointerup', onUp);
         handle.removeEventListener('pointercancel', onUp);
@@ -513,24 +581,26 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
   wireDrag(logo);
   wireDrag(ftr);
 
-  // Resize from the edge/corner zones.
-  for (const zone of el.querySelectorAll<HTMLElement>('.eda-resize')) {
+  // Resize from the edge/corner zones. Same pointerId scoping as the drag above.
+  for (const { zone, edge } of resizeZones) {
     zone.addEventListener('pointerdown', (e: PointerEvent) => {
       if (e.button !== 0) return;
       if (state.status !== 'normalized') return;
-      const edge = zone.dataset['edge'] as Edge;
       const startRect = readRect();
       const scale = opts.viewport?.getState().scale ?? 1;
+      const id = e.pointerId;
       const sx = e.clientX;
       const sy = e.clientY;
       let moved = false;
       const onMove = (ev: PointerEvent): void => {
+        if (ev.pointerId !== id) return;
         moved = true;
         applyRect(
           resizeRect(startRect, edge, ev.clientX - sx, ev.clientY - sy, scale, MIN_W, MIN_H),
         );
       };
-      const onUp = (): void => {
+      const onUp = (ev: PointerEvent): void => {
+        if (ev.pointerId !== id) return;
         zone.removeEventListener('pointermove', onMove);
         zone.removeEventListener('pointerup', onUp);
         zone.removeEventListener('pointercancel', onUp);

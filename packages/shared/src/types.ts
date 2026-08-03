@@ -81,6 +81,13 @@ export interface WindowGeometry {
   minimized: boolean;
   maximized: boolean;
   /**
+   * The window is collapsed to its titlebar ("smallified"), content and footer
+   * folded away. `w`/`h` stay the PRE-collapse size — the header-only height is
+   * below the sanitizer's minimum, so storing it would make the whole record
+   * look corrupt. Absent/false ⇒ the window is unfolded.
+   */
+  smallified?: boolean;
+  /**
    * The window was closed by the user, hiding the table without deleting it.
    * A closed table keeps all its data and is reopened from the command palette
    * ("Go to <table>"); permanent deletion is a separate, explicit action.

@@ -54,7 +54,10 @@ easyDBAccess/
 ├── docs/
 │   ├── tech/          architecture notes (this file, SYNCH.md, etc.)
 │   └── help/          user guide + screenshots
-├── e2e/               Playwright suites
+├── test/              every test suite
+│   ├── renderer/      Vitest units, mirroring packages/renderer/src/
+│   ├── server/        Vitest HTTP suites for the Hono app
+│   └── e2e/           Playwright specs + fixtures
 └── .claude/plans/     authoritative design docs
 ```
 
@@ -190,9 +193,9 @@ All commands run from the repo root:
 | `npm run dev:server` | `tsx watch` Hono server on `http://localhost:3000` |
 | `npm run dev:electron` | Boots Vite + Electron with live reload |
 | `npm run build` | Builds every workspace that has a `build` script |
-| `npm run typecheck` | `tsc -b` across all project references |
-| `npm run test` | Vitest unit suites in every package that has one (renderer, server, electron) |
-| `npm run test:e2e` | Playwright — one Chromium project against the browser build. There is no Electron Playwright project; desktop-only code is covered by Vitest instead (see [`TESTING.md`](./TESTING.md)) |
+| `npm run typecheck` | `tsc -b` across all project references, then `test/tsconfig.json` |
+| `npm run test` | One Vitest run over `test/` |
+| `npm run test:e2e` | Playwright specs in `test/e2e/` — one Chromium project against the browser build. There is no Electron Playwright project; desktop-only code is covered by Vitest instead (see [`TESTING.md`](./TESTING.md)) |
 | `npm run package:electron` | Produces an installer via `electron-builder` |
 
 Renderer is shipped via Vite; shared/server/electron compile with `tsc -b`

@@ -37,11 +37,27 @@ export function tableKind(t: Pick<Table, 'source' | 'origin'>): TableKind {
  * A table has a Refresh button (datasette-source.ts `datasette:refresh`,
  * import-data.ts `import-data:refresh`, url-source.ts `url-source:refresh`)
  * whenever it carries a `source` OR an `origin` — i.e. every kind except
- * `'normal'`. Drives the `eda-refreshable` panel class (see index.html) that
- * gives refreshable tables a distinct titlebar colour.
+ * `'normal'`. Also drives {@link panelColor}, which gives refreshable tables a
+ * distinct titlebar colour.
  */
 export function isRefreshable(t: Pick<Table, 'source' | 'origin'>): boolean {
   return !!(t.source || t.origin);
+}
+
+/** A plain local table's chrome (jsPanel's old 'primary' theme colour). */
+export const PANEL_COLOR_LOCAL = '#01579b';
+/** A refreshable table's chrome. Violet keeps the white header text at ~7.1:1
+ * contrast, matching the local colour's own ~7.4:1. */
+export const PANEL_COLOR_REFRESHABLE = '#6d28d9';
+
+/**
+ * The titlebar colour for a table, so "backed by something remote" reads at a
+ * glance. Handed to the panel shell as its `color`, which is what BOTH the
+ * window and its minimized dock bar paint from — the colour used to be a CSS
+ * class over the window only, so a docked window changed colour.
+ */
+export function panelColor(t: Pick<Table, 'source' | 'origin'>): string {
+  return isRefreshable(t) ? PANEL_COLOR_REFRESHABLE : PANEL_COLOR_LOCAL;
 }
 
 /** Shared attributes for every titlebar icon — matches the style of plugin

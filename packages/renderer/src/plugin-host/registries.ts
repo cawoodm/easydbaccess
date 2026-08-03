@@ -49,6 +49,16 @@ export interface Registries {
   commands: CommandSpec[];
 }
 
+/**
+ * Renderer names kept registered for columns saved under an older name, but not
+ * offered as a choice any more. The columns editor filters these out of its
+ * dropdown, so a renamed renderer appears once, under its current name, while
+ * the tables that still carry the old name keep rendering.
+ */
+export const LEGACY_CELL_RENDERERS: ReadonlySet<string> = new Set([
+  'html-preview', // → 'preview' in v0.0.282
+]);
+
 export function createRegistries(): Registries {
   return {
     headerButtons: [],

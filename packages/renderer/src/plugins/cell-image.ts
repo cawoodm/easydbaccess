@@ -1,5 +1,6 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { makePencil, makeValueEditor, pencilRow } from './cell-pencil.js';
+import { imageSrcFrom } from '../util/image-source.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'cell-image',
@@ -21,19 +22,24 @@ export function init(api: HostApi): void {
 }
 
 class CellImage extends HTMLElement {
-  private _value = '';
+  /**
+   * Not necessarily a string: a photo column read from a database hands over
+   * bytes (a `Uint8Array`, or the object one becomes through JSON). What it can
+   * be rendered as is `imageSrcFrom`'s problem, not this setter's.
+   */
+  private _value: unknown = '';
   private _readonly = false;
   private _editing = false;
   /** The input allowed to commit — see `makeValueEditor`. */
   private _editor: HTMLInputElement | null = null;
 
-  set value(v: string) {
+  set value(v: unknown) {
     if (this._value === v) return;
     this._value = v ?? '';
     this._editing = false;
     this.render();
   }
-  get value() {
+  get value(): unknown {
     return this._value;
   }
 
@@ -67,7 +73,10 @@ class CellImage extends HTMLElement {
       row.style.cssText =
         'display:flex;align-items:center;gap:0.25rem;width:100%;min-width:0;max-width:100%';
       const input = makeValueEditor({
-        value: this._value,
+        // Only a text value is editable text. A blob is megabytes of bytes with
+        // no useful string form, so the editor opens empty and typing a URL
+        // replaces it — which is what the pencil is for.
+        value: typeof this._value === 'string' ? this._value : '',
         onCommit: (v) => this.commit(v),
         onCancel: () => {
           // Disown the editor before re-rendering: removing it fires a blur
@@ -92,12 +101,14 @@ class CellImage extends HTMLElement {
 
     const content = document.createElement('span');
     content.style.cssText = 'display:flex;align-items:center;gap:0.4rem;min-width:0';
-    const isImageSrc =
-      typeof this._value === 'string' &&
-      (this._value.startsWith('data:image') || this._value.startsWith('http'));
-    if (isImageSrc) {
+    // Whatever the importer left in the cell: a data URI, a URL, a SQL hex blob
+    // (`X'ffd8…'`, how a database photo column arrives), raw bytes or bare
+    // base64. `imageSrcFrom` reads the type from the bytes and returns null for
+    // anything that is not an image.
+    const src = imageSrcFrom(this._value);
+    if (src) {
       const img = document.createElement('img');
-      img.src = this._value;
+      img.src = src;
       img.alt = '';
       img.style.cssText =
         'max-height:32px;max-width:64px;border-radius:.15rem;border:1px solid #e5e7eb';

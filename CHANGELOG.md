@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## 3 Aug 2026
+
+### Features
+
+- ✨ Importing or converting a `.db` shows its tables at once and fills each one in with its own percentage (v0.0.286)
+- ✨ Convert to EDA asks which tables to take, with a shortcut that skips the views (v0.0.286)
+- ✨ The `html-preview` cell renderer is called `preview` now, and shows a Markdown value as formatted text by itself (v0.0.282)
+- ✨ The `html` cell renderer has a pencil for the source, so a link inside the cell can be clicked (v0.0.281)
+- ✨ The command-palette launcher is an icon button on the header's utility side now, beside search, plugins, help and settings (v0.0.278)
+- ✨ "Go to" a table or view now brings its window on screen: the canvas pans to it on desktop, and it fills the screen on a phone (v0.0.275)
+- ✨ Drop a CSV on a table window to append to it, replace its rows, or make a new table; append opens a column mapper (v0.0.274)
+
+### Bugs
+
+- 🪲 Converting a `.db` left the app with no window for 15 seconds, and every table that finished importing made all the others re-read their rows (v0.0.286)
+- 🪲 Every click inside a window re-ordered the windows while a minimized one sat above it; a second finger hijacked a drag or resize (v0.0.283)
+- 🪲 A column script's Markdown output showed its HTML tags as text when the cell already held HTML (v0.0.281)
+- 🪲 Editing an HTML cell on a scripted column saved the computed output over the stored source (v0.0.281)
+- 🪲 A photo column read out of a database showed "no image": the renderer took only URLs and data URIs, never the image's own bytes (v0.0.277)
+- 🪲 A minimized window changed colour in the dock (v0.0.276)
+- 🪲 A file dropped on a table window was ignored, and the browser left the app to open it (v0.0.274)
+- 🪲 The unsaved-work prompt could still stop a reload for a moment after the editor was closed (v0.0.272)
+- 🪲 A window that had never been moved reopened at the top-left, and a bit too small, after being minimized (v0.0.272)
+- 🪲 A window closed right after a drag could come back open (v0.0.272)
+- 🪲 A collapsed window reopened at the default size and position, and no longer collapsed (v0.0.272)
+
 ## 2 Aug 2026
 
 ### Features

@@ -141,9 +141,13 @@ URL, `image` at a computed `data:`/`http` value, `boolean` at a derived flag,
 or plain text when the column has no renderer at all. There used to be a
 dedicated `script` renderer that ran the same script a second time and
 injected the result as raw HTML; it duplicated this generic path and was
-removed. A scripted cell is always read-only — the value is derived, so there
-is nowhere to write an edit back to. If a script's own output is markup you
-want rendered rather than escaped, give the column the `html` renderer.
+removed. The DISPLAYED value is always read-only — it is derived, so there is
+nowhere to write it back to — but the renderer also receives `rawValue`, the
+STORED cell, and a `change` event writes there. That is how the `html`
+renderer's pencil edits the Markdown a script reads while the cell shows the
+HTML it produced. If a script's own output is markup you want rendered, give
+the column the `html` renderer; `preview` shows it as one line of text with a
+popup for the full markup.
 
 ### Invalid stored values
 

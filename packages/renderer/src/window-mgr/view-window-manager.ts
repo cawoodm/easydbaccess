@@ -36,7 +36,7 @@ import { byAscendingZ } from './geometry.js';
 import { nextFrontZ } from './front-order.js';
 import { registerPanel, unregisterPanel } from './panel-registry.js';
 import { createPanel, type PanelShellEl } from './panel-shell/panel-shell.js';
-import { isMobileViewport } from '../util/viewport.js';
+import { revealPanel } from './reveal.js';
 // Side-effect import registers the <view-window> custom element; the type-only
 // import would otherwise be elided, leaving <view-window> an unupgraded
 // (inline, zero-size) element.
@@ -44,6 +44,10 @@ import '../views/view-window.js';
 import type { ViewWindow } from '../views/view-window.js';
 // Core header search box — the same component the table windows use.
 import '../chrome/panel-search.js';
+
+/** Opening size of a view window, and the fallback when nothing is stored. */
+const DEFAULT_W = 480;
+const DEFAULT_H = 520;
 
 /** Per-open-view window state: the panel, its element, and title inputs. */
 interface ViewEntry {
@@ -76,19 +80,8 @@ export async function persistViewWindowGeometry(): Promise<void> {
 export function focusViewWindow(instanceId: string): boolean {
   const entry = panels.get(instanceId);
   if (!entry) return false;
-  const panel = entry.panel;
-  if (panel.status === 'minimized') panel.normalize();
-  if (isMobileViewport()) {
-    // A phone has no room to arrange windows and no way to resize one, so
-    // "show me this view" means "put it on the screen" — all of it.
-    if (panel.status !== 'maximized') panel.maximize();
-  } else {
-    // Bring it where the user is looking. Without this, Open on a view sitting
-    // off-panned or behind another window fronted something invisible, which
-    // read as the button doing nothing at all.
-    panel.centerInViewport();
-  }
-  panel.front();
+  // One reveal behaviour for every window, table or view — see `reveal.ts`.
+  revealPanel(entry.panel);
   return true;
 }
 
@@ -317,10 +310,14 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     content,
     ...(g
       ? { panelSize: { w: g.w, h: g.h }, position: { x: g.x, y: g.y } }
-      : { contentSize: { w: 480, h: 520 }, position: { centerTopOffset: 60 } }),
+      : { contentSize: { w: DEFAULT_W, h: DEFAULT_H }, position: { centerTopOffset: 60 } }),
     minimizeTo: '#easydb-minimized-dock',
     viewport: shellViewport(),
-    boot: { minimized: g?.minimized === true, maximized: g?.maximized === true },
+    boot: {
+      minimized: g?.minimized === true,
+      maximized: g?.maximized === true,
+      smallified: g?.smallified === true,
+    },
     onmoved: () => void saveGeometry(inst.id),
     onresized: () => void saveGeometry(inst.id),
     // Stamp a monotonic front rank; DOM z stays session-local in the shell but
@@ -408,11 +405,15 @@ async function writeViewFrontOrder(instanceId: string, ctx: AppContext): Promise
   try {
     const inst = await ctx.store.viewInstances.findOne(instanceId);
     if (!inst) return;
+    // Nothing stored yet: the panel's own rect, not a constant — the opening
+    // constants are a CONTENT size, and this field holds a PANEL size.
     const geom = inst.windowGeometry ?? {
-      x: 0,
-      y: 0,
-      w: 480,
-      h: 520,
+      ...(panels.get(instanceId)?.panel.persistRect() ?? {
+        x: 0,
+        y: 0,
+        w: DEFAULT_W,
+        h: DEFAULT_H,
+      }),
       z: 0,
       minimized: false,
       maximized: false,
@@ -432,39 +433,25 @@ function saveGeometry(instanceId: string): Promise<void> {
 }
 
 async function writeViewGeometry(instanceId: string): Promise<void> {
-  const el = document.getElementById(panelDomId(instanceId));
   const entry = panels.get(instanceId);
-  if (!el || !entry) return;
-  const { minimized, maximized } = entry.panel.persistFlags();
+  if (!entry) return;
+  const { minimized, maximized, smallified } = entry.panel.persistFlags();
+  // The shell decides which rect belongs in the store: a minimized panel is
+  // display:none, a maximized one fills the container, and a collapsed one is
+  // header-height, so none of their live boxes describe normal geometry.
+  const rect = entry.panel.persistRect();
   try {
     const ctx = await getContext();
     const prev = (await ctx.store.viewInstances.findOne(instanceId))?.windowGeometry;
-    // Only the normalized rect is meaningful; while minimized the shell parks
-    // the panel off-DOM (display:none) and while maximized it fills the
-    // container, so in those states keep the last-stored normal rect and only
-    // flip the flag.
-    let x = el.offsetLeft;
-    let y = el.offsetTop;
-    let w = el.offsetWidth;
-    let h = el.offsetHeight;
-    if ((minimized || maximized) && prev) {
-      x = prev.x;
-      y = prev.y;
-      w = prev.w;
-      h = prev.h;
-    }
-    if (x <= -9000) x = prev?.x ?? 40;
     const geom: WindowGeometry = {
-      x,
-      y,
-      w,
-      h,
+      ...rect,
       // Preserve the front-order rank written by stampViewFrontOrder — a
       // geometry save (drag/resize/status-change) must not clobber it back to
       // 0, or the window's stacking position would be forgotten on reload.
       z: prev?.z ?? 0,
       minimized,
       maximized,
+      smallified,
     };
     await ctx.store.viewInstances.patch(instanceId, {
       windowGeometry: geom,

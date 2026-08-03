@@ -12,7 +12,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <!-- The version is kept in sync by scripts/bump-version.mjs. app-shell
          prefixes the workspace title at runtime, keeping this as the base. -->
-    <title>easyDBAccess v0.0.277</title>
+    <title>easyDBAccess v0.0.286</title>
     <style>
       html,
       body {
@@ -66,21 +66,11 @@
       .jsPanel-headerlogo svg {
         display: block;
       }
-      /* Refreshable tables (source- or origin-backed: connected / referenced /
-         imported) get a distinct header colour so they read as "backed by
-         something remote" at a glance — every kind except a plain local table
-         (the default panel colour, #01579b) and view windows (cyan, see
-         view-window-manager.ts). The panel shell sets its header colour as an
-         INLINE `--eda-panel-color` custom property (createPanel() in
-         panel-shell.ts), so `!important` is required to win here; that's
-         deliberate — this overrides via a class instead of touching the
-         `color` option passed to `createPanel()` in jspanel-manager.ts.
-         Violet (#6d28d9) keeps the existing white header text at ~7.1:1
-         contrast, matching the default colour's own ~7.4:1. */
-      #easydb-panels-viewport > .jsPanel.eda-refreshable,
-      #easydb-panels-viewport > .jsPanel.eda-refreshable > .jsPanel-hdr {
-        background-color: #6d28d9 !important;
-      }
+      /* A refreshable table's violet chrome used to be an `.eda-refreshable`
+         override here. It only matched windows inside the viewport, so a
+         minimized window changed colour in the dock. The colour now comes from
+         `panelColor()` (window-mgr/table-kind.ts) through the shell's `color`
+         option, which paints the window and its dock bar from one value. */
       /* Minimized-window dock. It lives OUTSIDE the pan/zoom viewport (a child
          of the fixed overlay), so minimized windows stay pinned to the bottom-
          left of the table area and do NOT move when the canvas is panned or

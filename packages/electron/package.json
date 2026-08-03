@@ -11,8 +11,7 @@
     "build": "tsc -b --force",
     "prestart": "node scripts/check-frontend.cjs",
     "start": "electron .",
-    "package": "electron-builder --config electron-builder.json",
-    "test": "vitest run"
+    "package": "electron-builder --config electron-builder.json"
   },
   "dependencies": {
     "@easydb/shared": "file:../shared",

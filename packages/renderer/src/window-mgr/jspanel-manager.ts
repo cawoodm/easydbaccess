@@ -31,11 +31,12 @@ import {
   type VisibleCountDetail,
 } from './panel-title.js';
 import { sanitizeGeometry, byAscendingZ } from './geometry.js';
-import { tableKind, isRefreshable, TABLE_KIND_ICONS } from './table-kind.js';
+import { tableKind, panelColor, TABLE_KIND_ICONS } from './table-kind.js';
 import { nextFrontZ } from './front-order.js';
 import { registerPanel, unregisterPanel } from './panel-registry.js';
 import { initRestack } from './restack.js';
 import { FORCE_MINIMIZED } from './boot-flags.js';
+import { revealPanel } from './reveal.js';
 
 // Re-exported so existing importers of this module keep working.
 export { FORCE_MINIMIZED };
@@ -100,11 +101,6 @@ export function shellViewport(): ShellViewport {
 }
 
 /**
- * Brings a table's window to the front (restoring it first if minimized).
- * Used by the command palette's "Go to <table>" commands. Returns false when
- * no panel exists for that table id.
- */
-/**
  * Persist every open table panel's current rect. Tile/Cascade move panels by
  * writing inline styles, which no jsPanel callback reports, so without this the
  * arranged layout was lost on the next reload (the stored rect still described
@@ -115,11 +111,17 @@ export async function persistTablePanelGeometry(): Promise<void> {
   await Promise.all([...panels.keys()].map((id) => saveGeometry(id, ctx)));
 }
 
+/**
+ * Show a table's window: restore it if minimized, bring it into view, and front
+ * it. Used by the command palette's "Go to <table>". Always returns true — a
+ * table with no panel is hidden, and un-hiding it opens one.
+ */
 export function focusTableWindow(tableId: string): boolean {
   const p = panels.get(tableId);
   if (p) {
-    if (p.status === 'minimized') p.normalize();
-    p.front();
+    // Restore, bring into view (pan on desktop, fill the screen on a phone) and
+    // front — the same reveal every targeted window gets, see `reveal.ts`.
+    revealPanel(p);
     return true;
   }
   // No panel — the table is hidden (windowGeometry.closed). Un-hide it; the
@@ -321,27 +323,33 @@ function openPanel(t: Table, ctx: AppContext): void {
   const onPanelClosed = async (): Promise<void> => {
     document.removeEventListener(VISIBLE_COUNT_EVENT, onVisibleCount as EventListener);
     document.removeEventListener(IMPORT_PROGRESS_EVENT, onImportProgress as EventListener);
+    // The rect has to be read BEFORE the panel leaves the map: the queued write
+    // below runs after any in-flight drag save, by which time there is no shell
+    // left to ask.
+    const rect = panels.get(t.id)?.persistRect();
     panels.delete(t.id);
     unregisterPanel(t.id);
     // Programmatic close (table deleted/replaced/pulled, or hidden from
     // another tab) — the store already reflects the intended state, so don't
     // re-hide it.
     if (externallyClosed.delete(t.id)) return;
-    // User closed the window: persist it as hidden, preserving geometry.
-    const cur = await ctx.store.tables.findOne(t.id);
-    if (!cur) return;
-    const geom = cur.windowGeometry ?? {
-      x: 60,
-      y: 60,
-      w: 720,
-      h: 360,
-      z: 1,
-      minimized: false,
-      maximized: false,
-    };
-    await ctx.store.tables.patch(t.id, {
-      windowGeometry: { ...geom, closed: true },
-      updatedAt: Date.now(),
+    // User closed the window: persist it as hidden, preserving geometry. Queued
+    // like every other geometry write — a drag that lands as the window closes
+    // would otherwise patch the whole geometry object on top of this one and
+    // drop `closed`, leaving a window the user shut still open on reload.
+    await queueGeometryWrite(`table:${t.id}`, async () => {
+      const cur = await ctx.store.tables.findOne(t.id);
+      if (!cur) return;
+      const geom = cur.windowGeometry ?? {
+        ...(rect ?? { x: 60, y: 60, w: DEFAULT_W, h: DEFAULT_H }),
+        z: 1,
+        minimized: false,
+        maximized: false,
+      };
+      await ctx.store.tables.patch(t.id, {
+        windowGeometry: { ...geom, closed: true },
+        updatedAt: Date.now(),
+      });
     });
   };
 
@@ -350,7 +358,9 @@ function openPanel(t: Table, ctx: AppContext): void {
     container,
     title: lastTitle,
     logo: TABLE_KIND_ICONS[tableKind(t)],
-    color: '#01579b', // jsPanel's old 'primary' theme color
+    // Refreshable tables (source- or origin-backed) read as violet; the shell
+    // paints the window AND its dock bar from this one value.
+    color: panelColor(t),
     content,
     footerToolbar: footer,
     // Saved g.w/g.h come from offsetWidth/Height (total panel size incl.
@@ -360,8 +370,13 @@ function openPanel(t: Table, ctx: AppContext): void {
       : { contentSize: { w: DEFAULT_W, h: DEFAULT_H }, position: nextCascadePosition() }),
     minimizeTo: '#easydb-minimized-dock',
     viewport: shellViewport(),
-    // ?minimize wins over a saved maximized state — nothing loads rows on boot.
-    boot: { minimized: startMinimized, maximized: !FORCE_MINIMIZED && g?.maximized === true },
+    // ?minimize wins over a saved maximized/collapsed state — nothing loads rows
+    // on boot.
+    boot: {
+      minimized: startMinimized,
+      maximized: !FORCE_MINIMIZED && g?.maximized === true,
+      smallified: !FORCE_MINIMIZED && g?.smallified === true,
+    },
     onmoved: () => void saveGeometry(t.id, ctx),
     onresized: () => void saveGeometry(t.id, ctx),
     // Stamp a monotonic front rank; DOM z stays stable in the shell but the
@@ -388,10 +403,6 @@ function openPanel(t: Table, ctx: AppContext): void {
   const panelEl = document.getElementById(panelId);
   const controlbar = panelEl?.querySelector('.jsPanel-controlbar');
   if (controlbar) controlbar.prepend(search);
-
-  // Refreshable tables (source- or origin-backed) get a distinct panel colour
-  // (see index.html's `.eda-refreshable` rule) — every kind except `normal`.
-  if (isRefreshable(t)) panelEl?.classList.add('eda-refreshable');
 
   // (i) info button in the titlebar — shown only when the table carries
   // descriptive metadata (Datasette description / source / license / about),
@@ -444,7 +455,7 @@ function openPanel(t: Table, ctx: AppContext): void {
     if (kind !== lastKind) {
       lastKind = kind;
       panel.setHeaderLogo(TABLE_KIND_ICONS[kind]);
-      panelEl?.classList.toggle('eda-refreshable', isRefreshable(cur));
+      panel.setHeaderColor(panelColor(cur));
     }
   });
 }
@@ -461,11 +472,20 @@ function saveGeometry(tableId: string, ctx: AppContext): Promise<void> {
 }
 
 async function writeGeometry(tableId: string, ctx: AppContext): Promise<void> {
-  const el = document.getElementById(`panel-${cssSafe(tableId)}`);
-  if (!el) return;
   const shell = panels.get(tableId);
-  const status = shell?.status ?? 'normalized';
-  const flags = shell?.persistFlags() ?? { minimized: false, maximized: false };
+  const el = shell ?? document.getElementById(`panel-${cssSafe(tableId)}`);
+  if (!el) return;
+  const flags = shell?.persistFlags() ?? { minimized: false, maximized: false, smallified: false };
+  // The shell owns "which rect belongs in the store" — minimized, maximized and
+  // collapsed panels all have a live box that describes something other than
+  // their normal geometry (see `persistRect`). Without a shell (the panel is
+  // gone from the map) the element's own box is the best we have.
+  const rect = shell?.persistRect() ?? {
+    x: el.offsetLeft,
+    y: el.offsetTop,
+    w: el.offsetWidth,
+    h: el.offsetHeight,
+  };
   try {
     const t = await ctx.store.tables.findOne(tableId);
     const prev = t?.windowGeometry;
@@ -473,49 +493,14 @@ async function writeGeometry(tableId: string, ctx: AppContext): Promise<void> {
     // whatever was saved (see WINDOWS.md).
     const minimized = FORCE_MINIMIZED ? (prev?.minimized ?? false) : flags.minimized;
     const maximized = FORCE_MINIMIZED ? (prev?.maximized ?? false) : flags.maximized;
-    let x = el.offsetLeft;
-    let y = el.offsetTop;
-    let w = el.offsetWidth;
-    let h = el.offsetHeight;
-    // While minimized the shell sets display:none (no longer the old
-    // left:-9999 parking); while maximized it fills the container. In neither
-    // state does the live rect describe the panel's normal geometry, so keep
-    // the last-stored rect instead. The sentinel guard below is now dead code
-    // (nothing parks off-screen at that x anymore) but stays harmless.
-    //
-    // Key off the LIVE status, not the flags above: under `?minimize` those
-    // flags carry the saved values, but the panel really is parked (hidden),
-    // so reading its rect would write x/y/w/h of a hidden window.
-    const parked = status === 'minimized' || status === 'maximized';
-    if (parked) {
-      if (prev) {
-        x = prev.x;
-        y = prev.y;
-        w = prev.w;
-        h = prev.h;
-      } else {
-        // Nothing stored yet (e.g. a fresh panel maximized before it was ever
-        // saved normalized) — there's no honest rect to record, but the
-        // minimized/maximized FLAGS still must land, so fall back to the same
-        // placeholder rect writeFrontOrder uses rather than dropping the write
-        // entirely (that silently lost the flags whenever this was the very
-        // first geometry write for a panel).
-        x = 0;
-        y = 0;
-        w = DEFAULT_W;
-        h = DEFAULT_H;
-      }
-    }
-    if (x <= -9000) x = prev?.x ?? 40;
+    const smallified = FORCE_MINIMIZED ? (prev?.smallified ?? false) : flags.smallified;
     const geom: WindowGeometry = {
-      x,
-      y,
-      w,
-      h,
+      ...rect,
       // Preserve the front-order timestamp written by stampFrontOrder.
       z: prev?.z ?? 0,
       minimized,
       maximized,
+      smallified,
     };
     await ctx.store.tables.patch(tableId, {
       windowGeometry: geom,
@@ -543,11 +528,11 @@ async function writeFrontOrder(tableId: string, ctx: AppContext): Promise<void> 
   try {
     const t = await ctx.store.tables.findOne(tableId);
     if (!t) return;
+    // Nothing stored yet: take the panel's own rect rather than a constant. The
+    // old placeholder used the CONTENT size as if it were the PANEL size, so a
+    // window whose first-ever write was this one restored at 0,0 and too small.
     const geom = t.windowGeometry ?? {
-      x: 0,
-      y: 0,
-      w: 720,
-      h: 360,
+      ...(panels.get(tableId)?.persistRect() ?? { x: 0, y: 0, w: DEFAULT_W, h: DEFAULT_H }),
       z: 0,
       minimized: false,
       maximized: false,
@@ -579,4 +564,21 @@ async function deleteTableCascade(tableId: string, ctx: AppContext): Promise<voi
 
 function cssSafe(s: string): string {
   return s.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+/**
+ * The table whose window contains `node`, or null when `node` is anywhere else
+ * (the canvas, the chrome, a view window).
+ *
+ * Asks the panel map rather than parsing the DOM id: `cssSafe` is lossy, so a
+ * `panel-<id>` attribute cannot be turned back into the table id it came from.
+ * Used by the drop handlers to tell "dropped on THIS table" from "dropped on the
+ * app".
+ */
+export function tableIdAtNode(node: EventTarget | null): string | null {
+  if (!(node instanceof Node)) return null;
+  for (const [tableId, shell] of panels) {
+    if (shell.contains(node)) return tableId;
+  }
+  return null;
 }

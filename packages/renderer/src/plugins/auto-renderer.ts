@@ -2,7 +2,7 @@
 //
 // easyDBAccess built-in plugin — picks a cell renderer for freshly imported
 // columns from what the values actually look like: a URL gets `link`, an image
-// URL gets `image`, markup or long prose gets `html-preview`.
+// URL gets `image`, markup or long prose gets `preview`.
 //
 // It listens on `import:after` rather than hooking any importer, so it applies
 // to EVERY import path (CSV, JSON, Datasette, and anything a third-party plugin
@@ -13,6 +13,7 @@
 // plain text everywhere can switch the guessing off in the Plugin Manager.
 
 import type { ColumnSpec, ColumnType, HostApi, PluginModule } from '@easydb/shared';
+import { looksLikeImage } from '../util/image-source.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'auto-renderer',
@@ -20,7 +21,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   type: 'cell-renderer',
   version: '0.1.0',
   description:
-    'After any import, gives columns a renderer based on their values: link for URLs, image for image URLs, html-preview for markup or long text.',
+    'After any import, gives columns a renderer based on their values: link for URLs, image for image URLs, preview for markup or long text.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.5 3 8 6.5 4.5 8 8 9.5 9.5 13 11 9.5 14.5 8 11 6.5 9.5 3z"/><path d="M17.5 12 16.75 14 15 14.75 16.75 15.5 17.5 17.5 18.25 15.5 20 14.75 18.25 14 17.5 12z"/><path d="M4 17h9"/><path d="M4 21h6"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/auto-renderer.ts',
@@ -28,7 +29,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
 
 /**
  * Longest a string column can average before it counts as prose and gets the
- * html-preview renderer (truncated cell + a popup for the full value). Picked so
+ * `preview` renderer (truncated cell + a popup for the full value). Picked so
  * a title or a short description stays inline and a paragraph does not.
  */
 const LONG_TEXT_CHARS = 120;
@@ -46,7 +47,14 @@ function isHttpUrl(s: string): boolean {
 
 function isImageValue(s: string): boolean {
   if (/^data:image\//i.test(s)) return true;
-  return isHttpUrl(s) && IMAGE_EXT.test(s);
+  // A URL has to LOOK like an image — `imageSrcFrom` would take any URL, which
+  // is right once a column is set to `image` but far too eager for guessing.
+  if (isHttpUrl(s)) return IMAGE_EXT.test(s);
+  // A photo column out of a database is neither a URI nor a URL: it is the
+  // image's BYTES, as a SQL hex literal or base64. `looksLikeImage` decides from
+  // the bytes themselves, so a text column full of hexadecimal is not mistaken
+  // for one.
+  return looksLikeImage(s);
 }
 
 /**
@@ -73,9 +81,9 @@ export function inferRenderer(type: ColumnType, samples: readonly unknown[]): st
 
   if (values.every(isImageValue)) return 'image';
   if (values.every(isHttpUrl)) return 'link';
-  if (values.some((s) => HTML_TAG.test(s))) return 'html-preview';
+  if (values.some((s) => HTML_TAG.test(s))) return 'preview';
   const avg = values.reduce((sum, s) => sum + s.length, 0) / values.length;
-  if (avg > LONG_TEXT_CHARS) return 'html-preview';
+  if (avg > LONG_TEXT_CHARS) return 'preview';
   return undefined;
 }
 

@@ -22,6 +22,9 @@ export function init(api: HostApi): void {
     label: 'Commands',
     icon: 'chevron_right',
     tooltip: 'Open the command palette (Ctrl/⌘K)',
+    // A utility action, not one of the header's main calls to action: it belongs
+    // with search / plugins / help / settings on the far right, as an icon.
+    variant: 'secondary',
     onClick: () => api.ui.openCommandPalette(),
   });
 }

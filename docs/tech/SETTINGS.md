@@ -17,7 +17,7 @@ api.ui.registerSettings(pluginId: string, name: string, fields: SettingsFieldSpe
 ```
 
 - `pluginId` — the tab's identifier. By convention this is the plugin's own
-  `meta.id` (`gist-sync`, `server-sync`, `html-preview`), but it's a free-form
+  `meta.id` (`gist-sync`, `server-sync`, `preview`), but it's a free-form
   string, not a lookup into the plugin registry — see "A tab id need not be a
   real plugin id" below.
 - `name` — the tab's display label in the Settings dialog nav.
@@ -98,7 +98,7 @@ effect).
 ## Key format and where each layer persists
 
 Every setting is addressed as `${pluginId}:${key}` — e.g. `gist-sync:gist_token`,
-`html-preview:maxChars`, `datasette:maxImportRows`.
+`preview:maxChars`, `datasette:maxImportRows`.
 
 - **Workspace layer** — the Dexie `settings` table
   ([`dexie-db.ts`](../../packages/renderer/src/db/dexie-db.ts)). The physical
@@ -154,7 +154,7 @@ fields explicitly typed `'secret'`.
 
 ## Recipe: add a setting to your plugin
 
-Modeled on [`html-preview.ts`](../../packages/renderer/src/plugins/html-preview.ts),
+Modeled on [`preview.ts`](../../packages/renderer/src/plugins/preview.ts),
 which caches the resolved value in a module-level variable for cheap reads
 from a hot rendering path, refreshing it at `init()` and again on `app:ready`:
 
@@ -162,12 +162,12 @@ from a hot rendering path, refreshing it at `init()` and again on `app:ready`:
 let maxChars = 30;
 
 async function refreshMaxChars(api: HostApi): Promise<void> {
-  const v = await api.settings.get<number>('html-preview', 'maxChars');
+  const v = await api.settings.get<number>('preview', 'maxChars');
   if (typeof v === 'number' && Number.isFinite(v) && v > 0) maxChars = Math.floor(v);
 }
 
 export function init(api: HostApi): void {
-  api.ui.registerSettings('html-preview', 'HTML Preview', [
+  api.ui.registerSettings('preview', 'Preview', [
     {
       key: 'maxChars',
       label: 'Max characters shown',

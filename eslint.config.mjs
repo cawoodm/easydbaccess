@@ -32,6 +32,11 @@ export default [
       // Self-contained demo plugins served verbatim to the browser; they are
       // not part of the compiled workspace.
       'packages/renderer/public/plugins/**',
+      // Playwright specs. They were never linted (they sat in the old root
+      // `e2e/`, outside the `eslint packages` glob) and 33 of them don't pass
+      // today; keeping them out means moving them under test/ didn't change
+      // what lint covers. Drop this line to opt them in.
+      'test/e2e/**',
     ],
   },
   js.configs.recommended,

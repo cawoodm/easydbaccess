@@ -10,17 +10,25 @@
 // Keys are strings so two dialogs can be dirty at once and neither clears the
 // other's flag.
 
-const dirty = new Set<string>();
+/** Dirty key → the dialog holding the edits, or null for a non-dialog editor. */
+const dirty = new Map<string, HTMLDialogElement | null>();
 let installed = false;
 
 /** True while at least one editor holds unsaved changes. */
 export function isDirty(): boolean {
-  return dirty.size > 0;
+  for (const dialog of dirty.values()) {
+    // A dialog that has closed has nothing left to lose. Its key is cleared by
+    // the `close` EVENT, which the platform queues as a task, while `close()`
+    // clears `open` right away — so the key alone would keep blocking a reload
+    // for a tick or two after the user shut the editor.
+    if (dialog === null || dialog.open) return true;
+  }
+  return false;
 }
 
-/** Registers `key` as holding unsaved changes. */
-export function markDirty(key: string): void {
-  dirty.add(key);
+/** Registers `key` as holding unsaved changes, optionally owned by `dialog`. */
+export function markDirty(key: string, dialog: HTMLDialogElement | null = null): void {
+  dirty.set(key, dialog);
   install();
 }
 
@@ -38,14 +46,14 @@ export function markClean(key: string): void {
  * saved or cancelled. A dialog that closes after a successful save is therefore
  * clean without the save path having to say so.
  *
- * Only an OPEN dialog can be dirty. Clicking Save/Done blurs the field the user
- * was typing in, and that blur fires a trailing `change` — after the `close`
- * event — which would otherwise re-arm the guard on a dialog that is already
- * gone.
+ * Only an OPEN dialog can be dirty — both when the flag is set and when it is
+ * read (see {@link isDirty}). Clicking Save/Done blurs the field the user was
+ * typing in, and that blur fires a trailing `change` — after the `close` event —
+ * which would otherwise re-arm the guard on a dialog that is already gone.
  */
 export function watchDialogDirty(key: string, dialog: HTMLDialogElement): void {
   const touch = () => {
-    if (dialog.open) markDirty(key);
+    if (dialog.open) markDirty(key, dialog);
   };
   dialog.addEventListener('input', touch);
   dialog.addEventListener('change', touch);
