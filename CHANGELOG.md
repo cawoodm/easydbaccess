@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 3 Aug 2026
+
+### Chores
+
+- 🔧 Every test now lives in the root `test/` folder, run by one Vitest config and one Playwright config (v0.0.268)
+
 ## 2 Aug 2026
 
 ### Features

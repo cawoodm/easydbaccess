@@ -1,0 +1,28 @@
+{
+  // Standalone typecheck project for the test tree. It is NOT part of the root
+  // `tsc -b` reference graph: the suites import renderer/server modules by
+  // source path (`../../packages/renderer/src/...`), which pulls those files
+  // into this program directly rather than through a project reference.
+  // `npm run typecheck` runs `tsc -b` and then this project.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node", "vite/client"],
+    // Match the renderer's decorator settings — the suites import Lit
+    // components, whose @property fields break under native class fields
+    // (see the renderer's tsconfig.json and CLAUDE.md).
+    "useDefineForClassFields": false,
+    "experimentalDecorators": true
+  },
+  // e2e/ is excluded because it never was typechecked (no tsconfig covered the
+  // old root e2e/ either) and ~30 specs don't compile clean: implicit-any
+  // callbacks, `import('/src/...')` URLs Vite resolves at runtime, and the
+  // untyped scripts/dev-port.mjs. Playwright runs them through its own esbuild
+  // transform, which doesn't typecheck.
+  "include": ["**/*.ts"],
+  "exclude": ["e2e/**"]
+}

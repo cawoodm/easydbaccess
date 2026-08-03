@@ -16,14 +16,14 @@ import { resolveDevPort, resolveServerPort } from './scripts/dev-port.mjs';
  * the current branch (see scripts/dev-port.mjs), so e2e always targets
  * whichever ports THIS checkout actually runs on, never a hardcoded pair that
  * might belong to a different worktree. Specs read the server URL from
- * `e2e/server-url.ts`, which calls the same resolver.
+ * `test/e2e/server-url.ts`, which calls the same resolver.
  */
 const rendererPort = resolveDevPort();
 const baseURL = `http://localhost:${rendererPort}`;
 const serverPort = resolveServerPort();
 
 export default defineConfig({
-  testDir: './e2e',
+  testDir: './test/e2e',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -64,10 +64,10 @@ export default defineConfig({
         STORAGE_PATH: '.playwright-storage',
         CORS_ORIGINS: baseURL,
         // Curated registry served at /plugins/registry — exercised by
-        // e2e/13-plugins-registry.spec.ts. Resolve to absolute because
+        // test/e2e/13-plugins-registry.spec.ts. Resolve to absolute because
         // `npm run dev:server` changes cwd to packages/server/ where a
         // bare relative path would miss.
-        PLUGINS_REGISTRY_PATH: resolve('e2e/fixtures/plugins-registry.json'),
+        PLUGINS_REGISTRY_PATH: resolve('test/e2e/fixtures/plugins-registry.json'),
       },
     },
   ],

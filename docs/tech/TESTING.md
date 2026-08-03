@@ -8,21 +8,41 @@ layer — Lit component *behavior* is covered by e2e, not by mounting
 components in jsdom.
 
 ```bash
-npm run test         # Vitest — every workspace package with a test script
-npm run test:e2e     # Playwright — the e2e/ suite (34 specs)
+npm run test         # Vitest — test/renderer/ + test/server/ (694 tests)
+npm run test:e2e     # Playwright — the test/e2e/ suite (79 specs)
 npm run test:e2e:ui  # same, with Playwright's interactive UI
 ```
 
-## Unit tests (Vitest) — one package at a time
+## Where the tests live
 
-`npm run test` is `npm run test --workspaces --if-present`: each package
-runs its own `vitest run` independently (`packages/shared` has no test
-script — it's pure types, nothing to unit-test).
+Every suite sits under the root `test/` folder, never next to the code it
+covers:
 
-### `packages/renderer` — pure functions extracted for testability
+```
+test/
+├── renderer/   Vitest units, mirroring packages/renderer/src/
+├── server/     Vitest HTTP suites for the Hono app
+├── e2e/        Playwright specs, helpers and fixtures
+└── tsconfig.json
+```
 
-There's no dedicated `vitest.config.ts` here; it runs on Vitest's defaults.
-What makes this workable is a consistent pattern throughout the renderer:
+`test/renderer/` and `test/server/` mirror the source tree of the package they
+cover, so `test/renderer/window-mgr/z-order.test.ts` covers
+`packages/renderer/src/window-mgr/z-order.ts`. Suites import the module under
+test by relative source path (`../../../packages/renderer/src/...`).
+
+`npm run test` is a single `vitest run` driven by the root `vitest.config.ts`,
+which picks up `test/**/*.test.ts`. The Playwright specs are `.spec.ts`, so
+that pattern skips them by design. Typechecking is separate: the root
+`tsc -b` covers `packages/`, and `test/tsconfig.json` covers the suites (both
+run by `npm run typecheck`). `test/e2e/` is excluded there — those specs never
+were typechecked and ~30 of them don't compile clean; Playwright transforms
+them with its own esbuild pass, which doesn't typecheck.
+
+### `test/renderer` — pure functions extracted for testability
+
+These run on Vitest's Node environment: no DOM, no jsdom. What makes that
+workable is a consistent pattern throughout the renderer:
 **logic that doesn't strictly need the DOM or Dexie is pulled out into a
 standalone, dependency-free module**, specifically so it can be unit-tested
 without spinning up a browser. Examples scattered through this codebase:
@@ -47,12 +67,12 @@ merge resolves) can be pulled into a plain function next to it — that's
 the difference between something Vitest can check in milliseconds and
 something that only e2e can ever exercise.
 
-### `packages/server` — real HTTP, real adapters, no mocks
+### `test/server` — real HTTP, real adapters, no mocks
 
-`packages/server/vitest.config.ts` sets `pool: 'forks'` (SQLite's native
-bindings don't play well with Vitest's default worker-thread pool) and
+The root `vitest.config.ts` sets `pool: 'forks'` (SQLite's native bindings
+don't play well with Vitest's default worker-thread pool) and
 `EASYDB_LOG: 'quiet'` (so the request logger doesn't spam test output). Its
-two suites (`test/sync.e2e.test.ts`, `test/plugins.e2e.test.ts`) are
+two suites (`test/server/sync.e2e.test.ts`, `test/server/plugins.e2e.test.ts`) are
 E2E-style despite running under Vitest: each test boots the **real** `Hono`
 app via `@hono/node-server` on an ephemeral port (`port: 0`), against a
 **real** storage adapter pointed at a fresh `mkdtemp()` directory — both
@@ -63,7 +83,7 @@ mocked; see `SERVER.md` for what's actually being exercised here.
 
 ## End-to-end tests (Playwright) — the real app, driven two ways
 
-`e2e/` holds 34 numbered specs (`01-dialogs` through `34-resume-import`),
+`test/e2e/` holds 79 numbered specs (`01-dialogs` through `71-projection-join-writeback`),
 covering dialogs, the data table, column editing, cell editing, filters,
 the window manager, import/export, auto-sync, SQL export, the backend
 `/fetch` proxy, the plugin registry, mobile UI, loading bars, Datasette
@@ -82,7 +102,7 @@ sync/auto-sync/plugins-registry specs have a real backend to talk to.
 the current git branch — `resolveDevPort()` for the renderer (main 5190) and
 `resolveServerPort()` for the backing server (renderer port + 1000, so main
 6190). Specs that need the backend import `SERVER_URL` from
-`e2e/server-url.ts`, which calls the same resolver, so the config and the
+`test/e2e/server-url.ts`, which calls the same resolver, so the config and the
 specs can't disagree. This is what lets two worktrees run `npm run test:e2e`
 at the same time: with one shared server port, whichever run started first
 owned it, and the other run's auto-sync / backend-proxy / plugins-registry
@@ -91,7 +111,7 @@ first run's renderer origin. Pin both with `RENDERER_PORT` /
 `EASYDB_SERVER_PORT` if you need a specific pair.
 
 **Per-test isolation without wiping the whole database.** The `app` page
-fixture (`e2e/fixtures.ts`) gives every test a unique `workspaceId`
+fixture (`test/e2e/fixtures.ts`) gives every test a unique `workspaceId`
 (`e2e-<testId>-<nonce>`), and — belt-and-braces — deletes every IndexedDB
 database via an injected `__easydbResetIDB()` before the app boots at all.
 That combination means tests don't just avoid clobbering each other's data
@@ -107,7 +127,7 @@ whether to:
 
 - **drive real UI** — click buttons, type into inputs, drag column headers —
   for anything the test is actually about (the whole point of e2e), or
-- **set up or verify state directly** through `e2e/helpers.ts` (`createTable`,
+- **set up or verify state directly** through `test/e2e/helpers.ts` (`createTable`,
   `bulkAddRows`, `addRow`, `readTable`, `readRows`, `waitForPanel`) which
   calls straight through `window.__easydb.store`, bypassing clicks entirely.
 
@@ -133,5 +153,5 @@ rendering section). A test that wants to type into a cell needs to pass
   `packages/server/test/*.e2e.test.ts` — boot the real app, hit it over
   real HTTP, don't mock `StoreAdapter`.
 - **Added or changed user-visible behavior** (a new button, a dialog flow,
-  a rendering change)? That's `e2e/`, in whichever numbered spec already
+  a rendering change)? That's `test/e2e/`, in whichever numbered spec already
   covers the feature area, or a new one if it doesn't fit an existing file.
