@@ -26,8 +26,27 @@ import { commitImport, previewImport, probeDatabaseFile, type DatabaseFileKind, 
  */
 const DEFAULT_DB_NAME = 'easydbaccess.db';
 
-/** What Save As offers for a brand-new workspace file. */
+/** What Save As offers when there is no workspace to name the file after. */
 const DEFAULT_WORKSPACE_NAME = 'easydbaccess.edb';
+
+/**
+ * `<workspace name>.edb` — the file name Save As proposes.
+ *
+ * Falls back to the generic name when the store holds no workspace yet, and
+ * sanitises the name because a workspace may legally contain characters a file
+ * name may not.
+ */
+function workspaceFileName(): string {
+  try {
+    const workspaces = getStore().find('workspaces') as Array<{ name?: string }>;
+    const name = workspaces[0]?.name?.trim();
+    if (!name) return DEFAULT_WORKSPACE_NAME;
+    const safe = name.replace(/[^a-zA-Z0-9 _-]+/g, '_').trim();
+    return `${safe || 'workspace'}.${WORKSPACE_EXTENSION}`;
+  } catch {
+    return DEFAULT_WORKSPACE_NAME;
+  }
+}
 
 /**
  * Remembers the last-opened `.db` path across restarts. Deliberately a tiny
@@ -308,7 +327,10 @@ export function switchToDatabase(win: BrowserWindow | null, newPath: string): { 
 export async function saveDbAs(win: BrowserWindow | null): Promise<DialogResult<{ path: string }> | CancelledResult> {
   const opts = {
     title: 'Save easyDBAccess database as',
-    defaultPath: DEFAULT_WORKSPACE_NAME,
+    // Named after the workspace, not a generic default: a folder of files called
+    // `easydbaccess.edb` is indistinguishable, and the workspace already has the
+    // name the user chose.
+    defaultPath: workspaceFileName(),
     filters: [{ name: 'easyDBAccess workspace', extensions: [WORKSPACE_EXTENSION] }],
   };
   const result = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);

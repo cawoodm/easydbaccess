@@ -119,6 +119,12 @@ export interface ImportCandidate {
    * projection, not as SQL.
    */
   isView?: boolean;
+  /**
+   * The source object's own column names, in its own order. Present so the
+   * renderer can offer an append mapping without a second round trip to read the
+   * schema it is mapping FROM.
+   */
+  columns?: string[];
 }
 
 export interface ImportPreview {
@@ -207,12 +213,30 @@ function rowCountOf(db: DatabaseSyncType, sqlTable: string): number {
   return r.n;
 }
 
-function listEasydbCandidates(db: DatabaseSyncType): Array<{ name: string; sqlTable: string; rowCount: number }> {
+function listEasydbCandidates(db: DatabaseSyncType): Array<{ name: string; sqlTable: string; rowCount: number; columns: string[] }> {
   const rows = db.prepare(`SELECT name, sql_table FROM _easydb_tables ORDER BY ordinal`).all() as Array<{
     name: string;
     sql_table: string;
   }>;
-  return rows.map((r) => ({ name: r.name, sqlTable: r.sql_table, rowCount: rowCountOf(db, r.sql_table) }));
+  return rows.map((r) => ({
+    name: r.name,
+    sqlTable: r.sql_table,
+    rowCount: rowCountOf(db, r.sql_table),
+    // From the recorded ColumnSpec[], not the SQL schema: those are the fields a
+    // row's `data` is keyed by, which is what an append maps FROM.
+    columns: easydbColumnNames(db, r.sql_table),
+  }));
+}
+
+/** The recorded field names of an easydb-origin table. */
+function easydbColumnNames(db: DatabaseSyncType, sqlTable: string): string[] {
+  try {
+    const meta = db.prepare(`SELECT columns_json FROM ${quoteIdent(`_easydb_meta_${sqlTable}`)}`).get() as { columns_json?: string } | undefined;
+    if (!meta?.columns_json) return [];
+    return (JSON.parse(meta.columns_json) as ColumnSpec[]).map((c) => c.field);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -222,7 +246,7 @@ function listEasydbCandidates(db: DatabaseSyncType): Array<{ name: string; sqlTa
  * nature, which is also what makes it safe to treat one exactly like a table
  * from here on.
  */
-function listForeignCandidates(db: DatabaseSyncType): Array<{ name: string; sqlTable: string; rowCount: number; isView: boolean }> {
+function listForeignCandidates(db: DatabaseSyncType): Array<{ name: string; sqlTable: string; rowCount: number; isView: boolean; columns: string[] }> {
   const rows = db
     .prepare(
       `SELECT name, type FROM sqlite_master
@@ -238,7 +262,20 @@ function listForeignCandidates(db: DatabaseSyncType): Array<{ name: string; sqlT
     // -1 for a view: see `ImportCandidate.rowCount`. Counting one runs it.
     rowCount: r.type === 'view' ? -1 : rowCountOf(db, r.name),
     isView: r.type === 'view',
+    // Names only, and cheap (`PRAGMA table_info`): enough for the renderer to
+    // offer an append mapping without a second round trip for the schema.
+    columns: columnNamesOf(db, r.name),
   }));
+}
+
+/** A source object's column names, in its own order. */
+function columnNamesOf(db: DatabaseSyncType, sqlTable: string): string[] {
+  try {
+    const info = db.prepare(`PRAGMA table_info(${quoteIdent(sqlTable)})`).all() as unknown as RawColumnInfo[];
+    return info.map((c) => c.name);
+  } catch {
+    return []; // an unreadable object simply offers no mapping
+  }
 }
 
 /**
@@ -260,6 +297,10 @@ export function previewImport(sourcePath: string, targetStore: SqliteStore, work
         rowCount: c.rowCount,
         collides: existingNames.has(c.name.toLowerCase()),
         ...('isView' in c && c.isView ? { isView: true } : {}),
+        // Only useful when the name collides (that is the only time an append is
+        // offered), but carried for every candidate rather than making the
+        // renderer ask again once the user picks Append.
+        ...('columns' in c && c.columns.length > 0 ? { columns: c.columns } : {}),
       })),
     };
   } finally {
@@ -269,12 +310,31 @@ export function previewImport(sourcePath: string, targetStore: SqliteStore, work
 
 // -- Commit ------------------------------------------------------------------
 
-export type CollisionAction = 'overwrite' | 'rename' | 'skip';
+/**
+ * What to do about a source table whose name already exists in the workspace.
+ *
+ * `append` adds the source's rows to the existing table and leaves its SCHEMA
+ * exactly as it is — no column is added, renamed or retyped. That is the point of
+ * it: the target's columns are the user's own work (labels, renderers, widths,
+ * scripts, read-only flags), and a second import must not be able to rewrite
+ * them. Anything the source carries that the target has no column for is dropped
+ * rather than added, which is why append needs a mapping.
+ */
+export type CollisionAction = 'overwrite' | 'rename' | 'skip' | 'append';
 
 export interface ImportDecision {
   action: CollisionAction;
   /** Final table name to use. Required for 'rename'; ignored otherwise (the source name is used). */
   renameTo?: string;
+  /**
+   * For `append`: per SOURCE column — in `ImportCandidate.columns` order — the
+   * TARGET field it feeds. `''` drops that column.
+   *
+   * Positional, aligned to the source's own column order, so the CSV append's
+   * `guessMapping`/`ColumnMapping` from `renderer/src/import/map-columns.ts` can
+   * be reused verbatim. Absent means match by field name and drop the rest.
+   */
+  mapping?: string[];
 }
 
 /**
@@ -297,7 +357,9 @@ export interface ImportProgress {
 
 export interface ImportedTableResult {
   sourceName: string;
-  action: 'created' | 'overwritten' | 'renamed' | 'skipped';
+  /** Append only: the SOURCE field -> TARGET field map actually used. */
+  fieldMap?: Record<string, string> | undefined;
+  action: 'created' | 'overwritten' | 'renamed' | 'skipped' | 'appended';
   finalName: string;
   tableId: string | null;
   rowCount: number;
@@ -344,7 +406,48 @@ function* readRowBatches(db: DatabaseSyncType, sqlTable: string, columns: string
 }
 
 /** Resolves what to do for one source table, given the caller's decisions map (keyed by source name). */
-function resolveAction(candidate: ImportCandidate, decisions: Record<string, ImportDecision>): { action: 'create' | 'overwrite' | 'rename' | 'skip'; finalName: string } {
+/** What one candidate resolved to, plus the append mapping when there is one. */
+interface ResolvedAction {
+  action: 'create' | 'overwrite' | 'rename' | 'skip' | 'append';
+  finalName: string;
+  /** Append only: per SOURCE column, the TARGET field it feeds (see `ImportDecision.mapping`). */
+  mapping?: string[] | undefined;
+}
+
+/**
+ * SOURCE field -> TARGET field, from the user's positional mapping when there is
+ * one and by matching names when there isn't.
+ *
+ * Only fields the TARGET actually has can appear on the right: append never adds
+ * a column, so a source column with nowhere to go is dropped. Matching falls back
+ * to case-insensitive, because SQLite identifiers are.
+ */
+function buildFieldMap(sourceFields: readonly string[], targetColumns: readonly ColumnSpec[], mapping: readonly string[] | undefined): Record<string, string> {
+  const targetByLower = new Map(targetColumns.map((c) => [c.field.toLowerCase(), c.field] as const));
+  const out: Record<string, string> = {};
+  sourceFields.forEach((sourceField, i) => {
+    const chosen = mapping?.[i];
+    if (mapping) {
+      // An explicit '' means the user dropped this column; respect it.
+      if (chosen && targetByLower.has(chosen.toLowerCase())) out[sourceField] = targetByLower.get(chosen.toLowerCase())!;
+      return;
+    }
+    const hit = targetByLower.get(sourceField.toLowerCase());
+    if (hit) out[sourceField] = hit;
+  });
+  return out;
+}
+
+/** The past-tense action reported for a resolved one. */
+function resultAction(action: ResolvedAction['action']): ImportedTableResult['action'] {
+  if (action === 'create') return 'created';
+  if (action === 'rename') return 'renamed';
+  if (action === 'append') return 'appended';
+  if (action === 'skip') return 'skipped';
+  return 'overwritten';
+}
+
+function resolveAction(candidate: ImportCandidate, decisions: Record<string, ImportDecision>): ResolvedAction {
   const decision = decisions[candidate.name];
   // An explicit skip wins whether or not the name collides. `decisions` started
   // out as purely collision resolution, but two callers now use it to say "not
@@ -352,6 +455,9 @@ function resolveAction(candidate: ImportCandidate, decisions: Record<string, Imp
   // Convert skips every view — and honouring it only on a collision silently
   // imported both.
   if (decision?.action === 'skip') return { action: 'skip', finalName: candidate.name };
+  // Append needs the collision — it is defined by there being an existing table
+  // to add to. Without one there is nothing to append to, so it is a plain create.
+  if (decision?.action === 'append' && candidate.collides) return { action: 'append', finalName: candidate.name, mapping: decision.mapping };
   if (!candidate.collides) return { action: 'create', finalName: candidate.name };
   if (!decision) return { action: 'skip', finalName: candidate.name };
   if (decision.action === 'overwrite') return { action: 'overwrite', finalName: candidate.name };
@@ -380,7 +486,7 @@ function importEasydbTable(
   targetStore: SqliteStore,
   workspaceId: string,
   candidate: { name: string; sqlTable: string; rowCount: number },
-  resolved: { action: 'create' | 'overwrite' | 'rename' | 'skip'; finalName: string },
+  resolved: ResolvedAction,
   onProgress?: ((p: ImportProgress) => void) | undefined,
   /** Create the table and stop — phase 1 of the two-phase import. */
   structureOnly = false,
@@ -399,10 +505,25 @@ function importEasydbTable(
   const columns = JSON.parse(metaRow.columns_json) as ColumnSpec[];
   const tableRest = JSON.parse(metaRow.table_json) as Record<string, unknown>;
 
-  const existing =
-    resolved.action === 'overwrite'
-      ? ((targetStore.find('tables', { workspaceId }) as Array<{ id: string; name: string }>).find((t) => t.name.toLowerCase() === candidate.name.toLowerCase()) ?? null)
-      : null;
+  const reusesExisting = resolved.action === 'overwrite' || resolved.action === 'append';
+  const existing = reusesExisting
+    ? ((targetStore.find('tables', { workspaceId }) as Array<{ id: string; name: string; columns?: ColumnSpec[] }>).find((t) => t.name.toLowerCase() === candidate.name.toLowerCase()) ?? null)
+    : null;
+
+  // Nothing to append to — reported rather than quietly created, which would
+  // ignore the very schema the user chose append to protect.
+  if (resolved.action === 'append' && !existing) {
+    return { sourceName: candidate.name, action: 'skipped', finalName: resolved.finalName, tableId: null, rowCount: 0 };
+  }
+
+  const fieldMap =
+    resolved.action === 'append'
+      ? buildFieldMap(
+          columns.map((c) => c.field),
+          existing?.columns ?? [],
+          resolved.mapping,
+        )
+      : undefined;
 
   const tableId = existing?.id ?? randomUUID();
   // Carry over the display/query metadata that still makes sense in a new
@@ -429,16 +550,21 @@ function importEasydbTable(
     info: tableRest.info,
     updatedAt: Date.now(),
   };
-  if (existing) targetStore.upsert('tables', table);
-  else targetStore.insert('tables', table);
+  // NOT on append: this doc carries `columns`, so writing it is precisely how an
+  // append would replace the schema the user asked to keep.
+  if (resolved.action !== 'append') {
+    if (existing) targetStore.upsert('tables', table);
+    else targetStore.insert('tables', table);
+  }
 
   if (structureOnly) {
     return {
       sourceName: candidate.name,
-      action: resolved.action === 'create' ? 'created' : resolved.action === 'rename' ? 'renamed' : 'overwritten',
+      action: resultAction(resolved.action),
       finalName: resolved.finalName,
       tableId,
       rowCount: 0,
+      ...(fieldMap ? { fieldMap } : {}),
     };
   }
 
@@ -449,6 +575,7 @@ function importEasydbTable(
     sqlTable: candidate.sqlTable,
     finalName: resolved.finalName,
     total: candidate.rowCount,
+    fieldMap,
   })) {
     imported = p.rows;
     onProgress?.(p);
@@ -456,10 +583,11 @@ function importEasydbTable(
 
   return {
     sourceName: candidate.name,
-    action: resolved.action === 'create' ? 'created' : resolved.action === 'rename' ? 'renamed' : 'overwritten',
+    action: resultAction(resolved.action),
     finalName: resolved.finalName,
     tableId,
     rowCount: imported,
+    ...(fieldMap ? { fieldMap } : {}),
   };
 }
 
@@ -486,6 +614,29 @@ interface RowStreamTarget {
   sqlTable: string;
   finalName: string;
   total: number;
+  /**
+   * Append only: SOURCE field -> TARGET field. A source field absent from this
+   * map is DROPPED, never added to the target — appending must not alter the
+   * target's schema, and a column the target does not have is not a column the
+   * user asked for.
+   */
+  fieldMap?: Record<string, string> | undefined;
+}
+
+/**
+ * Renames a row's fields onto the target's, dropping anything unmapped.
+ *
+ * Dropping rather than passing through is the schema guarantee: `SqliteStore`
+ * would otherwise stash an unknown field in `_extra`, so the value would survive
+ * invisibly — present in the file, absent from every column the user sees.
+ */
+function applyFieldMap(data: Record<string, unknown>, fieldMap: Record<string, string>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [sourceField, value] of Object.entries(data)) {
+    const target = fieldMap[sourceField];
+    if (target) out[target] = value;
+  }
+  return out;
 }
 
 function* easydbRowBatches(src: DatabaseSyncType, targetStore: SqliteStore, t: RowStreamTarget): Generator<ImportProgress> {
@@ -506,9 +657,11 @@ function* easydbRowBatches(src: DatabaseSyncType, targetStore: SqliteStore, t: R
       const extraJson = raw._extra as string | null;
       if (extraJson) Object.assign(data, JSON.parse(extraJson) as Record<string, unknown>);
       return {
-        id: raw._id as string,
+        // A NEW id on append: the source's own `_id` may already name a row in
+        // the target, and appending must add rows rather than overwrite them.
+        id: t.fieldMap ? randomUUID() : (raw._id as string),
         tableId: t.tableId,
-        data,
+        data: t.fieldMap ? applyFieldMap(data, t.fieldMap) : data,
         updatedAt: (raw._updatedAt as number) ?? fallbackAt,
       };
     });
@@ -540,7 +693,7 @@ function* foreignRowBatches(src: DatabaseSyncType, targetStore: SqliteStore, t: 
         const v = fromRawSqlValue(spec.type, raw[sourceField]);
         if (v !== null) data[spec.field] = v;
       }
-      return { id: randomUUID(), tableId: t.tableId, data, updatedAt: importedAt };
+      return { id: randomUUID(), tableId: t.tableId, data: t.fieldMap ? applyFieldMap(data, t.fieldMap) : data, updatedAt: importedAt };
     });
     targetStore.bulkInsert('rows', docs);
     pacer.observe(docs.length, Date.now() - startedAt);
@@ -562,7 +715,9 @@ export interface ImportPlanEntry {
   total: number;
   /** Which read path this table's rows need. */
   kind: 'easydb' | 'foreign';
-  action: 'created' | 'overwritten' | 'renamed';
+  action: 'created' | 'overwritten' | 'renamed' | 'appended';
+  /** Append only: SOURCE field -> TARGET field, resolved when the plan was made. */
+  fieldMap?: Record<string, string> | undefined;
 }
 
 export interface ImportPlan {
@@ -605,17 +760,20 @@ export function prepareImport(sourcePath: string, targetStore: SqliteStore, work
       // `jspanel-manager.ts`), which is what keeps phase 1 free: the user sees
       // every table they asked for without any of them loading.
       const n = plan.length;
-      targetStore.patch('tables', result.tableId, {
-        windowGeometry: {
-          x: 40 + (n % 10) * 24,
-          y: 40 + (n % 10) * 24,
-          w: 640,
-          h: 360,
-          z: n,
-          minimized: true,
-          maximized: false,
-        },
-      });
+      // An append writes into a table the user already has open and placed —
+      // moving or minimizing it would be the import rearranging their desk.
+      if (result.action !== 'appended')
+        targetStore.patch('tables', result.tableId, {
+          windowGeometry: {
+            x: 40 + (n % 10) * 24,
+            y: 40 + (n % 10) * 24,
+            w: 640,
+            h: 360,
+            z: n,
+            minimized: true,
+            maximized: false,
+          },
+        });
       plan.push({
         sourceName: result.sourceName,
         finalName: result.finalName,
@@ -624,6 +782,7 @@ export function prepareImport(sourcePath: string, targetStore: SqliteStore, work
         total: c.rowCount,
         kind,
         action: result.action,
+        ...(result.fieldMap ? { fieldMap: result.fieldMap } : {}),
       });
     }
     return { plan, skipped };
@@ -643,6 +802,7 @@ export function* importRowsFor(sourcePath: string, targetStore: SqliteStore, ent
   const src = new DatabaseSync(sourcePath, { readOnly: true });
   try {
     const target: RowStreamTarget = {
+      fieldMap: entry.fieldMap,
       tableId: entry.tableId,
       sqlTable: entry.sqlTable,
       finalName: entry.finalName,
@@ -700,7 +860,7 @@ function importForeignTable(
   targetStore: SqliteStore,
   workspaceId: string,
   candidate: { name: string; sqlTable: string; rowCount: number },
-  resolved: { action: 'create' | 'overwrite' | 'rename' | 'skip'; finalName: string },
+  resolved: ResolvedAction,
   onProgress?: ((p: ImportProgress) => void) | undefined,
   /** Create the table and stop — phase 1 of the two-phase import. */
   structureOnly = false,
@@ -717,12 +877,29 @@ function importForeignTable(
 
   const columns = inferForeignColumns(src, candidate.sqlTable);
 
-  const existing =
-    resolved.action === 'overwrite'
-      ? ((targetStore.find('tables', { workspaceId }) as Array<{ id: string; name: string }>).find((t) => t.name.toLowerCase() === candidate.name.toLowerCase()) ?? null)
-      : null;
+  const reusesExisting = resolved.action === 'overwrite' || resolved.action === 'append';
+  const existing = reusesExisting
+    ? ((targetStore.find('tables', { workspaceId }) as Array<{ id: string; name: string; columns?: ColumnSpec[] }>).find((t) => t.name.toLowerCase() === candidate.name.toLowerCase()) ?? null)
+    : null;
+
+  // Appending to a table that has since been deleted has nothing to append to.
+  // Creating it instead would silently ignore the schema the user was protecting,
+  // so this is reported rather than guessed at.
+  if (resolved.action === 'append' && !existing) {
+    return { sourceName: candidate.name, action: 'skipped', finalName: resolved.finalName, tableId: null, rowCount: 0 };
+  }
 
   const tableId = existing?.id ?? randomUUID();
+
+  // The map from the SOURCE's columns onto the TARGET's, for append only.
+  const fieldMap =
+    resolved.action === 'append'
+      ? buildFieldMap(
+          columns.map((c) => c.field),
+          existing?.columns ?? [],
+          resolved.mapping,
+        )
+      : undefined;
   const table = {
     id: tableId,
     workspaceId,
@@ -732,16 +909,21 @@ function importForeignTable(
     view: 'table',
     updatedAt: Date.now(),
   };
-  if (existing) targetStore.upsert('tables', table);
-  else targetStore.insert('tables', table);
+  // NOT written on append: the target's `columns` are the user's own work, and
+  // writing this doc is exactly how an append would clobber them.
+  if (resolved.action !== 'append') {
+    if (existing) targetStore.upsert('tables', table);
+    else targetStore.insert('tables', table);
+  }
 
   if (structureOnly) {
     return {
       sourceName: candidate.name,
-      action: resolved.action === 'create' ? 'created' : resolved.action === 'rename' ? 'renamed' : 'overwritten',
+      action: resultAction(resolved.action),
       finalName: resolved.finalName,
       tableId,
       rowCount: 0,
+      ...(fieldMap ? { fieldMap } : {}),
     };
   }
 
@@ -752,6 +934,7 @@ function importForeignTable(
     sqlTable: candidate.sqlTable,
     finalName: resolved.finalName,
     total: candidate.rowCount,
+    fieldMap,
   })) {
     imported = p.rows;
     onProgress?.(p);
@@ -759,10 +942,11 @@ function importForeignTable(
 
   return {
     sourceName: candidate.name,
-    action: resolved.action === 'create' ? 'created' : resolved.action === 'rename' ? 'renamed' : 'overwritten',
+    action: resultAction(resolved.action),
     finalName: resolved.finalName,
     tableId,
     rowCount: imported,
+    ...(fieldMap ? { fieldMap } : {}),
   };
 }
 

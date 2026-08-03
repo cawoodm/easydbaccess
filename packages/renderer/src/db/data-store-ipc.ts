@@ -40,6 +40,8 @@ export interface EasydbImportCandidate {
   collides: boolean;
   /** A SQL VIEW: importing snapshots the rows it returns now; the definition doesn't travel. */
   isView?: boolean;
+  /** The source object's own column names, in its order — what an append maps FROM. */
+  columns?: string[];
 }
 
 export interface EasydbImportPreview {
@@ -48,17 +50,20 @@ export interface EasydbImportPreview {
   candidates: EasydbImportCandidate[];
 }
 
-export type EasydbCollisionAction = 'overwrite' | 'rename' | 'skip';
+/** `append` adds rows to the existing table and leaves its schema alone. */
+export type EasydbCollisionAction = 'overwrite' | 'rename' | 'skip' | 'append';
 
 export interface EasydbImportDecision {
   action: EasydbCollisionAction;
   /** Final table name to use. Required for 'rename'; ignored otherwise. */
   renameTo?: string;
+  /** For 'append': per SOURCE column (in `EasydbImportCandidate.columns` order), the TARGET field it feeds; '' drops it. */
+  mapping?: string[];
 }
 
 export interface EasydbImportedTableResult {
   sourceName: string;
-  action: 'created' | 'overwritten' | 'renamed' | 'skipped';
+  action: 'created' | 'overwritten' | 'renamed' | 'skipped' | 'appended';
   finalName: string;
   tableId: string | null;
   rowCount: number;
@@ -109,7 +114,9 @@ export interface EasydbImportPlanEntry {
   sqlTable: string;
   total: number;
   kind: 'easydb' | 'foreign';
-  action: 'created' | 'overwritten' | 'renamed';
+  action: 'created' | 'overwritten' | 'renamed' | 'appended';
+  /** Append only: SOURCE field -> TARGET field, resolved when the plan was made. */
+  fieldMap?: Record<string, string>;
 }
 
 export interface EasydbImportPlan {

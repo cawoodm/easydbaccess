@@ -4,6 +4,8 @@
 
 ### Features
 
+- ✨ Importing a `.db` onto a table that already exists offers Append: the rows are added and the table's own columns are left alone, with a column mapper when the names differ (v0.0.291)
+- ✨ Save As names the file after the workspace (v0.0.291)
 - ✨ Workspace files are `.edb` now: drop one to open it, drop a plain `.db` to import its data — no question asked (v0.0.290)
 - ✨ The app opens a workspace named on the command line, and a setting controls whether the last one reopens on startup (v0.0.290)
 - ✨ Importing a `.db` runs on a worker thread, so the window stays responsive while it copies (v0.0.289)

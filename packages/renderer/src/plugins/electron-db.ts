@@ -414,9 +414,15 @@ export async function importFlow(api: HostApi, bridge: EasydbDbBridge, sourcePat
       continue;
     }
     if (!c.collides) continue;
-    const choice = await api.ui.dialogs.choice(`A table named "${c.name}" already exists in this workspace.`, ['Overwrite', 'Rename', 'Skip'], 'Import — table already exists');
+    const choice = await api.ui.dialogs.choice(`A table named "${c.name}" already exists in this workspace.`, ['Append', 'Overwrite', 'Rename', 'Skip'], 'Import — table already exists');
     if (!choice || choice === 'Skip') {
       decisions[c.name] = { action: 'skip' };
+      continue;
+    }
+    if (choice === 'Append') {
+      const decision = await appendDecision(api, c, workspaceId);
+      // A dismissed mapper means "not this table", not "append unmapped".
+      decisions[c.name] = decision ?? { action: 'skip' };
       continue;
     }
     if (choice === 'Overwrite') {
@@ -579,6 +585,36 @@ async function pickCandidates(api: HostApi, candidates: EasydbImportCandidate[])
   if (choice === ALL) return candidates;
   const one = candidates[labels.indexOf(choice)];
   return one ? [one] : [];
+}
+
+/**
+ * The append decision for one colliding table, asking for a column mapping only
+ * when the names do not already line up.
+ *
+ * Append never changes the target's schema, so every source column has to land on
+ * a column the target already has — or be dropped. When the names match there is
+ * nothing to ask; when they do not, guessing silently is how values end up in the
+ * wrong fields, so the mapper decides. It is the same dialog a CSV append uses.
+ *
+ * Null means the user dismissed the mapper, which the caller reads as "skip this
+ * table" rather than as an append with no mapping at all.
+ */
+async function appendDecision(api: HostApi, candidate: EasydbImportCandidate, workspaceId: string): Promise<EasydbImportDecision | null> {
+  const sourceFields = candidate.columns ?? [];
+  const target = (await api.store.tables.find()).find((t) => t.workspaceId === workspaceId && t.name.toLowerCase() === candidate.name.toLowerCase());
+  const targetCols = target?.columns ?? [];
+
+  // Nothing to decide when every source column already names a target column, or
+  // when either side's schema is unknown — the main process then matches by name.
+  const targetFields = new Set(targetCols.map((c) => c.field.toLowerCase()));
+  if (sourceFields.length === 0 || targetCols.length === 0 || sourceFields.every((f) => targetFields.has(f.toLowerCase()))) {
+    return { action: 'append' };
+  }
+
+  const { mapColumnsToTable } = await import('../dialogs/column-map-dialog.js');
+  const mapping = await mapColumnsToTable([...sourceFields], [...targetCols], candidate.name);
+  if (!mapping) return null;
+  return { action: 'append', mapping };
 }
 
 /** `name`, or `name (2)`, `name (3)`, … — first not already in `taken` (case-insensitive). */

@@ -67,6 +67,12 @@ function harness(opts: {
   confirmAnswer?: boolean;
   /** An unfinished conversion's note, if this workspace has one. */
   pending?: { sourcePath: string; plan: unknown[] };
+  /** Make the single candidate collide with an existing table. */
+  collides?: boolean;
+  /** The source table's column names. */
+  sourceColumns?: string[];
+  /** The existing table an append would target. */
+  existingTable?: { name: string; columns: Array<{ field: string; label: string; type: string }> };
 }): { api: HostApi; bridge: EasydbDbBridge; rec: Recorded } {
   const rec: Recorded = {
     alerts: [],
@@ -99,7 +105,7 @@ function harness(opts: {
         path: sourcePath ?? opts.path,
         preview: {
           kind: 'foreign' as const,
-          candidates: [{ name: 'bookmarks', rowCount: 1, collides: false }],
+          candidates: [{ name: 'bookmarks', rowCount: 1, collides: opts.collides ?? false, columns: opts.sourceColumns ?? ['url', 'title'] }],
         },
       };
     },
@@ -156,7 +162,8 @@ function harness(opts: {
     workspaceId: () => 'ws1',
     store: {
       tables: {
-        find: async (): Promise<Table[]> => [],
+        find: async (): Promise<Table[]> =>
+          opts.existingTable ? [{ id: 'existing', workspaceId: 'ws1', name: opts.existingTable.name, columns: opts.existingTable.columns, view: 'table', updatedAt: 1 } as unknown as Table] : [],
         insert: async (doc: Record<string, unknown>) => {
           rec.inserted.push(doc);
           return doc;
@@ -541,5 +548,48 @@ describe('electron-db — a dropped file routes by extension', () => {
     expect(rec.committedOpens).toEqual([]);
     expect(rec.toasts.some((t) => /does not contain one/.test(t))).toBe(true);
     expect(rec.choices[0]!.options).toEqual(['Open Workspace', 'Browse .db file', 'Import data']);
+  });
+});
+
+/**
+ * Append adds rows to an existing table and leaves its schema alone. Whether the
+ * user is asked for a column mapping depends on whether the names already line
+ * up — asking when there is nothing to decide is noise, and NOT asking when they
+ * differ is how values land in the wrong fields.
+ */
+describe('electron-db — Append onto an existing table', () => {
+  it('offers Append first among the collision choices', async () => {
+    const { api, bridge, rec } = harness({
+      kind: 'foreign',
+      path: 'C:/northwind.db',
+      collides: true,
+      choices: ['Import data', null],
+    });
+    await openFlow(api, bridge);
+
+    const collision = rec.choices.find((c) => c.message.includes('already exists'));
+    expect(collision?.options).toEqual(['Append', 'Overwrite', 'Rename', 'Skip']);
+  });
+
+  it('does not ask for a mapping when every source column already matches', async () => {
+    const { api, bridge, rec } = harness({
+      kind: 'foreign',
+      path: 'C:/northwind.db',
+      collides: true,
+      sourceColumns: ['url', 'title'],
+      existingTable: {
+        name: 'bookmarks',
+        columns: [
+          { field: 'url', label: 'URL', type: 'text' },
+          { field: 'title', label: 'Title', type: 'text' },
+        ],
+      },
+      choices: ['Import data', 'Append'],
+    });
+    await openFlow(api, bridge);
+
+    // The mapper is a separate dialog; only the two choice prompts should appear.
+    expect(rec.choices).toHaveLength(2);
+    expect(rec.preparedPaths).toEqual(['C:/northwind.db']);
   });
 });

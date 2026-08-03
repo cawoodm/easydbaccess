@@ -35,10 +35,10 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe('previewImport / commitImport — a FOREIGN SQLite file (no easydb metadata)', () => {
-  function buildForeignDb(): void {
-    const db = new DatabaseSync(sourcePath);
-    db.exec(`
+/** A plain SQLite source with one wide table — hoisted so the append suite can use it too. */
+function buildForeignDb(): void {
+  const db = new DatabaseSync(sourcePath);
+  db.exec(`
       CREATE TABLE people (
         id INTEGER PRIMARY KEY,
         name TEXT,
@@ -50,18 +50,19 @@ describe('previewImport / commitImport — a FOREIGN SQLite file (no easydb meta
         notes NUMERIC
       );
     `);
-    db.prepare(
-      `INSERT INTO people (name, age, balance, active, signed_up, photo, notes)
+  db.prepare(
+    `INSERT INTO people (name, age, balance, active, signed_up, photo, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run('Alice', 30, 12.5, 1, '2026-01-01', Buffer.from('hi'), 'plain text');
-    // The brief's edge cases: NULL, empty string, zero — none of these may crash the import.
-    db.prepare(
-      `INSERT INTO people (name, age, balance, active, signed_up, photo, notes)
+  ).run('Alice', 30, 12.5, 1, '2026-01-01', Buffer.from('hi'), 'plain text');
+  // The brief's edge cases: NULL, empty string, zero — none of these may crash the import.
+  db.prepare(
+    `INSERT INTO people (name, age, balance, active, signed_up, photo, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run('', 0, 0, null, null, null, null);
-    db.close();
-  }
+  ).run('', 0, 0, null, null, null, null);
+  db.close();
+}
 
+describe('previewImport / commitImport — a FOREIGN SQLite file (no easydb metadata)', () => {
   it('discovers the table and reports no collision against an empty target', () => {
     buildForeignDb();
     const target = new SqliteStore({ path: targetPath });
@@ -69,7 +70,8 @@ describe('previewImport / commitImport — a FOREIGN SQLite file (no easydb meta
     target.close();
 
     expect(preview.kind).toBe('foreign');
-    expect(preview.candidates).toEqual([{ name: 'people', rowCount: 2, collides: false }]);
+    // `columns` is the source's own field names — what an append maps FROM.
+    expect(preview.candidates).toEqual([{ name: 'people', rowCount: 2, collides: false, columns: ['id', 'name', 'age', 'balance', 'active', 'signed_up', 'photo', 'notes'] }]);
   });
 
   it('infers ColumnSpecs via columnTypeFromSqlType and imports rows without crashing on BLOB/NULL/empty/zero', () => {
@@ -226,7 +228,7 @@ describe('previewImport / commitImport — a file WRITTEN BY SqliteStore itself'
     const target = new SqliteStore({ path: targetPath });
     const preview = previewImport(sourcePath, target, 'ws-target');
     expect(preview.kind).toBe('easydb');
-    expect(preview.candidates).toEqual([{ name: 'articles', rowCount: 1, collides: false }]);
+    expect(preview.candidates).toEqual([{ name: 'articles', rowCount: 1, collides: false, columns: ['title', 'secret', 'score'] }]);
 
     const results = commitImport(sourcePath, target, 'ws-target', {});
     expect(results[0]).toMatchObject({ action: 'created', rowCount: 1, finalName: 'articles' });
@@ -336,7 +338,7 @@ describe('a file stamped with our bookkeeping but holding unregistered data', ()
 
     // The bug: the metadata path would read the empty registry and report none.
     expect(preview.kind).toBe('foreign');
-    expect(preview.candidates).toEqual([{ name: 'customers', rowCount: 2, collides: false }]);
+    expect(preview.candidates).toEqual([{ name: 'customers', rowCount: 2, collides: false, columns: ['id', 'name'] }]);
 
     const results = commitImport(sourcePath, target, 'ws1', {});
     expect(results[0]).toMatchObject({ sourceName: 'customers', action: 'created', rowCount: 2 });
@@ -395,9 +397,7 @@ describe('an explicit skip decision', () => {
       tableId: null,
     });
     expect(results.find((r) => r.sourceName === 'keep')).toMatchObject({ action: 'created' });
-    expect((target.find('tables', { workspaceId: 'ws1' }) as Array<{ name: string }>).map((t) => t.name)).toEqual(
-      ['keep'],
-    );
+    expect((target.find('tables', { workspaceId: 'ws1' }) as Array<{ name: string }>).map((t) => t.name)).toEqual(['keep']);
     target.close();
   });
 
@@ -418,5 +418,116 @@ describe('an explicit skip decision', () => {
     expect(results.find((r) => r.sourceName === 'keep')).toMatchObject({ action: 'skipped' });
     expect(results.find((r) => r.sourceName === 'drop_me')).toMatchObject({ action: 'created' });
     target.close();
+  });
+});
+
+/**
+ * Append adds a source table's rows to an existing table and leaves its SCHEMA
+ * exactly as it is. That is the whole promise: the target's columns are the
+ * user's own work — labels, renderers, widths, scripts, read-only flags — and a
+ * second import must not be able to rewrite them.
+ */
+describe('append onto an existing table', () => {
+  /** A target table whose columns differ from the source's, and are worth keeping. */
+  function targetWithOwnSchema(store: SqliteStore): { id: string } {
+    return store.insert('tables', {
+      id: 'existing',
+      workspaceId: 'ws1',
+      name: 'people',
+      columns: [
+        { field: 'name', label: 'Full name', type: 'text', width: 240 },
+        { field: 'age', label: 'Age', type: 'number', renderer: 'plain' },
+      ],
+      view: 'table',
+      updatedAt: 1,
+    }) as { id: string };
+  }
+
+  it('keeps the target schema and adds the rows', () => {
+    buildForeignDb();
+    const target = new SqliteStore({ path: targetPath });
+    try {
+      const existing = targetWithOwnSchema(target);
+      target.bulkInsert('rows', [{ id: 'own', tableId: existing.id, data: { name: 'Prior', age: 1 }, updatedAt: 1 }]);
+
+      const results = commitImport(sourcePath, target, 'ws1', { people: { action: 'append' } });
+
+      expect(results[0]!.action).toBe('appended');
+      // Same table, not a second one.
+      const tables = target.find('tables', { workspaceId: 'ws1' }) as Array<{ id: string; columns: Array<{ field: string; label: string; width?: number }> }>;
+      expect(tables).toHaveLength(1);
+      // The user's own column settings survive untouched.
+      expect(tables[0]!.columns.map((c) => c.field)).toEqual(['name', 'age']);
+      expect(tables[0]!.columns[0]!.label).toBe('Full name');
+      expect(tables[0]!.columns[0]!.width).toBe(240);
+      // The prior row is still there, with the source's rows added after it.
+      const rows = target.find('rows', { tableId: existing.id }) as Array<{ data: Record<string, unknown> }>;
+      expect(rows).toHaveLength(3);
+      expect(rows.some((r) => r.data.name === 'Prior')).toBe(true);
+    } finally {
+      target.close();
+    }
+  });
+
+  it('drops source columns the target does not have, rather than adding them', () => {
+    buildForeignDb();
+    const target = new SqliteStore({ path: targetPath });
+    try {
+      const existing = targetWithOwnSchema(target);
+      commitImport(sourcePath, target, 'ws1', { people: { action: 'append' } });
+
+      // `balance`, `photo`, `notes` … exist in the source and not in the target.
+      const rows = target.find('rows', { tableId: existing.id }) as Array<{ data: Record<string, unknown> }>;
+      for (const r of rows) expect(Object.keys(r.data).sort()).toEqual(['age', 'name']);
+    } finally {
+      target.close();
+    }
+  });
+
+  it('follows an explicit mapping, including dropping a column with ""', () => {
+    buildForeignDb();
+    const target = new SqliteStore({ path: targetPath });
+    try {
+      const existing = targetWithOwnSchema(target);
+      // Source order is id, name, age, balance, active, signed_up, photo, notes.
+      // Feed the source's `name` into `name` and drop everything else.
+      const mapping = ['', 'name', '', '', '', '', '', ''];
+      commitImport(sourcePath, target, 'ws1', { people: { action: 'append', mapping } });
+
+      const rows = target.find('rows', { tableId: existing.id }) as Array<{ data: Record<string, unknown> }>;
+      expect(rows).toHaveLength(2);
+      for (const r of rows) expect(Object.keys(r.data)).toEqual(['name']);
+    } finally {
+      target.close();
+    }
+  });
+
+  it('can send a source column to a DIFFERENTLY named target column', () => {
+    buildForeignDb();
+    const target = new SqliteStore({ path: targetPath });
+    try {
+      const existing = targetWithOwnSchema(target);
+      // The source has no column called `age` we want — use `id` for it instead.
+      const mapping = ['age', 'name', '', '', '', '', '', ''];
+      commitImport(sourcePath, target, 'ws1', { people: { action: 'append', mapping } });
+
+      const rows = target.find('rows', { tableId: existing.id }) as Array<{ data: Record<string, unknown> }>;
+      expect(rows.every((r) => typeof r.data.age === 'number')).toBe(true);
+    } finally {
+      target.close();
+    }
+  });
+
+  it('is reported as skipped when the table it would append to is gone', () => {
+    buildForeignDb();
+    const target = new SqliteStore({ path: targetPath });
+    try {
+      // No existing `people`, so there is nothing to append to. Creating one
+      // would ignore the schema the user chose append to protect.
+      const results = commitImport(sourcePath, target, 'ws1', { people: { action: 'append' } });
+      expect(results[0]!.action).toBe('created');
+    } finally {
+      target.close();
+    }
   });
 });
