@@ -56,6 +56,11 @@ export class AnchoredMenu extends LitElement {
         font-family: system-ui, sans-serif;
         font-size: 0.875rem;
         color: #111;
+        /* A value list (a view's filter chip offers every value of its field) can
+           be hundreds of entries long, so the menu scrolls rather than growing
+           past the viewport. Short menus are unaffected. */
+        max-height: min(60vh, 420px);
+        overflow-y: auto;
       }
       button {
         display: flex;

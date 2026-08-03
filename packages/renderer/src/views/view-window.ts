@@ -7,6 +7,8 @@ import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViewsDialog } from '../dialogs/views-dialog.js';
 import { addPillValue, evaluateRows, hasRowHtml, removePillValue, substituteRow, viewRows } from './view-render.js';
 import { parseColumnFilter } from '../search/column-filter.js';
+import { facetable, facetValues } from '../search/facet-values.js';
+import { AnchoredMenu } from '../chrome/anchored-menu.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 // Side-effect import: the template-off mode renders the standard interactive
@@ -144,6 +146,23 @@ export class ViewWindow extends LitElement {
         background: #e0f2fe;
         color: #0369a1;
         font-size: 0.8rem;
+      }
+      /* The label is a button: it opens the field's other values, so a second
+         value can be OR-ed onto the same field by clicking. */
+      .eda-pill-chip-label {
+        padding: 0;
+        border: none;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      .eda-pill-chip-label:hover {
+        text-decoration: underline;
+      }
+      .eda-pill-chip-label[disabled] {
+        cursor: default;
+        text-decoration: none;
       }
       .eda-pill-chip-remove {
         display: inline-flex;
@@ -475,13 +494,69 @@ export class ViewWindow extends LitElement {
     const field = t.getAttribute('data-eda-filter-field');
     const value = t.getAttribute('data-eda-filter-value');
     if (!field || value == null) return;
+    await this.addPill(field, value);
+  };
+
+  /** Add one exact value to a field's pill filter, OR-ed with what is there. */
+  private async addPill(field: string, value: string) {
+    if (!this.instance) return;
     const next = addPillValue(this.instance.pillFilters?.[field], value);
     const pillFilters = { ...(this.instance.pillFilters ?? {}), [field]: next };
     const ctx = await getContext();
     await ctx.store.viewInstances.patch(this.instance.id, { pillFilters, updatedAt: Date.now() });
     this.instance = { ...this.instance, pillFilters };
     this.recompute();
-  };
+  }
+
+  /** The values already pill-filtered on `field`, lower-cased for comparison. */
+  private activePillValues(field: string): Set<string> {
+    const raw = this.instance?.pillFilters?.[field];
+    const out = new Set<string>();
+    if (!raw) return out;
+    for (const tok of parseColumnFilter(raw)) {
+      if (tok.term) out.add(tok.term.toLowerCase());
+    }
+    return out;
+  }
+
+  /**
+   * The rows a chip's value list is built from: everything the view shows with
+   * this ONE field's pill filter lifted, the view's own snapshotted filters and
+   * the other fields' pills still applied.
+   *
+   * Lifting the field is the point. With its own filter still on, the only value
+   * left in the rows is the one already selected — which is exactly why the
+   * sibling values were unreachable by clicking.
+   */
+  private rowsFacetedFor(field: string): Row[] {
+    if (!this.instance) return [];
+    const pills = { ...(this.instance.pillFilters ?? {}) };
+    delete pills[field];
+    return viewRows(evaluateRows(this.allRows, this.tableColumns), {
+      ...this.instance,
+      pillFilters: pills,
+    });
+  }
+
+  /**
+   * Open a chip's value menu: every value the field holds in the faceted rows,
+   * with a tick on the ones already filtered on. Picking an unticked value ORs it
+   * in; picking a ticked one drops it — the same toggle the chip's `×` performs.
+   */
+  private async openPillMenu(field: string, anchor: HTMLElement) {
+    const rows = this.rowsFacetedFor(field);
+    if (!facetable(rows, field)) return;
+    const values = facetValues(rows, field);
+    if (values.length === 0) return;
+    const active = this.activePillValues(field);
+    const picked = await AnchoredMenu.open(
+      anchor.getBoundingClientRect(),
+      values.map((v) => ({ id: v, label: v, icon: active.has(v.toLowerCase()) ? 'check' : undefined })),
+    );
+    if (picked == null) return;
+    if (active.has(picked.toLowerCase())) await this.removePill(field, picked);
+    else await this.addPill(field, picked);
+  }
 
   /** Remove one pill-filter chip (the `×` in the header bar). Drops the field
    * entirely once its last value is removed. */
@@ -687,7 +762,14 @@ export class ViewWindow extends LitElement {
     return html`<div class="vw-pillbar">
       ${chips.map(
         (c) => html`<span class="eda-pill-chip">
-          <span class="eda-pill-chip-label">${c.field}: ${c.value}</span>
+          <button
+            type="button"
+            class="eda-pill-chip-label"
+            title=${`Other values of ${c.field}`}
+            @click=${(e: Event) => void this.openPillMenu(c.field, e.currentTarget as HTMLElement)}
+          >
+            ${c.field}: ${c.value}
+          </button>
           <button
             type="button"
             class="eda-pill-chip-remove"
