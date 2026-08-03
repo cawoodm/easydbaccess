@@ -17,7 +17,13 @@
  */
 
 import { SqliteStore } from './sqlite-store';
-import { commitImport, type ImportedTableResult } from './db-import';
+import {
+  commitImport,
+  previewImport,
+  type ImportDecision,
+  type ImportProgress,
+  type ImportedTableResult,
+} from './db-import';
 
 /**
  * The workspace id a converted file gets. `default` is what the renderer's own
@@ -37,7 +43,11 @@ export interface ConvertResult {
  * `sourcePath`. `destPath` must not be an existing easydb file — the caller's
  * save dialog is what confirms overwriting anything.
  */
-export function convertToEasydb(sourcePath: string, destPath: string): ConvertResult {
+export function convertToEasydb(
+  sourcePath: string,
+  destPath: string,
+  onProgress?: ((p: ImportProgress) => void) | undefined,
+): ConvertResult {
   const dest = new SqliteStore({ path: destPath });
   try {
     // The renderer will find and adopt this workspace on boot instead of
@@ -50,9 +60,23 @@ export function convertToEasydb(sourcePath: string, destPath: string): ConvertRe
         pluginUrls: [],
       });
     }
-    // No decisions to make: the destination is fresh, so nothing can collide.
-    const tables = commitImport(sourcePath, dest, CONVERTED_WORKSPACE_ID, {});
-    return { path: destPath, tables };
+
+    // Tables only. A converted workspace mirrors what the file STORES; a view
+    // is derived, and snapshotting one would freeze a stale copy of a query
+    // beside the tables it was computed from. It is also ruinously expensive:
+    // converting `northwind.db` with its views went from 13 objects / 625,890
+    // rows to 30 / 1,909,973, because several of its views join the 609k-row
+    // `Order Details`. Someone who wants a view's rows can Import it (that path
+    // offers views deliberately) or Browse the file.
+    const preview = previewImport(sourcePath, dest, CONVERTED_WORKSPACE_ID);
+    const decisions: Record<string, ImportDecision> = {};
+    for (const c of preview.candidates) {
+      if (c.isView) decisions[c.name] = { action: 'skip' };
+    }
+
+    const results = commitImport(sourcePath, dest, CONVERTED_WORKSPACE_ID, decisions, onProgress);
+    // Skipped views would otherwise be reported as converted-with-zero-rows.
+    return { path: destPath, tables: results.filter((r) => r.action !== 'skipped') };
   } finally {
     dest.close();
   }

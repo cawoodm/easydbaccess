@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { SqliteStore } from './sqlite-store.js';
 import { BROWSE_ROW_CAP, listBrowsable, readBrowseRows } from './db-browse.js';
+import { convertToEasydb } from './db-convert.js';
 
 /**
  * "Browse a .db" — a read-only look at a file we neither open nor import.
@@ -178,5 +179,32 @@ describe('a mis-stamped file', () => {
       'table:customers',
       'view:big',
     ]);
+  });
+});
+
+/**
+ * Convert to EDA mirrors what the file STORES: its tables. A view is derived, so
+ * snapshotting one would freeze a stale copy of a query next to the tables it
+ * came from — and it is ruinously expensive, since a view over a big table
+ * repeats that table's rows (converting `northwind.db` with its views meant
+ * 1,909,973 rows instead of 625,890).
+ */
+describe('convertToEasydb', () => {
+  it('converts tables and leaves views out', () => {
+    const raw = new DatabaseSync(dbPath);
+    raw.exec(`
+      CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, qty INTEGER);
+      CREATE VIEW in_stock AS SELECT name FROM items WHERE qty > 0;
+    `);
+    raw.exec("INSERT INTO items (name, qty) VALUES ('a', 1), ('b', 0)");
+    raw.close();
+
+    const dest = join(dir, 'converted.db');
+    const result = convertToEasydb(dbPath, dest);
+
+    expect(result.tables.map((t) => t.finalName)).toEqual(['items']);
+    const store = new SqliteStore({ path: dest });
+    expect((store.find('tables') as Array<{ name: string }>).map((t) => t.name)).toEqual(['items']);
+    store.close();
   });
 });

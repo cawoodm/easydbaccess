@@ -35,8 +35,14 @@ import type { SqliteStore } from './sqlite-store';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { DatabaseSync } = require('node:sqlite') as { DatabaseSync: typeof DatabaseSyncType };
 
-/** Rows read from the source file and written to the target in one batch (`bulkInsert`). */
-const BATCH_SIZE = 500;
+/**
+ * Rows read from the source file and written to the target in one batch
+ * (`bulkInsert`). Measured on 400,000 rows with `synchronous = OFF`: 500 rows
+ * took 21.4s, 2000 took 6.0s, 5000 took 5.3s, 20000 took 2.6s — while peak RSS
+ * climbed from 142 MB to 320 MB, since a batch is alive as JS objects while it
+ * is written. 2000 keeps most of the speed at a fraction of the memory.
+ */
+const BATCH_SIZE = 2000;
 
 /** Reserved column names on every SqliteStore rows table — see `sqlite-store.ts`'s `writeTableNoTx`. */
 const RESERVED_ROW_COLUMNS = new Set(['_id', '_updatedAt', '_extra']);
@@ -227,6 +233,24 @@ export interface ImportDecision {
   renameTo?: string;
 }
 
+/**
+ * Emitted per written batch so the renderer can show a progress bar instead of a
+ * frozen window. `total` is the source's own count, so it is exact for a table
+ * and a best effort for anything else.
+ *
+ * This matters more than it looks: the import runs synchronously in the Electron
+ * MAIN process, so while it works no `store:*` IPC call can complete and the
+ * window cannot do anything. `webContents.send` still reaches the renderer,
+ * which paints in its own process — so progress is the one signal that can get
+ * out during the freeze.
+ */
+export interface ImportProgress {
+  table: string;
+  rows: number;
+  /** Rows the source reports for this object. */
+  total: number;
+}
+
 export interface ImportedTableResult {
   sourceName: string;
   action: 'created' | 'overwritten' | 'renamed' | 'skipped';
@@ -276,20 +300,29 @@ function resolveAction(
   candidate: ImportCandidate,
   decisions: Record<string, ImportDecision>,
 ): { action: 'create' | 'overwrite' | 'rename' | 'skip'; finalName: string } {
-  if (!candidate.collides) return { action: 'create', finalName: candidate.name };
   const decision = decisions[candidate.name];
-  if (!decision || decision.action === 'skip') return { action: 'skip', finalName: candidate.name };
+  // An explicit skip wins whether or not the name collides. `decisions` started
+  // out as purely collision resolution, but two callers now use it to say "not
+  // this one" — the Import picker skips every object the user didn't choose, and
+  // Convert skips every view — and honouring it only on a collision silently
+  // imported both.
+  if (decision?.action === 'skip') return { action: 'skip', finalName: candidate.name };
+  if (!candidate.collides) return { action: 'create', finalName: candidate.name };
+  if (!decision) return { action: 'skip', finalName: candidate.name };
   if (decision.action === 'overwrite') return { action: 'overwrite', finalName: candidate.name };
   return { action: 'rename', finalName: decision.renameTo ?? candidate.name };
 }
 
 /** Replaces a local table's rows wholesale — same "wipe then bulk-insert" convention `gist-sync.ts`'s pull() uses. */
-function replaceRows(store: SqliteStore, tableId: string, docs: Array<Record<string, unknown>>): void {
+/**
+ * Drops a table's existing rows, so an overwrite can then stream the new ones in
+ * like any other import. It used to take the full `docs` array and write it
+ * after the read — see `importForeignTable` for why nothing may hold a whole
+ * table in memory.
+ */
+function clearRows(store: SqliteStore, tableId: string): void {
   const existingIds = (store.find('rows', { tableId }) as Array<{ id: string }>).map((r) => r.id);
   if (existingIds.length > 0) store.bulkRemove('rows', existingIds);
-  for (let i = 0; i < docs.length; i += BATCH_SIZE) {
-    store.bulkInsert('rows', docs.slice(i, i + BATCH_SIZE));
-  }
 }
 
 /**
@@ -303,6 +336,7 @@ function importEasydbTable(
   workspaceId: string,
   candidate: { name: string; sqlTable: string; rowCount: number },
   resolved: { action: 'create' | 'overwrite' | 'rename' | 'skip'; finalName: string },
+  onProgress?: ((p: ImportProgress) => void) | undefined,
 ): ImportedTableResult {
   if (resolved.action === 'skip') {
     return {
@@ -356,10 +390,14 @@ function importEasydbTable(
   else targetStore.insert('tables', table);
 
   const rawCols = ['_id', '_updatedAt', '_extra', ...columns.map((c) => c.field)];
+  if (resolved.action === 'overwrite') clearRows(targetStore, tableId);
+
+  // Streamed, for the same reason as `importForeignTable` — see the comment
+  // there. This path had the identical accumulate-the-whole-table bug.
+  const fallbackAt = Date.now();
   let imported = 0;
-  const docs: Array<Record<string, unknown>> = [];
   for (const batch of readRowBatches(src, candidate.sqlTable, rawCols)) {
-    for (const raw of batch) {
+    const docs = batch.map((raw) => {
       const data: Record<string, unknown> = {};
       for (const spec of columns) {
         const v = fromRawSqlValue(spec.type, raw[spec.field]);
@@ -367,12 +405,17 @@ function importEasydbTable(
       }
       const extraJson = raw._extra as string | null;
       if (extraJson) Object.assign(data, JSON.parse(extraJson) as Record<string, unknown>);
-      docs.push({ id: raw._id as string, tableId, data, updatedAt: (raw._updatedAt as number) ?? Date.now() });
-    }
-    imported += batch.length;
+      return {
+        id: raw._id as string,
+        tableId,
+        data,
+        updatedAt: (raw._updatedAt as number) ?? fallbackAt,
+      };
+    });
+    targetStore.bulkInsert('rows', docs);
+    imported += docs.length;
+    onProgress?.({ table: resolved.finalName, rows: imported, total: candidate.rowCount });
   }
-  if (resolved.action === 'overwrite') replaceRows(targetStore, tableId, docs);
-  else for (let i = 0; i < docs.length; i += BATCH_SIZE) targetStore.bulkInsert('rows', docs.slice(i, i + BATCH_SIZE));
 
   return {
     sourceName: candidate.name,
@@ -428,6 +471,7 @@ function importForeignTable(
   workspaceId: string,
   candidate: { name: string; sqlTable: string; rowCount: number },
   resolved: { action: 'create' | 'overwrite' | 'rename' | 'skip'; finalName: string },
+  onProgress?: ((p: ImportProgress) => void) | undefined,
 ): ImportedTableResult {
   if (resolved.action === 'skip') {
     return {
@@ -465,10 +509,19 @@ function importForeignTable(
   if (existing) targetStore.upsert('tables', table);
   else targetStore.insert('tables', table);
 
+  // An overwrite clears first, then streams like any other import.
+  if (resolved.action === 'overwrite') clearRows(targetStore, tableId);
+
+  // Each batch is written as it is READ. Nothing accumulates: `readRowBatches`
+  // exists precisely so a large table is never fully materialised, and building
+  // a `docs` array of the whole table first threw that away — a 609,283-row
+  // `northwind.db` drove the Electron main process past 1.4 GB and froze the
+  // window, because every row was alive as a JS object before the first insert.
+  // Covered by `db-import-streaming.test.ts`.
+  const importedAt = Date.now(); // one import is one instant, not one per row
   let imported = 0;
-  const docs: Array<Record<string, unknown>> = [];
   for (const batch of readRowBatches(src, candidate.sqlTable, sourceFieldNames)) {
-    for (const raw of batch) {
+    const docs = batch.map((raw) => {
       const data: Record<string, unknown> = {};
       for (let i = 0; i < columns.length; i++) {
         const spec = columns[i]!;
@@ -476,12 +529,12 @@ function importForeignTable(
         const v = fromRawSqlValue(spec.type, raw[sourceField]);
         if (v !== null) data[spec.field] = v;
       }
-      docs.push({ id: randomUUID(), tableId, data, updatedAt: Date.now() });
-    }
-    imported += batch.length;
+      return { id: randomUUID(), tableId, data, updatedAt: importedAt };
+    });
+    targetStore.bulkInsert('rows', docs);
+    imported += docs.length;
+    onProgress?.({ table: resolved.finalName, rows: imported, total: candidate.rowCount });
   }
-  if (resolved.action === 'overwrite') replaceRows(targetStore, tableId, docs);
-  else for (let i = 0; i < docs.length; i += BATCH_SIZE) targetStore.bulkInsert('rows', docs.slice(i, i + BATCH_SIZE));
 
   return {
     sourceName: candidate.name,
@@ -504,6 +557,7 @@ export function commitImport(
   targetStore: SqliteStore,
   workspaceId: string,
   decisions: Record<string, ImportDecision>,
+  onProgress?: ((p: ImportProgress) => void) | undefined,
 ): ImportedTableResult[] {
   const src = new DatabaseSync(sourcePath, { readOnly: true });
   try {
@@ -514,6 +568,11 @@ export function commitImport(
         t.name.toLowerCase(),
       ),
     );
+    // Durability off for the import: the destination is a fresh file (Convert) or
+    // tables the user can re-import, and an interrupted import has to be redone
+    // anyway — so waiting for a flush per commit buys nothing. Worth 3.5x on the
+    // measurements above. Restored in the `finally` below, failure included.
+    targetStore.setDurability('bulk');
     const results: ImportedTableResult[] = [];
     for (const c of raw) {
       const candidate: ImportCandidate = {
@@ -524,12 +583,13 @@ export function commitImport(
       const resolved = resolveAction(candidate, decisions);
       results.push(
         kind === 'easydb'
-          ? importEasydbTable(src, targetStore, workspaceId, c, resolved)
-          : importForeignTable(src, targetStore, workspaceId, c, resolved),
+          ? importEasydbTable(src, targetStore, workspaceId, c, resolved, onProgress)
+          : importForeignTable(src, targetStore, workspaceId, c, resolved, onProgress),
       );
     }
     return results;
   } finally {
+    targetStore.setDurability('safe');
     src.close();
   }
 }

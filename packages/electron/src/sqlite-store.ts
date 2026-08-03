@@ -19,7 +19,11 @@
  */
 
 import { copyFileSync } from 'node:fs';
-import type { DatabaseSync as DatabaseSyncType, SQLInputValue } from 'node:sqlite';
+import type {
+  DatabaseSync as DatabaseSyncType,
+  SQLInputValue,
+  StatementSync as StatementSyncType,
+} from 'node:sqlite';
 import {
   decodeValue,
   encodeValue,
@@ -103,7 +107,39 @@ export class SqliteStore {
   constructor(opts: SqliteStoreOptions) {
     this.filePath = opts.path;
     this.db = new DatabaseSync(opts.path);
+    this.tune();
     this.createSchema();
+  }
+
+  /**
+   * Connection tuning. `cache_size` is the load-bearing one: SQLite's default
+   * page cache is 2 MB, and every row's primary key is a random UUID, so once a
+   * table outgrows that cache each insert lands in an uncached B-tree page.
+   * Measured on a 5-column table with random-UUID keys: ~22,000 rows/s at 20k
+   * rows, collapsing to ~1,400 rows/s by 400k — a 44 MB file, far too small for
+   * disk pressure to explain it. Importing a 609,283-row table took over 10
+   * minutes at that rate, which is what made the window look hung.
+   *
+   * Negative means kibibytes rather than pages, so this asks for 64 MB.
+   */
+  private tune(): void {
+    this.db.exec('PRAGMA cache_size = -65536');
+  }
+
+  /**
+   * Trades crash-durability for insert speed, for the length of a bulk import.
+   *
+   * `synchronous = OFF` stops SQLite waiting for the OS to flush on each commit.
+   * The risk it accepts is narrow and, here, acceptable: a power loss or kernel
+   * panic mid-import can corrupt the database. A process crash cannot — the OS
+   * still has the writes. An interrupted import is already something the user
+   * must redo, and the destination is either a fresh file (Convert) or a table
+   * they can re-import, so there is nothing irreplaceable in flight.
+   *
+   * Always restore with `'safe'` when the import ends, including on failure.
+   */
+  setDurability(mode: 'safe' | 'bulk'): void {
+    this.db.exec(mode === 'bulk' ? 'PRAGMA synchronous = OFF' : 'PRAGMA synchronous = FULL');
   }
 
   private createSchema(): void {
@@ -159,13 +195,70 @@ export class SqliteStore {
     if (docs.length === 0) return [];
     this.db.exec('BEGIN');
     try {
-      for (const doc of docs) this.insertNoTx(coll, doc);
+      if (coll === 'rows') this.bulkInsertRowsNoTx(docs);
+      else for (const doc of docs) this.insertNoTx(coll, doc);
       this.db.exec('COMMIT');
     } catch (err) {
       this.db.exec('ROLLBACK');
       throw err;
     }
     return docs;
+  }
+
+  /**
+   * Batch row insert. Resolves each table's SQL name and columns ONCE and
+   * prepares ONE statement per table, where the per-row path
+   * (`writeRowNoTx`) does all of that for every single row: two lookup
+   * queries, a `JSON.parse` of `columns_json`, a fresh statement compile —
+   * and then reads the row back with `SELECT * WHERE _id = ?` and decodes it,
+   * only for `bulkInsert` to discard the result (it returns its inputs).
+   *
+   * That read-back is the part that got worse as a table grew: it is a
+   * primary-key lookup into a B-tree keyed by random UUIDs. Dropping it, plus
+   * the once-per-table setup, is what makes a 600k-row import finish in a
+   * reasonable time.
+   *
+   * Same observable behaviour as the per-row path: a missing `id`/`tableId` or
+   * an unregistered `tableId` throws, and the caller's `BEGIN`/`ROLLBACK` still
+   * makes the whole batch all-or-nothing. Only `insert` and `upsert` need to
+   * return the stored row, and they keep using `writeRowNoTx`.
+   */
+  private bulkInsertRowsNoTx(docs: Record<string, unknown>[]): void {
+    const targets = new Map<string, { columns: ColumnSpec[]; stmt: StatementSyncType }>();
+    for (const doc of docs) {
+      const id = doc.id;
+      const tableId = doc.tableId;
+      if (typeof id !== 'string') {
+        throw new Error(`SqliteStore.insert: "rows" doc is missing its primary key "id"`);
+      }
+      if (typeof tableId !== 'string') {
+        throw new Error(`SqliteStore.insert: "rows" doc is missing its "tableId"`);
+      }
+      let target = targets.get(tableId);
+      if (!target) {
+        const sqlTable = this.resolveRowsTable(tableId);
+        const columns = this.readColumnsJson(sqlTable);
+        // `encodeRowColumns` emits a value for EVERY column (absent data keys
+        // encode to null), so the column list is fixed per table and one
+        // prepared statement serves every row of it.
+        const allCols = ['_id', '_updatedAt', '_extra', ...columns.map((c) => c.field)];
+        target = {
+          columns,
+          stmt: this.db.prepare(
+            `INSERT INTO ${quoteIdent(sqlTable)} (${allCols.map(quoteIdent).join(', ')}) VALUES (${allCols
+              .map(() => '?')
+              .join(', ')})`,
+          ),
+        };
+        targets.set(tableId, target);
+      }
+      const { values, extraJson } = this.encodeRowColumns(
+        target.columns,
+        (doc.data as Record<string, unknown>) ?? {},
+      );
+      const updatedAt = typeof doc.updatedAt === 'number' ? doc.updatedAt : null;
+      target.stmt.run(...sqlParams([id, updatedAt, extraJson, ...values]));
+    }
   }
 
   upsert(coll: string, doc: Record<string, unknown>): unknown {

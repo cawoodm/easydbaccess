@@ -362,3 +362,61 @@ describe('a file stamped with our bookkeeping but holding unregistered data', ()
     expect(probeDatabaseFile(sourcePath)).toBe('easydb');
   });
 });
+
+/**
+ * An explicit `skip` must be honoured whether or not the name collides.
+ *
+ * `decisions` began life as purely a COLLISION resolution, so `resolveAction`
+ * only consulted it for a colliding candidate. Two callers then started using it
+ * to mean "not this one": the Import picker passes `skip` for every object the
+ * user did not choose, and Convert passes it for every view. Both were silently
+ * ignored — picking one table imported all of them, and converting
+ * `northwind.db` snapshotted its views into 1,909,973 rows instead of 625,890.
+ */
+describe('an explicit skip decision', () => {
+  function buildTwoTables(): void {
+    const db = new DatabaseSync(sourcePath);
+    db.exec('CREATE TABLE keep (id INTEGER PRIMARY KEY, v TEXT)');
+    db.exec('CREATE TABLE drop_me (id INTEGER PRIMARY KEY, v TEXT)');
+    db.exec("INSERT INTO keep (v) VALUES ('a')");
+    db.exec("INSERT INTO drop_me (v) VALUES ('b')");
+    db.close();
+  }
+
+  it('is honoured for a table that does NOT collide', () => {
+    buildTwoTables();
+    const target = new SqliteStore({ path: targetPath });
+
+    const results = commitImport(sourcePath, target, 'ws1', { drop_me: { action: 'skip' } });
+
+    expect(results.find((r) => r.sourceName === 'drop_me')).toMatchObject({
+      action: 'skipped',
+      rowCount: 0,
+      tableId: null,
+    });
+    expect(results.find((r) => r.sourceName === 'keep')).toMatchObject({ action: 'created' });
+    expect((target.find('tables', { workspaceId: 'ws1' }) as Array<{ name: string }>).map((t) => t.name)).toEqual(
+      ['keep'],
+    );
+    target.close();
+  });
+
+  it('still defaults a COLLIDING table with no decision to skip', () => {
+    buildTwoTables();
+    const target = new SqliteStore({ path: targetPath });
+    target.insert('tables', {
+      id: 'existing',
+      workspaceId: 'ws1',
+      name: 'keep',
+      columns: [{ field: 'v', label: 'V', type: 'string' }],
+      view: 'table',
+      updatedAt: 1,
+    });
+
+    const results = commitImport(sourcePath, target, 'ws1', {});
+
+    expect(results.find((r) => r.sourceName === 'keep')).toMatchObject({ action: 'skipped' });
+    expect(results.find((r) => r.sourceName === 'drop_me')).toMatchObject({ action: 'created' });
+    target.close();
+  });
+});
