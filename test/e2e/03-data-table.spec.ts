@@ -329,9 +329,9 @@ test.describe('data-table rendering', () => {
     const dt = page.locator(`#${panelDomId(id)} data-table`);
     await expect(dt.locator('tbody tr:not(.spacer)')).toHaveCount(4);
 
-    // Click the "score" header twice: none → asc → desc.
+    // One click: a first click sorts DESCENDING (grid:sortDescFirst, on by
+    // default — see table/sort-cycle.ts).
     const scoreHeader = dt.locator('thead th', { hasText: 'score' }).locator('.sort-icon');
-    await scoreHeader.click();
     await scoreHeader.click();
 
     // Descending orders the present values 3,2,1 — and the empty score (Bob)
@@ -362,18 +362,31 @@ test.describe('data-table rendering', () => {
     const dt = page.locator(`#${panelDomId(id)} data-table`);
     await expect(dt.locator('tbody tr:not(.spacer)')).toHaveCount(4);
 
-    // One click on the "label" header → ascending.
-    await dt.locator('thead th', { hasText: 'label' }).locator('.sort-icon').click();
-
-    // Read the first cell (k) of each row in render order.
-    const ks = await dt.evaluate((el) =>
-      [
-        ...(el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelectorAll(
-          'tbody tr:not(.spacer)',
+    // Sort ascending through the store, not through clicks: what is under test
+    // here is where empties land, and how many clicks a direction takes is a
+    // separate question (a setting — see 77-sort-desc-first).
+    await page.evaluate(async (tid) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (window as any).__easydb.store.tables.patch(tid, {
+        sortBy: [{ field: 'label', asc: true }],
+        sortColumn: 'label',
+        sortAsc: true,
+        updatedAt: Date.now(),
+      });
+    }, id);
+    // Read the first cell (k) of each row in render order, polling: the store
+    // write lands through a liveQuery, so the re-render is a tick behind.
+    await expect
+      .poll(() =>
+        dt.evaluate((el) =>
+          [
+            ...(el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelectorAll(
+              'tbody tr:not(.spacer)',
+            ),
+          ].map((tr) => tr.querySelector('input')?.value ?? null),
         ),
-      ].map((tr) => tr.querySelector('input')?.value ?? null),
-    );
-    expect(ks).toEqual(['b', 'c', 'd', 'a']); // null, blank, apple, zebra
+      )
+      .toEqual(['b', 'c', 'd', 'a']); // null, blank, apple, zebra
   });
 
   test('loading bar is thick, indeterminate without progress and proportional with it', async ({

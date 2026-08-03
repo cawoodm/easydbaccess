@@ -9,6 +9,8 @@ import '../chrome/filter-combobox.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { matchesColumnFilter } from '../search/column-filter.js';
 import { facetable, facetCounts, facetValues } from '../search/facet-values.js';
+import { readSortDescFirst } from './grid-settings.js';
+import { nextSortSpecs } from './sort-cycle.js';
 import { runColumnScript } from '../util/column-script.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
@@ -923,29 +925,15 @@ export class DataTable extends LitElement {
   /**
    * Cycle one column's sort. Each click walks asc → desc → off for that column.
    *
-   * `additive` (shift-click) keeps the sort keys already in place and works on
-   * this column behind them, so "city, then age descending" is two clicks. A
-   * plain click drops the others — the common case is one column, and having to
-   * clear leftover keys first would be worse than losing them.
+   * The rule itself is `sort-cycle.ts` — pure, so which direction a first click
+   * takes (the `grid:sortDescFirst` setting) is testable without a grid.
    */
   private async toggleSort(field: string, additive = false) {
-    const current = this.sortSpecs.find((s) => s.field === field);
-    const isOnlyKey = this.sortSpecs.length === 1 && this.sortSpecs[0]?.field === field;
-    // A plain click on a column that is NOT already the only key means "sort by
-    // this instead": it becomes the sole ascending key. Only when it is already
-    // alone does the click walk the cycle on to descending and then off —
-    // otherwise dropping the other keys would land on "unsorted" unexpectedly.
-    if (!additive && !isOnlyKey) {
-      this.sortSpecs = [{ field, asc: true }];
-      await this.persistSort(this.sortSpecs);
-      return;
-    }
-    const next: SortSpec[] = additive ? this.sortSpecs.filter((s) => s.field !== field) : [];
-    // asc → desc → gone. An untouched column starts ascending.
-    if (!current) next.push({ field, asc: true });
-    else if (current.asc) next.push({ field, asc: false });
-    // (a descending column simply stays out of `next` — that is the "off" step)
-
+    const ctx = await getContext();
+    const next = nextSortSpecs(this.sortSpecs, field, {
+      additive,
+      descFirst: await readSortDescFirst(ctx.api.settings),
+    });
     this.sortSpecs = next;
     await this.persistSort(next);
   }
