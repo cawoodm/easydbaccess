@@ -7,12 +7,14 @@ talks over IPC to a `node:sqlite` store in the main process, and the user can
 open, save and import `.db` files (see [`STORAGE.md`](./STORAGE.md)). An
 in-process sync server is still ahead. See
 [`packages/electron/CLAUDE.md`](../../packages/electron/CLAUDE.md) for the
-terse contributor-facing version, the
+terse contributor-facing version, and the
 [storage design](../../.claude/plans/2026-07-31-electron-sqlite-storage.md)
-for why the file is laid out the way it is, and the
-[rewrite plan](../../.claude/plans/2026-05-21-rewrite-architecture.md) (Phase 8)
-for the original design rationale. The user-facing side of the `.db`
+for why the file is laid out the way it is. The user-facing side of the `.db`
 operations is [`help/database-files.md`](../help/database-files.md).
+
+"Phase 8" throughout this doc refers to the original rewrite plan's numbering.
+That plan file is gone, but the numbering is still how the docs and `CLAUDE.md`
+talk about remaining scope.
 
 ## What's actually running today
 

@@ -24,8 +24,8 @@ mounted in two places:
 - **In-process (Electron, Phase 8)** — Electron's main process will call
   `createServer(...)` directly and mount it on a localhost port instead of
   spawning a separate Node process, reusing `globalThis.fetch` for the fetch
-  proxy instead of going through the network at all. Not wired yet; see the
-  [rewrite plan](../../.claude/plans/2026-05-21-rewrite-architecture.md).
+  proxy instead of going through the network at all. Not wired yet — see
+  [`ELECTRON.md`](./ELECTRON.md) for what the main process does run today.
 
 ```ts
 export interface ServerDeps {

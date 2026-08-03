@@ -9,9 +9,11 @@ a local-first, plugin-extensible, multi-table database app that runs both as a
 browser app and as an Electron desktop app, with a small loosely-coupled Node
 backend for multi-device sync and URL-based data ingestion.
 
-The canonical design lives at [`.claude/plans/2026-05-21-rewrite-architecture.md`](./.claude/plans/2026-05-21-rewrite-architecture.md).
-Read it before making structural changes — it is more authoritative than this
-file for the _why_ behind the architecture. Phases 1–6 are landed (skeleton +
+The canonical design lived at `.claude/plans/2026-05-21-rewrite-architecture.md`.
+That file no longer exists; the dated per-feature notes still in
+`.claude/plans/` are what survives of it, and they remain more authoritative
+than this file for the _why_ behind anything they cover. Read the relevant one
+before making structural changes. Phases 1–6 are landed (skeleton +
 shared types + Dexie + plugin host + built-in plugins + jsPanel windows +
 standalone Hono server with `/sync`, `/fetch`, `/plugins/registry`). Phase 8's
 storage half is landed too: inside Electron the renderer talks to a
