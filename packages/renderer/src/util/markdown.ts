@@ -5,14 +5,14 @@
 // a third of that for what column scripts actually use — emphasis, code, links,
 // lists, headings, tables.
 //
-// SAFETY: the source is escaped FIRST, so raw HTML in the Markdown is shown as
-// text rather than injected. That is the opposite of CommonMark, which passes
-// HTML through, and it is deliberate. Markdown reaches this function from cell
-// DATA — a column script runs `markdownToHtml(row.notes)` over whatever was
-// imported — and imported data is not authored by the person looking at it. A
-// `<script>` or an `onerror=` in a CSV column must not become live markup in
-// the grid. Script AUTHORS are trusted (they can already do anything on the
-// page); the rows they read are not.
+// SAFETY: raw HTML in the source is SANITIZED, not escaped — see
+// `sanitize-html.ts`. Markdown reaches this function from cell DATA, and cell
+// data is not authored by the person looking at it, but it does contain real
+// markup they want to see: an Atom-feed body is `<p><strong><a href=…>` and
+// escaping it showed the tags as text, which made `markdownToHtml(row.body)`
+// useless on such a column. So the tags are rebuilt from an allowlist instead:
+// formatting survives, and a `<script>` or an `onerror=` from a CSV cannot.
+// This is CommonMark's HTML behaviour minus what can execute.
 //
 // The supported subset, and nothing else:
 //   # h1 … ###### h6        **bold**  __bold__      *em*  _em_
@@ -21,8 +21,11 @@
 //   - / * / + bullets       1. ordered              nested by 2-space indent
 //   > blockquote            --- hr                  | tables | with alignment
 //   paragraphs, and a hard break from two trailing spaces
+//   sanitized inline HTML, and raw HTML blocks (CommonMark rule 6)
 //
 // Anything else passes through as escaped text. Unit tests in markdown.test.ts.
+
+import { esc, escEntityAware, safeUrl, sanitizeHtml, sanitizeTag, stripUnsafe, TAG_RE } from './sanitize-html.js';
 
 /**
  * Placeholder wrapper for an extracted code span. A private-use code point, so
@@ -33,23 +36,42 @@
 const SENTINEL = '\uE000';
 const SENTINEL_RE = /\uE000(\d+)\uE000/g;
 
-/** HTML-escape text so it can never become markup. */
-function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+/**
+ * The block openers, one definition each, used BOTH by the branch that consumes
+ * the block and by the paragraph fallthrough that must stop in front of it.
+ *
+ * They have to come from the same place. A paragraph stops on any line these
+ * match; if one of them matched a line that no branch then claimed, the run
+ * would consume nothing, `i` would not move, and the block loop would spin
+ * forever — freezing the tab, not throwing. That is exactly what an indented
+ * `#` did: the heading branch is anchored at `^#` (an indented `#` is code, not
+ * a heading) while the paragraph rule stopped on `^\s*#`, so `    # comment`
+ * inside a 4-space code block belonged to nobody.
+ */
+const FENCE_RE = /^\s*(```+|~~~+)\s*([A-Za-z0-9_+-]*)\s*$/;
+const HEADING_RE = /^(#{1,6})\s+(.*)$/;
+const HR_RE = /^\s*([-*_])(\s*\1){2,}\s*$/;
+const QUOTE_RE = /^\s*>/;
+const LIST_RE = /^\s*(?:[-*+]|\d+[.)])\s+/;
+/** A table's `|---|:--:|` delimiter row, which only means anything as line two. */
+const DELIM_RE = /^\s*\|?[\s:|-]+\|[\s:|-]*$/;
 
 /**
- * A URL safe to put in `href`/`src`. Rejects everything but http, https,
- * mailto, tel and relative paths — `javascript:` and `data:` in a link are the
- * classic way markdown turns into script execution.
+ * Tag names that open a raw-HTML BLOCK: the run of lines up to the next blank
+ * line is HTML, and no Markdown rule applies inside it. This is CommonMark's
+ * rule 6, and it is what stops `<p>x</p>` in the data from being wrapped in a
+ * paragraph of our own — `<p><p>x</p></p>` is what that produced.
+ *
+ * Span-level tags are absent on purpose. A line starting with `<span>` is an
+ * ordinary paragraph, and its tags are handled inline.
  */
-function safeUrl(raw: string): string | null {
-  const url = raw.trim();
-  if (url === '') return null;
-  // A scheme-relative or absolute path, or anything with no scheme at all, is
-  // fine — there is nothing executable about it.
-  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) return url;
-  return /^(https?|mailto|tel):/i.test(url) ? url : null;
+const HTML_BLOCK_TAGS =
+  'address|article|aside|blockquote|caption|col|colgroup|dd|details|div|dl|dt|figcaption|figure|footer|form|h[1-6]|header|hr|iframe|legend|li|main|nav|ol|p|pre|script|section|style|summary|table|tbody|td|tfoot|th|thead|tr|ul';
+const HTML_BLOCK_RE = new RegExp(`^\\s*</?(?:${HTML_BLOCK_TAGS})(?:[\\s/>]|$)`, 'i');
+
+/** Does `line` open a block, i.e. must a paragraph stop in front of it? */
+function opensBlock(line: string): boolean {
+  return FENCE_RE.test(line) || HEADING_RE.test(line) || HR_RE.test(line) || QUOTE_RE.test(line) || LIST_RE.test(line) || HTML_BLOCK_RE.test(line);
 }
 
 /** Inline spans: code first (its contents are literal), then the rest. */
@@ -63,7 +85,18 @@ function inline(src: string): string {
     return `${SENTINEL}${spans.length - 1}${SENTINEL}`;
   });
 
-  s = esc(s);
+  // Inline HTML from the data goes into the SAME placeholder list as code
+  // spans, so a sanitized tag is opaque to every rule below it: no emphasis
+  // marker inside an `href` can be read as emphasis, and no rule can graft a
+  // `<em>` into the middle of an attribute value.
+  s = stripUnsafe(s).replace(TAG_RE, (_m, closing: string, name: string, attrs: string) => {
+    const tag = sanitizeTag(closing === '/', name, attrs);
+    if (tag === '') return '';
+    spans.push(tag);
+    return `${SENTINEL}${spans.length - 1}${SENTINEL}`;
+  });
+
+  s = escEntityAware(s);
 
   // Images before links — `![a](b)` shares the link shape.
   s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g, (m, alt: string, url: string, title?: string) => {
@@ -154,7 +187,7 @@ export function markdownToHtml(src: unknown): string {
     }
 
     // Fenced code — contents are literal, so no inline pass.
-    const fence = /^\s*(```+|~~~+)\s*([A-Za-z0-9_+-]*)\s*$/.exec(line);
+    const fence = FENCE_RE.exec(line);
     if (fence) {
       const close = fence[1]!.slice(0, 3);
       i++;
@@ -165,7 +198,18 @@ export function markdownToHtml(src: unknown): string {
       continue;
     }
 
-    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    // A raw HTML block: everything up to the next blank line is markup, kept
+    // as markup (sanitized) and never wrapped in a paragraph. A feed body is
+    // mostly this. The run always contains the current line, so the block loop
+    // cannot stall here.
+    if (HTML_BLOCK_RE.test(line)) {
+      const block = take((l) => l.trim() !== '');
+      const html = sanitizeHtml(block.join('\n'));
+      if (html.trim() !== '') out.push(html);
+      continue;
+    }
+
+    const heading = HEADING_RE.exec(line);
     if (heading) {
       const level = heading[1]!.length;
       out.push(`<h${level}>${inline(heading[2]!.replace(/\s+#+\s*$/, ''))}</h${level}>`);
@@ -173,21 +217,21 @@ export function markdownToHtml(src: unknown): string {
       continue;
     }
 
-    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+    if (HR_RE.test(line)) {
       out.push('<hr>');
       i++;
       continue;
     }
 
-    if (/^\s*>/.test(line)) {
-      const block = take((l) => /^\s*>/.test(l) || l.trim() !== '');
+    if (QUOTE_RE.test(line)) {
+      const block = take((l) => QUOTE_RE.test(l) || l.trim() !== '');
       // Recurse on the un-quoted body so a blockquote can hold anything.
       out.push(`<blockquote>${markdownToHtml(block.map((l) => l.replace(/^\s*>\s?/, '')).join('\n'))}</blockquote>`);
       continue;
     }
 
     // Table: a header row followed by a |---|:--:| delimiter row.
-    if (line.includes('|') && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i + 1]!) && lines[i + 1]!.includes('-')) {
+    if (line.includes('|') && i + 1 < lines.length && DELIM_RE.test(lines[i + 1]!) && lines[i + 1]!.includes('-')) {
       const head = cells(line);
       const aligns = cells(lines[i + 1]!).map(ALIGN);
       i += 2;
@@ -203,15 +247,24 @@ export function markdownToHtml(src: unknown): string {
       continue;
     }
 
-    if (/^\s*(?:[-*+]|\d+[.)])\s+/.test(line)) {
-      const block = take((l) => l.trim() !== '' && !/^\s*(?:```|~~~|#{1,6}\s)/.test(l));
+    if (LIST_RE.test(line)) {
+      const block = take((l) => l.trim() !== '' && !FENCE_RE.test(l) && !HEADING_RE.test(l));
       out.push(list(block));
       continue;
     }
 
     // Paragraph: everything up to a blank line or the start of another block.
-    const para = take((l) => l.trim() !== '' && !/^\s*(?:```|~~~|>|#{1,6}\s|(?:[-*+]|\d+[.)])\s)/.test(l) && !/^\s*([-*_])(\s*\1){2,}\s*$/.test(l));
-    if (para.length > 0) out.push(`<p>${inline(para.join('\n'))}</p>`);
+    const para = take((l) => l.trim() !== '' && !opensBlock(l));
+    // `opensBlock` mirrors the branches above, so the current line never opens a
+    // block here and the run is never empty. Kept as a backstop regardless: a
+    // future branch that stops a paragraph without consuming its own line would
+    // hang the tab, and one line of escaped output is a better failure mode.
+    if (para.length === 0) {
+      out.push(`<p>${inline(line)}</p>`);
+      i++;
+      continue;
+    }
+    out.push(`<p>${inline(para.join('\n'))}</p>`);
   }
 
   return out.join('\n');

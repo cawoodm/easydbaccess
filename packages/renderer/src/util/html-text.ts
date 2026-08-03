@@ -9,25 +9,14 @@
  * is plain text.
  */
 
+import { decodeEntities } from './sanitize-html.js';
+
 /** Matches a real open tag, close tag, or entity — not a bare `<`/`>`/`&`. */
 const HTML_LIKE = /<\/?[a-z][a-z0-9]*(\s[^<>]*)?\/?>|&[a-z][a-z0-9]*;|&#\d+;|&#x[0-9a-f]+;/i;
 
 /** True when `s` plausibly contains HTML markup (a tag or an entity). */
 export function looksLikeHtml(s: string): boolean {
   return HTML_LIKE.test(s);
-}
-
-/** Decodes the handful of entities that matter once tags are stripped. */
-function decodeEntities(s: string): string {
-  return s
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&apos;|&#39;/gi, "'")
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&#x([0-9a-f]+);/gi, (_m, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_m, dec: string) => String.fromCodePoint(Number(dec)))
-    .replace(/&amp;/gi, '&');
 }
 
 /**
