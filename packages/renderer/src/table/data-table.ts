@@ -13,7 +13,7 @@ import { readSortDescFirst } from './grid-settings.js';
 import { readSortSpecs, sortRowsBySpecs } from './row-sort.js';
 import { nextSortSpecs } from './sort-cycle.js';
 import { runColumnScript } from '../util/column-script.js';
-import { arrayCellText, arrayMembers } from '@easydb/shared';
+import { arrayMembers } from '@easydb/shared';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
 

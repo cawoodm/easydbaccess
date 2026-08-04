@@ -482,7 +482,7 @@ export class AppShell extends LitElement {
             target="_blank"
             rel="noopener"
             title="View the changelog on GitHub"
-            ><span class="version">v0.0.298</span></a
+            ><span class="version">v0.0.299</span></a
           ></strong
         >
         ${this.headerButtons
