@@ -371,6 +371,27 @@ function rowsViewIpc(bridge: EasydbStoreBridge, tableId: string): DataCollection
       // open tables sit that one out.
       return subscribeToCollection(bridge, 'rows', () => fetchAll(), fn, tableId);
     },
+    /**
+     * The same notification `subscribe` acts on, minus the fetch.
+     *
+     * This is the cheap half of the broadcast: the bridge already tells us WHICH
+     * collection changed, and `subscribe` only reads the rows in order to have
+     * something to pass. A consumer running its own `query` does not want them,
+     * so it gets the bare signal and nothing crosses IPC at all.
+     *
+     * Fires once immediately, matching `subscribe`'s initial emission, so a
+     * caller has one code path for "load now" and "load again".
+     */
+    watch(fn): Unsubscribe {
+      fn();
+      return bridge.onChanged((changed, changedScope) => {
+        if (changed !== 'rows') return;
+        // A scoped broadcast is only for the table it names; an unscoped one is
+        // an ordinary write and reaches everybody.
+        if (changedScope && changedScope !== tableId) return;
+        fn();
+      });
+    },
   };
 }
 

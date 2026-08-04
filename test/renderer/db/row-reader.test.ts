@@ -171,6 +171,33 @@ describe('readRows', () => {
     expect(page.rows.map((r) => r.id)).toEqual(['r1', 'r3']);
   });
 
+  /**
+   * The bug the whole contract exists to fix.
+   *
+   * The grid used to fetch a capped prefix of the table and filter THAT. So a
+   * match sitting past the cap simply did not exist as far as the user was
+   * concerned — the grid showed "no rows" over a table that had them, and a sort
+   * showed the top of an arbitrary prefix rather than the top of the table.
+   */
+  it('finds a match that lies past the fetch cap, because the backend filters the whole table', async () => {
+    const many: Row[] = Array.from({ length: 500 }, (_, i) => ({
+      id: `r${i}`,
+      tableId: 't',
+      data: { name: `Person ${i}`, country: i === 400 ? 'Zanzibar' : 'Sweden', age: 30, secret: '' },
+      updatedAt: 1,
+    }));
+    const { coll, seen } = fakeColl({ rows: many });
+    // A cap far below where the match sits.
+    const page = await readRows(coll, req({ filters: { country: 'Zanzibar' } }), 50);
+    expect(seen.finds).toBe(0);
+    expect(page.total).toBe(1);
+    expect(page.rows.map((r) => r.id)).toEqual(['r400']);
+
+    // And the contrast: reading a capped prefix and filtering it finds nothing.
+    const blind = applyRowRequest(many.slice(0, 50), req({ filters: { country: 'Zanzibar' } }));
+    expect(blind.total).toBe(0);
+  });
+
   it('caps what it pulls even on the unsound path, and reports the cap as truncation', async () => {
     const { coll, seen } = fakeColl();
     const page = await readRows(coll, req({ search: 'ada OR bo' }), 3);

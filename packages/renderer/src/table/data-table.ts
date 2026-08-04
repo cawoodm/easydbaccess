@@ -1,7 +1,9 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { html as staticHtml, unsafeStatic } from 'lit/static-html.js';
 import { customElement, property, state } from 'lit/decorators.js';
-import type { ColumnSpec, Row, SortSpec, Table, ViewInstance } from '@easydb/shared';
+import type { ColumnSpec, DataCollection, Row, SortSpec, Table, ViewInstance } from '@easydb/shared';
+import { readRows, type RowRequest } from '../db/row-reader.js';
+import { ROW_FETCH_CAP } from '../db/data-store-ipc.js';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
@@ -17,9 +19,17 @@ import { arrayMembers } from '@easydb/shared';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
 
-
 /** Delay before the header loading bar appears, so fast loads don't flash it. */
 const LOAD_BAR_DELAY_MS = 200;
+
+/**
+ * How long a view change waits before the grid refetches.
+ *
+ * Every keystroke in a filter box changes the query, and one round trip per
+ * character is both wasteful and visibly jittery. 250ms matches what the
+ * filter's own persist already waits, so the refetch and the save coincide.
+ */
+const RELOAD_DEBOUNCE_MS = 250;
 
 /**
  * Narrowest a column may be dragged. Small enough to park a column you don't
@@ -63,6 +73,19 @@ export class DataTable extends LitElement {
         height: 8px;
         background: #dbeafe;
         overflow: hidden;
+      }
+      /* Says the grid is showing a slice. Sticky so scrolling a long table
+         cannot leave the user reading a partial answer as a whole one. */
+      .truncated-note {
+        position: sticky;
+        top: 0;
+        left: 0;
+        z-index: 3;
+        padding: 0.25rem 0.5rem;
+        background: #fef3c7;
+        border-bottom: 1px solid #fcd34d;
+        color: #92400e;
+        font-size: 0.75rem;
       }
       .load-bar-fill {
         height: 100%;
@@ -393,7 +416,29 @@ export class DataTable extends LitElement {
    */
   @property({ type: String }) viewInstanceId = '';
   @state() private columns: ColumnSpec[] = [];
+  /**
+   * The rows this grid holds — the answer to its CURRENT query, not the table.
+   *
+   * It used to be the whole table (capped at `ROW_FETCH_CAP`), which cost 1483ms
+   * and a 15.4 MB IPC payload to show about 30 rows of a 609,283-row table. Worse
+   * than slow, it was wrong: the cap truncated silently, so a filter or a sort
+   * only ever saw the first 20,000 rows and confidently showed the wrong ones.
+   * Now the filter, the search and the sort go to the store (`db/row-reader.ts`),
+   * which applies them over the whole table and returns the narrowed set.
+   */
   @state() private rows: Row[] = [];
+  /**
+   * Rows MATCHING the current filter and search across the whole table, which is
+   * not the same as `rows.length` once the fetch is capped. The panel title needs
+   * a number the grid did not fetch.
+   */
+  @state() private matchingTotal = 0;
+  /**
+   * The fetch stopped short of the matching set, so `matchingTotal` is a floor and
+   * what is on screen is a slice. Said out loud rather than implied — a truncated
+   * grid that looks complete is how the old cap misled.
+   */
+  @state() private truncated = false;
   /**
    * Sort keys in priority order. A plain header click replaces the list; a
    * shift-click adds the column as a tie-breaker behind the ones already there.
@@ -430,6 +475,14 @@ export class DataTable extends LitElement {
   private resizeObs: ResizeObserver | null = null;
   private unsubscribe?: () => void;
   private filterSaveTimer: number | null = null;
+  /** The row collection this grid reads, kept so a refetch needn't re-resolve it. */
+  private rowColl: DataCollection<Row> | null = null;
+  /**
+   * Monotonic id per fetch. Two loads can be in flight (a change signal and a
+   * filter edit), and the slower one must not deliver over the fresher one.
+   */
+  private loadGeneration = 0;
+  private reloadTimer: number | null = null;
   /** View-bound mode: the instance + the table's column definitions. */
   private viewInst: ViewInstance | null = null;
   private tableColumns: ColumnSpec[] = [];
@@ -485,6 +538,12 @@ export class DataTable extends LitElement {
     this.unsubscribe?.();
     this.tableSubUnsub?.();
     this.viewSubUnsub?.();
+    // A pending refetch would otherwise land on a detached element — and bump
+    // the generation, so a later re-connect could discard its own fresh load.
+    if (this.reloadTimer != null) {
+      window.clearTimeout(this.reloadTimer);
+      this.reloadTimer = null;
+    }
     // A live column resize (see onResizeStart) has its own window-level
     // pointermove/pointerup/pointercancel listeners, but those only fire on
     // an actual pointer event — if the grid unmounts mid-drag (table
@@ -503,7 +562,11 @@ export class DataTable extends LitElement {
   };
 
   private onGlobalSearch = (e: Event) => {
-    this.globalQuery = (e as CustomEvent<{ query: string }>).detail.query ?? '';
+    const next = (e as CustomEvent<{ query: string }>).detail.query ?? '';
+    if (next === this.globalQuery) return;
+    this.globalQuery = next;
+    // Search is part of the query the store answers, so it has to be re-asked.
+    this.scheduleReload();
   };
 
   private onTableSearch = (e: Event) => {
@@ -511,7 +574,10 @@ export class DataTable extends LitElement {
     // In view-bound mode the header search box is keyed by the VIEW instance id,
     // so match either — the underlying table id or the view instance id.
     if (d.tableId === this.tableId || (this.viewMode && d.tableId === this.viewInstanceId)) {
-      this.localQuery = d.query ?? '';
+      const next = d.query ?? '';
+      if (next === this.localQuery) return;
+      this.localQuery = next;
+      this.scheduleReload();
     }
   };
 
@@ -549,7 +615,10 @@ export class DataTable extends LitElement {
     const key = this.viewMode ? this.viewInstanceId : this.tableId;
     if (!key) return;
     const count = this.renderedCount;
-    const total = this.rows.length;
+    // The MATCHING total, which is not `rows.length`: the fetch is capped, so on
+    // a big table the rows held are a slice and their length would understate the
+    // table by any amount. The store counts without returning.
+    const total = Math.max(this.matchingTotal, this.rows.length);
     if (count === this.lastEmittedCount && total === this.lastEmittedTotal) return;
     this.lastEmittedCount = count;
     this.lastEmittedTotal = total;
@@ -604,27 +673,86 @@ export class DataTable extends LitElement {
     // that registered late is picked up too.
     this.cellRenderers = new Map(ctx.registries.cellRenderers);
     ctx.events.on('app:ready', () => (this.cellRenderers = new Map(ctx.registries.cellRenderers)));
-    const rowColl = ctx.store.rows(this.tableId);
-    this.unsubscribe = rowColl.subscribe((r) => (this.rows = r));
+    this.rowColl = ctx.store.rows(this.tableId);
+    // `watch` is the change signal on its own; `subscribe` has to read the whole
+    // collection to have something to hand its callback, which is the second
+    // full fetch this grid used to pay for on every open. Either way the
+    // response is the same: re-run OUR query.
+    this.unsubscribe = this.rowColl.watch ? this.rowColl.watch(() => void this.loadRows()) : this.rowColl.subscribe(() => void this.loadRows());
+    // `watch`/`subscribe` both fire once immediately, so the initial load is
+    // already in flight — awaiting it here is what makes `bind()` resolve with
+    // rows on screen, which the tests and the loading bar both rely on.
+    await this.loadRows();
+  }
+
+  /**
+   * Ask the store for exactly the rows this grid is showing.
+   *
+   * The request carries the filter, the search and the sort, so the narrowing
+   * happens where the data is (`db/row-reader.ts` decides how much of that the
+   * backend can soundly do and finishes the rest here). The grid's own
+   * `filteredRows`/`sortedRows` still run over what comes back — that is what
+   * keeps typing in a filter box responsive while this refetch is in flight, and
+   * it is a no-op once the answer lands.
+   */
+  private async loadRows(): Promise<void> {
+    const coll = this.rowColl;
+    if (!coll) return;
+    const gen = ++this.loadGeneration;
     // Show a loading bar in the table header, but only if the fetch is slow
     // enough to matter (large local tables, remote sources) — fast local loads
     // resolve before the delay so the bar never flashes.
     const barTimer = window.setTimeout(() => (this.loading = true), LOAD_BAR_DELAY_MS);
     try {
-      this.rows = await rowColl.find();
+      const page = await readRows(coll, this.rowRequest(), ROW_FETCH_CAP);
+      // A slower earlier load must not land on top of a newer one — the same
+      // generation guard `subscribeToCollection` uses for the same reason.
+      if (gen !== this.loadGeneration) return;
+      this.rows = page.rows;
+      this.matchingTotal = page.total;
+      this.truncated = page.truncated === true;
     } catch (err) {
+      if (gen !== this.loadGeneration) return;
       // A remote-backed table (e.g. a live Datasette source) can fail to load
       // its rows — a blocked cross-origin fetch, a bot challenge, an auth
       // error. Surface it instead of leaving a silently empty grid.
       this.rows = [];
+      this.matchingTotal = 0;
+      const ctx = await getContext();
       ctx.api.ui.dialogs.toast(`Couldn't load rows: ${(err as Error)?.message ?? String(err)}`, {
         kind: 'error',
         title: 'Load failed',
       });
     } finally {
       window.clearTimeout(barTimer);
-      this.loading = false;
+      if (gen === this.loadGeneration) this.loading = false;
     }
+  }
+
+  /** The current view, as a request the store can answer. */
+  private rowRequest(): RowRequest {
+    const search = [this.localQuery.trim(), this.globalQuery.trim()].filter(Boolean).join(' ');
+    return {
+      columns: this.columns,
+      filters: this.filters,
+      ...(search ? { search } : {}),
+      ...(this.sortSpecs.length > 0 ? { sort: this.sortSpecs } : {}),
+    };
+  }
+
+  /**
+   * Refetch after the view changed, coalescing a burst into one round trip.
+   *
+   * Typing in a filter box changes the request on every keystroke, and each one
+   * would otherwise be its own query. The delay matches the one the filter's own
+   * persist already waits, so the refetch and the save land together.
+   */
+  private scheduleReload(): void {
+    if (this.reloadTimer != null) window.clearTimeout(this.reloadTimer);
+    this.reloadTimer = window.setTimeout(() => {
+      this.reloadTimer = null;
+      void this.loadRows();
+    }, RELOAD_DEBOUNCE_MS);
   }
 
   private applyTable(table: Table) {
@@ -680,12 +808,7 @@ export class DataTable extends LitElement {
    * (notnull, max, unique) before writing. On rejection: pop a dialog with
    * the reason and re-render so the cell input reverts to its prior value.
    */
-  private async commitCell(
-    ctx: import('../app-context.js').AppContext,
-    row: Row,
-    field: string,
-    value: unknown,
-  ) {
+  private async commitCell(ctx: import('../app-context.js').AppContext, row: Row, field: string, value: unknown) {
     const col = this.columns.find((c) => c.field === field);
     if (col) {
       const reason = validate(col, value, this.rows, row.id);
@@ -705,10 +828,7 @@ export class DataTable extends LitElement {
       // Remote (e.g. Datasette) sources can reject a write — read-only table,
       // expired token, server error. Surface it and revert the cell instead of
       // leaving an unhandled rejection and a stale-looking value.
-      await ctx.api.ui.dialogs.alert(
-        (err as Error)?.message ?? 'Could not save the change.',
-        'Save failed',
-      );
+      await ctx.api.ui.dialogs.alert((err as Error)?.message ?? 'Could not save the change.', 'Save failed');
       this.requestUpdate();
     }
   }
@@ -799,10 +919,7 @@ export class DataTable extends LitElement {
       .column=${col}
       .row=${row.data}
       .readonly=${true}
-      @change=${this.readOnly
-        ? undefined
-        : (e: Event) =>
-            this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
+      @change=${this.readOnly ? undefined : (e: Event) => this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
     ></${tag}>`;
   }
 
@@ -851,10 +968,7 @@ export class DataTable extends LitElement {
         .column=${col}
         .row=${row.data}
         .readonly=${cellReadonly}
-        @change=${cellReadonly
-          ? undefined
-          : (e: Event) =>
-              this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
+        @change=${cellReadonly ? undefined : (e: Event) => this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
       ></${tag}>`;
     }
     // Read-only never offers an editor: show the value as plain text
@@ -881,8 +995,7 @@ export class DataTable extends LitElement {
           type="date"
           .value=${toDateIso(raw)}
           @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, toDateIso(raw))}
-          @change=${(e: Event) =>
-            this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
+          @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
         />`;
       case 'datetime':
         if (isNonEmptyButUnparsed(raw, toDatetimeLocal(raw))) {
@@ -892,8 +1005,7 @@ export class DataTable extends LitElement {
           type="datetime-local"
           .value=${toDatetimeLocal(raw)}
           @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, toDatetimeLocal(raw))}
-          @change=${(e: Event) =>
-            this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
+          @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
         />`;
       case 'number': {
         const isEmpty = raw == null || raw === '';
@@ -920,8 +1032,7 @@ export class DataTable extends LitElement {
           type="text"
           .value=${list}
           @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, list)}
-          @change=${(e: Event) =>
-            this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
+          @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
         />`;
       }
       default:
@@ -929,8 +1040,7 @@ export class DataTable extends LitElement {
           type="text"
           .value=${String(raw ?? '')}
           @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, String(raw ?? ''))}
-          @change=${(e: Event) =>
-            this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
+          @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
         />`;
     }
   }
@@ -940,10 +1050,7 @@ export class DataTable extends LitElement {
     try {
       await ctx.store.rows(this.tableId).remove(rowId);
     } catch (err) {
-      await ctx.api.ui.dialogs.alert(
-        (err as Error)?.message ?? 'Could not delete the row.',
-        'Delete failed',
-      );
+      await ctx.api.ui.dialogs.alert((err as Error)?.message ?? 'Could not delete the row.', 'Delete failed');
     }
   }
 
@@ -965,6 +1072,10 @@ export class DataTable extends LitElement {
       descFirst: await readSortDescFirst(ctx.api.settings),
     });
     this.sortSpecs = next;
+    // The sort travels with the query: on a table bigger than the fetch cap,
+    // sorting only the rows already held would show the top of an arbitrary
+    // slice rather than the top of the table.
+    this.scheduleReload();
     await this.persistSort(next);
   }
 
@@ -987,9 +1098,7 @@ export class DataTable extends LitElement {
    * once here rather than per row, since only `array` changes how a cell is read
    * (per member instead of as one value) and finding that out is a column scan.
    */
-  private typedFilters(
-    active: Array<[string, string]>,
-  ): Array<{ field: string; query: string; type: string | undefined }> {
+  private typedFilters(active: Array<[string, string]>): Array<{ field: string; query: string; type: string | undefined }> {
     return active.map(([field, query]) => ({
       field,
       query,
@@ -1001,12 +1110,8 @@ export class DataTable extends LitElement {
     // A column flagged `filterable: false` is excluded from free-text search
     // as well as from the per-column funnel. A stored per-column filter that
     // predates the flag being set must not silently keep narrowing the grid.
-    const unfilterable = new Set(
-      this.columns.filter((c) => c.filterable === false).map((c) => c.field),
-    );
-    const active = Object.entries(this.filters).filter(
-      ([field, q]) => q && q.trim().length > 0 && !unfilterable.has(field),
-    );
+    const unfilterable = new Set(this.columns.filter((c) => c.filterable === false).map((c) => c.field));
+    const active = Object.entries(this.filters).filter(([field, q]) => q && q.trim().length > 0 && !unfilterable.has(field));
     const gq = this.globalQuery.trim();
     const lq = this.localQuery.trim();
     if (active.length === 0 && gq.length === 0 && lq.length === 0) return this.rows;
@@ -1014,9 +1119,7 @@ export class DataTable extends LitElement {
     let rows = this.rows;
     if (active.length > 0) {
       const typed = this.typedFilters(active);
-      rows = rows.filter((r) =>
-        typed.every((f) => matchesColumnFilter(r.data[f.field], f.query, { type: f.type })),
-      );
+      rows = rows.filter((r) => typed.every((f) => matchesColumnFilter(r.data[f.field], f.query, { type: f.type })));
     }
     // Free-text search supports `field:value` (with !/^/comma-OR/NULL), boolean
     // AND/OR, and the phrase→AND→OR fallback. Local and global queries each
@@ -1047,13 +1150,7 @@ export class DataTable extends LitElement {
     });
     // Toggles apply live while the popover stays open (multi-value tri-state);
     // the promise only reports dismissal or an explicit Clear.
-    const result = await popover.open(
-      btn.getBoundingClientRect(),
-      values,
-      this.filters[field] ?? '',
-      blanks,
-      (next) => this.onFilterInput(field, next),
-    );
+    const result = await popover.open(btn.getBoundingClientRect(), values, this.filters[field] ?? '', blanks, (next) => this.onFilterInput(field, next));
     if (result === null) return;
     if (typeof result === 'object' && 'clear' in result) {
       this.onFilterInput(field, '');
@@ -1073,6 +1170,11 @@ export class DataTable extends LitElement {
       this.filterSaveTimer = null;
       void this.saveFilters();
     }, 250);
+    // The filter is part of the query now, so the store has to be asked again.
+    // Until it answers, the in-memory pass over the rows already held keeps the
+    // grid responsive — and it narrows a truncated set, which is why the answer
+    // still matters: on a big table those rows are only the first slice.
+    this.scheduleReload();
   }
 
   private get visibleColumns(): ColumnSpec[] {
@@ -1090,17 +1192,11 @@ export class DataTable extends LitElement {
    * Pass `null` to evaluate against ALL per-column filters.
    */
   private rowsFacetedFor(focusField: string | null): Row[] {
-    const unfilterable = new Set(
-      this.columns.filter((c) => c.filterable === false).map((c) => c.field),
-    );
-    const active = Object.entries(this.filters).filter(
-      ([f, q]) => q && q.trim().length > 0 && f !== focusField && !unfilterable.has(f),
-    );
+    const unfilterable = new Set(this.columns.filter((c) => c.filterable === false).map((c) => c.field));
+    const active = Object.entries(this.filters).filter(([f, q]) => q && q.trim().length > 0 && f !== focusField && !unfilterable.has(f));
     if (active.length === 0) return this.rows;
     const typed = this.typedFilters(active);
-    return this.rows.filter((r) =>
-      typed.every((f) => matchesColumnFilter(r.data[f.field], f.query, { type: f.type })),
-    );
+    return this.rows.filter((r) => typed.every((f) => matchesColumnFilter(r.data[f.field], f.query, { type: f.type })));
   }
 
   /**
@@ -1138,9 +1234,7 @@ export class DataTable extends LitElement {
       if (cell) measured.set(c.field, Math.round(cell.getBoundingClientRect().width));
     });
     if (measured.size === 0) return;
-    this.columns = this.columns.map((c) =>
-      measured.has(c.field) ? { ...c, width: measured.get(c.field)! } : c,
-    );
+    this.columns = this.columns.map((c) => (measured.has(c.field) ? { ...c, width: measured.get(c.field)! } : c));
   }
 
   private onResizeStart(e: PointerEvent, field: string, th: HTMLElement) {
@@ -1161,9 +1255,7 @@ export class DataTable extends LitElement {
       const dx = ev.clientX - this.resizing.startX;
       const w = Math.max(MIN_COL_W, this.resizing.startW + dx);
       // Live update: patch the in-memory column width so the colgroup reflows.
-      this.columns = this.columns.map((c) =>
-        c.field === this.resizing!.field ? { ...c, width: w } : c,
-      );
+      this.columns = this.columns.map((c) => (c.field === this.resizing!.field ? { ...c, width: w } : c));
     };
     const onUp = async () => {
       window.removeEventListener('pointermove', onMove);
@@ -1286,8 +1378,7 @@ export class DataTable extends LitElement {
       });
       return;
     }
-    const filters: Record<string, string> | undefined =
-      Object.keys(cleaned).length === 0 ? undefined : cleaned;
+    const filters: Record<string, string> | undefined = Object.keys(cleaned).length === 0 ? undefined : cleaned;
     await ctx.store.tables.patch(this.tableId, { filters, updatedAt: Date.now() });
   }
 
@@ -1344,18 +1435,13 @@ export class DataTable extends LitElement {
     const frac = this.externalLoading ? this.externalProgress : null;
     return html`
       ${this.loading || this.externalLoading
-        ? html`<div
-            class="load-bar"
-            role="progressbar"
-            aria-label="Loading rows"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            aria-valuenow=${frac != null ? Math.round(frac * 100) : nothing}
-          >
-            <div
-              class="load-bar-fill ${frac != null ? 'determinate' : ''}"
-              style=${frac != null ? `width:${Math.max(2, Math.round(frac * 100))}%` : nothing}
-            ></div>
+        ? html`<div class="load-bar" role="progressbar" aria-label="Loading rows" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${frac != null ? Math.round(frac * 100) : nothing}>
+            <div class="load-bar-fill ${frac != null ? 'determinate' : ''}" style=${frac != null ? `width:${Math.max(2, Math.round(frac * 100))}%` : nothing}></div>
+          </div>`
+        : nothing}
+      ${this.truncated
+        ? html`<div class="truncated-note" role="status">
+            Showing the first ${this.rows.length.toLocaleString()} of ${this.matchingTotal.toLocaleString()}+ matching rows. Narrow the filter to see the rest.
           </div>`
         : nothing}
       <table style=${this.tableSizingStyle(cols) ?? nothing}>
@@ -1378,12 +1464,7 @@ export class DataTable extends LitElement {
               const typeClass = `t-${c.type}`;
               const isSrc = this.dragSourceField === c.field;
               const isTgt = this.dropTargetField === c.field;
-              const edgeClass =
-                isTgt && this.dropEdge === 'before'
-                  ? ' drop-before'
-                  : isTgt && this.dropEdge === 'after'
-                    ? ' drop-after'
-                    : '';
+              const edgeClass = isTgt && this.dropEdge === 'before' ? ' drop-before' : isTgt && this.dropEdge === 'after' ? ' drop-after' : '';
               const tip =
                 (c.description ? `${c.description}\n` : '') +
                 (c.units ? `Units: ${c.units}\n` : '') +
@@ -1394,8 +1475,7 @@ export class DataTable extends LitElement {
                   class=${`${typeClass}${sorted ? ' sorted' : ''}${isSrc ? ' drag-source' : ''}${edgeClass}${canSort ? '' : ' no-sort'}`}
                   title=${tip}
                   @click=${(e: MouseEvent) => canSort && this.toggleSort(c.field, e.shiftKey)}
-                  @dragover=${(e: DragEvent) =>
-                    this.onColDragOver(e, c.field, e.currentTarget as HTMLElement)}
+                  @dragover=${(e: DragEvent) => this.onColDragOver(e, c.field, e.currentTarget as HTMLElement)}
                   @dragleave=${() => this.onColDragLeave(c.field)}
                   @drop=${(e: DragEvent) => this.onColDrop(e, c.field)}
                 >
@@ -1418,15 +1498,8 @@ export class DataTable extends LitElement {
                         this.dropEdge = null;
                       }}
                       >drag_indicator</span
-                    ><span class="col-label"
-                      >${c.label}${c.units
-                        ? html`<span class="col-units"> (${c.units})</span>`
-                        : ''}</span
-                    ><span class="sort-icon" aria-hidden="true"
-                      >${icon}${rankLabel
-                        ? html`<span class="sort-rank">${rankLabel}</span>`
-                        : nothing}</span
-                    >
+                    ><span class="col-label">${c.label}${c.units ? html`<span class="col-units"> (${c.units})</span>` : ''}</span
+                    ><span class="sort-icon" aria-hidden="true">${icon}${rankLabel ? html`<span class="sort-rank">${rankLabel}</span>` : nothing}</span>
                     ${canFilter
                       ? html`<button
                           class=${`funnel${this.filters[c.field] ? ' active' : ''}`}
@@ -1442,12 +1515,7 @@ export class DataTable extends LitElement {
                     class="col-resize"
                     title="Drag to resize column"
                     @click=${(e: Event) => e.stopPropagation()}
-                    @pointerdown=${(e: PointerEvent) =>
-                      this.onResizeStart(
-                        e,
-                        c.field,
-                        (e.currentTarget as HTMLElement).parentElement as HTMLElement,
-                      )}
+                    @pointerdown=${(e: PointerEvent) => this.onResizeStart(e, c.field, (e.currentTarget as HTMLElement).parentElement as HTMLElement)}
                   ></span>
                 </th>
               `;
@@ -1465,11 +1533,7 @@ export class DataTable extends LitElement {
                     .options=${opts}
                     placeholder="filter…"
                     title="Filter: text = contains, ^text = starts with, !text = does not contain, NULL = empty, !NULL = has a value. Comma-separate for several values (a,b = a OR b; !a,!b excludes both); quote a value containing a comma."
-                    @filter-change=${(e: Event) =>
-                      this.onFilterInput(
-                        c.field,
-                        (e as CustomEvent<{ value: string }>).detail.value,
-                      )}
+                    @filter-change=${(e: Event) => this.onFilterInput(c.field, (e as CustomEvent<{ value: string }>).detail.value)}
                   ></filter-combobox>
                 </th>
               `;
@@ -1489,9 +1553,7 @@ export class DataTable extends LitElement {
                 ${cols.map(
                   (c) =>
                     html`<td
-                      class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}${
-                        c.renderer && this.cellRenderers?.get(c.renderer) ? ' has-renderer' : ''
-                      }${cellStateClass(r, c)}`}
+                      class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}${c.renderer && this.cellRenderers?.get(c.renderer) ? ' has-renderer' : ''}${cellStateClass(r, c)}`}
                       title=${cellTooltip(r, c)}
                     >
                       ${this.renderCell(r, c)}
@@ -1500,11 +1562,7 @@ export class DataTable extends LitElement {
                 <td>
                   ${this.readOnly
                     ? nothing
-                    : html`<button
-                        class="danger"
-                        title="Delete row"
-                        @click=${() => this.deleteRow(r.id)}
-                      >
+                    : html`<button class="danger" title="Delete row" @click=${() => this.deleteRow(r.id)}>
                         <span class="mi sm">delete</span>
                       </button>`}
                 </td>
@@ -1629,9 +1687,7 @@ function isNonEmptyButUnparsed(raw: unknown, parsed: string): boolean {
  * any data arrives.
  */
 export function setTableLoading(tableId: string, loading: boolean, progress?: number): void {
-  document.dispatchEvent(
-    new CustomEvent('easydb:table-loading', { detail: { tableId, loading, progress } }),
-  );
+  document.dispatchEvent(new CustomEvent('easydb:table-loading', { detail: { tableId, loading, progress } }));
 }
 
 declare global {

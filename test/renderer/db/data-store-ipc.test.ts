@@ -305,3 +305,78 @@ async function flush(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
 }
+
+/**
+ * `watch` is the change signal WITHOUT the rows.
+ *
+ * `subscribe` has to read the collection to have something to hand its callback,
+ * so a consumer that runs its own narrow query paid for every row on every write
+ * — and `data-table` paid it twice on open. What matters here is not just that
+ * the callback fires, but that NOTHING was read to make it fire.
+ */
+describe('rows().watch', () => {
+  it('notifies without reading a single row', () => {
+    const bridge = fakeBridge();
+    const spy = vi.spyOn(bridge, 'find');
+    const store = createIpcDataStore(bridge, () => 'ws1');
+    const seen: number[] = [];
+
+    const off = store.rows('t1').watch!(() => seen.push(seen.length));
+    expect(seen).toHaveLength(1); // fires once immediately, like subscribe
+    bridge.broadcast('rows');
+    expect(seen).toHaveLength(2);
+    // The whole point: no fetch happened for any of it.
+    expect(spy).not.toHaveBeenCalled();
+    off();
+  });
+
+  it('ignores a broadcast for another collection', () => {
+    const bridge = fakeBridge();
+    const store = createIpcDataStore(bridge, () => 'ws1');
+    let calls = 0;
+    const off = store.rows('t1').watch!(() => calls++);
+    calls = 0;
+    bridge.broadcast('tables');
+    bridge.broadcast('settings');
+    expect(calls).toBe(0);
+    off();
+  });
+
+  it('sits out a broadcast scoped to a DIFFERENT table', () => {
+    // An import fills one table at a time and scopes its broadcast to it. Without
+    // this, filling one table made every other open grid re-query — the quadratic
+    // work that dominated a 13-table import.
+    const bridge = fakeBridge();
+    const store = createIpcDataStore(bridge, () => 'ws1');
+    let mine = 0;
+    const off = store.rows('t1').watch!(() => mine++);
+    mine = 0;
+    bridge.broadcast('rows', 't2');
+    expect(mine).toBe(0);
+    bridge.broadcast('rows', 't1');
+    expect(mine).toBe(1);
+    off();
+  });
+
+  it('still hears an UNSCOPED rows write, which is what an ordinary edit is', () => {
+    const bridge = fakeBridge();
+    const store = createIpcDataStore(bridge, () => 'ws1');
+    let mine = 0;
+    const off = store.rows('t1').watch!(() => mine++);
+    mine = 0;
+    bridge.broadcast('rows');
+    expect(mine).toBe(1);
+    off();
+  });
+
+  it('stops notifying once unsubscribed', () => {
+    const bridge = fakeBridge();
+    const store = createIpcDataStore(bridge, () => 'ws1');
+    let calls = 0;
+    const off = store.rows('t1').watch!(() => calls++);
+    off();
+    calls = 0;
+    bridge.broadcast('rows');
+    expect(calls).toBe(0);
+  });
+});

@@ -92,6 +92,17 @@ export interface DataCollection<T> {
   /** Subscribe to changes; returns unsubscribe. */
   subscribe(fn: (docs: T[]) => void): Unsubscribe;
   /**
+   * Optional: be told that something changed, WITHOUT being handed the docs.
+   *
+   * `subscribe` has to materialise the whole collection to deliver its argument,
+   * so a consumer that only wants to re-run its own narrow query pays for every
+   * row on every write — and `data-table` did exactly that, fetching a table
+   * twice on open (once to subscribe, once to read). A collection whose backing
+   * store can signal a change without reading it implements this; callers must
+   * feature-detect and fall back to `subscribe`.
+   */
+  watch?(fn: () => void): Unsubscribe;
+  /**
    * Optional: force a re-read from the backing store and notify subscribers.
    * Local (Dexie) collections are always live so they don't implement it;
    * remote-backed collections (e.g. Datasette) that cache reads expose it so a
