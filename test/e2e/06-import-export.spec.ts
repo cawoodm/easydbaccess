@@ -82,18 +82,23 @@ test.describe('import / export', () => {
     expect(rows).toHaveLength(2);
   });
 
-  test('CSV append maps cells to existing columns by index when header names differ', async ({ page }) => {
+  test('CSV append opens the mapper when the header does not line up, and honours it', async ({ page }) => {
     // Existing table has fields [name, age]. CSV header is [Person Name, Years]
-    // — names slugify to different strings (person_name, years), so the OLD
-    // behavior dropped the data on the floor. Index-mapping must put column 0
-    // into `name` and column 1 into `age`.
+    // — names slugify to different strings (person_name, years), so nothing lines
+    // up and the import asks rather than guessing. The mapper's positional
+    // suggestion is right here: column 0 into `name`, column 1 into `age`.
     const tableId = await createTable(page, 'mismatched', [{ field: 'name' }, { field: 'age', type: 'number' }]);
 
     const dropPromise = dropFile(page, 'mismatched.csv', 'Person Name,Years\nAlice,30\nBob,25', 'text/csv');
     await answerCsvDropPrompt(page);
     const dialog = page.locator('host-dialogs');
-    await expect(dialog.getByRole('button', { name: 'Append rows' })).toBeVisible();
-    await dialog.getByRole('button', { name: 'Append rows' }).click();
+    await expect(dialog.locator('button.choice', { hasText: 'Append the rows' })).toBeVisible();
+    await dialog.locator('button.choice', { hasText: 'Append the rows' }).click();
+    const mapper = page.locator('column-map-dialog dialog');
+    await expect(mapper).toBeVisible();
+    await expect(mapper.locator('select').nth(0)).toHaveValue('name');
+    await expect(mapper.locator('select').nth(1)).toHaveValue('age');
+    await mapper.getByRole('button', { name: 'Append' }).click();
     await dropPromise;
 
     const rows = await readRows(page, tableId);
@@ -103,10 +108,11 @@ test.describe('import / export', () => {
     expect(sorted[1]?.data).toEqual({ name: 'Bob', age: 25 });
   });
 
-  test('CSV overwrite preserves existing column definitions and maps by index', async ({ page }) => {
+  test('CSV re-load preserves existing column definitions and maps by index', async ({ page }) => {
     // Existing table has fields [name, age] with width=200 on name. After
-    // Overwrite, the column definitions must survive (width preserved) and
-    // the CSV data must populate by position.
+    // Re-Load, the column definitions must survive (width preserved) and
+    // the CSV data must populate by position — the mapper's suggestion, since
+    // this header lines up with nothing.
     const tableId = await createTable(page, 'preserve-schema', [{ field: 'name' }, { field: 'age', type: 'number' }]);
     await addRow(page, tableId, { name: 'old', age: 1 });
     await page.evaluate(async (id) => {
@@ -120,7 +126,10 @@ test.describe('import / export', () => {
     const dropPromise = dropFile(page, 'preserve-schema.csv', 'WhateverHeader,SomethingElse\nCarol,40\nDan,50', 'text/csv');
     await answerCsvDropPrompt(page);
     const dialog = page.locator('host-dialogs');
-    await dialog.getByRole('button', { name: 'Overwrite rows' }).click();
+    await dialog.locator('button.choice', { hasText: 'Re-Load' }).click();
+    const mapper = page.locator('column-map-dialog dialog');
+    await expect(mapper).toBeVisible();
+    await mapper.getByRole('button', { name: 'Append' }).click();
     await dropPromise;
 
     const tbl = await readTable(page, tableId);
@@ -168,11 +177,14 @@ test.describe('import / export', () => {
 
     const dialog = page.locator('host-dialogs');
     await expect(dialog.getByText(/already exists/i)).toBeVisible();
-    await expect(dialog.getByRole('button', { name: 'Append rows' })).toBeVisible();
-    await expect(dialog.getByRole('button', { name: 'Overwrite rows' })).toBeVisible();
-    await expect(dialog.getByRole('button', { name: 'Create as new table' })).toBeVisible();
-    // Pick Append.
-    await dialog.getByRole('button', { name: 'Append rows' }).click();
+    // The same four answers a drop ON the table's window offers — the file
+    // naming the table is the same thing as landing on it.
+    await expect(dialog.locator('button.choice', { hasText: 'Re-Create' })).toBeVisible();
+    await expect(dialog.locator('button.choice', { hasText: 'Re-Load' })).toBeVisible();
+    await expect(dialog.locator('button.choice', { hasText: 'Append the rows' })).toBeVisible();
+    await expect(dialog.locator('button.choice', { hasText: 'A new table' })).toBeVisible();
+    // Pick Append. `name` lines up with the table's one column, so no mapper.
+    await dialog.locator('button.choice', { hasText: 'Append the rows' }).click();
     await dropPromise;
 
     const tables = await page.evaluate(

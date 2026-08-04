@@ -6,7 +6,7 @@ import { addRow, createTable, readRows } from './helpers.js';
  * instances bind to their source BY NAME, so a duplicate makes every reference
  * to it ambiguous.
  *
- * Dropping a `.table.json` and answering "Add as new tables" used to write the
+ * Dropping a `.table.json` and answering "a new table" used to write the
  * dump's name verbatim, which produced two tables called the same thing. The
  * uniquing now lives in the STORE, so every writer obeys it — the last two
  * cases here poke the store directly, with no importer involved.
@@ -52,8 +52,9 @@ test('dropping a .table.json and adding it as new gets a free name, not a duplic
 
   const dropped = dropFile(page, 'people.table.json', PEOPLE_FILE, 'application/json');
   const dialog = page.locator('host-dialogs');
-  await expect(dialog.getByText(/share a name with existing data/i)).toBeVisible();
-  await dialog.getByRole('button', { name: 'Add as new tables' }).click();
+  // One table naming one existing table asks what to do with THAT table.
+  await expect(dialog.getByText(/already exists/i)).toBeVisible();
+  await dialog.locator('button.choice', { hasText: 'A new table' }).click();
   await dropped;
 
   expect(await tableNames(page)).toEqual(['people', 'people-2']);
@@ -72,7 +73,7 @@ test('the import says which name the table came in under', async ({ page }) => {
   await createTable(page, 'people', [{ field: 'name' }]);
 
   const dropped = dropFile(page, 'people.table.json', PEOPLE_FILE, 'application/json');
-  await page.locator('host-dialogs').getByRole('button', { name: 'Add as new tables' }).click();
+  await page.locator('host-dialogs').locator('button.choice', { hasText: 'A new table' }).click();
   await dropped;
 
   await expect(page.locator('toast-host').getByText(/came in as .people-2./)).toBeVisible();

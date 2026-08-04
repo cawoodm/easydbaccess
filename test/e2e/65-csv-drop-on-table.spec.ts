@@ -1,14 +1,15 @@
 import { test, expect, type Page } from './fixtures.js';
-import { bulkAddRows, createTable, panelDomId, readRows, waitForPanel } from './helpers.js';
+import { bulkAddRows, createTable, panelDomId, readRows, readTable, waitForPanel } from './helpers.js';
 
 /**
  * A CSV dropped ON a table window names its own destination, so the drop asks
- * what to do with THAT table — append, replace its rows, or make a new table —
- * instead of the generic "review the columns?" question.
+ * what to do with THAT table — Re-Create it from the file, Re-Load its rows,
+ * append, or make a new table — instead of the generic "review the columns?"
+ * question.
  *
- * Append opens the column mapper, because the append path matches the file's
- * columns to the table's by POSITION: right for a file the table came from,
- * silently wrong for anything else.
+ * Re-Load and Append open the column mapper when the file's header does NOT line
+ * up with the table's columns, because those paths otherwise match by POSITION:
+ * right for a file the table came from, silently wrong for anything else.
  */
 
 /** Drop `text` as a CSV file onto the panel of `tableId`, through the real shell. */
@@ -37,14 +38,40 @@ async function makeCities(page: Page) {
   return id;
 }
 
-test('dropping a CSV on a table offers append, replace, or a new table', async ({ page }) => {
+test('dropping a CSV on a table offers re-create, re-load, append or a new table', async ({ page }) => {
   const id = await makeCities(page);
   await dropOnPanel(page, id, 'more.csv', 'city,pop\nZug,30000\n');
 
   await expect(dialogs(page).getByText(/Import "more\.csv" into "Cities"\?/)).toBeVisible();
-  await expect(dialogs(page).locator('button.choice', { hasText: 'Append to this table' })).toBeVisible();
-  await expect(dialogs(page).locator('button.choice', { hasText: 'Replace the rows of this table' })).toBeVisible();
+  await expect(dialogs(page).locator('button.choice', { hasText: 'Re-Create' })).toBeVisible();
+  await expect(dialogs(page).locator('button.choice', { hasText: 'Re-Load' })).toBeVisible();
+  await expect(dialogs(page).locator('button.choice', { hasText: 'Append the rows' })).toBeVisible();
   await expect(dialogs(page).locator('button.choice', { hasText: 'A new table' })).toBeVisible();
+});
+
+test('a header that lines up with the columns skips the mapper', async ({ page }) => {
+  const id = await makeCities(page);
+  // `city,pop` IS the table, so there is nothing to ask about.
+  await dropOnPanel(page, id, 'same.csv', 'city,pop\nZug,30000\n');
+  await dialogs(page).locator('button.choice', { hasText: 'Append the rows' }).click();
+
+  await expect(mapper(page)).toBeHidden();
+  await expect.poll(async () => (await readRows(page, id)).length).toBe(2);
+});
+
+test('Re-Create takes the columns from the file, replacing the table’s', async ({ page }) => {
+  const id = await makeCities(page);
+  await dropOnPanel(page, id, 'other-shape.csv', 'town,inhabitants,mayor\nZug,30000,Ada\n');
+  await dialogs(page).locator('button.choice', { hasText: 'Re-Create' }).click();
+
+  // The file decides the schema, so there is nothing to map and no mapper.
+  await expect(mapper(page)).toBeHidden();
+  await expect
+    .poll(async () => (await readTable(page, id)).columns.map((c: { field: string }) => c.field))
+    .toEqual(['town', 'inhabitants', 'mayor']);
+  const rows = await readRows(page, id);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.data).toMatchObject({ town: 'Zug', inhabitants: 30000, mayor: 'Ada' });
 });
 
 test('append matches the file columns by name, whatever their order', async ({ page }) => {
@@ -52,7 +79,7 @@ test('append matches the file columns by name, whatever their order', async ({ p
   // The table is city,pop — the file is the other way round. By position the
   // population would land in `city`; by name it does not.
   await dropOnPanel(page, id, 'swapped.csv', 'pop,city\n30000,Zug\n');
-  await dialogs(page).locator('button.choice', { hasText: 'Append to this table' }).click();
+  await dialogs(page).locator('button.choice', { hasText: 'Append the rows' }).click();
 
   await expect(mapper(page)).toBeVisible();
   const selects = mapper(page).locator('select');
@@ -75,7 +102,7 @@ test('a manual remap decides where the values land', async ({ page }) => {
   // Headers that match nothing, so the mapper opens on the positional guess —
   // which is wrong here: the numbers are in the second column.
   await dropOnPanel(page, id, 'opaque.csv', 'A,B\nZug,30000\n');
-  await dialogs(page).locator('button.choice', { hasText: 'Append to this table' }).click();
+  await dialogs(page).locator('button.choice', { hasText: 'Append the rows' }).click();
 
   const selects = mapper(page).locator('select');
   await expect(selects.nth(0)).toHaveValue('city');
@@ -100,7 +127,7 @@ test('a manual remap decides where the values land', async ({ page }) => {
 test('the mapper refuses two columns pointing at one field', async ({ page }) => {
   const id = await makeCities(page);
   await dropOnPanel(page, id, 'dup.csv', 'a,b\n1,2\n');
-  await dialogs(page).locator('button.choice', { hasText: 'Append to this table' }).click();
+  await dialogs(page).locator('button.choice', { hasText: 'Append the rows' }).click();
   await expect(mapper(page)).toBeVisible();
 
   const selects = mapper(page).locator('select');
@@ -114,10 +141,10 @@ test('the mapper refuses two columns pointing at one field', async ({ page }) =>
   await expect(mapper(page).getByRole('button', { name: 'Append' })).toBeEnabled();
 });
 
-test('replace drops the old rows and keeps the table', async ({ page }) => {
+test('Re-Load drops the old rows and keeps the table and its columns', async ({ page }) => {
   const id = await makeCities(page);
   await dropOnPanel(page, id, 'fresh.csv', 'city,pop\nZug,30000\nChur,37000\n');
-  await dialogs(page).locator('button.choice', { hasText: 'Replace the rows of this table' }).click();
+  await dialogs(page).locator('button.choice', { hasText: 'Re-Load' }).click();
 
   await expect.poll(async () => (await readRows(page, id)).length).toBe(2);
   const rows = await readRows(page, id);

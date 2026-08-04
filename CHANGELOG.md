@@ -8,6 +8,7 @@
 - 🪶 New `array` column type: a cell holds several values (`foo,bar` or `["Foo","Bar"]`) and the filter dropdown offers each one (v0.0.295)
 - ✨ New `markdown` cell renderer: one line of text in the grid, the formatted value in the popup, and never guessed at (v0.0.298)
 - ✨ `$filter.TAGS` in a view renders one chip per value of an `array` field, and each chip filters on that value (v0.0.307)
+- 🪶 A file dropped on a table, or naming one, offers Re-Create / Re-Load / Append / A new table — and maps mismatched columns (v0.0.308)
 - 🪶 Workspace commands in the palette — switch, new and delete; deleting takes the workspace's tables, rows, views and settings with it (v0.0.305)
 - ✨ A twikki dump converts to importable `.table.json` tables, one per twikki package (v0.0.306)
 

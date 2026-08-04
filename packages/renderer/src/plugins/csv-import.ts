@@ -1,5 +1,6 @@
 import type { ColumnSpec, ColumnType, HostApi, ImporterSpec, ImportSourceInput, PluginModule, TableOrigin } from '@easydb/shared';
 import { filenameFromUrl } from '../import/fetch-source.js';
+import { askImportOntoMode, columnsLineUp, type ImportOntoMode } from '../import/import-mode.js';
 import { isUnsafeIntegerText } from '../import/big-numbers.js';
 import { mapRowsToTarget, type ColumnMapping } from '../import/map-columns.js';
 import { cryptoUUID, slugField } from '../util/ids.js';
@@ -97,12 +98,6 @@ function candidateName(input: ImportSourceInput): string {
 const DROP_DIRECT = 'Import directly';
 const DROP_EDIT = 'Edit columns first';
 
-// Dropping a file ON a table window names its destination, so the question is
-// what to do with that table. The wording matches the Import dialog's Target
-// field, which offers the same three things.
-const ONTO_NEW = 'A new table';
-const ONTO_APPEND = 'Append to this table';
-const ONTO_REPLACE = 'Replace the rows of this table';
 
 /**
  * Handle a CSV dropped onto an existing table's window. Returns false when the
@@ -128,21 +123,32 @@ async function dropOntoTable(api: HostApi, event: DragEvent, file: File): Promis
     return false;
   }
 
-  const choice = await api.ui.dialogs.choice(`Import "${file.name}" into "${table.name}"?`, [ONTO_APPEND, ONTO_REPLACE, ONTO_NEW], 'Import CSV');
-  if (!choice) return true; // dismissed ⇒ the drop is cancelled, and it was ours
-  if (choice === ONTO_NEW) return false; // fall through to the new-table flow
+  const mode = await askImportOntoMode(api, { fileName: file.name, tableName: table.name, title: 'Import CSV' });
+  if (!mode) return true; // dismissed ⇒ the drop is cancelled, and it was ours
+  if (mode === 'new') return false; // fall through to the new-table flow
 
-  const text = await file.text();
-  const mode = choice === ONTO_APPEND ? 'append' : 'overwrite';
-  const opts: CsvImportOpts = { target: { tableId, mode } };
-  if (mode === 'append') {
-    opts.mapFields = async (header, targetCols, sample) => {
-      const { mapColumnsToTable } = await import('../dialogs/column-map-dialog.js');
-      return mapColumnsToTable(header, targetCols, table.name, sample);
-    };
-  }
-  await importCsvText(api, text, file.name, opts);
+  await importCsvText(api, await file.text(), file.name, ontoTableOpts(tableId, table.name, mode));
   return true;
+}
+
+/**
+ * Import options for landing a file on a table it did not come from.
+ *
+ * `recreate` takes its schema from the file, so there is nothing to map. The
+ * other two keep the table's columns, and the mapper opens ONLY when the file's
+ * header does not line up with them — a file the table was imported from maps by
+ * position without a question, anything else would otherwise put cells silently
+ * under the wrong columns.
+ */
+function ontoTableOpts(tableId: string, tableName: string, mode: 'recreate' | 'reload' | 'append'): CsvImportOpts {
+  const opts: CsvImportOpts = { target: { tableId, mode } };
+  if (mode === 'recreate') return opts;
+  opts.mapFields = async (header, targetCols, sample) => {
+    if (columnsLineUp(header, targetCols)) return targetCols.map((c) => c.field);
+    const { mapColumnsToTable } = await import('../dialogs/column-map-dialog.js');
+    return mapColumnsToTable(header, targetCols, tableName, sample);
+  };
+  return opts;
 }
 
 const importerSpec: ImporterSpec = {
@@ -280,7 +286,7 @@ export interface CsvImportOpts {
    * same-name lookup below must not run (and must not offer to create a new
    * table under a uniquified name).
    */
-  target?: { tableId: string; mode: 'append' | 'overwrite' } | undefined;
+  target?: { tableId: string; mode: 'append' | 'reload' | 'recreate' } | undefined;
   /**
    * Map the file's columns onto the target table's columns before an append.
    * Receives the file's header, the table's columns and the first data row (so
@@ -311,23 +317,31 @@ export async function importCsvText(api: HostApi, text: string, name: string, op
   const existing = chosen ?? (await api.store.tables.find()).find((t) => t.workspaceId === workspaceId && t.name === baseName);
 
   let targetId: string;
-  let mode: 'new' | 'append' | 'overwrite';
+  let mode: ImportOntoMode;
+  /** How incoming columns map onto the target's. Set by the caller, or below. */
+  let mapFields = opts.mapFields;
 
   if (chosen && opts.target) {
     mode = opts.target.mode;
     targetId = chosen.id;
   } else if (existing) {
-    const choice = await api.ui.dialogs.choice(`A table named "${baseName}" already exists in this workspace.`, ['Append rows', 'Overwrite rows', 'Create as new table'], 'CSV import');
-    if (!choice) return; // cancelled
-    if (choice === 'Append rows') {
-      mode = 'append';
-      targetId = existing.id;
-    } else if (choice === 'Overwrite rows') {
-      mode = 'overwrite';
-      targetId = existing.id;
-    } else {
-      mode = 'new';
+    // Same question as a drop ON the table's window: the file names that table,
+    // which is the same thing as being dropped on it.
+    const picked = await askImportOntoMode(api, {
+      fileName: name || baseName,
+      tableName: existing.name,
+      title: 'CSV import',
+      reason: `A table named "${baseName}" already exists in this workspace.`,
+    });
+    if (!picked) return; // cancelled
+    mode = picked;
+    if (mode === 'new') {
       targetId = cryptoUUID();
+    } else {
+      targetId = existing.id;
+      // The mapper applies here too — this path never had one, so an appended
+      // file with a different header shifted every cell one column over.
+      mapFields = ontoTableOpts(existing.id, existing.name, mode).mapFields;
     }
   } else {
     mode = 'new';
@@ -336,11 +350,11 @@ export async function importCsvText(api: HostApi, text: string, name: string, op
 
   api.events.emit('import:before', { source: 'csv', tableId: targetId });
 
-  // Build the rows to insert. For 'new' mode the CSV defines the schema, so
-  // we run the full parser. For 'append'/'overwrite' we map CSV cells onto
-  // the existing column schema BY INDEX — header names are ignored, so a
-  // CSV column whose header doesn't match doesn't go missing (which is what
-  // happened when we keyed by `slug(header)` instead).
+  // Build the rows to insert. For 'new' and 'recreate' the CSV defines the
+  // schema, so we run the full parser. For 'append'/'reload' we map CSV cells
+  // onto the existing column schema — by position unless a mapping is supplied
+  // (see `mapFields`), because a header name that does not match must not make
+  // its column go missing (which is what keying by `slug(header)` did).
   let docs: Array<{
     id: string;
     tableId: string;
@@ -348,7 +362,9 @@ export async function importCsvText(api: HostApi, text: string, name: string, op
     updatedAt: number;
   }>;
 
-  if (mode === 'new') {
+  if (mode === 'new' || mode === 'recreate') {
+    // Both take the file's own schema. `recreate` then writes it INTO the
+    // existing table (keeping its id, name and window) instead of making one.
     const parsed = parseCsv(text, { maxRows: opts.maxRows, separator });
     let columns = parsed.columns;
     let rows = parsed.rows;
@@ -359,23 +375,34 @@ export async function importCsvText(api: HostApi, text: string, name: string, op
       columns = edited;
     }
     if (opts.maxRows != null) rows = rows.slice(0, opts.maxRows);
-    // No local uniquing rule: the store refuses a duplicate name and hands back
-    // `places-2` (see `db/unique-table-names.ts`). This used to append a base36
-    // timestamp here, which read as `places (m8x1k2)`.
-    await api.store.tables.insert({
-      id: targetId,
-      workspaceId,
-      name: baseName,
-      // NOTE: csv-import derives the table `code` with the FIELD slug
-      // (underscores), unlike every other importer, which uses the TABLE slug
-      // (dashes). Kept as-is here so this extraction changes no behavior.
-      // Unify in Phase C — see .claude/plans/2026-07-28-importer-architecture.md.
-      code: slugField(baseName),
-      columns,
-      view: 'table',
-      ...(opts.origin ? { origin: opts.origin } : {}),
-      updatedAt: Date.now(),
-    });
+    if (mode === 'recreate') {
+      // Re-Create: the table is emptied and re-schemad in place. Deleting and
+      // re-inserting it would be the literal reading, but it would take the
+      // window position with it and break every projection and view bound to
+      // its id — and the point of re-creating is that this IS that table.
+      const rows = api.store.rows(targetId);
+      const old = await rows.find();
+      await rows.bulkRemove(old.map((r) => r.id));
+      await api.store.tables.patch(targetId, { columns, updatedAt: Date.now() });
+    } else {
+      // No local uniquing rule: the store refuses a duplicate name and hands back
+      // `places-2` (see `db/unique-table-names.ts`). This used to append a base36
+      // timestamp here, which read as `places (m8x1k2)`.
+      await api.store.tables.insert({
+        id: targetId,
+        workspaceId,
+        name: baseName,
+        // NOTE: csv-import derives the table `code` with the FIELD slug
+        // (underscores), unlike every other importer, which uses the TABLE slug
+        // (dashes). Kept as-is here so this extraction changes no behavior.
+        // Unify in Phase C — see .claude/plans/2026-07-28-importer-architecture.md.
+        code: slugField(baseName),
+        columns,
+        view: 'table',
+        ...(opts.origin ? { origin: opts.origin } : {}),
+        updatedAt: Date.now(),
+      });
+    }
     docs = rows.map((row) => ({
       id: cryptoUUID(),
       tableId: targetId,
@@ -391,8 +418,8 @@ export async function importCsvText(api: HostApi, text: string, name: string, op
     const raw = parseCsvRaw(text, { maxRows: opts.maxRows, separator });
     const rawRows = opts.maxRows != null ? raw.rows.slice(0, opts.maxRows) : raw.rows;
     let mapping: ColumnMapping = targetCols.map((c) => c.field);
-    if (opts.mapFields) {
-      const chosenMapping = await opts.mapFields(raw.header, targetCols, raw.rows[0] ?? []);
+    if (mapFields) {
+      const chosenMapping = await mapFields(raw.header, targetCols, raw.rows[0] ?? []);
       if (chosenMapping === null) return; // user cancelled the mapper
       mapping = chosenMapping;
     }
@@ -402,7 +429,7 @@ export async function importCsvText(api: HostApi, text: string, name: string, op
       data,
       updatedAt: Date.now(),
     }));
-    if (mode === 'overwrite') {
+    if (mode === 'reload') {
       // Wipe existing rows; keep the table id (panel position) AND its
       // columns (widths, renderers, etc. survive).
       const rows = api.store.rows(targetId);

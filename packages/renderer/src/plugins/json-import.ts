@@ -1,5 +1,7 @@
-import type { ColumnSpec, ColumnType, HostApi, ImporterSpec, ImportSourceInput, PluginModule, TableInfo, TableOrigin, TableSource, ViewInstance, ViewTemplate, WindowGeometry } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, HostApi, ImporterSpec, ImportSourceInput, PluginModule, Table, TableInfo, TableOrigin, TableSource, ViewInstance, ViewTemplate, WindowGeometry } from '@easydb/shared';
+import type { ColumnMapping } from '../import/map-columns.js';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
+import { askImportOntoMode, columnsLineUp } from '../import/import-mode.js';
 import { quoteBigIntegers } from '../import/big-numbers.js';
 import { runImport } from '../import/import-kernel.js';
 import { rowRekeyer } from '../table/column-merge.js';
@@ -34,10 +36,104 @@ export function init(api: HostApi): void {
 
     event.preventDefault();
     for (const file of jsons) {
+      // A drop ON a table window names its destination — the same question a
+      // CSV drop asks. Anything else is an ordinary import.
+      if (await dropOntoTable(api, event, file)) continue;
       await importJsonFile(api, file);
     }
     return true;
   });
+}
+
+/**
+ * A `.json` / `.table.json` dropped onto a table's window: that table is the
+ * destination, so ask what should happen to it and do it. Returns false when the
+ * drop landed anywhere else, or when the user chose "a new table", leaving the
+ * ordinary import to run.
+ */
+async function dropOntoTable(api: HostApi, event: DragEvent, file: File): Promise<boolean> {
+  const { tableIdAtNode } = await import('../window-mgr/table-window-manager.js');
+  const tableId = tableIdAtNode(event.target);
+  if (!tableId) return false;
+  const table = await api.store.tables.findOne(tableId);
+  if (!table) return false;
+  // A read-only table (a live connection, a reference) cannot take rows at all.
+  if (table.readonly === true || table.source != null) {
+    api.ui.dialogs.toast(`"${table.name}" is read-only, so the file was imported as a new table.`, { kind: 'warning', title: 'Import JSON' });
+    return false;
+  }
+
+  const text = await file.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(quoteBigIntegers(text));
+  } catch {
+    return false; // let the ordinary import report the parse error
+  }
+  const incoming = parsedToTables(parsed, stripJsonExt(file.name));
+  if (incoming.length === 0) return false;
+  if (incoming.length > 1) {
+    // Several tables cannot land in one table. The canvas drop restores them all.
+    api.ui.dialogs.toast(`"${file.name}" holds ${incoming.length} tables — drop it outside a window to import them.`, { kind: 'warning', title: 'Import JSON' });
+    return true;
+  }
+
+  const mode = await askImportOntoMode(api, { fileName: file.name, tableName: table.name, title: 'Import JSON' });
+  if (!mode) return true; // dismissed ⇒ the drop is cancelled, and it was ours
+  if (mode === 'new') return false;
+  await importIntoTable(api, table, incoming[0]!, mode);
+  return true;
+}
+
+/**
+ * Write ONE incoming table into an existing table, the three ways that are not
+ * "make another table".
+ *
+ *  - `recreate` — the file's columns replace the table's, and its rows replace
+ *    the data. The table keeps its id, name and window, so a projection or view
+ *    bound to it survives.
+ *  - `reload` / `append` — the table's columns stay and the incoming FIELDS are
+ *    mapped onto them: silently when they line up (a file the table came from),
+ *    through the column mapper when they do not. `reload` wipes the rows first.
+ *
+ * JSON values are already typed, so nothing is coerced on the way in — unlike a
+ * CSV, where every cell arrives as text.
+ */
+async function importIntoTable(api: HostApi, table: Table, incoming: NormalizedTable, mode: 'recreate' | 'reload' | 'append'): Promise<void> {
+  const rowColl = api.store.rows(table.id);
+  api.events.emit('import:before', { source: 'json', tableId: table.id });
+
+  let rows: Array<Record<string, unknown>>;
+  if (mode === 'recreate') {
+    await api.store.tables.patch(table.id, { columns: incoming.columns, updatedAt: Date.now() });
+    rows = incoming.rows;
+  } else {
+    const fields = incoming.columns.map((c) => c.field);
+    let mapping: ColumnMapping = table.columns.map((c: ColumnSpec) => c.field);
+    if (!columnsLineUp(fields, table.columns)) {
+      const { mapColumnsToTable } = await import('../dialogs/column-map-dialog.js');
+      const sample = fields.map((f) => String(incoming.rows[0]?.[f] ?? ''));
+      const chosen = await mapColumnsToTable(fields, table.columns, table.name, sample);
+      if (chosen === null) return; // the mapper was cancelled
+      mapping = chosen;
+    }
+    rows = incoming.rows.map((row) => {
+      const out: Record<string, unknown> = {};
+      fields.forEach((field, i) => {
+        const target = mapping[i];
+        if (target) out[target] = row[field];
+      });
+      return out;
+    });
+  }
+
+  if (mode !== 'append') {
+    const old = await rowColl.find();
+    await rowColl.bulkRemove(old.map((r) => r.id));
+  }
+  const docs = rows.map((data) => ({ id: cryptoUUID(), tableId: table.id, data, updatedAt: Date.now() }));
+  await rowColl.bulkInsert(docs);
+  api.events.emit('import:after', { source: 'json', tableId: table.id, rowCount: docs.length });
 }
 
 // -- Importer spec ------------------------------------------------------------
@@ -271,6 +367,26 @@ export async function restoreWorkspaceDump(
   let mode: 'overwrite-matching' | 'replace-workspace' | 'append-new';
   if (collisions.length === 0 && tables.length === 1) {
     mode = 'append-new';
+  } else if (tables.length === 1 && collisions.length === 1) {
+    // ONE table naming ONE existing table is not a workspace question at all —
+    // it is the same question a drop on that table's window asks, so it gets the
+    // same four answers. "Replace entire workspace" for a single-table file was
+    // a trap: it deleted every OTHER table too.
+    const target = collisions[0]!;
+    const picked = await askImportOntoMode(api, {
+      fileName: filename,
+      tableName: target.name,
+      title: 'JSON import',
+      reason: `A table named "${target.name}" already exists in this workspace.`,
+    });
+    if (!picked) return; // cancelled
+    if (picked === 'reload' || picked === 'append') {
+      // Rows into the table that is already there; its columns, geometry, sort
+      // and views all stay as they are. Nothing else in the dump applies.
+      await importIntoTable(api, target, tables[0]!, picked);
+      return;
+    }
+    mode = picked === 'recreate' ? 'overwrite-matching' : 'append-new';
   } else {
     const opts = collisions.length > 0 ? [`Overwrite matching (${collisions.length})`, 'Replace entire workspace', 'Add as new tables'] : ['Add to current workspace', 'Replace entire workspace'];
     const choice = await api.ui.dialogs.choice(

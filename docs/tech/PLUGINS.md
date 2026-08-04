@@ -272,11 +272,9 @@ cells support a mini-language: `field:label:type:default:max:flags` (flags:
 `u`=unique, `n`=notnull, `h`=hidden) — a plain header like `Customer Name`
 just infers everything. Column types (`string`/`number`/`boolean`/`date`/
 `datetime`) are inferred from sampled values when not pinned by the header.
-Dropping a CSV whose table name already exists prompts
-Append / Overwrite / Create new; append and overwrite map CSV cells onto the
-*existing* column schema **by position**, not by header name, so the
-existing table's renderers/widths/constraints survive untouched. Exports
-`parseCsv`/`importCsvText` for reuse by `import-data`.
+Dropping a CSV onto a table, or importing one whose name already exists, asks
+the four-way question below. Exports `parseCsv`/`importCsvText` for reuse by
+`import-data`.
 
 ### json-import
 
@@ -286,12 +284,43 @@ round-trippable), the legacy minniDBMax v1 `{ "<name>.table.json": {dataArray,
 columns, elementRect} }` shape (converted in place, including window geometry
 and sort order), and a bare array/object of plain JS values (columns inferred
 from the union of keys). A multi-table dump opens a checklist of which tables
-to import; a name collision with an existing table prompts
-Overwrite-matching / Replace-workspace / Add-as-new. A table carrying a live
+to import, then asks the workspace-level question
+(Overwrite-matching / Replace-workspace / Add-as-new). A file holding ONE table
+that names an existing one asks the four-way question below instead — a
+single-table file is not a workspace question, and offering "Replace entire
+workspace" for one was a trap that deleted every other table. A table carrying a live
 `source` (e.g. a Datasette connection) or snapshot `origin` in the dump is
 reconstructed with that backing intact rather than as a plain local table.
 Exports `parsedToTables`/`importJsonText` for reuse by `import-data` and
 `server-sync-core`.
+
+### One file, one existing table: the four-way question
+
+`import/import-mode.ts` owns it, so a CSV and a `.table.json` ask it in the same
+words, and a file dropped ON a table window asks the same thing as a file that
+merely carries that table's name — those are the same situation:
+
+| Answer | What happens |
+|---|---|
+| **Re-Create** | The file's columns REPLACE the table's, and its rows replace the data. |
+| **Re-Load** | The table's columns stay (widths, renderers, types, scripts); only the rows are replaced. |
+| **Append** | The rows are added after the ones already there. |
+| **A new table** | That table is left alone; the store uniques the name (`Cities-2`). |
+
+Re-Create keeps the table's **id**, name and window rather than deleting and
+re-inserting it: every projection and view instance bound to it survives what is
+otherwise a re-import, and the panel does not jump back to a cascade position.
+
+Re-Load and Append have to map the file's columns onto the table's, and they open
+the **column mapper** (`dialogs/column-map-dialog.ts`) unless `columnsLineUp()`
+says the incoming names already match the target's fields or labels, position for
+position — the case of a file the table was imported FROM. Anything else mapped
+by position silently, which put cells under the wrong columns in a table that
+already held data. Re-Create maps nothing, so it never asks.
+
+A read-only table (a live connection, a reference) takes no rows at all: the drop
+says so and falls through to importing as a new table. A multi-table file dropped
+on a window cannot land in one table either, and says so.
 
 ### datasette-import and datasette-connect
 
