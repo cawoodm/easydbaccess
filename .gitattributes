@@ -1,0 +1,6 @@
+# Windows batch files must keep CRLF endings and are read by cmd in the OEM
+# codepage, so they must also stay plain ASCII. `scripts/electron.cmd` broke
+# on both counts once already: LF endings plus a UTF-8 dash in a REM comment
+# made cmd try to run part of the comment as a command.
+*.cmd text eol=crlf
+*.bat text eol=crlf

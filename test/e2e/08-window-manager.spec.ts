@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { addRow, createTable, panelDomId, waitForPanel } from './helpers.js';
+import { addRow, bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js';
 
 /**
  * TODO § Window manager
@@ -21,6 +21,48 @@ test.describe('window manager', () => {
 
     await addRow(page, id, { sym: 'MSFT' });
     await expect(title).toContainText('Stocks (2)');
+  });
+
+  test('a filter shows shown-of-total, and it STAYS shown', async ({ page }) => {
+    // The denominator is the TABLE's count, which is a different number from what
+    // the filter matched. When the grid started fetching only the matching rows,
+    // both other numbers shrank together and the title collapsed from "2/4" to
+    // "2" a moment after the filter was typed — the count disappearing exactly
+    // when it had something to say.
+    const id = await createTable(page, 'Fruit', [{ field: 'name' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ name: 'apple' }, { name: 'apricot' }, { name: 'banana' }, { name: 'cherry' }]);
+
+    const title = page.locator(`#${panelDomId(id)} .jsPanel-title`);
+    await expect(title).toContainText('Fruit (4)');
+
+    const dt = page.locator(`#${panelDomId(id)} data-table`);
+    await dt.locator('tr.filter-row filter-combobox input').first().fill('ap');
+    await expect(title).toContainText('Fruit (2/4)');
+
+    // Past the refetch: the same thing, not "(2)". The bug was only visible after
+    // the debounce, so a bare assertion would have passed against it.
+    await page.waitForTimeout(700);
+    await expect(title).toContainText('Fruit (2/4)');
+
+    // Clearing it goes back to the plain count.
+    await dt.locator('tr.filter-row filter-combobox input').first().fill('');
+    await expect(title).toContainText('Fruit (4)');
+  });
+
+  test('a search shows shown-of-total too', async ({ page }) => {
+    const id = await createTable(page, 'Cities', [{ field: 'city' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ city: 'Bern' }, { city: 'Basel' }, { city: 'Zurich' }]);
+
+    const title = page.locator(`#${panelDomId(id)} .jsPanel-title`);
+    await expect(title).toContainText('Cities (3)');
+    const panel = page.locator(`#${panelDomId(id)}`);
+    await panel.locator('panel-search').getByRole('button').click();
+    await panel.locator('panel-search input').fill('ba');
+    await expect(title).toContainText('Cities (1/3)');
+    await page.waitForTimeout(700);
+    await expect(title).toContainText('Cities (1/3)');
   });
 
   test('panels drag freely off-screen (no boundary clamp)', async ({ page }) => {

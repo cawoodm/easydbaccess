@@ -1,23 +1,35 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { html as staticHtml, unsafeStatic } from 'lit/static-html.js';
 import { customElement, property, state } from 'lit/decorators.js';
-import type { ColumnSpec, ColumnType, Row, SortSpec, Table, ViewInstance } from '@easydb/shared';
+import type { ColumnSpec, DataCollection, Row, SortSpec, Table, ViewInstance } from '@easydb/shared';
+import { readRows, type RowRequest } from '../db/row-reader.js';
+import { ROW_FETCH_CAP } from '../db/data-store-ipc.js';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
 import '../chrome/filter-combobox.js';
 import { searchRowsByField } from '../search/text-search.js';
-import { matchesColumnFilter } from '../search/column-filter.js';
+import { matchesColumnFilter } from '@easydb/shared';
 import { facetable, facetCounts, facetValues } from '../search/facet-values.js';
 import { readSortDescFirst } from './grid-settings.js';
+import { readSortSpecs, sortRowsBySpecs } from './row-sort.js';
 import { nextSortSpecs } from './sort-cycle.js';
 import { runColumnScript } from '../util/column-script.js';
-import { arrayCellText, arrayMembers } from '../util/array-cell.js';
+import { arrayMembers } from '@easydb/shared';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
 
 /** Delay before the header loading bar appears, so fast loads don't flash it. */
 const LOAD_BAR_DELAY_MS = 200;
+
+/**
+ * How long a view change waits before the grid refetches.
+ *
+ * Every keystroke in a filter box changes the query, and one round trip per
+ * character is both wasteful and visibly jittery. 250ms matches what the
+ * filter's own persist already waits, so the refetch and the save coincide.
+ */
+const RELOAD_DEBOUNCE_MS = 250;
 
 /**
  * Narrowest a column may be dragged. Small enough to park a column you don't
@@ -61,6 +73,19 @@ export class DataTable extends LitElement {
         height: 8px;
         background: #dbeafe;
         overflow: hidden;
+      }
+      /* Says the grid is showing a slice. Sticky so scrolling a long table
+         cannot leave the user reading a partial answer as a whole one. */
+      .truncated-note {
+        position: sticky;
+        top: 0;
+        left: 0;
+        z-index: 3;
+        padding: 0.25rem 0.5rem;
+        background: #fef3c7;
+        border-bottom: 1px solid #fcd34d;
+        color: #92400e;
+        font-size: 0.75rem;
       }
       .load-bar-fill {
         height: 100%;
@@ -391,7 +416,41 @@ export class DataTable extends LitElement {
    */
   @property({ type: String }) viewInstanceId = '';
   @state() private columns: ColumnSpec[] = [];
+  /**
+   * The rows this grid holds — the answer to its CURRENT query, not the table.
+   *
+   * It used to be the whole table (capped at `ROW_FETCH_CAP`), which cost 1483ms
+   * and a 15.4 MB IPC payload to show about 30 rows of a 609,283-row table. Worse
+   * than slow, it was wrong: the cap truncated silently, so a filter or a sort
+   * only ever saw the first 20,000 rows and confidently showed the wrong ones.
+   * Now the filter, the search and the sort go to the store (`db/row-reader.ts`),
+   * which applies them over the whole table and returns the narrowed set.
+   */
   @state() private rows: Row[] = [];
+  /**
+   * Rows MATCHING the current filter and search across the whole table, which is
+   * not the same as `rows.length` once the fetch is capped. The panel title needs
+   * a number the grid did not fetch.
+   */
+  @state() private matchingTotal = 0;
+  /**
+   * Rows in the TABLE, filter and search ignored — the denominator of the panel
+   * title's "3 of 1,204".
+   *
+   * A third number, because the other two cannot stand in for it. `rows.length` is
+   * what was fetched and `matchingTotal` is what the filter matched, so once the
+   * grid stopped fetching everything, both shrink the moment a filter is typed and
+   * the title collapsed from "2/4" to "2" — the count vanishing exactly when it
+   * became interesting. Counting is cheap (`COUNT(*)`, or a Dexie index count);
+   * fetching to measure is what was not.
+   */
+  @state() private tableTotal = 0;
+  /**
+   * The fetch stopped short of the matching set, so `matchingTotal` is a floor and
+   * what is on screen is a slice. Said out loud rather than implied — a truncated
+   * grid that looks complete is how the old cap misled.
+   */
+  @state() private truncated = false;
   /**
    * Sort keys in priority order. A plain header click replaces the list; a
    * shift-click adds the column as a tie-breaker behind the ones already there.
@@ -428,6 +487,14 @@ export class DataTable extends LitElement {
   private resizeObs: ResizeObserver | null = null;
   private unsubscribe?: () => void;
   private filterSaveTimer: number | null = null;
+  /** The row collection this grid reads, kept so a refetch needn't re-resolve it. */
+  private rowColl: DataCollection<Row> | null = null;
+  /**
+   * Monotonic id per fetch. Two loads can be in flight (a change signal and a
+   * filter edit), and the slower one must not deliver over the fresher one.
+   */
+  private loadGeneration = 0;
+  private reloadTimer: number | null = null;
   /** View-bound mode: the instance + the table's column definitions. */
   private viewInst: ViewInstance | null = null;
   private tableColumns: ColumnSpec[] = [];
@@ -483,6 +550,12 @@ export class DataTable extends LitElement {
     this.unsubscribe?.();
     this.tableSubUnsub?.();
     this.viewSubUnsub?.();
+    // A pending refetch would otherwise land on a detached element — and bump
+    // the generation, so a later re-connect could discard its own fresh load.
+    if (this.reloadTimer != null) {
+      window.clearTimeout(this.reloadTimer);
+      this.reloadTimer = null;
+    }
     // A live column resize (see onResizeStart) has its own window-level
     // pointermove/pointerup/pointercancel listeners, but those only fire on
     // an actual pointer event — if the grid unmounts mid-drag (table
@@ -501,7 +574,11 @@ export class DataTable extends LitElement {
   };
 
   private onGlobalSearch = (e: Event) => {
-    this.globalQuery = (e as CustomEvent<{ query: string }>).detail.query ?? '';
+    const next = (e as CustomEvent<{ query: string }>).detail.query ?? '';
+    if (next === this.globalQuery) return;
+    this.globalQuery = next;
+    // Search is part of the query the store answers, so it has to be re-asked.
+    this.scheduleReload();
   };
 
   private onTableSearch = (e: Event) => {
@@ -509,7 +586,10 @@ export class DataTable extends LitElement {
     // In view-bound mode the header search box is keyed by the VIEW instance id,
     // so match either — the underlying table id or the view instance id.
     if (d.tableId === this.tableId || (this.viewMode && d.tableId === this.viewInstanceId)) {
-      this.localQuery = d.query ?? '';
+      const next = d.query ?? '';
+      if (next === this.localQuery) return;
+      this.localQuery = next;
+      this.scheduleReload();
     }
   };
 
@@ -547,7 +627,10 @@ export class DataTable extends LitElement {
     const key = this.viewMode ? this.viewInstanceId : this.tableId;
     if (!key) return;
     const count = this.renderedCount;
-    const total = this.rows.length;
+    // The TABLE's count, not the fetch's and not the filter's — see `tableTotal`.
+    // `matchingTotal`/`rows.length` are the floor for a store that cannot count,
+    // which keeps the old behaviour rather than reporting zero.
+    const total = Math.max(this.tableTotal, this.matchingTotal, this.rows.length);
     if (count === this.lastEmittedCount && total === this.lastEmittedTotal) return;
     this.lastEmittedCount = count;
     this.lastEmittedTotal = total;
@@ -602,27 +685,99 @@ export class DataTable extends LitElement {
     // that registered late is picked up too.
     this.cellRenderers = new Map(ctx.registries.cellRenderers);
     ctx.events.on('app:ready', () => (this.cellRenderers = new Map(ctx.registries.cellRenderers)));
-    const rowColl = ctx.store.rows(this.tableId);
-    this.unsubscribe = rowColl.subscribe((r) => (this.rows = r));
+    this.rowColl = ctx.store.rows(this.tableId);
+    // `watch` is the change signal on its own; `subscribe` has to read the whole
+    // collection to have something to hand its callback, which is the second
+    // full fetch this grid used to pay for on every open. Either way the
+    // response is the same: re-run OUR query.
+    this.unsubscribe = this.rowColl.watch ? this.rowColl.watch(() => void this.loadRows()) : this.rowColl.subscribe(() => void this.loadRows());
+    // `watch`/`subscribe` both fire once immediately, so the initial load is
+    // already in flight — awaiting it here is what makes `bind()` resolve with
+    // rows on screen, which the tests and the loading bar both rely on.
+    await this.loadRows();
+  }
+
+  /**
+   * Ask the store for exactly the rows this grid is showing.
+   *
+   * The request carries the filter, the search and the sort, so the narrowing
+   * happens where the data is (`db/row-reader.ts` decides how much of that the
+   * backend can soundly do and finishes the rest here). The grid's own
+   * `filteredRows`/`sortedRows` still run over what comes back — that is what
+   * keeps typing in a filter box responsive while this refetch is in flight, and
+   * it is a no-op once the answer lands.
+   */
+  private async loadRows(): Promise<void> {
+    const coll = this.rowColl;
+    if (!coll) return;
+    const gen = ++this.loadGeneration;
     // Show a loading bar in the table header, but only if the fetch is slow
     // enough to matter (large local tables, remote sources) — fast local loads
     // resolve before the delay so the bar never flashes.
     const barTimer = window.setTimeout(() => (this.loading = true), LOAD_BAR_DELAY_MS);
     try {
-      this.rows = await rowColl.find();
+      const page = await readRows(coll, this.rowRequest(), ROW_FETCH_CAP);
+      // A slower earlier load must not land on top of a newer one — the same
+      // generation guard `subscribeToCollection` uses for the same reason.
+      if (gen !== this.loadGeneration) return;
+      this.rows = page.rows;
+      this.matchingTotal = page.total;
+      this.truncated = page.truncated === true;
+      // The table count travels separately because the page's `total` is the
+      // FILTERED one. Counted, never fetched, and only when the store can do it
+      // without reading rows.
+      if (coll.count) {
+        const n = await coll.count();
+        if (gen !== this.loadGeneration) return;
+        this.tableTotal = n;
+      } else {
+        // No cheap count: an unfiltered read already told us, and a filtered one
+        // can only report what it matched.
+        this.tableTotal = page.total;
+      }
     } catch (err) {
+      if (gen !== this.loadGeneration) return;
       // A remote-backed table (e.g. a live Datasette source) can fail to load
       // its rows — a blocked cross-origin fetch, a bot challenge, an auth
       // error. Surface it instead of leaving a silently empty grid.
       this.rows = [];
+      this.matchingTotal = 0;
+      this.tableTotal = 0;
+      const ctx = await getContext();
       ctx.api.ui.dialogs.toast(`Couldn't load rows: ${(err as Error)?.message ?? String(err)}`, {
         kind: 'error',
         title: 'Load failed',
       });
     } finally {
       window.clearTimeout(barTimer);
-      this.loading = false;
+      if (gen === this.loadGeneration) this.loading = false;
     }
+  }
+
+  /** The current view, as a request the store can answer. */
+  private rowRequest(): RowRequest {
+    const search = [this.localQuery.trim(), this.globalQuery.trim()].filter(Boolean).join(' ');
+    return {
+      columns: this.columns,
+      filters: this.filters,
+      ...(search ? { search } : {}),
+      ...(this.sortSpecs.length > 0 ? { sort: this.sortSpecs } : {}),
+    };
+  }
+
+  /**
+   * Refetch after the view changed, coalescing a burst into one round trip.
+   *
+   * Typing in a filter box changes the request on every keystroke, and each one
+   * would otherwise be its own query. The delay matches the one the filter's own
+   * persist already waits, so the refetch and the save land together.
+   */
+  private scheduleReload(): void {
+    if (this.reloadTimer != null) window.clearTimeout(this.reloadTimer);
+    this.reloadTimer = window.setTimeout(() => {
+      this.reloadTimer = null;
+      void this.loadRows();
+    }, RELOAD_DEBOUNCE_MS);
   }
 
   private applyTable(table: Table) {
@@ -958,6 +1113,10 @@ export class DataTable extends LitElement {
       descFirst: await readSortDescFirst(ctx.api.settings),
     });
     this.sortSpecs = next;
+    // The sort travels with the query: on a table bigger than the fetch cap,
+    // sorting only the rows already held would show the top of an arbitrary
+    // slice rather than the top of the table.
+    this.scheduleReload();
     await this.persistSort(next);
   }
 
@@ -1014,24 +1173,7 @@ export class DataTable extends LitElement {
   }
 
   private sortedRows(): Row[] {
-    const base = this.filteredRows();
-    if (this.sortSpecs.length === 0) return base;
-    // Resolve each key's column type once, not per comparison.
-    const keys = this.sortSpecs.map((s) => ({
-      field: s.field,
-      factor: s.asc ? 1 : -1,
-      type: (this.columns.find((c) => c.field === s.field)?.type ?? 'string') as ColumnType,
-    }));
-    const arr = [...base];
-    arr.sort((a, b) => {
-      // Walk the keys in order; the next one only speaks when the previous ties.
-      for (const k of keys) {
-        const cmp = compareBySortKey(a.data[k.field], b.data[k.field], k.type, k.factor);
-        if (cmp !== 0) return cmp;
-      }
-      return 0;
-    });
-    return arr;
+    return sortRowsBySpecs(this.filteredRows(), this.sortSpecs, this.columns);
   }
 
   private async openFilterPicker(e: Event, field: string) {
@@ -1069,6 +1211,11 @@ export class DataTable extends LitElement {
       this.filterSaveTimer = null;
       void this.saveFilters();
     }, 250);
+    // The filter is part of the query now, so the store has to be asked again.
+    // Until it answers, the in-memory pass over the rows already held keeps the
+    // grid responsive — and it narrows a truncated set, which is why the answer
+    // still matters: on a big table those rows are only the first slice.
+    this.scheduleReload();
   }
 
   private get visibleColumns(): ColumnSpec[] {
@@ -1333,6 +1480,11 @@ export class DataTable extends LitElement {
             <div class="load-bar-fill ${frac != null ? 'determinate' : ''}" style=${frac != null ? `width:${Math.max(2, Math.round(frac * 100))}%` : nothing}></div>
           </div>`
         : nothing}
+      ${this.truncated
+        ? html`<div class="truncated-note" role="status">
+            Showing the first ${this.rows.length.toLocaleString()} of ${this.matchingTotal.toLocaleString()}+ matching rows. Narrow the filter to see the rest.
+          </div>`
+        : nothing}
       <table style=${this.tableSizingStyle(cols) ?? nothing}>
         <colgroup>
           ${cols.map((c) => html`<col style=${c.width != null ? `width: ${c.width}px` : ''} />`)}
@@ -1566,64 +1718,6 @@ function isNonEmptyButUnparsed(raw: unknown, parsed: string): boolean {
   if (raw == null) return false;
   if (typeof raw === 'string' && raw.trim() === '') return false;
   return parsed === '';
-}
-
-/**
- * One sort key applied to one pair of rows, direction included. Extracted from
- * `sortedRows` so several keys can be walked in priority order.
- *
- * Emptiness is ranked as the *smallest* value: null < blank < present. The rank
- * rides the direction flip, so ascending floats empties to the top (nulls first,
- * then blanks) and descending sinks them to the bottom. null and blank are
- * DISTINCT — a null cell is "no value" and sorts ahead of an empty string.
- */
-function compareBySortKey(av: unknown, bv: unknown, type: ColumnType, factor: number): number {
-  const rank = (v: unknown): number => (v == null ? 0 : v === '' ? 1 : 2);
-  const ar = rank(av);
-  const br = rank(bv);
-  if (ar !== 2 || br !== 2) return (ar - br) * factor;
-  return compareValues(av, bv, type) * factor;
-}
-
-/**
- * The sort keys of a table or view instance: the `sortBy` list when present,
- * else the single legacy `sortColumn`/`sortAsc` pair (a workspace written before
- * multi-sort, or a view whose sort bar still sets one column).
- */
-function readSortSpecs(rec: { sortBy?: SortSpec[] | undefined; sortColumn?: string | undefined; sortAsc?: boolean | undefined }): SortSpec[] {
-  if (rec.sortBy?.length) return rec.sortBy.map((s) => ({ field: s.field, asc: s.asc !== false }));
-  if (!rec.sortColumn) return [];
-  return [{ field: rec.sortColumn, asc: rec.sortAsc !== false }];
-}
-
-// Compares two PRESENT (non-empty) values by column type. Empty handling is
-// the caller's job — `compareBySortKey` deals with blanks before this runs.
-function compareValues(a: unknown, b: unknown, type: ColumnType): number {
-  switch (type) {
-    case 'number': {
-      const na = Number(a);
-      const nb = Number(b);
-      if (Number.isNaN(na) || Number.isNaN(nb)) return String(a).localeCompare(String(b));
-      return na - nb;
-    }
-    case 'boolean':
-      return (a ? 1 : 0) - (b ? 1 : 0);
-    case 'array':
-      // Sort on the members as they READ (`a, b`), so a JSON-array cell and a
-      // comma-list cell in the same column order against each other.
-      return arrayCellText(a).localeCompare(arrayCellText(b), undefined, {
-        numeric: true,
-        sensitivity: 'base',
-      });
-    case 'date': {
-      const ta = new Date(String(a)).getTime();
-      const tb = new Date(String(b)).getTime();
-      if (Number.isNaN(ta) || Number.isNaN(tb)) return String(a).localeCompare(String(b));
-      return ta - tb;
-    }
-    default:
-      return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
-  }
 }
 
 /**

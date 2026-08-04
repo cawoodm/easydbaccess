@@ -24,13 +24,41 @@ export interface SelectableTable {
    * but still selectable.
    */
   hidden?: boolean | undefined;
+  /**
+   * Tables and views are listed under separate headings when this is set, each
+   * with its own all/none. They are different enough to be worth separating: a
+   * view holds no rows of its own, and picking one means choosing how it should
+   * arrive (see `mode`).
+   */
+  kind?: 'table' | 'view' | undefined;
 }
+
+/** How a chosen VIEW should arrive. */
+export type ViewMode = 'projection' | 'data';
 
 export interface ChooseTablesOpts {
   title?: string;
   message?: string;
   /** Verb for the confirm button; the count is appended, e.g. "Import (3)". */
   confirmLabel?: string;
+  /**
+   * Offer each view a Projection / Data choice.
+   *
+   * The two are genuinely different things rather than a preference. A projection
+   * keeps the view's QUERY and recomputes from the tables it reads; Data takes a
+   * snapshot of the rows it returns now, frozen and editable. Defaulting silently
+   * either way would be wrong, so the picker asks — per view, since one file can
+   * reasonably want both.
+   */
+  offerViewModes?: boolean;
+  /** Which mode a view starts on. Defaults to `projection` — a view IS a query. */
+  defaultViewMode?: ViewMode;
+}
+
+/** One chosen object: its index in the input array, plus the mode if it is a view. */
+export interface ObjectChoice {
+  index: number;
+  mode?: ViewMode | undefined;
 }
 
 /**
@@ -39,6 +67,15 @@ export interface ChooseTablesOpts {
  * confirm button is disabled while nothing is selected.
  */
 export function chooseTables(items: SelectableTable[], opts: ChooseTablesOpts = {}): Promise<number[] | null> {
+  const dlg = TableSelectDialog.instance ?? mountDialog();
+  return dlg.open(items, opts).then((chosen) => chosen?.map((c) => c.index) ?? null);
+}
+
+/**
+ * The same picker, resolving with each choice's MODE as well — for a source whose
+ * views can arrive either as projections or as snapshot data.
+ */
+export function chooseDatabaseObjects(items: SelectableTable[], opts: ChooseTablesOpts = {}): Promise<ObjectChoice[] | null> {
   const dlg = TableSelectDialog.instance ?? mountDialog();
   return dlg.open(items, opts);
 }
@@ -150,6 +187,54 @@ export class TableSelectDialog extends LitElement {
         background: #93c5fd;
         cursor: default;
       }
+      .section + .section {
+        margin-top: 0.75rem;
+      }
+      .section-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 0 0.15rem 0.25rem;
+        font-size: 0.82rem;
+      }
+      .section-title {
+        font-weight: 600;
+        color: #374151;
+      }
+      .section-count {
+        font-weight: 400;
+        color: #6b7280;
+      }
+      .section-head button {
+        font: inherit;
+        background: transparent;
+        border: 0;
+        color: #2563eb;
+        cursor: pointer;
+        padding: 0;
+      }
+      .section-head button:hover {
+        text-decoration: underline;
+      }
+      .mode {
+        flex: 0 0 auto;
+        display: flex;
+        gap: 0.5rem;
+        font-size: 0.78rem;
+        color: #374151;
+      }
+      .mode-opt {
+        display: flex;
+        align-items: center;
+        gap: 0.2rem;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .mode input[type='radio'] {
+        width: 0.85rem;
+        height: 0.85rem;
+      }
     `,
   ];
 
@@ -160,7 +245,10 @@ export class TableSelectDialog extends LitElement {
   @state() private confirmLabel = 'Import';
 
   private dialogEl: HTMLDialogElement | null = null;
-  private resolveFn: ((v: number[] | null) => void) | null = null;
+  @state() private modes: ViewMode[] = [];
+  @state() private offerViewModes = false;
+
+  private resolveFn: ((v: ObjectChoice[] | null) => void) | null = null;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -178,20 +266,22 @@ export class TableSelectDialog extends LitElement {
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
   }
 
-  open(items: SelectableTable[], opts: ChooseTablesOpts): Promise<number[] | null> {
+  open(items: SelectableTable[], opts: ChooseTablesOpts): Promise<ObjectChoice[] | null> {
     this.items = items;
     // Hidden tables start unchecked (the user opts in); everything else is on.
     this.selected = items.map((t) => !t.hidden);
+    this.offerViewModes = opts.offerViewModes ?? false;
+    this.modes = items.map(() => opts.defaultViewMode ?? 'projection');
     this.heading = opts.title ?? 'Select tables';
     this.message = opts.message ?? '';
     this.confirmLabel = opts.confirmLabel ?? 'Import';
-    return new Promise<number[] | null>((resolve) => {
+    return new Promise<ObjectChoice[] | null>((resolve) => {
       this.resolveFn = resolve;
       void this.updateComplete.then(() => this.dialogEl?.showModal());
     });
   }
 
-  private finish(value: number[] | null): void {
+  private finish(value: ObjectChoice[] | null): void {
     this.dialogEl?.close();
     const resolve = this.resolveFn;
     this.resolveFn = null;
@@ -209,8 +299,25 @@ export class TableSelectDialog extends LitElement {
     this.selected = next;
   }
 
-  private setAll(value: boolean): void {
-    this.selected = this.items.map(() => value);
+  /** All/none for one section, or for everything when `kind` is omitted. */
+  private setAll(value: boolean, kind?: 'table' | 'view'): void {
+    this.selected = this.items.map((t, i) => (kind && (t.kind ?? 'table') !== kind ? (this.selected[i] ?? false) : value));
+  }
+
+  private setMode(i: number, mode: ViewMode): void {
+    const next = this.modes.slice();
+    next[i] = mode;
+    this.modes = next;
+  }
+
+  /** Indices belonging to one section, in the input's own order. */
+  private indicesOf(kind: 'table' | 'view'): number[] {
+    return this.items.map((t, i) => ((t.kind ?? 'table') === kind ? i : -1)).filter((i) => i >= 0);
+  }
+
+  /** True when the items are explicitly kinded, so sections are meaningful. */
+  private get sectioned(): boolean {
+    return this.items.some((t) => t.kind !== undefined);
   }
 
   private get selectedCount(): number {
@@ -219,10 +326,74 @@ export class TableSelectDialog extends LitElement {
 
   private submit = (e: Event): void => {
     e.preventDefault();
-    const indices = this.selected.map((on, i) => (on ? i : -1)).filter((i) => i >= 0);
-    if (indices.length === 0) return;
-    this.finish(indices);
+    const chosen: ObjectChoice[] = [];
+    this.selected.forEach((on, i) => {
+      if (!on) return;
+      const isView = (this.items[i]?.kind ?? 'table') === 'view';
+      chosen.push(isView && this.offerViewModes ? { index: i, mode: this.modes[i] ?? 'projection' } : { index: i });
+    });
+    if (chosen.length === 0) return;
+    this.finish(chosen);
   };
+
+  /** One section — its own heading, count and all/none, then its rows. */
+  private renderSection(kind: 'table' | 'view', label: string) {
+    const indices = this.indicesOf(kind);
+    if (indices.length === 0) return html``; // a file with no views shows no Views heading
+    const on = indices.filter((i) => this.selected[i]).length;
+    return html`
+      <div class="section">
+        <div class="section-head">
+          <span class="section-title">${label} <span class="section-count">${on}/${indices.length}</span></span>
+          <span>
+            <button type="button" @click=${() => this.setAll(true, kind)}>All</button>
+            &nbsp;·&nbsp;
+            <button type="button" @click=${() => this.setAll(false, kind)}>None</button>
+          </span>
+        </div>
+        <ul class="tables">
+          ${indices.map((i) => this.renderRow(this.items[i]!, i))}
+        </ul>
+      </div>
+    `;
+  }
+
+  private renderRow(t: SelectableTable, i: number) {
+    const isView = (t.kind ?? 'table') === 'view';
+    return html`
+      <li>
+        <input type="checkbox" id=${`tsel-${i}`} .checked=${this.selected[i] ?? false} @change=${() => this.toggle(i)} />
+        <label for=${`tsel-${i}`}>
+          <span class="name">${t.name}</span>
+          ${t.hidden ? html`<span class="tag-hidden">hidden</span>` : ''}
+          <span class="size">${formatSize(t.size)}</span>
+          ${t.detail ? html`<span class="detail">${t.detail}</span>` : ''}
+        </label>
+        ${isView && this.offerViewModes ? this.renderModeToggle(i) : ''}
+      </li>
+    `;
+  }
+
+  /**
+   * Projection or Data, for one view. Two radios rather than a checkbox: neither
+   * is the "off" state of the other — a projection recomputes from the tables it
+   * reads, data is a frozen snapshot you can edit.
+   */
+  private renderModeToggle(i: number) {
+    const mode = this.modes[i] ?? 'projection';
+    return html`
+      <span class="mode" title="A projection recomputes from its source tables; Data is a snapshot you can edit">
+        <label class="mode-opt">
+          <input type="radio" name=${`mode-${i}`} .checked=${mode === 'projection'} @change=${() => this.setMode(i, 'projection')} />
+          Projection
+        </label>
+        <label class="mode-opt">
+          <input type="radio" name=${`mode-${i}`} .checked=${mode === 'data'} @change=${() => this.setMode(i, 'data')} />
+          Data
+        </label>
+      </span>
+    `;
+  }
 
   override render() {
     const count = this.selectedCount;
@@ -247,21 +418,11 @@ export class TableSelectDialog extends LitElement {
                 <button type="button" @click=${() => this.setAll(false)}>None</button>
               </span>
             </div>
-            <ul class="tables">
-              ${this.items.map(
-                (t, i) => html`
-                  <li>
-                    <input type="checkbox" id=${`tsel-${i}`} .checked=${this.selected[i] ?? false} @change=${() => this.toggle(i)} />
-                    <label for=${`tsel-${i}`}>
-                      <span class="name">${t.name}</span>
-                      ${t.hidden ? html`<span class="tag-hidden">hidden</span>` : ''}
-                      <span class="size">${formatSize(t.size)}</span>
-                      ${t.detail ? html`<span class="detail">${t.detail}</span>` : ''}
-                    </label>
-                  </li>
-                `,
-              )}
-            </ul>
+            ${this.sectioned
+              ? html`${this.renderSection('table', 'Tables')}${this.renderSection('view', 'Views')}`
+              : html`<ul class="tables">
+                  ${this.items.map((t, i) => this.renderRow(t, i))}
+                </ul>`}
           </div>
         </form>
       </dialog>

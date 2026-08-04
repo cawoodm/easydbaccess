@@ -161,7 +161,7 @@ describe('parseCsv: array columns', () => {
     // The `tags` renderer comes with the type — one pill per value.
     expect(columns[0]).toMatchObject({ field: 'tags', type: 'array', renderer: 'tags' });
     // The cell is not rewritten — the reader takes the members out of whichever
-    // spelling arrived (see util/array-cell.ts).
+    // spelling arrived (see array-cell.ts).
     expect(rows.map((r) => r.tags)).toEqual(['["a","b"]', '["c"]']);
   });
 

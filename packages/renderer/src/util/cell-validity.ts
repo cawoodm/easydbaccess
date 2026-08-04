@@ -14,7 +14,7 @@
  * so the app has exactly one "this is wrong" colour.
  */
 
-import { arrayMembers } from './array-cell.js';
+import { arrayMembers } from '@easydb/shared';
 
 /** The one invalid-value red used everywhere. Do not introduce another. */
 export const INVALID_COLOR = '#dc2626';

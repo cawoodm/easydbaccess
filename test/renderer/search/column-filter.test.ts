@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { composeColumnFilter, matchesColumnFilter, parseColumnFilter } from '../../../packages/renderer/src/search/column-filter.js';
+import { composeColumnFilter, matchesColumnFilter, parseColumnFilter } from '../../../packages/shared/src/column-filter.js';
 
 describe('matchesColumnFilter', () => {
   it('empty query matches everything', () => {

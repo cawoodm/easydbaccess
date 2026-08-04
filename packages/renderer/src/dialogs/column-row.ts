@@ -84,3 +84,46 @@ export function buildColumnSpec(row: ColumnRow): ColumnSpec {
   else delete spec.filterable;
   return spec;
 }
+
+/** The editor's five checkbox columns, named for what their header glyph means. */
+export type ColumnFlag = 'unique' | 'notnull' | 'visible' | 'sortable' | 'filterable';
+
+/**
+ * Read and write one checkbox column the way the CHECKBOX reads it: `true` is
+ * ticked.
+ *
+ * Three of the five are not stored that way. `hidden` is the opposite of the
+ * "visible" box, and `sortable`/`filterable` are absent-means-yes, so ticking
+ * them clears the field rather than setting `true` (`buildColumnSpec` only
+ * persists the `false`). Doing that arithmetic in one place is what lets the
+ * header toggle treat all five alike.
+ */
+const FLAGS: Record<ColumnFlag, { get(row: ColumnRow): boolean; set(on: boolean): Partial<ColumnRow> }> = {
+  unique: { get: (r) => !!r.unique, set: (on) => ({ unique: on ? true : undefined }) },
+  notnull: { get: (r) => !!r.notnull, set: (on) => ({ notnull: on ? true : undefined }) },
+  visible: { get: (r) => !r.hidden, set: (on) => ({ hidden: on ? undefined : true }) },
+  sortable: { get: (r) => r.sortable !== false, set: (on) => ({ sortable: on ? undefined : false }) },
+  filterable: { get: (r) => r.filterable !== false, set: (on) => ({ filterable: on ? undefined : false }) },
+};
+
+/** Is this checkbox ticked on `row`? */
+export function columnFlag(row: ColumnRow, flag: ColumnFlag): boolean {
+  return FLAGS[flag].get(row);
+}
+
+/** Are every row's boxes ticked in this column? Vacuously true for no rows. */
+export function allColumnsFlagged(rows: readonly ColumnRow[], flag: ColumnFlag): boolean {
+  return rows.every((r) => FLAGS[flag].get(r));
+}
+
+/**
+ * All-or-none for one checkbox column, as clicking its header does.
+ *
+ * A MIXED column ticks rather than unticks: the click means "select all", and
+ * only a column that is already fully ticked has anything else to do. So the
+ * two states a user can reach by clicking twice are all and none, in that order.
+ */
+export function toggleColumnFlag(rows: readonly ColumnRow[], flag: ColumnFlag): ColumnRow[] {
+  const next = !allColumnsFlagged(rows, flag);
+  return rows.map((r) => ({ ...r, ...FLAGS[flag].set(next) }));
+}

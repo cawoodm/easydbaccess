@@ -7,7 +7,7 @@
 // and the snapshotted filter/sort a view instance applies.
 
 import type { ColumnSpec, Row, ViewInstance } from '@easydb/shared';
-import { composeColumnFilter, matchesColumnFilter, parseColumnFilter, type FilterToken } from '../search/column-filter.js';
+import { composeColumnFilter, matchesColumnFilter, parseColumnFilter, type FilterToken } from '@easydb/shared';
 import { runColumnScript } from '../util/column-script.js';
 
 /**

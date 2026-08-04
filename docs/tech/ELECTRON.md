@@ -1,16 +1,20 @@
 # The Electron Shell
 
-`packages/electron` is the desktop wrapper. Today it is deliberately minimal
-— a `BrowserWindow` loading the exact same renderer bundle the browser uses,
-still backed by Dexie/IndexedDB inside the renderer process (see
-[`STORAGE.md`](./STORAGE.md)) — with the bigger integration work (an
-in-process sync server, a SQLite-backed storage adapter, native file
-dialogs) planned but not yet wired. This page covers what exists today and
-exactly what's still ahead; see
+`packages/electron` is the desktop wrapper: a `BrowserWindow` loading the
+exact same renderer bundle the browser uses, **plus** the desktop storage
+layer. Inside Electron the renderer does not use Dexie/IndexedDB at all — it
+talks over IPC to a `node:sqlite` store in the main process, and the user can
+open, save and import `.db` files (see [`STORAGE.md`](./STORAGE.md)). An
+in-process sync server is still ahead. See
 [`packages/electron/CLAUDE.md`](../../packages/electron/CLAUDE.md) for the
-terse contributor-facing version and the
-[rewrite plan](../../.claude/plans/2026-05-21-rewrite-architecture.md) (Phase 8)
-for the original design rationale.
+terse contributor-facing version, and the
+[storage design](../../.claude/plans/2026-07-31-electron-sqlite-storage.md)
+for why the file is laid out the way it is. The user-facing side of the `.db`
+operations is [`help/database-files.md`](../help/database-files.md).
+
+"Phase 8" throughout this doc refers to the original rewrite plan's numbering.
+That plan file is gone, but the numbering is still how the docs and `CLAUDE.md`
+talk about remaining scope.
 
 ## What's actually running today
 
@@ -27,26 +31,84 @@ switching on whether `EASYDB_RENDERER_URL` is set:
   `--base /easydbaccess/`) precisely so packaging the desktop app can never
   silently clobber — or be clobbered by — the browser build, or vice versa.
 
+The prod branch also sets a Content-Security-Policy on the `file://` load via
+`onHeadersReceived`. It keeps `script-src 'unsafe-eval'`, because per-column
+user scripts run through `new Function`
+(`packages/renderer/src/util/column-script.ts`). The consequence is visible:
+Electron's "Insecure Content-Security-Policy" warning still prints to the
+console in an unpackaged run. It fires on any policy granting `unsafe-eval`
+and cannot be silenced without dropping the column-script feature; Electron
+suppresses it once the app is packaged.
+
 `app.on('window-all-closed')` quits on every platform except macOS (the
 platform convention of leaving the app running with no windows);
 `app.on('activate')` recreates the window if the dock icon is clicked with
-none open. That's the entire main-process surface today — no IPC handlers,
-no menu customization, no auto-updater.
+none open. Beyond that the main process registers the storage and file IPC
+handlers described below — still no menu customization, no auto-updater.
 
 **Security defaults, not to be relaxed:** `contextIsolation: true`,
 `nodeIntegration: false`, `sandbox: true`. Anything the main process ever
 needs to expose to the renderer goes through `preload.ts`'s
 `contextBridge`, never by turning any of these three off.
 
-## The preload bridge — currently a version stamp
+## The preload bridge
 
-[`src/preload.ts`](../../packages/electron/src/preload.ts) exposes exactly one
-thing today: `window.easydb = { platform: 'electron', version }`. That's
-enough for the renderer to *detect* it's running inside Electron (useful
-once there's an Electron-specific code path to branch into — see Phase 8
-below) but nothing yet routes through it. The file's own comment marks it
-as the landing spot for the IPC storage adapter and native
-save/open-file handlers once those exist.
+[`src/preload.ts`](../../packages/electron/src/preload.ts) exposes
+`window.easydb = { platform, version, store, db }` — no raw `ipcRenderer`,
+and only the specific functions the renderer needs:
+
+- **`store`** — one method per `store:*` IPC channel (`find`, `findOne`,
+  `insert`, `bulkInsert`, `upsert`, `patch`, `remove`, `bulkRemove`, `count`,
+  `dbPath`) plus `onChanged(cb)`, which subscribes to the main process's
+  `store:changed` broadcast. That broadcast is what replaces Dexie's
+  `liveQuery`: the main process names the mutated collection, the renderer's
+  collection re-runs its query and notifies its subscribers.
+- **`db`** — the user-facing file operations: `openDb` / `openDbCommit`,
+  `saveDbAs`, `importDb` / `importDbCommit`, `currentDb`. Open and Import are
+  two-phase on purpose: the OS dialog has to return before the app can name
+  the file (or the colliding table) in its own confirmation prompt, so phase
+  one picks and previews with no side effects and phase two commits what the
+  user agreed to.
+
+`preload.ts` imports the main-side modules **for their types only**
+(`import type`, erased at compile time). Their runtime code calls
+`dialog`/`app`/`BrowserWindow`, which don't exist in preload's context —
+importing them for real would misbehave at run time instead of failing
+typecheck.
+
+## Storage
+
+The store lives in the main process, not the renderer:
+
+| File | Role |
+|---|---|
+| [`src/sqlite-store.ts`](../../packages/electron/src/sqlite-store.ts) | The store. User tables are real SQL tables; documents (`workspaces`, `settings`, `plugins`, `viewTemplates`, `viewInstances`) live in `_easydb_docs`. |
+| [`src/db-files.ts`](../../packages/electron/src/db-files.ts) | Store singleton (open / switch / remembered path) and the Open / Save As dialogs. |
+| [`src/db-import.ts`](../../packages/electron/src/db-import.ts) | Imports **any** SQLite file by reading its `sqlite_master` — not only files easyDBAccess wrote. `probeDatabaseFile` classifies a picked file read-only. |
+
+**Open takes only our own files; Import takes any.** Opening a database is not
+a read-only act — the store's constructor creates `_easydb_docs` and
+`_easydb_tables` — so Open on a stranger's `.db` would add two tables to it and
+show an empty workspace. `pickDatabaseToOpen` therefore probes first and
+reports `kind`: `easydb` opens after the usual confirmation, `foreign` is
+offered as an import of the same file, and `unreadable` (not a SQLite database
+at all) is reported as such. Nothing is written until the user has agreed to
+one of those.
+
+The renderer side is [`db/data-store-ipc.ts`](../../packages/renderer/src/db/data-store-ipc.ts),
+selected in `app-context.ts` when `window.easydb?.store` exists. The
+plugin-facing `DataCollection<T>` contract is identical either way, so no
+plugin knows the difference — and `renderer/src/plugins/electron-db.ts` (the
+Database footer button) registers nothing at all when the bridge is absent,
+which is how the browser build stays untouched.
+
+`packages/shared/src/sql-mapping.ts` holds the type↔SQL mapping used by
+**both** this store and the server's `sqlite-store.ts`, so a `.db` written by
+either has the same shape. Full layout and the three rules that must not be
+broken (`sql_table` assigned once, additive-only column reconciliation,
+`_extra` overflow) are in
+[`packages/electron/CLAUDE.md`](../../packages/electron/CLAUDE.md) and the
+[design note](../../.claude/plans/2026-07-31-electron-sqlite-storage.md).
 
 ## Why this package is CommonJS
 
@@ -90,13 +152,14 @@ server alone.
 ```
 
 Build order matters — shared and server are built first (Electron pulls
-both as workspace dependencies, `@easydb/server` in anticipation of Phase 8
-even though nothing imports it yet), then the renderer is built via the
+both as workspace dependencies; `@easydb/shared` is imported for real, by
+`sqlite-store.ts` and `db-import.ts`, while `@easydb/server` is still only
+pre-staged), then the renderer is built via the
 Electron-specific `build:electron` script (→ `packages/electron/frontend/`,
 `base=./`), then `packages/electron` itself (`tsc`).
 [`electron-builder.json`](../../packages/electron/electron-builder.json)
 bundles `dist/**/*` (compiled main/preload), `frontend/**/*` (the renderer
-build), and `../server/dist/**/*` (again, pre-staged for Phase 8) into
+build), and `../server/dist/**/*` (again, pre-staged) into
 platform installers — NSIS on Windows, a `.dmg` on macOS, an AppImage on
 Linux — output to `packages/electron/dist-installer/`.
 
@@ -108,41 +171,32 @@ Windows file locks. The script's own comment warns: only pass `-Installer`
 when you're prepared to run a plain `npm install` afterward to restore the
 workspace.
 
-## What's deliberately not wired yet (Phase 8)
+## What's deliberately not wired yet
 
-Everything below is planned, not present. Don't "fix" the current
-BrowserWindow-only shell into partially implementing one of these without
-reading the architecture plan first — each is a coordinated change across
-the renderer and this package, not a local patch:
+Two Phase 8 items remain. Each is a coordinated change across the renderer and
+this package, not a local patch:
 
 - **Hono in-process.** The main process will call `createServer(...)` from
   `@easydb/server` (see [`SERVER.md`](./SERVER.md)) directly and mount it
   on a localhost port, instead of the renderer talking to a separately
-  spawned Node process — the same exported `Hono` app, just given a
-  different `StoreAdapter`.
-- **A `better-sqlite3`-backed `StoreAdapter`.** The server package
-  currently ships `fs` and `sqlite` (via Node's built-in `node:sqlite`)
-  adapters (`SERVER.md`); Electron's in-process server needs a
-  `better-sqlite3` implementation of the same `StoreAdapter` interface —
-  chosen for Electron specifically because it's a synchronous, native
-  binding well-suited to bundling inside a desktop app.
-- **Dexie-over-IPC storage adapter.** The renderer's `DataStore` (see
-  `STORAGE.md`) swaps from Dexie/IndexedDB to an implementation that
-  proxies every call over IPC to a main-process store — the plugin-facing
-  `DataCollection<T>` contract stays byte-for-byte identical, so no plugin
-  code changes; only `db/data-store-dexie.ts` gets a sibling
-  implementation, selected at boot when `window.easydb?.platform ===
-  'electron'`. Per `packages/electron/CLAUDE.md`, this branch belongs in
-  `app-context.ts`, not scattered `window.easydb` checks throughout the
-  renderer.
-- **Native save/open dialogs.** `api.backend.saveFile` (see `PLUGINS.md`'s
-  exporter plugins, all of which call it) currently falls back to a
-  browser `<a download>` even inside Electron; it will route through
-  `dialog.showSaveDialog` once the IPC bridge exists.
+  spawned Node process — the same exported `Hono` app, given a `StoreAdapter`
+  over the same SQLite file. `@easydb/server` is already a dependency and is
+  already pre-staged into the installer; nothing imports it yet.
+- **Native save dialog for exports.** `api.backend.saveFile` (see
+  `PLUGINS.md`'s exporter plugins, all of which call it) still falls back to
+  a browser `<a download>` even inside Electron. `dialog.showSaveDialog` is
+  already in use for the `.db` operations, so routing `saveFile` through the
+  same bridge is the leftover.
 
-The consistent pattern for landing any of these: implement the main-process
-side in `src/main.ts` (or split into `src/ipc/` if it grows), expose only
-the minimal surface needed through `preload.ts`'s `contextBridge` — never
-raw Electron APIs — and make the renderer's `app-context.ts` the single
-place that decides which adapter to construct, so plugins and the rest of
-the renderer stay oblivious to which environment they're running in.
+The plan called for a `better-sqlite3` `StoreAdapter`; it was not needed.
+Electron 43 ships Node 24, where `node:sqlite` is available unflagged, so the
+store uses the built-in and the desktop app carries no native binding to
+rebuild per platform.
+
+The consistent pattern for landing either remaining item: implement the
+main-process side in `src/main.ts` (or split into `src/ipc/` if it grows),
+expose only the minimal surface needed through `preload.ts`'s
+`contextBridge` — never raw Electron APIs — and keep the environment branch in
+the renderer's `app-context.ts` (or a plugin's own `init` guard), so plugins
+and the rest of the renderer stay oblivious to which environment they're
+running in.

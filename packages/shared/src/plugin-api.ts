@@ -8,6 +8,7 @@
  */
 
 import type { ColumnSpec, PluginRecord, Row, Setting, Table, TableSource, ViewInstance, ViewTemplate, Workspace } from './types.js';
+import type { QueryPage, RowQuery } from './row-query.js';
 
 // -- Plugin module shape --------------------------------------------------
 
@@ -91,12 +92,47 @@ export interface DataCollection<T> {
   /** Subscribe to changes; returns unsubscribe. */
   subscribe(fn: (docs: T[]) => void): Unsubscribe;
   /**
+   * Optional: be told that something changed, WITHOUT being handed the docs.
+   *
+   * `subscribe` has to materialise the whole collection to deliver its argument,
+   * so a consumer that only wants to re-run its own narrow query pays for every
+   * row on every write — and `data-table` did exactly that, fetching a table
+   * twice on open (once to subscribe, once to read). A collection whose backing
+   * store can signal a change without reading it implements this; callers must
+   * feature-detect and fall back to `subscribe`.
+   */
+  watch?(fn: () => void): Unsubscribe;
+  /**
+   * Optional: how many documents there are, without returning any.
+   *
+   * Distinct from `QueryPage.total`, which counts what MATCHES a query. A panel
+   * title needs both — "3 of 1,204" is the filtered count over the table count —
+   * and once a reader stops fetching everything it no longer knows the second
+   * one. Callers must feature-detect.
+   */
+  count?(): Promise<number>;
+  /**
    * Optional: force a re-read from the backing store and notify subscribers.
    * Local (Dexie) collections are always live so they don't implement it;
    * remote-backed collections (e.g. Datasette) that cache reads expose it so a
    * user "Refresh" can bypass the cache. Callers must feature-detect it.
    */
   refresh?(): Promise<void>;
+  /**
+   * Optional: answer a `RowQuery` — specific fields, filtered, sorted, one
+   * slice — instead of handing over everything for the caller to narrow.
+   *
+   * Optional because `find()` remains the whole contract a collection must
+   * satisfy, and a caller can always fall back to it. But `find()` is why a
+   * large table is slow: the grid virtualises what it DRAWS and then fetches
+   * every row anyway. Implement this wherever the backing store can narrow
+   * cheaply — SQL, or a remote endpoint that takes query parameters — and
+   * `db/row-reader.ts`'s `readRows` in the renderer will use it.
+   *
+   * Callers must honour `QueryPage.partial`: it means the backend could not
+   * apply some predicate, so `rows` is a SUPERSET and needs narrowing again.
+   */
+  query?(q: RowQuery): Promise<QueryPage<T>>;
 }
 
 export interface DataStore {
@@ -143,6 +179,17 @@ export interface RowCollectionProvider {
   /** Matched against `TableSource.type`. */
   type: string;
   create(table: Table, ctx: RowSourceCtx): DataCollection<Row>;
+  /**
+   * False ⇒ this table's schema is owned elsewhere and the chrome hides the
+   * column editor for it (e.g. a read-only browse of a file we do not own).
+   * Absent/true ⇒ the editor shows, as for every other table.
+   *
+   * `Table.readonly` deliberately does NOT imply this. A readonly LOCAL table
+   * must keep its column editor — that is where the readonly flag is toggled
+   * (v0.0.216) — so hiding on `readonly` alone would trap the user out of
+   * un-protecting their own table.
+   */
+  schemaEditable?: boolean | undefined;
 }
 
 /** Re-export so downstream code can import the descriptor from the contract. */

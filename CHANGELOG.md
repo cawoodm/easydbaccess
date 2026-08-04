@@ -9,6 +9,12 @@
 - ✨ New `markdown` cell renderer: one line of text in the grid, the formatted value in the popup, and never guessed at (v0.0.298)
 - 🪶 Workspace commands in the palette — switch, new and delete; deleting takes the workspace's tables, rows, views and settings with it (v0.0.305)
 - ✨ A twikki dump converts to importable `.table.json` tables, one per twikki package (v0.0.306)
+- 🪶 A big table opens fast: the grid, views and projections now ask the store for the rows they show instead of reading the whole table (v0.0.309)
+- 🪶 A `.db` import runs in the background on a worker thread, so the app stays usable while it copies (v0.0.309)
+- 🪶 Converting or importing a `.db` shows one progress bar for the whole file, weighted by how big each table is (v0.0.309)
+- 🪶 Workspace files are `.edb`; a plain `.db` can be imported, appended onto a table that already exists, or browsed read-only (v0.0.309)
+- 🪶 Importing a `.db` picks its tables and views with checkboxes, and a view can arrive as a projection or as a snapshot (v0.0.309)
+- ✨ The columns editor's checkbox headers set or clear their whole column, and 👁 moved to the front of the row (v0.0.309)
 
 ### Bugs
 
@@ -18,16 +24,28 @@
 - 🪲 A gist kept the file of a table deleted locally, so the next pull brought the table back (v0.0.301)
 - 🪲 A read-only table offered a Save button on its `preview`, `markdown` and `html` cells (v0.0.302)
 - 🪲 Dragging in a `.table.json` and choosing "Add as new table" made a second table with the same name (v0.0.304)
+- 🪲 Filtering, searching or sorting a table above 20,000 rows only saw the first 20,000 and confidently showed the wrong ones (v0.0.309)
+- 🪲 The panel title lost its `shown/total` count a moment after a filter was typed (v0.0.309)
+- 🪲 The app crashed on startup with a large workspace, and an unfinished import restarted itself (v0.0.309)
+- 🪲 The UI froze while a `.db` imported (v0.0.309)
 
 ## 3 Aug 2026
 
 ### Features
 
 - ✨ Clicking a column header sorts descending first, then ascending — Settings → Table grid turns it around (v0.0.293)
+- ✨ Importing a `.db` lists its tables and views as checkboxes in separate sections, each with its own all/none; a view can come in as a Projection or as Data (v0.0.292)
+- ✨ Importing a `.db` onto a table that already exists offers Append: the rows are added and the table's own columns are left alone, with a column mapper when the names differ (v0.0.291)
+- ✨ Save As names the file after the workspace (v0.0.291)
 - ✨ A view's filter chip is `field = value` now, in the same bar as the sort: the field cycles = / ≠ / off, the value opens a checklist of the field's other values (v0.0.291)
+- ✨ Workspace files are `.edb` now: drop one to open it, drop a plain `.db` to import its data — no question asked (v0.0.290)
+- ✨ The app opens a workspace named on the command line, and a setting controls whether the last one reopens on startup (v0.0.290)
+- ✨ Importing a `.db` runs on a worker thread, so the window stays responsive while it copies (v0.0.289)
 - ✨ Esc closes a preview popup or its source editor, like it closes a dialog (v0.0.289)
 - ✨ A view's filter chip lists the field's other values, so a second value can be OR-ed in by clicking (v0.0.289)
 - ✨ A column filter takes `AND`: `!NULL AND Biden` needs both, and `OR` spells out the comma (v0.0.288)
+- ✨ Importing or converting a `.db` shows its tables at once and fills each one in with its own percentage (v0.0.286)
+- ✨ Convert to EDA asks which tables to take, with a shortcut that skips the views (v0.0.286)
 - ✨ The `html-preview` cell renderer is called `preview` now, and shows a Markdown value as formatted text by itself (v0.0.282)
 - ✨ The `html` cell renderer has a pencil for the source, so a link inside the cell can be clicked (v0.0.281)
 - ✨ The command-palette launcher is an icon button on the header's utility side now, beside search, plugins, help and settings (v0.0.278)
@@ -38,6 +56,10 @@
 
 - 🪲 A cell with a renderer ignored the column width: `preview` cut at 30 characters and a long value widened the whole column (v0.0.294)
 - 🪲 An id past 2^53 (e.g. 1298624375692894210) was rounded on import — silently a different id (v0.0.292)
+- 🪲 The app crashed on startup after converting a large database: every open window fetched its whole table, 1.9 million rows between them (v0.0.288)
+- 🪲 An unfinished conversion restarted its import on every launch, unprompted and with no way to stop it (v0.0.288)
+- 🪲 The app froze while a `.db` imported — clicks and windows stopped responding until it finished (v0.0.287)
+- 🪲 Converting a `.db` left the app with no window for 15 seconds, and every table that finished importing made all the others re-read their rows (v0.0.286)
 - 🪲 Every click inside a window re-ordered the windows while a minimized one sat above it; a second finger hijacked a drag or resize (v0.0.283)
 - 🪲 A column script's Markdown output showed its HTML tags as text when the cell already held HTML (v0.0.281)
 - 🪲 Editing an HTML cell on a scripted column saved the computed output over the stored source (v0.0.281)

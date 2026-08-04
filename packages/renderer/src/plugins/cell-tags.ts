@@ -1,5 +1,5 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
-import { arrayMembers } from '../util/array-cell.js';
+import { arrayMembers } from '@easydb/shared';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'cell-tags',
@@ -15,7 +15,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
 
 /**
  * Built-in cell renderer for `array` columns — the display half of the type
- * (`util/array-cell.ts` is the reading half). A cell holding several values is
+ * (`array-cell.ts` is the reading half). A cell holding several values is
  * one long string in a plain input, and there is no way to see where one value
  * ends and the next starts; a pill per value shows that at a glance.
  *

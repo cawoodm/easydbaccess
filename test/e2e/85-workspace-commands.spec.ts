@@ -11,7 +11,10 @@ import { addRow, createTable, waitForPanel } from './helpers.js';
 
 /** Open the palette, type `query`, and run the entry titled `title`. */
 async function runCommand(page: import('@playwright/test').Page, query: string, title: string) {
-  await page.locator('app-shell header').getByTitle(/open the command palette/i).click();
+  await page
+    .locator('app-shell header')
+    .getByTitle(/open the command palette/i)
+    .click();
   const palette = page.locator('command-palette-dialog dialog');
   await expect(palette).toBeVisible();
   await palette.locator('input').fill(query);
@@ -56,7 +59,10 @@ async function createWorkspace(page: import('@playwright/test').Page, name: stri
 }
 
 test('the palette carries switch, new and delete', async ({ page }) => {
-  await page.locator('app-shell header').getByTitle(/open the command palette/i).click();
+  await page
+    .locator('app-shell header')
+    .getByTitle(/open the command palette/i)
+    .click();
   const palette = page.locator('command-palette-dialog dialog');
   await palette.locator('input').fill('workspace');
 

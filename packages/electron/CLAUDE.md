@@ -1,16 +1,80 @@
 # @easydb/electron
 
-Thin desktop shell. A `BrowserWindow` that loads the renderer — Vite in dev,
-the built `dist/index.html` in production.
+Desktop shell **and** desktop storage. A `BrowserWindow` that loads the
+renderer — Vite in dev, the built `frontend/index.html` in production — plus a
+`node:sqlite` store in the main process that the renderer uses instead of
+Dexie/IndexedDB.
 
 ## Files
 
-| File                    | Role                                                                                                                  |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `src/main.ts`           | App entry. Creates the BrowserWindow, picks dev vs prod loader, handles `window-all-closed` / `activate`.             |
-| `src/preload.ts`        | contextBridge surface exposed to the renderer as `window.easydb`. Currently just `{ platform: 'electron', version }`. |
-| `scripts/dev.cjs`       | Boots `dev:renderer` (Vite) first, then launches Electron with `EASYDB_RENDERER_URL` pointing at it.                  |
-| `electron-builder.json` | Packaging config (out of scope for code edits — bumped via the publish scripts at repo root).                         |
+| File                         | Role                                                                                                                                                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/main.ts`                | App entry. Creates the BrowserWindow, picks dev vs prod loader, registers the `store:*` and `db:*` IPC handlers, applies the production CSP, handles `window-all-closed` / `activate`.                                          |
+| `src/sqlite-store.ts`        | The store itself. User tables become real SQL tables; everything else lives in `_easydb_docs`. See "Storage layout" below.                                                                                                      |
+| `src/db-files.ts`            | The store singleton (open / close / switch, remembered path) and the Open / Save As file operations, including the OS dialogs.                                                                                                  |
+| `src/db-import.ts`           | Reads **any** SQLite file's `sqlite_master` and imports its tables and views — a two-phase preview-then-commit so the renderer can resolve name collisions first. Also `probeDatabaseFile`, the guard Open needs.               |
+| `src/db-browse.ts`           | Read-only listing and reading of a file's tables + views, for Browse. Never writes — not even a `-wal`.                                                                                                                         |
+| `src/db-convert.ts`          | Convert to EDA: writes a NEW workspace file from a foreign one, leaving the original alone. Takes an `only` list of source object names — the renderer asks which, the same as Import does; without it, every table (no views). |
+| `src/preload.ts`             | contextBridge surface exposed as `window.easydb`: `{ platform, version, store, db }`. Never the raw `ipcRenderer`.                                                                                                              |
+| `scripts/dev.cjs`            | Boots `dev:renderer` (Vite) first, then launches Electron with `EASYDB_RENDERER_URL` pointing at it.                                                                                                                            |
+| `scripts/check-frontend.cjs` | `prestart` guard — fails with a readable message instead of Chromium's "Not allowed to load local resource" when `frontend/index.html` was never built.                                                                         |
+| `electron-builder.json`      | Packaging config (out of scope for code edits — bumped via the publish scripts at repo root).                                                                                                                                   |
+
+Design: [`.claude/plans/2026-07-31-electron-sqlite-storage.md`](../../.claude/plans/2026-07-31-electron-sqlite-storage.md).
+
+**Open, Browse and Import are not interchangeable.** Browse and Import take any
+SQLite file; Open takes only a file this app wrote. Opening is not a read-only
+act — the store's constructor runs `CREATE TABLE IF NOT EXISTS _easydb_docs` /
+`_easydb_tables` — so pointing it at a stranger's database adds two tables to it
+and then shows an empty workspace, there being no registry rows to list.
+`probeDatabaseFile` therefore runs first, read-only, and `pickDatabaseToOpen`
+returns its verdict as `kind`; the renderer (`plugins/electron-db.ts`) offers
+Convert or Browse for a `foreign` file and says so plainly for an `unreadable`
+one. Design: [`2026-08-03-open-db-three-ways.md`](../../.claude/plans/2026-08-03-open-db-three-ways.md).
+
+**The stamp alone does not make a file ours.** `isEasydbFile` requires the
+registry to be _usable_: some rows in it, OR no unregistered user objects in the
+file. A file the pre-guard Open had already stamped carries `_easydb_tables`
+with nothing in it over all of its real tables — a real `northwind.db` did, with
+13 tables and 17 views — and testing only for the stamp made Open show a blank
+workspace and made Import find zero tables, both silently. A brand-new easydb
+file also has an empty registry and must still count as ours; unregistered data
+sitting alongside is what separates the two.
+
+## Storage layout
+
+A saved `.db` is a genuine database — openable in DB Browser or Datasette —
+not an opaque blob. That is the whole point of the design, and it is why
+"import a `.db`" is meaningful.
+
+| SQL object                 | Holds                                                                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `<sanitized table name>`   | the rows: `_id TEXT PRIMARY KEY` (= `Row.id`), `_updatedAt INTEGER`, `_extra TEXT` (overflow), then one column per `ColumnSpec` |
+| `_easydb_meta_<sanitized>` | that table's `columns_json` (the `ColumnSpec[]` verbatim) + `table_json` (the `Table` doc minus `columns`)                      |
+| `_easydb_tables`           | registry: `id`, `name`, `sql_table`, `ordinal`                                                                                  |
+| `_easydb_docs`             | `workspaces`, `settings`, `plugins`, `viewTemplates`, `viewInstances` — `(coll, key, workspaceId, doc)`                         |
+
+Three rules that a naive change would break:
+
+- **`sql_table` is assigned once.** Renaming `Table.name` updates the registry
+  and `table_json`, never the SQL object — nothing outside the registry
+  addresses a table by its physical name, and renaming risks a fresh collision
+  for no benefit.
+- **Column reconciliation is additive only** — `ALTER TABLE … ADD COLUMN`,
+  never `RENAME`/`DROP`. `ColumnSpec` has no stable id, so a rename is
+  indistinguishable from a drop-plus-add; dropping on that guess destroys data
+  (the v0.0.218 bug). A removed column just lingers, orphaned and harmless:
+  `columns_json`, not the DDL, says what is visible.
+- **`_extra` holds schemaless overflow.** `Row.data` may carry keys with no
+  `ColumnSpec`; they go to a JSON object in `_extra` rather than being dropped.
+  It is SQL `NULL` (not `'{}'`) when empty, and a decoded `null` is omitted
+  from `data` so a round-tripped row matches a fresh one.
+
+`packages/shared/src/sql-mapping.ts` owns the type↔SQL mapping
+(`sanitizeTableName` / `quoteIdent` / `sqlAffinity` / `encodeValue` /
+`decodeValue` / `columnTypeFromSqlType`) and the server's `sqlite-store.ts`
+imports the same helpers — one convention, so a `.db` written by either side
+has the same shape.
 
 ## Dev vs prod
 
@@ -18,12 +82,20 @@ the built `dist/index.html` in production.
 const isDev = !!process.env.EASYDB_RENDERER_URL;
 ```
 
-- **Dev**: `dev:electron` runs Vite on port 5190 and sets the URL. The
+- **Dev**: `dev:electron` runs Vite on the branch's port and sets the URL. The
   window loads it and opens DevTools detached.
-- **Prod**: `loadFile(path.join(__dirname, '../../renderer/dist/index.html'))`
-  — resolves to `packages/renderer/dist/` relative to
-  `packages/electron/dist/main.js`. The renderer must be built first; the
-  packaging script handles this.
+- **Prod**: `loadFile(path.join(__dirname, '../frontend/index.html'))` —
+  `packages/electron/frontend/`, built by
+  `npm run build:electron --workspace @easydb/renderer` (`--base ./`). Kept
+  separate from `packages/renderer/dist/` so the gh-pages build
+  (`--base /easydbaccess/`) can't collide with the `file://` build.
+
+The production load also gets a CSP via `onHeadersReceived`. It keeps
+`script-src 'unsafe-eval'` because per-column user scripts run through
+`new Function` (`renderer/src/util/column-script.ts`) — which means Electron's
+"Insecure Content-Security-Policy" console warning still fires in dev. That
+warning cannot be silenced without dropping the column-script feature, and
+Electron itself suppresses it in a packaged build.
 
 ## Security defaults
 
@@ -31,6 +103,10 @@ const isDev = !!process.env.EASYDB_RENDERER_URL;
 `nodeIntegration: false`, `sandbox: true`. Don't relax any of these.
 Anything the renderer needs from the main process goes through
 `preload.ts` via `contextBridge.exposeInMainWorld`.
+
+`preload.ts` imports `db-files.ts` / `db-import.ts` **for their types only**
+(`import type`). Their runtime code calls `dialog`/`app`/`BrowserWindow`,
+which don't exist in preload's context.
 
 ## CommonJS, not ESM
 
@@ -40,39 +116,41 @@ that shape cleanly. Imports use plain TS / ESM-style syntax but compile to
 CJS via `tsc`. Don't switch this to ESM without verifying
 `electron-builder` still resolves the entry.
 
+`node:sqlite` is loaded with `require('node:sqlite')`, not a static `import` —
+the bundler/transpiler chain mishandles the built-in otherwise. Electron 43
+(Node 24) is what makes it available unflagged.
+
 ## What's intentionally not wired yet
 
-`@easydb/server` is already declared as a runtime dependency in `package.json`
-in anticipation, but `src/main.ts` does not import or boot it. The Phase 8
-work-items are:
+`@easydb/server` is a runtime dependency in `package.json` but `src/main.ts`
+does not import or boot it. The remaining Phase 8 work-items are:
 
 - **Hono in-process** — main process boots `createServer(...)` from
-  `@easydb/server` and mounts it on a localhost port. The `store` it passes
-  in will be a `better-sqlite3`-backed `StoreAdapter` (not yet implemented in
-  the server package; current adapters are `fs-store` and `sqlite-store`
-  using `node:sqlite`).
-- **Dexie-over-IPC storage adapter** — the renderer's `DataStore` swaps to
-  an IPC-backed implementation that proxies to main-process `better-sqlite3`,
-  instead of using Dexie/IndexedDB locally. Plugin contract stays identical
-  (`DataCollection<T>`); only `db/data-store-dexie.ts` is replaced at boot
-  when `window.easydb?.platform === 'electron'`.
-- **Native saveFile / openFile** — `api.backend.saveFile` routes through
-  Electron's `dialog.showSaveDialog` instead of a `<a download>`.
+  `@easydb/server` and mounts it on a localhost port, passing it a
+  `StoreAdapter` over the same SQLite file.
+- **Native saveFile** — `api.backend.saveFile` still uses a browser
+  `<a download>`. The `.db` operations already use
+  `dialog.showSaveDialog`; routing `saveFile` through it is the leftover.
 
-When you add any of these:
+When you add either:
 
 1. Implement on the main side under `src/main.ts` (or split into
    `src/ipc/` if it grows).
 2. Expose a minimal surface via `preload.ts` — never the raw Electron API.
-3. The renderer's `api.backend` / `DataStore` should NOT branch on
-   `window.easydb` — instead, the renderer's `app-context.ts` swaps in an
-   Electron-aware adapter when `window.easydb?.platform === 'electron'`.
+3. Keep the branch in `app-context.ts` (or a plugin's own `init` guard, as
+   `renderer/src/plugins/electron-db.ts` does) — not scattered
+   `window.easydb` checks inside `api.backend` / `DataStore` callers.
 
-## Build / package
+## Build / package / test
 
 ```bash
 npm run dev:electron          # vite + electron (live reload)
 npm run build --workspace @easydb/electron
-npm run start:electron        # uses already-built dist
+npm run build:electron --workspace @easydb/renderer   # produces frontend/
+npm run start:electron        # uses already-built dist + frontend
+npm test --workspace @easydb/electron                 # vitest: store, import, sql mapping
 npm run package:electron      # electron-builder installer (PowerShell wrapper)
 ```
+
+The store module is pure Node, so vitest covers it directly — no Electron
+runtime needed for the storage tests.

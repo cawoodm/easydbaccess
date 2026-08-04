@@ -6,36 +6,54 @@ sits on top of this layer, see [`PLUGINS.md`](./PLUGINS.md).
 
 ## At a glance
 
-Everything lives in one browser-native IndexedDB database, accessed through
-[Dexie](https://dexie.org/), a thin wrapper that adds `liveQuery` reactivity
-and explicit versioned schema migrations on top of the raw IndexedDB API.
-There is no server-side database today — a device with no network access
-still has a fully working, persistent app. `packages/server`'s `/sync` route
-stores workspace *snapshots* (JSON blobs), not a live copy of this data; see
-`SYNCH.md`.
+There are **two** storage backends behind one contract, and the environment
+picks which one runs — decided once, in `app-context.ts`, by whether the
+Electron preload bridge is present:
+
+- **Browser** — one IndexedDB database, accessed through
+  [Dexie](https://dexie.org/), a thin wrapper that adds `liveQuery`
+  reactivity and explicit versioned schema migrations on top of the raw
+  IndexedDB API.
+- **Electron** — no IndexedDB at all. The renderer talks over IPC to a
+  `node:sqlite` store in the **main process**, and the workspace is a real
+  `.db` file on disk that the user can open, save elsewhere, and read in DB
+  Browser or Datasette.
+
+Neither case involves a server-side database — a device with no network
+access still has a fully working, persistent app. `packages/server`'s `/sync`
+route stores workspace *snapshots* (JSON blobs), not a live copy of this
+data; see `SYNCH.md`.
 
 ```
-Plugin
-  │  (never touches Dexie directly)
-  ▼
-DataStore  ──  packages/shared/src/plugin-api.ts (the contract)
-  │  createDataStore()
-  ▼
-data-store-dexie.ts  ──  wraps each Dexie table in DataCollection<T>
-  │
-  ▼
-dexie-db.ts  ──  getDexie() — one Dexie() instance, one IndexedDB database "easydb"
-  │
-  ▼
-IndexedDB (browser) — persists across reloads, scoped to the origin
+                              Plugin
+                                │  (never touches Dexie or IPC directly)
+                                ▼
+                            DataStore
+                 packages/shared/src/plugin-api.ts — the contract
+                                │
+             ┌──────────────────┴──────────────────┐
+        browser                               Electron
+             │                                     │
+             ▼                                     ▼
+   data-store-dexie.ts                     data-store-ipc.ts
+   wraps each Dexie table                  same DataCollection<T>,
+   in DataCollection<T>                    each call an IPC round trip
+             │                                     │
+             ▼                                     ▼
+   dexie-db.ts                             preload.ts (contextBridge)
+   one Dexie() instance, one               window.easydb.store
+   IndexedDB database "easydb"                     │
+             │                                     ▼
+             ▼                             electron/src/sqlite-store.ts
+   IndexedDB — persists across             main process, node:sqlite
+   reloads, scoped to the origin                   │
+                                                   ▼
+                                           a .db file the user chose
 ```
 
-Electron today reuses this exact path (the renderer is the same bundle
-running inside Electron's renderer process, IndexedDB and all). Phase 8 of
-the [rewrite plan](../../.claude/plans/2026-05-21-rewrite-architecture.md) will
-swap Electron's storage to an IPC bridge into a main-process
-`better-sqlite3` file — the point of the `DataStore` abstraction below is
-that this swap touches nothing above it.
+The `DataStore` abstraction below is what makes those two interchangeable:
+the plugin-facing `DataCollection<T>` contract is identical, so no plugin —
+and almost nothing in the chrome — knows which backend it is talking to.
 
 ## Why Dexie, not a bigger database engine
 
@@ -121,6 +139,88 @@ fine-grained diffing. This is intentionally coarse: every chrome component
 that subscribes (the table list, a data-table's row set, footer state)
 consumes the full result set on every change anyway, so the extra
 re-evaluation cost is harmless and the implementation stays simple.
+
+## The Electron path — the workspace IS a SQLite file
+
+Inside Electron the same `DataStore` contract is served by
+[`db/data-store-ipc.ts`](../../packages/renderer/src/db/data-store-ipc.ts)
+instead of the Dexie wrapper. `app-context.ts` selects it when
+`window.easydb?.store` exists; every `find`/`insert`/`patch`/… becomes an IPC
+call to a `node:sqlite` store in the main process
+([`packages/electron/src/sqlite-store.ts`](../../packages/electron/src/sqlite-store.ts)).
+`ELECTRON.md` covers the shell and the preload bridge; what matters here is
+the shape of what lands on disk.
+
+**A saved `.db` is a genuine database, not an opaque blob** — openable in DB
+Browser or Datasette. That is the whole point of the design, and it is what
+makes "import a `.db`" a meaningful operation:
+
+| SQL object | Holds |
+|---|---|
+| `<sanitized table name>` | the rows — `_id TEXT PRIMARY KEY` (= `Row.id`), `_updatedAt INTEGER`, `_extra TEXT` (overflow), then one real column per `ColumnSpec` |
+| `_easydb_meta_<sanitized>` | that table's `columns_json` (the `ColumnSpec[]` verbatim) + `table_json` (the `Table` doc minus `columns`) |
+| `_easydb_tables` | registry: `id`, `name`, `sql_table`, `ordinal` |
+| `_easydb_docs` | the non-row collections — `workspaces`, `settings`, `plugins`, `viewTemplates`, `viewInstances` — as `(coll, key, workspaceId, doc)` |
+
+So the browser's "one `rows` table, many logical tables" (above) inverts
+here: each logical table really is its own SQL table, and `rows(tableId)`
+selects *which* table rather than filtering a `tableId` column. The view
+semantics plugins see are unchanged.
+
+Three rules a naive change would break:
+
+- **`sql_table` is assigned once.** Renaming `Table.name` updates the
+  registry and `table_json`, never the SQL object. Nothing outside the
+  registry addresses a table by its physical name, and renaming would risk a
+  fresh collision for no benefit.
+- **Column reconciliation is additive only** — `ALTER TABLE … ADD COLUMN`,
+  never `RENAME` or `DROP`. `ColumnSpec` has no stable id, so a rename is
+  indistinguishable from a drop-plus-add, and dropping on that guess destroys
+  data (that was the v0.0.218 bug). A removed column just lingers, orphaned
+  and harmless: `columns_json`, not the DDL, decides what is visible.
+- **`_extra` holds schemaless overflow.** `Row.data` may carry keys with no
+  `ColumnSpec`; they go into a JSON object in `_extra` rather than being
+  dropped. It is SQL `NULL` (not `'{}'`) when empty, and a decoded `null` is
+  omitted from `data`, so a round-tripped row matches a fresh one.
+
+[`packages/shared/src/sql-mapping.ts`](../../packages/shared/src/sql-mapping.ts)
+owns the type↔SQL mapping (`sanitizeTableName`, `quoteIdent`, `sqlAffinity`,
+`encodeValue`, `decodeValue`, `columnTypeFromSqlType`) and the **server's**
+`storage/sqlite-store.ts` imports the same helpers — one convention, so a
+`.db` written by either side has the same shape.
+
+**Reactivity without `liveQuery`.** There is no Dexie here, so nothing
+re-runs a query closure automatically. The main process instead broadcasts
+`store:changed` naming the mutated collection; the renderer's collection
+re-runs its query and notifies its subscribers. Same coarse granularity as
+`liveQuery`, same contract.
+
+### Open takes only our own files; Import takes any
+
+Opening a database is **not** a read-only act: the store's constructor runs
+`CREATE TABLE IF NOT EXISTS _easydb_docs` / `_easydb_tables`. Pointing it at
+a stranger's `.db` would therefore add two bookkeeping tables to someone
+else's file and then show an empty workspace, there being no registry rows to
+list.
+
+So `pickDatabaseToOpen` probes the picked file read-only first
+(`probeDatabaseFile` in
+[`db-import.ts`](../../packages/electron/src/db-import.ts)) and reports a
+`kind`:
+
+| `kind` | Meaning | What the user is offered |
+|---|---|---|
+| `easydb` | has our registry — a file this app wrote | Open, after a confirmation naming the file |
+| `foreign` | a valid SQLite database, but not ours | Import its tables instead, reusing the already-picked path |
+| `unreadable` | not a SQLite database at all | told so plainly |
+
+Nothing is written until the user agrees to one of those. Import itself is
+two-phase for the same reason: phase one previews (table names, row counts,
+which collide with an existing table) with no side effects, so the app can
+ask Overwrite / Rename / Skip per collision, and phase two commits only what
+was agreed. The renderer half of both flows is the `electron-db` plugin
+(see `PLUGINS.md`); the file operations live in
+[`db-files.ts`](../../packages/electron/src/db-files.ts).
 
 ## Table names are unique, and the store is what makes them unique
 
@@ -270,28 +370,40 @@ plugin's original URL later goes offline.
 
 ## Practical implications
 
-- **Per-origin, per-browser.** IndexedDB data is scoped to the browser
-  profile + origin. Opening the app in a different browser, a private
-  window, or after clearing site data starts from an empty database — this
-  is exactly what `SYNCH.md`'s server sync and the `gist-sync` plugin exist
-  to bridge.
-- **No built-in encryption or backup.** Everything above — table data,
-  plugin settings, cached plugin source, sync tokens — is plain IndexedDB,
-  inspectable and editable via DevTools → Application → IndexedDB. Losing
-  the browser's storage (profile deletion, private-mode exit, "clear
-  browsing data") loses everything not separately synced or exported.
+- **In the browser: per-origin, per-browser.** IndexedDB data is scoped to
+  the browser profile + origin. Opening the app in a different browser, a
+  private window, or after clearing site data starts from an empty database —
+  this is exactly what `SYNCH.md`'s server sync and the `gist-sync` plugin
+  exist to bridge. **In Electron this doesn't apply**: the workspace is a
+  file, so backing it up is copying it, and moving it to another machine is
+  Save As plus Open.
+- **No built-in encryption.** Everything above — table data, plugin settings,
+  cached plugin source, sync tokens — is plain IndexedDB, inspectable and
+  editable via DevTools → Application → IndexedDB (or, in Electron, plain SQL
+  in a file anything can read). In the browser, losing the browser's storage
+  (profile deletion, private-mode exit, "clear browsing data") loses
+  everything not separately synced or exported.
 - **Adding a new persisted field to an existing type** touches at most one
   place (`packages/shared/src/types.ts`) if the field isn't indexed. Adding
-  a **new collection**, or indexing an existing field, touches three places
+  a **new collection**, or indexing an existing field, touches four places
   in lockstep — the type, the Dexie schema + typed accessor in
-  `dexie-db.ts`, and the `DataStore` wrapper in `data-store-dexie.ts` — see
-  `packages/shared/CLAUDE.md`.
+  `dexie-db.ts`, the `DataStore` wrapper in `data-store-dexie.ts`, and the
+  same collection in `data-store-ipc.ts` + `packages/electron/src/sqlite-store.ts`
+  (an unknown collection **throws** there rather than degrading quietly) —
+  see `packages/shared/CLAUDE.md`.
 
 ## Where each piece of data lives today
 
 A map from "thing" to its actual storage location on one device — useful when
 reasoning about what `gist-sync` (see `SYNCH.md`) does and doesn't carry
 across devices, since it only ever reads from a subset of this list.
+
+The table below is the **browser** layout. Under Electron every IndexedDB row
+becomes SQL in the open `.db` file instead (`tables`/`rows` → one real SQL
+table each plus `_easydb_meta_*`, everything else → `_easydb_docs`), while the
+three `localStorage` entries stay exactly as they are — user-layer settings,
+the secrets store, and the last-active workspace id are device-local either
+way and do not travel with the `.db` file.
 
 | Data | Where stored today |
 |---|---|
