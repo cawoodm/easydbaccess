@@ -33,9 +33,7 @@ describe('buildColumnSpec', () => {
 
   it('always overwrites field/label/type from the draft, even with an orig base', () => {
     const base = orig({ field: 'qty', label: 'Quantity', type: 'number', width: 80 });
-    const spec = buildColumnSpec(
-      row({ field: 'amount', label: 'Amount', type: 'string', orig: base }),
-    );
+    const spec = buildColumnSpec(row({ field: 'amount', label: 'Amount', type: 'string', orig: base }));
     expect(spec.field).toBe('amount');
     expect(spec.label).toBe('Amount');
     expect(spec.type).toBe('string');
@@ -69,9 +67,7 @@ describe('buildColumnSpec', () => {
 
   it('removes hidden/notnull/unique/max when cleared, even though orig had them', () => {
     const base = orig({ hidden: true, notnull: true, unique: true, max: 50 });
-    const spec = buildColumnSpec(
-      row({ orig: base, hidden: false, notnull: false, unique: false, max: undefined }),
-    );
+    const spec = buildColumnSpec(row({ orig: base, hidden: false, notnull: false, unique: false, max: undefined }));
     expect('hidden' in spec).toBe(false);
     expect('notnull' in spec).toBe(false);
     expect('unique' in spec).toBe(false);
@@ -92,9 +88,7 @@ describe('buildColumnSpec', () => {
 
   it('re-enabling sortable/filterable (draft undefined) deletes the keys, even when orig had them false', () => {
     const base = orig({ sortable: false, filterable: false });
-    const spec = buildColumnSpec(
-      row({ orig: base, sortable: undefined, filterable: undefined }),
-    );
+    const spec = buildColumnSpec(row({ orig: base, sortable: undefined, filterable: undefined }));
     expect('sortable' in spec).toBe(false);
     expect('filterable' in spec).toBe(false);
   });

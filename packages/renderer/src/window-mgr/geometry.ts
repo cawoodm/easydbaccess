@@ -28,9 +28,6 @@ export function sanitizeGeometry(g: WindowGeometry | undefined): WindowGeometry 
  * opening sequence — the cross-kind merge that fixes relative table/view
  * stacking is `z-order.ts` + `restack.ts`.
  */
-export function byAscendingZ(
-  a: { windowGeometry?: WindowGeometry | undefined },
-  b: { windowGeometry?: WindowGeometry | undefined },
-): number {
+export function byAscendingZ(a: { windowGeometry?: WindowGeometry | undefined }, b: { windowGeometry?: WindowGeometry | undefined }): number {
   return (a.windowGeometry?.z ?? -Infinity) - (b.windowGeometry?.z ?? -Infinity);
 }

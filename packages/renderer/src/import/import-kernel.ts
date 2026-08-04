@@ -7,26 +7,11 @@
 //
 // The importer is called at most three times and never touches the store.
 
-import type {
-  ColumnSpec,
-  HostApi,
-  ImportBatch,
-  ImportCandidate,
-  ImporterSpec,
-  ImportCtx,
-  ImportSourceInput,
-  TableOrigin,
-} from '@easydb/shared';
+import type { ColumnSpec, HostApi, ImportBatch, ImportCandidate, ImporterSpec, ImportCtx, ImportSourceInput, TableOrigin } from '@easydb/shared';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 import { fetchImportTextWithBar } from './fetch-source.js';
-import {
-  landCandidate,
-  takenNames,
-  uniqueTableName,
-  type ImportTarget,
-  type LandResult,
-} from './land-tables.js';
+import { landCandidate, takenNames, uniqueTableName, type ImportTarget, type LandResult } from './land-tables.js';
 
 export interface RunImportOptions {
   /** Copy = a local snapshot. Reference = a live read-only table, no rows stored. */
@@ -57,8 +42,7 @@ function makeCtx(api: HostApi, opts: RunImportOptions, extra: Partial<ImportCtx>
   const uncapped = opts.mode === 'reference' || opts.maxRows != null;
   return {
     api,
-    fetchText: (url, label) =>
-      fetchImportTextWithBar(api, url, label ?? 'Reading…', uncapped ? { maxBytes: null } : {}),
+    fetchText: (url, label) => fetchImportTextWithBar(api, url, label ?? 'Reading…', uncapped ? { maxBytes: null } : {}),
     panel: opts.panel ?? {},
     ...(opts.cursor !== undefined ? { cursor: opts.cursor } : {}),
     ...(opts.maxRows !== undefined ? { maxRows: opts.maxRows } : {}),
@@ -79,10 +63,7 @@ export interface RunImportResult {
  * picker; several open the shared checklist, which is the one piece of import UI
  * that was already reused across formats.
  */
-async function pickCandidates(
-  spec: ImporterSpec,
-  candidates: ImportCandidate[],
-): Promise<ImportCandidate[] | null> {
+async function pickCandidates(spec: ImporterSpec, candidates: ImportCandidate[]): Promise<ImportCandidate[] | null> {
   if (candidates.length <= 1) return candidates;
   const picked = await chooseTables(
     candidates.map((c) => ({
@@ -108,13 +89,7 @@ async function pickCandidates(
  * batch purely to learn the schema, which is what the old `createUrlReference`
  * did too.
  */
-async function landReference(
-  api: HostApi,
-  spec: ImporterSpec,
-  ctx: ImportCtx,
-  candidate: ImportCandidate,
-  workspaceId: string,
-): Promise<LandResult> {
+async function landReference(api: HostApi, spec: ImporterSpec, ctx: ImportCtx, candidate: ImportCandidate, workspaceId: string): Promise<LandResult> {
   if (!spec.reference) {
     throw new Error(`${spec.label} cannot be referenced — import a copy instead.`);
   }
@@ -149,12 +124,7 @@ async function landReference(
   return { tableId, tableName: name, rowCount: 0, created: true };
 }
 
-export async function runImport(
-  api: HostApi,
-  spec: ImporterSpec,
-  input: ImportSourceInput,
-  opts: RunImportOptions,
-): Promise<RunImportResult> {
+export async function runImport(api: HostApi, spec: ImporterSpec, input: ImportSourceInput, opts: RunImportOptions): Promise<RunImportResult> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('No active workspace.');
 
@@ -188,9 +158,7 @@ export async function runImport(
       });
 
       const batches: AsyncIterable<ImportBatch> = spec.read(readCtx, candidate);
-      const origin: TableOrigin | undefined =
-        opts.origin ??
-        (input.kind === 'url' && input.url ? { type: spec.id, url: input.url } : undefined);
+      const origin: TableOrigin | undefined = opts.origin ?? (input.kind === 'url' && input.url ? { type: spec.id, url: input.url } : undefined);
 
       const result = await landCandidate(api, candidate.name, batches, {
         workspaceId,

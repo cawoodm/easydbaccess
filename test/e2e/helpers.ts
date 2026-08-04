@@ -27,11 +27,7 @@ export interface TestColumn {
 }
 
 /** Creates a table via the data-store. Returns the new table id. */
-export async function createTable(
-  page: Page,
-  name: string,
-  columns: TestColumn[],
-): Promise<string> {
+export async function createTable(page: Page, name: string, columns: TestColumn[]): Promise<string> {
   return page.evaluate(
     async ({ name, columns }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -68,11 +64,7 @@ export async function createTable(
 }
 
 /** Bulk-inserts rows into a table. Returns the inserted row ids. */
-export async function bulkAddRows(
-  page: Page,
-  tableId: string,
-  rows: Array<Record<string, unknown>>,
-): Promise<string[]> {
+export async function bulkAddRows(page: Page, tableId: string, rows: Array<Record<string, unknown>>): Promise<string[]> {
   return page.evaluate(
     async ({ tableId, rows }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -91,11 +83,7 @@ export async function bulkAddRows(
 }
 
 /** Inserts a row into the given table. Returns the new row id. */
-export async function addRow(
-  page: Page,
-  tableId: string,
-  data: Record<string, unknown>,
-): Promise<string> {
+export async function addRow(page: Page, tableId: string, data: Record<string, unknown>): Promise<string> {
   return page.evaluate(
     async ({ tableId, data }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

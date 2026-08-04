@@ -106,9 +106,7 @@ export function looksLikeImage(value: unknown): boolean {
 function asBytes(value: unknown): ArrayLike<number> | null {
   if (value instanceof Uint8Array) return value;
   if (Array.isArray(value)) {
-    return value.length > 0 && value.every((n) => typeof n === 'number')
-      ? (value as number[])
-      : null;
+    return value.length > 0 && value.every((n) => typeof n === 'number') ? (value as number[]) : null;
   }
   // `{0: 255, 1: 216, …}` — what a byte array becomes through JSON. It has no
   // `length`, so it has to be materialised before anything can slice it.

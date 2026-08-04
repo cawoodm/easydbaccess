@@ -96,8 +96,7 @@ class CellLink extends HTMLElement {
 
     if (url || email || tel) {
       const wrap = document.createElement('span');
-      wrap.style.cssText =
-        'display:flex;align-items:center;gap:0.25rem;width:100%;min-width:0;max-width:100%';
+      wrap.style.cssText = 'display:flex;align-items:center;gap:0.25rem;width:100%;min-width:0;max-width:100%';
       const a = document.createElement('a');
       a.href = url ? v : email ? `mailto:${v.trim()}` : `tel:${v.replace(/[^\d+]/g, '')}`;
       if (url) {
@@ -110,17 +109,14 @@ class CellLink extends HTMLElement {
       // truncates it with an ellipsis at whatever the current column width is —
       // purely in CSS, and it re-flows live as the column is resized. The full
       // value stays in the title tooltip.
-      a.style.cssText =
-        'flex:1 1 auto;min-width:0;display:block;color:#2563eb;text-decoration:underline;' +
-        'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      a.style.cssText = 'flex:1 1 auto;min-width:0;display:block;color:#2563eb;text-decoration:underline;' + 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
       a.title = url ? `Open ${v}` : email ? `Email ${v}` : `Call ${v}`;
 
       const edit = document.createElement('button');
       edit.type = 'button';
       edit.title = 'Edit';
       edit.textContent = '✎';
-      edit.style.cssText =
-        'flex:none;background:transparent;border:0;cursor:pointer;color:#9ca3af;font-size:0.85em;padding:0 0.15rem;line-height:1';
+      edit.style.cssText = 'flex:none;background:transparent;border:0;cursor:pointer;color:#9ca3af;font-size:0.85em;padding:0 0.15rem;line-height:1';
       edit.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -136,8 +132,7 @@ class CellLink extends HTMLElement {
       // Edit the stored value, which on a scripted column is not what the cell
       // displays. `rawValue` falls back to `value` for every ordinary column.
       input.value = this.rawValue;
-      input.style.cssText =
-        'width:100%;box-sizing:border-box;border:0;background:transparent;font:inherit;padding:0';
+      input.style.cssText = 'width:100%;box-sizing:border-box;border:0;background:transparent;font:inherit;padding:0';
       input.addEventListener('change', () => {
         if (this._editor !== input) return;
         this.commit(input.value);
@@ -187,9 +182,7 @@ class CellLink extends HTMLElement {
     // typed a URL stayed an <input> instead of becoming a link.
     this.render();
     if (!changed) return;
-    this.dispatchEvent(
-      new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }),
-    );
+    this.dispatchEvent(new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }));
   }
 }
 

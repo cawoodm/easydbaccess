@@ -7,10 +7,7 @@ import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js
  * view-window-manager reconnects a dangling view to a same-named table (by the
  * `tableName` snapshot), and the open window re-binds to the new rows.
  */
-test('a view reconnects to a recreated same-named table and shows its new rows', async ({
-  page,
-  workspaceId,
-}) => {
+test('a view reconnects to a recreated same-named table and shows its new rows', async ({ page, workspaceId }) => {
   const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [{ title: 'Original', url: 'https://example.com/o' }]);
@@ -22,10 +19,7 @@ test('a view reconnects to a recreated same-named table and shows its new rows',
     .click();
   const dlg = page.locator('views-dialog dialog');
   await expect(dlg).toBeVisible();
-  await dlg
-    .locator('ul.list li', { hasText: 'RSS Feed' })
-    .getByRole('button', { name: 'Use' })
-    .click();
+  await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
   await dlg.getByRole('button', { name: 'Create view' }).click();
 
   const vw = page.locator('view-window');

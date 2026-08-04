@@ -93,8 +93,7 @@ class CellDatetime extends HTMLElement {
     const input = document.createElement('input');
     input.type = 'datetime-local';
     input.value = toDatetimeLocal(this._value);
-    input.style.cssText =
-      'font:inherit;border:0;background:transparent;padding:0;width:100%;box-sizing:border-box';
+    input.style.cssText = 'font:inherit;border:0;background:transparent;padding:0;width:100%;box-sizing:border-box';
     input.addEventListener('change', () => this.commit(input.value || null));
     this.append(input);
   }
@@ -111,9 +110,7 @@ class CellDatetime extends HTMLElement {
     this._value = v;
     this._editing = false;
     this.render();
-    this.dispatchEvent(
-      new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }),
-    );
+    this.dispatchEvent(new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }));
   }
 }
 

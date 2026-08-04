@@ -23,9 +23,7 @@ test('imports a CSV from a URL into a typed table', async ({ page, workspaceId }
   await expect(dlg).toBeVisible();
 
   // The CSV sample is offered in the dropdown.
-  const presetLabels = (await dlg.getByTestId('import-sample').locator('option').allTextContents())
-    .join(' | ')
-    .toLowerCase();
+  const presetLabels = (await dlg.getByTestId('import-sample').locator('option').allTextContents()).join(' | ').toLowerCase();
   expect(presetLabels).toContain('csv');
 
   await dlg.locator('input[type="text"]').fill('https://ex.example/data.csv');
@@ -38,9 +36,7 @@ test('imports a CSV from a URL into a typed table', async ({ page, workspaceId }
         page.evaluate(async (ws) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const store = (window as any).__easydb.store;
-          const t = (await store.tables.find()).find(
-            (x: any) => x.workspaceId === ws && x.name === 'data',
-          );
+          const t = (await store.tables.find()).find((x: any) => x.workspaceId === ws && x.name === 'data');
           if (!t) return 0;
           return (await store.rows(t.id).find()).length;
         }, workspaceId),
@@ -50,12 +46,8 @@ test('imports a CSV from a URL into a typed table', async ({ page, workspaceId }
     return page.evaluate(async (ws) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__easydb.store;
-      const t = (await store.tables.find()).find(
-        (x: any) => x.workspaceId === ws && x.name === 'data',
-      );
-      const cols = Object.fromEntries(
-        t.columns.map((c: { field: string; type: string }) => [c.field, c.type]),
-      );
+      const t = (await store.tables.find()).find((x: any) => x.workspaceId === ws && x.name === 'data');
+      const cols = Object.fromEntries(t.columns.map((c: { field: string; type: string }) => [c.field, c.type]));
       const rows = await store.rows(t.id).find();
       return { cols, pops: rows.map((r: any) => r.data.pop) };
     }, workspaceId);
@@ -95,9 +87,7 @@ test('a CSV import HTTP error surfaces the status code and a body snippet', asyn
   await expect(toast).toContainText('Not Found: no such object');
 });
 
-test('an oversized CSV surfaces the actual size and the limit, not "Load failed"', async ({
-  page,
-}) => {
+test('an oversized CSV surfaces the actual size and the limit, not "Load failed"', async ({ page }) => {
   // 200 OK with a huge Content-Length (like the 152 MB StackExchange LFS CSV).
   await page.route('https://ex.example/huge.csv', (route) =>
     route.fulfill({
@@ -126,13 +116,8 @@ const HUGE_HEADERS = {
   'content-length': String(159525875), // 152 MB, well over the 50 MB ceiling
 };
 
-test('a row limit lifts the size ceiling — an oversized CSV still imports', async ({
-  page,
-  workspaceId,
-}) => {
-  await page.route('https://ex.example/huge-capped.csv', (route) =>
-    route.fulfill({ status: 200, contentType: 'text/plain', headers: HUGE_HEADERS, body: CSV }),
-  );
+test('a row limit lifts the size ceiling — an oversized CSV still imports', async ({ page, workspaceId }) => {
+  await page.route('https://ex.example/huge-capped.csv', (route) => route.fulfill({ status: 200, contentType: 'text/plain', headers: HUGE_HEADERS, body: CSV }));
 
   await page.getByTitle('Import data from a URL').click();
   const dlg = page.locator('import-dialog dialog');
@@ -147,9 +132,7 @@ test('a row limit lifts the size ceiling — an oversized CSV still imports', as
     .poll(async () =>
       page.evaluate(async (ws) => {
         const store = (window as any).__easydb.store;
-        const t = (await store.tables.find()).find(
-          (x: any) => x.workspaceId === ws && x.name === 'huge-capped',
-        );
+        const t = (await store.tables.find()).find((x: any) => x.workspaceId === ws && x.name === 'huge-capped');
         if (!t) return -1;
         return (await store.rows(t.id).find()).length;
       }, workspaceId),
@@ -158,13 +141,8 @@ test('a row limit lifts the size ceiling — an oversized CSV still imports', as
   await expect(page.locator('toast-host .toast.error')).toHaveCount(0);
 });
 
-test('Reference mode lifts the size ceiling — an oversized CSV is referenced', async ({
-  page,
-  workspaceId,
-}) => {
-  await page.route('https://ex.example/huge-ref.csv', (route) =>
-    route.fulfill({ status: 200, contentType: 'text/plain', headers: HUGE_HEADERS, body: CSV }),
-  );
+test('Reference mode lifts the size ceiling — an oversized CSV is referenced', async ({ page, workspaceId }) => {
+  await page.route('https://ex.example/huge-ref.csv', (route) => route.fulfill({ status: 200, contentType: 'text/plain', headers: HUGE_HEADERS, body: CSV }));
 
   await page.getByTitle('Import data from a URL').click();
   const dlg = page.locator('import-dialog dialog');
@@ -183,9 +161,7 @@ test('Reference mode lifts the size ceiling — an oversized CSV is referenced',
     .poll(async () =>
       page.evaluate(async (ws) => {
         const store = (window as any).__easydb.store;
-        const t = (await store.tables.find()).find(
-          (x: any) => x.workspaceId === ws && String(x.name).startsWith('huge-ref'),
-        );
+        const t = (await store.tables.find()).find((x: any) => x.workspaceId === ws && String(x.name).startsWith('huge-ref'));
         return t ? `${t.source?.type}:${t.columns.length}` : 'missing';
       }, workspaceId),
     )
@@ -202,10 +178,7 @@ test('a network/CORS failure surfaces a reason, not a bare "Load failed"', async
   await expect(toast).toContainText(/no response|CORS|unreachable/i);
 });
 
-test('shows the top progress bar when a URL read takes more than 2s', async ({
-  page,
-  workspaceId,
-}) => {
+test('shows the top progress bar when a URL read takes more than 2s', async ({ page, workspaceId }) => {
   // Stall the response ~3s — longer than the 2s slow-threshold — so the top
   // progress bar is revealed while the body is still being read.
   await page.route('https://ex.example/slow.csv', async (route) => {
@@ -254,10 +227,7 @@ test('shows the top progress bar when a URL read takes more than 2s', async ({
  * media.githubusercontent.com, which 404s for files that are NOT LFS-tracked —
  * so the media host is only tried once a pointer has actually come back.
  */
-const LFS_POINTER =
-  'version https://git-lfs.github.com/spec/v1\n' +
-  'oid sha256:2d1f65308877282edfb4470520eabbc08cb499118432a3dcec6a66c086aa2baa\n' +
-  'size 140893245\n';
+const LFS_POINTER = 'version https://git-lfs.github.com/spec/v1\n' + 'oid sha256:2d1f65308877282edfb4470520eabbc08cb499118432a3dcec6a66c086aa2baa\n' + 'size 140893245\n';
 
 const RAW_LFS = 'https://raw.githubusercontent.com/StackExchange/Survey/main/lfs.csv';
 const MEDIA_LFS = 'https://media.githubusercontent.com/media/StackExchange/Survey/main/lfs.csv';
@@ -278,10 +248,7 @@ async function columnFields(page: import('@playwright/test').Page, ws: string, n
   );
 }
 
-test('an LFS pointer from the raw host is followed to the media host', async ({
-  page,
-  workspaceId,
-}) => {
+test('an LFS pointer from the raw host is followed to the media host', async ({ page, workspaceId }) => {
   await page.route(RAW_LFS, (route) =>
     route.fulfill({
       status: 200,
@@ -333,27 +300,19 @@ test('the size limit applies to the media host, not just the first read', async 
   await expect(toast).toContainText(/limit/i);
 });
 
-test('a github.com blob/raw URL is auto-converted to the CORS raw host and imports', async ({
-  page,
-  workspaceId,
-}) => {
+test('a github.com blob/raw URL is auto-converted to the CORS raw host and imports', async ({ page, workspaceId }) => {
   // Only the raw.githubusercontent.com URL is served (CORS-enabled). If the app
   // fetched github.com directly it would 404 here → the import would fail.
-  await page.route(
-    'https://raw.githubusercontent.com/StackExchange/Survey/main/results.csv',
-    (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'text/plain',
-        headers: { 'access-control-allow-origin': '*' },
-        body: 'a,b\n1,2\n3,4\n',
-      }),
+  await page.route('https://raw.githubusercontent.com/StackExchange/Survey/main/results.csv', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/plain',
+      headers: { 'access-control-allow-origin': '*' },
+      body: 'a,b\n1,2\n3,4\n',
+    }),
   );
 
-  await attemptCsvImport(
-    page,
-    'https://github.com/StackExchange/Survey/raw/refs/heads/main/results.csv',
-  );
+  await attemptCsvImport(page, 'https://github.com/StackExchange/Survey/raw/refs/heads/main/results.csv');
 
   await expect
     .poll(() =>
@@ -361,9 +320,7 @@ test('a github.com blob/raw URL is auto-converted to the CORS raw host and impor
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const store = (window as any).__easydb.store;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const t = (await store.tables.find()).find(
-          (x: any) => x.workspaceId === ws && x.name === 'results',
-        );
+        const t = (await store.tables.find()).find((x: any) => x.workspaceId === ws && x.name === 'results');
         if (!t) return 0;
         return (await store.rows(t.id).find()).length;
       }, workspaceId),

@@ -69,9 +69,7 @@ test('a non-string script value reaches a renderer that wants one', async ({ pag
     ]);
     await waitForPanel(page, id);
     await addRow(page, id, { qty });
-    return page
-      .locator(`#${panelDomId(id)}`)
-      .locator('data-table tbody td cell-boolean input[type="checkbox"]');
+    return page.locator(`#${panelDomId(id)}`).locator('data-table tbody td cell-boolean input[type="checkbox"]');
   }
 
   // The script returns a real boolean and the boolean renderer honours it.
@@ -85,10 +83,7 @@ test('a non-string script value reaches a renderer that wants one', async ({ pag
 });
 
 test('a script that throws shows an inline chip and leaves the row readable', async ({ page }) => {
-  const id = await createTable(page, 'Broken', [
-    { field: 'name' },
-    { field: 'oops', script: 'function render(row) { return row.missing.deep; }' },
-  ]);
+  const id = await createTable(page, 'Broken', [{ field: 'name' }, { field: 'oops', script: 'function render(row) { return row.missing.deep; }' }]);
   await waitForPanel(page, id);
   await addRow(page, id, { name: 'still here' });
 
@@ -100,23 +95,15 @@ test('a script that throws shows an inline chip and leaves the row readable', as
 });
 
 test('a script that does not compile says so', async ({ page }) => {
-  const id = await createTable(page, 'Unparsed', [
-    { field: 'name' },
-    { field: 'oops', script: 'function render(row) { return' },
-  ]);
+  const id = await createTable(page, 'Unparsed', [{ field: 'name' }, { field: 'oops', script: 'function render(row) { return' }]);
   await waitForPanel(page, id);
   await addRow(page, id, { name: 'x' });
 
   await expect(cellsOf(page, id).nth(1).locator('.script-err')).toHaveText(/compile error/);
 });
 
-test('the column editor offers the script button on every column, not just script-rendered ones', async ({
-  page,
-}) => {
-  const id = await createTable(page, 'Editable', [
-    { field: 'plain' },
-    { field: 'linked', renderer: 'link' },
-  ]);
+test('the column editor offers the script button on every column, not just script-rendered ones', async ({ page }) => {
+  const id = await createTable(page, 'Editable', [{ field: 'plain' }, { field: 'linked', renderer: 'link' }]);
   await waitForPanel(page, id);
 
   await page
@@ -160,9 +147,7 @@ test('the renderer dropdown no longer offers a dedicated "script" renderer', asy
   await expect(rendererSelect.locator('option[value="link"]')).toHaveCount(1);
 });
 
-test('the pencil on a scripted link edits the stored value, not the computed URL', async ({
-  page,
-}) => {
+test('the pencil on a scripted link edits the stored value, not the computed URL', async ({ page }) => {
   // The script expands the cell's OWN stored value, so the anchor shows a full
   // URL while the thing to edit is the short form behind it.
   const id = await createTable(page, 'Repos', [
@@ -177,10 +162,7 @@ test('the pencil on a scripted link edits the stored value, not the computed URL
   await addRow(page, id, { name: 'easyDBAccess', url: 'cawoodm/easydbaccess' });
 
   const cell = cellsOf(page, id).nth(1);
-  await expect(cell.locator('a')).toHaveAttribute(
-    'href',
-    'https://github.com/cawoodm/easydbaccess',
-  );
+  await expect(cell.locator('a')).toHaveAttribute('href', 'https://github.com/cawoodm/easydbaccess');
 
   // The editor opens on the stored value — it used to open on the computed URL
   // and then drop the edit, because a scripted cell had no change handler.

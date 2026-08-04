@@ -21,11 +21,7 @@ import type { DataCollection, ViewTemplate } from '@easydb/shared';
  * pointing at the dump's id, which was never written, and its window would
  * open with no template.
  */
-export async function restoreTemplates(
-  coll: DataCollection<ViewTemplate>,
-  workspaceId: string,
-  incoming: ViewTemplate[],
-): Promise<Map<string, string>> {
+export async function restoreTemplates(coll: DataCollection<ViewTemplate>, workspaceId: string, incoming: ViewTemplate[]): Promise<Map<string, string>> {
   const remap = new Map<string, string>();
   if (incoming.length === 0) return remap;
 

@@ -11,10 +11,7 @@ import { createTable, panelDomId, waitForPanel } from './helpers.js';
  * layout the user arranged. On a phone the window is maximized instead.
  */
 
-const canvasTransform = (page: Page) =>
-  page.evaluate(
-    () => (document.getElementById('easydb-panels-viewport') as HTMLElement).style.transform,
-  );
+const canvasTransform = (page: Page) => page.evaluate(() => (document.getElementById('easydb-panels-viewport') as HTMLElement).style.transform);
 
 /** Where the panel's box sits on SCREEN, transform included. */
 const screenBox = (page: Page, domId: string) =>
@@ -115,9 +112,7 @@ test('Go to a VIEW pans to its window too', async ({ page, workspaceId }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__easydb.store;
       const templates = await store.viewTemplates.find({ workspaceId: ws });
-      const rss = (templates as Array<{ id: string; name: string }>).find(
-        (t) => t.name === 'RSS Feed',
-      )!;
+      const rss = (templates as Array<{ id: string; name: string }>).find((t) => t.name === 'RSS Feed')!;
       await store.viewInstances.insert({
         id: 'far-view',
         workspaceId: ws,

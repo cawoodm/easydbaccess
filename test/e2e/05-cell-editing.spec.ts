@@ -19,9 +19,7 @@ test.describe('cell editing constraints', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ctx = (window as any).__easydb;
         const t = await ctx.store.tables.findOne(tableId);
-        const cols = t.columns.map((c: { field: string }) =>
-          c.field === 'name' ? { ...c, notnull: true } : c,
-        );
+        const cols = t.columns.map((c: { field: string }) => (c.field === 'name' ? { ...c, notnull: true } : c));
         await ctx.store.tables.patch(tableId, { columns: cols, updatedAt: Date.now() });
       },
       { tableId: id },
@@ -51,9 +49,7 @@ test.describe('cell editing constraints', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ctx = (window as any).__easydb;
         const t = await ctx.store.tables.findOne(tableId);
-        const cols = t.columns.map((c: { field: string }) =>
-          c.field === 'code' ? { ...c, max: 5 } : c,
-        );
+        const cols = t.columns.map((c: { field: string }) => (c.field === 'code' ? { ...c, max: 5 } : c));
         await ctx.store.tables.patch(tableId, { columns: cols, updatedAt: Date.now() });
       },
       { tableId: id },
@@ -81,9 +77,7 @@ test.describe('cell editing constraints', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ctx = (window as any).__easydb;
         const t = await ctx.store.tables.findOne(tableId);
-        const cols = t.columns.map((c: { field: string }) =>
-          c.field === 'code' ? { ...c, unique: true } : c,
-        );
+        const cols = t.columns.map((c: { field: string }) => (c.field === 'code' ? { ...c, unique: true } : c));
         await ctx.store.tables.patch(tableId, { columns: cols, updatedAt: Date.now() });
       },
       { tableId: id },
@@ -123,9 +117,7 @@ test.describe('cell editing constraints', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ctx = (window as any).__easydb;
         const t = await ctx.store.tables.findOne(tableId);
-        const cols = t.columns.map((c: { field: string }) =>
-          c.field === 'status' ? { ...c, default: 'pending' } : c,
-        );
+        const cols = t.columns.map((c: { field: string }) => (c.field === 'status' ? { ...c, default: 'pending' } : c));
         await ctx.store.tables.patch(tableId, { columns: cols, updatedAt: Date.now() });
       },
       { tableId: id },

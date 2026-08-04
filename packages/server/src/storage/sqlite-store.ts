@@ -87,12 +87,8 @@ export function sqliteStoreAdapter(rootDir: string): StoreAdapter {
           etag        = excluded.etag,
           updated_at  = excluded.updated_at
       `),
-      selectTables: db.prepare(
-        'SELECT ordinal, name, sql_table, columns_json FROM _easydb_tables ORDER BY ordinal',
-      ),
-      insertTable: db.prepare(
-        'INSERT INTO _easydb_tables (ordinal, name, sql_table, columns_json) VALUES (?, ?, ?, ?)',
-      ),
+      selectTables: db.prepare('SELECT ordinal, name, sql_table, columns_json FROM _easydb_tables ORDER BY ordinal'),
+      insertTable: db.prepare('INSERT INTO _easydb_tables (ordinal, name, sql_table, columns_json) VALUES (?, ?, ?, ?)'),
       deleteTables: db.prepare('DELETE FROM _easydb_tables'),
     };
     connections.set(workspaceId, conn);
@@ -119,9 +115,7 @@ export function sqliteStoreAdapter(rootDir: string): StoreAdapter {
 
     parsed.tables.forEach((t, ordinal) => {
       const sqlName = sanitize(t.name);
-      const colDefs = t.columns
-        .map((c) => `${quoteIdent(c.field)} ${sqlAffinity(c.type)}`)
-        .join(', ');
+      const colDefs = t.columns.map((c) => `${quoteIdent(c.field)} ${sqlAffinity(c.type)}`).join(', ');
       conn.db.exec(
         `CREATE TABLE ${quoteIdent(sqlName)} (
           _id INTEGER PRIMARY KEY AUTOINCREMENT${colDefs ? ', ' + colDefs : ''}
@@ -131,9 +125,7 @@ export function sqliteStoreAdapter(rootDir: string): StoreAdapter {
       if (t.rows.length > 0 && t.columns.length > 0) {
         const placeholders = t.columns.map(() => '?').join(', ');
         const fieldList = t.columns.map((c) => quoteIdent(c.field)).join(', ');
-        const insert = conn.db.prepare(
-          `INSERT INTO ${quoteIdent(sqlName)} (${fieldList}) VALUES (${placeholders})`,
-        );
+        const insert = conn.db.prepare(`INSERT INTO ${quoteIdent(sqlName)} (${fieldList}) VALUES (${placeholders})`);
         for (const row of t.rows) {
           const values = t.columns.map((c) => encodeValue(c.type, row[c.field]));
           insert.run(...values);
@@ -159,9 +151,7 @@ export function sqliteStoreAdapter(rootDir: string): StoreAdapter {
     }>;
     const tables = tableRows.map((tr) => {
       const columns = JSON.parse(tr.columns_json) as ColumnSpec[];
-      const sqlRows = conn.db
-        .prepare(`SELECT * FROM ${quoteIdent(tr.sql_table)} ORDER BY _id`)
-        .all() as Array<Record<string, unknown>>;
+      const sqlRows = conn.db.prepare(`SELECT * FROM ${quoteIdent(tr.sql_table)} ORDER BY _id`).all() as Array<Record<string, unknown>>;
       const rows = sqlRows.map((r) => {
         const out: Record<string, unknown> = {};
         for (const c of columns) {
@@ -195,11 +185,7 @@ export function sqliteStoreAdapter(rootDir: string): StoreAdapter {
       // If the caller requires an etag match but the workspace doesn't exist
       // yet, fail fast — don't create an empty .db file that would then leak
       // into list().
-      if (
-        opts.ifMatchEtag !== null &&
-        !connections.has(workspaceId) &&
-        !existsSync(filePath(workspaceId))
-      ) {
+      if (opts.ifMatchEtag !== null && !connections.has(workspaceId) && !existsSync(filePath(workspaceId))) {
         return { ok: false, conflict: true, currentEtag: '' };
       }
 
@@ -339,11 +325,7 @@ function validateBody(body: Json): WorkspaceBody {
       }
       return cc as unknown as ColumnSpec;
     });
-    const rows = Array.isArray(t.rows)
-      ? (t.rows.filter((r) => r && typeof r === 'object' && !Array.isArray(r)) as Array<
-          Record<string, unknown>
-        >)
-      : [];
+    const rows = Array.isArray(t.rows) ? (t.rows.filter((r) => r && typeof r === 'object' && !Array.isArray(r)) as Array<Record<string, unknown>>) : [];
     return { name: t.name, columns, rows };
   });
   return {

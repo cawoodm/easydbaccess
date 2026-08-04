@@ -46,11 +46,7 @@ function memStore(): {
     tables: {
       async find(query?: Partial<Table>) {
         if (!query || Object.keys(query).length === 0) return [...tables];
-        return tables.filter((t) =>
-          Object.entries(query).every(
-            ([k, v]) => (t as unknown as Record<string, unknown>)[k] === v,
-          ),
-        );
+        return tables.filter((t) => Object.entries(query).every(([k, v]) => (t as unknown as Record<string, unknown>)[k] === v));
       },
       subscribe(fn: (docs: Table[]) => void): Unsubscribe {
         const run = () => fn([...tables]);
@@ -179,9 +175,7 @@ describe('createProjectionCollection', () => {
           config: {
             version: 1,
             sources: [{ alias: 'p', tableName: 'People' }],
-            columns: [
-              { field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'p', field: 'name' } },
-            ],
+            columns: [{ field: 'name', label: 'Name', type: 'string', from: { kind: 'source', alias: 'p', field: 'name' } }],
           },
         },
       };
@@ -232,20 +226,14 @@ describe('createProjectionCollection', () => {
     const { mem, coll } = setup();
     // Sue's department does not exist, so `dept` is empty — there is no row to
     // put the value in, and inventing one is not this code's business.
-    await expect(coll.patch('pb#0', { data: { name: 'Sue', dept: 'Marketing' } })).rejects.toThrow(
-      /no matching "Dept" row/,
-    );
+    await expect(coll.patch('pb#0', { data: { name: 'Sue', dept: 'Marketing' } })).rejects.toThrow(/no matching "Dept" row/);
     expect(await mem.rowData('pb')).toEqual({ name: 'Sue', deptId: 'y' });
   });
 
   it('refuses an edit to a computed column instead of pretending it saved', async () => {
     const { mem, coll } = setup('computed');
-    await expect(coll.patch('pa#0', { data: { name: 'Bob', shout: 'NOPE' } })).rejects.toBeInstanceOf(
-      ProjectionReadOnlyError,
-    );
-    await expect(coll.patch('pa#0', { data: { name: 'Bob', shout: 'NOPE' } })).rejects.toThrow(
-      /computed by a script/,
-    );
+    await expect(coll.patch('pa#0', { data: { name: 'Bob', shout: 'NOPE' } })).rejects.toBeInstanceOf(ProjectionReadOnlyError);
+    await expect(coll.patch('pa#0', { data: { name: 'Bob', shout: 'NOPE' } })).rejects.toThrow(/computed by a script/);
     expect(await mem.rowData('pa')).toEqual({ name: 'Bob', deptId: 'x' });
   });
 

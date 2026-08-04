@@ -9,12 +9,14 @@ import { createTable, panelDomId, waitForPanel } from './helpers.js';
  * store — the churn the topmost check exists to avoid.
  */
 
-const zOf = (page: import('@playwright/test').Page, tableId: string) =>
-  page.locator(`#${panelDomId(tableId)}`).evaluate((el) => Number(el.style.zIndex));
+const zOf = (page: import('@playwright/test').Page, tableId: string) => page.locator(`#${panelDomId(tableId)}`).evaluate((el) => Number(el.style.zIndex));
 
 /** Straight to the element, so an overlapping neighbour cannot take the click. */
 const poke = (page: import('@playwright/test').Page, tableId: string) =>
-  page.locator(`#${panelDomId(tableId)}`).locator('.jsPanel-titlebar').dispatchEvent('pointerdown');
+  page
+    .locator(`#${panelDomId(tableId)}`)
+    .locator('.jsPanel-titlebar')
+    .dispatchEvent('pointerdown');
 
 test('a minimized panel above does not make every click a front', async ({ page }) => {
   const under = await createTable(page, 'Under', [{ field: 'x' }]);
@@ -24,7 +26,10 @@ test('a minimized panel above does not make every click a front', async ({ page 
   // The newer panel opens above the older one.
   expect(await zOf(page, over)).toBeGreaterThan(await zOf(page, under));
 
-  await page.locator(`#${panelDomId(over)}`).locator('button[title="Minimize"]').click();
+  await page
+    .locator(`#${panelDomId(over)}`)
+    .locator('button[title="Minimize"]')
+    .click();
   await expect(page.locator(`#${panelDomId(over)}`)).toBeHidden();
 
   const before = await zOf(page, under);

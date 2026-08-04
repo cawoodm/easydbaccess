@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  isRefreshable,
-  PANEL_COLOR_LOCAL,
-  PANEL_COLOR_REFRESHABLE,
-  panelColor,
-  tableKind,
-} from '../../../packages/renderer/src/window-mgr/table-kind.js';
+import { isRefreshable, PANEL_COLOR_LOCAL, PANEL_COLOR_REFRESHABLE, panelColor, tableKind } from '../../../packages/renderer/src/window-mgr/table-kind.js';
 
 describe('tableKind', () => {
   it('is "normal" for a plain table with neither source nor origin', () => {
@@ -66,9 +60,7 @@ describe('panelColor', () => {
   });
 
   it('gives every refreshable kind the same violet', () => {
-    expect(panelColor({ origin: { type: 'csv', url: 'https://x/y' } })).toBe(
-      PANEL_COLOR_REFRESHABLE,
-    );
+    expect(panelColor({ origin: { type: 'csv', url: 'https://x/y' } })).toBe(PANEL_COLOR_REFRESHABLE);
     expect(panelColor({ source: { type: 'url', config: {} } })).toBe(PANEL_COLOR_REFRESHABLE);
     expect(panelColor({ source: { type: 'datasette', config: {} } })).toBe(PANEL_COLOR_REFRESHABLE);
   });

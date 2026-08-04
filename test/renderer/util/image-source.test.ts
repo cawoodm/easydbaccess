@@ -1,18 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import {
-  imageSrcFrom,
-  looksLikeImage,
-  sniffImageType,
-} from '../../../packages/renderer/src/util/image-source.js';
+import { imageSrcFrom, looksLikeImage, sniffImageType } from '../../../packages/renderer/src/util/image-source.js';
 
 /** The real leading bytes of each format, as a database BLOB would hold them. */
 const JPEG = [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46];
 const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00];
 const GIF = [0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00];
 const BMP = [0x42, 0x4d, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00];
-const WEBP = [
-  0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x20,
-];
+const WEBP = [0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x20];
 
 const hex = (bytes: number[]) => bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
 const b64 = (bytes: number[]) => btoa(String.fromCharCode(...bytes));
@@ -47,9 +41,7 @@ describe('imageSrcFrom — URLs and data URIs', () => {
   it('re-types an octet-stream data URI from its own bytes', () => {
     // What a BLOB export looks like: right bytes, useless declared type.
     const body = b64(JPEG);
-    expect(imageSrcFrom(`data:application/octet-stream;base64,${body}`)).toBe(
-      `data:image/jpeg;base64,${body}`,
-    );
+    expect(imageSrcFrom(`data:application/octet-stream;base64,${body}`)).toBe(`data:image/jpeg;base64,${body}`);
     expect(imageSrcFrom(`data:;base64,${body}`)).toBe(`data:image/jpeg;base64,${body}`);
   });
 
@@ -59,9 +51,7 @@ describe('imageSrcFrom — URLs and data URIs', () => {
 
   it('takes an http(s) or protocol-relative URL on shape alone', () => {
     expect(imageSrcFrom('https://x/y.png')).toBe('https://x/y.png');
-    expect(imageSrcFrom('http://accweb/emmployees/davolio.bmp')).toBe(
-      'http://accweb/emmployees/davolio.bmp',
-    );
+    expect(imageSrcFrom('http://accweb/emmployees/davolio.bmp')).toBe('http://accweb/emmployees/davolio.bmp');
     expect(imageSrcFrom('//cdn/x.jpg')).toBe('//cdn/x.jpg');
   });
 

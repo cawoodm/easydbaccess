@@ -31,10 +31,7 @@ const dialogs = (page: Page) => page.locator('host-dialogs');
 const mapper = (page: Page) => page.locator('column-map-dialog dialog');
 
 async function makeCities(page: Page) {
-  const id = await createTable(page, 'Cities', [
-    { field: 'city' },
-    { field: 'pop', type: 'number' },
-  ]);
+  const id = await createTable(page, 'Cities', [{ field: 'city' }, { field: 'pop', type: 'number' }]);
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [{ city: 'Bern', pop: 134000 }]);
   return id;
@@ -46,9 +43,7 @@ test('dropping a CSV on a table offers append, replace, or a new table', async (
 
   await expect(dialogs(page).getByText(/Import "more\.csv" into "Cities"\?/)).toBeVisible();
   await expect(dialogs(page).locator('button.choice', { hasText: 'Append to this table' })).toBeVisible();
-  await expect(
-    dialogs(page).locator('button.choice', { hasText: 'Replace the rows of this table' }),
-  ).toBeVisible();
+  await expect(dialogs(page).locator('button.choice', { hasText: 'Replace the rows of this table' })).toBeVisible();
   await expect(dialogs(page).locator('button.choice', { hasText: 'A new table' })).toBeVisible();
 });
 
@@ -122,9 +117,7 @@ test('the mapper refuses two columns pointing at one field', async ({ page }) =>
 test('replace drops the old rows and keeps the table', async ({ page }) => {
   const id = await makeCities(page);
   await dropOnPanel(page, id, 'fresh.csv', 'city,pop\nZug,30000\nChur,37000\n');
-  await dialogs(page)
-    .locator('button.choice', { hasText: 'Replace the rows of this table' })
-    .click();
+  await dialogs(page).locator('button.choice', { hasText: 'Replace the rows of this table' }).click();
 
   await expect.poll(async () => (await readRows(page, id)).length).toBe(2);
   const rows = await readRows(page, id);

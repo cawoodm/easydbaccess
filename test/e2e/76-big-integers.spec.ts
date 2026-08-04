@@ -14,11 +14,7 @@ const BIG = '1298624375692894210';
 const BIG2 = '9007199254740993'; // one past MAX_SAFE_INTEGER
 
 /** Field → value of the single imported row, read back out of the store. */
-async function importedRow(
-  page: import('@playwright/test').Page,
-  ws: string,
-  name: string,
-): Promise<Record<string, unknown>> {
+async function importedRow(page: import('@playwright/test').Page, ws: string, name: string): Promise<Record<string, unknown>> {
   return page.evaluate(
     async ([w, n]) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -35,13 +31,7 @@ async function importedRow(
   );
 }
 
-async function importUrl(
-  page: import('@playwright/test').Page,
-  url: string,
-  body: string,
-  contentType: string,
-  format: string,
-) {
+async function importUrl(page: import('@playwright/test').Page, url: string, body: string, contentType: string, format: string) {
   await page.route(url, (route) =>
     route.fulfill({
       status: 200,
@@ -59,54 +49,25 @@ async function importUrl(
 }
 
 test('a CSV id past 2^53 keeps every digit, as text', async ({ page, workspaceId }) => {
-  await importUrl(
-    page,
-    'https://ex.example/ids.csv',
-    `id,name\n${BIG},Ada\n`,
-    'text/plain; charset=utf-8',
-    'csv',
-  );
+  await importUrl(page, 'https://ex.example/ids.csv', `id,name\n${BIG},Ada\n`, 'text/plain; charset=utf-8', 'csv');
 
   await expect.poll(() => importedRow(page, workspaceId, 'ids')).toEqual({ id: BIG, name: 'Ada' });
   // And it is on screen in full, not rounded. A string cell renders as an
   // editable input, so the digits are its VALUE, not its text.
-  await expect
-    .poll(() =>
-      page.locator('data-table tbody').first().locator('input').first().inputValue(),
-    )
-    .toBe(BIG);
+  await expect.poll(() => page.locator('data-table tbody').first().locator('input').first().inputValue()).toBe(BIG);
 });
 
-test('a JSON id past 2^53 keeps every digit — JSON.parse cannot be trusted with it', async ({
-  page,
-  workspaceId,
-}) => {
+test('a JSON id past 2^53 keeps every digit — JSON.parse cannot be trusted with it', async ({ page, workspaceId }) => {
   // The literal is unquoted in the source, which is where the damage used to
   // happen: the parse itself rounds it, and no reviver can recover the digits.
-  await importUrl(
-    page,
-    'https://ex.example/ids.json',
-    `[{"id":${BIG},"other":${BIG2},"small":42}]`,
-    'application/json',
-    'json',
-  );
+  await importUrl(page, 'https://ex.example/ids.json', `[{"id":${BIG},"other":${BIG2},"small":42}]`, 'application/json', 'json');
 
-  await expect
-    .poll(() => importedRow(page, workspaceId, 'ids'))
-    .toEqual({ id: BIG, other: BIG2, small: 42 });
+  await expect.poll(() => importedRow(page, workspaceId, 'ids')).toEqual({ id: BIG, other: BIG2, small: 42 });
 });
 
 test('ordinary numbers still import as numbers', async ({ page, workspaceId }) => {
   // The guard must not turn every id column into text.
-  await importUrl(
-    page,
-    'https://ex.example/small.csv',
-    'n,m\n42,9007199254740991\n',
-    'text/plain; charset=utf-8',
-    'csv',
-  );
+  await importUrl(page, 'https://ex.example/small.csv', 'n,m\n42,9007199254740991\n', 'text/plain; charset=utf-8', 'csv');
 
-  await expect
-    .poll(() => importedRow(page, workspaceId, 'small'))
-    .toEqual({ n: 42, m: 9007199254740991 });
+  await expect.poll(() => importedRow(page, workspaceId, 'small')).toEqual({ n: 42, m: 9007199254740991 });
 });

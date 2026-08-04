@@ -28,8 +28,7 @@ export function iconButton(svg: string, title: string): HTMLButtonElement {
   btn.title = title;
   btn.setAttribute('aria-label', title);
   btn.innerHTML = svg;
-  btn.style.cssText =
-    'flex:none;display:inline-flex;align-items:center;justify-content:center;padding:1px;background:none;border:0;color:#9ca3af;cursor:pointer;line-height:0';
+  btn.style.cssText = 'flex:none;display:inline-flex;align-items:center;justify-content:center;padding:1px;background:none;border:0;color:#9ca3af;cursor:pointer;line-height:0';
   btn.addEventListener('mouseenter', () => (btn.style.color = '#4b5563'));
   btn.addEventListener('mouseleave', () => (btn.style.color = '#9ca3af'));
   return btn;
@@ -49,12 +48,7 @@ export const POPOUT_SVG =
  * shows the source behind a `preview` / `markdown` cell — that is what a
  * truncated cell is for — without offering an edit the core would refuse.
  */
-export function openHtmlEditor(
-  title: string,
-  value: string,
-  onSave: (next: string) => void,
-  opts?: { readonly?: boolean },
-): void {
+export function openHtmlEditor(title: string, value: string, onSave: (next: string) => void, opts?: { readonly?: boolean }): void {
   const readonly = opts?.readonly === true;
   const content = document.createElement('div');
   content.style.cssText = 'display:flex;flex-direction:column;gap:0.5rem;height:100%;box-sizing:border-box;padding:0.5rem';

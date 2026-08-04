@@ -140,23 +140,14 @@ export class ScriptEditorDialog extends LitElement {
           </div>
           <div class="dialog-body">
             <p class="hint">
-              Define <code>function render(row) { … }</code>. <code>row</code> is the full row
-              object. What you return is passed to the column's renderer, so the cell shows a
-              computed value instead of the stored one — and the cell becomes read-only. A script
-              that throws shows a small error chip in the cell.
+              Define <code>function render(row) { … }</code>. <code>row</code> is the full row object. What you return is passed to the column's renderer, so the cell shows a computed value instead of
+              the stored one — and the cell becomes read-only. A script that throws shows a small error chip in the cell.
             </p>
             <p class="hint">
-              Besides the JS globals you can call <code>markdownToHtml(text)</code> (also
-              <code>easydb.markdownToHtml</code>) — set this column's renderer to
-              <code>html</code> so the result shows as formatted text rather than as its own
-              source.
+              Besides the JS globals you can call <code>markdownToHtml(text)</code> (also <code>easydb.markdownToHtml</code>) — set this column's renderer to <code>html</code> so the result shows as
+              formatted text rather than as its own source.
             </p>
-            <textarea
-              spellcheck="false"
-              autofocus
-              .value=${this.text}
-              @input=${(e: Event) => (this.text = (e.target as HTMLTextAreaElement).value)}
-            ></textarea>
+            <textarea spellcheck="false" autofocus .value=${this.text} @input=${(e: Event) => (this.text = (e.target as HTMLTextAreaElement).value)}></textarea>
           </div>
         </form>
       </dialog>

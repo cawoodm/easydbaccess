@@ -1,12 +1,5 @@
 import { test, expect } from './fixtures.js';
-import {
-  addRow,
-  bulkAddRows,
-  createTable,
-  panelDomId,
-  readTable,
-  waitForPanel,
-} from './helpers.js';
+import { addRow, bulkAddRows, createTable, panelDomId, readTable, waitForPanel } from './helpers.js';
 
 /**
  * TODO § Data table rendering
@@ -67,9 +60,7 @@ test.describe('data-table rendering', () => {
     await bulkAddRows(
       page,
       id,
-      Array.from({ length: 15 }, () =>
-        Object.fromEntries(fields.map((f) => [f.field, 'a fairly long cell value here'])),
-      ),
+      Array.from({ length: 15 }, () => Object.fromEntries(fields.map((f) => [f.field, 'a fairly long cell value here']))),
     );
 
     const panel = page.locator(`#${panelDomId(id)}`);
@@ -91,30 +82,19 @@ test.describe('data-table rendering', () => {
     const endWidth = (await th.boundingBox())?.width ?? 0;
     expect(endWidth).toBeGreaterThan(startWidth + 120);
 
-    const layout = await panel
-      .locator('data-table')
-      .evaluate(
-        (el) =>
-          getComputedStyle(
-            (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelector('table')!,
-          ).tableLayout,
-      );
+    const layout = await panel.locator('data-table').evaluate((el) => getComputedStyle((el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelector('table')!).tableLayout);
     expect(layout).toBe('fixed');
 
     // Every column was frozen with a width, and the dragged one persisted.
     await expect
       .poll(async () => {
         const t = await readTable(page, id);
-        return (
-          t?.columns.filter((c: { width?: number }) => typeof c.width === 'number').length ?? 0
-        );
+        return t?.columns.filter((c: { width?: number }) => typeof c.width === 'number').length ?? 0;
       })
       .toBe(12);
   });
 
-  test('column resize on a background (non-topmost) window still persists its width', async ({
-    page,
-  }) => {
+  test('column resize on a background (non-topmost) window still persists its width', async ({ page }) => {
     // Regression: table A opens first, so it's already open (and topmost) when
     // table B opens after it and fronts itself, leaving A in the background.
     // Starting a column drag on A's resize handle fires a pointerdown that
@@ -132,9 +112,7 @@ test.describe('data-table rendering', () => {
     await bulkAddRows(
       page,
       idA,
-      Array.from({ length: 15 }, () =>
-        Object.fromEntries(fields.map((f) => [f.field, 'a fairly long cell value here'])),
-      ),
+      Array.from({ length: 15 }, () => Object.fromEntries(fields.map((f) => [f.field, 'a fairly long cell value here']))),
     );
 
     // Table B opens after A and fronts itself, so A is now the background window.
@@ -180,23 +158,14 @@ test.describe('data-table rendering', () => {
     const endWidth = (await th.boundingBox())?.width ?? 0;
     expect(endWidth).toBeGreaterThan(startWidth + 120);
 
-    const layout = await panelA
-      .locator('data-table')
-      .evaluate(
-        (el) =>
-          getComputedStyle(
-            (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelector('table')!,
-          ).tableLayout,
-      );
+    const layout = await panelA.locator('data-table').evaluate((el) => getComputedStyle((el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelector('table')!).tableLayout);
     expect(layout).toBe('fixed');
 
     // Every column on A was frozen with a width, and the dragged one persisted.
     await expect
       .poll(async () => {
         const t = await readTable(page, idA);
-        return (
-          t?.columns.filter((c: { width?: number }) => typeof c.width === 'number').length ?? 0
-        );
+        return t?.columns.filter((c: { width?: number }) => typeof c.width === 'number').length ?? 0;
       })
       .toBe(12);
     await expect
@@ -252,21 +221,13 @@ test.describe('data-table rendering', () => {
     const heights = await panel
       .locator('data-table')
       .evaluate((el) =>
-        [
-          ...(el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelectorAll(
-            'tbody tr',
-          ),
-        ]
-          .slice(0, 4)
-          .map((tr) => Math.round((tr as HTMLElement).getBoundingClientRect().height)),
+        [...(el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelectorAll('tbody tr')].slice(0, 4).map((tr) => Math.round((tr as HTMLElement).getBoundingClientRect().height)),
       );
     expect(new Set(heights).size).toBe(1);
 
     // An editable cell is an <input>, which clips flat unless it ellipses itself.
     const textOverflow = await panel.locator('data-table').evaluate((el) => {
-      const input = (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelector(
-        'tbody td input',
-      );
+      const input = (el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelector('tbody td input');
       return input ? getComputedStyle(input).textOverflow : null;
     });
     expect(textOverflow).toBe('ellipsis');
@@ -314,10 +275,7 @@ test.describe('data-table rendering', () => {
   });
 
   test('descending sort keeps empty values at the bottom', async ({ page }) => {
-    const id = await createTable(page, 'Scores', [
-      { field: 'name' },
-      { field: 'score', type: 'number' },
-    ]);
+    const id = await createTable(page, 'Scores', [{ field: 'name' }, { field: 'score', type: 'number' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [
       { name: 'Alice', score: 3 },
@@ -346,15 +304,7 @@ test.describe('data-table rendering', () => {
     // Descending orders the present values 3,2,1 — and the empty score (Bob)
     // stays at the BOTTOM rather than floating to the top.
     await expect
-      .poll(() =>
-        dt.evaluate((el) =>
-          [
-            ...(el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelectorAll(
-              'tbody tr:not(.spacer)',
-            ),
-          ].map((tr) => tr.querySelector('input')?.value ?? null),
-        ),
-      )
+      .poll(() => dt.evaluate((el) => [...(el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelectorAll('tbody tr:not(.spacer)')].map((tr) => tr.querySelector('input')?.value ?? null)))
       .toEqual(['Alice', 'Dave', 'Carol', 'Bob']);
   });
 
@@ -389,38 +339,22 @@ test.describe('data-table rendering', () => {
     // Read the first cell (k) of each row in render order, polling: the store
     // write lands through a liveQuery, so the re-render is a tick behind.
     await expect
-      .poll(() =>
-        dt.evaluate((el) =>
-          [
-            ...(el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelectorAll(
-              'tbody tr:not(.spacer)',
-            ),
-          ].map((tr) => tr.querySelector('input')?.value ?? null),
-        ),
-      )
+      .poll(() => dt.evaluate((el) => [...(el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelectorAll('tbody tr:not(.spacer)')].map((tr) => tr.querySelector('input')?.value ?? null)))
       .toEqual(['b', 'c', 'd', 'a']); // null, blank, apple, zebra
   });
 
-  test('loading bar is thick, indeterminate without progress and proportional with it', async ({
-    page,
-  }) => {
+  test('loading bar is thick, indeterminate without progress and proportional with it', async ({ page }) => {
     const id = await createTable(page, 'Prog', [{ field: 'x' }]);
     await waitForPanel(page, id);
     const dt = page.locator(`#${panelDomId(id)} data-table`);
-    const fire = (detail: Record<string, unknown>) =>
-      page.evaluate(
-        (d) => document.dispatchEvent(new CustomEvent('easydb:table-loading', { detail: d })),
-        detail,
-      );
+    const fire = (detail: Record<string, unknown>) => page.evaluate((d) => document.dispatchEvent(new CustomEvent('easydb:table-loading', { detail: d })), detail);
 
     // Loading with no fraction → an indeterminate (animated) bar, and it's
     // thicker than the old 3px.
     await fire({ tableId: id, loading: true });
     const bar = dt.locator('.load-bar');
     await expect(bar).toBeVisible();
-    expect(
-      parseFloat(await bar.evaluate((el) => getComputedStyle(el).height)),
-    ).toBeGreaterThanOrEqual(6);
+    expect(parseFloat(await bar.evaluate((el) => getComputedStyle(el).height))).toBeGreaterThanOrEqual(6);
     await expect(dt.locator('.load-bar-fill.determinate')).toHaveCount(0);
 
     // A 50% fraction → determinate fill spanning ~half the bar's width.
@@ -499,9 +433,7 @@ test.describe('data-table rendering', () => {
     const panel = page.locator(`#${panelDomId(id)}`);
     // Wait for the table to settle on a virtualized count (it polls in case
     // rendering catches up over a frame or two).
-    await expect
-      .poll(async () => panel.locator('data-table tbody tr:not(.spacer)').count())
-      .toBeLessThan(250);
+    await expect.poll(async () => panel.locator('data-table tbody tr:not(.spacer)').count()).toBeLessThan(250);
     const rendered = await panel.locator('data-table tbody tr:not(.spacer)').count();
     expect(rendered).toBeGreaterThan(0);
     expect(rendered).toBeLessThan(250);
@@ -527,10 +459,7 @@ test.describe('data-table rendering', () => {
   });
 
   test('number cells are right-aligned but the header stays left-aligned', async ({ page }) => {
-    const id = await createTable(page, 'Prices', [
-      { field: 'name' },
-      { field: 'price', type: 'number' },
-    ]);
+    const id = await createTable(page, 'Prices', [{ field: 'name' }, { field: 'price', type: 'number' }]);
     await waitForPanel(page, id);
     await addRow(page, id, { name: 'apple', price: 1.5 });
 
@@ -547,9 +476,7 @@ test.describe('data-table rendering', () => {
   });
 
   test('date column edits use <input type="date">', async ({ page }) => {
-    const id = await createTable(page, 'Events', [
-      { field: 'when', type: 'date', renderer: 'date' },
-    ]);
+    const id = await createTable(page, 'Events', [{ field: 'when', type: 'date', renderer: 'date' }]);
     await waitForPanel(page, id);
     await addRow(page, id, { when: '2026-05-23' });
 
@@ -560,9 +487,7 @@ test.describe('data-table rendering', () => {
   });
 
   test('datetime column edits use <input type="datetime-local">', async ({ page }) => {
-    const id = await createTable(page, 'Stamps', [
-      { field: 'at', type: 'datetime', renderer: 'datetime' },
-    ]);
+    const id = await createTable(page, 'Stamps', [{ field: 'at', type: 'datetime', renderer: 'datetime' }]);
     await waitForPanel(page, id);
     await addRow(page, id, { at: '2026-05-23T14:30' });
 
@@ -591,18 +516,14 @@ test.describe('data-table rendering', () => {
     // Hover darkens to red — assertion is best-effort because Lit-rendered
     // hover state sometimes needs a frame to repaint.
     await deleteBtn.hover();
-    await expect
-      .poll(async () => deleteBtn.evaluate((el) => getComputedStyle(el).color))
-      .toBe('rgb(239, 68, 68)'); // #ef4444
+    await expect.poll(async () => deleteBtn.evaluate((el) => getComputedStyle(el).color)).toBe('rgb(239, 68, 68)'); // #ef4444
 
     // Click → row removed.
     await deleteBtn.click();
     await expect(panel.locator('data-table tbody tr:not(.spacer)')).toHaveCount(1);
   });
 
-  test('cell-link renders mailto: for email values, http(s) for URLs, tel: for phones', async ({
-    page,
-  }) => {
+  test('cell-link renders mailto: for email values, http(s) for URLs, tel: for phones', async ({ page }) => {
     const id = await createTable(page, 'Contacts', [{ field: 'contact', renderer: 'link' }]);
     await waitForPanel(page, id);
     await addRow(page, id, { contact: 'alice@example.com' });

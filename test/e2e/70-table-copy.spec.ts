@@ -24,9 +24,7 @@ async function tables(page: import('@playwright/test').Page, ws: string) {
         projection: t.source?.type === 'projection',
         readonly: t.readonly === true,
         columns: t.columns.map((c: { field: string }) => c.field),
-        rows: (await store.rows(t.id).find())
-          .map((r: { data: Record<string, unknown> }) => r.data)
-          .sort((a: unknown, b: unknown) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+        rows: (await store.rows(t.id).find()).map((r: { data: Record<string, unknown> }) => r.data).sort((a: unknown, b: unknown) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
       })),
     );
   }, ws);
@@ -73,9 +71,7 @@ test('Visible Data drops hidden columns and applies the filter', async ({ page, 
     const store = (window as any).__easydb.store;
     const t = await store.tables.findOne(tableId);
     await store.tables.patch(tableId, {
-      columns: t.columns.map((c: { field: string }) =>
-        c.field === 'secret' ? { ...c, hidden: true } : c,
-      ),
+      columns: t.columns.map((c: { field: string }) => (c.field === 'secret' ? { ...c, hidden: true } : c)),
       filters: { name: 'ali' },
       updatedAt: Date.now(),
     });
@@ -141,10 +137,7 @@ test.describe('copying a projection', () => {
     return { projId, peopleId, deptId };
   }
 
-  test('Duplicate gives a SECOND live projection, still tracking its sources', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('Duplicate gives a SECOND live projection, still tracking its sources', async ({ page, workspaceId }) => {
     const { projId, deptId } = await setupProjection(page);
     await pressCopy(page, projId, 'Duplicate');
 
@@ -159,22 +152,13 @@ test.describe('copying a projection', () => {
       const store = (window as any).__easydb.store;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const r = (await store.rows(dept).find())[0] as any;
-      await store
-        .rows(dept)
-        .patch(r.id, { data: { ...r.data, label: 'Revenue' }, updatedAt: Date.now() });
+      await store.rows(dept).patch(r.id, { data: { ...r.data, label: 'Revenue' }, updatedAt: Date.now() });
     }, deptId);
 
-    await expect
-      .poll(
-        async () => (await tables(page, workspaceId)).find((t) => t.name === 'Staff copy')?.rows,
-      )
-      .toEqual([{ who: 'Alice', dept: 'Revenue' }]);
+    await expect.poll(async () => (await tables(page, workspaceId)).find((t) => t.name === 'Staff copy')?.rows).toEqual([{ who: 'Alice', dept: 'Revenue' }]);
   });
 
-  test('Raw Data FREEZES it into a plain table that no longer follows its sources', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('Raw Data FREEZES it into a plain table that no longer follows its sources', async ({ page, workspaceId }) => {
     const { projId, deptId } = await setupProjection(page);
     await pressCopy(page, projId, 'Raw Data');
 
@@ -189,25 +173,16 @@ test.describe('copying a projection', () => {
       const store = (window as any).__easydb.store;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const r = (await store.rows(dept).find())[0] as any;
-      await store
-        .rows(dept)
-        .patch(r.id, { data: { ...r.data, label: 'Revenue' }, updatedAt: Date.now() });
+      await store.rows(dept).patch(r.id, { data: { ...r.data, label: 'Revenue' }, updatedAt: Date.now() });
     }, deptId);
 
     // The ORIGINAL projection moves…
-    await expect
-      .poll(async () => (await tables(page, workspaceId)).find((t) => t.name === 'Staff')?.rows)
-      .toEqual([{ who: 'Alice', dept: 'Revenue' }]);
+    await expect.poll(async () => (await tables(page, workspaceId)).find((t) => t.name === 'Staff')?.rows).toEqual([{ who: 'Alice', dept: 'Revenue' }]);
     // …and the snapshot stays where it was.
-    expect((await tables(page, workspaceId)).find((t) => t.name === 'Staff copy')!.rows).toEqual([
-      { who: 'Alice', dept: 'Sales' },
-    ]);
+    expect((await tables(page, workspaceId)).find((t) => t.name === 'Staff copy')!.rows).toEqual([{ who: 'Alice', dept: 'Sales' }]);
   });
 
-  test('a frozen copy is editable — the projection’s read-only columns are not', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('a frozen copy is editable — the projection’s read-only columns are not', async ({ page, workspaceId }) => {
     const { projId } = await setupProjection(page);
     await pressCopy(page, projId, 'Raw Data');
     await expect.poll(async () => (await tables(page, workspaceId)).length).toBe(4);

@@ -7,11 +7,7 @@ import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js
  * plugin existed. It only fills the editor: the user still presses Save.
  */
 test('Guess renderers fills the editor from the values, and Save keeps them', async ({ page }) => {
-  const id = await createTable(page, 'Links', [
-    { field: 'title' },
-    { field: 'url' },
-    { field: 'pic' },
-  ]);
+  const id = await createTable(page, 'Links', [{ field: 'title' }, { field: 'url' }, { field: 'pic' }]);
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [
     { title: 'One', url: 'https://example.com/a', pic: 'https://example.com/a.png' },
@@ -31,7 +27,10 @@ test('Guess renderers fills the editor from the values, and Save keeps them', as
     ['pic', ''],
   ]);
 
-  await page.locator(`#${panelDomId(id)} panel-footer`).getByTitle('Edit columns').click();
+  await page
+    .locator(`#${panelDomId(id)} panel-footer`)
+    .getByTitle('Edit columns')
+    .click();
   const editor = page.locator('new-table-dialog dialog');
   await expect(editor).toBeVisible();
 

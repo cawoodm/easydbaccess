@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  facetable,
-  facetCounts,
-  facetValues,
-  FACET_MAX_LEN,
-} from '../../../packages/renderer/src/search/facet-values.js';
+import { facetable, facetCounts, facetValues, FACET_MAX_LEN } from '../../../packages/renderer/src/search/facet-values.js';
 
 const rows = (...vals: unknown[]) => vals.map((v) => ({ data: { tag: v, other: 'x' } }));
 

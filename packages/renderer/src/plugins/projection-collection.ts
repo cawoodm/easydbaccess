@@ -15,21 +15,8 @@
 // closes over `api.store` (the routed store — hence projection-on-projection
 // composes) and needs nothing store-related from `RowSourceCtx`.
 
-import type {
-  DataCollection,
-  DataStore,
-  ProjectionSpec,
-  Row,
-  Table,
-  Unsubscribe,
-} from '@easydb/shared';
-import {
-  computeProjectionRows,
-  hasProjectionCycle,
-  writebackTarget,
-  type SourceRowsByAlias,
-  type RowProvenance,
-} from './projection-compute.js';
+import type { DataCollection, DataStore, ProjectionSpec, Row, Table, Unsubscribe } from '@easydb/shared';
+import { computeProjectionRows, hasProjectionCycle, writebackTarget, type SourceRowsByAlias, type RowProvenance } from './projection-compute.js';
 
 /** Thrown when a write is attempted against a read-only projection cell. */
 export class ProjectionReadOnlyError extends Error {

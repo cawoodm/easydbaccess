@@ -7,8 +7,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   name: 'Cell Image',
   type: 'cell-renderer',
   version: '0.1.0',
-  description:
-    'Renderer for image cells: thumbnail with upload/clear. Apply by setting a column\'s renderer to "image". Values are kept as data: URIs.',
+  description: 'Renderer for image cells: thumbnail with upload/clear. Apply by setting a column\'s renderer to "image". Values are kept as data: URIs.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/cell-image.ts',
@@ -70,8 +69,7 @@ class CellImage extends HTMLElement {
     // to see or retype the source of an image that is already set.
     if (this._editing) {
       const row = document.createElement('span');
-      row.style.cssText =
-        'display:flex;align-items:center;gap:0.25rem;width:100%;min-width:0;max-width:100%';
+      row.style.cssText = 'display:flex;align-items:center;gap:0.25rem;width:100%;min-width:0;max-width:100%';
       const input = makeValueEditor({
         // Only a text value is editable text. A blob is megabytes of bytes with
         // no useful string form, so the editor opens empty and typing a URL
@@ -110,8 +108,7 @@ class CellImage extends HTMLElement {
       const img = document.createElement('img');
       img.src = src;
       img.alt = '';
-      img.style.cssText =
-        'max-height:32px;max-width:64px;border-radius:.15rem;border:1px solid #e5e7eb';
+      img.style.cssText = 'max-height:32px;max-width:64px;border-radius:.15rem;border:1px solid #e5e7eb';
       content.append(img);
     } else {
       const placeholder = document.createElement('span');
@@ -161,8 +158,6 @@ class CellImage extends HTMLElement {
     // — and we just assigned it — so the thumbnail would never come back.
     this.render();
     if (!changed) return;
-    this.dispatchEvent(
-      new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }),
-    );
+    this.dispatchEvent(new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }));
   }
 }

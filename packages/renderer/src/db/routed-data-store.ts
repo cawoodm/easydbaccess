@@ -1,11 +1,4 @@
-import type {
-  DataCollection,
-  DataStore,
-  RowCollectionProvider,
-  RowSourceCtx,
-  Row,
-  Table,
-} from '@easydb/shared';
+import type { DataCollection, DataStore, RowCollectionProvider, RowSourceCtx, Row, Table } from '@easydb/shared';
 
 /**
  * Per-table row-collection routing (Phase 2a of the Datasette live connector).

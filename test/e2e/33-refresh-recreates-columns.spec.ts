@@ -32,17 +32,13 @@ const rateLimited = () => ({
   body: JSON.stringify({ ok: false, error: 'rate limit exceeded' }),
 });
 
-test('an empty table shell recovers on Refresh: columns recreated, editor opened', async ({
-  page,
-  workspaceId,
-}) => {
+test('an empty table shell recovers on Refresh: columns recreated, editor opened', async ({ page, workspaceId }) => {
   await page.route('https://ppl2.example/**', (route) => {
     const u = new URL(route.request().url());
     if (u.pathname === '/-/metadata.json') return route.fulfill(json({}));
     if (u.pathname === '/energy/plants.json') {
       const extra = u.searchParams.get('_extra') ?? '';
-      if (extra.includes('columns'))
-        return route.fulfill(json({ ok: true, columns: ['id', 'name', 'capacity_mw'], rows: [] }));
+      if (extra.includes('columns')) return route.fulfill(json({ ok: true, columns: ['id', 'name', 'capacity_mw'], rows: [] }));
       if (extra.includes('count')) return route.fulfill(json({ ok: true, count: ROWS.length }));
       return route.fulfill(json({ ok: true, next: null, rows: ROWS }));
     }
@@ -55,10 +51,7 @@ test('an empty table shell recovers on Refresh: columns recreated, editor opened
   const importDialog = page.locator('import-dialog dialog');
   await importDialog.locator('input[type="text"]').fill('https://ppl2.example/energy/plants');
   await importDialog.getByTestId('import-format').selectOption('datasette');
-  await importDialog
-    .locator('label.check', { hasText: 'Edit columns before import' })
-    .locator('input[type="checkbox"]')
-    .check();
+  await importDialog.locator('label.check', { hasText: 'Edit columns before import' }).locator('input[type="checkbox"]').check();
   await importDialog.getByRole('button', { name: 'Import' }).click();
   // The pre-import editor is `column-names-dialog` (the table's own column
   // editor, `new-table-dialog`, is what Refresh opens further down).
@@ -72,20 +65,14 @@ test('an empty table shell recovers on Refresh: columns recreated, editor opened
       .poll(() =>
         page.evaluate(async (ws) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const t = (await (window as any).__easydb.store.tables.find()).find(
-            (x: { workspaceId: string; name: string }) =>
-              x.workspaceId === ws && x.name === 'energy/plants',
-          );
+          const t = (await (window as any).__easydb.store.tables.find()).find((x: { workspaceId: string; name: string }) => x.workspaceId === ws && x.name === 'energy/plants');
           return t ? t.columns.length : -1;
         }, workspaceId),
       )
       .toBe(0); // table exists, no columns (the failed import)
     return page.evaluate(async (ws) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const t = (await (window as any).__easydb.store.tables.find()).find(
-        (x: { workspaceId: string; name: string }) =>
-          x.workspaceId === ws && x.name === 'energy/plants',
-      );
+      const t = (await (window as any).__easydb.store.tables.find()).find((x: { workspaceId: string; name: string }) => x.workspaceId === ws && x.name === 'energy/plants');
       return t.id as string;
     }, workspaceId);
   })();
@@ -116,17 +103,13 @@ test('an empty table shell recovers on Refresh: columns recreated, editor opened
   await expect(editor.locator('.notice')).toContainText('capacity_mw');
 });
 
-test('a deleted column is remembered and not re-added by a later refresh (issues 3 & 4)', async ({
-  page,
-  workspaceId,
-}) => {
+test('a deleted column is remembered and not re-added by a later refresh (issues 3 & 4)', async ({ page, workspaceId }) => {
   await page.route('https://ppl3.example/**', (route) => {
     const u = new URL(route.request().url());
     if (u.pathname === '/-/metadata.json') return route.fulfill(json({}));
     if (u.pathname === '/energy/plants.json') {
       const extra = u.searchParams.get('_extra') ?? '';
-      if (extra.includes('columns'))
-        return route.fulfill(json({ ok: true, columns: ['id', 'name', 'capacity_mw'], rows: [] }));
+      if (extra.includes('columns')) return route.fulfill(json({ ok: true, columns: ['id', 'name', 'capacity_mw'], rows: [] }));
       if (extra.includes('count')) return route.fulfill(json({ ok: true, count: ROWS.length }));
       return route.fulfill(json({ ok: true, next: null, rows: ROWS }));
     }
@@ -144,20 +127,14 @@ test('a deleted column is remembered and not re-added by a later refresh (issues
       .poll(() =>
         page.evaluate(async (ws) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const t = (await (window as any).__easydb.store.tables.find()).find(
-            (x: { workspaceId: string; name: string }) =>
-              x.workspaceId === ws && x.name === 'energy/plants',
-          );
+          const t = (await (window as any).__easydb.store.tables.find()).find((x: { workspaceId: string; name: string }) => x.workspaceId === ws && x.name === 'energy/plants');
           return t ? t.columns.length : -1;
         }, workspaceId),
       )
       .toBe(3);
     return page.evaluate(async (ws) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const t = (await (window as any).__easydb.store.tables.find()).find(
-        (x: { workspaceId: string; name: string }) =>
-          x.workspaceId === ws && x.name === 'energy/plants',
-      );
+      const t = (await (window as any).__easydb.store.tables.find()).find((x: { workspaceId: string; name: string }) => x.workspaceId === ws && x.name === 'energy/plants');
       return t.id as string;
     }, workspaceId);
   })();

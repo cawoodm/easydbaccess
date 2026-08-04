@@ -100,21 +100,11 @@ export class PanelSearch extends LitElement {
   override render() {
     if (!this.open) {
       const active = this.query.trim().length > 0;
-      return html`<button
-        class="icon ${active ? 'active' : ''}"
-        title=${active ? `Filtering rows: ${this.query}` : 'Search rows in this table'}
-        @click=${this.openSearch}
-      >
+      return html`<button class="icon ${active ? 'active' : ''}" title=${active ? `Filtering rows: ${this.query}` : 'Search rows in this table'} @click=${this.openSearch}>
         <span class="mi sm">search</span>
       </button>`;
     }
-    return html`<input
-      type="search"
-      placeholder="search…"
-      .value=${this.query}
-      @input=${this.onInput}
-      @blur=${this.onBlur}
-    />`;
+    return html`<input type="search" placeholder="search…" .value=${this.query} @input=${this.onInput} @blur=${this.onBlur} />`;
   }
 }
 

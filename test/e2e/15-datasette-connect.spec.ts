@@ -10,10 +10,7 @@ import { panelDomId } from './helpers.js';
  */
 
 test.describe('datasette live connect', () => {
-  test('connects a table, renders live rows, and writes an edit back via PATCH', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('connects a table, renders live rows, and writes an edit back via PATCH', async ({ page, workspaceId }) => {
     const updates: Array<{ body: any; auth?: string }> = [];
 
     await page.route('https://ds.example/**', async (route) => {
@@ -35,13 +32,10 @@ test.describe('datasette live connect', () => {
         return json({ ok: true, rows: [{ id: 1, name: 'Alicia' }] });
       }
       if (u.pathname === '/-/versions.json') return json({ datasette: { version: '1.0a37' } });
-      if (u.pathname === '/-/actor.json')
-        return json({ ok: true, actor: req.headers()['authorization'] ? { id: 'root' } : null });
+      if (u.pathname === '/-/actor.json') return json({ ok: true, actor: req.headers()['authorization'] ? { id: 'root' } : null });
       if (u.pathname === '/db/people.json') {
-        if (u.search.includes('_extra=primary_keys'))
-          return json({ ok: true, primary_keys: ['id'], rows: [] });
-        if (u.search.includes('_extra=columns'))
-          return json({ ok: true, columns: ['id', 'name'], rows: [] });
+        if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
+        if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'name'], rows: [] });
         return json({
           ok: true,
           next: null,
@@ -71,9 +65,7 @@ test.describe('datasette live connect', () => {
         page.evaluate(async (ws) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const store = (window as any).__easydb.store;
-          const t = (await store.tables.find()).find(
-            (x: any) => x.workspaceId === ws && x.source?.type === 'datasette',
-          );
+          const t = (await store.tables.find()).find((x: any) => x.workspaceId === ws && x.source?.type === 'datasette');
           if (!t) return null;
           const rows = await store.rows(t.id).find();
           return { writable: t.source.writable, pks: t.source.config.pks, rowCount: rows.length };
@@ -84,9 +76,7 @@ test.describe('datasette live connect', () => {
     const tableId: string = await page.evaluate(async (ws) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__easydb.store;
-      const t = (await store.tables.find()).find(
-        (x: any) => x.workspaceId === ws && x.source?.type === 'datasette',
-      );
+      const t = (await store.tables.find()).find((x: any) => x.workspaceId === ws && x.source?.type === 'datasette');
       return t.id;
     }, workspaceId);
 
@@ -97,16 +87,12 @@ test.describe('datasette live connect', () => {
     // source-backed table must route to the live collection the instant its
     // panel binds `rows(id)`; if the routing cache is cold it silently reads
     // the empty local table — columns show, no rows.)
-    await expect(
-      page.locator(`#${panelDomId(tableId)}`).locator('tbody tr:not(.spacer)'),
-    ).toHaveCount(2);
+    await expect(page.locator(`#${panelDomId(tableId)}`).locator('tbody tr:not(.spacer)')).toHaveCount(2);
 
     // Edit row id=1 through the routed store → the live collection writes back.
     const patched = await page.evaluate(async (id) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (window as any).__easydb.store
-        .rows(id)
-        .patch('1', { data: { id: 1, name: 'Alicia' } });
+      return (window as any).__easydb.store.rows(id).patch('1', { data: { id: 1, name: 'Alicia' } });
     }, tableId);
     expect(patched.data).toEqual({ id: 1, name: 'Alicia' });
 
@@ -117,10 +103,7 @@ test.describe('datasette live connect', () => {
     expect(updates[0]!.auth).toBe('Bearer dstok_T');
   });
 
-  test('a token-less connection is read-only: editing a cell is rejected, no write is sent', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('a token-less connection is read-only: editing a cell is rejected, no write is sent', async ({ page, workspaceId }) => {
     const writes: string[] = [];
     await page.route('https://ds.example/**', async (route) => {
       const req = route.request();
@@ -139,10 +122,8 @@ test.describe('datasette live connect', () => {
       if (u.pathname === '/-/versions.json') return json({ datasette: { version: '1.0a37' } });
       if (u.pathname === '/-/actor.json') return json({ ok: true, actor: null }); // anonymous
       if (u.pathname === '/db/people.json') {
-        if (u.search.includes('_extra=primary_keys'))
-          return json({ ok: true, primary_keys: ['id'], rows: [] });
-        if (u.search.includes('_extra=columns'))
-          return json({ ok: true, columns: ['id', 'name'], rows: [] });
+        if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
+        if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'name'], rows: [] });
         return json({
           ok: true,
           next: null,
@@ -196,10 +177,7 @@ test.describe('datasette live connect', () => {
     expect(writes).toEqual([]); // no write request was attempted
   });
 
-  test('deleting a live table removes it locally, writes nothing remote, and it does not reappear', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('deleting a live table removes it locally, writes nothing remote, and it does not reappear', async ({ page, workspaceId }) => {
     const writes: string[] = [];
     await page.route('https://ds.example/**', async (route) => {
       const req = route.request();
@@ -218,10 +196,8 @@ test.describe('datasette live connect', () => {
       if (u.pathname === '/-/versions.json') return json({ datasette: { version: '1.0a37' } });
       if (u.pathname === '/-/actor.json') return json({ ok: true, actor: null });
       if (u.pathname === '/db/people.json') {
-        if (u.search.includes('_extra=primary_keys'))
-          return json({ ok: true, primary_keys: ['id'], rows: [] });
-        if (u.search.includes('_extra=columns'))
-          return json({ ok: true, columns: ['id', 'name'], rows: [] });
+        if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
+        if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'name'], rows: [] });
         return json({
           ok: true,
           next: null,
@@ -266,7 +242,10 @@ test.describe('datasette live connect', () => {
     // much as a local one — permanent removal is the footer's trash button, and
     // that is the path this test is about: it must drop the local record without
     // ever writing to the remote.
-    await page.locator(`#${panelDomId(tableId)} panel-footer`).getByTitle(/Delete this table/).click();
+    await page
+      .locator(`#${panelDomId(tableId)} panel-footer`)
+      .getByTitle(/Delete this table/)
+      .click();
     await page.locator('host-dialogs').getByRole('button', { name: 'Yes' }).click();
 
     // The local Table record is removed (the bug left it behind because the
@@ -286,10 +265,7 @@ test.describe('datasette live connect', () => {
     expect(writes).toEqual([]);
   });
 
-  test('a connected live table has a Refresh button that re-pulls remote rows', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('a connected live table has a Refresh button that re-pulls remote rows', async ({ page, workspaceId }) => {
     let people = [
       { id: 1, name: 'Alice' },
       { id: 2, name: 'Bob' },
@@ -306,10 +282,8 @@ test.describe('datasette live connect', () => {
       if (u.pathname === '/-/versions.json') return jm({ datasette: { version: '1.0a37' } });
       if (u.pathname === '/-/actor.json') return jm({ ok: true, actor: null });
       if (u.pathname === '/db/people.json') {
-        if (u.search.includes('_extra=primary_keys'))
-          return jm({ ok: true, primary_keys: ['id'], rows: [] });
-        if (u.search.includes('_extra=columns'))
-          return jm({ ok: true, columns: ['id', 'name'], rows: [] });
+        if (u.search.includes('_extra=primary_keys')) return jm({ ok: true, primary_keys: ['id'], rows: [] });
+        if (u.search.includes('_extra=columns')) return jm({ ok: true, columns: ['id', 'name'], rows: [] });
         return jm({ ok: true, next: null, rows: people });
       }
       return route.fulfill({ status: 404, body: '{"ok":false}' });
@@ -366,8 +340,7 @@ test.describe('datasette live connect', () => {
           body: JSON.stringify(body),
         });
       if (u.pathname === '/db/people.json') {
-        if (u.search.includes('_extra='))
-          return jm({ ok: true, primary_keys: ['id'], columns: ['id', 'name'], rows: [] });
+        if (u.search.includes('_extra=')) return jm({ ok: true, primary_keys: ['id'], columns: ['id', 'name'], rows: [] });
         rowRequests += 1;
         return jm({
           ok: true,
@@ -422,13 +395,8 @@ test.describe('datasette live connect', () => {
     expect(rowRequests).toBe(0);
 
     // Expand → the grid mounts and only NOW are the remote rows fetched.
-    await page.evaluate(
-      (d) => (document.getElementById(d) as HTMLElement & { normalize(): void }).normalize(),
-      domId,
-    );
-    await expect(
-      page.locator(`#${domId} .jsPanel-content data-table tbody tr:not(.spacer)`),
-    ).toHaveCount(2);
+    await page.evaluate((d) => (document.getElementById(d) as HTMLElement & { normalize(): void }).normalize(), domId);
+    await expect(page.locator(`#${domId} .jsPanel-content data-table tbody tr:not(.spacer)`)).toHaveCount(2);
     expect(rowRequests).toBeGreaterThan(0);
   });
 
@@ -439,10 +407,7 @@ test.describe('datasette live connect', () => {
     await expect(dlg.locator('input[type="text"]')).toHaveValue('https://datasette.io');
   });
 
-  test("a database URL lists that database's tables (no db picker) and connects them", async ({
-    page,
-    workspaceId,
-  }) => {
+  test("a database URL lists that database's tables (no db picker) and connects them", async ({ page, workspaceId }) => {
     await page.route('https://dbc.example/**', async (route) => {
       const u = new URL(route.request().url());
       const json = (body: unknown) =>
@@ -467,16 +432,12 @@ test.describe('datasette live connect', () => {
             ],
           });
         case '/legislators/legislators.json':
-          if (u.search.includes('_extra=columns'))
-            return json({ ok: true, columns: ['id', 'name'], rows: [] });
-          if (u.search.includes('_extra=primary_keys'))
-            return json({ ok: true, primary_keys: ['id'], rows: [] });
+          if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'name'], rows: [] });
+          if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
           return json({ ok: true, next: null, rows: [{ id: 1, name: 'A' }] });
         case '/legislators/offices.json':
-          if (u.search.includes('_extra=columns'))
-            return json({ ok: true, columns: ['id', 'city'], rows: [] });
-          if (u.search.includes('_extra=primary_keys'))
-            return json({ ok: true, primary_keys: ['id'], rows: [] });
+          if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'city'], rows: [] });
+          if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
           return json({ ok: true, next: null, rows: [{ id: 1, city: 'DC' }] });
         default:
           return route.fulfill({ status: 404, body: '{"ok":false}' });
@@ -493,11 +454,7 @@ test.describe('datasette live connect', () => {
     // default — so it can be opted in, but isn't connected unless ticked.
     const picker = page.locator('table-select-dialog dialog');
     await expect(picker.getByRole('button', { name: /^Connect \(/ })).toBeVisible();
-    await expect(picker.locator('ul.tables li .name')).toHaveText([
-      'legislators',
-      'offices',
-      'legislators_fts',
-    ]);
+    await expect(picker.locator('ul.tables li .name')).toHaveText(['legislators', 'offices', 'legislators_fts']);
     const ftsRow = picker.locator('ul.tables li').filter({ hasText: 'legislators_fts' });
     await expect(ftsRow.locator('.tag-hidden')).toBeVisible();
     await expect(ftsRow.locator('input[type="checkbox"]')).not.toBeChecked();
@@ -521,10 +478,7 @@ test.describe('datasette live connect', () => {
       .toEqual(['legislators/legislators', 'legislators/offices']);
   });
 
-  test('connects when the version probe is blocked but table pages read (Cloudflare case)', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('connects when the version probe is blocked but table pages read (Cloudflare case)', async ({ page, workspaceId }) => {
     // Mimic datasette.io behind Cloudflare: /-/versions.json + /-/actor.json are
     // challenged (non-JSON), but the database page and table pages read fine.
     await page.route('https://wafed.example/**', async (route) => {
@@ -547,10 +501,8 @@ test.describe('datasette live connect', () => {
         return json({ ok: true, tables: [{ name: 'offices', count: 1312, primary_keys: ['id'] }] });
       }
       if (u.pathname === '/legislators/offices.json') {
-        if (u.search.includes('_extra=columns'))
-          return json({ ok: true, columns: ['id', 'city'], rows: [] });
-        if (u.search.includes('_extra=primary_keys'))
-          return json({ ok: true, primary_keys: ['id'], rows: [] });
+        if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'city'], rows: [] });
+        if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
         return json({ ok: true, next: null, rows: [{ id: 1, city: 'DC' }] });
       }
       return route.fulfill({ status: 404, body: '{"ok":false}' });
@@ -570,9 +522,7 @@ test.describe('datasette live connect', () => {
       .poll(() =>
         page.evaluate(async (ws) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const t = (await (window as any).__easydb.store.tables.find()).find(
-            (x: any) => x.workspaceId === ws && x.source?.type === 'datasette',
-          );
+          const t = (await (window as any).__easydb.store.tables.find()).find((x: any) => x.workspaceId === ws && x.source?.type === 'datasette');
           return t ? { table: t.source.config.table, writable: t.source.writable } : null;
         }, workspaceId),
       )
@@ -580,10 +530,7 @@ test.describe('datasette live connect', () => {
       .toEqual({ table: 'offices', writable: false });
   });
 
-  test('an instance URL lists databases (skipping _memory, honouring custom routes), then tables', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('an instance URL lists databases (skipping _memory, honouring custom routes), then tables', async ({ page, workspaceId }) => {
     await page.route('https://inst.example/**', async (route) => {
       const u = new URL(route.request().url());
       const json = (body: unknown) =>
@@ -612,10 +559,8 @@ test.describe('datasette live connect', () => {
         case '/alt-route.json': // reached only if the ROUTE (not name 'special') is used
           return json({ ok: true, tables: [{ name: 'widgets', count: 3, primary_keys: ['id'] }] });
         case '/alt-route/widgets.json':
-          if (u.search.includes('_extra=columns'))
-            return json({ ok: true, columns: ['id', 'label'], rows: [] });
-          if (u.search.includes('_extra=primary_keys'))
-            return json({ ok: true, primary_keys: ['id'], rows: [] });
+          if (u.search.includes('_extra=columns')) return json({ ok: true, columns: ['id', 'label'], rows: [] });
+          if (u.search.includes('_extra=primary_keys')) return json({ ok: true, primary_keys: ['id'], rows: [] });
           return json({
             ok: true,
             next: null,
@@ -639,9 +584,7 @@ test.describe('datasette live connect', () => {
     // listed by its route.
     const picker = page.locator('table-select-dialog dialog');
     await expect(picker.getByRole('button', { name: /Next: choose tables/ })).toBeVisible();
-    const dbNames = (await picker.locator('ul.tables li .name').allInnerTexts()).map((s) =>
-      s.trim(),
-    );
+    const dbNames = (await picker.locator('ul.tables li .name').allInnerTexts()).map((s) => s.trim());
     expect(dbNames).toEqual(['main', 'alt-route']);
 
     // Choose only the custom-route database.
@@ -659,9 +602,7 @@ test.describe('datasette live connect', () => {
       .poll(() =>
         page.evaluate(async (ws) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const t = (await (window as any).__easydb.store.tables.find()).find(
-            (x: any) => x.workspaceId === ws && x.source?.type === 'datasette',
-          );
+          const t = (await (window as any).__easydb.store.tables.find()).find((x: any) => x.workspaceId === ws && x.source?.type === 'datasette');
           if (!t) return null;
           const rows = await (window as any).__easydb.store.rows(t.id).find();
           return { db: t.source.config.db, table: t.source.config.table, rowCount: rows.length };

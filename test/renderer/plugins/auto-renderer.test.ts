@@ -8,9 +8,7 @@ describe('inferRenderer', () => {
   });
 
   it('picks image for image URLs and data: URIs, in preference to link', () => {
-    expect(inferRenderer('string', ['https://x.test/a.png', 'https://x.test/b.JPG?v=2'])).toBe(
-      'image',
-    );
+    expect(inferRenderer('string', ['https://x.test/a.png', 'https://x.test/b.JPG?v=2'])).toBe('image');
     expect(inferRenderer('string', ['data:image/png;base64,AAAA'])).toBe('image');
   });
 
@@ -73,11 +71,7 @@ describe('withInferredRenderers', () => {
   ];
 
   it('fills in a renderer per column from the rows', () => {
-    expect(withInferredRenderers(cols, rows).map((c) => c.renderer)).toEqual([
-      'link',
-      undefined,
-      'image',
-    ]);
+    expect(withInferredRenderers(cols, rows).map((c) => c.renderer)).toEqual(['link', undefined, 'image']);
   });
 
   it('never overrides a renderer that is already set', () => {

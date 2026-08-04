@@ -9,9 +9,7 @@ import { addRow, createTable, panelDomId, waitForPanel } from './helpers.js';
  * the column out to the full URL width.
  */
 
-test('a long link is ellipsized to the column width, full value in the tooltip', async ({
-  page,
-}) => {
+test('a long link is ellipsized to the column width, full value in the tooltip', async ({ page }) => {
   const longUrl = 'https://example.com/' + 'segment-'.repeat(60) + 'end';
 
   const tableId = await createTable(page, 'links', [{ field: 'url', renderer: 'link' }]);

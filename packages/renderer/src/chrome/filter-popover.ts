@@ -1,10 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import {
-  composeColumnFilter,
-  parseColumnFilter,
-  type FilterToken,
-} from '../search/column-filter.js';
+import { composeColumnFilter, parseColumnFilter, type FilterToken } from '../search/column-filter.js';
 import { materialIconStyles } from './material-icon-css.js';
 
 /** Tri-state of one value in the picker: included, excluded, or unset. */
@@ -46,7 +42,9 @@ export class FilterPopover extends LitElement {
         max-height: 360px;
         display: flex;
         flex-direction: column;
-        font: 0.85rem system-ui, sans-serif;
+        font:
+          0.85rem system-ui,
+          sans-serif;
         overflow: hidden;
       }
       :host([hidden]) {
@@ -224,12 +222,7 @@ export class FilterPopover extends LitElement {
     this.onChange = onChange ?? null;
     this.exactValues = opts?.exact === true;
     // Seed the tri-states from the active filter so re-opening shows what's on.
-    this.states = new Map(
-      parseColumnFilter(current ?? '').map((t) => [
-        keyOf(t),
-        { state: t.negate ? ('not' as const) : ('on' as const), token: t },
-      ]),
-    );
+    this.states = new Map(parseColumnFilter(current ?? '').map((t) => [keyOf(t), { state: t.negate ? ('not' as const) : ('on' as const), token: t }]));
     this.current = current ?? '';
     this.search = '';
     this.style.top = `${Math.round(anchor.bottom + 4)}px`;
@@ -250,9 +243,7 @@ export class FilterPopover extends LitElement {
    * `=NULL` would look for the literal text "null".
    */
   private cycle(value: string, exact = this.exactValues) {
-    const token: FilterToken = exact
-      ? { term: value, negate: false, exact: true }
-      : { term: value, negate: false };
+    const token: FilterToken = exact ? { term: value, negate: false, exact: true } : { term: value, negate: false };
     const key = keyOf(token);
     const next = new Map(this.states);
     const entry = next.get(key);
@@ -298,35 +289,14 @@ export class FilterPopover extends LitElement {
     const filtered = this.values.filter((v) => v.value.toLowerCase().includes(q));
     const showBlanks = this.blanks > 0 && '(blanks)'.includes(q);
     const stateOf = (value: string, exact = this.exactValues): ValueState | undefined =>
-      this.states.get(
-        keyOf(exact ? { term: value, negate: false, exact: true } : { term: value, negate: false }),
-      )?.state;
-    const box = (state: ValueState | undefined) => html`
-      <span class=${`cb${state ? ` ${state}` : ''}`}
-        >${state === 'on' ? '✓' : state === 'not' ? '✕' : ''}</span
-      >
-    `;
-    const rowTitle = (state: ValueState | undefined) =>
-      state === 'on'
-        ? 'Included — click to exclude'
-        : state === 'not'
-          ? 'Excluded — click to clear'
-          : 'Click to include → exclude → off';
+      this.states.get(keyOf(exact ? { term: value, negate: false, exact: true } : { term: value, negate: false }))?.state;
+    const box = (state: ValueState | undefined) => html` <span class=${`cb${state ? ` ${state}` : ''}`}>${state === 'on' ? '✓' : state === 'not' ? '✕' : ''}</span> `;
+    const rowTitle = (state: ValueState | undefined) => (state === 'on' ? 'Included — click to exclude' : state === 'not' ? 'Excluded — click to clear' : 'Click to include → exclude → off');
     return html`
       <header>
         <span class="mi sm">search</span>
-        <input
-          type="text"
-          autofocus
-          placeholder="Filter values…"
-          .value=${this.search}
-          @input=${(e: Event) => (this.search = (e.target as HTMLInputElement).value)}
-        />
-        <button
-          class="icon"
-          title="Close"
-          @click=${() => this.close(null)}
-        >
+        <input type="text" autofocus placeholder="Filter values…" .value=${this.search} @input=${(e: Event) => (this.search = (e.target as HTMLInputElement).value)} />
+        <button class="icon" title="Close" @click=${() => this.close(null)}>
           <span class="mi sm">close</span>
         </button>
       </header>
@@ -336,11 +306,7 @@ export class FilterPopover extends LitElement {
         : html`<ul>
             ${showBlanks
               ? html`
-                  <li
-                    class="blanks"
-                    title=${rowTitle(stateOf('NULL', false))}
-                    @click=${() => this.cycle('NULL', false)}
-                  >
+                  <li class="blanks" title=${rowTitle(stateOf('NULL', false))} @click=${() => this.cycle('NULL', false)}>
                     <span class="left">
                       ${box(stateOf('NULL', false))}
                       <span class="label"><em>(Blanks)</em></span>
@@ -362,9 +328,7 @@ export class FilterPopover extends LitElement {
               `;
             })}
           </ul>`}
-      ${this.values.length > 500
-        ? html`<div class="cap" style="padding:0 .55rem">Showing first 500 of ${this.values.length}.</div>`
-        : ''}
+      ${this.values.length > 500 ? html`<div class="cap" style="padding:0 .55rem">Showing first 500 of ${this.values.length}.</div>` : ''}
       <div class="actions">
         <button
           class="text"

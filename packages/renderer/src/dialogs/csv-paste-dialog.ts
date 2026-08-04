@@ -39,7 +39,10 @@ export class CsvPasteDialog extends LitElement {
         border-radius: 0.25rem;
       }
       textarea {
-        font: 0.85rem ui-monospace, SFMono-Regular, monospace;
+        font:
+          0.85rem ui-monospace,
+          SFMono-Regular,
+          monospace;
         padding: 0.5rem;
         border: 1px solid #d1d5db;
         border-radius: 0.25rem;
@@ -112,10 +115,7 @@ export class CsvPasteDialog extends LitElement {
       updatedAt: Date.now(),
     }));
     await ctx.store.rows(tableId).bulkInsert(docs);
-    ctx.api.ui.dialogs.toast(
-      `Imported ${parsed.rows.length} row${parsed.rows.length === 1 ? '' : 's'} into "${name}".`,
-      { kind: 'success', title: 'CSV paste' },
-    );
+    ctx.api.ui.dialogs.toast(`Imported ${parsed.rows.length} row${parsed.rows.length === 1 ? '' : 's'} into "${name}".`, { kind: 'success', title: 'CSV paste' });
     this.close();
   }
 
@@ -132,27 +132,14 @@ export class CsvPasteDialog extends LitElement {
             </div>
           </div>
           <div class="dialog-body">
-            <p class="hint">
-              First line is treated as the header. Separator is auto-detected
-              (comma / semicolon / tab). Column types are inferred from data.
-            </p>
+            <p class="hint">First line is treated as the header. Separator is auto-detected (comma / semicolon / tab). Column types are inferred from data.</p>
             <label>
               Table name
-              <input
-                type="text"
-                autofocus
-                .value=${this.name}
-                placeholder="pasted"
-                @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)}
-              />
+              <input type="text" autofocus .value=${this.name} placeholder="pasted" @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)} />
             </label>
             <label>
               CSV
-              <textarea
-                spellcheck="false"
-                .value=${this.text}
-                @input=${(e: Event) => (this.text = (e.target as HTMLTextAreaElement).value)}
-              ></textarea>
+              <textarea spellcheck="false" .value=${this.text} @input=${(e: Event) => (this.text = (e.target as HTMLTextAreaElement).value)}></textarea>
             </label>
             ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''}
           </div>

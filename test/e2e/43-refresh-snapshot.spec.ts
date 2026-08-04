@@ -63,30 +63,21 @@ async function clickRefresh(page: import('@playwright/test').Page) {
 test('a refresh discovers a column the source has grown', async ({ page, workspaceId }) => {
   await serve(page, V1);
   await importCsv(page);
-  await expect
-    .poll(async () => (await snapshot(page, workspaceId))?.fields)
-    .toEqual(['city', 'pop']);
+  await expect.poll(async () => (await snapshot(page, workspaceId))?.fields).toEqual(['city', 'pop']);
 
   await serve(page, V2);
   await clickRefresh(page);
 
   // The new column is appended, not ignored — and the old ones keep their order.
-  await expect
-    .poll(async () => (await snapshot(page, workspaceId))?.fields)
-    .toEqual(['city', 'pop', 'canton']);
+  await expect.poll(async () => (await snapshot(page, workspaceId))?.fields).toEqual(['city', 'pop', 'canton']);
   const after = await snapshot(page, workspaceId);
   expect(after?.rows.map((r) => r.canton).sort()).toEqual(['BE', 'ZG']);
 });
 
-test('a refresh keeps a column the user added, and never re-adds a deleted one', async ({
-  page,
-  workspaceId,
-}) => {
+test('a refresh keeps a column the user added, and never re-adds a deleted one', async ({ page, workspaceId }) => {
   await serve(page, V1);
   await importCsv(page);
-  await expect
-    .poll(async () => (await snapshot(page, workspaceId))?.fields)
-    .toEqual(['city', 'pop']);
+  await expect.poll(async () => (await snapshot(page, workspaceId))?.fields).toEqual(['city', 'pop']);
   const before = await snapshot(page, workspaceId);
 
   // Add a local column with a value, and record `pop` as deliberately deleted.
@@ -96,10 +87,7 @@ test('a refresh keeps a column the user added, and never re-adds a deleted one',
       const store = (window as any).__easydb.store;
       const t = await store.tables.findOne(tableId);
       await store.tables.patch(tableId, {
-        columns: [
-          ...t.columns.filter((c: { field: string }) => c.field !== 'pop'),
-          { field: 'note', label: 'Note', type: 'string' },
-        ],
+        columns: [...t.columns.filter((c: { field: string }) => c.field !== 'pop'), { field: 'note', label: 'Note', type: 'string' }],
         deletedColumns: ['pop'],
         updatedAt: Date.now(),
       });
@@ -114,9 +102,7 @@ test('a refresh keeps a column the user added, and never re-adds a deleted one',
   await serve(page, V2);
   await clickRefresh(page);
 
-  await expect
-    .poll(async () => (await snapshot(page, workspaceId))?.fields)
-    .toEqual(['city', 'note', 'canton']);
+  await expect.poll(async () => (await snapshot(page, workspaceId))?.fields).toEqual(['city', 'note', 'canton']);
 
   const after = await snapshot(page, workspaceId);
   // `pop` stays gone — a deleted column is not resurrected by a refresh.
@@ -128,10 +114,7 @@ test('a refresh keeps a column the user added, and never re-adds a deleted one',
   expect(after?.rows.map((r) => r.note).sort()).toEqual(['seen Bern', 'seen Zug']);
 });
 
-test('what the user typed into their own column survives a refresh', async ({
-  page,
-  workspaceId,
-}) => {
+test('what the user typed into their own column survives a refresh', async ({ page, workspaceId }) => {
   // The reported bug, end to end: import a snapshot, add a field, fill it in,
   // press Refresh — and find the typing gone.
   await serve(page, V1);
@@ -167,10 +150,12 @@ test('what the user typed into their own column survives a refresh', async ({
 
   const after = await snapshot(page, workspaceId);
   // The user's values stayed with THEIR rows…
-  expect(after?.rows.filter((r) => r.rating).map((r) => `${r.city}=${r.rating}`).sort()).toEqual([
-    'Bern=Bern!',
-    'Zug=Zug!',
-  ]);
+  expect(
+    after?.rows
+      .filter((r) => r.rating)
+      .map((r) => `${r.city}=${r.rating}`)
+      .sort(),
+  ).toEqual(['Bern=Bern!', 'Zug=Zug!']);
   // …and the new row arrived with none, since there was nothing local to carry.
   expect(after?.rows.find((r) => r.city === 'Chur')?.rating).toBeUndefined();
 });

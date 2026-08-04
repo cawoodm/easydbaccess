@@ -45,11 +45,7 @@ function displayName(t: Table): string {
 
 /** The element panels mount into — the pan/zoom-transformed viewport. */
 function panelContainer(): HTMLElement {
-  return (
-    document.getElementById('easydb-panels-viewport') ??
-    document.getElementById('easydb-panels') ??
-    document.body
-  );
+  return document.getElementById('easydb-panels-viewport') ?? document.getElementById('easydb-panels') ?? document.body;
 }
 
 /**
@@ -191,9 +187,7 @@ export async function initWindowManager(): Promise<void> {
         }
       }
     }
-    const toOpen = inWs
-      .filter((t) => !panels.has(t.id) && !t.windowGeometry?.closed)
-      .sort(byAscendingZ);
+    const toOpen = inWs.filter((t) => !panels.has(t.id) && !t.windowGeometry?.closed).sort(byAscendingZ);
     for (const t of toOpen) openPanel(t, ctx);
   });
 
@@ -259,9 +253,7 @@ function openPanel(t: Table, ctx: AppContext): void {
   };
   const mountContent = (): void => {
     if (contentEl) return;
-    const host = document
-      .getElementById(panelId)
-      ?.querySelector('.jsPanel-content') as HTMLElement | null;
+    const host = document.getElementById(panelId)?.querySelector('.jsPanel-content') as HTMLElement | null;
     if (!host) return;
     host.replaceChildren(); // drop the minimized placeholder / any stale node
     const el = makeGrid();
@@ -327,9 +319,7 @@ function openPanel(t: Table, ctx: AppContext): void {
     footerToolbar: footer,
     // Saved g.w/g.h come from offsetWidth/Height (total panel size incl.
     // chrome), so restores use panelSize; new panels size the data area.
-    ...(g
-      ? { panelSize: { w: g.w, h: g.h }, position: { x: g.x, y: g.y } }
-      : { contentSize: { w: DEFAULT_W, h: DEFAULT_H }, position: nextCascadePosition() }),
+    ...(g ? { panelSize: { w: g.w, h: g.h }, position: { x: g.x, y: g.y } } : { contentSize: { w: DEFAULT_W, h: DEFAULT_H }, position: nextCascadePosition() }),
     minimizeTo: '#easydb-minimized-dock',
     viewport: shellViewport(),
     // ?minimize wins over a saved maximized/collapsed state — nothing loads rows
@@ -377,8 +367,7 @@ function openPanel(t: Table, ctx: AppContext): void {
   infoBtn.setAttribute('aria-label', 'Table info');
   infoBtn.className = 'eda-info-btn';
   infoBtn.textContent = 'ⓘ';
-  infoBtn.style.cssText =
-    'display:none;background:none;border:0;color:inherit;cursor:pointer;font-size:1rem;line-height:1;padding:0 0.3rem;';
+  infoBtn.style.cssText = 'display:none;background:none;border:0;color:inherit;cursor:pointer;font-size:1rem;line-height:1;padding:0 0.3rem;';
   infoBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (!curTable) return;

@@ -12,14 +12,8 @@ import { addRow, createTable, waitForPanel } from './helpers.js';
  */
 
 test.describe('sql-export', () => {
-  test('date columns serialize as YYYYMMDD CHAR(8); datetime stays ISO TIMESTAMP', async ({
-    page,
-  }) => {
-    const id = await createTable(page, 'Visits', [
-      { field: 'name' },
-      { field: 'dob', type: 'date' },
-      { field: 'seen_at', type: 'datetime' },
-    ]);
+  test('date columns serialize as YYYYMMDD CHAR(8); datetime stays ISO TIMESTAMP', async ({ page }) => {
+    const id = await createTable(page, 'Visits', [{ field: 'name' }, { field: 'dob', type: 'date' }, { field: 'seen_at', type: 'datetime' }]);
     await waitForPanel(page, id);
     await addRow(page, id, { name: 'Alice', dob: '2026-05-24', seen_at: '2026-05-24T14:30' });
     await addRow(page, id, { name: 'Bob', dob: '', seen_at: null });

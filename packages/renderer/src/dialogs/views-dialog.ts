@@ -13,10 +13,7 @@ import { revealViewWindow } from '../window-mgr/view-window-manager.js';
  * `editInstanceId` to jump into editing that view instance (rename / re-map) —
  * both used by the icon buttons in a view window's footer.
  */
-export function openViewsDialog(
-  tableId: string,
-  opts?: { editTemplateId?: string; editInstanceId?: string },
-): void {
+export function openViewsDialog(tableId: string, opts?: { editTemplateId?: string; editInstanceId?: string }): void {
   const dlg = ViewsDialog.instance ?? mount();
   void dlg.open(tableId, opts);
 }
@@ -28,10 +25,7 @@ function mount(): ViewsDialog {
 }
 
 function uuid(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  );
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 interface TemplateDraft {
@@ -207,10 +201,7 @@ export class ViewsDialog extends LitElement {
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
   }
 
-  async open(
-    tableId: string,
-    opts?: { editTemplateId?: string; editInstanceId?: string },
-  ): Promise<void> {
+  async open(tableId: string, opts?: { editTemplateId?: string; editInstanceId?: string }): Promise<void> {
     this.tableId = tableId;
     this.mode = 'list';
     this.tDraft = null;
@@ -234,12 +225,8 @@ export class ViewsDialog extends LitElement {
     const wsId = ctx.workspaceId;
     this.table = await ctx.store.tables.findOne(this.tableId);
     this.columns = this.table?.columns ?? [];
-    this.instances = (await ctx.store.viewInstances.find({ workspaceId: wsId })).filter(
-      (v) => v.tableId === this.tableId,
-    );
-    this.templates = (await ctx.store.viewTemplates.find({ workspaceId: wsId })).sort((a, b) =>
-      a.name.localeCompare(b.name),
-    );
+    this.instances = (await ctx.store.viewInstances.find({ workspaceId: wsId })).filter((v) => v.tableId === this.tableId);
+    this.templates = (await ctx.store.viewTemplates.find({ workspaceId: wsId })).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   private close = (): void => {
@@ -275,9 +262,7 @@ export class ViewsDialog extends LitElement {
     const tpl = await ctx.store.viewTemplates.findOne(inst.templateId);
     // Recover the template's live tokens; fall back to whatever the instance
     // already mapped if the template is gone.
-    const tokens = tpl
-      ? extractTokens(tpl.headerHtml, tpl.rowHtml, tpl.footerHtml)
-      : Object.keys(inst.mapping);
+    const tokens = tpl ? extractTokens(tpl.headerHtml, tpl.rowHtml, tpl.footerHtml) : Object.keys(inst.mapping);
     this.iDraft = {
       id: inst.id,
       templateId: inst.templateId,
@@ -362,8 +347,7 @@ export class ViewsDialog extends LitElement {
     const ctx = await getContext();
     const ok = await ctx.api.ui.dialogs.confirm(
       t.builtin
-        ? `Delete the built-in template "${t.name}"? It will not be seeded again in this ` +
-            `workspace. Views already created from it keep working.`
+        ? `Delete the built-in template "${t.name}"? It will not be seeded again in this ` + `workspace. Views already created from it keep working.`
         : `Delete the template "${t.name}"? Views already created from it keep working.`,
       t.builtin ? 'Delete built-in template' : 'Delete template',
     );
@@ -382,14 +366,9 @@ export class ViewsDialog extends LitElement {
     // proposes "<name> copy" — two templates called the same thing are then
     // impossible to tell apart in the list. Compared case-insensitively, and
     // against the OTHER templates only, so re-saving a template is fine.
-    const clash = this.templates.find(
-      (t) => t.id !== d.id && t.name.trim().toLowerCase() === d.name.trim().toLowerCase(),
-    );
+    const clash = this.templates.find((t) => t.id !== d.id && t.name.trim().toLowerCase() === d.name.trim().toLowerCase());
     if (clash) {
-      await ctx.api.ui.dialogs.alert(
-        `A template called “${clash.name}” already exists. Pick another name.`,
-        'Duplicate template name',
-      );
+      await ctx.api.ui.dialogs.alert(`A template called “${clash.name}” already exists. Pick another name.`, 'Duplicate template name');
       return;
     }
     if (d.id) {
@@ -455,9 +434,7 @@ export class ViewsDialog extends LitElement {
    */
   private autoMap(token: string): string {
     const lc = token.toLowerCase();
-    const hit = this.columns.find(
-      (c) => c.field.toLowerCase() === lc || (c.label ?? '').toLowerCase() === lc,
-    );
+    const hit = this.columns.find((c) => c.field.toLowerCase() === lc || (c.label ?? '').toLowerCase() === lc);
     if (hit) return hit.field;
     // `CHECK1`, `CHECK2`, … (the RSS template's editable `$input.CHECKn` flags)
     // map to the table's Nth boolean column, so a new view gets ready-to-tick
@@ -469,19 +446,7 @@ export class ViewsDialog extends LitElement {
       return bools[idx]?.field ?? '';
     }
     // Todo's DONE (and similar flag words) -> the first boolean column.
-    const boolWords = [
-      'done',
-      'complete',
-      'completed',
-      'checked',
-      'check',
-      'read',
-      'active',
-      'enabled',
-      'starred',
-      'flag',
-      'ok',
-    ];
+    const boolWords = ['done', 'complete', 'completed', 'checked', 'check', 'read', 'active', 'enabled', 'starred', 'flag', 'ok'];
     if (boolWords.includes(lc)) return this.firstColumn((c) => c.type === 'boolean');
 
     // Fall back to the table's designated label column (e.g. Datasette's
@@ -490,17 +455,7 @@ export class ViewsDialog extends LitElement {
     const label = this.table?.labelColumn;
     if (label && (lc === 'title' || lc === 'name' || lc === 'label')) return label;
 
-    const dateWords = [
-      'date',
-      'datetime',
-      'time',
-      'created',
-      'updated',
-      'modified',
-      'timestamp',
-      'day',
-      'when',
-    ];
+    const dateWords = ['date', 'datetime', 'time', 'created', 'updated', 'modified', 'timestamp', 'day', 'when'];
     if (dateWords.includes(lc)) {
       return this.firstColumn((c) => c.type === 'date' || c.type === 'datetime');
     }
@@ -524,20 +479,7 @@ export class ViewsDialog extends LitElement {
 
     // Gallery's IMAGE -> an image-renderer column, else an image-named column,
     // else any URL-ish column (images are commonly stored as URLs).
-    const imageWords = [
-      'image',
-      'img',
-      'photo',
-      'picture',
-      'pic',
-      'thumbnail',
-      'thumb',
-      'avatar',
-      'cover',
-      'poster',
-      'logo',
-      'icon',
-    ];
+    const imageWords = ['image', 'img', 'photo', 'picture', 'pic', 'thumbnail', 'thumb', 'avatar', 'cover', 'poster', 'logo', 'icon'];
     if (imageWords.includes(lc)) {
       const byRenderer = this.firstColumn((c) => c.renderer === 'image');
       if (byRenderer) return byRenderer;
@@ -552,21 +494,7 @@ export class ViewsDialog extends LitElement {
       return this.firstColumn(nameContains(['phone', 'tel', 'mobile', 'cell']));
     }
 
-    const descWords = [
-      'description',
-      'desc',
-      'notes',
-      'note',
-      'body',
-      'text',
-      'summary',
-      'about',
-      'comment',
-      'comments',
-      'details',
-      'detail',
-      'remarks',
-    ];
+    const descWords = ['description', 'desc', 'notes', 'note', 'body', 'text', 'summary', 'about', 'comment', 'comments', 'details', 'detail', 'remarks'];
     if (descWords.includes(lc)) {
       const named = this.firstColumn((c) => {
         if (c.type !== 'string') return false;
@@ -604,9 +532,7 @@ export class ViewsDialog extends LitElement {
         updatedAt: Date.now(),
       });
       // Reflect the change in an already-open window.
-      document.dispatchEvent(
-        new CustomEvent('easydb:reload-view', { detail: { instanceId: d.id } }),
-      );
+      document.dispatchEvent(new CustomEvent('easydb:reload-view', { detail: { instanceId: d.id } }));
       await this.refresh();
       this.mode = 'list';
       return;
@@ -644,27 +570,10 @@ export class ViewsDialog extends LitElement {
             (v) =>
               html`<li>
                 <span class="name">${v.name}</span>
-                <button type="button" class="mini" @click=${() => this.openInstance(v.id)}>
-                  Open
-                </button>
-                <button type="button" class="mini" @click=${() => void this.editInstance(v)}>
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  class="mini"
-                  title="Duplicate this view, picking up columns added to the table since"
-                  @click=${() => void this.copyInstance(v)}
-                >
-                  Copy
-                </button>
-                <button
-                  type="button"
-                  class="mini danger"
-                  @click=${() => void this.deleteInstance(v.id)}
-                >
-                  Delete
-                </button>
+                <button type="button" class="mini" @click=${() => this.openInstance(v.id)}>Open</button>
+                <button type="button" class="mini" @click=${() => void this.editInstance(v)}>Edit</button>
+                <button type="button" class="mini" title="Duplicate this view, picking up columns added to the table since" @click=${() => void this.copyInstance(v)}>Copy</button>
+                <button type="button" class="mini danger" @click=${() => void this.deleteInstance(v.id)}>Delete</button>
               </li>`,
           )}
         </ul>
@@ -678,18 +587,12 @@ export class ViewsDialog extends LitElement {
                 <span class="name">${t.name}</span>
                 ${t.builtin ? html`<span class="badge">built-in</span>` : nothing}
                 <button type="button" class="mini" @click=${() => this.useTemplate(t)}>Use</button>
-                <button type="button" class="mini" @click=${() => this.editTemplate(t)}>
-                  Edit
-                </button>
-                <button type="button" class="mini" @click=${() => this.copyTemplate(t)}>
-                  Copy
-                </button>
+                <button type="button" class="mini" @click=${() => this.editTemplate(t)}>Edit</button>
+                <button type="button" class="mini" @click=${() => this.copyTemplate(t)}>Copy</button>
                 <button
                   type="button"
                   class="mini danger"
-                  title=${t.builtin
-                    ? 'Delete this built-in template (it will not be seeded again)'
-                    : 'Delete this template'}
+                  title=${t.builtin ? 'Delete this built-in template (it will not be seeded again)' : 'Delete this template'}
                   @click=${() => void this.deleteTemplate(t)}
                 >
                   Delete
@@ -698,14 +601,10 @@ export class ViewsDialog extends LitElement {
           )}
         </ul>
         <div>
-          <button type="button" class="mini" @click=${() => this.newTemplate()}>
-            + New template
-          </button>
+          <button type="button" class="mini" @click=${() => this.newTemplate()}>+ New template</button>
         </div>
         <p class="hint">
-          A template's row HTML uses <code>$TOKEN</code> placeholders (e.g. <code>$TITLE</code>).
-          Leave row HTML blank to show a read-only columns table with the header/footer HTML around
-          it.
+          A template's row HTML uses <code>$TOKEN</code> placeholders (e.g. <code>$TITLE</code>). Leave row HTML blank to show a read-only columns table with the header/footer HTML around it.
         </p>
       </div>
     `;
@@ -727,11 +626,7 @@ export class ViewsDialog extends LitElement {
       </label>
       <label class="field">
         Row HTML <span class="hint">(blank ⇒ read-only table)</span>
-        <textarea
-          .value=${d.rowHtml}
-          @input=${set('rowHtml')}
-          placeholder="&lt;div&gt;$TITLE&lt;/div&gt;"
-        ></textarea>
+        <textarea .value=${d.rowHtml} @input=${set('rowHtml')} placeholder="&lt;div&gt;$TITLE&lt;/div&gt;"></textarea>
       </label>
       <label class="field">
         Footer HTML
@@ -745,12 +640,7 @@ export class ViewsDialog extends LitElement {
     return html`
       <label class="field">
         View name
-        <input
-          type="text"
-          .value=${d.name}
-          @input=${(e: Event) =>
-            (this.iDraft = { ...d, name: (e.target as HTMLInputElement).value })}
-        />
+        <input type="text" .value=${d.name} @input=${(e: Event) => (this.iDraft = { ...d, name: (e.target as HTMLInputElement).value })} />
       </label>
       <label class="field">
         Show at most (rows, 0 = all)
@@ -766,21 +656,13 @@ export class ViewsDialog extends LitElement {
         />
       </label>
       <label class="field-inline">
-        <input
-          type="checkbox"
-          .checked=${d.readonly}
-          @change=${(e: Event) =>
-            (this.iDraft = { ...d, readonly: (e.target as HTMLInputElement).checked })}
-        />
+        <input type="checkbox" .checked=${d.readonly} @change=${(e: Event) => (this.iDraft = { ...d, readonly: (e.target as HTMLInputElement).checked })} />
         Readonly (show values without editors in the table view)
       </label>
       <div class="section">
         <h3>Map placeholders to columns</h3>
         ${d.tokens.length === 0
-          ? html`<p class="hint">
-              This template has no <code>$TOKEN</code> placeholders — it will show the read-only
-              table with your current sort, filter and visible columns.
-            </p>`
+          ? html`<p class="hint">This template has no <code>$TOKEN</code> placeholders — it will show the read-only table with your current sort, filter and visible columns.</p>`
           : d.tokens.map(
               (tok) =>
                 html`<div class="map-row">
@@ -793,21 +675,13 @@ export class ViewsDialog extends LitElement {
                       })}
                   >
                     <option value="" ?selected=${!d.mapping[tok]}>— none —</option>
-                    ${this.columns.map(
-                      (c) =>
-                        html`<option value=${c.field} ?selected=${d.mapping[tok] === c.field}>
-                          ${c.label || c.field}
-                        </option>`,
-                    )}
+                    ${this.columns.map((c) => html`<option value=${c.field} ?selected=${d.mapping[tok] === c.field}>${c.label || c.field}</option>`)}
                   </select>
                 </div>`,
             )}
       </div>
       <p class="hint">
-        ${d.id
-          ? html`Editing name and column mapping. The snapshotted sort, filters and visible columns
-            are kept.`
-          : html`The view snapshots this table's current sort, filters and visible columns.`}
+        ${d.id ? html`Editing name and column mapping. The snapshotted sort, filters and visible columns are kept.` : html`The view snapshots this table's current sort, filters and visible columns.`}
       </p>
     `;
   }
@@ -824,17 +698,9 @@ export class ViewsDialog extends LitElement {
 
     const actions =
       this.mode === 'template'
-        ? html`<button type="button" class="ghost" @click=${() => (this.mode = 'list')}>
-              Back
-            </button>
-            <button type="submit" class="primary">Save</button>`
+        ? html`<button type="button" class="ghost" @click=${() => (this.mode = 'list')}>Back</button> <button type="submit" class="primary">Save</button>`
         : this.mode === 'instance'
-          ? html`<button type="button" class="ghost" @click=${() => (this.mode = 'list')}>
-                Back
-              </button>
-              <button type="submit" class="primary">
-                ${this.iDraft?.id ? 'Save' : 'Create view'}
-              </button>`
+          ? html`<button type="button" class="ghost" @click=${() => (this.mode = 'list')}>Back</button> <button type="submit" class="primary">${this.iDraft?.id ? 'Save' : 'Create view'}</button>`
           : html`<button type="submit" class="ghost">Close</button>`;
 
     return html`
@@ -845,13 +711,7 @@ export class ViewsDialog extends LitElement {
             <h2>${title}</h2>
             <div class="header-actions">${actions}</div>
           </div>
-          <div class="dialog-body">
-            ${this.mode === 'template'
-              ? this.renderTemplate()
-              : this.mode === 'instance'
-                ? this.renderInstance()
-                : this.renderList()}
-          </div>
+          <div class="dialog-body">${this.mode === 'template' ? this.renderTemplate() : this.mode === 'instance' ? this.renderInstance() : this.renderList()}</div>
         </form>
       </dialog>
     `;

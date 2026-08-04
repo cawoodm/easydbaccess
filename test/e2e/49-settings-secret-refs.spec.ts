@@ -13,9 +13,7 @@ import { test, expect } from './fixtures.js';
  */
 test.describe('settings secret references', () => {
   const openSettings = async (page: import('@playwright/test').Page) => {
-    await page.evaluate(() =>
-      document.dispatchEvent(new CustomEvent('easydb:open-settings', { bubbles: true })),
-    );
+    await page.evaluate(() => document.dispatchEvent(new CustomEvent('easydb:open-settings', { bubbles: true })));
     const dlg = page.locator('settings-dialog dialog');
     await expect(dlg).toBeVisible();
     return dlg;
@@ -50,9 +48,7 @@ test.describe('settings secret references', () => {
   });
 
   test('a valid reference closes straight away', async ({ page }) => {
-    await page.evaluate(() =>
-      localStorage.setItem('/easydbaccess/secrets.txt', 'gist_pat: ghp_example'),
-    );
+    await page.evaluate(() => localStorage.setItem('/easydbaccess/secrets.txt', 'gist_pat: ghp_example'));
     const dlg = await openSettings(page);
     await dlg.getByRole('button', { name: 'Gist Sync' }).click();
     const token = dlg.locator('.secret-row input');

@@ -24,11 +24,7 @@ const col = (field: string, type: ColumnSpec['type'], label?: string): ColumnSpe
 
 describe('view-render', () => {
   it('extracts distinct tokens across fragments', () => {
-    expect(extractTokens('<a href="$URL">$TITLE</a>', '', 'foot $DATE $TITLE').sort()).toEqual([
-      'DATE',
-      'TITLE',
-      'URL',
-    ]);
+    expect(extractTokens('<a href="$URL">$TITLE</a>', '', 'foot $DATE $TITLE').sort()).toEqual(['DATE', 'TITLE', 'URL']);
   });
 
   it('ignores a $ not followed by a word (e.g. prices)', () => {
@@ -42,11 +38,7 @@ describe('view-render', () => {
   });
 
   it('extractTokens strips the input. prefix so $X and $input.X share one key', () => {
-    expect(extractTokens('$input.CHECK1 $input:CHECK2 $TITLE $input.TITLE').sort()).toEqual([
-      'CHECK1',
-      'CHECK2',
-      'TITLE',
-    ]);
+    expect(extractTokens('$input.CHECK1 $input:CHECK2 $TITLE $input.TITLE').sort()).toEqual(['CHECK1', 'CHECK2', 'TITLE']);
   });
 
   it('renders a checked, wired checkbox for an $input.TOKEN over a boolean field', () => {
@@ -146,9 +138,7 @@ describe('view-render', () => {
   it('$TOKEN and $input.TOKEN rendering is unchanged', () => {
     expect(substituteRow('$TAG', row({ tag: 'foo' }), { TAG: 'tag' })).toBe('foo');
     const cols = new Map([['tag', col('tag', 'string')]]);
-    expect(substituteRow('$input.TAG', row({ tag: 'foo' }), { TAG: 'tag' }, { columns: cols })).toContain(
-      'type="text"',
-    );
+    expect(substituteRow('$input.TAG', row({ tag: 'foo' }), { TAG: 'tag' }, { columns: cols })).toContain('type="text"');
   });
 
   describe('addPillValue / removePillValue', () => {
@@ -271,12 +261,7 @@ describe('view-render', () => {
   });
 
   it('viewRows ANDs the filters and pillFilters layers, then sorts', () => {
-    const rows = [
-      row({ n: 3, k: 'x', tag: 'a' }),
-      row({ n: 1, k: 'y', tag: 'a' }),
-      row({ n: 2, k: 'x', tag: 'b' }),
-      row({ n: 4, k: 'x', tag: 'a' }),
-    ];
+    const rows = [row({ n: 3, k: 'x', tag: 'a' }), row({ n: 1, k: 'y', tag: 'a' }), row({ n: 2, k: 'x', tag: 'b' }), row({ n: 4, k: 'x', tag: 'a' })];
     const out = viewRows(rows, {
       filters: { k: 'x' },
       pillFilters: { tag: '=a' },

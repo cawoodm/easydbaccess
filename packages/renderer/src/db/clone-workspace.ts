@@ -16,10 +16,7 @@ import { settingId, type EasyDb } from './dexie-db.js';
 export type CloneMode = 'all' | 'settings' | 'empty';
 
 function uuid(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  );
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 /**
@@ -32,10 +29,7 @@ function uuid(): string {
  *
  * Returns the new workspace id. Caller navigates to it (`?space=`).
  */
-export async function cloneWorkspace(
-  db: EasyDb,
-  opts: { from: string; to: string; name: string; mode: CloneMode },
-): Promise<string> {
+export async function cloneWorkspace(db: EasyDb, opts: { from: string; to: string; name: string; mode: CloneMode }): Promise<string> {
   const { from, to, name, mode } = opts;
   const source = await db.workspaces.get(from);
 
@@ -65,10 +59,7 @@ export async function cloneWorkspace(
       }
     }
 
-    const templates = (await db.viewTemplates
-      .where('workspaceId')
-      .equals(from)
-      .toArray()) as ViewTemplate[];
+    const templates = (await db.viewTemplates.where('workspaceId').equals(from).toArray()) as ViewTemplate[];
     const templateIdMap = new Map<string, string>();
     for (const vt of templates) {
       const newId = uuid();
@@ -76,10 +67,7 @@ export async function cloneWorkspace(
       await db.viewTemplates.put({ ...vt, id: newId, workspaceId: to });
     }
 
-    const instances = (await db.viewInstances
-      .where('workspaceId')
-      .equals(from)
-      .toArray()) as ViewInstance[];
+    const instances = (await db.viewInstances.where('workspaceId').equals(from).toArray()) as ViewInstance[];
     for (const inst of instances) {
       // A view whose table did not come along would dangle, so skip it.
       const tableId = tableIdMap.get(inst.tableId);

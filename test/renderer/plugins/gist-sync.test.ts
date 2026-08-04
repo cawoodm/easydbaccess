@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { HostApi, Table, ViewInstance } from '@easydb/shared';
-import {
-  fetchGistFileContent,
-  offerPrune,
-  staleTableFiles,
-} from '../../../packages/renderer/src/plugins/gist-sync.js';
+import { fetchGistFileContent, offerPrune, staleTableFiles } from '../../../packages/renderer/src/plugins/gist-sync.js';
 
 // offerPrune reaches the window manager through a dynamic import; the real module
 // registers custom elements and cannot load in this Node environment.
@@ -22,9 +18,7 @@ describe('fetchGistFileContent', () => {
   });
 
   it('fetches raw_url when truncated and returns the full body', async () => {
-    const doFetch = vi.fn(
-      async () => ({ ok: true, text: async () => '{"full":true}' }) as unknown as Response,
-    );
+    const doFetch = vi.fn(async () => ({ ok: true, text: async () => '{"full":true}' }) as unknown as Response);
     const out = await fetchGistFileContent(
       {
         content: '{"trunc',
@@ -38,18 +32,12 @@ describe('fetchGistFileContent', () => {
   });
 
   it('throws when truncated but no raw_url is provided', async () => {
-    await expect(fetchGistFileContent({ content: 'x', truncated: true }, vi.fn())).rejects.toThrow(
-      /raw_url/,
-    );
+    await expect(fetchGistFileContent({ content: 'x', truncated: true }, vi.fn())).rejects.toThrow(/raw_url/);
   });
 
   it('throws when the raw fetch is not ok', async () => {
-    const doFetch = vi.fn(
-      async () => ({ ok: false, status: 404, statusText: 'Not Found' }) as unknown as Response,
-    );
-    await expect(
-      fetchGistFileContent({ content: 'x', truncated: true, raw_url: 'https://x/raw' }, doFetch),
-    ).rejects.toThrow(/404/);
+    const doFetch = vi.fn(async () => ({ ok: false, status: 404, statusText: 'Not Found' }) as unknown as Response);
+    await expect(fetchGistFileContent({ content: 'x', truncated: true, raw_url: 'https://x/raw' }, doFetch)).rejects.toThrow(/404/);
   });
 });
 
@@ -92,10 +80,7 @@ describe('offerPrune', () => {
 
   it('lists the leftovers and deletes them once confirmed', async () => {
     deleteTable.mockClear();
-    const f = fakeApi(
-      [table('t1', 'Feed'), table('t2', 'Old')],
-      [view('v1', 'Cards'), view('v2', 'Gone')],
-    );
+    const f = fakeApi([table('t1', 'Feed'), table('t2', 'Old')], [view('v1', 'Cards'), view('v2', 'Gone')]);
     await offerPrune(f.api, WS, {
       tableNames: new Set(['feed']),
       viewInstanceIds: new Set(['v1']),
@@ -128,10 +113,7 @@ describe('offerPrune', () => {
   });
 
   it('ignores objects from another workspace', async () => {
-    const f = fakeApi(
-      [{ id: 't9', name: 'Elsewhere', workspaceId: 'other-ws' }],
-      [{ id: 'v9', name: 'Elsewhere view', workspaceId: 'other-ws' }],
-    );
+    const f = fakeApi([{ id: 't9', name: 'Elsewhere', workspaceId: 'other-ws' }], [{ id: 'v9', name: 'Elsewhere view', workspaceId: 'other-ws' }]);
     await offerPrune(f.api, WS, { tableNames: new Set(), viewInstanceIds: new Set() });
     expect(f.confirm).not.toHaveBeenCalled();
   });
@@ -149,9 +131,7 @@ describe('staleTableFiles', () => {
   });
 
   it('catches the old name of a RENAMED table — the slug is in the file name', () => {
-    expect(staleTableFiles(['old_name.table.json'], ['new_name.table.json'])).toEqual([
-      'old_name.table.json',
-    ]);
+    expect(staleTableFiles(['old_name.table.json'], ['new_name.table.json'])).toEqual(['old_name.table.json']);
   });
 
   it('never touches the marker file or anything that is not ours', () => {
@@ -166,9 +146,6 @@ describe('staleTableFiles', () => {
   });
 
   it('sorts, so the confirm dialog reads the same way twice', () => {
-    expect(staleTableFiles(['b.table.json', 'a.table.json'], [])).toEqual([
-      'a.table.json',
-      'b.table.json',
-    ]);
+    expect(staleTableFiles(['b.table.json', 'a.table.json'], [])).toEqual(['a.table.json', 'b.table.json']);
   });
 });

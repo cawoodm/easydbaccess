@@ -36,12 +36,7 @@ describe('registerDatasetteSettings', () => {
     registerDatasetteSettings(api);
     const tab = registered.get(DATASETTE_SETTINGS_ID);
     expect(tab?.name).toBe('Datasette');
-    expect(tab?.fields.map((f) => f.key)).toEqual([
-      'maxImportRows',
-      'pageSize',
-      'connectMaxRows',
-      'retryWaitSeconds',
-    ]);
+    expect(tab?.fields.map((f) => f.key)).toEqual(['maxImportRows', 'pageSize', 'connectMaxRows', 'retryWaitSeconds']);
   });
 
   it('registering twice (both plugins calling it) leaves one identical tab', () => {
@@ -52,12 +47,7 @@ describe('registerDatasetteSettings', () => {
     const second = registered.get(DATASETTE_SETTINGS_ID);
     expect(registered.size).toBe(1);
     expect(second).toEqual(first);
-    expect(second?.fields.map((f) => f.key)).toEqual([
-      'maxImportRows',
-      'pageSize',
-      'connectMaxRows',
-      'retryWaitSeconds',
-    ]);
+    expect(second?.fields.map((f) => f.key)).toEqual(['maxImportRows', 'pageSize', 'connectMaxRows', 'retryWaitSeconds']);
   });
 });
 

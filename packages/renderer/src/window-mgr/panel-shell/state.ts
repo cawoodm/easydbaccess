@@ -23,11 +23,7 @@ export interface ShellState {
  * the user minimized a maximized window last session. `smallified` is checked
  * last: it only ever applies to a panel that is otherwise normalized (the
  * transition below refuses to smallify anything else). */
-export function initialState(boot?: {
-  minimized?: boolean;
-  maximized?: boolean;
-  smallified?: boolean;
-}): ShellState {
+export function initialState(boot?: { minimized?: boolean; maximized?: boolean; smallified?: boolean }): ShellState {
   if (boot?.minimized) {
     return { status: 'minimized', restoreStatus: boot.maximized ? 'maximized' : 'normalized' };
   }
@@ -72,8 +68,7 @@ export function persistFlags(s: ShellState): {
 } {
   return {
     minimized: s.status === 'minimized',
-    maximized:
-      s.status === 'maximized' || (s.status === 'minimized' && s.restoreStatus === 'maximized'),
+    maximized: s.status === 'maximized' || (s.status === 'minimized' && s.restoreStatus === 'maximized'),
     smallified: s.status === 'smallified',
   };
 }

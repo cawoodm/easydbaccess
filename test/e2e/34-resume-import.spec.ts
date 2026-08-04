@@ -40,10 +40,7 @@ const rateLimited = () => ({
   body: JSON.stringify({ ok: false, error: 'rate limit exceeded' }),
 });
 
-test('cancelling the paused prompt keeps a red Resume button that continues from the stored page', async ({
-  page,
-  workspaceId,
-}) => {
+test('cancelling the paused prompt keeps a red Resume button that continues from the stored page', async ({ page, workspaceId }) => {
   let page2Fails = true; // page-2 hop is rate-limited until we "recover"
   await page.route('https://ppl4.example/**', (route) => {
     const u = new URL(route.request().url());
@@ -52,8 +49,7 @@ test('cancelling the paused prompt keeps a red Resume button that continues from
       const extra = u.searchParams.get('_extra') ?? '';
       if (extra.includes('count')) return route.fulfill(json({ ok: true, count: 3 }));
       if (extra) return route.fulfill(json({ ok: true, columns: PAGE1.columns, rows: [] }));
-      if (u.searchParams.get('_next') === 'p2')
-        return route.fulfill(page2Fails ? rateLimited() : json(PAGE2));
+      if (u.searchParams.get('_next') === 'p2') return route.fulfill(page2Fails ? rateLimited() : json(PAGE2));
       return route.fulfill(json(PAGE1));
     }
     return route.fulfill({ status: 404, body: '{"ok":false}' });
@@ -79,10 +75,7 @@ test('cancelling the paused prompt keeps a red Resume button that continues from
         page.evaluate(async (ws) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const store = (window as any).__easydb.store;
-          const t = (await store.tables.find()).find(
-            (x: { workspaceId: string; name: string }) =>
-              x.workspaceId === ws && x.name === 'energy/plants',
-          );
+          const t = (await store.tables.find()).find((x: { workspaceId: string; name: string }) => x.workspaceId === ws && x.name === 'energy/plants');
           if (!t) return null;
           const rows = await store.rows(t.id).find();
           return { rows: rows.length, resume: t.importResume?.loadedRows ?? null };
@@ -91,10 +84,7 @@ test('cancelling the paused prompt keeps a red Resume button that continues from
       .toEqual({ rows: 2, resume: 2 });
     return page.evaluate(async (ws) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const t = (await (window as any).__easydb.store.tables.find()).find(
-        (x: { workspaceId: string; name: string }) =>
-          x.workspaceId === ws && x.name === 'energy/plants',
-      );
+      const t = (await (window as any).__easydb.store.tables.find()).find((x: { workspaceId: string; name: string }) => x.workspaceId === ws && x.name === 'energy/plants');
       return t.id as string;
     }, workspaceId);
   })();
@@ -127,10 +117,7 @@ test('cancelling the paused prompt keeps a red Resume button that continues from
   await expect(resumeBtn).toHaveCount(0);
 });
 
-test('the paused prompt\'s "Resume in 60s" waits then continues inline, leaving no marker', async ({
-  page,
-  workspaceId,
-}) => {
+test('the paused prompt\'s "Resume in 60s" waits then continues inline, leaving no marker', async ({ page, workspaceId }) => {
   // Shorten the 60s auto-resume wait so the test doesn't stall a real minute.
   // Set on the already-loaded page — the seam is read at wait time.
   await page.evaluate(() => {
@@ -174,10 +161,7 @@ test('the paused prompt\'s "Resume in 60s" waits then continues inline, leaving 
       page.evaluate(async (ws) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const store = (window as any).__easydb.store;
-        const t = (await store.tables.find()).find(
-          (x: { workspaceId: string; name: string }) =>
-            x.workspaceId === ws && x.name === 'energy/plants',
-        );
+        const t = (await store.tables.find()).find((x: { workspaceId: string; name: string }) => x.workspaceId === ws && x.name === 'energy/plants');
         if (!t) return null;
         const rows = await store.rows(t.id).find();
         return { rows: rows.length, resume: t.importResume ?? null };

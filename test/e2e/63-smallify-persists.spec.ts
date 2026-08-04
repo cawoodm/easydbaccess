@@ -88,9 +88,7 @@ test('a collapsed VIEW window comes back collapsed too', async ({ page, workspac
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__easydb.store;
       const templates = await store.viewTemplates.find({ workspaceId: ws });
-      const rss = (templates as Array<{ id: string; name: string }>).find(
-        (t) => t.name === 'RSS Feed',
-      )!;
+      const rss = (templates as Array<{ id: string; name: string }>).find((t) => t.name === 'RSS Feed')!;
       await store.viewInstances.insert({
         id: 'collapsible-view',
         workspaceId: ws,

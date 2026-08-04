@@ -11,8 +11,7 @@ import { test, expect } from './fixtures.js';
  * these specs prove the wiring.
  */
 
-const LONG =
-  'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.';
+const LONG = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.';
 
 /** Field → renderer for an imported table, so a missing renderer shows as null. */
 async function renderersOf(page: import('@playwright/test').Page, ws: string, name: string) {
@@ -59,10 +58,7 @@ const PEOPLE_CSV = [
   `Grace,https://example.com/grace,https://img.test/grace.jpg,"${LONG}",2026-03-04,false`,
 ].join('\n');
 
-test('a CSV import picks link, image and preview from the values', async ({
-  page,
-  workspaceId,
-}) => {
+test('a CSV import picks link, image and preview from the values', async ({ page, workspaceId }) => {
   await serveText(page, 'https://ex.example/people.csv', PEOPLE_CSV, 'text/plain; charset=utf-8');
   await importUrl(page, 'https://ex.example/people.csv', 'csv');
 
@@ -78,10 +74,7 @@ test('a CSV import picks link, image and preview from the values', async ({
     });
 });
 
-test('a JSON import gets the same treatment, which it used not to get at all', async ({
-  page,
-  workspaceId,
-}) => {
+test('a JSON import gets the same treatment, which it used not to get at all', async ({ page, workspaceId }) => {
   const rows = [
     {
       title: 'One',
@@ -119,10 +112,7 @@ test('an explicit CSV header renderer is not overridden', async ({ page, workspa
   await expect.poll(() => renderersOf(page, workspaceId, 'pinned')).toEqual({ url: 'color' });
 });
 
-test('a mixed column is left as plain text rather than guessed at', async ({
-  page,
-  workspaceId,
-}) => {
+test('a mixed column is left as plain text rather than guessed at', async ({ page, workspaceId }) => {
   const csv = 'maybe\nhttps://example.com/a\nnot a url\n';
   await serveText(page, 'https://ex.example/mixed.csv', csv, 'text/plain; charset=utf-8');
   await importUrl(page, 'https://ex.example/mixed.csv', 'csv');

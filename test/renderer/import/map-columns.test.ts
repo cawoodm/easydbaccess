@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ColumnSpec } from '@easydb/shared';
-import {
-  guessMapping,
-  mapRowsToTarget,
-} from '../../../packages/renderer/src/import/map-columns.js';
+import { guessMapping, mapRowsToTarget } from '../../../packages/renderer/src/import/map-columns.js';
 
 const col = (field: string, label = field, type: ColumnSpec['type'] = 'string'): ColumnSpec => ({
   field,

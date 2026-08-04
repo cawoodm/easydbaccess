@@ -78,9 +78,7 @@ test('the column editor toggles read-only on and off', async ({ page }) => {
   await expect(dlg).toBeHidden();
 
   await expect.poll(async () => (await readTable(page, id))?.readonly).toBe(true);
-  await expect(panel(page, id).locator('data-table tbody td').first().locator('input')).toHaveCount(
-    0,
-  );
+  await expect(panel(page, id).locator('data-table tbody td').first().locator('input')).toHaveCount(0);
 
   // ...and back off again: the checkbox reflects the saved state.
   dlg = await openEditor();
@@ -90,15 +88,10 @@ test('the column editor toggles read-only on and off', async ({ page }) => {
   await expect(dlg).toBeHidden();
 
   await expect.poll(async () => (await readTable(page, id))?.readonly).toBe(false);
-  await expect(panel(page, id).locator('data-table tbody td').first().locator('input')).toHaveValue(
-    'ada',
-  );
+  await expect(panel(page, id).locator('data-table tbody td').first().locator('input')).toHaveValue('ada');
 });
 
-test('a referenced table is read-only from the moment it is created', async ({
-  page,
-  workspaceId,
-}) => {
+test('a referenced table is read-only from the moment it is created', async ({ page, workspaceId }) => {
   const url = 'https://ex.example/ref.csv';
   await page.route(url, (route) =>
     route.fulfill({

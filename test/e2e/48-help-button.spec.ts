@@ -16,10 +16,7 @@ test.describe('help button', () => {
     const helpLink = header.locator('a[title="Help — open the user guide"]');
 
     await expect(helpLink).toBeVisible();
-    await expect(helpLink).toHaveAttribute(
-      'href',
-      'https://github.com/cawoodm/easydbaccess/blob/main/docs/help/INDEX.md',
-    );
+    await expect(helpLink).toHaveAttribute('href', 'https://github.com/cawoodm/easydbaccess/blob/main/docs/help/INDEX.md');
     await expect(helpLink).toHaveAttribute('target', '_blank');
     await expect(helpLink).toHaveAttribute('rel', 'noopener noreferrer');
     await expect(helpLink).toHaveAttribute('aria-label', 'Help — open the user guide');

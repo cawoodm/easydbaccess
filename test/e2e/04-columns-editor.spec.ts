@@ -66,10 +66,7 @@ test.describe('columns editor', () => {
   });
 
   test('hide column via editor removes it from the data-table', async ({ page }) => {
-    const id = await createTable(page, 'Visibility', [
-      { field: 'keep' },
-      { field: 'hideme' },
-    ]);
+    const id = await createTable(page, 'Visibility', [{ field: 'keep' }, { field: 'hideme' }]);
     await waitForPanel(page, id);
     await addRow(page, id, { keep: 'k', hideme: 'h' });
 
@@ -80,7 +77,10 @@ test.describe('columns editor', () => {
     await expect(panel.locator('data-table thead')).toContainText('hideme');
 
     // Open the column editor via the panel-footer Columns button.
-    await panel.locator('panel-footer').getByRole('button', { name: /Columns/ }).click();
+    await panel
+      .locator('panel-footer')
+      .getByRole('button', { name: /Columns/ })
+      .click();
 
     const dialog = page.locator('new-table-dialog dialog');
     await expect(dialog).toBeVisible();
@@ -115,7 +115,10 @@ test.describe('columns editor', () => {
     await waitForPanel(page, id);
 
     const panel = page.locator(`#${panelDomId(id)}`);
-    await panel.locator('panel-footer').getByRole('button', { name: /Columns/ }).click();
+    await panel
+      .locator('panel-footer')
+      .getByRole('button', { name: /Columns/ })
+      .click();
 
     const dialog = page.locator('new-table-dialog dialog');
     await expect(dialog).toBeVisible();

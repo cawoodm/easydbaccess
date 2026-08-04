@@ -52,9 +52,7 @@ const SEED_AND_HOLD_V1 = `(async () => {
   });
 })()`;
 
-test('a blocked schema upgrade shows an actionable overlay, then boots once the old tab yields', async ({
-  browser,
-}) => {
+test('a blocked schema upgrade shows an actionable overlay, then boots once the old tab yields', async ({ browser }) => {
   const context = await browser.newContext();
   try {
     // Holder tab: a blank same-origin page that keeps an old v1 DB open.
@@ -87,10 +85,7 @@ test('a blocked schema upgrade shows an actionable overlay, then boots once the 
 
     // Reloading the blocked tab now boots cleanly against the upgraded schema.
     await app.locator('#easydb-upgrade-reload').click();
-    await app.waitForFunction(
-      () => Boolean((window as unknown as { __easydb?: unknown }).__easydb),
-      { timeout: 15_000 },
-    );
+    await app.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 15_000 });
     await expect(app.locator('#easydb-upgrade-blocked')).toHaveCount(0);
   } finally {
     await context.close();

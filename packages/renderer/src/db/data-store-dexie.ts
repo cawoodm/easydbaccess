@@ -1,16 +1,5 @@
 import { liveQuery, type Table as DexieTable } from 'dexie';
-import type {
-  DataCollection,
-  DataStore,
-  PluginRecord,
-  Row,
-  Setting,
-  Table,
-  Unsubscribe,
-  ViewInstance,
-  ViewTemplate,
-  Workspace,
-} from '@easydb/shared';
+import type { DataCollection, DataStore, PluginRecord, Row, Setting, Table, Unsubscribe, ViewInstance, ViewTemplate, Workspace } from '@easydb/shared';
 import { settingId, type EasyDb } from './dexie-db.js';
 
 /**
@@ -21,9 +10,7 @@ import { settingId, type EasyDb } from './dexie-db.js';
  * every write to the referenced table. Coarse, but chrome callers consume
  * the full result set anyway so the granularity doesn't matter.
  */
-function wrap<T extends { id: string } | { url: string } | { key: string }>(
-  coll: DexieTable<T, string>,
-): DataCollection<T> {
+function wrap<T extends { id: string } | { url: string } | { key: string }>(coll: DexieTable<T, string>): DataCollection<T> {
   return {
     async find(query) {
       if (!query || Object.keys(query).length === 0) return coll.toArray();
@@ -81,9 +68,7 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string): DataCollectio
       const base = coll.where('tableId').equals(tableId);
       if (!query || Object.keys(query).length === 0) return base.toArray();
       const entries = Object.entries(query as Record<string, unknown>);
-      return base
-        .filter((doc) => matchesAll(doc as unknown as Record<string, unknown>, entries))
-        .toArray();
+      return base.filter((doc) => matchesAll(doc as unknown as Record<string, unknown>, entries)).toArray();
     },
     async findOne(id) {
       const doc = await coll.get(id);
@@ -142,10 +127,7 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string): DataCollectio
  * what lets a gist pull upsert another device's settings straight into the local
  * workspace instead of carrying its workspace id along.
  */
-function settingsView(
-  coll: DexieTable<Setting, string>,
-  workspaceId: () => string,
-): DataCollection<Setting> {
+function settingsView(coll: DexieTable<Setting, string>, workspaceId: () => string): DataCollection<Setting> {
   const stamp = (doc: Partial<Setting> & { name: string }): Setting => ({
     ...doc,
     workspaceId: workspaceId(),

@@ -16,7 +16,6 @@ import { arrayCellText, arrayMembers } from '../util/array-cell.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
 
-
 /** Delay before the header loading bar appears, so fast loads don't flash it. */
 const LOAD_BAR_DELAY_MS = 200;
 
@@ -679,24 +678,14 @@ export class DataTable extends LitElement {
    * (notnull, max, unique) before writing. On rejection: pop a dialog with
    * the reason and re-render so the cell input reverts to its prior value.
    */
-  private async commitCell(
-    ctx: import('../app-context.js').AppContext,
-    row: Row,
-    field: string,
-    value: unknown,
-  ) {
+  private async commitCell(ctx: import('../app-context.js').AppContext, row: Row, field: string, value: unknown) {
     const col = this.columns.find((c) => c.field === field);
     // The CORE refuses the write, whatever the renderer offered. A renderer is a
     // display concern and may ignore `.readonly` — a third-party one, or a
     // built-in that never honoured it (the `preview` cell opened a Save-able
     // editor on a read-only table). Nothing should be able to write through it.
     if (this.readOnly || col?.readonly === true) {
-      ctx.api.ui.dialogs.toast(
-        this.readOnly
-          ? 'This table is read-only.'
-          : `“${col?.label ?? field}” is a read-only column.`,
-        { kind: 'warning', title: 'Not saved' },
-      );
+      ctx.api.ui.dialogs.toast(this.readOnly ? 'This table is read-only.' : `“${col?.label ?? field}” is a read-only column.`, { kind: 'warning', title: 'Not saved' });
       // Re-render so an editor that got this far snaps back to the stored value.
       this.requestUpdate();
       return;
@@ -719,10 +708,7 @@ export class DataTable extends LitElement {
       // Remote (e.g. Datasette) sources can reject a write — read-only table,
       // expired token, server error. Surface it and revert the cell instead of
       // leaving an unhandled rejection and a stale-looking value.
-      await ctx.api.ui.dialogs.alert(
-        (err as Error)?.message ?? 'Could not save the change.',
-        'Save failed',
-      );
+      await ctx.api.ui.dialogs.alert((err as Error)?.message ?? 'Could not save the change.', 'Save failed');
       this.requestUpdate();
     }
   }
@@ -815,10 +801,7 @@ export class DataTable extends LitElement {
       .row=${row.data}
       .readonly=${true}
       .sourceReadonly=${this.readOnly}
-      @change=${this.readOnly
-        ? undefined
-        : (e: Event) =>
-            this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
+      @change=${this.readOnly ? undefined : (e: Event) => this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
     ></${tag}>`;
   }
 
@@ -871,10 +854,7 @@ export class DataTable extends LitElement {
         .row=${row.data}
         .readonly=${cellReadonly}
         .sourceReadonly=${cellReadonly}
-        @change=${cellReadonly
-          ? undefined
-          : (e: Event) =>
-              this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
+        @change=${cellReadonly ? undefined : (e: Event) => this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
       ></${tag}>`;
     }
     // Read-only never offers an editor: show the value as plain text
@@ -901,8 +881,7 @@ export class DataTable extends LitElement {
           type="date"
           .value=${toDateIso(raw)}
           @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, toDateIso(raw))}
-          @change=${(e: Event) =>
-            this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
+          @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
         />`;
       case 'datetime':
         if (isNonEmptyButUnparsed(raw, toDatetimeLocal(raw))) {
@@ -912,8 +891,7 @@ export class DataTable extends LitElement {
           type="datetime-local"
           .value=${toDatetimeLocal(raw)}
           @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, toDatetimeLocal(raw))}
-          @change=${(e: Event) =>
-            this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
+          @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
         />`;
       case 'number': {
         const isEmpty = raw == null || raw === '';
@@ -940,8 +918,7 @@ export class DataTable extends LitElement {
           type="text"
           .value=${list}
           @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, list)}
-          @change=${(e: Event) =>
-            this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
+          @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
         />`;
       }
       default:
@@ -949,8 +926,7 @@ export class DataTable extends LitElement {
           type="text"
           .value=${String(raw ?? '')}
           @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, String(raw ?? ''))}
-          @change=${(e: Event) =>
-            this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
+          @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
         />`;
     }
   }
@@ -960,10 +936,7 @@ export class DataTable extends LitElement {
     try {
       await ctx.store.rows(this.tableId).remove(rowId);
     } catch (err) {
-      await ctx.api.ui.dialogs.alert(
-        (err as Error)?.message ?? 'Could not delete the row.',
-        'Delete failed',
-      );
+      await ctx.api.ui.dialogs.alert((err as Error)?.message ?? 'Could not delete the row.', 'Delete failed');
     }
   }
 
@@ -1007,9 +980,7 @@ export class DataTable extends LitElement {
    * once here rather than per row, since only `array` changes how a cell is read
    * (per member instead of as one value) and finding that out is a column scan.
    */
-  private typedFilters(
-    active: Array<[string, string]>,
-  ): Array<{ field: string; query: string; type: string | undefined }> {
+  private typedFilters(active: Array<[string, string]>): Array<{ field: string; query: string; type: string | undefined }> {
     return active.map(([field, query]) => ({
       field,
       query,
@@ -1021,12 +992,8 @@ export class DataTable extends LitElement {
     // A column flagged `filterable: false` is excluded from free-text search
     // as well as from the per-column funnel. A stored per-column filter that
     // predates the flag being set must not silently keep narrowing the grid.
-    const unfilterable = new Set(
-      this.columns.filter((c) => c.filterable === false).map((c) => c.field),
-    );
-    const active = Object.entries(this.filters).filter(
-      ([field, q]) => q && q.trim().length > 0 && !unfilterable.has(field),
-    );
+    const unfilterable = new Set(this.columns.filter((c) => c.filterable === false).map((c) => c.field));
+    const active = Object.entries(this.filters).filter(([field, q]) => q && q.trim().length > 0 && !unfilterable.has(field));
     const gq = this.globalQuery.trim();
     const lq = this.localQuery.trim();
     if (active.length === 0 && gq.length === 0 && lq.length === 0) return this.rows;
@@ -1034,9 +1001,7 @@ export class DataTable extends LitElement {
     let rows = this.rows;
     if (active.length > 0) {
       const typed = this.typedFilters(active);
-      rows = rows.filter((r) =>
-        typed.every((f) => matchesColumnFilter(r.data[f.field], f.query, { type: f.type })),
-      );
+      rows = rows.filter((r) => typed.every((f) => matchesColumnFilter(r.data[f.field], f.query, { type: f.type })));
     }
     // Free-text search supports `field:value` (with !/^/comma-OR/NULL), boolean
     // AND/OR, and the phrase→AND→OR fallback. Local and global queries each
@@ -1084,13 +1049,7 @@ export class DataTable extends LitElement {
     });
     // Toggles apply live while the popover stays open (multi-value tri-state);
     // the promise only reports dismissal or an explicit Clear.
-    const result = await popover.open(
-      btn.getBoundingClientRect(),
-      values,
-      this.filters[field] ?? '',
-      blanks,
-      (next) => this.onFilterInput(field, next),
-    );
+    const result = await popover.open(btn.getBoundingClientRect(), values, this.filters[field] ?? '', blanks, (next) => this.onFilterInput(field, next));
     if (result === null) return;
     if (typeof result === 'object' && 'clear' in result) {
       this.onFilterInput(field, '');
@@ -1127,17 +1086,11 @@ export class DataTable extends LitElement {
    * Pass `null` to evaluate against ALL per-column filters.
    */
   private rowsFacetedFor(focusField: string | null): Row[] {
-    const unfilterable = new Set(
-      this.columns.filter((c) => c.filterable === false).map((c) => c.field),
-    );
-    const active = Object.entries(this.filters).filter(
-      ([f, q]) => q && q.trim().length > 0 && f !== focusField && !unfilterable.has(f),
-    );
+    const unfilterable = new Set(this.columns.filter((c) => c.filterable === false).map((c) => c.field));
+    const active = Object.entries(this.filters).filter(([f, q]) => q && q.trim().length > 0 && f !== focusField && !unfilterable.has(f));
     if (active.length === 0) return this.rows;
     const typed = this.typedFilters(active);
-    return this.rows.filter((r) =>
-      typed.every((f) => matchesColumnFilter(r.data[f.field], f.query, { type: f.type })),
-    );
+    return this.rows.filter((r) => typed.every((f) => matchesColumnFilter(r.data[f.field], f.query, { type: f.type })));
   }
 
   /**
@@ -1175,9 +1128,7 @@ export class DataTable extends LitElement {
       if (cell) measured.set(c.field, Math.round(cell.getBoundingClientRect().width));
     });
     if (measured.size === 0) return;
-    this.columns = this.columns.map((c) =>
-      measured.has(c.field) ? { ...c, width: measured.get(c.field)! } : c,
-    );
+    this.columns = this.columns.map((c) => (measured.has(c.field) ? { ...c, width: measured.get(c.field)! } : c));
   }
 
   private onResizeStart(e: PointerEvent, field: string, th: HTMLElement) {
@@ -1198,9 +1149,7 @@ export class DataTable extends LitElement {
       const dx = ev.clientX - this.resizing.startX;
       const w = Math.max(MIN_COL_W, this.resizing.startW + dx);
       // Live update: patch the in-memory column width so the colgroup reflows.
-      this.columns = this.columns.map((c) =>
-        c.field === this.resizing!.field ? { ...c, width: w } : c,
-      );
+      this.columns = this.columns.map((c) => (c.field === this.resizing!.field ? { ...c, width: w } : c));
     };
     const onUp = async () => {
       window.removeEventListener('pointermove', onMove);
@@ -1323,8 +1272,7 @@ export class DataTable extends LitElement {
       });
       return;
     }
-    const filters: Record<string, string> | undefined =
-      Object.keys(cleaned).length === 0 ? undefined : cleaned;
+    const filters: Record<string, string> | undefined = Object.keys(cleaned).length === 0 ? undefined : cleaned;
     await ctx.store.tables.patch(this.tableId, { filters, updatedAt: Date.now() });
   }
 
@@ -1381,18 +1329,8 @@ export class DataTable extends LitElement {
     const frac = this.externalLoading ? this.externalProgress : null;
     return html`
       ${this.loading || this.externalLoading
-        ? html`<div
-            class="load-bar"
-            role="progressbar"
-            aria-label="Loading rows"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            aria-valuenow=${frac != null ? Math.round(frac * 100) : nothing}
-          >
-            <div
-              class="load-bar-fill ${frac != null ? 'determinate' : ''}"
-              style=${frac != null ? `width:${Math.max(2, Math.round(frac * 100))}%` : nothing}
-            ></div>
+        ? html`<div class="load-bar" role="progressbar" aria-label="Loading rows" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${frac != null ? Math.round(frac * 100) : nothing}>
+            <div class="load-bar-fill ${frac != null ? 'determinate' : ''}" style=${frac != null ? `width:${Math.max(2, Math.round(frac * 100))}%` : nothing}></div>
           </div>`
         : nothing}
       <table style=${this.tableSizingStyle(cols) ?? nothing}>
@@ -1415,12 +1353,7 @@ export class DataTable extends LitElement {
               const typeClass = `t-${c.type}`;
               const isSrc = this.dragSourceField === c.field;
               const isTgt = this.dropTargetField === c.field;
-              const edgeClass =
-                isTgt && this.dropEdge === 'before'
-                  ? ' drop-before'
-                  : isTgt && this.dropEdge === 'after'
-                    ? ' drop-after'
-                    : '';
+              const edgeClass = isTgt && this.dropEdge === 'before' ? ' drop-before' : isTgt && this.dropEdge === 'after' ? ' drop-after' : '';
               const tip =
                 (c.description ? `${c.description}\n` : '') +
                 (c.units ? `Units: ${c.units}\n` : '') +
@@ -1431,8 +1364,7 @@ export class DataTable extends LitElement {
                   class=${`${typeClass}${sorted ? ' sorted' : ''}${isSrc ? ' drag-source' : ''}${edgeClass}${canSort ? '' : ' no-sort'}`}
                   title=${tip}
                   @click=${(e: MouseEvent) => canSort && this.toggleSort(c.field, e.shiftKey)}
-                  @dragover=${(e: DragEvent) =>
-                    this.onColDragOver(e, c.field, e.currentTarget as HTMLElement)}
+                  @dragover=${(e: DragEvent) => this.onColDragOver(e, c.field, e.currentTarget as HTMLElement)}
                   @dragleave=${() => this.onColDragLeave(c.field)}
                   @drop=${(e: DragEvent) => this.onColDrop(e, c.field)}
                 >
@@ -1455,15 +1387,8 @@ export class DataTable extends LitElement {
                         this.dropEdge = null;
                       }}
                       >drag_indicator</span
-                    ><span class="col-label"
-                      >${c.label}${c.units
-                        ? html`<span class="col-units"> (${c.units})</span>`
-                        : ''}</span
-                    ><span class="sort-icon" aria-hidden="true"
-                      >${icon}${rankLabel
-                        ? html`<span class="sort-rank">${rankLabel}</span>`
-                        : nothing}</span
-                    >
+                    ><span class="col-label">${c.label}${c.units ? html`<span class="col-units"> (${c.units})</span>` : ''}</span
+                    ><span class="sort-icon" aria-hidden="true">${icon}${rankLabel ? html`<span class="sort-rank">${rankLabel}</span>` : nothing}</span>
                     ${canFilter
                       ? html`<button
                           class=${`funnel${this.filters[c.field] ? ' active' : ''}`}
@@ -1479,12 +1404,7 @@ export class DataTable extends LitElement {
                     class="col-resize"
                     title="Drag to resize column"
                     @click=${(e: Event) => e.stopPropagation()}
-                    @pointerdown=${(e: PointerEvent) =>
-                      this.onResizeStart(
-                        e,
-                        c.field,
-                        (e.currentTarget as HTMLElement).parentElement as HTMLElement,
-                      )}
+                    @pointerdown=${(e: PointerEvent) => this.onResizeStart(e, c.field, (e.currentTarget as HTMLElement).parentElement as HTMLElement)}
                   ></span>
                 </th>
               `;
@@ -1502,11 +1422,7 @@ export class DataTable extends LitElement {
                     .options=${opts}
                     placeholder="filter…"
                     title="Filter: text = contains, ^text = starts with, !text = does not contain, NULL = empty, !NULL = has a value. Comma-separate for several values (a,b = a OR b; !a,!b excludes both); quote a value containing a comma."
-                    @filter-change=${(e: Event) =>
-                      this.onFilterInput(
-                        c.field,
-                        (e as CustomEvent<{ value: string }>).detail.value,
-                      )}
+                    @filter-change=${(e: Event) => this.onFilterInput(c.field, (e as CustomEvent<{ value: string }>).detail.value)}
                   ></filter-combobox>
                 </th>
               `;
@@ -1526,9 +1442,7 @@ export class DataTable extends LitElement {
                 ${cols.map(
                   (c) =>
                     html`<td
-                      class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}${
-                        c.renderer && this.cellRenderers?.get(c.renderer) ? ' has-renderer' : ''
-                      }${cellStateClass(r, c)}`}
+                      class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}${c.renderer && this.cellRenderers?.get(c.renderer) ? ' has-renderer' : ''}${cellStateClass(r, c)}`}
                       title=${cellTooltip(r, c)}
                     >
                       ${this.renderCell(r, c)}
@@ -1537,11 +1451,7 @@ export class DataTable extends LitElement {
                 <td>
                   ${this.readOnly
                     ? nothing
-                    : html`<button
-                        class="danger"
-                        title="Delete row"
-                        @click=${() => this.deleteRow(r.id)}
-                      >
+                    : html`<button class="danger" title="Delete row" @click=${() => this.deleteRow(r.id)}>
                         <span class="mi sm">delete</span>
                       </button>`}
                 </td>
@@ -1667,12 +1577,7 @@ function isNonEmptyButUnparsed(raw: unknown, parsed: string): boolean {
  * then blanks) and descending sinks them to the bottom. null and blank are
  * DISTINCT — a null cell is "no value" and sorts ahead of an empty string.
  */
-function compareBySortKey(
-  av: unknown,
-  bv: unknown,
-  type: ColumnType,
-  factor: number,
-): number {
+function compareBySortKey(av: unknown, bv: unknown, type: ColumnType, factor: number): number {
   const rank = (v: unknown): number => (v == null ? 0 : v === '' ? 1 : 2);
   const ar = rank(av);
   const br = rank(bv);
@@ -1685,11 +1590,7 @@ function compareBySortKey(
  * else the single legacy `sortColumn`/`sortAsc` pair (a workspace written before
  * multi-sort, or a view whose sort bar still sets one column).
  */
-function readSortSpecs(rec: {
-  sortBy?: SortSpec[] | undefined;
-  sortColumn?: string | undefined;
-  sortAsc?: boolean | undefined;
-}): SortSpec[] {
+function readSortSpecs(rec: { sortBy?: SortSpec[] | undefined; sortColumn?: string | undefined; sortAsc?: boolean | undefined }): SortSpec[] {
   if (rec.sortBy?.length) return rec.sortBy.map((s) => ({ field: s.field, asc: s.asc !== false }));
   if (!rec.sortColumn) return [];
   return [{ field: rec.sortColumn, asc: rec.sortAsc !== false }];
@@ -1733,9 +1634,7 @@ function compareValues(a: unknown, b: unknown, type: ColumnType): number {
  * any data arrives.
  */
 export function setTableLoading(tableId: string, loading: boolean, progress?: number): void {
-  document.dispatchEvent(
-    new CustomEvent('easydb:table-loading', { detail: { tableId, loading, progress } }),
-  );
+  document.dispatchEvent(new CustomEvent('easydb:table-loading', { detail: { tableId, loading, progress } }));
 }
 
 declare global {

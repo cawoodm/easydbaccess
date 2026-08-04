@@ -20,9 +20,7 @@ async function tableRows(page: import('@playwright/test').Page, ws: string, name
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__easydb.store;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const t = (await store.tables.find()).find(
-        (x: any) => x.workspaceId === ws && x.name === name,
-      );
+      const t = (await store.tables.find()).find((x: any) => x.workspaceId === ws && x.name === name);
       if (!t) return null;
       const rows = await store.rows(t.id).find();
       return { columns: t.columns, count: rows.length };
@@ -59,10 +57,7 @@ test('Limit rows caps how many rows are imported from an upload', async ({ page,
   await expect.poll(async () => (await tableRows(page, workspaceId, 'places'))?.count ?? 0).toBe(2);
 });
 
-test('Limit rows on a multi-MB upload imports only the cap (streams a prefix)', async ({
-  page,
-  workspaceId,
-}) => {
+test('Limit rows on a multi-MB upload imports only the cap (streams a prefix)', async ({ page, workspaceId }) => {
   // Build a CSV well over the 1 MiB streaming chunk so the capped read must span
   // several chunks — the case that silently killed the tab when the whole file
   // was read + parsed before the cap applied.
@@ -82,15 +77,10 @@ test('Limit rows on a multi-MB upload imports only the cap (streams a prefix)', 
   await dlg.locator('input[type="number"]').fill('50');
   await dlg.getByRole('button', { name: 'Import', exact: true }).click();
 
-  await expect
-    .poll(async () => (await tableRows(page, workspaceId, 'big'))?.count ?? 0)
-    .toBe(50);
+  await expect.poll(async () => (await tableRows(page, workspaceId, 'big'))?.count ?? 0).toBe(50);
 });
 
-test('column editor: clicking the Hide header toggles all columns hidden', async ({
-  page,
-  workspaceId,
-}) => {
+test('column editor: clicking the Hide header toggles all columns hidden', async ({ page, workspaceId }) => {
   await openDialog(page);
   const dlg = page.locator('import-dialog dialog');
   await dlg.locator('input[type="file"]').setInputFiles({

@@ -15,8 +15,7 @@ export const meta = {
   name: 'Image URL Renderer',
   type: 'cell-renderer',
   version: '0.1.0',
-  description:
-    'Renders the cell value as <img src=value>. Apply by setting a column\'s renderer to "image-url".',
+  description: 'Renders the cell value as <img src=value>. Apply by setting a column\'s renderer to "image-url".',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/public/plugins/cell-image-url.js',
@@ -62,8 +61,7 @@ class CellImageUrl extends HTMLElement {
       img.src = v;
       img.alt = '';
       img.referrerPolicy = 'no-referrer';
-      img.style.cssText =
-        'max-height:32px;max-width:64px;border-radius:.15rem;border:1px solid #e5e7eb;object-fit:contain';
+      img.style.cssText = 'max-height:32px;max-width:64px;border-radius:.15rem;border:1px solid #e5e7eb;object-fit:contain';
       img.addEventListener('error', () => {
         // Image failed to load — show a small broken-image hint so it's
         // obvious the URL is the problem, not just an empty cell.
@@ -74,8 +72,7 @@ class CellImageUrl extends HTMLElement {
       edit.type = 'button';
       edit.title = 'Edit URL';
       edit.textContent = '✎';
-      edit.style.cssText =
-        'background:transparent;border:0;cursor:pointer;color:#9ca3af;font-size:0.85em;padding:0 0.15rem;line-height:1';
+      edit.style.cssText = 'background:transparent;border:0;cursor:pointer;color:#9ca3af;font-size:0.85em;padding:0 0.15rem;line-height:1';
       edit.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -89,8 +86,7 @@ class CellImageUrl extends HTMLElement {
       input.type = 'text';
       input.placeholder = 'image URL';
       input.value = this._value;
-      input.style.cssText =
-        'width:100%;box-sizing:border-box;border:0;background:transparent;font:inherit;padding:0';
+      input.style.cssText = 'width:100%;box-sizing:border-box;border:0;background:transparent;font:inherit;padding:0';
       input.addEventListener('change', () => this.commit(input.value));
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
@@ -116,9 +112,7 @@ class CellImageUrl extends HTMLElement {
   commit(v) {
     this._value = v;
     this._editing = false;
-    this.dispatchEvent(
-      new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }),
-    );
+    this.dispatchEvent(new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }));
   }
 }
 

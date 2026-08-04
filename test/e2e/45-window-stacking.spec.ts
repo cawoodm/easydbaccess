@@ -1,13 +1,5 @@
 import { test, expect, type Page } from './fixtures.js';
-import {
-  bulkAddRows,
-  createTable,
-  panelDomId,
-  readTable,
-  readViewInstance,
-  viewInstanceIdOf,
-  waitForPanel,
-} from './helpers.js';
+import { bulkAddRows, createTable, panelDomId, readTable, readViewInstance, viewInstanceIdOf, waitForPanel } from './helpers.js';
 
 /**
  * Table windows (`table-window-manager.ts`) and view windows (`view-window-manager.ts`)
@@ -36,23 +28,16 @@ test.describe('window stacking across tables and views', () => {
    * unique per view instance and exist immediately (even before the inner
    * <view-window> mounts), so polling their count sidesteps both. */
   async function createViewOver(page: Page, tableId: string): Promise<string> {
-    const before = await page.evaluate(
-      () => document.querySelectorAll('[id^="view-panel-"]').length,
-    );
+    const before = await page.evaluate(() => document.querySelectorAll('[id^="view-panel-"]').length);
     await page
       .locator(`#${panelDomId(tableId)} panel-footer`)
       .getByRole('button', { name: /Views/ })
       .click();
     const dlg = page.locator('views-dialog dialog');
     await expect(dlg).toBeVisible();
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
-    await expect
-      .poll(() => page.evaluate(() => document.querySelectorAll('[id^="view-panel-"]').length))
-      .toBeGreaterThan(before);
+    await expect.poll(() => page.evaluate(() => document.querySelectorAll('[id^="view-panel-"]').length)).toBeGreaterThan(before);
     const panelId = await page.evaluate(() => {
       const panels = [...document.querySelectorAll('[id^="view-panel-"]')];
       return panels[panels.length - 1]!.id;
@@ -66,10 +51,7 @@ test.describe('window stacking across tables and views', () => {
   }
 
   async function zIndexOf(page: Page, domId: string): Promise<number> {
-    return page.evaluate(
-      (id) => Number(getComputedStyle(document.getElementById(id)!).zIndex) || 0,
-      domId,
-    );
+    return page.evaluate((id) => Number(getComputedStyle(document.getElementById(id)!).zIndex) || 0, domId);
   }
 
   async function front(page: Page, domId: string): Promise<void> {
@@ -100,19 +82,10 @@ test.describe('window stacking across tables and views', () => {
     await expect.poll(() => storedViewZ(page, viewPanelId)).toBeGreaterThan(before);
   }
 
-  async function makeTableAndView(
-    page: Page,
-  ): Promise<{ tablePanelId: string; viewPanelId: string; tableId: string }> {
-    const tableId = await createTable(page, 'Feed', [
-      { field: 'title' },
-      { field: 'url' },
-      { field: 'date' },
-      { field: 'description' },
-    ]);
+  async function makeTableAndView(page: Page): Promise<{ tablePanelId: string; viewPanelId: string; tableId: string }> {
+    const tableId = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }, { field: 'date' }, { field: 'description' }]);
     await waitForPanel(page, tableId);
-    await bulkAddRows(page, tableId, [
-      { title: 'Hello', url: 'https://example.com/1', date: '2024-01-01', description: 'a' },
-    ]);
+    await bulkAddRows(page, tableId, [{ title: 'Hello', url: 'https://example.com/1', date: '2024-01-01', description: 'a' }]);
     const viewPanelId = await createViewOver(page, tableId);
     return { tablePanelId: panelDomId(tableId), viewPanelId, tableId };
   }
@@ -125,9 +98,7 @@ test.describe('window stacking across tables and views', () => {
     await front(page, tablePanelId);
     // The table's front-rank write is the one we can observe directly (views
     // don't stamp one pre-fix — see the module doc above).
-    await expect
-      .poll(async () => (await readTable(page, tableId))?.windowGeometry?.z ?? 0)
-      .toBeGreaterThan(0);
+    await expect.poll(async () => (await readTable(page, tableId))?.windowGeometry?.z ?? 0).toBeGreaterThan(0);
 
     await page.reload();
     await page.waitForFunction(
@@ -155,9 +126,7 @@ test.describe('window stacking across tables and views', () => {
 
     // Front the table first, then the VIEW last — the view should win.
     await front(page, tablePanelId);
-    await expect
-      .poll(async () => (await readTable(page, tableId))?.windowGeometry?.z ?? 0)
-      .toBeGreaterThan(0);
+    await expect.poll(async () => (await readTable(page, tableId))?.windowGeometry?.z ?? 0).toBeGreaterThan(0);
     await frontView(page, viewPanelId);
 
     await page.reload();
@@ -178,9 +147,7 @@ test.describe('window stacking across tables and views', () => {
       .toBe(true);
   });
 
-  test('a table/view/table sandwich preserves interleaved stacking after a reload', async ({
-    page,
-  }) => {
+  test('a table/view/table sandwich preserves interleaved stacking after a reload', async ({ page }) => {
     // An additional stacking-restore case alongside the two above: a single
     // view sandwiched between two tables. NOTE: this shape does NOT pin the
     // old jsPanel-bridge regression (see the view/table/view test below for
@@ -203,14 +170,10 @@ test.describe('window stacking across tables and views', () => {
     // table sandwich (the view sits between the two tables, not above/below
     // both of them).
     await front(page, tableBPanelId);
-    await expect
-      .poll(async () => (await readTable(page, tableBId))?.windowGeometry?.z ?? 0)
-      .toBeGreaterThan(0);
+    await expect.poll(async () => (await readTable(page, tableBId))?.windowGeometry?.z ?? 0).toBeGreaterThan(0);
     await frontView(page, viewPanelId);
     await front(page, tableAPanelId);
-    await expect
-      .poll(async () => (await readTable(page, tableAId))?.windowGeometry?.z ?? 0)
-      .toBeGreaterThan(0);
+    await expect.poll(async () => (await readTable(page, tableAId))?.windowGeometry?.z ?? 0).toBeGreaterThan(0);
 
     await page.reload();
     await page.waitForFunction(
@@ -233,9 +196,7 @@ test.describe('window stacking across tables and views', () => {
       .toBe(true);
   });
 
-  test('a view/table/view sandwich preserves interleaved stacking after a reload — the actual bridge-regression pin', async ({
-    page,
-  }) => {
+  test('a view/table/view sandwich preserves interleaved stacking after a reload — the actual bridge-regression pin', async ({ page }) => {
     // THIS is the shape the old jsPanel z-order bridge (`bridgeJsPanelZOrder`,
     // removed in the view-window-manager swap) could not reproduce. With only
     // ONE view in play (see the table/view/table test above), the bridge's
@@ -256,9 +217,7 @@ test.describe('window stacking across tables and views', () => {
     // Front bottom → top: the lower view, then the table, then the upper view.
     await frontView(page, viewLowerPanelId);
     await front(page, tableAPanelId);
-    await expect
-      .poll(async () => (await readTable(page, tableAId))?.windowGeometry?.z ?? 0)
-      .toBeGreaterThan(0);
+    await expect.poll(async () => (await readTable(page, tableAId))?.windowGeometry?.z ?? 0).toBeGreaterThan(0);
     await frontView(page, viewUpperPanelId);
 
     await page.reload();

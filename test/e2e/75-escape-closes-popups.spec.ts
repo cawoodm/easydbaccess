@@ -9,10 +9,8 @@ import { addRow, createTable, panelDomId, waitForPanel } from './helpers.js';
  * panel-shell is opt-in for this reason).
  */
 
-const popups = (page: import('@playwright/test').Page) =>
-  page.locator('[id^="easydb-preview-popup-"]');
-const editors = (page: import('@playwright/test').Page) =>
-  page.locator('[id^="easydb-html-edit-"]');
+const popups = (page: import('@playwright/test').Page) => page.locator('[id^="easydb-preview-popup-"]');
+const editors = (page: import('@playwright/test').Page) => page.locator('[id^="easydb-html-edit-"]');
 
 async function tableWithPreview(page: import('@playwright/test').Page, name: string) {
   const tableId = await createTable(page, name, [{ field: 'note', renderer: 'preview' }]);
@@ -67,7 +65,10 @@ test('Escape closes the source editor from outside its textarea', async ({ page 
 test('Escape does NOT close a table window', async ({ page }) => {
   const tableId = await tableWithPreview(page, 'esctable');
 
-  await page.locator(`#${panelDomId(tableId)}`).locator('.jsPanel-titlebar').click();
+  await page
+    .locator(`#${panelDomId(tableId)}`)
+    .locator('.jsPanel-titlebar')
+    .click();
   await page.keyboard.press('Escape');
 
   await expect(page.locator(`#${panelDomId(tableId)}`)).toBeVisible();

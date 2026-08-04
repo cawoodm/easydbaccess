@@ -6,11 +6,11 @@ browser, Node, and Electron main equally.
 
 ## Files
 
-| File | What's in it |
-|---|---|
-| `src/types.ts` | TS interfaces: `Workspace`, `Table`, `Row`, `ColumnSpec`, `ColumnType`, `WindowGeometry`, `Setting`, `PluginRecord`. |
+| File                | What's in it                                                                                                                                                                                         |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/types.ts`      | TS interfaces: `Workspace`, `Table`, `Row`, `ColumnSpec`, `ColumnType`, `WindowGeometry`, `Setting`, `PluginRecord`.                                                                                 |
 | `src/plugin-api.ts` | The `HostApi`, `PluginModule`, `DataCollection<T>`, `DataStore`, `EventBus`, `Dialogs`, `WindowManager`, `Backend`, registry specs, `AppEvents`. **Single source of truth for the plugin contract.** |
-| `src/index.ts` | Just barrel re-exports. |
+| `src/index.ts`      | Just barrel re-exports.                                                                                                                                                                              |
 
 ## Hot rule: lockstep across packages
 

@@ -74,24 +74,15 @@ export class WorkspaceSelector extends LitElement {
 
   private async addWorkspace() {
     const ctx = await getContext();
-    const name = await ctx.api.ui.dialogs.prompt(
-      'Name the new workspace. It will become active after creation.',
-      '',
-      'New workspace',
-    );
+    const name = await ctx.api.ui.dialogs.prompt('Name the new workspace. It will become active after creation.', '', 'New workspace');
     if (!name || !name.trim()) return;
 
     // What the new workspace inherits. Settings are per-workspace now, so an
     // empty workspace really starts empty — it used to share this one's server
     // URL, tokens and plugin list whether you wanted that or not.
-    const pick = await ctx.api.ui.dialogs.choice(
-      `What should "${name.trim()}" start with?`,
-      [CLONE_ALL, CLONE_SETTINGS, CLONE_NOTHING],
-      'New workspace',
-    );
+    const pick = await ctx.api.ui.dialogs.choice(`What should "${name.trim()}" start with?`, [CLONE_ALL, CLONE_SETTINGS, CLONE_NOTHING], 'New workspace');
     if (!pick) return;
-    const mode: CloneMode =
-      pick === CLONE_ALL ? 'all' : pick === CLONE_SETTINGS ? 'settings' : 'empty';
+    const mode: CloneMode = pick === CLONE_ALL ? 'all' : pick === CLONE_SETTINGS ? 'settings' : 'empty';
 
     // Create the workspace here rather than letting init() do it on first load:
     // only this side knows what to copy, and the copy must be in place before the
@@ -106,13 +97,8 @@ export class WorkspaceSelector extends LitElement {
 
   override render() {
     return html`
-      <select
-        .value=${this.current}
-        @change=${(e: Event) => this.switchWorkspace((e.target as HTMLSelectElement).value)}
-      >
-        ${this.workspaces.map(
-          (w) => html`<option value=${w.id} ?selected=${w.id === this.current}>${w.name}</option>`,
-        )}
+      <select .value=${this.current} @change=${(e: Event) => this.switchWorkspace((e.target as HTMLSelectElement).value)}>
+        ${this.workspaces.map((w) => html`<option value=${w.id} ?selected=${w.id === this.current}>${w.name}</option>`)}
       </select>
       <button @click=${this.addWorkspace} title="New workspace">
         <span class="mi sm">add</span>

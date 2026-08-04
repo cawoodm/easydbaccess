@@ -52,11 +52,7 @@ export interface RefreshResult {
  * claims its `origin.type`, or when the source no longer offers a matching
  * table — each with a message worth showing the user.
  */
-export async function refreshFromOrigin(
-  api: HostApi,
-  table: Table,
-  spec: ImporterSpec,
-): Promise<RefreshResult> {
+export async function refreshFromOrigin(api: HostApi, table: Table, spec: ImporterSpec): Promise<RefreshResult> {
   const url = table.origin?.url;
   if (!url) throw new Error(`"${table.name}" has no source URL to reload from.`);
 
@@ -64,8 +60,7 @@ export async function refreshFromOrigin(
     api,
     // No size ceiling: the table already exists at this size, so refusing to
     // reload it would strand the user with stale rows and no way forward.
-    fetchText: (u: string, label?: string) =>
-      fetchImportTextWithBar(api, u, label ?? `Reading ${table.name}…`, { maxBytes: null }),
+    fetchText: (u: string, label?: string) => fetchImportTextWithBar(api, u, label ?? `Reading ${table.name}…`, { maxBytes: null }),
     // The panel values used at import time are not recorded on the table, so a
     // refresh re-detects instead — fine for a CSV separator (the body has not
     // changed shape), and `TableOrigin.panel` is the tidier fix when it lands.
@@ -78,9 +73,7 @@ export async function refreshFromOrigin(
   // A multi-table source must give back the SAME table, matched by the name it
   // proposed originally. Falling back to the only candidate covers a
   // single-table source whose name has since changed.
-  const candidate =
-    candidates.find((c) => c.name === table.name) ??
-    (candidates.length === 1 ? candidates[0]! : undefined);
+  const candidate = candidates.find((c) => c.name === table.name) ?? (candidates.length === 1 ? candidates[0]! : undefined);
   if (!candidate) {
     throw new Error(`"${table.name}" is no longer one of the tables at ${url}.`);
   }
@@ -94,17 +87,11 @@ export async function refreshFromOrigin(
 
   // Keep the user's arrangement (order, hidden, width, renderer, label) and
   // never re-add a column they deleted. Genuinely-new columns are appended.
-  const { columns, newFields } = reconcileColumns(
-    table.columns,
-    discovered,
-    table.deletedColumns ?? [],
-  );
+  const { columns, newFields } = reconcileColumns(table.columns, discovered, table.deletedColumns ?? []);
 
   const pks = table.origin?.pks ?? [];
   const remoteFields = new Set(discovered.map((c) => c.field));
-  const userAddedFields = table.columns
-    .map((c) => c.field)
-    .filter((f) => !remoteFields.has(f) && !pks.includes(f));
+  const userAddedFields = table.columns.map((c) => c.field).filter((f) => !remoteFields.has(f) && !pks.includes(f));
   const deletedRemoteFields = (table.deletedColumns ?? []).filter((f) => remoteFields.has(f));
 
   const rowColl = api.store.rows(table.id);

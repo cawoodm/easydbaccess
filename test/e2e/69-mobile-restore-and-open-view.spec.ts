@@ -15,8 +15,7 @@ import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js
 const PHONE = { width: 390, height: 780 };
 const DESKTOP = { width: 1280, height: 900 };
 
-const panel = (page: import('@playwright/test').Page, id: string) =>
-  page.locator(`#${panelDomId(id)}`);
+const panel = (page: import('@playwright/test').Page, id: string) => page.locator(`#${panelDomId(id)}`);
 
 async function makeTable(page: import('@playwright/test').Page, name = 'T') {
   const id = await createTable(page, name, [{ field: 'a' }]);
@@ -26,9 +25,7 @@ async function makeTable(page: import('@playwright/test').Page, name = 'T') {
 }
 
 test.describe('restoring a maximized window on a phone keeps its size', () => {
-  test('Restore leaves the window filling the screen, not back at its old rect', async ({
-    page,
-  }) => {
+  test('Restore leaves the window filling the screen, not back at its old rect', async ({ page }) => {
     await page.setViewportSize(PHONE);
     const id = await makeTable(page);
     const p = panel(page, id);
@@ -77,10 +74,7 @@ async function createView(page: import('@playwright/test').Page, tableId: string
     .getByRole('button', { name: /Views/ })
     .click();
   const dlg = page.locator('views-dialog dialog');
-  await dlg
-    .locator('ul.list li', { hasText: 'RSS Feed' })
-    .getByRole('button', { name: 'Use' })
-    .click();
+  await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
   await dlg.getByRole('button', { name: 'Create view' }).click();
   // `.jsPanel` excludes the minimized dock bar, which is `<panel id>-min` and
   // would otherwise match this prefix too.
@@ -138,16 +132,13 @@ test.describe('Open on a view actually shows it', () => {
 
     // Put the table window on top of the view.
     await page.locator(`#${panelDomId(id)} .jsPanel-hdr`).click();
-    const zOf = async (loc: import('@playwright/test').Locator) =>
-      Number(await loc.evaluate((el) => (el as HTMLElement).style.zIndex));
+    const zOf = async (loc: import('@playwright/test').Locator) => Number(await loc.evaluate((el) => (el as HTMLElement).style.zIndex));
     expect(await zOf(page.locator(`#${panelDomId(id)}`))).toBeGreaterThan(await zOf(viewPanel));
 
     await pressOpen(page, id);
 
     // This is the reported bug: the flag was already `true`, so nothing moved.
-    await expect
-      .poll(async () => (await zOf(viewPanel)) > (await zOf(page.locator(`#${panelDomId(id)}`))))
-      .toBe(true);
+    await expect.poll(async () => (await zOf(viewPanel)) > (await zOf(page.locator(`#${panelDomId(id)}`)))).toBe(true);
   });
 
   test('Open brings a view that was panned off-screen back into sight', async ({ page }) => {

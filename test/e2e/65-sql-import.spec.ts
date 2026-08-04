@@ -58,9 +58,7 @@ async function tables(page: import('@playwright/test').Page, ws: string) {
         // projection over it. These assertions are about CONTENT.
         rows: (await store.rows(t.id).find())
           .map((r: { data: Record<string, unknown> }) => r.data)
-          .sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
-            JSON.stringify(a).localeCompare(JSON.stringify(b)),
-          ),
+          .sort((a: Record<string, unknown>, b: Record<string, unknown>) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
       })),
     );
   }, ws);
@@ -70,16 +68,11 @@ async function uploadScript(page: import('@playwright/test').Page, name = 'dump.
   await page.getByTitle('Import data from a URL').click();
   const dlg = page.locator('import-dialog dialog');
   await expect(dlg).toBeVisible();
-  await dlg
-    .locator('input[type="file"]')
-    .setInputFiles({ name, mimeType: 'application/sql', buffer: Buffer.from(SCRIPT) });
+  await dlg.locator('input[type="file"]').setInputFiles({ name, mimeType: 'application/sql', buffer: Buffer.from(SCRIPT) });
   await dlg.getByRole('button', { name: 'Import', exact: true }).click();
 }
 
-test('a .sql script creates its tables, with typed columns and rows', async ({
-  page,
-  workspaceId,
-}) => {
+test('a .sql script creates its tables, with typed columns and rows', async ({ page, workspaceId }) => {
   await uploadScript(page);
 
   await expect.poll(async () => (await tables(page, workspaceId)).length).toBe(3);
@@ -96,10 +89,7 @@ test('a .sql script creates its tables, with typed columns and rows', async ({
   expect(all.find((t) => t.name === 'dept')!.rows).toHaveLength(2);
 });
 
-test('the SELECT becomes a live projection over the tables the same script created', async ({
-  page,
-  workspaceId,
-}) => {
+test('the SELECT becomes a live projection over the tables the same script created', async ({ page, workspaceId }) => {
   await uploadScript(page);
   await expect.poll(async () => (await tables(page, workspaceId)).length).toBe(3);
 
@@ -115,10 +105,7 @@ test('the SELECT becomes a live projection over the tables the same script creat
   ]);
 });
 
-test('the projection stays live: editing a source table updates it', async ({
-  page,
-  workspaceId,
-}) => {
+test('the projection stays live: editing a source table updates it', async ({ page, workspaceId }) => {
   await uploadScript(page);
   await expect.poll(async () => (await tables(page, workspaceId)).length).toBe(3);
 
@@ -126,25 +113,16 @@ test('the projection stays live: editing a source table updates it', async ({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const store = (window as any).__easydb.store;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const dept = (await store.tables.find()).find(
-      (t: any) => t.workspaceId === ws && t.name === 'dept',
-    );
+    const dept = (await store.tables.find()).find((t: any) => t.workspaceId === ws && t.name === 'dept');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const row = (await store.rows(dept.id).find()).find((r: any) => r.data.id === 'd1');
-    await store
-      .rows(dept.id)
-      .patch(row.id, { data: { ...row.data, label: 'Revenue' }, updatedAt: Date.now() });
+    await store.rows(dept.id).patch(row.id, { data: { ...row.data, label: 'Revenue' }, updatedAt: Date.now() });
   }, workspaceId);
 
-  await expect
-    .poll(async () => (await tables(page, workspaceId)).find((t) => t.projection)?.rows[0])
-    .toEqual({ who: 'Alice', dept: 'Revenue' });
+  await expect.poll(async () => (await tables(page, workspaceId)).find((t) => t.projection)?.rows[0]).toEqual({ who: 'Alice', dept: 'Revenue' });
 });
 
-test('a script with no SELECT imports as plain tables through the kernel', async ({
-  page,
-  workspaceId,
-}) => {
+test('a script with no SELECT imports as plain tables through the kernel', async ({ page, workspaceId }) => {
   await page.getByTitle('Import data from a URL').click();
   const dlg = page.locator('import-dialog dialog');
   await dlg.locator('input[type="file"]').setInputFiles({

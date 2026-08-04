@@ -15,11 +15,7 @@ import type { SortSpec } from '@easydb/shared';
  * click drops the others: the common case is one column, and having to clear
  * leftover keys first would be worse than losing them.
  */
-export function nextSortSpecs(
-  current: readonly SortSpec[],
-  field: string,
-  opts: { additive?: boolean | undefined; descFirst?: boolean | undefined } = {},
-): SortSpec[] {
+export function nextSortSpecs(current: readonly SortSpec[], field: string, opts: { additive?: boolean | undefined; descFirst?: boolean | undefined } = {}): SortSpec[] {
   const additive = opts.additive === true;
   const firstAsc = opts.descFirst !== true;
   const existing = current.find((s) => s.field === field);

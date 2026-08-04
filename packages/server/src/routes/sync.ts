@@ -57,10 +57,7 @@ export function mountSync(app: Hono, deps: { store: StoreAdapter }) {
       body = (await c.req.json()) as Json;
     } catch (err) {
       log('sync', 'push bad-json', { workspaceId: id, error: (err as Error).message });
-      return c.json(
-        { error: `request body must be valid JSON: ${(err as Error).message}` },
-        400,
-      );
+      return c.json({ error: `request body must be valid JSON: ${(err as Error).message}` }, 400);
     }
 
     const contentLength = Number(c.req.header('content-length') ?? 0);

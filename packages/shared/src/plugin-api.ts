@@ -7,17 +7,7 @@
  * host treats it as a mutable namespace.
  */
 
-import type {
-  ColumnSpec,
-  PluginRecord,
-  Row,
-  Setting,
-  Table,
-  TableSource,
-  ViewInstance,
-  ViewTemplate,
-  Workspace,
-} from './types.js';
+import type { ColumnSpec, PluginRecord, Row, Setting, Table, TableSource, ViewInstance, ViewTemplate, Workspace } from './types.js';
 
 // -- Plugin module shape --------------------------------------------------
 
@@ -193,10 +183,7 @@ export interface TableButtonSpec {
    * return false to hide the button for that table. Omitted ⇒ always shown.
    */
   visible?(table: Table): boolean;
-  onClick(
-    api: HostApi,
-    ctx: { tableId: string; anchor?: HTMLElement | undefined },
-  ): void | Promise<void>;
+  onClick(api: HostApi, ctx: { tableId: string; anchor?: HTMLElement | undefined }): void | Promise<void>;
 }
 
 // -- Importers -------------------------------------------------------------
@@ -443,15 +430,7 @@ export interface Dialogs {
 
 export type SettingScope = 'workspace' | 'user';
 
-export type SettingsFieldType =
-  | 'string'
-  | 'text'
-  | 'number'
-  | 'boolean'
-  | 'date'
-  | 'secret'
-  | 'option'
-  | 'selection';
+export type SettingsFieldType = 'string' | 'text' | 'number' | 'boolean' | 'date' | 'secret' | 'option' | 'selection';
 
 /**
  * One declarative field in a plugin's settings tab. Stored under the key
@@ -538,10 +517,7 @@ export interface ColumnEditorActionSpec {
   icon?: string;
   tooltip?: string;
   /** The table being edited; absent while a brand-new table is defined. */
-  run(
-    api: HostApi,
-    ctx: { columns: ColumnSpec[]; tableId?: string | undefined },
-  ): Promise<ColumnSpec[] | null> | ColumnSpec[] | null;
+  run(api: HostApi, ctx: { columns: ColumnSpec[]; tableId?: string | undefined }): Promise<ColumnSpec[] | null> | ColumnSpec[] | null;
 }
 
 export interface UiRegistry {

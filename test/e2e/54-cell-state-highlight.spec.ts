@@ -7,14 +7,8 @@ import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js
  * renderer could hide: a boolean's checkbox and an image cell both look
  * "non-empty" even with nothing stored.
  */
-test('empty cells go pink and invalid ones get the red outline, whatever the renderer', async ({
-  page,
-}) => {
-  const id = await createTable(page, 'Mixed', [
-    { field: 'name' },
-    { field: 'done', type: 'boolean', renderer: 'boolean' },
-    { field: 'count', type: 'number' },
-  ]);
+test('empty cells go pink and invalid ones get the red outline, whatever the renderer', async ({ page }) => {
+  const id = await createTable(page, 'Mixed', [{ field: 'name' }, { field: 'done', type: 'boolean', renderer: 'boolean' }, { field: 'count', type: 'number' }]);
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [
     { name: 'full', done: true, count: 3 },

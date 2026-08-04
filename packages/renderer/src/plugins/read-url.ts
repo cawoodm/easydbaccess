@@ -67,11 +67,7 @@ export function isGitLfsPointer(text: string): boolean {
   // A pointer file is tiny; anything large is the real content.
   if (text.length > 1024) return false;
   const lines = text.split('\n');
-  return (
-    lines[0]?.startsWith('version https://git-lfs.github.com/spec/v1') === true &&
-    lines.some((l) => l.startsWith('oid ')) &&
-    lines.some((l) => l.startsWith('size '))
-  );
+  return lines[0]?.startsWith('version https://git-lfs.github.com/spec/v1') === true && lines.some((l) => l.startsWith('oid ')) && lines.some((l) => l.startsWith('size '));
 }
 
 /**
@@ -100,10 +96,7 @@ export function toGitLfsMediaUrl(url: string): string | null {
   return `https://media.githubusercontent.com/media/${path}`;
 }
 
-export async function readResponseText(
-  res: Response,
-  onProgress?: (fraction: number) => void,
-): Promise<string> {
+export async function readResponseText(res: Response, onProgress?: (fraction: number) => void): Promise<string> {
   const len = Number(res.headers?.get?.('content-length'));
   const reader = res.body?.getReader?.();
   if (reader && Number.isFinite(len) && len > 0) {

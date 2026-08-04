@@ -22,15 +22,7 @@ export function dragRect(start: Rect, dx: number, dy: number, scale: number): Re
   return { ...start, x: start.x + dx / s, y: start.y + dy / s };
 }
 
-export function resizeRect(
-  start: Rect,
-  edge: Edge,
-  dx: number,
-  dy: number,
-  scale: number,
-  minW: number,
-  minH: number,
-): Rect {
+export function resizeRect(start: Rect, edge: Edge, dx: number, dy: number, scale: number, minW: number, minH: number): Rect {
   const s = scale > 0 ? scale : 1;
   const ddx = dx / s;
   const ddy = dy / s;

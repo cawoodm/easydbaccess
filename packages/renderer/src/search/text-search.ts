@@ -106,11 +106,7 @@ const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
  * substring across all field values, exactly as before. Top-level `AND` / `OR`
  * and the plain phrase→AND→OR fallback are unchanged.
  */
-export function searchRowsByField<T extends { data: Record<string, unknown> }>(
-  rows: T[],
-  query: string,
-  fields: SearchField[],
-): T[] {
+export function searchRowsByField<T extends { data: Record<string, unknown> }>(rows: T[], query: string, fields: SearchField[]): T[] {
   // Lower-cased field name / label → the real data key.
   const byName = new Map<string, string>();
   const typeOf = new Map<string, string | undefined>();
@@ -137,9 +133,7 @@ export function searchRowsByField<T extends { data: Record<string, unknown> }>(
         });
       }
     }
-    return Object.values(row.data).some(
-      (v) => v != null && String(v).toLowerCase().includes(needle),
-    );
+    return Object.values(row.data).some((v) => v != null && String(v).toLowerCase().includes(needle));
   };
   return searchRows(rows, q, contains);
 }

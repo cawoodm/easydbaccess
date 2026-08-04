@@ -12,13 +12,7 @@ import { buildColumnSpec, type ColumnRow } from './column-row.js';
 import { renameRowFields, type FieldRename } from '../table/column-merge.js';
 import { HostDialogs } from './host-dialogs.js';
 import { LEGACY_CELL_RENDERERS } from '../plugin-host/registries.js';
-import {
-  describeReferences,
-  findTableReferences,
-  repointProjectionSpec,
-  specOf,
-  type TableReferences,
-} from '../table/table-references.js';
+import { describeReferences, findTableReferences, repointProjectionSpec, specOf, type TableReferences } from '../table/table-references.js';
 
 const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'datetime', 'array'];
 
@@ -50,18 +44,11 @@ function rendererOptionsFor(offered: readonly string[], current: string | undefi
  * table does not come back under the old name, so a reference left pointing at
  * it resolves to nothing for good.
  */
-async function repointReferences(
-  tableId: string,
-  oldName: string,
-  name: string,
-  refs: TableReferences | null,
-): Promise<void> {
+async function repointReferences(tableId: string, oldName: string, name: string, refs: TableReferences | null): Promise<void> {
   const ctx = await getContext();
   // Views bind by name AND by id, so catch both: one bound by id alone (never
   // renamed before) still needs its snapshot brought up to date.
-  const insts = (await ctx.store.viewInstances.find()).filter(
-    (vi) => vi.tableId === tableId || vi.tableName === oldName,
-  );
+  const insts = (await ctx.store.viewInstances.find()).filter((vi) => vi.tableId === tableId || vi.tableName === oldName);
   for (const vi of insts) {
     if (vi.tableName !== name) {
       await ctx.store.viewInstances.patch(vi.id, { tableName: name, updatedAt: Date.now() });
@@ -80,9 +67,7 @@ async function repointReferences(
 }
 
 function confirmRename(from: string, to: string, what: string): Promise<boolean> {
-  const message =
-    `Renaming "${from}" to "${to}" affects ${what}.\n\n` +
-    `They reference this table by name, so they will be updated to point at "${to}". Continue?`;
+  const message = `Renaming "${from}" to "${to}" affects ${what}.\n\n` + `They reference this table by name, so they will be updated to point at "${to}". Continue?`;
   const host = HostDialogs.instance;
   return host ? host.confirm(message, 'Rename table') : Promise.resolve(window.confirm(message));
 }
@@ -539,13 +524,9 @@ export class NewTableDialog extends LitElement {
       return;
     }
     const ctx = await getContext();
-    const workspaceTables = (await ctx.store.tables.find()).filter(
-      (t) => t.workspaceId === ctx.workspaceId,
-    );
+    const workspaceTables = (await ctx.store.tables.find()).filter((t) => t.workspaceId === ctx.workspaceId);
     const lowerName = name.toLowerCase();
-    const clash = workspaceTables.find(
-      (t) => t.name.toLowerCase() === lowerName && t.id !== this.editTableId,
-    );
+    const clash = workspaceTables.find((t) => t.name.toLowerCase() === lowerName && t.id !== this.editTableId);
     if (clash) {
       this.errorMsg = `A table named "${clash.name}" already exists — names must be unique.`;
       return;
@@ -585,19 +566,13 @@ export class NewTableDialog extends LitElement {
       const prevSpecs = new Map((existingTable?.columns ?? []).map((c) => [c.field, c]));
       const newConstraints = columns.filter((c) => {
         const prev = prevSpecs.get(c.field);
-        return (
-          (c.unique && !prev?.unique) ||
-          (c.notnull && !prev?.notnull) ||
-          (c.max && c.max > 0 && c.max !== prev?.max)
-        );
+        return (c.unique && !prev?.unique) || (c.notnull && !prev?.notnull) || (c.max && c.max > 0 && c.max !== prev?.max);
       });
       if (newConstraints.length > 0) {
         const rows = await ctx.store.rows(tableId).find();
         const violations = scanConstraintViolations(newConstraints, rows);
         if (violations.length > 0) {
-          this.errorMsg = `Cannot save: ${violations.length} existing ${
-            violations.length === 1 ? 'row violates' : 'rows violate'
-          } the new constraints.\n${violations.slice(0, 5).join('\n')}${
+          this.errorMsg = `Cannot save: ${violations.length} existing ${violations.length === 1 ? 'row violates' : 'rows violate'} the new constraints.\n${violations.slice(0, 5).join('\n')}${
             violations.length > 5 ? `\n…and ${violations.length - 5} more.` : ''
           }`;
           return;
@@ -607,17 +582,11 @@ export class NewTableDialog extends LitElement {
       // re-add them. A removed column is an original field no longer kept by any
       // row (renames keep their `origField`, so they don't count as deleted).
       // Re-adding a column with a previously-deleted name clears it from the set.
-      const keptOrig = new Set(
-        this.columns.map((c) => c.origField).filter((f): f is string => !!f),
-      );
+      const keptOrig = new Set(this.columns.map((c) => c.origField).filter((f): f is string => !!f));
       const savedFields = new Set(columns.map((c) => c.field));
-      const removedNow = (existingTable?.columns ?? [])
-        .map((c) => c.field)
-        .filter((f) => !keptOrig.has(f));
+      const removedNow = (existingTable?.columns ?? []).map((c) => c.field).filter((f) => !keptOrig.has(f));
       const prevDeleted = existingTable?.deletedColumns ?? [];
-      const deletedColumns = [...new Set([...prevDeleted, ...removedNow])].filter(
-        (f) => !savedFields.has(f),
-      );
+      const deletedColumns = [...new Set([...prevDeleted, ...removedNow])].filter((f) => !savedFields.has(f));
 
       // A rename breaks every name-based reference to this table — projections
       // bind to their sources by name, and so do view instances. Say what will
@@ -625,9 +594,7 @@ export class NewTableDialog extends LitElement {
       // references are then carried across below rather than left dangling.
       let refs: TableReferences | null = null;
       if (existingTable && existingTable.name !== name) {
-        const views = (await ctx.store.viewInstances.find()).filter(
-          (v) => v.workspaceId === ctx.workspaceId,
-        );
+        const views = (await ctx.store.viewInstances.find()).filter((v) => v.workspaceId === ctx.workspaceId);
         refs = findTableReferences(existingTable.name, workspaceTables, views, tableId);
         const what = describeReferences(refs);
         if (what) {
@@ -715,10 +682,7 @@ export class NewTableDialog extends LitElement {
     // `submit` will on save, so a pending rename previews its real values
     // instead of an empty column (and its constraints are checked against them).
     const renames = this.fieldRenames();
-    const previewRows =
-      renames.length > 0
-        ? this.previewRows.map((r) => ({ ...r, data: renameRowFields(r.data, renames) ?? r.data }))
-        : this.previewRows;
+    const previewRows = renames.length > 0 ? this.previewRows.map((r) => ({ ...r, data: renameRowFields(r.data, renames) ?? r.data })) : this.previewRows;
     // Precompute duplicate maps for any unique column so per-row checks are O(1).
     const duplicateSets = new Map<string, Set<unknown>>();
     for (const c of this.columns) {
@@ -737,10 +701,7 @@ export class NewTableDialog extends LitElement {
     const visible = this.columns.filter((c) => !c.hidden);
     return html`
       <div class="preview">
-        <h3>
-          Live preview — first ${this.previewRows.length}
-          row${this.previewRows.length === 1 ? '' : 's'}
-        </h3>
+        <h3>Live preview — first ${this.previewRows.length} row${this.previewRows.length === 1 ? '' : 's'}</h3>
         <table>
           <thead>
             <tr>
@@ -754,9 +715,7 @@ export class NewTableDialog extends LitElement {
                   ${visible.map((c) => {
                     const v = r.data[c.field];
                     const reason = validateAgainstSpec(c, v, duplicateSets.get(c.field));
-                    return html`<td class=${reason ? 'violation' : ''} title=${reason ?? ''}>
-                      ${formatPreview(v)}
-                    </td>`;
+                    return html`<td class=${reason ? 'violation' : ''} title=${reason ?? ''}>${formatPreview(v)}</td>`;
                   })}
                 </tr>
               `,
@@ -776,9 +735,7 @@ export class NewTableDialog extends LitElement {
    */
   private fieldRenames(): FieldRename[] {
     if (this.mode !== 'edit') return [];
-    return this.columns
-      .filter((c) => c.origField && c.origField !== c.field.trim())
-      .map((c) => ({ from: c.origField as string, to: c.field.trim() }));
+    return this.columns.filter((c) => c.origField && c.origField !== c.field.trim()).map((c) => ({ from: c.origField as string, to: c.field.trim() }));
   }
 
   private renameDetected(): boolean {
@@ -805,29 +762,14 @@ export class NewTableDialog extends LitElement {
             ${this.noticeMsg ? html`<div class="notice">${this.noticeMsg}</div>` : ''}
             <label>
               Name
-              <input
-                type="text"
-                autofocus
-                .value=${this.name}
-                @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)}
-              />
+              <input type="text" autofocus .value=${this.name} @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)} />
             </label>
             <label>
               Title <span style="color:#9ca3af">(optional — shown in the window title)</span>
-              <input
-                type="text"
-                .value=${this.tableTitle}
-                @input=${(e: Event) => (this.tableTitle = (e.target as HTMLInputElement).value)}
-              />
+              <input type="text" .value=${this.tableTitle} @input=${(e: Event) => (this.tableTitle = (e.target as HTMLInputElement).value)} />
             </label>
             <label class="inline">
-              <input
-                type="checkbox"
-                data-testid="table-readonly"
-                .checked=${this.tableReadonly}
-                @change=${(e: Event) =>
-                  (this.tableReadonly = (e.target as HTMLInputElement).checked)}
-              />
+              <input type="checkbox" data-testid="table-readonly" .checked=${this.tableReadonly} @change=${(e: Event) => (this.tableReadonly = (e.target as HTMLInputElement).checked)} />
               Read-only
               <span style="color:#9ca3af">(show values, no editing or add/delete row)</span>
             </label>
@@ -853,41 +795,19 @@ export class NewTableDialog extends LitElement {
               ${this.columns.map((c, i) => {
                 const isSrc = this.dragSrcIdx === i;
                 const isTgt = this.dropTargetIdx === i;
-                const edgeClass =
-                  isTgt && this.dropEdge === 'before'
-                    ? ' drop-before'
-                    : isTgt && this.dropEdge === 'after'
-                      ? ' drop-after'
-                      : '';
+                const edgeClass = isTgt && this.dropEdge === 'before' ? ' drop-before' : isTgt && this.dropEdge === 'after' ? ' drop-after' : '';
                 return html`
                   <div
                     class=${`col-row${isSrc ? ' drag-source' : ''}${edgeClass}`}
-                    @dragover=${(e: DragEvent) =>
-                      this.onRowDragOver(e, i, e.currentTarget as HTMLElement)}
+                    @dragover=${(e: DragEvent) => this.onRowDragOver(e, i, e.currentTarget as HTMLElement)}
                     @dragleave=${() => this.onRowDragLeave(i)}
                     @drop=${(e: DragEvent) => this.onRowDrop(e, i)}
                   >
-                    <span
-                      class="drag-handle"
-                      title="Drag to reorder"
-                      draggable="true"
-                      @dragstart=${(e: DragEvent) => this.onRowDragStart(e, i)}
-                      @dragend=${() => this.onRowDragEnd()}
-                    >
+                    <span class="drag-handle" title="Drag to reorder" draggable="true" @dragstart=${(e: DragEvent) => this.onRowDragStart(e, i)} @dragend=${() => this.onRowDragEnd()}>
                       <span class="mi sm">drag_indicator</span>
                     </span>
-                    <input
-                      type="text"
-                      .value=${c.field}
-                      @input=${(e: Event) =>
-                        this.patchColumn(i, { field: (e.target as HTMLInputElement).value })}
-                    />
-                    <input
-                      type="text"
-                      .value=${c.label}
-                      @input=${(e: Event) =>
-                        this.patchColumn(i, { label: (e.target as HTMLInputElement).value })}
-                    />
+                    <input type="text" .value=${c.field} @input=${(e: Event) => this.patchColumn(i, { field: (e.target as HTMLInputElement).value })} />
+                    <input type="text" .value=${c.label} @input=${(e: Event) => this.patchColumn(i, { label: (e.target as HTMLInputElement).value })} />
                     <select
                       .value=${c.type}
                       @change=${(e: Event) =>
@@ -895,9 +815,7 @@ export class NewTableDialog extends LitElement {
                           type: (e.target as HTMLSelectElement).value as ColumnType,
                         })}
                     >
-                      ${TYPE_OPTIONS.map(
-                        (t) => html`<option value=${t} ?selected=${t === c.type}>${t}</option>`,
-                      )}
+                      ${TYPE_OPTIONS.map((t) => html`<option value=${t} ?selected=${t === c.type}>${t}</option>`)}
                     </select>
                     <select
                       title="Renderer — how cells in this column display. Read-only HTML-encoded text when blank."
@@ -908,16 +826,12 @@ export class NewTableDialog extends LitElement {
                       }}
                     >
                       <option value="" ?selected=${!c.renderer}>— none —</option>
-                      ${rendererOptionsFor(this.rendererOptions, c.renderer).map(
-                        (r) => html`<option value=${r} ?selected=${r === c.renderer}>${r}</option>`,
-                      )}
+                      ${rendererOptionsFor(this.rendererOptions, c.renderer).map((r) => html`<option value=${r} ?selected=${r === c.renderer}>${r}</option>`)}
                     </select>
                     <button
                       type="button"
                       class=${`icon-btn${c.script?.trim() ? ' has-script' : ''}`}
-                      title=${c.script?.trim()
-                        ? 'Edit the script — its render(row) output is what this column displays'
-                        : 'Add a script: render(row) computes what this column displays'}
+                      title=${c.script?.trim() ? 'Edit the script — its render(row) output is what this column displays' : 'Add a script: render(row) computes what this column displays'}
                       @click=${() => this.editScript(i)}
                     >
                       <span class="mi sm">edit</span>
@@ -934,30 +848,17 @@ export class NewTableDialog extends LitElement {
                       }}
                     />
                     <span class="flag">
-                      <input
-                        type="checkbox"
-                        title="Unique"
-                        .checked=${!!c.unique}
-                        @change=${(e: Event) =>
-                          this.patchColumn(i, { unique: (e.target as HTMLInputElement).checked })}
-                      />
+                      <input type="checkbox" title="Unique" .checked=${!!c.unique} @change=${(e: Event) => this.patchColumn(i, { unique: (e.target as HTMLInputElement).checked })} />
                     </span>
                     <span class="flag">
-                      <input
-                        type="checkbox"
-                        title="Not null"
-                        .checked=${!!c.notnull}
-                        @change=${(e: Event) =>
-                          this.patchColumn(i, { notnull: (e.target as HTMLInputElement).checked })}
-                      />
+                      <input type="checkbox" title="Not null" .checked=${!!c.notnull} @change=${(e: Event) => this.patchColumn(i, { notnull: (e.target as HTMLInputElement).checked })} />
                     </span>
                     <span class="flag">
                       <input
                         type="checkbox"
                         title="Visible — uncheck to hide the column without losing its data"
                         .checked=${!c.hidden}
-                        @change=${(e: Event) =>
-                          this.patchColumn(i, { hidden: !(e.target as HTMLInputElement).checked })}
+                        @change=${(e: Event) => this.patchColumn(i, { hidden: !(e.target as HTMLInputElement).checked })}
                       />
                     </span>
                     <span class="flag">
@@ -982,30 +883,13 @@ export class NewTableDialog extends LitElement {
                           })}
                       />
                     </span>
-                    <button
-                      type="button"
-                      class="icon-btn"
-                      title="Move up"
-                      ?disabled=${i === 0}
-                      @click=${() => this.moveColumn(i, -1)}
-                    >
+                    <button type="button" class="icon-btn" title="Move up" ?disabled=${i === 0} @click=${() => this.moveColumn(i, -1)}>
                       <span class="mi sm">arrow_upward</span>
                     </button>
-                    <button
-                      type="button"
-                      class="icon-btn"
-                      title="Move down"
-                      ?disabled=${i === this.columns.length - 1}
-                      @click=${() => this.moveColumn(i, 1)}
-                    >
+                    <button type="button" class="icon-btn" title="Move down" ?disabled=${i === this.columns.length - 1} @click=${() => this.moveColumn(i, 1)}>
                       <span class="mi sm">arrow_downward</span>
                     </button>
-                    <button
-                      type="button"
-                      class="icon-btn row-del"
-                      title="Remove column"
-                      @click=${() => this.removeColumn(i)}
-                    >
+                    <button type="button" class="icon-btn row-del" title="Remove column" @click=${() => this.removeColumn(i)}>
                       <span class="mi sm">delete</span>
                     </button>
                   </div>
@@ -1014,24 +898,9 @@ export class NewTableDialog extends LitElement {
             </div>
 
             <button type="button" class="add" @click=${this.addColumn}>+ Add column</button>
-            ${this.columnActions.map(
-              (a) => html`<button
-                type="button"
-                class="add"
-                title=${a.tooltip ?? a.label}
-                @click=${() => void this.runColumnAction(a)}
-              >
-                ${a.label}
-              </button>`,
-            )}
-
-            ${this.renameDetected()
-              ? html`<div class="hint">
-                  Existing rows are re-keyed on save, so renamed fields keep their data.
-                </div>`
-              : ''}
-            ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''}
-            ${this.mode === 'edit' ? this.renderPreview() : ''}
+            ${this.columnActions.map((a) => html`<button type="button" class="add" title=${a.tooltip ?? a.label} @click=${() => void this.runColumnAction(a)}>${a.label}</button>`)}
+            ${this.renameDetected() ? html`<div class="hint">Existing rows are re-keyed on save, so renamed fields keep their data.</div>` : ''}
+            ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''} ${this.mode === 'edit' ? this.renderPreview() : ''}
           </div>
         </form>
       </dialog>
@@ -1052,11 +921,7 @@ function formatPreview(v: unknown): string {
  * would fail, or null when it's fine. `dupSet` is the set of values seen
  * more than once across the preview slice for unique columns.
  */
-function validateAgainstSpec(
-  c: ColumnRow,
-  v: unknown,
-  dupSet: Set<unknown> | undefined,
-): string | null {
+function validateAgainstSpec(c: ColumnRow, v: unknown, dupSet: Set<unknown> | undefined): string | null {
   const empty = v === null || v === undefined || (typeof v === 'string' && v.trim() === '');
   if (c.notnull && empty) return `${c.label}: empty`;
   if (empty) return null;

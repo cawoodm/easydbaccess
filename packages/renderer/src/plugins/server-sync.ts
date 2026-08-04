@@ -1,13 +1,6 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { serializeWorkspace } from './dump-export.js';
-import {
-  loadEtag,
-  loadServerUrl,
-  replaceWorkspace,
-  saveEtag,
-  saveServerUrl,
-  stripEtag,
-} from './server-sync-core.js';
+import { loadEtag, loadServerUrl, replaceWorkspace, saveEtag, saveServerUrl, stripEtag } from './server-sync-core.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'server-sync',
@@ -40,8 +33,7 @@ export function init(api: HostApi): void {
     tooltip: 'Server sync — push or pull this workspace',
     onClick: async (api, ctx) => {
       const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
-      const rect =
-        ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
+      const rect = ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
       const choice = await AnchoredMenu.open(rect, [
         { id: 'push', label: 'Push (↑)', icon: 'cloud_upload' },
         { id: 'pull', label: 'Pull (↓)', icon: 'cloud_download' },
@@ -51,10 +43,7 @@ export function init(api: HostApi): void {
         if (choice === 'push') await push(api);
         else if (choice === 'pull') await pull(api);
       } catch (err) {
-        api.ui.dialogs.toast(
-          `${choice === 'push' ? 'Push' : 'Pull'} failed: ${(err as Error).message}`,
-          { kind: 'error', title: 'Server sync' },
-        );
+        api.ui.dialogs.toast(`${choice === 'push' ? 'Push' : 'Pull'} failed: ${(err as Error).message}`, { kind: 'error', title: 'Server sync' });
       }
     },
   });
@@ -84,8 +73,7 @@ async function push(api: HostApi): Promise<void> {
   if (res.status === 412) {
     const data = (await res.json().catch(() => ({}))) as { currentEtag?: string };
     const forced = await api.ui.dialogs.confirm(
-      `The server's copy of "${wsId}" has changed since you last pulled.\n\n` +
-        `Push anyway and overwrite it? (Cancel to pull the server version first.)`,
+      `The server's copy of "${wsId}" has changed since you last pulled.\n\n` + `Push anyway and overwrite it? (Cancel to pull the server version first.)`,
       'Server sync — conflict',
     );
     if (!forced) {
@@ -122,11 +110,7 @@ async function pull(api: HostApi): Promise<void> {
   const url = await ensureServerUrl(api);
   if (!url) return;
 
-  const ok = await api.ui.dialogs.confirm(
-    `Replace your local copy of "${wsId}" with the server's version?\n\n` +
-      `Local tables that aren't on the server will be removed.`,
-    'Server sync — pull',
-  );
+  const ok = await api.ui.dialogs.confirm(`Replace your local copy of "${wsId}" with the server's version?\n\n` + `Local tables that aren't on the server will be removed.`, 'Server sync — pull');
   if (!ok) return;
 
   const res = await fetch(`${url}/sync/${encodeURIComponent(wsId)}`);
@@ -158,11 +142,7 @@ async function pull(api: HostApi): Promise<void> {
 async function ensureServerUrl(api: HostApi): Promise<string | null> {
   const existing = await loadServerUrl(api);
   if (existing) return existing;
-  const input = await api.ui.dialogs.prompt(
-    'Server URL (e.g. http://localhost:3000):',
-    'http://localhost:3000',
-    'Server sync',
-  );
+  const input = await api.ui.dialogs.prompt('Server URL (e.g. http://localhost:3000):', 'http://localhost:3000', 'Server sync');
   if (!input) return null;
   try {
     new URL(input);

@@ -94,8 +94,7 @@ class CellTags extends HTMLElement {
 
     const members = arrayMembers(this._value);
     const wrap = document.createElement('span');
-    wrap.style.cssText =
-      'display:flex;align-items:center;gap:0.25rem;width:100%;min-width:0;max-width:100%';
+    wrap.style.cssText = 'display:flex;align-items:center;gap:0.25rem;width:100%;min-width:0;max-width:100%';
     for (const m of members) {
       const pill = document.createElement('span');
       pill.className = 'tag-pill';
@@ -116,9 +115,7 @@ class CellTags extends HTMLElement {
     edit.type = 'button';
     edit.title = 'Edit the list';
     edit.textContent = '✎';
-    edit.style.cssText =
-      'flex:none;background:transparent;border:0;cursor:pointer;color:#9ca3af;' +
-      'font-size:0.85em;padding:0 0.15rem;line-height:1';
+    edit.style.cssText = 'flex:none;background:transparent;border:0;cursor:pointer;color:#9ca3af;' + 'font-size:0.85em;padding:0 0.15rem;line-height:1';
     edit.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -138,8 +135,7 @@ class CellTags extends HTMLElement {
     input.type = 'text';
     input.value = arrayMembers(this._value).length === 0 ? '' : this._value;
     input.title = 'Comma-separated, or a JSON array';
-    input.style.cssText =
-      'width:100%;box-sizing:border-box;border:0;background:transparent;font:inherit;padding:0';
+    input.style.cssText = 'width:100%;box-sizing:border-box;border:0;background:transparent;font:inherit;padding:0';
     input.addEventListener('change', () => {
       if (this._editor !== input) return;
       this.commit(input.value);
@@ -178,8 +174,6 @@ class CellTags extends HTMLElement {
     // which early-returns on an unchanged value — and this just assigned it.
     this.render();
     if (!changed) return;
-    this.dispatchEvent(
-      new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }),
-    );
+    this.dispatchEvent(new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }));
   }
 }

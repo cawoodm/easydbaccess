@@ -31,9 +31,7 @@ async function savedFiles(page: Page): Promise<Array<{ filename: string; body: s
 }
 
 test.describe('table export menu', () => {
-  test('the per-table Export button opens a menu with CSV, JSON, and SQL entries', async ({
-    page,
-  }) => {
+  test('the per-table Export button opens a menu with CSV, JSON, and SQL entries', async ({ page }) => {
     const id = await createTable(page, 'Widgets', [{ field: 'name' }]);
     await waitForPanel(page, id);
 
@@ -50,14 +48,8 @@ test.describe('table export menu', () => {
     await expect(menu).toBeHidden();
   });
 
-  test('CSV + Visible Data narrows to non-hidden columns and applies the active filter', async ({
-    page,
-  }) => {
-    const id = await createTable(page, 'Contacts', [
-      { field: 'name' },
-      { field: 'secret' },
-      { field: 'city' },
-    ]);
+  test('CSV + Visible Data narrows to non-hidden columns and applies the active filter', async ({ page }) => {
+    const id = await createTable(page, 'Contacts', [{ field: 'name' }, { field: 'secret' }, { field: 'city' }]);
     await waitForPanel(page, id);
     await addRow(page, id, { name: 'Alice', secret: 'x1', city: 'Zurich' });
     await addRow(page, id, { name: 'Bob', secret: 'x2', city: 'Bern' });

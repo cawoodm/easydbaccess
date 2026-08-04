@@ -18,10 +18,7 @@ describe('reconcileColumns', () => {
   });
 
   it("keeps the user's arrangement (order, hidden, width) and never overwrites it", () => {
-    const existing = [
-      col('b', { hidden: true, width: 120, label: 'Bee' }),
-      col('a', { type: 'number' }),
-    ];
+    const existing = [col('b', { hidden: true, width: 120, label: 'Bee' }), col('a', { type: 'number' })];
     // Incoming lists the same fields in a different order with different props.
     const incoming = [col('a'), col('b')];
     const { columns, newFields } = reconcileColumns(existing, incoming);
@@ -55,8 +52,7 @@ describe('reconcileColumns', () => {
 });
 
 describe('rowRekeyer', () => {
-  const cols = (...fields: string[]): ColumnSpec[] =>
-    fields.map((field) => ({ field, label: field, type: 'string' }));
+  const cols = (...fields: string[]): ColumnSpec[] => fields.map((field) => ({ field, label: field, type: 'string' }));
 
   it('returns null when nothing was renamed', () => {
     expect(rowRekeyer(cols('a', 'b'), cols('a', 'b'))).toBeNull();

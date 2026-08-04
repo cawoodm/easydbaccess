@@ -19,8 +19,6 @@ export const GRID_SETTINGS_ID = 'grid';
  * the high end down, so ascending-first spent a click on the direction nobody
  * wanted; a column of names is the exception the setting exists for.
  */
-export async function readSortDescFirst(settings: {
-  get<T>(pluginId: string, key: string): Promise<T | undefined>;
-}): Promise<boolean> {
+export async function readSortDescFirst(settings: { get<T>(pluginId: string, key: string): Promise<T | undefined> }): Promise<boolean> {
   return (await settings.get<boolean>(GRID_SETTINGS_ID, 'sortDescFirst')) !== false;
 }

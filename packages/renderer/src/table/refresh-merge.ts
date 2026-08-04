@@ -94,9 +94,7 @@ export function mergeRefreshedRows(input: RefreshMergeInput): RefreshMergeResult
    * Sorted, so the key does not depend on the order the source lists them in.
    */
   const oldFields = new Set(oldRows.flatMap((r) => Object.keys(r.data)));
-  const contentFields = [...new Set(freshRows.flatMap((r) => Object.keys(r)))]
-    .filter((f) => oldFields.has(f) && !deletedSet.has(f) && !userSet.has(f))
-    .sort();
+  const contentFields = [...new Set(freshRows.flatMap((r) => Object.keys(r)))].filter((f) => oldFields.has(f) && !deletedSet.has(f) && !userSet.has(f)).sort();
 
   const byPk = pks.length > 0 && freshRows.every((row) => hasAllPkValues(row, pks));
   // With no fields to key on, every row hashes the same and the first old

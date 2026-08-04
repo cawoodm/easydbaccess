@@ -15,12 +15,7 @@ import type { HostApi } from '@easydb/shared';
 // already used this trick — keeping it here means each importer no longer has
 // to remember it.
 import type { ProgressHandle } from '../chrome/top-progress.js';
-import {
-  isGitLfsPointer,
-  readResponseText,
-  toCorsFriendlyUrl,
-  toGitLfsMediaUrl,
-} from '../plugins/read-url.js';
+import { isGitLfsPointer, readResponseText, toCorsFriendlyUrl, toGitLfsMediaUrl } from '../plugins/read-url.js';
 
 /**
  * Hard ceiling on a URL import buffered into the browser. A CSV/JSON body is
@@ -97,11 +92,7 @@ function mb(bytes: number): string {
  *   - oversized payload (surfaces the actual Content-Length vs the limit),
  *   - body-read failure (huge/truncated response).
  */
-export async function fetchImportText(
-  api: HostApi,
-  rawUrl: string,
-  progress: ImportProgress = {},
-): Promise<string> {
+export async function fetchImportText(api: HostApi, rawUrl: string, progress: ImportProgress = {}): Promise<string> {
   // Rewrite known non-CORS web URLs (e.g. a github.com blob/raw link) to their
   // CORS-enabled host so the browser can fetch them directly. No-op otherwise.
   const url = toCorsFriendlyUrl(rawUrl);
@@ -138,9 +129,7 @@ export async function fetchImportText(
     }
     if (!res.ok) {
       const snippet = await bodySnippet(res);
-      throw new Error(
-        `HTTP ${res.status} ${res.statusText || ''}`.trim() + (snippet ? ` — ${snippet}` : ''),
-      );
+      throw new Error(`HTTP ${res.status} ${res.statusText || ''}`.trim() + (snippet ? ` — ${snippet}` : ''));
     }
     const len = Number(res.headers.get('content-length'));
     if (ceiling !== null && Number.isFinite(len) && len > ceiling) {
@@ -157,10 +146,7 @@ export async function fetchImportText(
     try {
       return await readResponseText(res, progress.onProgress);
     } catch (err) {
-      throw new Error(
-        `Failed reading the response body from ${urlHost(target)}: ${(err as Error).message}`,
-        { cause: err },
-      );
+      throw new Error(`Failed reading the response body from ${urlHost(target)}: ${(err as Error).message}`, { cause: err });
     }
   };
 
@@ -184,12 +170,7 @@ export async function fetchImportText(
  * advertises a `Content-Length`, indeterminate otherwise, so quick imports
  * never flash it.
  */
-export async function fetchImportTextWithBar(
-  api: HostApi,
-  url: string,
-  label: string,
-  opts: { maxBytes?: number | null } = {},
-): Promise<string> {
+export async function fetchImportTextWithBar(api: HostApi, url: string, label: string, opts: { maxBytes?: number | null } = {}): Promise<string> {
   // Resolve the bar class before the read starts, so the `onSlow` callback
   // (which must stay synchronous) has it to hand.
   const { TopProgress } = await import('../chrome/top-progress.js');

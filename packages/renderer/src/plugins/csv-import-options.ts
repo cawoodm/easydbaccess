@@ -97,12 +97,7 @@ export class CsvImportOptions extends LitElement {
               this.emit();
             }}
           >
-            ${CHOICES.map(
-              (c) =>
-                html`<option value=${c.value} ?selected=${c.value === this.choice}>
-                  ${c.label}
-                </option>`,
-            )}
+            ${CHOICES.map((c) => html`<option value=${c.value} ?selected=${c.value === this.choice}>${c.label}</option>`)}
           </select>
         </label>
         ${this.choice === 'custom'
@@ -123,8 +118,7 @@ export class CsvImportOptions extends LitElement {
       </div>
       <p class="hint">
         Auto-detect counts commas, semicolons and tabs in the first lines. A
-        <code>.tsv</code> or <code>.tab</code> name always means TAB. Choose a separator here to
-        override both.
+        <code>.tsv</code> or <code>.tab</code> name always means TAB. Choose a separator here to override both.
       </p>
     `;
   }

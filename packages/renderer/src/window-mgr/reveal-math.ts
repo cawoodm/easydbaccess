@@ -32,13 +32,7 @@ export const REVEAL_MARGIN = 12;
  * asked to see a window. A window bigger than the viewport is pinned by its
  * top-left corner — that is where its titlebar is, the only handle it has.
  */
-export function panToReveal(
-  state: PanZoomState,
-  rect: Rect,
-  viewW: number,
-  viewH: number,
-  margin = REVEAL_MARGIN,
-): PanZoomState | null {
+export function panToReveal(state: PanZoomState, rect: Rect, viewW: number, viewH: number, margin = REVEAL_MARGIN): PanZoomState | null {
   const x = axis(state.x, rect.x, rect.w, viewW, state.scale, margin);
   const y = axis(state.y, rect.y, rect.h, viewH, state.scale, margin);
   if (x === state.x && y === state.y) return null;
@@ -50,14 +44,7 @@ export function panToReveal(
  * `pos * scale + offset`; solve for the offset that puts the whole span inside
  * `[margin, view - margin]`, moving as little as possible.
  */
-function axis(
-  offset: number,
-  pos: number,
-  size: number,
-  view: number,
-  scale: number,
-  margin: number,
-): number {
+function axis(offset: number, pos: number, size: number, view: number, scale: number, margin: number): number {
   const near = pos * scale + offset;
   const span = size * scale;
   const far = near + span;

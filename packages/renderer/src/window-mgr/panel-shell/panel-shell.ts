@@ -20,13 +20,7 @@
 import { MIN_H, MIN_W } from '../geometry.js';
 import { isMobileViewport } from '../../util/viewport.js';
 import { dragRect, EDGES, resizeRect, type Edge, type Rect } from './geometry-math.js';
-import {
-  initialState,
-  persistFlags,
-  transition,
-  type PanelAction,
-  type PanelStatus,
-} from './state.js';
+import { initialState, persistFlags, transition, type PanelAction, type PanelStatus } from './state.js';
 import './panel-shell.css';
 
 export interface ShellViewport {
@@ -125,16 +119,11 @@ function isInteractiveTarget(e: Event): boolean {
 }
 
 const ICONS: Record<string, string> = {
-  smallify:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 15 12 9 18 15"/></svg>',
-  minimize:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="19" x2="19" y2="19"/></svg>',
-  maximize:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="1"/></svg>',
-  normalize:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="4" width="12" height="12" rx="1"/><rect x="4" y="8" width="12" height="12" rx="1"/></svg>',
-  close:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>',
+  smallify: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 15 12 9 18 15"/></svg>',
+  minimize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="19" x2="19" y2="19"/></svg>',
+  maximize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="1"/></svg>',
+  normalize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="4" width="12" height="12" rx="1"/><rect x="4" y="8" width="12" height="12" rx="1"/></svg>',
+  close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>',
 };
 
 /** Session-monotonic z counter. Never renormalized, so a panel's z-index is a
@@ -458,8 +447,7 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
         if (from === 'normalized') normalRect = readRect();
         // A smallified panel may have been dragged; keep its live x/y but the
         // pre-collapse w/h captured at smallify time.
-        else if (from === 'smallified')
-          normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
+        else if (from === 'smallified') normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
         // display:none instead of jsPanel's left:-9999 parking — the managers'
         // "-9000 sentinel" guards become dead code but stay harmless.
         el.style.display = 'none';
@@ -470,8 +458,7 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
       }
       case 'maximized':
         if (from === 'normalized') normalRect = readRect();
-        else if (from === 'smallified')
-          normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
+        else if (from === 'smallified') normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
         enterMaximized();
         break;
       case 'smallified':
@@ -479,8 +466,7 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
         el.style.height = `${hdr.offsetHeight}px`;
         break;
       case 'normalized':
-        if (from === 'smallified')
-          normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
+        if (from === 'smallified') normalRect = { ...normalRect, x: el.offsetLeft, y: el.offsetTop };
         // Restoring a maximized panel on a phone must NOT shrink it back to the
         // rect it had before. There is no resize handle on a touch screen, so a
         // window that returns to 480x520 is stuck that way with no way to grow
@@ -648,9 +634,7 @@ export function createPanel(opts: PanelShellOptions): PanelShellEl {
       const onMove = (ev: PointerEvent): void => {
         if (ev.pointerId !== id) return;
         moved = true;
-        applyRect(
-          resizeRect(startRect, edge, ev.clientX - sx, ev.clientY - sy, scale, MIN_W, MIN_H),
-        );
+        applyRect(resizeRect(startRect, edge, ev.clientX - sx, ev.clientY - sy, scale, MIN_W, MIN_H));
       };
       const onUp = (ev: PointerEvent): void => {
         if (ev.pointerId !== id) return;

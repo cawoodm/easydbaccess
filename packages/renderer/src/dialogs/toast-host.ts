@@ -145,8 +145,7 @@ export class ToastHost extends LitElement {
       ...(opts?.title ? { title: opts.title } : {}),
     };
     this.toasts = [...this.toasts, t];
-    const dur =
-      opts?.durationMs ?? (t.kind === 'error' || t.kind === 'warning' ? 7000 : 4000);
+    const dur = opts?.durationMs ?? (t.kind === 'error' || t.kind === 'warning' ? 7000 : 4000);
     t.timer = window.setTimeout(() => this.dismiss(t.id), dur);
   }
 
@@ -162,9 +161,7 @@ export class ToastHost extends LitElement {
         (t) => html`
           <div class="toast ${t.kind}" role="status">
             <span class="mi lg">${iconFor(t.kind)}</span>
-            <span class="body">
-              ${t.title ? html`<strong>${t.title}</strong>` : ''}${linkify(t.message)}
-            </span>
+            <span class="body"> ${t.title ? html`<strong>${t.title}</strong>` : ''}${linkify(t.message)} </span>
             <button class="close" title="Dismiss" @click=${() => this.dismiss(t.id)}>
               <span class="mi">close</span>
             </button>
@@ -188,11 +185,7 @@ function linkify(s: string) {
   }
   if (last < s.length) parts.push(s.slice(last));
   if (parts.length === 0) return s;
-  return parts.map((p) =>
-    typeof p === 'string'
-      ? p
-      : html`<a href=${p.url} target="_blank" rel="noopener noreferrer">${p.url}</a>`,
-  );
+  return parts.map((p) => (typeof p === 'string' ? p : html`<a href=${p.url} target="_blank" rel="noopener noreferrer">${p.url}</a>`));
 }
 
 function iconFor(k: ToastKind): string {

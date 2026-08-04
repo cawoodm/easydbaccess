@@ -11,12 +11,8 @@ import { bulkAddRows, createTable, panelDomId, readRows, waitForPanel } from './
  * of being silently coerced to unchecked.
  */
 test.describe('cell-boolean four-state rendering', () => {
-  test('true/false/empty/invalid render distinctly; empty is clickable; invalid is pencil-fixable', async ({
-    page,
-  }) => {
-    const id = await createTable(page, 'Flags', [
-      { field: 'flag', type: 'boolean', renderer: 'boolean' },
-    ]);
+  test('true/false/empty/invalid render distinctly; empty is clickable; invalid is pencil-fixable', async ({ page }) => {
+    const id = await createTable(page, 'Flags', [{ field: 'flag', type: 'boolean', renderer: 'boolean' }]);
     await waitForPanel(page, id);
 
     await bulkAddRows(page, id, [{ flag: true }, { flag: false }, { flag: null }, { flag: 'foo' }]);
@@ -35,8 +31,7 @@ test.describe('cell-boolean four-state rendering', () => {
     expect([trueIdx, falseIdx, emptyIdx, invalidIdx].every((i) => i >= 0)).toBe(true);
 
     const panel = page.locator(`#${panelDomId(id)}`);
-    const cellAt = (idx: number) =>
-      panel.locator('data-table tbody tr').nth(idx).locator('cell-boolean');
+    const cellAt = (idx: number) => panel.locator('data-table tbody tr').nth(idx).locator('cell-boolean');
 
     // true → checked checkbox, no "empty" grayed styling.
     const trueCheckbox = cellAt(trueIdx).locator('input[type="checkbox"]');

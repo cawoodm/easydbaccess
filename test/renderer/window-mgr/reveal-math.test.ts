@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  panToReveal,
-  REVEAL_MARGIN,
-} from '../../../packages/renderer/src/window-mgr/reveal-math.js';
+import { panToReveal, REVEAL_MARGIN } from '../../../packages/renderer/src/window-mgr/reveal-math.js';
 
 const at = (x: number, y: number, scale = 1) => ({ x, y, scale });
 const rect = (x: number, y: number, w = 200, h = 100) => ({ x, y, w, h });

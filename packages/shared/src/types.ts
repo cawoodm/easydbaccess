@@ -210,8 +210,7 @@ export interface ProjectionColumn {
   /** Legacy seed values from specs written before presentation moved to the table. */
   label?: string | undefined;
   type?: ColumnType | undefined;
-  from:
-    /** A real stored column of a source — the only writeback candidate. */
+  from: /** A real stored column of a source — the only writeback candidate. */
     | { kind: 'source'; alias: string; field: string }
     /** Computed via `function render(row) { … }` — always read-only. */
     | { kind: 'script'; script: string };

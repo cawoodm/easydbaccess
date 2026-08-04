@@ -22,9 +22,7 @@ describe('looksLikeHtml', () => {
 
 describe('htmlToPreviewText', () => {
   it('collapses newlines/whitespace for a plain-text value', () => {
-    expect(htmlToPreviewText('line one\nline two\n  line three')).toBe(
-      'line one line two line three',
-    );
+    expect(htmlToPreviewText('line one\nline two\n  line three')).toBe('line one line two line three');
   });
 
   it('collapses whitespace for an HTML value by stripping tags', () => {

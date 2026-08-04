@@ -1,6 +1,6 @@
 # @easydb/server
 
-A Hono app exported by `createServer({ store, fetchFn, ... })`. The *same*
+A Hono app exported by `createServer({ store, fetchFn, ... })`. The _same_
 exported app runs in two places:
 
 - **Standalone** — `src/standalone.ts` wraps it in `@hono/node-server`. This
@@ -10,18 +10,18 @@ exported app runs in two places:
 
 ## Files
 
-| File | Role |
-|---|---|
-| `src/index.ts` | `createServer(deps)` factory + `ServerDeps` shape. Mounts routes, configures CORS, logger, `/health`. |
-| `src/standalone.ts` | Node entry: `.env` load, env-var parsing, port binding, SIGINT/SIGTERM shutdown. |
-| `src/log.ts` | One-liner request/response logger. `EASYDB_LOG=quiet` silences it. |
-| `src/routes/sync.ts` | Whole-workspace JSON push/pull + SSE stream. |
-| `src/routes/fetch.ts` | Outbound URL proxy with allowlist + byte cap. |
-| `src/routes/plugins.ts` | `/plugins/registry` — serves the JSON file at `PLUGINS_REGISTRY_PATH` (if set). Re-read per request so operators can edit without restart. |
-| `src/storage/types.ts` | `StoreAdapter` — the only interface backends implement. |
-| `src/storage/fs-store.ts` | One JSON file per workspace. Default. |
-| `src/storage/sqlite-store.ts` | One SQLite DB per workspace, single-row blob table. |
-| `src/storage/factory.ts` | `createStoreFromEnv` — switch via `STORAGE_KIND`. |
+| File                          | Role                                                                                                                                       |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/index.ts`                | `createServer(deps)` factory + `ServerDeps` shape. Mounts routes, configures CORS, logger, `/health`.                                      |
+| `src/standalone.ts`           | Node entry: `.env` load, env-var parsing, port binding, SIGINT/SIGTERM shutdown.                                                           |
+| `src/log.ts`                  | One-liner request/response logger. `EASYDB_LOG=quiet` silences it.                                                                         |
+| `src/routes/sync.ts`          | Whole-workspace JSON push/pull + SSE stream.                                                                                               |
+| `src/routes/fetch.ts`         | Outbound URL proxy with allowlist + byte cap.                                                                                              |
+| `src/routes/plugins.ts`       | `/plugins/registry` — serves the JSON file at `PLUGINS_REGISTRY_PATH` (if set). Re-read per request so operators can edit without restart. |
+| `src/storage/types.ts`        | `StoreAdapter` — the only interface backends implement.                                                                                    |
+| `src/storage/fs-store.ts`     | One JSON file per workspace. Default.                                                                                                      |
+| `src/storage/sqlite-store.ts` | One SQLite DB per workspace, single-row blob table.                                                                                        |
+| `src/storage/factory.ts`      | `createStoreFromEnv` — switch via `STORAGE_KIND`.                                                                                          |
 
 ## The data model
 
@@ -52,16 +52,16 @@ if you add ETag-aware routes.
 
 ## Environment variables
 
-| Var | Purpose | Default |
-|---|---|---|
-| `PORT` | Server port | `3000` |
-| `STORAGE_KIND` | `fs` or `sqlite` | `fs` |
-| `STORAGE_PATH` | Directory holding workspace files. **Required.** | — |
-| `CORS_ORIGINS` | `*`, comma list, or unset (= `*`) | `*` |
-| `FETCH_ALLOWLIST` | Comma list of host suffixes for `/fetch` | unset (allow all) |
-| `FETCH_MAX_BYTES` | Cap on `/fetch` response bodies | `5_000_000` |
+| Var                     | Purpose                                                                                                                                | Default            |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `PORT`                  | Server port                                                                                                                            | `3000`             |
+| `STORAGE_KIND`          | `fs` or `sqlite`                                                                                                                       | `fs`               |
+| `STORAGE_PATH`          | Directory holding workspace files. **Required.**                                                                                       | —                  |
+| `CORS_ORIGINS`          | `*`, comma list, or unset (= `*`)                                                                                                      | `*`                |
+| `FETCH_ALLOWLIST`       | Comma list of host suffixes for `/fetch`                                                                                               | unset (allow all)  |
+| `FETCH_MAX_BYTES`       | Cap on `/fetch` response bodies                                                                                                        | `5_000_000`        |
 | `PLUGINS_REGISTRY_PATH` | Path to a JSON file `{ plugins: [...] }` served by `/plugins/registry`. Same shape as `packages/renderer/public/plugins/catalog.json`. | unset → empty list |
-| `EASYDB_LOG` | `quiet` to silence logger | unset |
+| `EASYDB_LOG`            | `quiet` to silence logger                                                                                                              | unset              |
 
 `.env` is loaded from the package root via `process.loadEnvFile` (Node ≥20.12,
 no dotenv dependency).

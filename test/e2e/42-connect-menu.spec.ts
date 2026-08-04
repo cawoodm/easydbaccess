@@ -10,9 +10,7 @@ import { test, expect } from './fixtures.js';
  * split, so the two buttons must not merge or shadow each other.
  */
 
-test('exactly one Connect button in the header, however many connectors exist', async ({
-  page,
-}) => {
+test('exactly one Connect button in the header, however many connectors exist', async ({ page }) => {
   await expect(page.getByTitle(/^Connect a live table/)).toHaveCount(1);
 
   // The old per-backend button is gone. Its tooltip was "Connect a live,

@@ -127,7 +127,5 @@ test('an empty cell says so, and a script column keeps its source', async ({ pag
   // The script's output, flattened for the line — the `**` is gone.
   expect(await cell.textContent()).toContain('raw');
   await cell.locator('[title="Click to edit"]').click();
-  await expect(page.locator('[id^="easydb-html-edit-"]').last().locator('textarea')).toHaveValue(
-    'raw',
-  );
+  await expect(page.locator('[id^="easydb-html-edit-"]').last().locator('textarea')).toHaveValue('raw');
 });

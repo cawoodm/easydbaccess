@@ -38,10 +38,7 @@ export interface ChooseTablesOpts {
  * chose, or null if they cancelled. Never resolves with an empty array — the
  * confirm button is disabled while nothing is selected.
  */
-export function chooseTables(
-  items: SelectableTable[],
-  opts: ChooseTablesOpts = {},
-): Promise<number[] | null> {
+export function chooseTables(items: SelectableTable[], opts: ChooseTablesOpts = {}): Promise<number[] | null> {
   const dlg = TableSelectDialog.instance ?? mountDialog();
   return dlg.open(items, opts);
 }
@@ -231,17 +228,13 @@ export class TableSelectDialog extends LitElement {
     const count = this.selectedCount;
     return html`
       <dialog @cancel=${this.onCancel} @keydown=${ctrlEnterSubmits}>
-        <button type="button" class="close-x" title="Close" @click=${() => this.finish(null)}>
-          ×
-        </button>
+        <button type="button" class="close-x" title="Close" @click=${() => this.finish(null)}>×</button>
         <form @submit=${this.submit}>
           <div class="dialog-header">
             <h2>${this.heading}</h2>
             <div class="header-actions">
               <button type="button" class="ghost" @click=${() => this.finish(null)}>Cancel</button>
-              <button type="submit" class="primary" ?disabled=${count === 0}>
-                ${this.confirmLabel} (${count})
-              </button>
+              <button type="submit" class="primary" ?disabled=${count === 0}>${this.confirmLabel} (${count})</button>
             </div>
           </div>
           <div class="dialog-body">
@@ -258,12 +251,7 @@ export class TableSelectDialog extends LitElement {
               ${this.items.map(
                 (t, i) => html`
                   <li>
-                    <input
-                      type="checkbox"
-                      id=${`tsel-${i}`}
-                      .checked=${this.selected[i] ?? false}
-                      @change=${() => this.toggle(i)}
-                    />
+                    <input type="checkbox" id=${`tsel-${i}`} .checked=${this.selected[i] ?? false} @change=${() => this.toggle(i)} />
                     <label for=${`tsel-${i}`}>
                       <span class="name">${t.name}</span>
                       ${t.hidden ? html`<span class="tag-hidden">hidden</span>` : ''}

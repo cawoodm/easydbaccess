@@ -15,30 +15,16 @@
 // to edit what they see, the answer is "import a copy" (csv-import /
 // json-import), which makes a normal local table with its own identity.
 
-import type {
-  DataCollection,
-  HostApi,
-  PluginModule,
-  Row,
-  RowSourceCtx,
-  Table,
-  Unsubscribe,
-} from '@easydb/shared';
+import type { DataCollection, HostApi, PluginModule, Row, RowSourceCtx, Table, Unsubscribe } from '@easydb/shared';
 import { parseCsv } from './csv-import.js';
-import {
-  isGitLfsPointer,
-  readResponseText,
-  toCorsFriendlyUrl,
-  toGitLfsMediaUrl,
-} from './read-url.js';
+import { isGitLfsPointer, readResponseText, toCorsFriendlyUrl, toGitLfsMediaUrl } from './read-url.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'url-source',
   name: 'URL Reference',
   type: 'source',
   version: '0.1.0',
-  description:
-    'Backs a table with a live read-only fetch of a plain CSV or JSON URL — a "reference" table whose rows are never persisted locally.',
+  description: 'Backs a table with a live read-only fetch of a plain CSV or JSON URL — a "reference" table whose rows are never persisted locally.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18z"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/url-source.ts',
@@ -171,8 +157,7 @@ function nextPageUrl(parsed: unknown, base: string): string | null {
 }
 
 function jsonToRecords(parsed: unknown): Array<Record<string, unknown>> {
-  const isObj = (v: unknown): v is Record<string, unknown> =>
-    typeof v === 'object' && v !== null && !Array.isArray(v);
+  const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
   if (Array.isArray(parsed)) {
     return parsed.filter(isObj);
@@ -223,17 +208,12 @@ export function createUrlCollection(table: Table, ctx: RowSourceCtx): DataCollec
     try {
       return await readResponseText(res);
     } catch (err) {
-      throw new Error(
-        `Could not read response from ${url}: ${(err as Error)?.message ?? String(err)}`,
-        { cause: err },
-      );
+      throw new Error(`Could not read response from ${url}: ${(err as Error)?.message ?? String(err)}`, { cause: err });
     }
   }
 
   /** One page: fetch, follow a GitHub LFS pointer if that is what came back, parse. */
-  async function fetchPage(
-    target: string,
-  ): Promise<{ records: Array<Record<string, unknown>>; nextUrl: string | null }> {
+  async function fetchPage(target: string): Promise<{ records: Array<Record<string, unknown>>; nextUrl: string | null }> {
     const cors = toCorsFriendlyUrl(target);
     let text = await readText(cors);
     // GitHub's raw host answers 200 with an LFS pointer stub for LFS-tracked
@@ -249,10 +229,7 @@ export function createUrlCollection(table: Table, ctx: RowSourceCtx): DataCollec
       }
       return { records: parseCsv(text).rows, nextUrl: null };
     } catch (err) {
-      throw new Error(
-        `Could not parse ${format.toUpperCase()} from ${url}: ${(err as Error)?.message ?? String(err)}`,
-        { cause: err },
-      );
+      throw new Error(`Could not parse ${format.toUpperCase()} from ${url}: ${(err as Error)?.message ?? String(err)}`, { cause: err });
     }
   }
 
@@ -267,8 +244,7 @@ export function createUrlCollection(table: Table, ctx: RowSourceCtx): DataCollec
     while (target && records.length < MAX_REFERENCE_ROWS) {
       if (seen.has(target)) break; // a cursor that points at itself must not loop
       seen.add(target);
-      const page: { records: Array<Record<string, unknown>>; nextUrl: string | null } =
-        await fetchPage(target);
+      const page: { records: Array<Record<string, unknown>>; nextUrl: string | null } = await fetchPage(target);
       records.push(...page.records);
       // A page that returns nothing ends the walk even if it still offers a
       // cursor — otherwise a quirky endpoint could page forever.

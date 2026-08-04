@@ -53,10 +53,7 @@ export function mountPlugins(app: Hono, deps: ServerDeps) {
     }
     if (!Array.isArray(parsed.plugins)) {
       log('plugins', 'registry shape-error', { path });
-      return c.json(
-        { error: 'registry JSON must contain a `plugins` array' },
-        500,
-      );
+      return c.json({ error: 'registry JSON must contain a `plugins` array' }, 500);
     }
     log('plugins', 'registry', { path, count: parsed.plugins.length });
     return c.json(parsed);

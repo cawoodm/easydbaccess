@@ -92,8 +92,7 @@ describe('createUrlCollection — paged JSON', () => {
   const P1 = 'https://ds.test/db/t.json?_size=max';
   const P2 = 'https://ds.test/db/t.json?_size=max&_next=100';
 
-  const page = (rows: Array<Record<string, unknown>>, next?: string) =>
-    JSON.stringify({ ok: true, rows, ...(next ? { next: '100', next_url: next } : {}) });
+  const page = (rows: Array<Record<string, unknown>>, next?: string) => JSON.stringify({ ok: true, rows, ...(next ? { next: '100', next_url: next } : {}) });
 
   it('follows next_url until the cursor runs out', async () => {
     const { ctx, calls } = makeCtx({

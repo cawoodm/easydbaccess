@@ -5,12 +5,12 @@ the built `dist/index.html` in production.
 
 ## Files
 
-| File | Role |
-|---|---|
-| `src/main.ts` | App entry. Creates the BrowserWindow, picks dev vs prod loader, handles `window-all-closed` / `activate`. |
-| `src/preload.ts` | contextBridge surface exposed to the renderer as `window.easydb`. Currently just `{ platform: 'electron', version }`. |
-| `scripts/dev.cjs` | Boots `dev:renderer` (Vite) first, then launches Electron with `EASYDB_RENDERER_URL` pointing at it. |
-| `electron-builder.json` | Packaging config (out of scope for code edits — bumped via the publish scripts at repo root). |
+| File                    | Role                                                                                                                  |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `src/main.ts`           | App entry. Creates the BrowserWindow, picks dev vs prod loader, handles `window-all-closed` / `activate`.             |
+| `src/preload.ts`        | contextBridge surface exposed to the renderer as `window.easydb`. Currently just `{ platform: 'electron', version }`. |
+| `scripts/dev.cjs`       | Boots `dev:renderer` (Vite) first, then launches Electron with `EASYDB_RENDERER_URL` pointing at it.                  |
+| `electron-builder.json` | Packaging config (out of scope for code edits — bumped via the publish scripts at repo root).                         |
 
 ## Dev vs prod
 

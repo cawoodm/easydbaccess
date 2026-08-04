@@ -39,8 +39,7 @@ export function isRawSecret(value: unknown): boolean {
  *
  * Word boundaries only, so `tokenizer` or `keyboard` are not credentials.
  */
-const SECRET_NAME_RE =
-  /(^|[_:.\-\s])(tokens?|secrets?|passwords?|passwd|pwd|api[_-]?keys?|apikeys?|auth|credentials?|pat)($|[_:.\-\s])/i;
+const SECRET_NAME_RE = /(^|[_:.\-\s])(tokens?|secrets?|passwords?|passwd|pwd|api[_-]?keys?|apikeys?|auth|credentials?|pat)($|[_:.\-\s])/i;
 
 /** Does a setting or property name read as a credential? */
 export function looksSecretName(name: string): boolean {
@@ -59,17 +58,12 @@ export interface NamedSetting {
  * any credential-named property of an object value is raw — a composite record
  * leaks through its members, not through itself.
  */
-export function holdsRawSecret(
-  setting: NamedSetting,
-  isSecretField?: (name: string) => boolean,
-): boolean {
+export function holdsRawSecret(setting: NamedSetting, isSecretField?: (name: string) => boolean): boolean {
   const named = looksSecretName(setting.name) || isSecretField?.(setting.name) === true;
   if (named && isRawSecret(setting.value)) return true;
   const v = setting.value;
   if (v === null || typeof v !== 'object' || Array.isArray(v)) return false;
-  return Object.entries(v as Record<string, unknown>).some(
-    ([k, member]) => looksSecretName(k) && isRawSecret(member),
-  );
+  return Object.entries(v as Record<string, unknown>).some(([k, member]) => looksSecretName(k) && isRawSecret(member));
 }
 
 /**
@@ -79,10 +73,7 @@ export function holdsRawSecret(
  * would look like "the other device cleared this", and a pull would then wipe a
  * reference that is perfectly good on the receiving side.
  */
-export function withoutRawSecrets<T extends NamedSetting>(
-  settings: readonly T[],
-  isSecretField?: (name: string) => boolean,
-): { kept: T[]; withheld: string[] } {
+export function withoutRawSecrets<T extends NamedSetting>(settings: readonly T[], isSecretField?: (name: string) => boolean): { kept: T[]; withheld: string[] } {
   const kept: T[] = [];
   const withheld: string[] = [];
   for (const s of settings) {
@@ -106,11 +97,7 @@ export function withoutRawSecrets<T extends NamedSetting>(
  * this, and is refused too. That is the safe way round: the Settings dialog does
  * not accept a raw secret in a `secret` field either.
  */
-export function resolvesToSameSecret(
-  raw: unknown,
-  next: unknown,
-  secrets: Record<string, string>,
-): boolean {
+export function resolvesToSameSecret(raw: unknown, next: unknown, secrets: Record<string, string>): boolean {
   if (typeof next !== 'string' || next === '') return false;
   if (!hasSecretRef(raw)) return false;
   return interpolateSecrets(raw as string, secrets) === next;

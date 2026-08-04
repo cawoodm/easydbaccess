@@ -1,21 +1,13 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { serializeWorkspace } from './dump-export.js';
-import {
-  canonicalize,
-  loadEtag,
-  loadServerUrl,
-  replaceWorkspace,
-  saveEtag,
-  stripEtag,
-} from './server-sync-core.js';
+import { canonicalize, loadEtag, loadServerUrl, replaceWorkspace, saveEtag, stripEtag } from './server-sync-core.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'auto-sync',
   name: 'Auto Sync',
   type: 'sync',
   version: '0.1.0',
-  description:
-    'Pushes the workspace to the server every minute; prompts to pull when the server changes.',
+  description: 'Pushes the workspace to the server every minute; prompts to pull when the server changes.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/auto-sync.ts',
@@ -112,19 +104,13 @@ async function syncOnce(api: HostApi, url: string, wsId: string): Promise<void> 
 
   prompting = true;
   try {
-    const yes = await api.ui.dialogs.confirm(
-      `The server has new data for "${wsId}". Pull and replace your local copy?`,
-      'auto-sync',
-    );
+    const yes = await api.ui.dialogs.confirm(`The server has new data for "${wsId}". Pull and replace your local copy?`, 'auto-sync');
     if (yes) {
       const dump = JSON.parse(serverBody) as unknown;
       const imported = await replaceWorkspace(api, wsId, dump);
       if (serverEtag) await saveEtag(api, wsId, serverEtag);
       dismissedEtag.delete(wsId);
-      api.ui.dialogs.toast(
-        `Pulled ${imported} table${imported === 1 ? '' : 's'} from the server.`,
-        { kind: 'success', title: 'auto-sync' },
-      );
+      api.ui.dialogs.toast(`Pulled ${imported} table${imported === 1 ? '' : 's'} from the server.`, { kind: 'success', title: 'auto-sync' });
     } else if (serverEtag) {
       dismissedEtag.set(wsId, serverEtag);
     }
@@ -133,13 +119,7 @@ async function syncOnce(api: HostApi, url: string, wsId: string): Promise<void> 
   }
 }
 
-async function silentPut(
-  api: HostApi,
-  url: string,
-  wsId: string,
-  body: string,
-  ifMatch: string | null,
-): Promise<void> {
+async function silentPut(api: HostApi, url: string, wsId: string, body: string, ifMatch: string | null): Promise<void> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (ifMatch) headers['If-Match'] = `"${ifMatch}"`;
   const res = await fetch(`${url}/sync/${encodeURIComponent(wsId)}`, {

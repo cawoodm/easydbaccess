@@ -8,10 +8,7 @@ import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js
  */
 
 /** A projection over People + Dept, inserted the way the editor compiles one. */
-async function addProjection(
-  page: import('@playwright/test').Page,
-  name = 'Staff',
-): Promise<string> {
+async function addProjection(page: import('@playwright/test').Page, name = 'Staff'): Promise<string> {
   return page.evaluate(async (name) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ctx = (window as any).__easydb;
@@ -51,10 +48,7 @@ async function addProjection(
 }
 
 /** The source table names the projection currently binds to. */
-async function sourceNames(
-  page: import('@playwright/test').Page,
-  projId: string,
-): Promise<string[]> {
+async function sourceNames(page: import('@playwright/test').Page, projId: string): Promise<string[]> {
   return page.evaluate(async (id) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const t = await (window as any).__easydb.store.tables.findOne(id);
@@ -99,9 +93,7 @@ async function setup(page: import('@playwright/test').Page) {
   return { peopleId, deptId, projId };
 }
 
-test('renaming a referenced table warns, names the projection, and can be cancelled', async ({
-  page,
-}) => {
+test('renaming a referenced table warns, names the projection, and can be cancelled', async ({ page }) => {
   const { peopleId, projId } = await setup(page);
 
   await renameTo(page, peopleId, 'Crew');
@@ -142,9 +134,7 @@ test('confirming the rename re-points the projection so it keeps resolving', asy
 
   await expect.poll(async () => sourceNames(page, projId)).toEqual(['Crew', 'Dept']);
   // The point of re-pointing: the projection still computes its rows.
-  await expect
-    .poll(async () => projectionRows(page, projId))
-    .toEqual([{ who: 'Alice', dept: 'Sales' }]);
+  await expect.poll(async () => projectionRows(page, projId)).toEqual([{ who: 'Alice', dept: 'Sales' }]);
 });
 
 test('renaming a table nothing references saves without a warning', async ({ page }) => {

@@ -5,15 +5,7 @@ import type { ColumnSpec, Row, ViewInstance, ViewTemplate } from '@easydb/shared
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViewsDialog } from '../dialogs/views-dialog.js';
-import {
-  addPillValue,
-  cyclePillValue,
-  evaluateRows,
-  hasRowHtml,
-  removePillValue,
-  substituteRow,
-  viewRows,
-} from './view-render.js';
+import { addPillValue, cyclePillValue, evaluateRows, hasRowHtml, removePillValue, substituteRow, viewRows } from './view-render.js';
 import { parseColumnFilter } from '../search/column-filter.js';
 import { facetable, facetCounts } from '../search/facet-values.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
@@ -394,9 +386,7 @@ export class ViewWindow extends LitElement {
       void ctx.store.viewInstances.patch(inst.id, { tableName: table.name });
     }
     const byField = new Map(this.tableColumns.map((c) => [c.field, c]));
-    this.columns = inst.visibleColumns.map(
-      (f) => byField.get(f) ?? { field: f, label: f, type: 'string' as const },
-    );
+    this.columns = inst.visibleColumns.map((f) => byField.get(f) ?? { field: f, label: f, type: 'string' as const });
     // Track instance changes so filters / sort the grid persists (template-off
     // mode) flow straight into the template render — toggling back shows the
     // same rows the user just filtered.
@@ -530,11 +520,7 @@ export class ViewWindow extends LitElement {
     if (!this.instance) return [];
     const pills = { ...(this.instance.pillFilters ?? {}) };
     delete pills[field];
-    return viewRows(
-      evaluateRows(this.allRows, this.tableColumns),
-      { ...this.instance, pillFilters: pills },
-      this.tableColumns,
-    );
+    return viewRows(evaluateRows(this.allRows, this.tableColumns), { ...this.instance, pillFilters: pills }, this.tableColumns);
   }
 
   /** Write a field's whole pill-filter string (the value checklist applies live). */
@@ -660,10 +646,7 @@ export class ViewWindow extends LitElement {
   private async deleteView() {
     if (!this.instance) return;
     const ctx = await getContext();
-    const ok = await ctx.api.ui.dialogs.confirm(
-      `Delete the view "${this.instance.name}"? The table and its rows stay.`,
-      'Delete view',
-    );
+    const ok = await ctx.api.ui.dialogs.confirm(`Delete the view "${this.instance.name}"? The table and its rows stay.`, 'Delete view');
     if (!ok) return;
     await ctx.store.viewInstances.remove(this.instance.id);
   }
@@ -724,21 +707,14 @@ export class ViewWindow extends LitElement {
       // for a boolean, number/text otherwise). A readonly view disables them.
       const colMap = new Map(this.tableColumns.map((c) => [c.field, c]));
       const readonly = this.instance?.readonly === true;
-      const body = this.rows
-        .map((r) => substituteRow(t.rowHtml, r, mapping, { columns: colMap, readonly }))
-        .join('');
+      const body = this.rows.map((r) => substituteRow(t.rowHtml, r, mapping, { columns: colMap, readonly })).join('');
       const full = (t.headerHtml ?? '') + body + (t.footerHtml ?? '');
       return html`<div class="vw-root">${unsafeHTML(full)}</div>`;
     }
     // Table mode: header/footer HTML above and below a read-only table.
     return html`<div class="vw-root">
-      ${t.headerHtml?.trim()
-        ? html`<div class="vw-html">${unsafeHTML(t.headerHtml)}</div>`
-        : nothing}
-      ${this.renderTable()}
-      ${t.footerHtml?.trim()
-        ? html`<div class="vw-html">${unsafeHTML(t.footerHtml)}</div>`
-        : nothing}
+      ${t.headerHtml?.trim() ? html`<div class="vw-html">${unsafeHTML(t.headerHtml)}</div>` : nothing} ${this.renderTable()}
+      ${t.footerHtml?.trim() ? html`<div class="vw-html">${unsafeHTML(t.footerHtml)}</div>` : nothing}
     </div>`;
   }
 
@@ -766,22 +742,11 @@ export class ViewWindow extends LitElement {
     const asc = this.instance.sortAsc ?? true;
     return html`<div class="vw-sortbar">
       <span class="mi" title="Sort">sort</span>
-      <select
-        aria-label="Sort by"
-        @change=${(e: Event) => void this.setSortColumn((e.target as HTMLSelectElement).value)}
-      >
+      <select aria-label="Sort by" @change=${(e: Event) => void this.setSortColumn((e.target as HTMLSelectElement).value)}>
         <option value="" ?selected=${!cur}>— unsorted —</option>
-        ${cols.map(
-          (c) =>
-            html`<option value=${c.field} ?selected=${cur === c.field}>${c.label || c.field}</option>`,
-        )}
+        ${cols.map((c) => html`<option value=${c.field} ?selected=${cur === c.field}>${c.label || c.field}</option>`)}
       </select>
-      <button
-        aria-label="Toggle sort direction"
-        title=${asc ? 'Ascending (click for descending)' : 'Descending (click for ascending)'}
-        ?disabled=${!cur}
-        @click=${() => void this.toggleSortDir()}
-      >
+      <button aria-label="Toggle sort direction" title=${asc ? 'Ascending (click for descending)' : 'Descending (click for ascending)'} ?disabled=${!cur} @click=${() => void this.toggleSortDir()}>
         <span class="mi">${asc ? 'arrow_upward' : 'arrow_downward'}</span>
       </button>
       ${chips}
@@ -809,35 +774,23 @@ export class ViewWindow extends LitElement {
       }
     }
     return chips.map(
-      (c) => html`<span class=${`eda-pill-chip${c.state === 'not' ? ' not' : ''}`}>
-        <button
-          type="button"
-          class="eda-pill-chip-field"
-          title=${c.state === 'not'
-            ? `Excluding this value — click to stop filtering on ${c.field}`
-            : `Only this value — click to EXCLUDE it instead`}
-          @click=${() => void this.cyclePill(c.field, c.value)}
-        >
-          ${c.field}${c.state === 'not' ? ' ≠' : ' ='}
-        </button>
-        <button
-          type="button"
-          class="eda-pill-chip-value"
-          title=${`Other values of ${c.field}`}
-          @click=${(e: Event) => void this.openPillValues(c.field, e.currentTarget as HTMLElement)}
-        >
-          ${c.value}
-        </button>
-        <button
-          type="button"
-          class="eda-pill-chip-remove"
-          aria-label=${`Remove filter ${c.field}: ${c.value}`}
-          title="Remove this filter"
-          @click=${() => void this.removePill(c.field, c.value)}
-        >
-          ×
-        </button>
-      </span>`,
+      (c) =>
+        html`<span class=${`eda-pill-chip${c.state === 'not' ? ' not' : ''}`}>
+          <button
+            type="button"
+            class="eda-pill-chip-field"
+            title=${c.state === 'not' ? `Excluding this value — click to stop filtering on ${c.field}` : `Only this value — click to EXCLUDE it instead`}
+            @click=${() => void this.cyclePill(c.field, c.value)}
+          >
+            ${c.field}${c.state === 'not' ? ' ≠' : ' ='}
+          </button>
+          <button type="button" class="eda-pill-chip-value" title=${`Other values of ${c.field}`} @click=${(e: Event) => void this.openPillValues(c.field, e.currentTarget as HTMLElement)}>
+            ${c.value}
+          </button>
+          <button type="button" class="eda-pill-chip-remove" aria-label=${`Remove filter ${c.field}: ${c.value}`} title="Remove this filter" @click=${() => void this.removePill(c.field, c.value)}>
+            ×
+          </button>
+        </span>`,
     );
   }
 
@@ -848,41 +801,19 @@ export class ViewWindow extends LitElement {
     return html`<div class="vw-footer">
       ${!on && this.showColsMenu
         ? html`<div class="cols-menu">
-            ${this.tableColumns.map(
-              (c) =>
-                html`<label
-                  ><input
-                    type="checkbox"
-                    .checked=${visible.has(c.field)}
-                    @change=${() => void this.toggleColumn(c.field)}
-                  />${c.label || c.field}</label
-                >`,
-            )}
+            ${this.tableColumns.map((c) => html`<label><input type="checkbox" .checked=${visible.has(c.field)} @change=${() => void this.toggleColumn(c.field)} />${c.label || c.field}</label>`)}
           </div>`
         : nothing}
       ${!on
-        ? html`<button
-            title="Show / hide columns"
-            aria-label="Columns"
-            @click=${() => (this.showColsMenu = !this.showColsMenu)}
-          >
+        ? html`<button title="Show / hide columns" aria-label="Columns" @click=${() => (this.showColsMenu = !this.showColsMenu)}>
             <span class="mi">view_column</span>
           </button>`
         : nothing}
-      <button
-        aria-label="Edit view"
-        title="Edit this view (rename, re-map columns)"
-        @click=${() => this.editView()}
-      >
+      <button aria-label="Edit view" title="Edit this view (rename, re-map columns)" @click=${() => this.editView()}>
         <span class="mi">edit</span>
       </button>
       ${this.template
-        ? html`<button
-            class="edit-template"
-            aria-label="Edit template"
-            title=${`Edit the "${this.template.name}" template`}
-            @click=${() => this.editTemplate()}
-          >
+        ? html`<button class="edit-template" aria-label="Edit template" title=${`Edit the "${this.template.name}" template`} @click=${() => this.editTemplate()}>
             <span class="mi">code</span>
           </button>`
         : nothing}
@@ -895,33 +826,21 @@ export class ViewWindow extends LitElement {
       >
         <span class="mi">table_view</span>
       </button>
-      <button
-        class="danger"
-        aria-label="Delete view"
-        title="Delete this view (the table stays)"
-        @click=${() => void this.deleteView()}
-      >
+      <button class="danger" aria-label="Delete view" title="Delete this view (the table stays)" @click=${() => void this.deleteView()}>
         <span class="mi">delete</span>
       </button>
     </div>`;
   }
 
   override render() {
-    if (!this.loaded)
-      return html`<div class="vw-body scroll"><div class="vw-loading">Loading…</div></div>`;
-    if (this.error)
-      return html`<div class="vw-body scroll"><div class="vw-empty">${this.error}</div></div>`;
+    if (!this.loaded) return html`<div class="vw-body scroll"><div class="vw-loading">Loading…</div></div>`;
+    if (this.error) return html`<div class="vw-body scroll"><div class="vw-empty">${this.error}</div></div>`;
 
     const on = this.templateOn;
     const body = on
-      ? html`<div class="vw-body scroll" @change=${this.onInputChange} @click=${this.onPillClick}>
-          ${this.renderTemplated()}
-        </div>`
+      ? html`<div class="vw-body scroll" @change=${this.onInputChange} @click=${this.onPillClick}>${this.renderTemplated()}</div>`
       : html`<div class="vw-body grid">
-          <data-table
-            .tableId=${this.instance?.tableId ?? ''}
-            .viewInstanceId=${this.viewInstanceId}
-          ></data-table>
+          <data-table .tableId=${this.instance?.tableId ?? ''} .viewInstanceId=${this.viewInstanceId}></data-table>
         </div>`;
     // One toolbar for both: sort controls in template mode, filter chips in
     // either (pill filters apply to the grid too). It renders nothing in grid
