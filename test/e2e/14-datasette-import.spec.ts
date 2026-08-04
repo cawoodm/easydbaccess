@@ -433,11 +433,12 @@ test.describe('datasette import — whole database', () => {
     await choice.getByRole('button', { name: 'Overwrite' }).click();
     await expect.poll(() => countNamed(page, workspaceId, 'legislators/executives')).toBe(1);
 
-    // Third import → Rename → a distinct "… (2)" table is created.
+    // Third import → Rename → a distinct "…-2" table is created. Datasette used
+    // to spell this "… (2)"; there is one workspace-wide naming rule now.
     await importExecutives(page);
     await expect(page.locator('host-dialogs dialog')).toBeVisible();
     await page.locator('host-dialogs dialog').getByRole('button', { name: 'Rename' }).click();
-    await expect.poll(() => countNamed(page, workspaceId, 'legislators/executives (2)')).toBe(1);
+    await expect.poll(() => countNamed(page, workspaceId, 'legislators/executives-2')).toBe(1);
   });
 });
 

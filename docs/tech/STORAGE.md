@@ -222,6 +222,37 @@ was agreed. The renderer half of both flows is the `electron-db` plugin
 (see `PLUGINS.md`); the file operations live in
 [`db-files.ts`](../../packages/electron/src/db-files.ts).
 
+## Table names are unique, and the store is what makes them unique
+
+Two tables in one workspace may never share a name. This is load-bearing, not
+cosmetic: projections and view instances bind to their source **by name**, so a
+duplicate makes every reference to it ambiguous — it resolves to whichever
+document the query happens to return first.
+
+The columns editor has always refused a clash, but it is one writer of many.
+Dropping a `.table.json` and answering "Add as new tables" wrote the dump's name
+verbatim and produced two tables with one name, and each importer carried its
+own rule (or none). So
+[`unique-table-names.ts`](../../packages/renderer/src/db/unique-table-names.ts)
+decorates the `tables` collection — the one place that sees every write — and
+`app-context.ts` wraps it in before anything else touches the store.
+
+- `insert`, `bulkInsert`, `upsert` and a name-changing `patch` all go through it.
+  A `bulkInsert` also resolves collisions **inside** the batch, so two tables of
+  one name in a single dump collide with each other, not only with what is
+  already stored.
+- A taken name is uniqued by `uniqueTableName`
+  ([`util/table-names.ts`](../../packages/renderer/src/util/table-names.ts)) —
+  `places` → `places-2`, compared case-insensitively — and `code` is re-derived
+  so it keeps matching. This is the ONE naming rule now: the CSV importer's
+  base36 timestamp (`places (m8x1k2)`) and Datasette's `places (2)` both read it
+  from here.
+- **The write is never rejected.** A rejection would abort a gist pull or a dump
+  restore halfway through a loop the caller cannot resume; a renamed table can
+  be fixed by hand. Callers that show the name must use the RETURNED document,
+  which carries the name that was actually stored — `json-import` does, and
+  toasts which name a dumped table came in under.
+
 ## Row-source routing — when a "table" isn't local at all
 
 A `Table` may carry an optional `source: TableSource` descriptor

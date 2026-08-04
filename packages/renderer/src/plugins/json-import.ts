@@ -315,6 +315,8 @@ export async function restoreWorkspaceDump(
     // Maps each imported table's name → its (new or matched) id, so view
     // instances in the dump can be re-pointed at the freshly-minted table ids.
     const nameToId = new Map<string, string>();
+    /** Tables the store had to rename to keep names unique: dump name → stored name. */
+    const renamed: Array<[string, string]> = [];
     let rowsDone = 0;
     for (const t of tables) {
       // Prefer backing info embedded in the dump (another device's export); else,
@@ -367,7 +369,11 @@ export async function restoreWorkspaceDump(
       } else {
         tableId = cryptoUUID();
         api.events.emit('import:before', { source: 'json', tableId });
-        await api.store.tables.insert({
+        // "Add as new tables" on a dump whose names are already taken: the store
+        // uniques the name (`orders` → `orders-2`) rather than making a second
+        // `orders`, and hands back what it stored. Say so, or the new table
+        // looks like it silently overwrote the old one.
+        const stored = await api.store.tables.insert({
           id: tableId,
           workspaceId,
           name: t.name,
@@ -386,7 +392,9 @@ export async function restoreWorkspaceDump(
           ...(origin ? { origin } : {}),
           updatedAt: Date.now(),
         });
+        if (stored.name !== t.name) renamed.push([t.name, stored.name]);
       }
+      // Keyed by the name the DUMP used — that is what its view instances name.
       nameToId.set(t.name, tableId);
 
       // Snapshot rows are stored locally; a live (`source`) table pulls its own
@@ -418,6 +426,10 @@ export async function restoreWorkspaceDump(
     // re-pointing each instance at the freshly-imported table id by name. Only
     // native dumps carry these; other JSON shapes leave them undefined.
     await restoreViews(api, parsed, workspaceId, nameToId, mode === 'replace-workspace');
+
+    if (renamed.length > 0) {
+      api.ui.dialogs.toast(renamed.map(([from, to]) => `“${from}” came in as “${to}”`).join('\n'), { kind: 'info', title: 'Names must be unique' });
+    }
   } finally {
     handle?.done();
   }

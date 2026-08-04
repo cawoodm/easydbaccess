@@ -147,14 +147,10 @@ export function withDatasetteSourceInfo(patch: MetadataTablePatch, base: string,
   return { ...patch, info };
 }
 
-/** First "name", "name (2)", "name (3)"… not already used by a table in the set. */
-export function uniqueTableName(taken: Set<string>, name: string): string {
-  if (!taken.has(name)) return name;
-  for (let i = 2; ; i++) {
-    const candidate = `${name} (${i})`;
-    if (!taken.has(candidate)) return candidate;
-  }
-}
+// Datasette used to have its own `name (2)` rule. There is one workspace-wide
+// policy now — the store applies it to every write — so both plugins read it
+// from there and no longer produce a differently-shaped name than an import does.
+export { uniqueTableName } from '../util/table-names.js';
 
 /**
  * Resolve the tables the user wants to act on from a Datasette URL:

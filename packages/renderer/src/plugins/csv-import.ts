@@ -359,16 +359,18 @@ export async function importCsvText(api: HostApi, text: string, name: string, op
       columns = edited;
     }
     if (opts.maxRows != null) rows = rows.slice(0, opts.maxRows);
-    const uniqueName = existing ? `${baseName} (${Date.now().toString(36)})` : baseName;
+    // No local uniquing rule: the store refuses a duplicate name and hands back
+    // `places-2` (see `db/unique-table-names.ts`). This used to append a base36
+    // timestamp here, which read as `places (m8x1k2)`.
     await api.store.tables.insert({
       id: targetId,
       workspaceId,
-      name: uniqueName,
+      name: baseName,
       // NOTE: csv-import derives the table `code` with the FIELD slug
       // (underscores), unlike every other importer, which uses the TABLE slug
       // (dashes). Kept as-is here so this extraction changes no behavior.
       // Unify in Phase C — see .claude/plans/2026-07-28-importer-architecture.md.
-      code: slugField(uniqueName),
+      code: slugField(baseName),
       columns,
       view: 'table',
       ...(opts.origin ? { origin: opts.origin } : {}),

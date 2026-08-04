@@ -7,6 +7,13 @@
 - ✨ An `array` column shows its values as pills, one per value, with a pencil for the raw list (v0.0.296)
 - 🪶 New `array` column type: a cell holds several values (`foo,bar` or `["Foo","Bar"]`) and the filter dropdown offers each one (v0.0.295)
 - ✨ New `markdown` cell renderer: one line of text in the grid, the formatted value in the popup, and never guessed at (v0.0.298)
+- 🪶 Workspace commands in the palette — switch, new and delete; deleting takes the workspace's tables, rows, views and settings with it (v0.0.305)
+- 🪶 A big table opens fast: the grid, views and projections now ask the store for the rows they show instead of reading the whole table (v0.0.309)
+- 🪶 A `.db` import runs in the background on a worker thread, so the app stays usable while it copies (v0.0.309)
+- 🪶 Converting or importing a `.db` shows one progress bar for the whole file, weighted by how big each table is (v0.0.309)
+- 🪶 Workspace files are `.edb`; a plain `.db` can be imported, appended onto a table that already exists, or browsed read-only (v0.0.309)
+- 🪶 Importing a `.db` picks its tables and views with checkboxes, and a view can arrive as a projection or as a snapshot (v0.0.309)
+- ✨ The columns editor's checkbox headers set or clear their whole column, and 👁 moved to the front of the row (v0.0.309)
 
 ### Bugs
 
@@ -15,6 +22,11 @@
 - 🪲 A setting holding `${secret:name}` was overwritten with the secret itself, which then synced (v0.0.300)
 - 🪲 A gist kept the file of a table deleted locally, so the next pull brought the table back (v0.0.301)
 - 🪲 A read-only table offered a Save button on its `preview`, `markdown` and `html` cells (v0.0.302)
+- 🪲 Dragging in a `.table.json` and choosing "Add as new table" made a second table with the same name (v0.0.304)
+- 🪲 Filtering, searching or sorting a table above 20,000 rows only saw the first 20,000 and confidently showed the wrong ones (v0.0.309)
+- 🪲 The panel title lost its `shown/total` count a moment after a filter was typed (v0.0.309)
+- 🪲 The app crashed on startup with a large workspace, and an unfinished import restarted itself (v0.0.309)
+- 🪲 The UI froze while a `.db` imported (v0.0.309)
 
 ## 3 Aug 2026
 

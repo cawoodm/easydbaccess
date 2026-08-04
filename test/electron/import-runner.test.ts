@@ -150,22 +150,28 @@ describe('runImport', () => {
    */
   it('leaves the main thread free while it copies', async () => {
     const { store, entry } = prepared();
+    const INTERVAL_MS = 5;
     try {
       const lags: number[] = [];
       let last = Date.now();
       const timer = setInterval(() => {
         const now = Date.now();
-        lags.push(now - last - 20);
+        lags.push(now - last - INTERVAL_MS);
         last = now;
-      }, 20);
+      }, INTERVAL_MS);
 
       await runImport(sourcePath, store, entry, { onProgress: () => undefined });
       clearInterval(timer);
 
-      expect(lags.length).toBeGreaterThan(2);
+      // Only a guard against `Math.max()` of an empty array. It deliberately does
+      // NOT require a minimum number of samples: how many land depends on how long
+      // the copy happens to take, and an earlier version asserting `> 2` failed
+      // about one run in three purely because the import finished quickly — which
+      // is the good outcome, not a regression.
+      expect(lags.length).toBeGreaterThanOrEqual(1);
       const worst = Math.max(...lags);
-      // Generous next to the ~1300ms stalls the in-process path produced, while
-      // still far below anything a person notices.
+      // The actual claim. Generous next to the ~1300ms stalls the in-process path
+      // produced, while still far below anything a person notices.
       expect(worst).toBeLessThan(150);
     } finally {
       store.close();
