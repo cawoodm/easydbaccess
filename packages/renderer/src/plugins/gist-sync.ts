@@ -8,6 +8,7 @@ import type {
   ViewTemplate,
 } from '@easydb/shared';
 import { cryptoUUID, slugTable } from '../util/ids.js';
+import { withoutRawSecrets } from '../db/secret-guard.js';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a
 // custom element on import, which would blow up under Vitest's default
@@ -368,10 +369,19 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
     );
     // Name + value only: the physical key and workspaceId are this device's, and
     // the pulling side re-derives both for ITS workspace (see settingsView).
-    const settings = (await api.store.settings.find()).map((s) => ({
-      name: s.name,
-      value: s.value,
-    }));
+    const all = (await api.store.settings.find()).map((s) => ({ name: s.name, value: s.value }));
+    // A credential setting may only leave this device as a `${secret:name}`
+    // reference. Anything holding the value itself stays behind, whatever put it
+    // there — see db/secret-guard.ts. This is the last gate before the network.
+    const { kept: settings, withheld } = withoutRawSecrets(all);
+    if (withheld.length > 0) {
+      api.ui.dialogs.toast(
+        `Not pushed: ${withheld.join(', ')} — a secret is stored as its own value. ` +
+          `Move it into the secrets store (Settings → General) and reference it with ` +
+          `\${secret:name}.`,
+        { kind: 'warning', title: 'Gist sync' },
+      );
+    }
     files['_easydb.workspace.json'] = {
       content: JSON.stringify(
         {
@@ -417,8 +427,11 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
     });
     if (!res.ok) throw new Error(await readError(res));
     updated = await res.json();
+    // Only the id is new. Writing the whole credential set back would push the
+    // RESOLVED token into the setting that holds the reference (settings.set
+    // refuses that now, but there is no reason to ask).
     creds.gistId = updated.id;
-    await saveCreds(api, creds);
+    await api.settings.set('gist-sync', 'gist_id', updated.id);
   }
 
   const url = updated.html_url ?? `https://gist.github.com/${creds.user}/${updated.id}`;

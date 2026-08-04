@@ -95,6 +95,27 @@ a field's scope in the dialog is a move, not a copy.
 `'workspace'`, or `null` if neither — meaning the field default is in
 effect).
 
+### `set` will not overwrite a reference with its own secret
+
+Because `get` resolves `${secret:name}`, a plugin that reads a setting, changes
+something else and writes it back hands `set` the SECRET where the reference used
+to be — and the secret then syncs. gist-sync did this when it saved the id of a
+newly created gist alongside the credentials it had just read, which is how a
+`${secret:...}` field appeared to "reset itself to the resolved value".
+
+So `set` compares the incoming string with the resolved form of what is already
+stored (`resolvesToSameSecret` in
+[`db/secret-guard.ts`](../../packages/renderer/src/db/secret-guard.ts)) and keeps
+the reference instead of writing. Pointing the field at another secret, clearing
+it, or writing any other value all go through as normal. A literal value that
+happens to equal the secret is indistinguishable from the accident and is refused
+too — the safe way round, since the dialog does not accept a raw secret in a
+`secret` field either.
+
+The push side has the matching net: `withoutRawSecrets()` withholds any setting
+that holds a credential rather than a reference, so one that got in by some other
+road still never leaves the device (see `PLUGINS.md`'s gist-sync section).
+
 ## Key format and where each layer persists
 
 Every setting is addressed as `${pluginId}:${key}` — e.g. `gist-sync:gist_token`,

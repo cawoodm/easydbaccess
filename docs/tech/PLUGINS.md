@@ -406,11 +406,16 @@ aren't populated yet.
 Push now bundles more than tables: alongside each table's own
 `<slug>.table.json` file and the `_easydb.workspace.json` marker (which
 lets Pull tell an easyDBAccess gist from an unrelated one), that marker file
-also carries the workspace's `viewTemplates`, `viewInstances`, and every
-**non-secret** `settings` entry — `isSyncableSetting()` excludes any key
-starting with `gist:`, `datasette:token:`, or `server-sync:` before
-including it, so a pull can restore views and plugin config too, without
-ever round-tripping a credential through the gist itself. Each table's own
+also carries the workspace's `viewTemplates`, `viewInstances`, and its
+`settings` entries, so a pull can restore views and plugin config too. Key
+prefixes are no longer excluded (they were, until secrets moved into
+`secrets.txt`); instead `withoutRawSecrets()` from
+[`db/secret-guard.ts`](../../packages/renderer/src/db/secret-guard.ts) withholds
+any setting that actually HOLDS a credential — a credential-named key whose value
+is neither empty nor a `${secret:name}` reference, or a composite record with such
+a member (the legacy `gist:<id>` value, or `datasette:token:<base>` which is
+written straight to the settings table). The whole entry is left out rather than
+blanked, and the push toast names what stayed behind. Each table's own
 file is likewise more than rows: `tableToFile()` also carries `title`,
 `view`, `windowGeometry`, `sortColumn`/`sortAsc`, `filters`, `labelColumn`,
 `deletedColumns`, `readonly`, and `info`, so a pull restores a table's window
