@@ -8,6 +8,7 @@
 - 🪶 New `array` column type: a cell holds several values (`foo,bar` or `["Foo","Bar"]`) and the filter dropdown offers each one (v0.0.295)
 - ✨ New `markdown` cell renderer: one line of text in the grid, the formatted value in the popup, and never guessed at (v0.0.298)
 - 🪶 Workspace commands in the palette — switch, new and delete; deleting takes the workspace's tables, rows, views and settings with it (v0.0.305)
+- ✨ A twikki dump converts to importable `.table.json` tables, one per twikki package (v0.0.306)
 - 🪶 A big table opens fast: the grid, views and projections now ask the store for the rows they show instead of reading the whole table (v0.0.309)
 - 🪶 A `.db` import runs in the background on a worker thread, so the app stays usable while it copies (v0.0.309)
 - 🪶 Converting or importing a `.db` shows one progress bar for the whole file, weighted by how big each table is (v0.0.309)
