@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectionSpec, Table, ViewInstance } from '@easydb/shared';
-import { describeReferences, findTableReferences, repointProjectionSpec, specOf } from '../../../packages/renderer/src/table/table-references.js';
+import { describeReferences, findTableReferences, renameProjectionOutputs, renameProjectionSourceFields, repointProjectionSpec, specOf } from '../../../packages/renderer/src/table/table-references.js';
 
 const table = (id: string, name: string, spec?: ProjectionSpec): Table => ({
   id,
@@ -118,5 +118,108 @@ describe('describeReferences', () => {
 
   it('mentions only the kind that actually has dependents', () => {
     expect(describeReferences({ projections: [], views: [view('v1', 'People', 'Cards')] })).toBe('1 view ("Cards")');
+  });
+});
+
+/**
+ * A projection names FIELDS in three places, and the columns editor renaming a
+ * field used to rewrite none of them: the projection kept writing the old key
+ * into every row while the renamed column read the new one, so the column came
+ * out empty. A join key left on the old name matched nothing at all.
+ */
+describe('renameProjectionOutputs', () => {
+  const outputs = (): ProjectionSpec => ({
+    version: 1,
+    sources: [{ alias: 'p', tableName: 'People' }],
+    columns: [
+      { field: 'name', from: { kind: 'source', alias: 'p', field: 'full_name' } },
+      { field: 'age', from: { kind: 'source', alias: 'p', field: 'age' } },
+    ],
+    filters: { name: 'a', age: '>1' },
+  });
+
+  it('renames the output field, leaving the source field it reads alone', () => {
+    const next = renameProjectionOutputs(outputs(), [{ from: 'name', to: 'label' }])!;
+    expect(next.columns[0]!.field).toBe('label');
+    expect(next.columns[0]!.from).toEqual({ kind: 'source', alias: 'p', field: 'full_name' });
+    expect(next.columns[1]!.field).toBe('age');
+  });
+
+  it('moves the filter keyed by that output field with it', () => {
+    const next = renameProjectionOutputs(outputs(), [{ from: 'name', to: 'label' }])!;
+    expect(next.filters).toEqual({ label: 'a', age: '>1' });
+  });
+
+  it('applies a SWAP in one pass rather than one rename over the other', () => {
+    const next = renameProjectionOutputs(outputs(), [
+      { from: 'name', to: 'age' },
+      { from: 'age', to: 'name' },
+    ])!;
+    expect(next.columns.map((c) => c.field)).toEqual(['age', 'name']);
+  });
+
+  it('is null when no output field is touched, so the caller skips the write', () => {
+    expect(renameProjectionOutputs(outputs(), [{ from: 'nothing', to: 'x' }])).toBeNull();
+    expect(renameProjectionOutputs(outputs(), [])).toBeNull();
+    expect(renameProjectionOutputs(outputs(), [{ from: 'name', to: 'name' }])).toBeNull();
+  });
+});
+
+describe('renameProjectionSourceFields', () => {
+  const joined = (): ProjectionSpec => ({
+    version: 1,
+    sources: [
+      { alias: 'o', tableName: 'Orders' },
+      { alias: 'p', tableName: 'People', join: { type: 'inner', on: [{ field: 'person_id', eqAlias: 'o', eqField: 'buyer_id' }] } },
+    ],
+    columns: [
+      { field: 'buyer', from: { kind: 'source', alias: 'p', field: 'full_name' } },
+      { field: 'total', from: { kind: 'source', alias: 'o', field: 'total' } },
+      { field: 'calc', from: { kind: 'script', script: 'return 1' } },
+    ],
+  });
+
+  it('renames the source field a column reads', () => {
+    const next = renameProjectionSourceFields(joined(), 'People', [{ from: 'full_name', to: 'name' }])!;
+    expect(next.columns[0]!.from).toEqual({ kind: 'source', alias: 'p', field: 'name' });
+    // The OUTPUT field is unaffected — the projection's own column keeps its name.
+    expect(next.columns[0]!.field).toBe('buyer');
+  });
+
+  it('renames the join key on the side of the renamed table', () => {
+    const next = renameProjectionSourceFields(joined(), 'People', [{ from: 'person_id', to: 'pid' }])!;
+    expect(next.sources[1]!.join!.on[0]).toEqual({ field: 'pid', eqAlias: 'o', eqField: 'buyer_id' });
+  });
+
+  it('renames the OTHER side of the join when that is the renamed table', () => {
+    const next = renameProjectionSourceFields(joined(), 'Orders', [{ from: 'buyer_id', to: 'bid' }])!;
+    expect(next.sources[1]!.join!.on[0]).toEqual({ field: 'person_id', eqAlias: 'o', eqField: 'bid' });
+  });
+
+  it('covers every alias of a self-join, not just the first', () => {
+    const selfJoin: ProjectionSpec = {
+      version: 1,
+      sources: [
+        { alias: 'a', tableName: 'People' },
+        { alias: 'b', tableName: 'People', join: { type: 'left', on: [{ field: 'boss_id', eqAlias: 'a', eqField: 'boss_id' }] } },
+      ],
+      columns: [
+        { field: 'me', from: { kind: 'source', alias: 'a', field: 'boss_id' } },
+        { field: 'them', from: { kind: 'source', alias: 'b', field: 'boss_id' } },
+      ],
+    };
+    const next = renameProjectionSourceFields(selfJoin, 'People', [{ from: 'boss_id', to: 'manager_id' }])!;
+    expect(next.columns.map((c) => (c.from.kind === 'source' ? c.from.field : ''))).toEqual(['manager_id', 'manager_id']);
+    expect(next.sources[1]!.join!.on[0]).toEqual({ field: 'manager_id', eqAlias: 'a', eqField: 'manager_id' });
+  });
+
+  it('leaves a scripted column and an unrelated table alone', () => {
+    const next = renameProjectionSourceFields(joined(), 'People', [{ from: 'full_name', to: 'name' }])!;
+    expect(next.columns[2]!.from).toEqual({ kind: 'script', script: 'return 1' });
+    expect(renameProjectionSourceFields(joined(), 'Elsewhere', [{ from: 'full_name', to: 'name' }])).toBeNull();
+  });
+
+  it('is null when the spec names none of the renamed fields', () => {
+    expect(renameProjectionSourceFields(joined(), 'People', [{ from: 'unused', to: 'x' }])).toBeNull();
   });
 });

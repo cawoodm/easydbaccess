@@ -126,6 +126,14 @@ so the columns editor warns before it writes and then carries the references
 across (`table/table-references.ts`, used by `new-table-dialog`'s `submit`).
 View instances bind the same way and are repointed in the same place.
 
+**Fields are name-bound too**, in three places: a projection's output fields
+(`columns[].field`, which key its own `ColumnSpec`s), the source fields it reads
+(`columns[].from.field`) and its join keys (`sources[].join.on`). So a FIELD
+rename is carried across in the same `submit`, by `renameProjectionOutputs` /
+`renameProjectionSourceFields`. Without it a renamed column came out empty — the
+projection kept writing the old key while the renamed column read the new one —
+and a join key left on the old name matched nothing.
+
 ## The DataStore abstraction (don't bypass it)
 
 The renderer opens a Dexie database (`db/dexie-db.ts`) and wraps each Dexie

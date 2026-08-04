@@ -1,6 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import type { ColumnEditorActionSpec, ColumnSpec, ColumnType, Row, Table } from '@easydb/shared';
+import type { ColumnEditorActionSpec, ColumnSpec, ColumnType, ProjectionSpec, Row, Table } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
@@ -12,7 +12,7 @@ import { buildColumnSpec, type ColumnRow } from './column-row.js';
 import { renameRowFields, type FieldRename } from '../table/column-merge.js';
 import { HostDialogs } from './host-dialogs.js';
 import { LEGACY_CELL_RENDERERS } from '../plugin-host/registries.js';
-import { describeReferences, findTableReferences, repointProjectionSpec, specOf, type TableReferences } from '../table/table-references.js';
+import { describeReferences, findTableReferences, renameProjectionOutputs, renameProjectionSourceFields, repointProjectionSpec, specOf, type TableReferences } from '../table/table-references.js';
 
 const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'datetime', 'array'];
 
@@ -63,6 +63,36 @@ async function repointReferences(tableId: string, oldName: string, name: string,
       source: { type: 'projection', config: next as unknown as Record<string, unknown> },
       updatedAt: Date.now(),
     });
+  }
+}
+
+/**
+ * Carry field renames into every projection that names one of the renamed
+ * fields — the projection being edited (its OUTPUT fields) and any projection
+ * reading FROM this table (its source fields and join keys).
+ *
+ * Without this, renaming a field emptied a column: the projection still wrote
+ * the old key into every row while the renamed ColumnSpec read the new one. A
+ * join key left on the old name matched nothing at all.
+ *
+ * `tableName` is the name the specs currently use — the name BEFORE a rename in
+ * the same save, which `repointReferences` fixes afterwards.
+ */
+async function repointFieldRenames(tableId: string, tableName: string, renames: readonly FieldRename[], tables: Table[]): Promise<void> {
+  if (renames.length === 0) return;
+  const ctx = await getContext();
+  const write = async (t: Table, next: ProjectionSpec) => {
+    await ctx.store.tables.patch(t.id, {
+      source: { type: 'projection', config: next as unknown as Record<string, unknown> },
+      updatedAt: Date.now(),
+    });
+  };
+  for (const t of tables) {
+    const spec = specOf(t);
+    if (!spec) continue;
+    // The projection being edited: its own output fields were renamed.
+    const next = t.id === tableId ? renameProjectionOutputs(spec, renames) : renameProjectionSourceFields(spec, tableName, renames);
+    if (next) await write(t, next);
   }
 }
 
@@ -655,6 +685,10 @@ export class NewTableDialog extends LitElement {
           }
         }
       }
+      // A renamed FIELD is name-bound too: a projection names its output fields,
+      // the source fields it reads, and its join keys. Runs before the table
+      // rename is carried across, because the specs still say the old NAME here.
+      await repointFieldRenames(tableId, oldName ?? name, renames, workspaceTables);
       if (oldName !== undefined && oldName !== name) {
         await repointReferences(tableId, oldName, name, refs);
       }

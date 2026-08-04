@@ -20,6 +20,7 @@
 - 🪲 A gist kept the file of a table deleted locally, so the next pull brought the table back (v0.0.301)
 - 🪲 A read-only table offered a Save button on its `preview`, `markdown` and `html` cells (v0.0.302)
 - 🪲 Dragging in a `.table.json` and choosing "Add as new table" made a second table with the same name (v0.0.304)
+- 🪲 Renaming a field emptied the column in a projection, and left a join on that field matching nothing (v0.0.309)
 
 ## 3 Aug 2026
 

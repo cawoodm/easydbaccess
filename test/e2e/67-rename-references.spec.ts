@@ -164,3 +164,78 @@ test('editing columns without touching the name never warns', async ({ page }) =
   await expect(dlg).toBeHidden();
   await expect(page.locator('host-dialogs').getByText(/Renaming/)).toHaveCount(0);
 });
+
+/** Open the columns editor for a table and rename column `n`'s FIELD. */
+async function renameField(page: import('@playwright/test').Page, tableId: string, n: number, next: string) {
+  // Panels stack in creation order, so the one under test can sit beneath
+  // another and its footer button be unclickable. The footer's own Columns
+  // button fires this event, so ask the shell directly.
+  await page.evaluate((id) => {
+    document.dispatchEvent(new CustomEvent('easydb:edit-columns', { detail: { tableId: id } }));
+  }, tableId);
+  const dlg = page.locator('new-table-dialog dialog');
+  await expect(dlg).toBeVisible();
+  // First text input of a `.col-row` is the field; the second is the label.
+  await dlg.locator('.col-row').nth(n).locator('input[type="text"]').first().fill(next);
+  await dlg.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(dlg).toBeHidden();
+}
+
+/** The projection's spec, for asserting what its fields and join now name. */
+async function specOfProjection(page: import('@playwright/test').Page, projId: string) {
+  return page.evaluate(async (id) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const t = await (window as any).__easydb.store.tables.findOne(id);
+    return t.source.config as {
+      sources: Array<{ alias: string; tableName: string; join?: { on: Array<{ field: string; eqAlias: string; eqField: string }> } }>;
+      columns: Array<{ field: string; from: { kind: string; alias?: string; field?: string } }>;
+    };
+  }, projId);
+}
+
+/**
+ * A projection names FIELDS as well as tables — its output fields, the source
+ * fields it reads, and its join keys — and a rename has to carry those across
+ * too. It did not, so a renamed column came out EMPTY: the projection kept
+ * writing the old key into every row while the renamed column read the new one.
+ */
+test('renaming a column OF a projection keeps its values', async ({ page }) => {
+  const { projId } = await setup(page);
+  await waitForPanel(page, projId);
+  await expect.poll(async () => (await projectionRows(page, projId))[0]?.who).toBe('Alice');
+
+  await renameField(page, projId, 0, 'person');
+
+  // The output field moved in the spec, so the computed row carries the new key.
+  const spec = await specOfProjection(page, projId);
+  expect(spec.columns[0]!.field).toBe('person');
+  // What it READS is untouched — only the output name changed.
+  expect(spec.columns[0]!.from).toMatchObject({ alias: 'p', field: 'name' });
+  await expect.poll(async () => (await projectionRows(page, projId))[0]?.person).toBe('Alice');
+});
+
+test('renaming a field of a SOURCE table keeps the projection reading it', async ({ page }) => {
+  const { peopleId, projId } = await setup(page);
+  await expect.poll(async () => (await projectionRows(page, projId))[0]?.who).toBe('Alice');
+
+  // People.name → People.fullName. The projection reads `p.name`.
+  await renameField(page, peopleId, 0, 'fullName');
+
+  const spec = await specOfProjection(page, projId);
+  expect(spec.columns[0]!.from).toMatchObject({ alias: 'p', field: 'fullName' });
+  await expect.poll(async () => (await projectionRows(page, projId))[0]?.who).toBe('Alice');
+});
+
+test('renaming a JOIN key on either side keeps the join matching', async ({ page }) => {
+  const { peopleId, deptId, projId } = await setup(page);
+  await expect.poll(async () => (await projectionRows(page, projId))[0]?.dept).toBe('Sales');
+
+  // The join is Dept.id = People.deptId. Rename both sides, one save each.
+  await renameField(page, deptId, 0, 'deptKey');
+  await renameField(page, peopleId, 1, 'department');
+
+  const spec = await specOfProjection(page, projId);
+  expect(spec.sources[1]!.join!.on[0]).toEqual({ field: 'deptKey', eqAlias: 'p', eqField: 'department' });
+  // Still joined, so the joined column still carries its value.
+  await expect.poll(async () => (await projectionRows(page, projId))[0]?.dept).toBe('Sales');
+});
