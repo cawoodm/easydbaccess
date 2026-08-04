@@ -38,7 +38,7 @@ test('the columns editor blocks a reload once edited, and releases on close', as
   // Open but untouched — no work to lose yet.
   expect(await unloadBlocked(page)).toBe(false);
 
-  await dlg.locator('.col-row input').first().fill('renamed');
+  await dlg.locator('.col-row input[title^="Field"]').first().fill('renamed');
   expect(await unloadBlocked(page)).toBe(true);
 
   // Cancelling is a decision about the work, so the guard lets go.

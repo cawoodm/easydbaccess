@@ -168,7 +168,7 @@ test('editing columns without touching the name never warns', async ({ page }) =
   const dlg = page.locator('new-table-dialog dialog');
   await expect(dlg).toBeVisible();
   // Change a COLUMN label, leaving the table name alone.
-  await dlg.locator('.col-row input').nth(1).fill('Full Name');
+  await dlg.locator('.col-row input[title^="Label"]').first().fill('Full Name');
   await dlg.getByRole('button', { name: 'Save', exact: true }).click();
 
   await expect(dlg).toBeHidden();
