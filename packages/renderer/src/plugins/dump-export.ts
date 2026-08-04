@@ -9,8 +9,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   name: 'Dump Export',
   type: 'exporter',
   version: '0.1.0',
-  description:
-    'Export the current workspace as a single .db.json dump file, and — per table — CSV/JSON/SQL with a Raw vs. Visible vs. Structure Only choice.',
+  description: 'Export the current workspace as a single .db.json dump file, and — per table — CSV/JSON/SQL with a Raw vs. Visible vs. Structure Only choice.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/dump-export.ts',
@@ -26,8 +25,7 @@ export function init(api: HostApi): void {
       const wsId = api.workspaceId();
       if (!wsId) return;
       const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
-      const rect =
-        ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
+      const rect = ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
       const choice = await AnchoredMenu.open(rect, [
         { id: 'json', label: 'JSON dump (.db.json)', icon: 'data_object' },
         { id: 'sql', label: 'SQL script (.sql)', icon: 'storage' },
@@ -57,8 +55,7 @@ export function init(api: HostApi): void {
     tooltip: 'Export this table as CSV, JSON, or SQL',
     onClick: async (api, ctx) => {
       const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
-      const rect =
-        ctx.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
+      const rect = ctx.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
       const format = await AnchoredMenu.open(rect, [
         { id: 'csv', label: 'CSV (.csv)', icon: 'table_chart' },
         { id: 'json', label: 'JSON (.table.json)', icon: 'data_object' },
@@ -73,18 +70,9 @@ export function init(api: HostApi): void {
       // (primary/focused/Enter-activated) choice — it's the more common intent.
       // 'Structure Only' is listed last: the definition-only export, same full
       // column set as 'Raw Data' but zero rows.
-      const scopeChoice = await api.ui.dialogs.choice(
-        `Export "${table.name}" as ${format.toUpperCase()} — which rows/columns?`,
-        ['Visible Data', 'Raw Data', 'Structure Only'],
-        'Export table',
-      );
+      const scopeChoice = await api.ui.dialogs.choice(`Export "${table.name}" as ${format.toUpperCase()} — which rows/columns?`, ['Visible Data', 'Raw Data', 'Structure Only'], 'Export table');
       if (!scopeChoice) return;
-      const scope: ExportScope =
-        scopeChoice === 'Visible Data'
-          ? 'visible'
-          : scopeChoice === 'Raw Data'
-            ? 'raw'
-            : 'structure';
+      const scope: ExportScope = scopeChoice === 'Visible Data' ? 'visible' : scopeChoice === 'Raw Data' ? 'raw' : 'structure';
 
       try {
         const allRows = await api.store.rows(table.id).find();
@@ -94,15 +82,11 @@ export function init(api: HostApi): void {
         // The "no local rows" warning is about a live table's data not being
         // available locally — misleading noise when the user asked for the
         // structure only, since zero rows is then the intended outcome.
-        const isEmptyLiveTable =
-          scope !== 'structure' && table.source != null && allRows.length === 0;
+        const isEmptyLiveTable = scope !== 'structure' && table.source != null && allRows.length === 0;
 
         if (format === 'csv') {
           if (isEmptyLiveTable) {
-            api.ui.dialogs.toast(
-              `"${table.name}" is a live table with no local rows — exporting column definitions only.`,
-              { kind: 'warning', title: 'Export' },
-            );
+            api.ui.dialogs.toast(`"${table.name}" is a live table with no local rows — exporting column definitions only.`, { kind: 'warning', title: 'Export' });
           }
           await api.backend.saveFile(`${base}.csv`, serializeCsv(t, rows), 'text/csv');
         } else if (format === 'json') {
@@ -114,16 +98,9 @@ export function init(api: HostApi): void {
           await api.backend.saveFile(`${base}.table.json`, text, 'application/json');
         } else if (format === 'sql') {
           if (isEmptyLiveTable) {
-            api.ui.dialogs.toast(
-              `"${table.name}" is a live table with no local rows — exporting the CREATE TABLE only.`,
-              { kind: 'warning', title: 'Export' },
-            );
+            api.ui.dialogs.toast(`"${table.name}" is a live table with no local rows — exporting the CREATE TABLE only.`, { kind: 'warning', title: 'Export' });
           }
-          await api.backend.saveFile(
-            `${base}.sql`,
-            serializeTableAsSql(t, rows),
-            'application/sql',
-          );
+          await api.backend.saveFile(`${base}.sql`, serializeTableAsSql(t, rows), 'application/sql');
         }
       } catch (err) {
         api.ui.dialogs.toast(`Export failed: ${(err as Error).message}`, {
@@ -149,12 +126,8 @@ export async function serializeWorkspace(api: HostApi): Promise<string> {
   // View templates are workspace-global; instances are per-table. Both travel
   // with the dump so a re-import restores the view windows (not just tables) —
   // matching what the gist sync already carries.
-  const viewTemplates = (await api.store.viewTemplates.find()).filter(
-    (v) => v.workspaceId === wsId,
-  );
-  const viewInstances = (await api.store.viewInstances.find()).filter(
-    (v) => v.workspaceId === wsId,
-  );
+  const viewTemplates = (await api.store.viewTemplates.find()).filter((v) => v.workspaceId === wsId);
+  const viewInstances = (await api.store.viewInstances.find()).filter((v) => v.workspaceId === wsId);
   const out: {
     workspaceId: string;
     exportedAt: number;

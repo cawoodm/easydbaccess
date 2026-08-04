@@ -32,10 +32,7 @@ const rateLimited = () => ({
   body: JSON.stringify({ ok: false, error: 'rate limit exceeded' }),
 });
 
-test('a rate-limited import keeps and displays the rows that loaded before the 429', async ({
-  page,
-  workspaceId,
-}) => {
+test('a rate-limited import keeps and displays the rows that loaded before the 429', async ({ page, workspaceId }) => {
   await page.route('https://ppl.example/**', (route) => {
     const u = new URL(route.request().url());
     if (u.pathname === '/energy/plants.json') {
@@ -72,10 +69,7 @@ test('a rate-limited import keeps and displays the rows that loaded before the 4
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const store = (window as any).__easydb.store;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const t = (await store.tables.find()).find(
-            (x: { workspaceId: string; name: string }) =>
-              x.workspaceId === ws && x.name === 'energy/plants',
-          );
+          const t = (await store.tables.find()).find((x: { workspaceId: string; name: string }) => x.workspaceId === ws && x.name === 'energy/plants');
           if (!t) return -1;
           return (await store.rows(t.id).find()).length;
         }, workspaceId),

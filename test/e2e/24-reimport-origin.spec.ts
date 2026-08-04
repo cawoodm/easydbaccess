@@ -7,10 +7,7 @@ import { panelDomId } from './helpers.js';
  * another device.
  */
 
-test('CSV URL import stores its origin and Refresh re-pulls updated rows', async ({
-  page,
-  workspaceId,
-}) => {
+test('CSV URL import stores its origin and Refresh re-pulls updated rows', async ({ page, workspaceId }) => {
   let body = 'city,pop\nBern,133\nZug,30\n';
   await page.route('https://ex.example/air.csv', (route) =>
     route.fulfill({
@@ -31,9 +28,7 @@ test('CSV URL import stores its origin and Refresh re-pulls updated rows', async
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const store = (window as any).__easydb.store;
     for (let i = 0; i < 100; i++) {
-      const t = (await store.tables.find()).find(
-        (x: any) => x.workspaceId === ws && x.name === 'air',
-      );
+      const t = (await store.tables.find()).find((x: any) => x.workspaceId === ws && x.name === 'air');
       if (t) return t.id as string;
       await new Promise((r) => setTimeout(r, 50));
     }
@@ -63,10 +58,7 @@ test('CSV URL import stores its origin and Refresh re-pulls updated rows', async
     .toBe(3); // was 2, now 3 after refresh
 });
 
-test('a dump round-trips a snapshot origin (reconstructable on another device)', async ({
-  page,
-  workspaceId,
-}) => {
+test('a dump round-trips a snapshot origin (reconstructable on another device)', async ({ page, workspaceId }) => {
   // Build a table that carries an origin, export the workspace, wipe it, then
   // re-import the dump — the origin must survive.
   const dump = await page.evaluate(async (ws) => {
@@ -83,9 +75,7 @@ test('a dump round-trips a snapshot origin (reconstructable on another device)',
       origin: { type: 'csv', url: 'https://ex.example/x.csv' },
       updatedAt: Date.now(),
     });
-    await ctx.store
-      .rows(id)
-      .insert({ id: crypto.randomUUID(), tableId: id, data: { a: '1' }, updatedAt: Date.now() });
+    await ctx.store.rows(id).insert({ id: crypto.randomUUID(), tableId: id, data: { a: '1' }, updatedAt: Date.now() });
     const { serializeWorkspace } = await import('/src/plugins/dump-export.ts');
     const text = await serializeWorkspace(ctx.api);
     // Wipe the table so the re-import recreates it.
@@ -107,9 +97,7 @@ test('a dump round-trips a snapshot origin (reconstructable on another device)',
       const ctx = (window as any).__easydb;
       const { restoreWorkspaceDump } = await import('/src/plugins/json-import.ts');
       await restoreWorkspaceDump(ctx.api, args.dump, 'restore.json');
-      const t = (await ctx.store.tables.find()).find(
-        (x: any) => x.workspaceId === args.ws && x.name === 'FromUrl',
-      );
+      const t = (await ctx.store.tables.find()).find((x: any) => x.workspaceId === args.ws && x.name === 'FromUrl');
       return t?.origin ?? null;
     },
     { dump, ws: workspaceId },

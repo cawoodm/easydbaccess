@@ -69,8 +69,7 @@ export function registerDatasetteSettings(api: HostApi): void {
       type: 'number',
       default: DEFAULT_PAGE_SIZE,
       scope: 'workspace',
-      description:
-        'Rows requested per page hop while paging a table (the instance clamps this to its own max_returned_rows).',
+      description: 'Rows requested per page hop while paging a table (the instance clamps this to its own max_returned_rows).',
     },
     {
       key: 'connectMaxRows',
@@ -139,12 +138,7 @@ export function datasetteTableUrl(base: string, db: string, table: string): stri
  * license (datasette.io, for one, publishes none). A real `source`/`sourceUrl`
  * supplied by the instance is left untouched.
  */
-export function withDatasetteSourceInfo(
-  patch: MetadataTablePatch,
-  base: string,
-  db: string,
-  table: string,
-): MetadataTablePatch {
+export function withDatasetteSourceInfo(patch: MetadataTablePatch, base: string, db: string, table: string): MetadataTablePatch {
   const info: TableInfo = { ...(patch.info ?? {}) };
   if (!info.source && !info.sourceUrl) {
     info.source = `${host(base)}/${db}/${table}`;
@@ -169,12 +163,7 @@ export function uniqueTableName(taken: Set<string>, name: string): string {
  *  - instance URL   → pick database(s) first, then their tables.
  * Returns the chosen tables, [] if none exist, or null if cancelled.
  */
-export async function resolveChosenTables(
-  fetchFn: FetchFn,
-  ref: DatasetteRef,
-  verb: 'Import' | 'Connect' | 'Reference',
-  opts: { skipPicker?: boolean | undefined } = {},
-): Promise<TableRef[] | null> {
+export async function resolveChosenTables(fetchFn: FetchFn, ref: DatasetteRef, verb: 'Import' | 'Connect' | 'Reference', opts: { skipPicker?: boolean | undefined } = {}): Promise<TableRef[] | null> {
   if (ref.db && ref.table) {
     // Probe the named table so a missing/typo'd table surfaces as an error
     // BEFORE any window/record is created (otherwise connect silently makes an

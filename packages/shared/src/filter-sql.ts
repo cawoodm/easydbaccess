@@ -134,12 +134,7 @@ export function columnFilterToSql(columnSql: string, rawFilter: string): SqlFrag
  * `searchFields` are the fields a bare search term looks in; the search matches
  * when ANY of them does.
  */
-export function buildWhere(
-  filters: Record<string, string> | undefined,
-  search: string | undefined,
-  columnSqlOf: (field: string) => string | null,
-  searchFields: readonly string[],
-): SqlFragment {
+export function buildWhere(filters: Record<string, string> | undefined, search: string | undefined, columnSqlOf: (field: string) => string | null, searchFields: readonly string[]): SqlFragment {
   const clauses: string[] = [];
   const params: unknown[] = [];
   let expressible = true;

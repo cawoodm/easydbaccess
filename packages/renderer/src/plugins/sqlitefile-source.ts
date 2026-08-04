@@ -15,14 +15,7 @@
  * Electron-only: `init` registers nothing when `window.easydb?.db` is absent,
  * which is always true in the browser build.
  */
-import type {
-  DataCollection,
-  HostApi,
-  PluginModule,
-  Row,
-  Table,
-  Unsubscribe,
-} from '@easydb/shared';
+import type { DataCollection, HostApi, PluginModule, Row, Table, Unsubscribe } from '@easydb/shared';
 import type { EasydbDbBridge } from '../db/data-store-ipc.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
@@ -49,10 +42,7 @@ export function parseConfig(table: Table): SqliteFileConfig | null {
 }
 
 function readOnly(op: string): never {
-  throw new Error(
-    `This table is a read-only browse of a database file — ${op} is not possible. ` +
-      `Use Import to bring the data into your workspace first.`,
-  );
+  throw new Error(`This table is a read-only browse of a database file — ${op} is not possible. ` + `Use Import to bring the data into your workspace first.`);
 }
 
 /**

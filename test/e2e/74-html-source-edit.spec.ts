@@ -21,7 +21,10 @@ import { addRow, createTable, panelDomId, readRows, waitForPanel } from './helpe
 const SCRIPT = 'function render(row) { return markdownToHtml(row.body); }';
 
 function cellOf(page: import('@playwright/test').Page, tableId: string, nth: number) {
-  return page.locator(`#${panelDomId(tableId)}`).locator('data-table tbody tr td').nth(nth);
+  return page
+    .locator(`#${panelDomId(tableId)}`)
+    .locator('data-table tbody tr td')
+    .nth(nth);
 }
 
 function editor(page: import('@playwright/test').Page) {

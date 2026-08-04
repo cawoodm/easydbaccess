@@ -5,15 +5,10 @@ import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js
  * A column narrower than its content shows an ellipsis, so the full value has to
  * be readable on hover: every non-empty cell carries it as its `title`.
  */
-const LONG =
-  'Kajaki Hydroelectric Power Plant, Helmand — refurbished turbine hall and spillway works';
+const LONG = 'Kajaki Hydroelectric Power Plant, Helmand — refurbished turbine hall and spillway works';
 
 test('a cell carries its full value as a tooltip', async ({ page }) => {
-  const id = await createTable(page, 'Plants', [
-    { field: 'name' },
-    { field: 'note' },
-    { field: 'computed' },
-  ]);
+  const id = await createTable(page, 'Plants', [{ field: 'name' }, { field: 'note' }, { field: 'computed' }]);
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [{ name: LONG, note: '', computed: 'ignored' }]);
 
@@ -24,9 +19,7 @@ test('a cell carries its full value as a tooltip', async ({ page }) => {
     const store = (window as any).__easydb.store;
     const t = await store.tables.findOne(tid);
     await store.tables.patch(tid, {
-      columns: t.columns.map((c: { field: string }) =>
-        c.field === 'computed' ? { ...c, script: 'function render(row) { return "derived" }' } : c,
-      ),
+      columns: t.columns.map((c: { field: string }) => (c.field === 'computed' ? { ...c, script: 'function render(row) { return "derived" }' } : c)),
       updatedAt: Date.now(),
     });
   }, id);

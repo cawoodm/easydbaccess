@@ -22,9 +22,7 @@ export function makePencil(onClick: () => void, title = 'Edit'): HTMLButtonEleme
   btn.title = title;
   btn.textContent = '✎';
   btn.className = 'cell-pencil';
-  btn.style.cssText =
-    'flex:none;background:transparent;border:0;cursor:pointer;color:#9ca3af;' +
-    'font-size:0.85em;padding:0 0.15rem;line-height:1';
+  btn.style.cssText = 'flex:none;background:transparent;border:0;cursor:pointer;color:#9ca3af;' + 'font-size:0.85em;padding:0 0.15rem;line-height:1';
   btn.addEventListener('mouseenter', () => (btn.style.color = '#374151'));
   btn.addEventListener('mouseleave', () => (btn.style.color = '#9ca3af'));
   btn.addEventListener('click', (e) => {
@@ -44,8 +42,7 @@ export function makePencil(onClick: () => void, title = 'Edit'): HTMLButtonEleme
  */
 export function pencilRow(content: HTMLElement, trailing: HTMLElement): HTMLElement {
   const row = document.createElement('span');
-  row.style.cssText =
-    'display:flex;align-items:center;gap:0.25rem;width:100%;min-width:0;max-width:100%';
+  row.style.cssText = 'display:flex;align-items:center;gap:0.25rem;width:100%;min-width:0;max-width:100%';
   content.style.flex = '1 1 auto';
   content.style.minWidth = '0';
   content.style.overflow = 'hidden';
@@ -62,18 +59,11 @@ export function pencilRow(content: HTMLElement, trailing: HTMLElement): HTMLElem
  * edit would otherwise be saved by its own trailing blur. `isLive` lets the
  * caller answer "is this still the editor you're showing?".
  */
-export function makeValueEditor(opts: {
-  value: string;
-  onCommit: (v: string) => void;
-  onCancel: () => void;
-  isLive: (input: HTMLInputElement) => boolean;
-}): HTMLInputElement {
+export function makeValueEditor(opts: { value: string; onCommit: (v: string) => void; onCancel: () => void; isLive: (input: HTMLInputElement) => boolean }): HTMLInputElement {
   const input = document.createElement('input');
   input.type = 'text';
   input.value = opts.value;
-  input.style.cssText =
-    'width:100%;box-sizing:border-box;border:0;background:transparent;font:inherit;' +
-    'padding:0;text-overflow:ellipsis';
+  input.style.cssText = 'width:100%;box-sizing:border-box;border:0;background:transparent;font:inherit;' + 'padding:0;text-overflow:ellipsis';
   const commit = () => {
     if (!opts.isLive(input)) return;
     opts.onCommit(input.value);

@@ -827,10 +827,7 @@ describe('withAuthFetch', () => {
   });
 
   it('returns the fn unchanged when there is no token', () => {
-    const base = ((): Promise<Response> => Promise.resolve({} as Response)) as unknown as (
-      url: string,
-      opts?: FetchOpts,
-    ) => Promise<Response>;
+    const base = ((): Promise<Response> => Promise.resolve({} as Response)) as unknown as (url: string, opts?: FetchOpts) => Promise<Response>;
     expect(withAuthFetch(base, undefined)).toBe(base);
   });
 });

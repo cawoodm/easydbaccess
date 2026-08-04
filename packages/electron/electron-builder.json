@@ -5,11 +5,7 @@
   "directories": {
     "output": "dist-installer"
   },
-  "files": [
-    "dist/**/*",
-    "frontend/**/*",
-    "../server/dist/**/*"
-  ],
+  "files": ["dist/**/*", "frontend/**/*", "../server/dist/**/*"],
   "win": {
     "target": "nsis"
   },

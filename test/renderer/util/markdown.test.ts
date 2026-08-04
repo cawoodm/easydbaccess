@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import {
-  looksLikeMarkdown,
-  markdownToHtml,
-  markupKind,
-} from '../../../packages/renderer/src/util/markdown.js';
+import { looksLikeMarkdown, markdownToHtml, markupKind } from '../../../packages/renderer/src/util/markdown.js';
 
 describe('markdownToHtml: blocks', () => {
   it('renders headings, paragraphs and a horizontal rule', () => {

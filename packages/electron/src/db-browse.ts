@@ -93,12 +93,7 @@ export interface BrowseRow {
  * row's position. That is good enough because browse rows are never written —
  * nothing addresses one of these ids later.
  */
-export function readBrowseRows(
-  sourcePath: string,
-  objectName: string,
-  columns: ColumnSpec[],
-  limit = BROWSE_ROW_CAP,
-): BrowseRow[] {
+export function readBrowseRows(sourcePath: string, objectName: string, columns: ColumnSpec[], limit = BROWSE_ROW_CAP): BrowseRow[] {
   const db = new DatabaseSync(sourcePath, { readOnly: true });
   try {
     const capped = Math.max(0, Math.min(limit, BROWSE_ROW_CAP));
@@ -106,15 +101,11 @@ export function readBrowseRows(
     let raw: Array<Record<string, unknown>>;
     let hasRowid = true;
     try {
-      raw = db
-        .prepare(`SELECT rowid AS _browse_rowid, * FROM ${ident} LIMIT ?`)
-        .all(capped) as unknown as Array<Record<string, unknown>>;
+      raw = db.prepare(`SELECT rowid AS _browse_rowid, * FROM ${ident} LIMIT ?`).all(capped) as unknown as Array<Record<string, unknown>>;
     } catch {
       // A view, or a WITHOUT ROWID table: no rowid to select.
       hasRowid = false;
-      raw = db.prepare(`SELECT * FROM ${ident} LIMIT ?`).all(capped) as unknown as Array<
-        Record<string, unknown>
-      >;
+      raw = db.prepare(`SELECT * FROM ${ident} LIMIT ?`).all(capped) as unknown as Array<Record<string, unknown>>;
     }
 
     return raw.map((r, i) => {

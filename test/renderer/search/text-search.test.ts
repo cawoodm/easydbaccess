@@ -92,16 +92,8 @@ describe('searchRowsByField (field:value with column-filter operators)', () => {
   interface R {
     data: Record<string, unknown>;
   }
-  const rows: R[] = [
-    { data: { city: 'Paris', read: true, title: 'Alpha' } },
-    { data: { city: 'London', read: false, title: 'Beta' } },
-    { data: { city: 'Paris', read: false, title: 'Gamma' } },
-  ];
-  const fields = [
-    { field: 'city' },
-    { field: 'read' },
-    { field: 'title', label: 'Name' },
-  ];
+  const rows: R[] = [{ data: { city: 'Paris', read: true, title: 'Alpha' } }, { data: { city: 'London', read: false, title: 'Beta' } }, { data: { city: 'Paris', read: false, title: 'Gamma' } }];
+  const fields = [{ field: 'city' }, { field: 'read' }, { field: 'title', label: 'Name' }];
   const run = (q: string) => searchRowsByField(rows, q, fields).map((r) => r.data.title);
 
   it('field:value restricts the match to that column', () => {

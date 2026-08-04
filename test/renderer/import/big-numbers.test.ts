@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  isUnsafeIntegerText,
-  quoteBigIntegers,
-} from '../../../packages/renderer/src/import/big-numbers.js';
+import { isUnsafeIntegerText, quoteBigIntegers } from '../../../packages/renderer/src/import/big-numbers.js';
 
 /** The reported value: a snowflake id that reads back as …894200 as a number. */
 const BIG = '1298624375692894210';
@@ -78,10 +75,7 @@ describe('quoteBigIntegers', () => {
   });
 
   it('handles a big id in an array, and several in one document', () => {
-    expect(parse(`[{"id":${BIG}},{"id":9007199254740993}]`)).toEqual([
-      { id: BIG },
-      { id: '9007199254740993' },
-    ]);
+    expect(parse(`[{"id":${BIG}},{"id":9007199254740993}]`)).toEqual([{ id: BIG }, { id: '9007199254740993' }]);
   });
 
   it('leaves a document with nothing to fix byte-identical', () => {

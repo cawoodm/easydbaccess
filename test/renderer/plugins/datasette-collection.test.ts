@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DataCollection, FetchOpts, RowSourceCtx, Setting, Table } from '@easydb/shared';
-import {
-  createDatasetteCollection,
-  SourceReadOnlyError,
-  tokenSettingKey,
-} from '../../../packages/renderer/src/plugins/datasette-collection.js';
+import { createDatasetteCollection, SourceReadOnlyError, tokenSettingKey } from '../../../packages/renderer/src/plugins/datasette-collection.js';
 
 /**
  * Readers for a recorded call's options. `FetchOpts` has every field optional
@@ -98,8 +94,7 @@ describe('createDatasetteCollection — read', () => {
 });
 
 describe('createDatasetteCollection — request dedup', () => {
-  const rowReqs = (calls: Array<{ url: string }>) =>
-    calls.filter((c) => c.url.includes('/db/t.json')).length;
+  const rowReqs = (calls: Array<{ url: string }>) => calls.filter((c) => c.url.includes('/db/t.json')).length;
 
   it('subscribe + find on one instance issue a single row request', async () => {
     const { ctx, calls } = makeCtx(() => ({ ok: true, next: null, rows: [{ id: 1, name: 'a' }] }));
@@ -124,27 +119,18 @@ describe('createDatasetteCollection — request dedup', () => {
 });
 
 describe('createDatasetteCollection — read-only guard', () => {
-  const ro = () =>
-    createDatasetteCollection(sourcedTable(false), makeCtx(() => ({ ok: true, rows: [] })).ctx);
+  const ro = () => createDatasetteCollection(sourcedTable(false), makeCtx(() => ({ ok: true, rows: [] })).ctx);
 
   it('throws SourceReadOnlyError for insert/patch/remove when not writable', async () => {
-    await expect(
-      ro().insert({ id: '1', tableId: 't1', data: { name: 'a' }, updatedAt: 0 }),
-    ).rejects.toBeInstanceOf(SourceReadOnlyError);
-    await expect(ro().patch('1', { data: { name: 'b' } })).rejects.toBeInstanceOf(
-      SourceReadOnlyError,
-    );
+    await expect(ro().insert({ id: '1', tableId: 't1', data: { name: 'a' }, updatedAt: 0 })).rejects.toBeInstanceOf(SourceReadOnlyError);
+    await expect(ro().patch('1', { data: { name: 'b' } })).rejects.toBeInstanceOf(SourceReadOnlyError);
     await expect(ro().remove('1')).rejects.toThrow(/read-only/);
   });
 });
 
 describe('createDatasetteCollection — writes', () => {
   it('patch sends changed fields (minus PK) to /<pk>/-/update with the token', async () => {
-    const { ctx, calls, events, setToken } = makeCtx(({ url }) =>
-      url.includes('/-/update')
-        ? { ok: true, rows: [{ id: 5, name: 'b', qty: 99 }] }
-        : { ok: true, next: null, rows: [] },
-    );
+    const { ctx, calls, events, setToken } = makeCtx(({ url }) => (url.includes('/-/update') ? { ok: true, rows: [{ id: 5, name: 'b', qty: 99 }] } : { ok: true, next: null, rows: [] }));
     setToken(BASE, 'dstok_ABC');
     const coll = createDatasetteCollection(sourcedTable(true), ctx);
 
@@ -160,11 +146,7 @@ describe('createDatasetteCollection — writes', () => {
   });
 
   it('insert posts the row (no synthetic id) and keys the result by the returned PK', async () => {
-    const { ctx, calls, events } = makeCtx(({ url }) =>
-      url.endsWith('/-/insert')
-        ? { ok: true, rows: [{ id: 9, name: 'z' }] }
-        : { ok: true, next: null, rows: [] },
-    );
+    const { ctx, calls, events } = makeCtx(({ url }) => (url.endsWith('/-/insert') ? { ok: true, rows: [{ id: 9, name: 'z' }] } : { ok: true, next: null, rows: [] }));
     const coll = createDatasetteCollection(sourcedTable(true), ctx);
 
     const row = await coll.insert({ id: 'tmp', tableId: 't1', data: { name: 'z' }, updatedAt: 0 });

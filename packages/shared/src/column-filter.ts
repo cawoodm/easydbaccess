@@ -197,16 +197,7 @@ export function parseColumnFilter(raw: string): FilterToken[] {
  * and a term carrying a standalone `AND` / `OR` would come back split in two.
  */
 function needsQuoting(term: string): boolean {
-  return (
-    term.includes(',') ||
-    term.includes('"') ||
-    term !== term.trim() ||
-    term === '' ||
-    term.startsWith('!') ||
-    term.startsWith('^') ||
-    term.startsWith('=') ||
-    /\s(AND|OR)(?=[\s,]|$)/.test(term)
-  );
+  return term.includes(',') || term.includes('"') || term !== term.trim() || term === '' || term.startsWith('!') || term.startsWith('^') || term.startsWith('=') || /\s(AND|OR)(?=[\s,]|$)/.test(term);
 }
 
 /** Render tokens back into a filter string, quoting terms that need it. */
@@ -280,9 +271,7 @@ function matchesTerm(value: unknown, token: FilterToken, members: string[] | nul
 
 /** Does the cell satisfy every token of one AND-group? */
 function matchesGroup(value: unknown, group: FilterToken[], members: string[] | null): boolean {
-  return group.every((t) =>
-    t.negate ? !matchesTerm(value, t, members) : matchesTerm(value, t, members),
-  );
+  return group.every((t) => (t.negate ? !matchesTerm(value, t, members) : matchesTerm(value, t, members)));
 }
 
 /**
@@ -292,11 +281,7 @@ function matchesGroup(value: unknown, group: FilterToken[], members: string[] | 
  * matching to per-member (see the header). Every other type reads the cell as
  * one value, so a caller that knows no type can leave it out.
  */
-export function matchesColumnFilter(
-  value: unknown,
-  rawQuery: string,
-  opts?: { type?: string | undefined },
-): boolean {
+export function matchesColumnFilter(value: unknown, rawQuery: string, opts?: { type?: string | undefined }): boolean {
   const groups = groupColumnFilter(parseColumnFilter(rawQuery));
   if (groups.length === 0) return true;
   const members = opts?.type === 'array' ? arrayMembers(value) : null;

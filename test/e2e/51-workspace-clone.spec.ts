@@ -36,10 +36,7 @@ test.describe('new workspace clone choice', () => {
     // The click navigates to ?space=<new>, so wait for the new URL and then for
     // the app hook of the freshly booted page — evaluating any earlier races the
     // navigation and hits either the old context or a page with no __easydb yet.
-    await Promise.all([
-      page.waitForURL(new RegExp(`space=${NEW_WS}`), { timeout: 15_000 }),
-      dialogs.getByRole('button', { name: pick }).click(),
-    ]);
+    await Promise.all([page.waitForURL(new RegExp(`space=${NEW_WS}`), { timeout: 15_000 }), dialogs.getByRole('button', { name: pick }).click()]);
     await page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => Boolean((window as any).__easydb),
@@ -52,9 +49,7 @@ test.describe('new workspace clone choice', () => {
     page.evaluate(async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ctx = (window as any).__easydb;
-      const tables = (await ctx.store.tables.find()).filter(
-        (t: { workspaceId: string }) => t.workspaceId === ctx.workspaceId,
-      );
+      const tables = (await ctx.store.tables.find()).filter((t: { workspaceId: string }) => t.workspaceId === ctx.workspaceId);
       const settings = await ctx.store.settings.find();
       return {
         tables: tables.map((t: { name: string }) => t.name),

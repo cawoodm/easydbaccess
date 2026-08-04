@@ -50,12 +50,7 @@ export function panBy(state: PanZoomState, dx: number, dy: number): PanZoomState
  * Scale by `factor` about the point (cx, cy) — coordinates relative to the
  * viewport's origin — keeping the canvas point under (cx, cy) fixed on screen.
  */
-export function zoomAround(
-  state: PanZoomState,
-  factor: number,
-  cx: number,
-  cy: number,
-): PanZoomState {
+export function zoomAround(state: PanZoomState, factor: number, cx: number, cy: number): PanZoomState {
   const scale = clampScale(state.scale * factor);
   // World point currently under (cx, cy): (screen - translate) / scale.
   const worldX = (cx - state.x) / state.scale;

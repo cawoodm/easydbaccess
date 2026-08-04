@@ -3,9 +3,7 @@ import { COLUMN_SCRIPT_HELPERS, compileColumnScript, runColumnScript } from '../
 
 describe('runColumnScript', () => {
   it('returns whatever render(row) returns, not just strings', () => {
-    expect(
-      runColumnScript('function render(row) { return row.a + row.b }', { a: 2, b: 3 }),
-    ).toEqual({ ok: true, value: 5 });
+    expect(runColumnScript('function render(row) { return row.a + row.b }', { a: 2, b: 3 })).toEqual({ ok: true, value: 5 });
     expect(runColumnScript('function render() { return true }', {})).toEqual({
       ok: true,
       value: true,
@@ -24,10 +22,7 @@ describe('runColumnScript', () => {
   });
 
   it('allows const declarations and built-ins inside the body', () => {
-    const run = runColumnScript(
-      'const pad = (n) => String(n).padStart(2, "0");\nfunction render(row) { return pad(row.n) }',
-      { n: 7 },
-    );
+    const run = runColumnScript('const pad = (n) => String(n).padStart(2, "0");\nfunction render(row) { return pad(row.n) }', { n: 7 });
     expect(run).toEqual({ ok: true, value: '07' });
   });
 
@@ -65,9 +60,7 @@ describe('compileColumnScript', () => {
   it('memoizes by source, so a big table compiles once per column', () => {
     const src = 'function render(row) { return row.a }';
     expect(compileColumnScript(src)).toBe(compileColumnScript(src));
-    expect(compileColumnScript(src)).not.toBe(
-      compileColumnScript('function render(row) { return row.b }'),
-    );
+    expect(compileColumnScript(src)).not.toBe(compileColumnScript('function render(row) { return row.b }'));
   });
 
   it('throws on a syntax error (runColumnScript is what catches it)', () => {
@@ -97,10 +90,7 @@ describe('script helpers', () => {
   it('leaves a script that shadows a helper name working on its own version', () => {
     // The helpers are parameters, so a local declaration wins — a script that
     // defined its own `markdownToHtml` before must not break.
-    const run = runColumnScript(
-      'function markdownToHtml(s) { return "mine:" + s }\nfunction render(row) { return markdownToHtml("x") }',
-      {},
-    );
+    const run = runColumnScript('function markdownToHtml(s) { return "mine:" + s }\nfunction render(row) { return markdownToHtml("x") }', {});
     expect(run.ok).toBe(true);
     if (run.ok) expect(run.value).toBe('mine:x');
   });

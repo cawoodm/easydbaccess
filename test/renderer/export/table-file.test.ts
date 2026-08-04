@@ -50,11 +50,7 @@ describe('scopedColumns / scopedTable', () => {
 });
 
 describe('scopedRows', () => {
-  const rows = [
-    row({ name: 'Bolt', qty: 5 }),
-    row({ name: 'Anchor', qty: 20 }),
-    row({ name: 'Widget', qty: 1 }),
-  ];
+  const rows = [row({ name: 'Bolt', qty: 5 }), row({ name: 'Anchor', qty: 20 }), row({ name: 'Widget', qty: 1 })];
 
   it('raw scope returns every row, unsorted and unfiltered', () => {
     expect(scopedRows(table(), rows, 'raw')).toEqual(rows);

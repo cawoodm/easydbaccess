@@ -106,8 +106,6 @@ describe('fetchImportText — failures', () => {
     const api = {
       backend: { fetch: vi.fn().mockRejectedValue(new Error('Load failed')) },
     } as unknown as HostApi;
-    await expect(fetchImportText(api, 'https://example.com/x.csv')).rejects.toThrow(
-      /Could not reach example\.com — no response/,
-    );
+    await expect(fetchImportText(api, 'https://example.com/x.csv')).rejects.toThrow(/Could not reach example\.com — no response/);
   });
 });

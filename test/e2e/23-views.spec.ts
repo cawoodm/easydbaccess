@@ -8,12 +8,7 @@ import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js
  */
 test.describe('views', () => {
   test('RSS template renders a table as a list of linked cards', async ({ page }) => {
-    const id = await createTable(page, 'Feed', [
-      { field: 'title' },
-      { field: 'url' },
-      { field: 'date' },
-      { field: 'description' },
-    ]);
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }, { field: 'date' }, { field: 'description' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [
       {
@@ -59,12 +54,7 @@ test.describe('views', () => {
   });
 
   test('an existing view instance can be renamed and re-mapped', async ({ page }) => {
-    const id = await createTable(page, 'Feed', [
-      { field: 'title' },
-      { field: 'url' },
-      { field: 'date' },
-      { field: 'description' },
-    ]);
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }, { field: 'date' }, { field: 'description' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [
       {
@@ -81,10 +71,7 @@ test.describe('views', () => {
     await expect(dlg).toBeVisible();
 
     // Create an RSS view (auto-mapped: $TITLE → title).
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
 
     const vw = page.locator('view-window');
@@ -99,10 +86,7 @@ test.describe('views', () => {
     // Rename it and re-map $TITLE from the title column to description.
     await expect(dlg.locator('.dialog-header h2')).toContainText('Edit view');
     await dlg.locator('input[type="text"]').fill('My Renamed Feed');
-    await dlg
-      .locator('.map-row', { hasText: '$TITLE' })
-      .locator('select')
-      .selectOption({ label: 'description' });
+    await dlg.locator('.map-row', { hasText: '$TITLE' }).locator('select').selectOption({ label: 'description' });
     await dlg.getByRole('button', { name: 'Save' }).click();
 
     // Back in the list, the new name shows; the open window reloaded so the
@@ -112,9 +96,7 @@ test.describe('views', () => {
     await expect(vw.locator('a', { hasText: 'Hello World' })).toHaveCount(0);
   });
 
-  test('the view footer "Edit template" link opens the editor and edits apply live', async ({
-    page,
-  }) => {
+  test('the view footer "Edit template" link opens the editor and edits apply live', async ({ page }) => {
     const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [{ title: 'Hello World', url: 'https://example.com/1' }]);
@@ -122,10 +104,7 @@ test.describe('views', () => {
     const footer = page.locator(`#${panelDomId(id)} panel-footer`);
     await footer.getByRole('button', { name: /Views/ }).click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
 
     const vw = page.locator('view-window');
@@ -153,10 +132,7 @@ test.describe('views', () => {
     const footer = page.locator(`#${panelDomId(id)} panel-footer`);
     await footer.getByRole('button', { name: /Views/ }).click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
 
     const vw = page.locator('view-window');
@@ -169,9 +145,7 @@ test.describe('views', () => {
     await expect(dlg.locator('input[type="text"]').first()).toHaveValue(/RSS Feed — Feed/);
   });
 
-  test('a stale built-in RSS template is reconciled to the shipped HTML on reload', async ({
-    page,
-  }) => {
+  test('a stale built-in RSS template is reconciled to the shipped HTML on reload', async ({ page }) => {
     // Force the RSS template to be seeded, then simulate a workspace that was
     // provisioned by an OLD release: overwrite the built-in template's row HTML
     // with a version that lacks the line-clamp, and set a bogus stored
@@ -215,9 +189,7 @@ test.describe('views', () => {
       .toContain('line-clamp:20');
   });
 
-  test('a template with blank row HTML falls back to a read-only columns table', async ({
-    page,
-  }) => {
+  test('a template with blank row HTML falls back to a read-only columns table', async ({ page }) => {
     const id = await createTable(page, 'Plain', [{ field: 'a' }, { field: 'b' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [
@@ -240,10 +212,7 @@ test.describe('views', () => {
     await dlg.getByRole('button', { name: 'Save' }).click();
 
     // Use the new template → no tokens → create directly.
-    await dlg
-      .locator('ul.list li', { hasText: 'Bare' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'Bare' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
 
     // The view shows the header/footer HTML around a read-only table (2 rows).
@@ -266,10 +235,7 @@ test.describe('views', () => {
       .click();
     const dlg = page.locator('views-dialog dialog');
     await expect(dlg).toBeVisible();
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
     await expect(page.locator('view-window')).toBeVisible();
 
@@ -317,10 +283,7 @@ test.describe('views', () => {
       .getByRole('button', { name: /Views/ })
       .click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
     const viewPanel = page.locator('[id^="view-panel-"]');
     await expect(viewPanel).toBeVisible();
@@ -339,9 +302,7 @@ test.describe('views', () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const ctx = (window as any).__easydb;
           const all = await ctx.store.viewInstances.find();
-          return all.some(
-            (i: { windowGeometry?: { minimized?: boolean } }) => i.windowGeometry?.minimized,
-          );
+          return all.some((i: { windowGeometry?: { minimized?: boolean } }) => i.windowGeometry?.minimized);
         }),
       )
       .toBe(true);
@@ -356,9 +317,7 @@ test.describe('views', () => {
     await expect(page.locator('#easydb-minimized-dock .jsPanel-replacement')).toBeVisible();
   });
 
-  test('a maximized view window fills the area and stays filling through a pan', async ({
-    page,
-  }) => {
+  test('a maximized view window fills the area and stays filling through a pan', async ({ page }) => {
     const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [{ title: 'Hello', url: 'https://example.com/1' }]);
@@ -367,10 +326,7 @@ test.describe('views', () => {
       .getByRole('button', { name: /Views/ })
       .click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
     const viewPanel = page.locator('[id^="view-panel-"]');
     await expect(viewPanel).toBeVisible();
@@ -407,21 +363,14 @@ test.describe('views', () => {
       .getByRole('button', { name: /Views/ })
       .click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
     const viewPanel = page.locator('[id^="view-panel-"]');
     await expect(viewPanel).toBeVisible();
 
-    const status = () =>
-      viewPanel.evaluate((el) => (el as HTMLElement & { status: string }).status);
+    const status = () => viewPanel.evaluate((el) => (el as HTMLElement & { status: string }).status);
     const title = viewPanel.locator('.jsPanel-title');
-    const titlebarCursor = () =>
-      viewPanel
-        .locator('.jsPanel-titlebar')
-        .evaluate((el) => getComputedStyle(el as HTMLElement).cursor);
+    const titlebarCursor = () => viewPanel.locator('.jsPanel-titlebar').evaluate((el) => getComputedStyle(el as HTMLElement).cursor);
 
     expect(await status()).toBe('normalized');
     expect(await titlebarCursor()).toBe('move');
@@ -449,10 +398,7 @@ test.describe('views', () => {
       .getByRole('button', { name: /Views/ })
       .click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
     const viewPanel = page.locator('[id^="view-panel-"]');
     await expect(viewPanel).toBeVisible();
@@ -469,16 +415,8 @@ test.describe('views', () => {
     await expect(vw.locator('a', { hasText: 'Alpha' })).toBeVisible();
   });
 
-  test('the footer table toggle switches the template off to an interactive grid, stored on the instance', async ({
-    page,
-    workspaceId,
-  }) => {
-    const id = await createTable(page, 'Feed', [
-      { field: 'title' },
-      { field: 'url' },
-      { field: 'date' },
-      { field: 'description' },
-    ]);
+  test('the footer table toggle switches the template off to an interactive grid, stored on the instance', async ({ page, workspaceId }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }, { field: 'date' }, { field: 'description' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [
       { title: 'Hello World', url: 'https://example.com/1', date: '2024-01-01', description: 'a' },
@@ -490,10 +428,7 @@ test.describe('views', () => {
       .getByRole('button', { name: /Views/ })
       .click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
 
     const vw = page.locator('view-window');
@@ -546,10 +481,7 @@ test.describe('views', () => {
     await expect(vw.locator('data-table')).toHaveCount(0);
   });
 
-  test('a column filter in the grid is not reverted by a concurrent instance write', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('a column filter in the grid is not reverted by a concurrent instance write', async ({ page, workspaceId }) => {
     const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [
@@ -561,10 +493,7 @@ test.describe('views', () => {
       .getByRole('button', { name: /Views/ })
       .click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
 
     const vw = page.locator('view-window');
@@ -606,10 +535,7 @@ test.describe('views', () => {
       .getByRole('button', { name: /Views/ })
       .click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
 
     const vw = page.locator('view-window');
@@ -629,14 +555,8 @@ test.describe('views', () => {
     await expect(vw.locator('a', { hasText: 'Alpha' })).toBeVisible();
   });
 
-  test('global search filters a template view and respects the view’s own search', async ({
-    page,
-  }) => {
-    const id = await createTable(page, 'Feed', [
-      { field: 'title' },
-      { field: 'url' },
-      { field: 'city' },
-    ]);
+  test('global search filters a template view and respects the view’s own search', async ({ page }) => {
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }, { field: 'city' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [
       { title: 'Alice', url: 'https://example.com/a', city: 'Paris' },
@@ -648,10 +568,7 @@ test.describe('views', () => {
       .getByRole('button', { name: /Views/ })
       .click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
 
     const vw = page.locator('view-window');
@@ -699,12 +616,7 @@ test.describe('minimized views load nothing until expanded', () => {
    * once the view is detached (a `.jsPanel` that *has* a view-window would not).
    */
   async function makeView(page: import('@playwright/test').Page): Promise<string> {
-    const id = await createTable(page, 'Feed', [
-      { field: 'title' },
-      { field: 'url' },
-      { field: 'date' },
-      { field: 'description' },
-    ]);
+    const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }, { field: 'date' }, { field: 'description' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [
       { title: 'One', url: 'https://example.com/1', date: '2024-01-01', description: 'a' },
@@ -715,21 +627,14 @@ test.describe('minimized views load nothing until expanded', () => {
       .getByRole('button', { name: /Views/ })
       .click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
     await expect(page.locator('view-window')).toBeVisible();
-    return page.evaluate(
-      () => document.querySelector('view-window')!.closest('.jsPanel')!.id,
-    );
+    return page.evaluate(() => document.querySelector('view-window')!.closest('.jsPanel')!.id);
   }
 
-  const minimize = (page: import('@playwright/test').Page, panelId: string) =>
-    page.locator(`#${panelId}`).evaluate((el) => (el as HTMLElement & { minimize(): void }).minimize());
-  const restore = (page: import('@playwright/test').Page, panelId: string) =>
-    page.locator(`#${panelId}`).evaluate((el) => (el as HTMLElement & { normalize(): void }).normalize());
+  const minimize = (page: import('@playwright/test').Page, panelId: string) => page.locator(`#${panelId}`).evaluate((el) => (el as HTMLElement & { minimize(): void }).minimize());
+  const restore = (page: import('@playwright/test').Page, panelId: string) => page.locator(`#${panelId}`).evaluate((el) => (el as HTMLElement & { normalize(): void }).normalize());
 
   test('minimizing detaches the view; restoring mounts a fresh one', async ({ page }) => {
     const panelId = await makeView(page);
@@ -759,9 +664,7 @@ test.describe('minimized views load nothing until expanded', () => {
     // The minimized state is persisted, so a reload must restore it WITHOUT
     // ever mounting the view — this is the case that used to load eagerly.
     await page.reload();
-    await page.waitForFunction(() =>
-      Boolean((window as unknown as { __easydb?: unknown }).__easydb),
-    );
+    await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb));
     await expect(page.locator(`#${panelId}`)).toHaveCount(1);
     await expect(page.locator('view-window')).toHaveCount(0);
 
@@ -771,14 +674,8 @@ test.describe('minimized views load nothing until expanded', () => {
     await expect(page.locator('view-window a')).toHaveCount(2);
   });
 
-  test('an $input.TOKEN renders an editable checkbox that writes back to the row', async ({
-    page,
-  }) => {
-    const id = await createTable(page, 'Flags', [
-      { field: 'title' },
-      { field: 'read', type: 'boolean' },
-      { field: 'starred', type: 'boolean' },
-    ]);
+  test('an $input.TOKEN renders an editable checkbox that writes back to the row', async ({ page }) => {
+    const id = await createTable(page, 'Flags', [{ field: 'title' }, { field: 'read', type: 'boolean' }, { field: 'starred', type: 'boolean' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [{ title: 'Post A', read: false, starred: false }]);
 
@@ -786,10 +683,7 @@ test.describe('minimized views load nothing until expanded', () => {
     await footer.getByRole('button', { name: /Views/ }).click();
     const dlg = page.locator('views-dialog dialog');
     await expect(dlg).toBeVisible();
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
 
     const vw = page.locator('view-window');
@@ -814,23 +708,15 @@ test.describe('minimized views load nothing until expanded', () => {
       .toBe(true);
   });
 
-  test('editing an $input checkbox re-applies the view filter so the row can disappear', async ({
-    page,
-  }) => {
-    const id = await createTable(page, 'Flags', [
-      { field: 'title' },
-      { field: 'read', type: 'boolean' },
-    ]);
+  test('editing an $input checkbox re-applies the view filter so the row can disappear', async ({ page }) => {
+    const id = await createTable(page, 'Flags', [{ field: 'title' }, { field: 'read', type: 'boolean' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [{ title: 'Unread post', read: false }]);
 
     const footer = page.locator(`#${panelDomId(id)} panel-footer`);
     await footer.getByRole('button', { name: /Views/ }).click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
 
     const vw = page.locator('view-window');
@@ -854,25 +740,16 @@ test.describe('minimized views load nothing until expanded', () => {
   });
 
   test('a readonly view disables its $input controls', async ({ page }) => {
-    const id = await createTable(page, 'Flags', [
-      { field: 'title' },
-      { field: 'read', type: 'boolean' },
-    ]);
+    const id = await createTable(page, 'Flags', [{ field: 'title' }, { field: 'read', type: 'boolean' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [{ title: 'Post', read: false }]);
 
     const footer = page.locator(`#${panelDomId(id)} panel-footer`);
     await footer.getByRole('button', { name: /Views/ }).click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     // Tick "Readonly" before creating the view → the input renders disabled.
-    await dlg
-      .locator('label.field-inline', { hasText: 'Readonly' })
-      .locator('input[type="checkbox"]')
-      .check();
+    await dlg.locator('label.field-inline', { hasText: 'Readonly' }).locator('input[type="checkbox"]').check();
     await dlg.getByRole('button', { name: 'Create view' }).click();
 
     const vw = page.locator('view-window');
@@ -886,19 +763,12 @@ test.describe('minimized views load nothing until expanded', () => {
  * additional seeded standard templates (Todo List, Gallery, Contact Cards).
  */
 test.describe('views: sort, field search, standard templates', () => {
-  const useTemplate = async (
-    page: import('@playwright/test').Page,
-    tableId: string,
-    templateName: string,
-  ) => {
+  const useTemplate = async (page: import('@playwright/test').Page, tableId: string, templateName: string) => {
     const footer = page.locator(`#${panelDomId(tableId)} panel-footer`);
     await footer.getByRole('button', { name: /Views/ }).click();
     const dlg = page.locator('views-dialog dialog');
     await expect(dlg).toBeVisible();
-    await dlg
-      .locator('ul.list li', { hasText: templateName })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: templateName }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
   };
 
@@ -949,7 +819,10 @@ test.describe('views: sort, field search, standard templates', () => {
   test('the new standard templates are seeded and listed', async ({ page }) => {
     const id = await createTable(page, 'T', [{ field: 'a' }]);
     await waitForPanel(page, id);
-    await page.locator(`#${panelDomId(id)} panel-footer`).getByRole('button', { name: /Views/ }).click();
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
     const dlg = page.locator('views-dialog dialog');
     await expect(dlg).toBeVisible();
     for (const name of ['RSS Feed', 'Todo List', 'Gallery', 'Contact Cards']) {
@@ -958,11 +831,7 @@ test.describe('views: sort, field search, standard templates', () => {
   });
 
   test('the Todo template maps DONE to a boolean column as a checkbox', async ({ page }) => {
-    const id = await createTable(page, 'Tasks', [
-      { field: 'title' },
-      { field: 'done', type: 'boolean' },
-      { field: 'due', type: 'date' },
-    ]);
+    const id = await createTable(page, 'Tasks', [{ field: 'title' }, { field: 'done', type: 'boolean' }, { field: 'due', type: 'date' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [{ title: 'Ship it', done: false, due: '2024-01-01' }]);
     await useTemplate(page, id, 'Todo List');
@@ -974,11 +843,7 @@ test.describe('views: sort, field search, standard templates', () => {
   });
 
   test('the Gallery template makes each card open its row link', async ({ page }) => {
-    const id = await createTable(page, 'Shots', [
-      { field: 'title' },
-      { field: 'image' },
-      { field: 'url' },
-    ]);
+    const id = await createTable(page, 'Shots', [{ field: 'title' }, { field: 'image' }, { field: 'url' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [
       { title: 'First', image: 'https://pics.test/1.png', url: 'https://pics.test/1' },
@@ -1005,16 +870,11 @@ test.describe('views: sort, field search, standard templates', () => {
       await expect(a.locator('img')).toHaveAttribute('src', `${href}.png`);
       await expect(a).toContainText(href.endsWith('1') ? 'First' : 'Second');
     }
-    const hrefs = await cards.locator('a').evaluateAll((els) =>
-      els.map((el) => (el as HTMLAnchorElement).getAttribute('href')),
-    );
+    const hrefs = await cards.locator('a').evaluateAll((els) => els.map((el) => (el as HTMLAnchorElement).getAttribute('href')));
     expect([...hrefs].sort()).toEqual(['https://pics.test/1', 'https://pics.test/2']);
   });
 
-  test('copying a view picks up columns added to the table after it was created', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('copying a view picks up columns added to the table after it was created', async ({ page, workspaceId }) => {
     const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [{ title: 'Hello', url: 'https://x/1' }]);
@@ -1038,10 +898,7 @@ test.describe('views: sort, field search, standard templates', () => {
       .click();
     const dlg = page.locator('views-dialog dialog');
     await expect(dlg).toBeVisible();
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed — Feed' })
-      .getByRole('button', { name: 'Copy' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed — Feed' }).getByRole('button', { name: 'Copy' }).click();
 
     // The copy carries the NEW column in its visibleColumns; the original — a
     // pre-existing snapshot — does not.
@@ -1050,9 +907,7 @@ test.describe('views: sort, field search, standard templates', () => {
         page.evaluate(async (ws) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const store = (window as any).__easydb.store;
-          const insts = (await store.viewInstances.find()).filter(
-            (v: { workspaceId: string }) => v.workspaceId === ws,
-          );
+          const insts = (await store.viewInstances.find()).filter((v: { workspaceId: string }) => v.workspaceId === ws);
           const copy = insts.find((v: { name: string }) => v.name.endsWith('copy'));
           const orig = insts.find((v: { name: string }) => v.name === 'RSS Feed — Feed');
           return {
@@ -1064,10 +919,7 @@ test.describe('views: sort, field search, standard templates', () => {
       .toEqual({ copyHasAuthor: true, origHasAuthor: false });
   });
 
-  test('the view footer Delete button removes the view and closes its window', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('the view footer Delete button removes the view and closes its window', async ({ page, workspaceId }) => {
     const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'url' }]);
     await waitForPanel(page, id);
     await bulkAddRows(page, id, [{ title: 'Hello', url: 'https://x/1' }]);
@@ -1084,9 +936,7 @@ test.describe('views: sort, field search, standard templates', () => {
         page.evaluate(async (ws) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const store = (window as any).__easydb.store;
-          const insts = (await store.viewInstances.find()).filter(
-            (v: { workspaceId: string }) => v.workspaceId === ws,
-          );
+          const insts = (await store.viewInstances.find()).filter((v: { workspaceId: string }) => v.workspaceId === ws);
           return insts.length;
         }, workspaceId),
       )
@@ -1094,9 +944,7 @@ test.describe('views: sort, field search, standard templates', () => {
     await expect(vw).toHaveCount(0);
   });
 
-  test('a built-in template can be deleted after a confirm, and stays deleted', async ({
-    page,
-  }) => {
+  test('a built-in template can be deleted after a confirm, and stays deleted', async ({ page }) => {
     const id = await createTable(page, 'Feed', [{ field: 'title' }]);
     await waitForPanel(page, id);
     const openManager = async () => {
@@ -1160,10 +1008,7 @@ test.describe('view header layout', () => {
       .getByRole('button', { name: /Views/ })
       .click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
 
     const bar = page.locator('[id^="view-panel-"].jsPanel .jsPanel-controlbar');
@@ -1171,9 +1016,7 @@ test.describe('view header layout', () => {
 
     // Last child of the controlbar, which is itself the last thing in the
     // header — so it is the rightmost control there is, past Close.
-    const lastIsSearch = await bar.evaluate(
-      (el) => el.lastElementChild?.tagName.toLowerCase() === 'panel-search',
-    );
+    const lastIsSearch = await bar.evaluate((el) => el.lastElementChild?.tagName.toLowerCase() === 'panel-search');
     expect(lastIsSearch).toBe(true);
 
     // And visibly so: further right than the close button.

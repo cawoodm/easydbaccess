@@ -10,10 +10,7 @@ import { createTable, panelDomId, waitForPanel } from './helpers.js';
  */
 
 async function statusOf(page: Page, domId: string): Promise<string> {
-  return page.evaluate(
-    (id) => (document.getElementById(id) as HTMLElement & { status: string }).status,
-    domId,
-  );
+  return page.evaluate((id) => (document.getElementById(id) as HTMLElement & { status: string }).status, domId);
 }
 
 async function runTileCommand(page: Page): Promise<void> {
@@ -25,9 +22,7 @@ async function runTileCommand(page: Page): Promise<void> {
   await expect(palette).toBeHidden();
 }
 
-test('Tile windows skips minimized panels: they stay minimized and are excluded from the grid count', async ({
-  page,
-}) => {
+test('Tile windows skips minimized panels: they stay minimized and are excluded from the grid count', async ({ page }) => {
   await page.setViewportSize({ width: 1200, height: 800 });
 
   const a = await createTable(page, 'TileA', [{ field: 'x' }]);
@@ -42,15 +37,10 @@ test('Tile windows skips minimized panels: they stay minimized and are excluded 
   const domC = panelDomId(c);
 
   // Minimize C — the other two (A, B) stay normalized.
-  await page.evaluate(
-    (d) => (document.getElementById(d) as HTMLElement & { minimize(): void }).minimize(),
-    domC,
-  );
+  await page.evaluate((d) => (document.getElementById(d) as HTMLElement & { minimize(): void }).minimize(), domC);
   await expect.poll(() => statusOf(page, domC)).toBe('minimized');
 
-  const containerHeight = await page.evaluate(
-    () => document.getElementById('easydb-panels')!.clientHeight,
-  );
+  const containerHeight = await page.evaluate(() => document.getElementById('easydb-panels')!.clientHeight);
 
   await runTileCommand(page);
 

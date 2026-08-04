@@ -129,8 +129,6 @@ class CellBoolean extends HTMLElement {
     this._value = v;
     this._editing = false;
     this.render();
-    this.dispatchEvent(
-      new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }),
-    );
+    this.dispatchEvent(new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }));
   }
 }

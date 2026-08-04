@@ -7,10 +7,7 @@ import { panelDomId } from './helpers.js';
  * live Datasette connection whose row request is deliberately delayed.
  */
 
-test('shows a header loading bar while a large/slow table loads, then hides it', async ({
-  page,
-  workspaceId,
-}) => {
+test('shows a header loading bar while a large/slow table loads, then hides it', async ({ page, workspaceId }) => {
   await page.route('https://ds.example/**', async (route) => {
     const u = new URL(route.request().url());
     const json = (body: unknown) =>
@@ -29,7 +26,14 @@ test('shows a header loading bar while a large/slow table loads, then hides it',
       // The panel's live row load (_size=1000) — delay it so the loading bar
       // is on screen long enough to observe.
       await new Promise((r) => setTimeout(r, 1500));
-      return json({ ok: true, next: null, rows: [{ id: 1, name: 'A' }, { id: 2, name: 'B' }] });
+      return json({
+        ok: true,
+        next: null,
+        rows: [
+          { id: 1, name: 'A' },
+          { id: 2, name: 'B' },
+        ],
+      });
     }
     return route.fulfill({ status: 404, body: '{"ok":false}' });
   });
@@ -44,9 +48,7 @@ test('shows a header loading bar while a large/slow table loads, then hides it',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__easydb.store;
       for (let i = 0; i < 100; i++) {
-        const t = (await store.tables.find()).find(
-          (x: any) => x.workspaceId === ws && x.source?.type === 'datasette',
-        );
+        const t = (await store.tables.find()).find((x: any) => x.workspaceId === ws && x.source?.type === 'datasette');
         if (t) return t.id as string;
         await new Promise((r) => setTimeout(r, 50));
       }

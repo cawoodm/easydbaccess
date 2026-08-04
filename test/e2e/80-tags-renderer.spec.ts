@@ -11,10 +11,7 @@ import { addRow, createTable, panelDomId, waitForPanel } from './helpers.js';
  */
 
 async function tagsTable(page: import('@playwright/test').Page, name: string) {
-  const id = await createTable(page, name, [
-    { field: 'name' },
-    { field: 'tags', type: 'array', renderer: 'tags' },
-  ]);
+  const id = await createTable(page, name, [{ field: 'name' }, { field: 'tags', type: 'array', renderer: 'tags' }]);
   await waitForPanel(page, id);
   return id;
 }

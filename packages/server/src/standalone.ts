@@ -27,7 +27,10 @@ const corsOrigins: '*' | string[] | undefined =
     ? '*'
     : corsRaw === '*'
       ? '*'
-      : corsRaw.split(',').map((s) => s.trim()).filter(Boolean);
+      : corsRaw
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
 
 const app = createServer({
   store,

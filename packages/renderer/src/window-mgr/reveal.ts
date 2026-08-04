@@ -33,11 +33,6 @@ function panIntoView(panel: PanelShellEl): void {
   const pz = currentPanZoom();
   const outer = document.getElementById('easydb-panels');
   if (!pz || !outer) return;
-  const next = panToReveal(
-    pz.snapshot(),
-    { x: panel.offsetLeft, y: panel.offsetTop, w: panel.offsetWidth, h: panel.offsetHeight },
-    outer.clientWidth,
-    outer.clientHeight,
-  );
+  const next = panToReveal(pz.snapshot(), { x: panel.offsetLeft, y: panel.offsetTop, w: panel.offsetWidth, h: panel.offsetHeight }, outer.clientWidth, outer.clientHeight);
   if (next) pz.restore(next);
 }

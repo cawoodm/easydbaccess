@@ -22,9 +22,7 @@
 import { markdownToHtml } from './markdown.js';
 
 /** Outcome of one script run — never throws, so a broken script stays local. */
-export type ScriptRun =
-  | { ok: true; value: unknown }
-  | { ok: false; label: string; message: string };
+export type ScriptRun = { ok: true; value: unknown } | { ok: false; label: string; message: string };
 
 /**
  * Helpers a column script can call by name, on top of the JS globals.

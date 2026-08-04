@@ -8,26 +8,9 @@
 // token. Row identity is the tilde-encoded primary key, so a row's id is exactly
 // the URL segment used to update/delete it and stays stable across refetches.
 
-import type {
-  DataCollection,
-  HostApi,
-  Row,
-  RowSourceCtx,
-  Table,
-  Unsubscribe,
-  FetchOpts,
-} from '@easydb/shared';
+import type { DataCollection, HostApi, Row, RowSourceCtx, Table, Unsubscribe, FetchOpts } from '@easydb/shared';
 import { cryptoUUID } from '../util/ids.js';
-import {
-  deleteRowByPk,
-  fetchRows,
-  insertRows,
-  rowPk,
-  updateRowByPk,
-  upsertRows,
-  withAuthFetch,
-  type DatasetteRef,
-} from './datasette-client.js';
+import { deleteRowByPk, fetchRows, insertRows, rowPk, updateRowByPk, upsertRows, withAuthFetch, type DatasetteRef } from './datasette-client.js';
 import { DEFAULT_CONNECT_MAX_ROWS, getDatasetteSettings } from './datasette-common.js';
 
 /** Thrown when a write is attempted against a table resolved as read-only. */
@@ -74,11 +57,7 @@ function matchesQuery(row: Row, query: Partial<Row>): boolean {
  * it through explicitly. Omitting it (as the unit tests do) falls back to
  * {@link DEFAULT_CONNECT_MAX_ROWS}.
  */
-export function createDatasetteCollection(
-  table: Table,
-  ctx: RowSourceCtx,
-  api?: HostApi,
-): DataCollection<Row> {
+export function createDatasetteCollection(table: Table, ctx: RowSourceCtx, api?: HostApi): DataCollection<Row> {
   const src = table.source;
   const cfg = (src?.config ?? {}) as unknown as DatasetteSourceConfig;
   const ref: DatasetteRef = { base: cfg.base, db: cfg.db, table: cfg.table, query: {} };
@@ -91,9 +70,7 @@ export function createDatasetteCollection(
   function resolveMaxRows(): Promise<number> {
     if (explicitMaxRows != null) return Promise.resolve(explicitMaxRows);
     if (!maxRowsPromise) {
-      maxRowsPromise = api
-        ? getDatasetteSettings(api).then((s) => s.connectMaxRows)
-        : Promise.resolve(DEFAULT_CONNECT_MAX_ROWS);
+      maxRowsPromise = api ? getDatasetteSettings(api).then((s) => s.connectMaxRows) : Promise.resolve(DEFAULT_CONNECT_MAX_ROWS);
     }
     return maxRowsPromise;
   }
@@ -111,8 +88,7 @@ export function createDatasetteCollection(
   // one is stored — so private instances that require auth to read work too,
   // not only writes. Reads on public instances are unaffected (no token → no
   // header). Resolved per call so a freshly-entered token takes effect.
-  const fetchFn = async (u: string, o?: FetchOpts): Promise<Response> =>
-    withAuthFetch(baseFetch, await token())(u, o);
+  const fetchFn = async (u: string, o?: FetchOpts): Promise<Response> => withAuthFetch(baseFetch, await token())(u, o);
 
   function toRow(data: Record<string, unknown>): Row {
     const id = rowPk(data, pks) ?? cryptoUUID();

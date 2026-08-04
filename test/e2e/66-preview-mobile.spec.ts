@@ -19,9 +19,7 @@ async function openPreview(page: import('@playwright/test').Page, name: string) 
   const tableId = await createTable(page, name, [{ field: 'note', renderer: 'preview' }]);
   await waitForPanel(page, tableId);
   await addRow(page, tableId, { note: '<p>Hello <b>World</b></p>' });
-  const cell = page
-    .locator(`#${panelDomId(tableId)}`)
-    .locator('data-table tbody td preview-cell');
+  const cell = page.locator(`#${panelDomId(tableId)}`).locator('data-table tbody td preview-cell');
   await cell.locator('button').click();
   return page.locator('[id^="easydb-preview-popup-"]').last();
 }

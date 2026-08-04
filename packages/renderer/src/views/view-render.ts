@@ -7,12 +7,7 @@
 // and the snapshotted filter/sort a view instance applies.
 
 import type { ColumnSpec, Row, ViewInstance } from '@easydb/shared';
-import {
-  composeColumnFilter,
-  matchesColumnFilter,
-  parseColumnFilter,
-  type FilterToken,
-} from '@easydb/shared';
+import { composeColumnFilter, matchesColumnFilter, parseColumnFilter, type FilterToken } from '@easydb/shared';
 import { runColumnScript } from '../util/column-script.js';
 
 /**
@@ -37,10 +32,8 @@ export function extractTokens(...fragments: string[]): string[] {
   return [...seen];
 }
 
-const escapeHtml = (s: string): string =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const escapeAttr = (s: string): string =>
-  escapeHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+const escapeHtml = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escapeAttr = (s: string): string => escapeHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 /** Coerce a stored cell value to a checkbox state (handles bool / number / common truthy strings). */
 function coerceBool(v: unknown): boolean {
@@ -57,18 +50,10 @@ function coerceBool(v: unknown): boolean {
  * `readonly` disables the control. Wrapped in a `<label>` carrying the column's
  * caption so a bare checkbox still says what it toggles.
  */
-function renderInput(
-  field: string,
-  value: unknown,
-  rowId: string,
-  spec: ColumnSpec | undefined,
-  readonly: boolean,
-): string {
+function renderInput(field: string, value: unknown, rowId: string, spec: ColumnSpec | undefined, readonly: boolean): string {
   const type = spec?.type ?? 'string';
   const caption = escapeHtml(spec?.label || field);
-  const attrs =
-    `class="eda-input" data-eda-row="${escapeAttr(rowId)}" ` +
-    `data-eda-field="${escapeAttr(field)}" data-eda-type="${escapeAttr(type)}"`;
+  const attrs = `class="eda-input" data-eda-row="${escapeAttr(rowId)}" ` + `data-eda-field="${escapeAttr(field)}" data-eda-type="${escapeAttr(type)}"`;
   const dis = readonly ? ' disabled' : '';
   let control: string;
   if (type === 'boolean') {
@@ -92,10 +77,7 @@ function renderFilterPill(field: string, value: unknown): string {
   const text = String(value);
   const field_ = escapeAttr(field);
   const value_ = escapeAttr(text);
-  return (
-    `<button type="button" class="eda-filter-pill" data-eda-filter-field="${field_}" ` +
-    `data-eda-filter-value="${value_}" title="Filter by ${field_}: ${value_}">${escapeHtml(text)}</button>`
-  );
+  return `<button type="button" class="eda-filter-pill" data-eda-filter-field="${field_}" ` + `data-eda-filter-value="${value_}" title="Filter by ${field_}: ${value_}">${escapeHtml(text)}</button>`;
 }
 
 /**
@@ -109,12 +91,7 @@ function renderFilterPill(field: string, value: unknown): string {
  * Values are read straight from `row.data`, so pass a row that has been through
  * {@link evaluateRow} when the table has scripted columns.
  */
-export function substituteRow(
-  html: string,
-  row: Row,
-  mapping: Record<string, string>,
-  opts: { columns?: Map<string, ColumnSpec>; readonly?: boolean } = {},
-): string {
+export function substituteRow(html: string, row: Row, mapping: Record<string, string>, opts: { columns?: Map<string, ColumnSpec>; readonly?: boolean } = {}): string {
   return html.replace(TOKEN_RE, (_full, prefix: string | undefined, token: string) => {
     const field = mapping[token];
     if (!field) return '';
@@ -177,19 +154,11 @@ export function evaluateRows(rows: Row[], columns: readonly ColumnSpec[]): Row[]
  * matches per member, so a chip for one tag keeps the rows whose list contains
  * it. Without the columns every cell reads as one value, as it always did.
  */
-export function filterRows(
-  rows: Row[],
-  filters: Record<string, string>,
-  columns?: readonly ColumnSpec[],
-): Row[] {
+export function filterRows(rows: Row[], filters: Record<string, string>, columns?: readonly ColumnSpec[]): Row[] {
   const active = Object.entries(filters).filter(([, v]) => v != null && String(v).trim() !== '');
   if (active.length === 0) return rows;
   const typeOf = new Map((columns ?? []).map((c) => [c.field, c.type as string | undefined]));
-  return rows.filter((r) =>
-    active.every(([field, needle]) =>
-      matchesColumnFilter(r.data[field], needle, { type: typeOf.get(field) }),
-    ),
-  );
+  return rows.filter((r) => active.every(([field, needle]) => matchesColumnFilter(r.data[field], needle, { type: typeOf.get(field) })));
 }
 
 /** Does an exact-match token's term equal `value`, case-insensitively? */
@@ -247,9 +216,7 @@ export function pillValueState(current: string | undefined, value: string): Pill
  */
 export function cyclePillValue(current: string | undefined, value: string): string {
   const state = pillValueState(current, value);
-  const others = parseColumnFilter(current ?? '').filter(
-    (t) => !isExactPillToken(t, value) && !isExcludedPillToken(t, value),
-  );
+  const others = parseColumnFilter(current ?? '').filter((t) => !isExactPillToken(t, value) && !isExcludedPillToken(t, value));
   if (state === 'off') return composeColumnFilter([...others, { term: value, negate: false, exact: true }]);
   if (state === 'on') return composeColumnFilter([...others, { term: value, negate: true, exact: true }]);
   return composeColumnFilter(others);
@@ -272,10 +239,7 @@ export function sortRows(rows: Row[], sortColumn?: string, sortAsc = true): Row[
     const na = Number(av);
     const nb = Number(bv);
     if (!Number.isNaN(na) && !Number.isNaN(nb)) return (na - nb) * factor;
-    return (
-      String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) *
-      factor
-    );
+    return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) * factor;
   });
 }
 

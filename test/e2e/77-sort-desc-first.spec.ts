@@ -16,13 +16,7 @@ const ROWS = [{ n: 1 }, { n: 3 }, { n: 2 }];
 async function order(page: import('@playwright/test').Page, tableId: string): Promise<string[]> {
   return page
     .locator(`#${panelDomId(tableId)} data-table`)
-    .evaluate((el) =>
-      [
-        ...(el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelectorAll(
-          'tbody tr:not(.spacer)',
-        ),
-      ].map((tr) => tr.querySelector('input')?.value ?? ''),
-    );
+    .evaluate((el) => [...(el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelectorAll('tbody tr:not(.spacer)')].map((tr) => tr.querySelector('input')?.value ?? ''));
 }
 
 async function tableWithNumbers(page: import('@playwright/test').Page, name: string) {
@@ -34,11 +28,12 @@ async function tableWithNumbers(page: import('@playwright/test').Page, name: str
 }
 
 const header = (page: import('@playwright/test').Page, id: string) =>
-  page.locator(`#${panelDomId(id)} data-table`).locator('thead th', { hasText: 'n' }).locator('.sort-icon');
+  page
+    .locator(`#${panelDomId(id)} data-table`)
+    .locator('thead th', { hasText: 'n' })
+    .locator('.sort-icon');
 
-test('the first click sorts descending, the second ascending, the third not at all', async ({
-  page,
-}) => {
+test('the first click sorts descending, the second ascending, the third not at all', async ({ page }) => {
   const id = await tableWithNumbers(page, 'Descfirst');
 
   await header(page, id).click();
@@ -64,9 +59,7 @@ test('turning the setting off puts ascending first again', async ({ page }) => {
   const id = await tableWithNumbers(page, 'Ascfirst');
 
   // Settings → Table grid → Sort descending first.
-  await page.evaluate(() =>
-    document.dispatchEvent(new CustomEvent('easydb:open-settings', { bubbles: true })),
-  );
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('easydb:open-settings', { bubbles: true })));
   const dlg = page.locator('settings-dialog dialog');
   await expect(dlg).toBeVisible();
   await dlg.getByRole('button', { name: 'Table grid' }).click();

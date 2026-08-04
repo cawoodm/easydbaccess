@@ -10,20 +10,14 @@ import { addRow, createTable, panelDomId, waitForPanel } from './helpers.js';
  * and escaping safely; real HTML values must still render as markup.
  */
 
-test('a multi-line plain-text value opens in a <pre>, preserving line breaks and a literal "<"', async ({
-  page,
-}) => {
+test('a multi-line plain-text value opens in a <pre>, preserving line breaks and a literal "<"', async ({ page }) => {
   const value = 'line one\nline two has a < b in it\nline three';
 
-  const tableId = await createTable(page, 'htmlprevplain', [
-    { field: 'note', renderer: 'preview' },
-  ]);
+  const tableId = await createTable(page, 'htmlprevplain', [{ field: 'note', renderer: 'preview' }]);
   await waitForPanel(page, tableId);
   await addRow(page, tableId, { note: value });
 
-  const cell = page
-    .locator(`#${panelDomId(tableId)}`)
-    .locator('data-table tbody td preview-cell');
+  const cell = page.locator(`#${panelDomId(tableId)}`).locator('data-table tbody td preview-cell');
   await cell.locator('button').click();
 
   const popup = page.locator('[id^="easydb-preview-popup-"]').last();
@@ -35,15 +29,11 @@ test('a multi-line plain-text value opens in a <pre>, preserving line breaks and
 });
 
 test('a real HTML value still renders as markup, not a <pre>', async ({ page }) => {
-  const tableId = await createTable(page, 'htmlprevhtml', [
-    { field: 'note', renderer: 'preview' },
-  ]);
+  const tableId = await createTable(page, 'htmlprevhtml', [{ field: 'note', renderer: 'preview' }]);
   await waitForPanel(page, tableId);
   await addRow(page, tableId, { note: '<p>Hello</p><p><b>World</b></p>' });
 
-  const cell = page
-    .locator(`#${panelDomId(tableId)}`)
-    .locator('data-table tbody td preview-cell');
+  const cell = page.locator(`#${panelDomId(tableId)}`).locator('data-table tbody td preview-cell');
   await cell.locator('button').click();
 
   const popup = page.locator('[id^="easydb-preview-popup-"]').last();

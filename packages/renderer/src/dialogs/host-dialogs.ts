@@ -286,9 +286,7 @@ export class HostDialogs extends LitElement {
             <div class="dialog-header">
               <h2>${c.title}</h2>
               <div class="header-actions">
-                <button type="button" class="ghost" @click=${() => this.closeAndResolve(null)}>
-                  Cancel
-                </button>
+                <button type="button" class="ghost" @click=${() => this.closeAndResolve(null)}>Cancel</button>
               </div>
             </div>
             <div class="dialog-body">
@@ -297,13 +295,7 @@ export class HostDialogs extends LitElement {
                 ${c.options.map((opt, index) =>
                   index === 0
                     ? html`<button type="submit" class="choice primary" autofocus>${opt}</button>`
-                    : html`<button
-                        type="button"
-                        class="choice"
-                        @click=${() => this.closeAndResolve(opt)}
-                      >
-                        ${opt}
-                      </button>`,
+                    : html`<button type="button" class="choice" @click=${() => this.closeAndResolve(opt)}>${opt}</button>`,
                 )}
               </div>
             </div>

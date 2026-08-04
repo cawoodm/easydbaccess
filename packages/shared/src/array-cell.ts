@@ -79,12 +79,7 @@ function membersOf(list: readonly unknown[]): string[] {
   const out: string[] = [];
   for (const v of list) {
     if (v == null) continue;
-    const s =
-      typeof v === 'string'
-        ? v.trim()
-        : typeof v === 'object'
-          ? (JSON.stringify(v) ?? '')
-          : String(v);
+    const s = typeof v === 'string' ? v.trim() : typeof v === 'object' ? (JSON.stringify(v) ?? '') : String(v);
     if (s !== '') out.push(s);
   }
   return out;

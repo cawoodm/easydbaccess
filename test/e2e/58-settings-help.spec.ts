@@ -6,9 +6,7 @@ import { test, expect } from './fixtures.js';
  * grant and links straight to GitHub's token page.
  */
 test('a field with help shows it behind the (i) icon, with its link', async ({ page }) => {
-  await page.evaluate(() =>
-    document.dispatchEvent(new CustomEvent('easydb:open-settings', { bubbles: true })),
-  );
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('easydb:open-settings', { bubbles: true })));
   const dlg = page.locator('settings-dialog dialog');
   await expect(dlg).toBeVisible();
   await dlg.getByRole('button', { name: 'Gist Sync' }).click();
@@ -34,9 +32,7 @@ test('a field with help shows it behind the (i) icon, with its link', async ({ p
 });
 
 test('a field without help has no (i) icon', async ({ page }) => {
-  await page.evaluate(() =>
-    document.dispatchEvent(new CustomEvent('easydb:open-settings', { bubbles: true })),
-  );
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('easydb:open-settings', { bubbles: true })));
   const dlg = page.locator('settings-dialog dialog');
   await dlg.getByRole('button', { name: 'Gist Sync' }).click();
   // "Gist ID" carries only a one-line description.

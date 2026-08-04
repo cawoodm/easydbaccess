@@ -13,8 +13,7 @@ import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js
  */
 
 /** A valid 1×1 red PNG (69 bytes), base64. */
-const IMG_B64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
+const IMG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
 
 /** The same bytes as SQL hex — what a `.sql` dump of a BLOB column carries. */
 function hexLiteral(b64: string): string {
@@ -40,10 +39,7 @@ const decoded = (img: ReturnType<typeof imageIn>) =>
   });
 
 async function tableWithPhoto(page: Page, value: string) {
-  const id = await createTable(page, 'Employees', [
-    { field: 'name' },
-    { field: 'photo', renderer: 'image' },
-  ]);
+  const id = await createTable(page, 'Employees', [{ field: 'name' }, { field: 'photo', renderer: 'image' }]);
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [{ name: 'Davolio', photo: value }]);
   return id;
@@ -105,9 +101,7 @@ test('an imported blob column gets the image renderer on its own', async ({ page
       page.evaluate(async (tableId) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const t = await (window as any).__easydb.store.tables.findOne(tableId);
-        return (t?.columns as Array<{ field: string; renderer?: string }>).find(
-          (c) => c.field === 'photo',
-        )?.renderer;
+        return (t?.columns as Array<{ field: string; renderer?: string }>).find((c) => c.field === 'photo')?.renderer;
       }, id),
     )
     .toBe('image');

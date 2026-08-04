@@ -137,11 +137,7 @@ function renderViewTitle(entry: ViewEntry): void {
 
 /** Element view windows mount into — the pan/zoom-transformed canvas viewport. */
 function viewContainer(): HTMLElement {
-  return (
-    document.getElementById('easydb-panels-viewport') ??
-    document.getElementById('easydb-panels') ??
-    document.body
-  );
+  return document.getElementById('easydb-panels-viewport') ?? document.getElementById('easydb-panels') ?? document.body;
 }
 
 function cssSafe(s: string): string {
@@ -157,8 +153,7 @@ export async function initViewWindowManager(): Promise<void> {
   initialized = true;
   const ctx = await getContext();
 
-  const openInWs = (all: ViewInstance[]): ViewInstance[] =>
-    all.filter((i) => i.workspaceId === ctx.workspaceId && i.open);
+  const openInWs = (all: ViewInstance[]): ViewInstance[] => all.filter((i) => i.workspaceId === ctx.workspaceId && i.open);
 
   // Initial restore: reopen every instance already flagged open, in ascending
   // saved-z order (mirrors the table window manager) so the shell's session
@@ -291,9 +286,7 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
 
   const mountContent = (): void => {
     if (!entry || entry.el) return;
-    const host = document
-      .getElementById(panelId)
-      ?.querySelector('.jsPanel-content') as HTMLElement | null;
+    const host = document.getElementById(panelId)?.querySelector('.jsPanel-content') as HTMLElement | null;
     if (!host) return;
     host.replaceChildren(); // drop the minimized placeholder / any stale node
     const el = makeView();
@@ -308,9 +301,7 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     logo: VIEW_ICON,
     color: '#0891b2', // distinct cyan chrome so views read differently from tables
     content,
-    ...(g
-      ? { panelSize: { w: g.w, h: g.h }, position: { x: g.x, y: g.y } }
-      : { contentSize: { w: DEFAULT_W, h: DEFAULT_H }, position: { centerTopOffset: 60 } }),
+    ...(g ? { panelSize: { w: g.w, h: g.h }, position: { x: g.x, y: g.y } } : { contentSize: { w: DEFAULT_W, h: DEFAULT_H }, position: { centerTopOffset: 60 } }),
     minimizeTo: '#easydb-minimized-dock',
     viewport: shellViewport(),
     boot: {
@@ -339,11 +330,9 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
       // The user closed the window → drop the persisted open flag so it isn't
       // reopened on the next boot. (Closing because the flag already dropped is
       // a harmless redundant write; the reconcile subscription is idempotent.)
-      void ctx.store.viewInstances
-        .patch(inst.id, { open: false, updatedAt: Date.now() })
-        .catch(() => {
-          /* instance may have been deleted — ignore */
-        });
+      void ctx.store.viewInstances.patch(inst.id, { open: false, updatedAt: Date.now() }).catch(() => {
+        /* instance may have been deleted — ignore */
+      });
     },
   });
 

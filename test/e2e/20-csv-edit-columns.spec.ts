@@ -9,10 +9,7 @@ import { test, expect } from './fixtures.js';
 
 const CSV = 'T,TM,Tm\n16.9,25.1,6.6\n17.0,26.0,7.0\n';
 
-test('edit-columns editor highlights duplicates, blocks import, then applies edits', async ({
-  page,
-  workspaceId,
-}) => {
+test('edit-columns editor highlights duplicates, blocks import, then applies edits', async ({ page, workspaceId }) => {
   await page.route('https://ex.example/data.csv', (route) =>
     route.fulfill({
       status: 200,
@@ -63,9 +60,7 @@ test('edit-columns editor highlights duplicates, blocks import, then applies edi
         page.evaluate(async (ws) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const store = (window as any).__easydb.store;
-          const t = (await store.tables.find()).find(
-            (x: any) => x.workspaceId === ws && x.name === 'data',
-          );
+          const t = (await store.tables.find()).find((x: any) => x.workspaceId === ws && x.name === 'data');
           return t ? (await store.rows(t.id).find()).length : 0;
         }, workspaceId),
       )
@@ -73,9 +68,7 @@ test('edit-columns editor highlights duplicates, blocks import, then applies edi
     return page.evaluate(async (ws) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__easydb.store;
-      const t = (await store.tables.find()).find(
-        (x: any) => x.workspaceId === ws && x.name === 'data',
-      );
+      const t = (await store.tables.find()).find((x: any) => x.workspaceId === ws && x.name === 'data');
       const rows = await store.rows(t.id).find();
       return { fields: t.columns.map((c: any) => c.field), sample: rows.map((r: any) => r.data) };
     }, workspaceId);
@@ -83,7 +76,5 @@ test('edit-columns editor highlights duplicates, blocks import, then applies edi
 
   expect(summary.fields).toEqual(['t', 'tm', 'tmin']);
   // The "Tm" column's values landed under the renamed field, none lost.
-  expect(summary.sample.map((d: any) => d.tmin).sort((a: number, b: number) => a - b)).toEqual([
-    6.6, 7.0,
-  ]);
+  expect(summary.sample.map((d: any) => d.tmin).sort((a: number, b: number) => a - b)).toEqual([6.6, 7.0]);
 });

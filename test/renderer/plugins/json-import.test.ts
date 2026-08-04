@@ -352,8 +352,15 @@ describe('parsedToTables: top-level single native table ({ name, columns, rows, 
   it('returns exactly one table with ALL its rows, not one row of nonsense', () => {
     const doc = {
       name: 'Plants',
-      columns: [{ field: 'id', label: 'ID', type: 'number' }, { field: 'name', label: 'Name', type: 'string' }],
-      rows: [{ id: 1, name: 'A' }, { id: 2, name: 'B' }, { id: 3, name: 'C' }],
+      columns: [
+        { field: 'id', label: 'ID', type: 'number' },
+        { field: 'name', label: 'Name', type: 'string' },
+      ],
+      rows: [
+        { id: 1, name: 'A' },
+        { id: 2, name: 'B' },
+        { id: 3, name: 'C' },
+      ],
     };
     const tables = parsedToTables(doc, 'fallback');
     expect(tables).toHaveLength(1);
@@ -449,9 +456,7 @@ describe('isWorkspaceDump', () => {
   });
 
   it('is true for a v1 dump', () => {
-    expect(
-      isWorkspaceDump({ 'T.table.json': { dataArray: [], columns: [] } }),
-    ).toBe(true);
+    expect(isWorkspaceDump({ 'T.table.json': { dataArray: [], columns: [] } })).toBe(true);
   });
 
   it('is false for a plain array of objects', () => {

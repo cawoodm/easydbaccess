@@ -6,13 +6,7 @@ import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { focusTableWindow } from '../window-mgr/table-window-manager.js';
 import { revealViewWindow } from '../window-mgr/view-window-manager.js';
-import {
-  RECENT_GROUP,
-  RECENT_SETTING,
-  orderByRecent,
-  pushRecent,
-  readRecent,
-} from './palette-recent.js';
+import { RECENT_GROUP, RECENT_SETTING, orderByRecent, pushRecent, readRecent } from './palette-recent.js';
 
 /** One selectable entry in the palette (flattened from commands/buttons/tables). */
 interface PaletteItem {
@@ -40,8 +34,7 @@ function groupRank(g: string): number {
 
 function renderIcon(icon: string | undefined) {
   if (!icon) return html`<span class="mi sm">chevron_right</span>`;
-  if (icon.trimStart().startsWith('<svg'))
-    return html`<span class="cmd-svg">${unsafeSVG(icon)}</span>`;
+  if (icon.trimStart().startsWith('<svg')) return html`<span class="cmd-svg">${unsafeSVG(icon)}</span>`;
   return html`<span class="mi sm">${icon}</span>`;
 }
 
@@ -280,8 +273,7 @@ export class CommandPaletteDialog extends LitElement {
     // would read as (0,0) — outside the box — and close the palette.
     if (e.detail === 0 || !this.dialogEl) return;
     const r = this.dialogEl.getBoundingClientRect();
-    const inside =
-      e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
     if (!inside) this.close();
   };
 
@@ -316,19 +308,10 @@ export class CommandPaletteDialog extends LitElement {
     const items = this.filtered;
     let lastGroup = '';
     return html`
-      <dialog
-        @keydown=${this.onKeydown}
-        @click=${this.onDialogClick}
-        @close=${() => (this.search = '')}
-      >
+      <dialog @keydown=${this.onKeydown} @click=${this.onDialogClick} @close=${() => (this.search = '')}>
         <div class="search-row">
           <span class="mi">search</span>
-          <input
-            type="text"
-            placeholder="Type a command…  (windows, go to, import, export)"
-            .value=${this.search}
-            @input=${this.onInput}
-          />
+          <input type="text" placeholder="Type a command…  (windows, go to, import, export)" .value=${this.search} @input=${this.onInput} />
         </div>
         <div class="list">
           ${items.length === 0
@@ -337,11 +320,7 @@ export class CommandPaletteDialog extends LitElement {
                 const header = it.group !== lastGroup ? ((lastGroup = it.group), it.group) : null;
                 return html`
                   ${header ? html`<div class="group-head">${header}</div>` : ''}
-                  <div
-                    class=${`item${i === this.selected ? ' sel' : ''}`}
-                    @mousemove=${() => (this.selected = i)}
-                    @click=${() => this.execute(it)}
-                  >
+                  <div class=${`item${i === this.selected ? ' sel' : ''}`} @mousemove=${() => (this.selected = i)} @click=${() => this.execute(it)}>
                     ${renderIcon(it.icon)}
                     <span class="title">${it.title}</span>
                   </div>

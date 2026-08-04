@@ -140,13 +140,8 @@ export function parseDatasetteUrl(input: string): DatasetteRef {
 }
 
 /** Build a table JSON URL from a ref + extra query params. */
-export function buildTableUrl(
-  ref: DatasetteRef,
-  params: Record<string, string | number | undefined> = {},
-): string {
-  const u = new URL(
-    `${ref.base}/${encodeURIComponent(ref.db!)}/${encodeURIComponent(ref.table!)}.json`,
-  );
+export function buildTableUrl(ref: DatasetteRef, params: Record<string, string | number | undefined> = {}): string {
+  const u = new URL(`${ref.base}/${encodeURIComponent(ref.db!)}/${encodeURIComponent(ref.table!)}.json`);
   for (const [k, v] of Object.entries({ ...ref.query, ...params })) {
     if (v != null) u.searchParams.set(k, String(v));
   }
@@ -223,17 +218,11 @@ export function classifyPage(json: unknown): PageInfo {
   const rawNext = field(json, 'next');
   const nextToken = rawNext != null && rawNext !== false ? String(rawNext) : null;
   const rawRows = asArray(field(json, 'rows'));
-  const cols: string[] | null = Array.isArray(field(json, 'columns'))
-    ? asStrings(field(json, 'columns'))
-    : null;
+  const cols: string[] | null = Array.isArray(field(json, 'columns')) ? asStrings(field(json, 'columns')) : null;
   // Modern Datasette returns row objects by default; older versions return
   // positional arrays alongside a `columns` list. Normalise arrays to objects
   // so we don't have to send `_shape=objects` (which newer versions reject).
-  const rows = rawRows.map((r) =>
-    Array.isArray(r) && cols
-      ? Object.fromEntries(cols.map((c, i) => [c, (r as unknown[])[i]]))
-      : (r as Record<string, unknown>),
-  );
+  const rows = rawRows.map((r) => (Array.isArray(r) && cols ? Object.fromEntries(cols.map((c, i) => [c, (r as unknown[])[i]])) : (r as Record<string, unknown>)));
   return {
     rows,
     nextUrl,
@@ -250,13 +239,7 @@ export function sqliteTypeToEda(sqliteType: string | undefined, name = ''): Colu
     if (/^(is|has|can)_|_flag$|^enabled$|^active$/i.test(name)) return 'boolean';
     return 'number';
   }
-  if (
-    t.includes('REAL') ||
-    t.includes('FLOA') ||
-    t.includes('DOUB') ||
-    t.includes('NUM') ||
-    t.includes('DEC')
-  ) {
+  if (t.includes('REAL') || t.includes('FLOA') || t.includes('DOUB') || t.includes('NUM') || t.includes('DEC')) {
     return 'number';
   }
   if (t.includes('BLOB')) return 'string';
@@ -547,10 +530,7 @@ async function fetchJson(fetchFn: FetchFn, url: string): Promise<unknown> {
     } catch {
       /* non-JSON error body */
     }
-    throw new DatasetteError(
-      body && typeof body === 'object' ? body : { error: `HTTP ${res.status} for ${url}` },
-      res.status,
-    );
+    throw new DatasetteError(body && typeof body === 'object' ? body : { error: `HTTP ${res.status} for ${url}` }, res.status);
   }
   const json: unknown = await res.json();
   if (field(json, 'ok') === false) throw new DatasetteError(json, res.status);
@@ -563,11 +543,7 @@ export async function fetchDatabaseNames(fetchFn: FetchFn, base: string): Promis
 }
 
 /** List tables (with counts) for one database (`{base}/{db}.json`). */
-export async function fetchTablesForDb(
-  fetchFn: FetchFn,
-  base: string,
-  db: string,
-): Promise<TableRef[]> {
+export async function fetchTablesForDb(fetchFn: FetchFn, base: string, db: string): Promise<TableRef[]> {
   return parseTableList(await fetchJson(fetchFn, `${base}/${encodeURIComponent(db)}.json`), db);
 }
 
@@ -783,21 +759,13 @@ export interface DatasetteTableMetadata {
  * layering top-level source/license/about defaults under the per-table block
  * (Datasette applies attribution top-down). Pure — no I/O.
  */
-export function extractTableMetadata(
-  metaJson: unknown,
-  db: string | null,
-  table: string | null,
-): DatasetteTableMetadata {
+export function extractTableMetadata(metaJson: unknown, db: string | null, table: string | null): DatasetteTableMetadata {
   const root = asObject(metaJson) ?? {};
   const dbBlock = db ? (asObject(field(root['databases'], db)) ?? {}) : {};
   const tables = asObject(dbBlock['tables']) ?? {};
-  const t =
-    (table ? asObject(tables[table]) : null) ??
-    (table ? asObject(tables[table.toLowerCase()]) : null) ??
-    {};
+  const t = (table ? asObject(tables[table]) : null) ?? (table ? asObject(tables[table.toLowerCase()]) : null) ?? {};
   // Attribution falls back to the database and then top level.
-  const attr = (key: string): string | null =>
-    asString(t[key]) ?? asString(dbBlock[key]) ?? asString(root[key]);
+  const attr = (key: string): string | null => asString(t[key]) ?? asString(dbBlock[key]) ?? asString(root[key]);
 
   const out: DatasetteTableMetadata = { columns: {}, units: {} };
   const sort = asString(t['sort']);
@@ -853,10 +821,7 @@ export async function fetchInstanceMetadata(fetchFn: FetchFn, base: string): Pro
 }
 
 /** Fetch a table's resolved Datasette metadata (see {@link extractTableMetadata}). */
-export async function fetchTableMetadata(
-  fetchFn: FetchFn,
-  ref: DatasetteRef,
-): Promise<DatasetteTableMetadata> {
+export async function fetchTableMetadata(fetchFn: FetchFn, ref: DatasetteRef): Promise<DatasetteTableMetadata> {
   const json = await fetchInstanceMetadata(fetchFn, ref.base);
   return extractTableMetadata(json, ref.db, ref.table);
 }
@@ -889,10 +854,7 @@ function buildTableInfo(meta: DatasetteTableMetadata): TableInfo | undefined {
  * only when the named column actually exists. The grid sorts by column type, so
  * a default sort on a numeric column sorts numerically.
  */
-export function applyTableMetadata(
-  meta: DatasetteTableMetadata,
-  columns: ColumnSpec[],
-): { columns: ColumnSpec[]; patch: MetadataTablePatch } {
+export function applyTableMetadata(meta: DatasetteTableMetadata, columns: ColumnSpec[]): { columns: ColumnSpec[]; patch: MetadataTablePatch } {
   // A `sortable_columns` allowlist (any array, including empty) restricts which
   // columns the user may sort by; undefined ⇒ all sortable (leave unset).
   const sortAllow = meta.sortableColumns != null ? new Set(meta.sortableColumns) : null;
@@ -934,10 +896,7 @@ export function applyTableMetadata(
  * typed 'string' is reconsidered, and only upgraded when the rows agree on a
  * more specific type. No-op when there are no rows to learn from.
  */
-export function refineColumnTypes(
-  columns: ColumnSpec[],
-  rows: Array<Record<string, unknown>>,
-): ColumnSpec[] {
+export function refineColumnTypes(columns: ColumnSpec[], rows: Array<Record<string, unknown>>): ColumnSpec[] {
   if (rows.length === 0) return columns;
   const inferred = new Map(inferColumnsFromRows(rows).map((c) => [c.field, c.type]));
   return columns.map((c) => {
@@ -1003,9 +962,7 @@ export async function fetchRows(
   const firstUrl = buildTableUrl(ref, baseParams);
   // A stored resume cursor gets the same treatment, so an import already stuck on
   // an http:// cursor recovers on the next refresh instead of failing forever.
-  let url: string | null = opts.startUrl
-    ? (normaliseCursorUrl(opts.startUrl, firstUrl) ?? opts.startUrl)
-    : firstUrl;
+  let url: string | null = opts.startUrl ? (normaliseCursorUrl(opts.startUrl, firstUrl) ?? opts.startUrl) : firstUrl;
   const rows: Array<Record<string, unknown>> = [];
   let truncated = false;
   let hasMore = false;
@@ -1025,10 +982,7 @@ export async function fetchRows(
       // resume mode where the resume cursor itself is the thing that failed —
       // there we return it so the import stays resumable.
       if (rows.length === 0 && !opts.startUrl) throw err;
-      error =
-        err instanceof DatasetteError && err.status
-          ? `stopped after ${rows.length} rows: HTTP ${err.status}`
-          : `stopped after ${rows.length} rows: ${(err as Error)?.message ?? String(err)}`;
+      error = err instanceof DatasetteError && err.status ? `stopped after ${rows.length} rows: HTTP ${err.status}` : `stopped after ${rows.length} rows: ${(err as Error)?.message ?? String(err)}`;
       hasMore = true; // a cursor almost certainly remained — more is available
       resumeUrl = url; // the hop that failed — resume retries it
       break;
@@ -1050,10 +1004,8 @@ export async function fetchRows(
     // (see normaliseCursorUrl — an http:// cursor from a TLS-terminated instance
     // is blocked as mixed content). If it is unusable, fall back to rebuilding
     // from the raw token rather than giving up on paging.
-    const cursorUrl: string | null =
-      info.nextUrl != null ? normaliseCursorUrl(info.nextUrl, url) : null;
-    const nextPage: string | null =
-      cursorUrl ?? (info.nextToken != null ? buildTokenPageUrl(ref, info.nextToken) : null);
+    const cursorUrl: string | null = info.nextUrl != null ? normaliseCursorUrl(info.nextUrl, url) : null;
+    const nextPage: string | null = cursorUrl ?? (info.nextToken != null ? buildTokenPageUrl(ref, info.nextToken) : null);
 
     // Keep paging while there's a cursor, we're under the cap, and the page
     // actually returned rows (the last guard prevents a pathological loop on a
@@ -1100,12 +1052,7 @@ function rowWriteUrl(ref: DatasetteRef, pkPath: string, action: 'update' | 'dele
 }
 
 /** POST a JSON write body and parse the {ok,…} / {ok:false,error} envelope. */
-async function postWrite(
-  fetchFn: FetchFn,
-  url: string,
-  body: unknown,
-  token?: string,
-): Promise<unknown> {
+async function postWrite(fetchFn: FetchFn, url: string, body: unknown, token?: string): Promise<unknown> {
   let res: Response;
   try {
     res = await fetchFn(url, {
@@ -1114,10 +1061,7 @@ async function postWrite(
       body: JSON.stringify(body),
     });
   } catch (err) {
-    throw new DatasetteError(
-      { error: `Couldn't reach ${url} (${(err as Error)?.message || 'network error'}).` },
-      0,
-    );
+    throw new DatasetteError({ error: `Couldn't reach ${url} (${(err as Error)?.message || 'network error'}).` }, 0);
   }
   if (res && res.ok === false) {
     let b: unknown = null;
@@ -1126,10 +1070,7 @@ async function postWrite(
     } catch {
       /* non-JSON error body */
     }
-    throw new DatasetteError(
-      b && typeof b === 'object' ? b : { error: `HTTP ${res.status} for ${url}` },
-      res.status,
-    );
+    throw new DatasetteError(b && typeof b === 'object' ? b : { error: `HTTP ${res.status} for ${url}` }, res.status);
   }
   const json: unknown = await res.json();
   if (field(json, 'ok') === false) throw new DatasetteError(json, res.status);
@@ -1137,63 +1078,27 @@ async function postWrite(
 }
 
 /** Insert rows; returns the server's authoritative rows (defaults, coercion). */
-export async function insertRows(
-  fetchFn: FetchFn,
-  ref: DatasetteRef,
-  rows: Array<Record<string, unknown>>,
-  opts: WriteOpts = {},
-): Promise<Array<Record<string, unknown>>> {
-  const json = await postWrite(
-    fetchFn,
-    tableWriteUrl(ref, 'insert'),
-    { rows, return: true },
-    opts.token,
-  );
+export async function insertRows(fetchFn: FetchFn, ref: DatasetteRef, rows: Array<Record<string, unknown>>, opts: WriteOpts = {}): Promise<Array<Record<string, unknown>>> {
+  const json = await postWrite(fetchFn, tableWriteUrl(ref, 'insert'), { rows, return: true }, opts.token);
   return rowsOf(json);
 }
 
 /** Update one row by tilde-encoded PK with the changed fields; returns the row. */
-export async function updateRowByPk(
-  fetchFn: FetchFn,
-  ref: DatasetteRef,
-  pkPath: string,
-  changes: Record<string, unknown>,
-  opts: WriteOpts = {},
-): Promise<Record<string, unknown> | null> {
-  const json = await postWrite(
-    fetchFn,
-    rowWriteUrl(ref, pkPath, 'update'),
-    { update: changes, return: true },
-    opts.token,
-  );
+export async function updateRowByPk(fetchFn: FetchFn, ref: DatasetteRef, pkPath: string, changes: Record<string, unknown>, opts: WriteOpts = {}): Promise<Record<string, unknown> | null> {
+  const json = await postWrite(fetchFn, rowWriteUrl(ref, pkPath, 'update'), { update: changes, return: true }, opts.token);
   const one = asObject(field(json, 'row'));
   if (one) return one;
   return rowsOf(json)[0] ?? null;
 }
 
 /** Delete one row by tilde-encoded PK. */
-export async function deleteRowByPk(
-  fetchFn: FetchFn,
-  ref: DatasetteRef,
-  pkPath: string,
-  opts: WriteOpts = {},
-): Promise<void> {
+export async function deleteRowByPk(fetchFn: FetchFn, ref: DatasetteRef, pkPath: string, opts: WriteOpts = {}): Promise<void> {
   await postWrite(fetchFn, rowWriteUrl(ref, pkPath, 'delete'), {}, opts.token);
 }
 
 /** Upsert rows (insert or replace by PK); returns the server's rows. */
-export async function upsertRows(
-  fetchFn: FetchFn,
-  ref: DatasetteRef,
-  rows: Array<Record<string, unknown>>,
-  opts: WriteOpts = {},
-): Promise<Array<Record<string, unknown>>> {
-  const json = await postWrite(
-    fetchFn,
-    tableWriteUrl(ref, 'upsert'),
-    { rows, return: true },
-    opts.token,
-  );
+export async function upsertRows(fetchFn: FetchFn, ref: DatasetteRef, rows: Array<Record<string, unknown>>, opts: WriteOpts = {}): Promise<Array<Record<string, unknown>>> {
+  const json = await postWrite(fetchFn, tableWriteUrl(ref, 'upsert'), { rows, return: true }, opts.token);
   return rowsOf(json);
 }
 
@@ -1215,10 +1120,7 @@ export async function fetchPrimaryKeys(fetchFn: FetchFn, ref: DatasetteRef): Pro
  * never errors. `truncated` mirrors Datasette's `count_truncated` — see
  * {@link TableMeta.countTruncated}.
  */
-export async function fetchTableCount(
-  fetchFn: FetchFn,
-  ref: DatasetteRef,
-): Promise<{ count: number | null; truncated: boolean }> {
+export async function fetchTableCount(fetchFn: FetchFn, ref: DatasetteRef): Promise<{ count: number | null; truncated: boolean }> {
   try {
     const json = await fetchJson(fetchFn, buildTableUrl(ref, { _extra: 'count' }));
     return {
@@ -1245,11 +1147,7 @@ export interface ConnectionStatus {
  * the authenticated actor. `writable` is true only when a token authenticates
  * (a non-null actor) — otherwise the connection opens read-only.
  */
-export async function testConnection(
-  fetchFn: FetchFn,
-  base: string,
-  opts: WriteOpts = {},
-): Promise<ConnectionStatus> {
+export async function testConnection(fetchFn: FetchFn, base: string, opts: WriteOpts = {}): Promise<ConnectionStatus> {
   const init = opts.token ? { headers: { Authorization: `Bearer ${opts.token}` } } : undefined;
   try {
     const vres = await fetchFn(`${base}/-/versions.json`, init);
@@ -1263,8 +1161,7 @@ export async function testConnection(
       };
     }
     const vjson: unknown = await vres.json();
-    const version =
-      asString(field(field(vjson, 'datasette'), 'version')) ?? asString(field(vjson, 'version'));
+    const version = asString(field(field(vjson, 'datasette'), 'version')) ?? asString(field(vjson, 'version'));
     let actor: Record<string, unknown> | null = null;
     try {
       const ares = await fetchFn(`${base}/-/actor.json`, init);

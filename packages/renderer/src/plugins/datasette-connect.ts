@@ -31,13 +31,7 @@ import {
   type MetadataTablePatch,
   type TableRef,
 } from './datasette-client.js';
-import {
-  host,
-  registerDatasetteSettings,
-  resolveChosenTables,
-  uniqueTableName,
-  withDatasetteSourceInfo,
-} from './datasette-common.js';
+import { host, registerDatasetteSettings, resolveChosenTables, uniqueTableName, withDatasetteSourceInfo } from './datasette-common.js';
 import { createDatasetteCollection, tokenSettingKey } from './datasette-collection.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 
@@ -50,8 +44,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   name: 'Datasette Connect',
   type: 'source',
   version: '0.3.0',
-  description:
-    'Connect a live, editable table on any Datasette instance — rows are never stored locally',
+  description: 'Connect a live, editable table on any Datasette instance — rows are never stored locally',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/datasette-connect.ts',
@@ -122,8 +115,7 @@ async function refreshLiveTable(api: HostApi, tableId: string): Promise<void> {
       title: 'Refresh',
     });
   } catch (err) {
-    const msg =
-      err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
+    const msg = err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
     api.ui.dialogs.toast(`Refresh failed: ${msg}`, { kind: 'error', title: 'Refresh' });
   }
 }
@@ -143,15 +135,11 @@ async function openConnectDialog(api: HostApi): Promise<void> {
         // it in red.
         await probeSingleTable(withAuthFetch(fetchFn, token || undefined), ref);
         const v = status.version ? ` (Datasette ${status.version})` : '';
-        return status.writable
-          ? `Reachable${v} — table found, signed in, read-write.`
-          : `Reachable${v} — table found, read-only (no token / not authenticated).`;
+        return status.writable ? `Reachable${v} — table found, signed in, read-write.` : `Reachable${v} — table found, read-only (no token / not authenticated).`;
       }
       if (!status.reachable) return `Unreachable: ${status.error ?? 'no response'}`;
       const v = status.version ? ` (Datasette ${status.version})` : '';
-      return status.writable
-        ? `Reachable${v} — signed in, read-write.`
-        : `Reachable${v} — read-only (no token / not authenticated).`;
+      return status.writable ? `Reachable${v} — signed in, read-write.` : `Reachable${v} — read-only (no token / not authenticated).`;
     },
     async onConnect(url, token) {
       // Pre-flight gate: for a single-table URL, confirm the table exists BEFORE
@@ -168,8 +156,7 @@ async function openConnectDialog(api: HostApi): Promise<void> {
   try {
     await connectDatasette(api, result.url, result.token);
   } catch (err) {
-    const msg =
-      err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
+    const msg = err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
     await api.ui.dialogs.alert(msg, 'Connect Datasette failed');
   }
 }
@@ -204,8 +191,7 @@ export async function connectDatasette(api: HostApi, input: string, token: strin
   try {
     chosen = await resolveChosenTables(fetchFn, ref, 'Connect');
   } catch (err) {
-    const detail =
-      err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
+    const detail = err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
     throw new Error(`Couldn't read tables from ${host(ref.base)}: ${detail}`, { cause: err });
   }
   if (chosen === null) return; // cancelled
@@ -226,10 +212,7 @@ export async function connectDatasette(api: HostApi, input: string, token: strin
   }
   if (created.length === 0) return; // every table skipped
   const mode = status.writable ? 'read-write' : 'read-only';
-  api.ui.dialogs.toast(
-    `Connected ${created.length} live table${created.length === 1 ? '' : 's'} from Datasette (${mode}).`,
-    { kind: 'success', title: 'Connect Datasette' },
-  );
+  api.ui.dialogs.toast(`Connected ${created.length} live table${created.length === 1 ? '' : 's'} from Datasette (${mode}).`, { kind: 'success', title: 'Connect Datasette' });
   for (const { tableId, c } of created) {
     void refineLiveColumns(api, tableId, ref.base, c, token);
   }
@@ -244,28 +227,14 @@ export async function connectDatasette(api: HostApi, input: string, token: strin
  * the grid/footer on the old collection (Refresh would act on a different one).
  * Columns are still filled in lazily by `refineLiveColumns`.
  */
-async function upsertLiveTable(
-  api: HostApi,
-  workspaceId: string,
-  base: string,
-  c: TableRef,
-  writable: boolean,
-  token: string,
-): Promise<string | null> {
+async function upsertLiveTable(api: HostApi, workspaceId: string, base: string, c: TableRef, writable: boolean, token: string): Promise<string | null> {
   // Reconnecting to the SAME live source (base/db/table) silently reuses its
   // table so geometry/sort/filters survive — that isn't a name collision.
-  const workspaceTables = (await api.store.tables.find()).filter(
-    (t) => t.workspaceId === workspaceId,
-  );
+  const workspaceTables = (await api.store.tables.find()).filter((t) => t.workspaceId === workspaceId);
   let name = `${c.db}/${c.table}`;
   let existing = workspaceTables.find((t) => {
     const cfg = t.source?.config as { base?: string; db?: string; table?: string } | undefined;
-    return (
-      t.source?.type === 'datasette' &&
-      cfg?.base === base &&
-      cfg?.db === c.db &&
-      cfg?.table === c.table
-    );
+    return t.source?.type === 'datasette' && cfg?.base === base && cfg?.db === c.db && cfg?.table === c.table;
   });
 
   // Otherwise, a DIFFERENT table sharing this name (e.g. an earlier import
@@ -273,11 +242,7 @@ async function upsertLiveTable(
   if (!existing) {
     const clash = workspaceTables.find((t) => t.name.toLowerCase() === name.toLowerCase());
     if (clash) {
-      const choice = await api.ui.dialogs.choice(
-        `A table named "${name}" already exists in this workspace.`,
-        ['Overwrite', 'Rename', 'Skip'],
-        'Connect — table already exists',
-      );
+      const choice = await api.ui.dialogs.choice(`A table named "${name}" already exists in this workspace.`, ['Overwrite', 'Rename', 'Skip'], 'Connect — table already exists');
       if (!choice || choice === 'Skip') return null;
       if (choice === 'Overwrite') existing = clash;
       else name = uniqueTableName(new Set(workspaceTables.map((t) => t.name)), name);
@@ -288,10 +253,7 @@ async function upsertLiveTable(
   // is instant); otherwise probe once so writes address rows correctly.
   let pks = c.pks ?? [];
   if (pks.length === 0) {
-    const fetchFn = withAuthFetch(
-      (u: string, o?: unknown) => api.backend.fetch(u, o as never),
-      token || undefined,
-    );
+    const fetchFn = withAuthFetch((u: string, o?: unknown) => api.backend.fetch(u, o as never), token || undefined);
     try {
       pks = await fetchPrimaryKeys(fetchFn, { base, db: c.db, table: c.table, query: {} });
     } catch {
@@ -325,18 +287,9 @@ async function upsertLiveTable(
  * The grid re-renders its columns when the record updates; failures are
  * swallowed (the grid's own row fetch surfaces real connection errors).
  */
-async function refineLiveColumns(
-  api: HostApi,
-  tableId: string,
-  base: string,
-  c: TableRef,
-  token: string,
-): Promise<void> {
+async function refineLiveColumns(api: HostApi, tableId: string, base: string, c: TableRef, token: string): Promise<void> {
   const ref: DatasetteRef = { base, db: c.db, table: c.table, query: {} };
-  const fetchFn = withAuthFetch(
-    (u: string, o?: unknown) => api.backend.fetch(u, o as never),
-    token || undefined,
-  );
+  const fetchFn = withAuthFetch((u: string, o?: unknown) => api.backend.fetch(u, o as never), token || undefined);
   try {
     let metaColumns: ColumnSpec[] = [];
     let typed = false;
@@ -348,21 +301,14 @@ async function refineLiveColumns(
       /* fall back to row inference */
     }
     const { rows: sample } = await fetchRows(fetchFn, ref, { maxRows: 50, pageSize: 50 });
-    const baseColumns =
-      metaColumns.length === 0
-        ? inferColumnsFromRows(sample)
-        : typed
-          ? metaColumns
-          : refineColumnTypes(metaColumns, sample);
+    const baseColumns = metaColumns.length === 0 ? inferColumnsFromRows(sample) : typed ? metaColumns : refineColumnTypes(metaColumns, sample);
     if (baseColumns.length === 0) return; // learned nothing; leave placeholder
 
     // The table may have been closed while we fetched.
     const t = await api.store.tables.findOne(tableId);
     if (!t) return;
     const pks = ((t.source?.config as { pks?: string[] } | undefined)?.pks ?? []) as string[];
-    let columns = baseColumns.map((col) =>
-      pks.includes(col.field) ? { ...col, unique: true, notnull: true } : col,
-    );
+    let columns = baseColumns.map((col) => (pks.includes(col.field) ? { ...col, unique: true, notnull: true } : col));
     let metaPatch: MetadataTablePatch = {};
     try {
       const md = await fetchTableMetadata(fetchFn, ref);

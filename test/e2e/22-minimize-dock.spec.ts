@@ -28,12 +28,8 @@ test('minimized windows dock bottom-left and stay put while panning', async ({ p
   // Pan the canvas (two-finger equal-delta drag → pure translate).
   await page.evaluate(() => {
     const el = document.getElementById('easydb-panels') as HTMLElement;
-    const touch = (idn: number, x: number, y: number) =>
-      new Touch({ identifier: idn, target: el, clientX: x, clientY: y });
-    const fire = (type: string, touches: Touch[]) =>
-      el.dispatchEvent(
-        new TouchEvent(type, { touches, changedTouches: touches, bubbles: true, cancelable: true }),
-      );
+    const touch = (idn: number, x: number, y: number) => new Touch({ identifier: idn, target: el, clientX: x, clientY: y });
+    const fire = (type: string, touches: Touch[]) => el.dispatchEvent(new TouchEvent(type, { touches, changedTouches: touches, bubbles: true, cancelable: true }));
     fire('touchstart', [touch(1, 100, 100), touch(2, 300, 300)]);
     fire('touchmove', [touch(1, 220, 190), touch(2, 420, 390)]);
     fire('touchend', []);

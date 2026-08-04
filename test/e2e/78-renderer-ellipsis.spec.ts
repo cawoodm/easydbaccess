@@ -11,9 +11,7 @@ import { addRow, createTable, panelDomId, waitForPanel } from './helpers.js';
  * much text goes into the DOM.
  */
 
-const LONG =
-  'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor ' +
-  'incididunt ut labore et dolore magna aliqua, ut enim ad minim veniam quis nostrud.';
+const LONG = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor ' + 'incididunt ut labore et dolore magna aliqua, ut enim ad minim veniam quis nostrud.';
 
 async function previewTable(page: import('@playwright/test').Page, name: string) {
   const id = await createTable(page, name, [{ field: 'note', renderer: 'preview' }]);
@@ -24,9 +22,7 @@ async function previewTable(page: import('@playwright/test').Page, name: string)
 
 /** The preview cell's inner text span: what it holds, and whether CSS is clipping it. */
 function span(page: import('@playwright/test').Page, id: string) {
-  return page
-    .locator(`#${panelDomId(id)} data-table`)
-    .locator('tbody td preview-cell [title="Click to edit"]');
+  return page.locator(`#${panelDomId(id)} data-table`).locator('tbody td preview-cell [title="Click to edit"]');
 }
 
 test('a preview cell holds the whole line and lets CSS cut it', async ({ page }) => {
@@ -36,9 +32,7 @@ test('a preview cell holds the whole line and lets CSS cut it', async ({ page })
   await expect(span(page, id)).toHaveText(LONG);
 
   // And it is actually being clipped, rather than spilling out of the column.
-  const clipped = await span(page, id).evaluate(
-    (el) => el.scrollWidth > el.clientWidth && el.clientWidth > 0,
-  );
+  const clipped = await span(page, id).evaluate((el) => el.scrollWidth > el.clientWidth && el.clientWidth > 0);
   expect(clipped).toBe(true);
 });
 

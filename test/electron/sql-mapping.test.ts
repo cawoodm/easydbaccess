@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  columnTypeFromSqlType,
-  decodeValue,
-  encodeValue,
-  quoteIdent,
-  sanitizeTableName,
-  sqlAffinity,
-} from '@easydb/shared';
+import { columnTypeFromSqlType, decodeValue, encodeValue, quoteIdent, sanitizeTableName, sqlAffinity } from '@easydb/shared';
 
 /**
  * Unit tests for the SQL-mapping helpers shared between

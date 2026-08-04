@@ -1,13 +1,5 @@
 import { test, expect } from './fixtures.js';
-import {
-  addRow,
-  bulkAddRows,
-  createTable,
-  panelDomId,
-  readRows,
-  readTable,
-  waitForPanel,
-} from './helpers.js';
+import { addRow, bulkAddRows, createTable, panelDomId, readRows, readTable, waitForPanel } from './helpers.js';
 
 /**
  * Projections — virtual tables whose rows are derived (a database view / JOIN)
@@ -17,11 +9,7 @@ import {
  */
 
 /** Insert a projection table directly (what the editor's onSave compiles to). */
-async function createProjection(
-  page: import('@playwright/test').Page,
-  peopleId: string,
-  deptId: string,
-): Promise<string> {
+async function createProjection(page: import('@playwright/test').Page, peopleId: string, deptId: string): Promise<string> {
   return page.evaluate(
     async ({ peopleId, deptId }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -67,9 +55,7 @@ async function createProjection(
 }
 
 test.describe('projections', () => {
-  test('a projection joins its sources, and BOTH the base and joined columns are editable', async ({
-    page,
-  }) => {
+  test('a projection joins its sources, and BOTH the base and joined columns are editable', async ({ page }) => {
     const peopleId = await createTable(page, 'People', [{ field: 'name' }, { field: 'deptId' }]);
     const deptId = await createTable(page, 'Dept', [{ field: 'id' }, { field: 'label' }]);
     await bulkAddRows(page, peopleId, [{ name: 'Bob', deptId: 'd1' }]);
@@ -90,23 +76,17 @@ test.describe('projections', () => {
     // Editing the base column writes back to the underlying People row.
     await inputs.nth(0).fill('Robert');
     await inputs.nth(0).dispatchEvent('change');
-    await expect
-      .poll(async () => (await readRows(page, peopleId))[0]?.data.name)
-      .toBe('Robert');
+    await expect.poll(async () => (await readRows(page, peopleId))[0]?.data.name).toBe('Robert');
 
     // Editing the JOINED column writes back to the Dept row it came from —
     // and leaves People alone.
     await panel.locator('data-table tbody tr td input').nth(1).fill('Revenue');
     await panel.locator('data-table tbody tr td input').nth(1).dispatchEvent('change');
-    await expect
-      .poll(async () => (await readRows(page, deptId))[0]?.data.label)
-      .toBe('Revenue');
+    await expect.poll(async () => (await readRows(page, deptId))[0]?.data.label).toBe('Revenue');
     expect((await readRows(page, peopleId))[0]?.data.name).toBe('Robert');
   });
 
-  test('Edit columns opens the ordinary column editor; Edit Join opens the join editor', async ({
-    page,
-  }) => {
+  test('Edit columns opens the ordinary column editor; Edit Join opens the join editor', async ({ page }) => {
     const peopleId = await createTable(page, 'People', [{ field: 'name' }, { field: 'deptId' }]);
     const deptId = await createTable(page, 'Dept', [{ field: 'id' }, { field: 'label' }]);
     await bulkAddRows(page, peopleId, [{ name: 'Bob', deptId: 'd1' }]);
@@ -135,9 +115,7 @@ test.describe('projections', () => {
     await expect(page.locator('projection-dialog dialog')).toBeVisible();
   });
 
-  test('Edit Join offers source fields the projection left out, and adding one inherits its settings', async ({
-    page,
-  }) => {
+  test('Edit Join offers source fields the projection left out, and adding one inherits its settings', async ({ page }) => {
     const peopleId = await createTable(page, 'People', [{ field: 'name' }, { field: 'deptId' }]);
     const deptId = await createTable(page, 'Dept', [{ field: 'id' }, { field: 'label' }]);
     await bulkAddRows(page, peopleId, [{ name: 'Bob', deptId: 'd1' }]);
@@ -148,9 +126,7 @@ test.describe('projections', () => {
       const ctx = (window as any).__easydb;
       const t = await ctx.store.tables.findOne(id);
       await ctx.store.tables.patch(id, {
-        columns: t.columns.map((c: { field: string }) =>
-          c.field === 'id' ? { ...c, label: 'Dept code', renderer: 'link', width: 175 } : c,
-        ),
+        columns: t.columns.map((c: { field: string }) => (c.field === 'id' ? { ...c, label: 'Dept code', renderer: 'link', width: 175 } : c)),
         updatedAt: Date.now(),
       });
     }, deptId);
@@ -158,7 +134,10 @@ test.describe('projections', () => {
     // The projection selects People.name and Dept.label — NOT Dept.id.
     const projId = await createProjection(page, peopleId, deptId);
     await waitForPanel(page, projId);
-    await page.locator(`#${panelDomId(projId)}`).getByRole('button', { name: 'Edit Join' }).click();
+    await page
+      .locator(`#${panelDomId(projId)}`)
+      .getByRole('button', { name: 'Edit Join' })
+      .click();
     const dialog = page.locator('projection-dialog');
     await expect(dialog.locator('dialog')).toBeVisible();
 
@@ -182,16 +161,13 @@ test.describe('projections', () => {
 
   test('a row limit caps the projection', async ({ page }) => {
     const id = await createTable(page, 'Many', [{ field: 'name' }]);
-    await bulkAddRows(page, id, [
-      { name: 'a' },
-      { name: 'b' },
-      { name: 'c' },
-      { name: 'd' },
-      { name: 'e' },
-    ]);
+    await bulkAddRows(page, id, [{ name: 'a' }, { name: 'b' }, { name: 'c' }, { name: 'd' }, { name: 'e' }]);
     await waitForPanel(page, id);
 
-    await page.locator(`#${panelDomId(id)}`).getByRole('button', { name: 'New Projection' }).click();
+    await page
+      .locator(`#${panelDomId(id)}`)
+      .getByRole('button', { name: 'New Projection' })
+      .click();
     const dialog = page.locator('projection-dialog');
     await expect(dialog.locator('dialog')).toBeVisible();
     await dialog.locator('#proj-name').fill('Top two');
@@ -204,9 +180,7 @@ test.describe('projections', () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const ctx = (window as any).__easydb;
           const all = await ctx.store.tables.find({ workspaceId: ctx.workspaceId });
-          const p = all.find(
-            (t: { source?: { type?: string }; name: string }) => t.source?.type === 'projection' && t.name === 'Top two',
-          );
+          const p = all.find((t: { source?: { type?: string }; name: string }) => t.source?.type === 'projection' && t.name === 'Top two');
           if (!p) return null;
           return {
             limit: (p.source.config as { limit?: number }).limit,
@@ -217,16 +191,17 @@ test.describe('projections', () => {
       .toEqual({ limit: 2, rows: 2 });
   });
 
-  test('the New Projection button creates a working projection through the editor', async ({
-    page,
-  }) => {
+  test('the New Projection button creates a working projection through the editor', async ({ page }) => {
     const soloId = await createTable(page, 'Solo', [{ field: 'name' }]);
     await addRow(page, soloId, { name: 'only-row' });
     await waitForPanel(page, soloId);
 
     // New Projection is a per-table footer button: launching it from Solo makes
     // Solo the base, so no source picking is needed for a single-source view.
-    await page.locator(`#${panelDomId(soloId)}`).getByRole('button', { name: 'New Projection' }).click();
+    await page
+      .locator(`#${panelDomId(soloId)}`)
+      .getByRole('button', { name: 'New Projection' })
+      .click();
 
     const dialog = page.locator('projection-dialog');
     await expect(dialog.locator('dialog')).toBeVisible();
@@ -242,10 +217,7 @@ test.describe('projections', () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const ctx = (window as any).__easydb;
           const all = await ctx.store.tables.find({ workspaceId: ctx.workspaceId });
-          const p = all.find(
-            (t: { source?: { type?: string }; name: string }) =>
-              t.source?.type === 'projection' && t.name === 'Solo view',
-          );
+          const p = all.find((t: { source?: { type?: string }; name: string }) => t.source?.type === 'projection' && t.name === 'Solo view');
           if (!p) return null;
           const rows = await ctx.store.rows(p.id).find();
           return rows.map((r: { data: Record<string, unknown> }) => r.data);
@@ -255,11 +227,7 @@ test.describe('projections', () => {
   });
 
   test("inherits the base table's hidden columns, sort and filters", async ({ page }) => {
-    const id = await createTable(page, 'Staff', [
-      { field: 'name' },
-      { field: 'dept' },
-      { field: 'rowid' },
-    ]);
+    const id = await createTable(page, 'Staff', [{ field: 'name' }, { field: 'dept' }, { field: 'rowid' }]);
     await bulkAddRows(page, id, [
       { name: 'Bob', dept: 'Sales', rowid: 1 },
       { name: 'Ann', dept: 'Support', rowid: 2 },
@@ -270,9 +238,7 @@ test.describe('projections', () => {
       const ctx = (window as any).__easydb;
       const t = await ctx.store.tables.findOne(tableId);
       await ctx.store.tables.patch(tableId, {
-        columns: t.columns.map((c: { field: string }) =>
-          c.field === 'dept' ? { ...c, hidden: true } : c,
-        ),
+        columns: t.columns.map((c: { field: string }) => (c.field === 'dept' ? { ...c, hidden: true } : c)),
         sortBy: [{ field: 'name', asc: true }],
         sortColumn: 'name',
         sortAsc: true,
@@ -282,7 +248,10 @@ test.describe('projections', () => {
     }, id);
     await waitForPanel(page, id);
 
-    await page.locator(`#${panelDomId(id)}`).getByRole('button', { name: 'New Projection' }).click();
+    await page
+      .locator(`#${panelDomId(id)}`)
+      .getByRole('button', { name: 'New Projection' })
+      .click();
     const dialog = page.locator('projection-dialog');
     await expect(dialog.locator('dialog')).toBeVisible();
     await dialog.locator('#proj-name').fill('Staff view');
@@ -293,12 +262,7 @@ test.describe('projections', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ctx = (window as any).__easydb;
         const all = await ctx.store.tables.find({ workspaceId: ctx.workspaceId });
-        return (
-          all.find(
-            (t: { source?: { type?: string }; name: string }) =>
-              t.source?.type === 'projection' && t.name === 'Staff view',
-          ) ?? null
-        );
+        return all.find((t: { source?: { type?: string }; name: string }) => t.source?.type === 'projection' && t.name === 'Staff view') ?? null;
       });
     // Save → inherit columns → insert settles over a couple of ticks.
     await expect.poll(async () => Boolean(await readProj())).toBe(true);
@@ -327,21 +291,18 @@ test.describe('projections', () => {
       const ctx = (window as any).__easydb;
       const t = await ctx.store.tables.findOne(id);
       await ctx.store.tables.patch(id, {
-        columns: t.columns.map((c: { field: string }) =>
-          c.field === 'path' ? { ...c, unique: true } : c,
-        ),
+        columns: t.columns.map((c: { field: string }) => (c.field === 'path' ? { ...c, unique: true } : c)),
         updatedAt: Date.now(),
       });
     }, tilId);
-    const simId = await createTable(page, 'similarities', [
-      { field: 'id' },
-      { field: 'other_id' },
-      { field: 'score' },
-    ]);
+    const simId = await createTable(page, 'similarities', [{ field: 'id' }, { field: 'other_id' }, { field: 'score' }]);
     await bulkAddRows(page, simId, [{ id: 'a.md', other_id: 'b.md', score: 0.74 }]);
     await waitForPanel(page, simId);
 
-    await page.locator(`#${panelDomId(simId)}`).getByRole('button', { name: 'New Projection' }).click();
+    await page
+      .locator(`#${panelDomId(simId)}`)
+      .getByRole('button', { name: 'New Projection' })
+      .click();
     const dialog = page.locator('projection-dialog');
     await expect(dialog.locator('dialog')).toBeVisible();
     // Add `til` TWICE — no join keys touched, so the heuristic must pick both.
@@ -358,10 +319,7 @@ test.describe('projections', () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const ctx = (window as any).__easydb;
           const all = await ctx.store.tables.find({ workspaceId: ctx.workspaceId });
-          const p = all.find(
-            (t: { source?: { type?: string }; name: string }) =>
-              t.source?.type === 'projection' && t.name === 'Similar TILs',
-          );
+          const p = all.find((t: { source?: { type?: string }; name: string }) => t.source?.type === 'projection' && t.name === 'Similar TILs');
           if (!p) return null;
           const rows = await ctx.store.rows(p.id).find();
           return rows.map((r: { data: Record<string, unknown> }) => r.data);
@@ -372,9 +330,7 @@ test.describe('projections', () => {
       .toEqual([expect.objectContaining({ title: 'Apache bench', title_2: 'Escaping SQL' })]);
   });
 
-  test('adding a join preselects sensible keys, so the join works without picking fields', async ({
-    page,
-  }) => {
+  test('adding a join preselects sensible keys, so the join works without picking fields', async ({ page }) => {
     // Create Dept first, People last, so People's panel is on top and its
     // footer button isn't covered by another window.
     const deptId = await createTable(page, 'Dept', [{ field: 'id' }, { field: 'label' }]);
@@ -386,7 +342,10 @@ test.describe('projections', () => {
     // Launch from People (the base), add Dept as a join, and Save WITHOUT ever
     // touching the join-key selects — the heuristic must have preselected them
     // (People.deptId = Dept.id), or buildSpec would reject the blank keys.
-    await page.locator(`#${panelDomId(peopleId)}`).getByRole('button', { name: 'New Projection' }).click();
+    await page
+      .locator(`#${panelDomId(peopleId)}`)
+      .getByRole('button', { name: 'New Projection' })
+      .click();
     const dialog = page.locator('projection-dialog');
     await expect(dialog.locator('dialog')).toBeVisible();
     await dialog.locator('#add-src').selectOption({ label: 'Dept' });
@@ -400,10 +359,7 @@ test.describe('projections', () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const ctx = (window as any).__easydb;
           const all = await ctx.store.tables.find({ workspaceId: ctx.workspaceId });
-          const p = all.find(
-            (t: { source?: { type?: string }; name: string }) =>
-              t.source?.type === 'projection' && t.name === 'Staff',
-          );
+          const p = all.find((t: { source?: { type?: string }; name: string }) => t.source?.type === 'projection' && t.name === 'Staff');
           if (!p) return null;
           const rows = await ctx.store.rows(p.id).find();
           return rows.map((r: { data: Record<string, unknown> }) => r.data);

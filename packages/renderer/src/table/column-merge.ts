@@ -28,10 +28,7 @@ import type { ColumnSpec } from '@easydb/shared';
  * Returns null when nothing was renamed, so the caller can skip the copy.
  * Values under keys the editor did not touch are carried across unchanged.
  */
-export function rowRekeyer(
-  oldCols: ColumnSpec[],
-  newCols: ColumnSpec[],
-): ((row: Record<string, unknown>) => Record<string, unknown>) | null {
+export function rowRekeyer(oldCols: ColumnSpec[], newCols: ColumnSpec[]): ((row: Record<string, unknown>) => Record<string, unknown>) | null {
   if (oldCols.every((c, i) => c.field === newCols[i]?.field)) return null;
   return (row) => {
     const out: Record<string, unknown> = {};
@@ -60,10 +57,7 @@ export interface FieldRename {
  *
  * Returns null when `renames` is empty, so the caller can skip the write.
  */
-export function renameRowFields(
-  data: Record<string, unknown>,
-  renames: readonly FieldRename[],
-): Record<string, unknown> | null {
+export function renameRowFields(data: Record<string, unknown>, renames: readonly FieldRename[]): Record<string, unknown> | null {
   if (renames.length === 0) return null;
   const fromKeys = new Set(renames.map((r) => r.from));
   const out: Record<string, unknown> = {};
@@ -82,11 +76,7 @@ export interface ColumnMergeResult {
   newFields: string[];
 }
 
-export function reconcileColumns(
-  existing: ColumnSpec[],
-  incoming: ColumnSpec[],
-  deleted: readonly string[] = [],
-): ColumnMergeResult {
+export function reconcileColumns(existing: ColumnSpec[], incoming: ColumnSpec[], deleted: readonly string[] = []): ColumnMergeResult {
   const existingFields = new Set(existing.map((c) => c.field));
   const deletedSet = new Set(deleted);
   const columns = [...existing];

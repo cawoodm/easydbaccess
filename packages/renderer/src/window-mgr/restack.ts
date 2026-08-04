@@ -54,10 +54,7 @@ export async function restackAll(): Promise<void> {
 
   const ctx = await getContext();
   for (let attempts = 0; attempts <= 12; attempts++) {
-    const [tables, views] = await Promise.all([
-      ctx.store.tables.find(),
-      ctx.store.viewInstances.find(),
-    ]);
+    const [tables, views] = await Promise.all([ctx.store.tables.find(), ctx.store.viewInstances.find()]);
     const candidates: ZOrderCandidate[] = [
       ...tables
         .filter((t) => t.workspaceId === ctx.workspaceId && !t.windowGeometry?.closed)

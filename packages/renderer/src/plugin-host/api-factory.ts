@@ -1,25 +1,6 @@
-import type {
-  DataStore,
-  EventBus,
-  HostApi,
-  RowCollectionProvider,
-  SettingScope,
-  SettingsApi,
-  Unregister,
-  WindowHandle,
-  WindowManager,
-  WindowSpec,
-} from '@easydb/shared';
+import type { DataStore, EventBus, HostApi, RowCollectionProvider, SettingScope, SettingsApi, Unregister, WindowHandle, WindowManager, WindowSpec } from '@easydb/shared';
 import { createUiRegistry, type Registries } from './registries.js';
-import {
-  hasUserSetting,
-  interpolateSecrets,
-  parseSecrets,
-  readSecretsText,
-  readUserSetting,
-  removeUserSetting,
-  writeUserSetting,
-} from '../db/user-settings.js';
+import { hasUserSetting, interpolateSecrets, parseSecrets, readSecretsText, readUserSetting, removeUserSetting, writeUserSetting } from '../db/user-settings.js';
 import { resolvesToSameSecret } from '../db/secret-guard.js';
 
 export interface ApiFactoryOpts {
@@ -100,10 +81,7 @@ export function createHostApi(opts: ApiFactoryOpts): HostApi {
         });
       },
       async saveFile(filename, body, mimeType) {
-        const blob =
-          typeof body === 'string'
-            ? new Blob([body], { type: mimeType ?? 'application/octet-stream' })
-            : body;
+        const blob = typeof body === 'string' ? new Blob([body], { type: mimeType ?? 'application/octet-stream' }) : body;
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -142,15 +120,12 @@ async function readServerBaseUrl(store: DataStore): Promise<string | null> {
 function createSettingsApi(store: DataStore, registries: Registries): SettingsApi {
   const fullKey = (pluginId: string, key: string) => `${pluginId}:${key}`;
 
-  const fieldOf = (pluginId: string, key: string) =>
-    registries.settings.get(pluginId)?.fields.find((f) => f.key === key);
+  const fieldOf = (pluginId: string, key: string) => registries.settings.get(pluginId)?.fields.find((f) => f.key === key);
 
-  const resolveSecrets = (value: unknown): unknown =>
-    typeof value === 'string' ? interpolateSecrets(value, parseSecrets(readSecretsText())) : value;
+  const resolveSecrets = (value: unknown): unknown => (typeof value === 'string' ? interpolateSecrets(value, parseSecrets(readSecretsText())) : value);
 
   /** The RAW stored value of a key — the reference text, not what it resolves to. */
-  const rawOf = async (k: string): Promise<unknown> =>
-    hasUserSetting(k) ? readUserSetting(k) : (await store.settings.findOne(k))?.value;
+  const rawOf = async (k: string): Promise<unknown> => (hasUserSetting(k) ? readUserSetting(k) : (await store.settings.findOne(k))?.value);
 
   /**
    * Would this write replace a stored `${secret:name}` reference with the secret
@@ -158,8 +133,7 @@ function createSettingsApi(store: DataStore, registries: Registries): SettingsAp
    * gist-sync saving a new gist id alongside the credentials it had just read is
    * how it was found.
    */
-  const isResolvedRefWrite = async (k: string, next: unknown): Promise<boolean> =>
-    resolvesToSameSecret(await rawOf(k), next, parseSecrets(readSecretsText()));
+  const isResolvedRefWrite = async (k: string, next: unknown): Promise<boolean> => resolvesToSameSecret(await rawOf(k), next, parseSecrets(readSecretsText()));
 
   return {
     async get<T = unknown>(pluginId: string, key: string): Promise<T | undefined> {

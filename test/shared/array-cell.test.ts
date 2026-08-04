@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  arrayCellText,
-  arrayMembers,
-  jsonArray,
-  looksLikeArray,
-  looksLikeJsonArray,
-} from '../../packages/shared/src/array-cell.js';
+import { arrayCellText, arrayMembers, jsonArray, looksLikeArray, looksLikeJsonArray } from '../../packages/shared/src/array-cell.js';
 
 /**
  * An `array` column has to read three spellings of the same thing: a comma list

@@ -49,9 +49,7 @@ test('clicking a preview cell opens the raw source, with no way to save', async 
   // The raw Markdown, not the rendered value…
   await expect(panel.locator('textarea')).toHaveValue(MD);
   // …and it cannot be typed into or saved.
-  expect(await panel.locator('textarea').evaluate((el) => (el as HTMLTextAreaElement).readOnly)).toBe(
-    true,
-  );
+  expect(await panel.locator('textarea').evaluate((el) => (el as HTMLTextAreaElement).readOnly)).toBe(true);
   await expect(panel.getByRole('button', { name: 'Save' })).toHaveCount(0);
   // `:text-is` and not the role: the panel's own titlebar button is also "Close".
   await expect(panel.locator('button:text-is("Close")')).toBeVisible();
@@ -96,17 +94,13 @@ test('a read-only table listens to no commit at all', async ({ page }) => {
   // Firing the renderer's own commit event is all a renderer can do, and the
   // grid wires no listener for it here.
   await page.locator(`#${panelDomId(id)} data-table preview-cell`).evaluate((el) => {
-    el.dispatchEvent(
-      new CustomEvent('change', { detail: { value: 'written' }, bubbles: true, composed: true }),
-    );
+    el.dispatchEvent(new CustomEvent('change', { detail: { value: 'written' }, bubbles: true, composed: true }));
   });
 
   expect(await storedNote(page, id)).toBe(before);
 });
 
-test('the core refuses a write to a read-only COLUMN, where a commit does arrive', async ({
-  page,
-}) => {
+test('the core refuses a write to a read-only COLUMN, where a commit does arrive', async ({ page }) => {
   // A scripted column IS wired for commits — that is how the link renderer's
   // pencil edits the value a script reads. Marked read-only (a projection's
   // computed column is), the write must be refused by the core, not by the cell.
@@ -130,9 +124,7 @@ test('the core refuses a write to a read-only COLUMN, where a commit does arrive
   const cell = page.locator(`#${panelDomId(id)} data-table preview-cell`);
   await expect(cell).toBeVisible();
   await cell.evaluate((el) => {
-    el.dispatchEvent(
-      new CustomEvent('change', { detail: { value: 'written' }, bubbles: true, composed: true }),
-    );
+    el.dispatchEvent(new CustomEvent('change', { detail: { value: 'written' }, bubbles: true, composed: true }));
   });
 
   await expect(page.locator('toast-host').getByText(/read-only column/)).toBeVisible();

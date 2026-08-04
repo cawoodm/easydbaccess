@@ -52,11 +52,7 @@ function cellValues(value: unknown, type: string | undefined): string[] {
  * runs past the limit as one string, and would otherwise lose its dropdown
  * exactly when it has enough values to need one.
  */
-export function facetable(
-  rows: readonly HasData[],
-  field: string,
-  opts?: { maxLen?: number; type?: string | undefined },
-): boolean {
+export function facetable(rows: readonly HasData[], field: string, opts?: { maxLen?: number; type?: string | undefined }): boolean {
   const maxLen = opts?.maxLen ?? FACET_MAX_LEN;
   if (rows.length === 0) return false;
   for (const r of rows.slice(0, ELIGIBILITY_SAMPLE)) {
@@ -79,11 +75,7 @@ export function facetable(
  * this field's own, and the list is faceted — picking a value in one column
  * narrows what the others offer, while this column keeps showing its siblings.
  */
-export function facetValues(
-  rows: readonly HasData[],
-  field: string,
-  opts?: { maxLen?: number; maxOptions?: number; type?: string | undefined },
-): string[] {
+export function facetValues(rows: readonly HasData[], field: string, opts?: { maxLen?: number; maxOptions?: number; type?: string | undefined }): string[] {
   const maxLen = opts?.maxLen ?? FACET_MAX_LEN;
   const maxOptions = opts?.maxOptions ?? FACET_MAX_OPTIONS;
   const seen = new Set<string>();
@@ -117,30 +109,19 @@ export interface FacetCount {
  * row count — a row carrying `foo,bar` is one for `foo` AND one for `bar`. A
  * cell with no members at all counts as blank.
  */
-export function facetCounts(
-  rows: readonly HasData[],
-  field: string,
-  opts?: { type?: string | undefined },
-): { values: FacetCount[]; blanks: number } {
+export function facetCounts(rows: readonly HasData[], field: string, opts?: { type?: string | undefined }): { values: FacetCount[]; blanks: number } {
   const counts = new Map<string, number>();
   let blanks = 0;
   for (const r of rows) {
     const v = r.data[field];
-    const values =
-      opts?.type === 'array'
-        ? arrayMembers(v)
-        : v == null || asText(v).trim() === ''
-          ? []
-          : [asText(v)];
+    const values = opts?.type === 'array' ? arrayMembers(v) : v == null || asText(v).trim() === '' ? [] : [asText(v)];
     if (values.length === 0) {
       blanks++;
       continue;
     }
     for (const s of values) counts.set(s, (counts.get(s) ?? 0) + 1);
   }
-  let values = [...counts.entries()]
-    .map(([value, count]) => ({ value, count }))
-    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+  let values = [...counts.entries()].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
   if (opts?.type === 'boolean') {
     const domain = ['true', 'false'].map((value) => ({ value, count: counts.get(value) ?? 0 }));
     values = [...domain, ...values.filter((v) => v.value !== 'true' && v.value !== 'false')];

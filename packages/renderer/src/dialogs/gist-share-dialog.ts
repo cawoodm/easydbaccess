@@ -150,30 +150,12 @@ export class GistShareDialog extends LitElement {
             </div>
           </div>
           <div class="dialog-body">
-            <a
-              class="link-preview"
-              href=${this.link}
-              target="_blank"
-              rel="noopener noreferrer"
-              title=${this.link}
-              >${this.link}</a
-            >
+            <a class="link-preview" href=${this.link} target="_blank" rel="noopener noreferrer" title=${this.link}>${this.link}</a>
             <div class="link-row">
-              <input
-                class="link"
-                type="text"
-                readonly
-                .value=${this.link}
-                @focus=${this.onFocusInput}
-              />
-              <button type="button" class="ghost copy" @click=${() => void this.copy()}>
-                ${this.copyLabel}
-              </button>
+              <input class="link" type="text" readonly .value=${this.link} @focus=${this.onFocusInput} />
+              <button type="button" class="ghost copy" @click=${() => void this.copy()}>${this.copyLabel}</button>
             </div>
-            <p class="caution">
-              ⚠ This link contains your GitHub token — anyone you send it to can read and modify
-              your gists. Only share it with people you trust.
-            </p>
+            <p class="caution">⚠ This link contains your GitHub token — anyone you send it to can read and modify your gists. Only share it with people you trust.</p>
           </div>
         </form>
       </dialog>

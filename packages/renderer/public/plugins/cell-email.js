@@ -16,8 +16,7 @@ export const meta = {
   name: 'Email Renderer',
   type: 'cell-renderer',
   version: '0.1.0',
-  description:
-    'Renders email-shaped values as mailto: links. Apply by setting a column\'s renderer to "email".',
+  description: 'Renders email-shaped values as mailto: links. Apply by setting a column\'s renderer to "email".',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22 6 12 13 2 6"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/public/plugins/cell-email.js',
@@ -65,15 +64,13 @@ class CellEmail extends HTMLElement {
       a.href = `mailto:${email}`;
       a.textContent = email;
       a.title = `Email ${email}`;
-      a.style.cssText =
-        'color:#2563eb;text-decoration:underline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      a.style.cssText = 'color:#2563eb;text-decoration:underline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
 
       const edit = document.createElement('button');
       edit.type = 'button';
       edit.title = 'Edit';
       edit.textContent = '✎';
-      edit.style.cssText =
-        'background:transparent;border:0;cursor:pointer;color:#9ca3af;font-size:0.85em;padding:0 0.15rem;line-height:1';
+      edit.style.cssText = 'background:transparent;border:0;cursor:pointer;color:#9ca3af;font-size:0.85em;padding:0 0.15rem;line-height:1';
       edit.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -88,8 +85,7 @@ class CellEmail extends HTMLElement {
       input.type = 'text';
       input.placeholder = 'email address';
       input.value = v;
-      input.style.cssText =
-        'width:100%;box-sizing:border-box;border:0;background:transparent;font:inherit;padding:0';
+      input.style.cssText = 'width:100%;box-sizing:border-box;border:0;background:transparent;font:inherit;padding:0';
       input.addEventListener('change', () => this.commit(input.value));
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
@@ -113,9 +109,7 @@ class CellEmail extends HTMLElement {
   commit(v) {
     this._value = v;
     this._editing = false;
-    this.dispatchEvent(
-      new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }),
-    );
+    this.dispatchEvent(new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }));
   }
 }
 

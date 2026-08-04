@@ -6,9 +6,7 @@ import { createTable, panelDomId, waitForPanel } from './helpers.js';
  * metadata (Datasette description / source / license / about). Clicking it opens
  * a read-only info dialog. The button is hidden when there's no such metadata.
  */
-test('the (i) info button appears with table metadata and opens the info dialog', async ({
-  page,
-}) => {
+test('the (i) info button appears with table metadata and opens the info dialog', async ({ page }) => {
   const id = await createTable(page, 'Attractions', [{ field: 'name' }]);
   await waitForPanel(page, id);
 
@@ -39,9 +37,6 @@ test('the (i) info button appears with table metadata and opens the info dialog'
   const dlg = page.locator('table-info-dialog dialog');
   await expect(dlg).toBeVisible();
   await expect(dlg).toContainText('Roadside attractions of note.');
-  await expect(dlg.locator('a', { hasText: 'ACME Data' })).toHaveAttribute(
-    'href',
-    'https://acme.example/data',
-  );
+  await expect(dlg.locator('a', { hasText: 'ACME Data' })).toHaveAttribute('href', 'https://acme.example/data');
   await expect(dlg).toContainText('ODbL');
 });

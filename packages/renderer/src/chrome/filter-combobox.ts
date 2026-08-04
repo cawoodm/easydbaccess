@@ -290,36 +290,11 @@ export class FilterCombobox extends LitElement {
           @input=${this.onInput}
           @keydown=${this.onKeyDown}
         />
-        ${this.value
-          ? html`<button
-              type="button"
-              class="clear"
-              title="Clear filter"
-              tabindex="-1"
-              @mousedown=${(e: Event) => e.preventDefault()}
-              @click=${this.onClear}
-            >
-              ×
-            </button>`
-          : nothing}
+        ${this.value ? html`<button type="button" class="clear" title="Clear filter" tabindex="-1" @mousedown=${(e: Event) => e.preventDefault()} @click=${this.onClear}>×</button>` : nothing}
       </div>
       ${showDropdown
-        ? html`<ul
-            class="dropdown"
-            style=${style}
-            @mousedown=${(e: Event) => e.preventDefault()}
-          >
-            ${opts.map(
-              (v, i) => html`
-                <li
-                  class=${i === this.highlightIdx ? 'highlighted' : ''}
-                  @mousedown=${(e: Event) => e.preventDefault()}
-                  @click=${() => this.onPick(v)}
-                >
-                  ${v}
-                </li>
-              `,
-            )}
+        ? html`<ul class="dropdown" style=${style} @mousedown=${(e: Event) => e.preventDefault()}>
+            ${opts.map((v, i) => html` <li class=${i === this.highlightIdx ? 'highlighted' : ''} @mousedown=${(e: Event) => e.preventDefault()} @click=${() => this.onPick(v)}>${v}</li> `)}
           </ul>`
         : nothing}
     `;

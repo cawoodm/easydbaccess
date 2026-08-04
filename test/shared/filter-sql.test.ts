@@ -20,23 +20,7 @@ import { matchesColumnFilter } from '../../packages/shared/src/column-filter.js'
 const { DatabaseSync } = require('node:sqlite') as { DatabaseSync: typeof DatabaseSyncType };
 
 /** The awkward cases: nulls, blanks, mixed case, punctuation, SQL wildcards. */
-const VALUES: Array<string | null> = [
-  'Sweden',
-  'sweden',
-  'Norway',
-  'Switzerland',
-  'Berlin, DE',
-  'Closed',
-  'Cancelled',
-  'Open',
-  'urgent Open',
-  '100%',
-  'under_score',
-  'null',
-  '',
-  '   ',
-  null,
-];
+const VALUES: Array<string | null> = ['Sweden', 'sweden', 'Norway', 'Switzerland', 'Berlin, DE', 'Closed', 'Cancelled', 'Open', 'urgent Open', '100%', 'under_score', 'null', '', '   ', null];
 
 let dir: string;
 let db: DatabaseSyncType;
@@ -112,7 +96,7 @@ describe('columnFilterToSql agrees with the in-memory matcher', () => {
     expect(frag.params).toEqual(["%o'brien%"]);
   });
 
-  it("treats SQL wildcards in a term as literal text", () => {
+  it('treats SQL wildcards in a term as literal text', () => {
     // `100%` must find the value "100%", not "everything starting 100".
     expect(viaSql('100%')).toEqual(['100%']);
     expect(viaSql('under_score')).toEqual(['under_score']);

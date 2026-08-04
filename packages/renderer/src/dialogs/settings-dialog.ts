@@ -6,12 +6,7 @@ import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
-import {
-  parseSecrets,
-  readSecretsText,
-  readUserSetting,
-  writeSecretsText,
-} from '../db/user-settings.js';
+import { parseSecrets, readSecretsText, readUserSetting, writeSecretsText } from '../db/user-settings.js';
 
 const GENERAL = '__general__';
 
@@ -441,10 +436,7 @@ export class SettingsDialog extends LitElement {
     const v = this.values[k];
     switch (f.type) {
       case 'text':
-        return html`<textarea
-          .value=${String(v ?? '')}
-          @change=${(e: Event) => this.setValue(tab, f, (e.target as HTMLTextAreaElement).value)}
-        ></textarea>`;
+        return html`<textarea .value=${String(v ?? '')} @change=${(e: Event) => this.setValue(tab, f, (e.target as HTMLTextAreaElement).value)}></textarea>`;
       case 'number':
         return html`<input
           type="number"
@@ -455,60 +447,37 @@ export class SettingsDialog extends LitElement {
           }}
         />`;
       case 'boolean':
-        return html`<label class="scope"
-          ><input
-            type="checkbox"
-            .checked=${Boolean(v)}
-            @change=${(e: Event) => this.setValue(tab, f, (e.target as HTMLInputElement).checked)}
-          />
-          enabled</label
-        >`;
+        return html`<label class="scope"><input type="checkbox" .checked=${Boolean(v)} @change=${(e: Event) => this.setValue(tab, f, (e.target as HTMLInputElement).checked)} /> enabled</label>`;
       case 'date':
-        return html`<input
-          type="date"
-          .value=${String(v ?? '')}
-          @change=${(e: Event) => this.setValue(tab, f, (e.target as HTMLInputElement).value)}
-        />`;
+        return html`<input type="date" .value=${String(v ?? '')} @change=${(e: Event) => this.setValue(tab, f, (e.target as HTMLInputElement).value)} />`;
       case 'secret':
         return this.renderSecretControl(tab, f, v);
       case 'option':
         return html`<div class="radios">
-          ${(f.options ?? []).map(
-            (opt) => html`<label
-              ><input
-                type="radio"
-                name=${k}
-                .checked=${v === opt}
-                @change=${() => this.setValue(tab, f, opt)}
-              />${opt}</label
-            >`,
-          )}
+          ${(f.options ?? []).map((opt) => html`<label><input type="radio" name=${k} .checked=${v === opt} @change=${() => this.setValue(tab, f, opt)} />${opt}</label>`)}
         </div>`;
       case 'selection': {
         const arr = Array.isArray(v) ? (v as string[]) : [];
         return html`<div class="checks">
           ${(f.options ?? []).map(
-            (opt) => html`<label
-              ><input
-                type="checkbox"
-                .checked=${arr.includes(opt)}
-                @change=${(e: Event) => {
-                  const on = (e.target as HTMLInputElement).checked;
-                  const next = on ? [...arr, opt] : arr.filter((x) => x !== opt);
-                  this.setValue(tab, f, next);
-                }}
-              />${opt}</label
-            >`,
+            (opt) =>
+              html`<label
+                ><input
+                  type="checkbox"
+                  .checked=${arr.includes(opt)}
+                  @change=${(e: Event) => {
+                    const on = (e.target as HTMLInputElement).checked;
+                    const next = on ? [...arr, opt] : arr.filter((x) => x !== opt);
+                    this.setValue(tab, f, next);
+                  }}
+                />${opt}</label
+              >`,
           )}
         </div>`;
       }
       case 'string':
       default:
-        return html`<input
-          type="text"
-          .value=${String(v ?? '')}
-          @change=${(e: Event) => this.setValue(tab, f, (e.target as HTMLInputElement).value)}
-        />`;
+        return html`<input type="text" .value=${String(v ?? '')} @change=${(e: Event) => this.setValue(tab, f, (e.target as HTMLInputElement).value)} />`;
     }
   }
 
@@ -561,26 +530,16 @@ export class SettingsDialog extends LitElement {
             </button>`
           : nothing}
         <label class="scope" title="Store on this device only (not synced)">
-          <input
-            type="checkbox"
-            .checked=${this.placements[k] === 'user'}
-            @change=${(e: Event) => this.toggleScope(tab, f, (e.target as HTMLInputElement).checked)}
-          />
+          <input type="checkbox" .checked=${this.placements[k] === 'user'} @change=${(e: Event) => this.toggleScope(tab, f, (e.target as HTMLInputElement).checked)} />
           user
         </label>
       </div>
       ${hasHelp && helpOpen
         ? html`<div class="help-panel">
-            ${f.help ? html`<p>${f.help}</p>` : nothing}
-            ${f.helpUrl
-              ? html`<a href=${f.helpUrl} target="_blank" rel="noopener noreferrer"
-                  >${f.helpLinkLabel || hostOf(f.helpUrl)}</a
-                >`
-              : nothing}
+            ${f.help ? html`<p>${f.help}</p>` : nothing} ${f.helpUrl ? html`<a href=${f.helpUrl} target="_blank" rel="noopener noreferrer">${f.helpLinkLabel || hostOf(f.helpUrl)}</a>` : nothing}
           </div>`
         : nothing}
-      ${this.renderControl(tab, f)}
-      ${f.description ? html`<p class="desc">${f.description}</p>` : nothing}
+      ${this.renderControl(tab, f)} ${f.description ? html`<p class="desc">${f.description}</p>` : nothing}
     </div>`;
   }
 
@@ -593,37 +552,18 @@ export class SettingsDialog extends LitElement {
       </p>
       <div class="field">
         <div class="field-head"><label>Workspace title</label></div>
-        <p class="desc">
-          Shown in the header instead of "easyDBAccess". Leave blank to use the default.
-        </p>
-        <input
-          type="text"
-          placeholder="easyDBAccess"
-          .value=${this.workspaceTitle}
-          @change=${(e: Event) => this.setWorkspaceTitle((e.target as HTMLInputElement).value)}
-        />
+        <p class="desc">Shown in the header instead of "easyDBAccess". Leave blank to use the default.</p>
+        <input type="text" placeholder="easyDBAccess" .value=${this.workspaceTitle} @change=${(e: Event) => this.setWorkspaceTitle((e.target as HTMLInputElement).value)} />
       </div>
       <div class="field">
         <div class="field-head"><label>Secrets</label></div>
         <p class="desc">
-          Cross-workspace, device-local. One <code>name: value</code> per line.
-          Reference a secret from any field with <code>\${secret:name}</code>.
-          Drag a <code>secrets.txt</code> onto the app to re-import.
+          Cross-workspace, device-local. One <code>name: value</code> per line. Reference a secret from any field with <code>\${secret:name}</code>. Drag a <code>secrets.txt</code> onto the app to
+          re-import.
         </p>
-        <textarea
-          placeholder="githubPAT: ghp_…"
-          .value=${this.secretsText}
-          @input=${this.onSecretsInput}
-        ></textarea>
+        <textarea placeholder="githubPAT: ghp_…" .value=${this.secretsText} @input=${this.onSecretsInput}></textarea>
         <div class="secrets-actions">
-          <button
-            type="button"
-            class="ghost"
-            ?disabled=${this.secretsText.trim().length === 0}
-            @click=${this.downloadSecrets}
-          >
-            <span class="mi sm">download</span> Download secrets.txt
-          </button>
+          <button type="button" class="ghost" ?disabled=${this.secretsText.trim().length === 0} @click=${this.downloadSecrets}><span class="mi sm">download</span> Download secrets.txt</button>
         </div>
       </div>
     `;
@@ -635,9 +575,7 @@ export class SettingsDialog extends LitElement {
     if (!tab) return nothing;
     return html`
       <h3>${tab.name}</h3>
-      ${tab.fields.length === 0
-        ? html`<p class="empty">This plugin registered no settings.</p>`
-        : tab.fields.map((f) => this.renderField(tab, f))}
+      ${tab.fields.length === 0 ? html`<p class="empty">This plugin registered no settings.</p>` : tab.fields.map((f) => this.renderField(tab, f))}
     `;
   }
 
@@ -654,28 +592,12 @@ export class SettingsDialog extends LitElement {
               <button type="submit" class="primary">Done</button>
             </div>
           </div>
-          ${this.secretError
-            ? html`<div class="secret-error" role="alert">${this.secretError}</div>`
-            : nothing}
+          ${this.secretError ? html`<div class="secret-error" role="alert">${this.secretError}</div>` : nothing}
           <div class="dialog-body">
             <div class="layout">
               <nav class="tabs">
-                <button
-                  type="button"
-                  class=${this.active === GENERAL ? 'active' : ''}
-                  @click=${() => (this.active = GENERAL)}
-                >
-                  General
-                </button>
-                ${this.tabs.map(
-                  (t) => html`<button
-                    type="button"
-                    class=${this.active === t.id ? 'active' : ''}
-                    @click=${() => (this.active = t.id)}
-                  >
-                    ${t.name}
-                  </button>`,
-                )}
+                <button type="button" class=${this.active === GENERAL ? 'active' : ''} @click=${() => (this.active = GENERAL)}>General</button>
+                ${this.tabs.map((t) => html`<button type="button" class=${this.active === t.id ? 'active' : ''} @click=${() => (this.active = t.id)}>${t.name}</button>`)}
               </nav>
               <section class="panel">${this.renderPanel()}</section>
             </div>

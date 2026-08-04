@@ -25,8 +25,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   name: 'Connect',
   type: 'ui',
   version: '0.1.0',
-  description:
-    'Header Connect button listing every registered live-backend connector. Chrome only — it knows no backend.',
+  description: 'Header Connect button listing every registered live-backend connector. Chrome only — it knows no backend.',
   author: 'Marc Cawood',
   icon: CONNECT_ICON_SVG,
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/connect-menu.ts',
@@ -54,9 +53,7 @@ export function init(api: HostApi): void {
 /** Registered connectors, lowest `order` first. */
 async function connectors(): Promise<ConnectorSpec[]> {
   const { registries } = await getContext();
-  return [...registries.connectors].sort(
-    (x, y) => (x.order ?? Number.MAX_SAFE_INTEGER) - (y.order ?? Number.MAX_SAFE_INTEGER),
-  );
+  return [...registries.connectors].sort((x, y) => (x.order ?? Number.MAX_SAFE_INTEGER) - (y.order ?? Number.MAX_SAFE_INTEGER));
 }
 
 /**
@@ -69,10 +66,7 @@ async function openConnect(api: HostApi, anchor?: HTMLElement): Promise<void> {
   const specs = await connectors();
 
   if (specs.length === 0) {
-    await api.ui.dialogs.alert(
-      'No backends are installed to connect to. Install a connector plugin from the Plugin Manager first.',
-      'Connect',
-    );
+    await api.ui.dialogs.alert('No backends are installed to connect to. Install a connector plugin from the Plugin Manager first.', 'Connect');
     return;
   }
 
@@ -100,9 +94,6 @@ async function openConnect(api: HostApi, anchor?: HTMLElement): Promise<void> {
   try {
     await chosen.connect(api);
   } catch (err) {
-    await api.ui.dialogs.alert(
-      (err as Error)?.message ?? String(err),
-      `Connect ${chosen.label} failed`,
-    );
+    await api.ui.dialogs.alert((err as Error)?.message ?? String(err), `Connect ${chosen.label} failed`);
   }
 }

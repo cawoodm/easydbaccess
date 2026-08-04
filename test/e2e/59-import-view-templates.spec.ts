@@ -34,18 +34,13 @@ function templatesNamed(page: import('@playwright/test').Page, ws: string, name:
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__easydb.store;
       const all = await store.viewTemplates.find({ workspaceId: ws });
-      return (all as Array<{ id: string; name: string; rowHtml: string }>)
-        .filter((t) => t.name === name)
-        .map((t) => ({ id: t.id, rowHtml: t.rowHtml }));
+      return (all as Array<{ id: string; name: string; rowHtml: string }>).filter((t) => t.name === name).map((t) => ({ id: t.id, rowHtml: t.rowHtml }));
     },
     { ws, name },
   );
 }
 
-test('a dump overwrites the same-named view template instead of duplicating it', async ({
-  page,
-  workspaceId,
-}) => {
+test('a dump overwrites the same-named view template instead of duplicating it', async ({ page, workspaceId }) => {
   // The views plugin seeds the built-ins asynchronously on boot.
   await expect.poll(async () => (await templatesNamed(page, workspaceId, 'Gallery')).length).toBe(1);
   const before = await templatesNamed(page, workspaceId, 'Gallery');
@@ -96,9 +91,7 @@ test('a dump overwrites the same-named view template instead of duplicating it',
   // One table, no name collision → the import runs without a mode prompt.
   await dropFile(page, 'other.db.json', dump);
 
-  await expect
-    .poll(async () => (await templatesNamed(page, workspaceId, 'Gallery')).length)
-    .toBe(1);
+  await expect.poll(async () => (await templatesNamed(page, workspaceId, 'Gallery')).length).toBe(1);
   const after = await templatesNamed(page, workspaceId, 'Gallery');
   expect(after[0]!.id).toBe(localId); // kept the LOCAL id
   expect(after[0]!.rowHtml).toContain('imported'); // took the dump's HTML

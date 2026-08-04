@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  parseCsv,
-  parseCsvRaw,
-  dedupeFields,
-  readCsvHead,
-  separatorForName,
-  stripDelimitedExt,
-} from '../../../packages/renderer/src/plugins/csv-import.js';
+import { parseCsv, parseCsvRaw, dedupeFields, readCsvHead, separatorForName, stripDelimitedExt } from '../../../packages/renderer/src/plugins/csv-import.js';
 
 describe('dedupeFields', () => {
   it('suffixes repeats in first-seen order, leaving the first untouched', () => {

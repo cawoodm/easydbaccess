@@ -59,13 +59,10 @@ async function makeFilterView(page: import('@playwright/test').Page): Promise<st
   return tableId;
 }
 
-const chips = (page: import('@playwright/test').Page) =>
-  page.locator('view-window .eda-pill-chip');
+const chips = (page: import('@playwright/test').Page) => page.locator('view-window .eda-pill-chip');
 /** The tri-state value checklist — the grid's funnel popover, portaled to body. */
-const checklist = (page: import('@playwright/test').Page) =>
-  page.locator('filter-popover:not([hidden])');
-const option = (page: import('@playwright/test').Page, value: string) =>
-  checklist(page).locator('li', { hasText: value });
+const checklist = (page: import('@playwright/test').Page) => page.locator('filter-popover:not([hidden])');
+const option = (page: import('@playwright/test').Page, value: string) => checklist(page).locator('li', { hasText: value });
 
 test('the chips ride in the same bar as the sort controls', async ({ page }) => {
   await makeFilterView(page);

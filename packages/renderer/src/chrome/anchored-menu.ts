@@ -145,11 +145,7 @@ export class AnchoredMenu extends LitElement {
       <div class="menu" role="menu">
         ${this.items.map(
           (it) => html`
-            <button
-              role="menuitem"
-              class=${it.danger ? 'danger' : ''}
-              @click=${() => this.finish(it.id)}
-            >
+            <button role="menuitem" class=${it.danger ? 'danger' : ''} @click=${() => this.finish(it.id)}>
               ${it.icon ? html`<span class="mi">${it.icon}</span>` : ''}
               <span>${it.label}</span>
             </button>

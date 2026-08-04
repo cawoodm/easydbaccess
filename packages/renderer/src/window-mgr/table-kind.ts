@@ -63,8 +63,7 @@ export function panelColor(t: Pick<Table, 'source' | 'origin'>): string {
 /** Shared attributes for every titlebar icon — matches the style of plugin
  * `meta.icon` strings (dump-export.ts, cell-boolean.ts, views.ts), sized to
  * sit comfortably in a panel titlebar (~14–16px). */
-const ICON_ATTRS =
-  'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15" role="img"';
+const ICON_ATTRS = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15" role="img"';
 
 /**
  * Inline SVGs shown at the far left of a table's panel titlebar, one per

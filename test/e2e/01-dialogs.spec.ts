@@ -93,9 +93,7 @@ test.describe('dialogs', () => {
     expect(await cancelResult).toBeNull();
   });
 
-  test('choice defaults to the first option: primary style, focused, Enter submits', async ({
-    page,
-  }) => {
+  test('choice defaults to the first option: primary style, focused, Enter submits', async ({ page }) => {
     const dialog = page.locator('host-dialogs');
 
     const enterResult = page.evaluate(() => {

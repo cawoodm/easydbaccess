@@ -496,9 +496,7 @@ export class PluginManagerDialog extends LitElement {
     this.records = new Map(recs.map((r) => [r.url, r]));
 
     const saved = await ctx.store.settings.findOne(CATALOG_URLS_SETTING);
-    const savedList = Array.isArray(saved?.value)
-      ? (saved.value as unknown[]).filter((v): v is string => typeof v === 'string')
-      : [];
+    const savedList = Array.isArray(saved?.value) ? (saved.value as unknown[]).filter((v): v is string => typeof v === 'string') : [];
     this.catalogUrls = savedList.length > 0 ? savedList : [defaultCatalogUrl()];
     this.activeCatalogUrl = this.catalogUrls[0] ?? defaultCatalogUrl();
 
@@ -617,9 +615,7 @@ export class PluginManagerDialog extends LitElement {
       ...(rec ?? { url, lastFetched: 0 }),
       enabled,
     });
-    this.records = new Map(
-      this.records.set(url, { ...rec!, url, enabled, lastFetched: rec?.lastFetched ?? 0 }),
-    );
+    this.records = new Map(this.records.set(url, { ...rec!, url, enabled, lastFetched: rec?.lastFetched ?? 0 }));
   }
 
   private async removePlugin(url: string) {
@@ -645,9 +641,7 @@ export class PluginManagerDialog extends LitElement {
       enabled,
       lastFetched: rec?.lastFetched ?? 0,
     });
-    this.records = new Map(
-      this.records.set(key, { ...rec!, url: key, enabled, lastFetched: rec?.lastFetched ?? 0 }),
-    );
+    this.records = new Map(this.records.set(key, { ...rec!, url: key, enabled, lastFetched: rec?.lastFetched ?? 0 }));
   }
 
   /** Dispatches an enable/disable toggle to the right store slot and hints that a reload is needed. */
@@ -735,13 +729,7 @@ export class PluginManagerDialog extends LitElement {
    * One tri-state filter chip. Every filter row uses this — category, status,
    * and type all behave identically, so they must also look identical.
    */
-  private renderTri(
-    label: string,
-    state: FilterState | undefined,
-    onClick: () => void,
-    extraClass = '',
-    titles?: { off: string; on: string; not: string },
-  ) {
+  private renderTri(label: string, state: FilterState | undefined, onClick: () => void, extraClass = '', titles?: { off: string; on: string; not: string }) {
     const title = titles
       ? titles[state ?? 'off']
       : state === 'on'
@@ -750,13 +738,7 @@ export class PluginManagerDialog extends LitElement {
           ? `Hiding ${label} plugins — click to clear`
           : `Filter by ${label} — click: show only → exclude → off`;
     return html`
-      <button
-        type="button"
-        class=${`tri${extraClass ? ` ${extraClass}` : ''}${state ? ` ${state}` : ''}`}
-        title=${title}
-        aria-pressed=${state !== undefined}
-        @click=${onClick}
-      >
+      <button type="button" class=${`tri${extraClass ? ` ${extraClass}` : ''}${state ? ` ${state}` : ''}`} title=${title} aria-pressed=${state !== undefined} @click=${onClick}>
         <span class="tri-mark">${state === 'on' ? '✓' : state === 'not' ? '≠' : ''}</span>${label}
       </button>
     `;
@@ -784,8 +766,7 @@ export class PluginManagerDialog extends LitElement {
 
   /** Cycle the status filter: any → enabled only → disabled only → any. */
   private cycleStatusFilter(): void {
-    this.statusFilter =
-      this.statusFilter === undefined ? 'on' : this.statusFilter === 'on' ? 'not' : undefined;
+    this.statusFilter = this.statusFilter === undefined ? 'on' : this.statusFilter === 'on' ? 'not' : undefined;
   }
 
   /**
@@ -805,9 +786,7 @@ export class PluginManagerDialog extends LitElement {
       const skipped = !meta.fixed && SAFE_MODE === 'all-optional';
       // Built-ins ship with the app and are active in the workspace, so they
       // count as "installed" too — that's what the Installed filter should show.
-      const categories: Category[] = meta.fixed
-        ? ['built-in', 'fixed', 'installed']
-        : ['built-in', 'installed'];
+      const categories: Category[] = meta.fixed ? ['built-in', 'fixed', 'installed'] : ['built-in', 'installed'];
       rows.set(`builtin:${id}`, {
         id,
         name: meta.name,
@@ -842,9 +821,7 @@ export class PluginManagerDialog extends LitElement {
         ...(entry.repo ? { repo: entry.repo } : {}),
         ...(entry.author ? { author: entry.author } : {}),
         meta: entry.description ?? entry.absUrl,
-        categories: existing
-          ? new Set([...existing.categories, ...categories])
-          : new Set(categories),
+        categories: existing ? new Set([...existing.categories, ...categories]) : new Set(categories),
         enabled: entryEnabled,
         // Only rows that can actually be toggled (i.e. installed) get a
         // status — a catalog entry that's merely "available" has none, so
@@ -901,8 +878,7 @@ export class PluginManagerDialog extends LitElement {
       (state === 'on' ? typeInclude : typeExclude).push(type);
     }
     // The one status chip asks for a specific status, in both of its states.
-    const wantStatus: PluginStatus | undefined =
-      this.statusFilter === 'on' ? 'enabled' : this.statusFilter === 'not' ? 'disabled' : undefined;
+    const wantStatus: PluginStatus | undefined = this.statusFilter === 'on' ? 'enabled' : this.statusFilter === 'not' ? 'disabled' : undefined;
     const byFilter = rows.filter((r) => {
       // Fixed plugins used to be hidden unless the "Fixed" chip was on. That
       // made every other filter lie: "Enabled" hid Settings (the plugin that
@@ -924,9 +900,7 @@ export class PluginManagerDialog extends LitElement {
       return true;
     });
     if (!term) return byFilter;
-    return byFilter.filter((r) =>
-      [r.id, r.name, r.type, r.meta, r.author].some((f) => f?.toLowerCase().includes(term)),
-    );
+    return byFilter.filter((r) => [r.id, r.name, r.type, r.meta, r.author].some((f) => f?.toLowerCase().includes(term)));
   }
 
   private renderRow(row: PluginRow) {
@@ -934,79 +908,33 @@ export class PluginManagerDialog extends LitElement {
     const canUninstall = !!row.url && row.categories.has('installed');
     const canInstall = !!row.url && !row.categories.has('installed');
     return html`
-      <div
-        class=${`row${row.categories.has('built-in') ? ' builtin' : ''}${
-          row.metaIsError ? ' error' : ''
-        }${row.skipped ? ' skipped' : ''}`}
-      >
+      <div class=${`row${row.categories.has('built-in') ? ' builtin' : ''}${row.metaIsError ? ' error' : ''}${row.skipped ? ' skipped' : ''}`}>
         <span class="row-icon">${row.icon ? unsafeHTML(row.icon) : FALLBACK_ICON}</span>
         <div class="row-main">
           <div class=${`row-title${row.urlOnly ? ' mono' : ''}`}>
-            ${row.name}${row.id !== row.name
-              ? html`<span class="row-id">${row.id}</span>`
-              : ''}${row.type
-              ? html`<span class="row-type" title="Plugin type"
-                  >${TYPE_LABEL.get(row.type) ?? row.type}</span
-                >`
-              : ''}${row.skipped
-              ? html`<span
-                  class="row-skipped"
-                  title="Safe mode kept this plugin from loading this session — your saved setting is unchanged"
-                  >skipped</span
-                >`
-              : ''}
+            ${row.name}${row.id !== row.name ? html`<span class="row-id">${row.id}</span>` : ''}${row.type
+              ? html`<span class="row-type" title="Plugin type">${TYPE_LABEL.get(row.type) ?? row.type}</span>`
+              : ''}${row.skipped ? html`<span class="row-skipped" title="Safe mode kept this plugin from loading this session — your saved setting is unchanged">skipped</span>` : ''}
           </div>
-          ${row.meta
-            ? html`<div class=${`meta${row.metaIsError ? ' err' : ''}`}>${row.meta}</div>`
-            : ''}
+          ${row.meta ? html`<div class=${`meta${row.metaIsError ? ' err' : ''}`}>${row.meta}</div>` : ''}
         </div>
         <div class="row-author">${row.author ?? ''}</div>
-        ${row.repo
-          ? html`<a
-              class="row-repo"
-              href=${row.repo}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="View source on GitHub"
-              >${unsafeHTML(GITHUB_ICON_SVG)}</a
-            >`
-          : html`<span></span>`}
+        ${row.repo ? html`<a class="row-repo" href=${row.repo} target="_blank" rel="noopener noreferrer" title="View source on GitHub">${unsafeHTML(GITHUB_ICON_SVG)}</a>` : html`<span></span>`}
         ${row.fixed
           ? html`<span class="mi sm lock-icon" title="Always on — cannot be disabled">lock</span>`
           : showToggle
-            ? html`<label
-                class="switch"
-                title=${row.skipped
-                  ? 'Your saved setting — safe mode is what stopped this plugin loading now'
-                  : 'Enable / disable'}
-              >
-                <input
-                  type="checkbox"
-                  .checked=${row.enabled}
-                  @change=${(e: Event) =>
-                    this.onRowToggle(row, (e.target as HTMLInputElement).checked)}
-                />
+            ? html`<label class="switch" title=${row.skipped ? 'Your saved setting — safe mode is what stopped this plugin loading now' : 'Enable / disable'}>
+                <input type="checkbox" .checked=${row.enabled} @change=${(e: Event) => this.onRowToggle(row, (e.target as HTMLInputElement).checked)} />
                 <span class="slider"></span>
               </label>`
             : html`<span></span>`}
         ${canInstall
-          ? html`<button
-              type="button"
-              class="install"
-              ?disabled=${row.installing}
-              @click=${() => this.installFromCatalog({ absUrl: row.url!, name: row.name })}
-            >
+          ? html`<button type="button" class="install" ?disabled=${row.installing} @click=${() => this.installFromCatalog({ absUrl: row.url!, name: row.name })}>
               <span class="mi sm">${row.installing ? 'hourglass_empty' : 'download'}</span>
               ${row.installing ? 'Installing…' : 'Install'}
             </button>`
           : canUninstall
-            ? html`<button
-                type="button"
-                class="uninstall"
-                @click=${() => this.removePlugin(row.url!)}
-              >
-                <span class="mi sm">delete</span> Uninstall
-              </button>`
+            ? html`<button type="button" class="uninstall" @click=${() => this.removePlugin(row.url!)}><span class="mi sm">delete</span> Uninstall</button>`
             : html`<span></span>`}
       </div>
     `;
@@ -1024,57 +952,35 @@ export class PluginManagerDialog extends LitElement {
             <h2>Plugins</h2>
             <div class="header-actions">
               <button type="button" class="ghost" @click=${this.close}>Close</button>
-              <button type="button" class="primary" @click=${this.reload}>
-                <span class="mi sm">refresh</span> Reload to apply
-              </button>
+              <button type="button" class="primary" @click=${this.reload}><span class="mi sm">refresh</span> Reload to apply</button>
             </div>
           </div>
           <div class="dialog-body">
-            <p class="hint">
-              Plugins are JavaScript modules loaded by URL into this workspace. Enable/disable
-              changes take effect after reload; installing a plugin activates it immediately.
-            </p>
+            <p class="hint">Plugins are JavaScript modules loaded by URL into this workspace. Enable/disable changes take effect after reload; installing a plugin activates it immediately.</p>
             ${SAFE_MODE !== 'off'
               ? html`<p class="safemode">
                   <strong>Safe mode is on.</strong>
                   ${SAFE_MODE === 'all-optional'
-                    ? html`<code>?safemode</code> skipped every URL plugin and every optional
-                        built-in for this session.`
+                    ? html`<code>?safemode</code> skipped every URL plugin and every optional built-in for this session.`
                     : html`<code>?safemode1</code> skipped every URL plugin for this session.`}
-                  Plugins marked <span class="row-skipped">skipped</span> are not running. The
-                  toggles below still show — and change — your saved settings, which safe mode never
-                  touches. Reload without the flag to run them again.
+                  Plugins marked <span class="row-skipped">skipped</span> are not running. The toggles below still show — and change — your saved settings, which safe mode never touches. Reload
+                  without the flag to run them again.
                 </p>`
               : ''}
 
             <div class="filters">
               <div class="chips">
-                ${FILTER_LABELS.map(([cat, label]) =>
-                  this.renderTri(label, this.filterStates.get(cat), () => this.cycleFilter(cat)),
-                )}
-                ${this.renderTri(
-                  'Enabled',
-                  this.statusFilter,
-                  () => this.cycleStatusFilter(),
-                  'status',
-                  STATUS_TITLES,
-                )}
+                ${FILTER_LABELS.map(([cat, label]) => this.renderTri(label, this.filterStates.get(cat), () => this.cycleFilter(cat)))}
+                ${this.renderTri('Enabled', this.statusFilter, () => this.cycleStatusFilter(), 'status', STATUS_TITLES)}
               </div>
               <div class="search">
-                <input
-                  type="text"
-                  placeholder="Search plugins…"
-                  .value=${this.search}
-                  @input=${(e: Event) => (this.search = (e.target as HTMLInputElement).value)}
-                />
+                <input type="text" placeholder="Search plugins…" .value=${this.search} @input=${(e: Event) => (this.search = (e.target as HTMLInputElement).value)} />
               </div>
             </div>
 
             <div class="type-filters">
               <span class="filter-label">Type</span>
-              ${TYPE_LABELS.map(([type, label]) =>
-                this.renderTri(label, this.typeFilters.get(type), () => this.cycleTypeFilter(type)),
-              )}
+              ${TYPE_LABELS.map(([type, label]) => this.renderTri(label, this.typeFilters.get(type), () => this.cycleTypeFilter(type)))}
             </div>
 
             <div class="catalog-source">
@@ -1082,40 +988,19 @@ export class PluginManagerDialog extends LitElement {
                 type="text"
                 list="catalog-url-options"
                 .value=${this.activeCatalogUrl}
-                @input=${(e: Event) =>
-                  (this.activeCatalogUrl = (e.target as HTMLInputElement).value)}
+                @input=${(e: Event) => (this.activeCatalogUrl = (e.target as HTMLInputElement).value)}
                 placeholder="Catalog source URL"
               />
-              <datalist id="catalog-url-options">
-                ${this.catalogUrls.map((u) => html`<option value=${u}></option>`)}
-              </datalist>
-              <button type="button" class="ghost" @click=${this.reloadCatalogSource}>
-                <span class="mi sm">refresh</span> Reload
-              </button>
+              <datalist id="catalog-url-options">${this.catalogUrls.map((u) => html`<option value=${u}></option>`)}</datalist>
+              <button type="button" class="ghost" @click=${this.reloadCatalogSource}><span class="mi sm">refresh</span> Reload</button>
             </div>
-            ${this.catalogError
-              ? html`<div class="meta err">Catalog unavailable: ${this.catalogError}</div>`
-              : ''}
-            ${this.serverCatalogError
-              ? html`<div class="meta err">
-                  Server registry unavailable: ${this.serverCatalogError}
-                </div>`
-              : ''}
+            ${this.catalogError ? html`<div class="meta err">Catalog unavailable: ${this.catalogError}</div>` : ''}
+            ${this.serverCatalogError ? html`<div class="meta err">Server registry unavailable: ${this.serverCatalogError}</div>` : ''}
 
-            <div class="plugin-list">
-              ${rows.length === 0
-                ? html`<p class="hint">No plugins match the current filters/search.</p>`
-                : ''}
-              ${rows.map((row) => this.renderRow(row))}
-            </div>
+            <div class="plugin-list">${rows.length === 0 ? html`<p class="hint">No plugins match the current filters/search.</p>` : ''} ${rows.map((row) => this.renderRow(row))}</div>
 
             <div class="add">
-              <input
-                type="text"
-                placeholder="https://example.com/my-plugin.js"
-                .value=${this.addUrl}
-                @input=${(e: Event) => (this.addUrl = (e.target as HTMLInputElement).value)}
-              />
+              <input type="text" placeholder="https://example.com/my-plugin.js" .value=${this.addUrl} @input=${(e: Event) => (this.addUrl = (e.target as HTMLInputElement).value)} />
               <button type="submit" class="primary"><span class="mi sm">add</span> Add</button>
             </div>
           </div>

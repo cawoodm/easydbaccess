@@ -26,8 +26,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   name: 'Projection (virtual tables)',
   type: 'source',
   version: '0.1.0',
-  description:
-    'Virtual tables ("Projections") whose rows are derived live from other tables — database views and JOINs that look and act like tables.',
+  description: 'Virtual tables ("Projections") whose rows are derived live from other tables — database views and JOINs that look and act like tables.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h7v10H4z"/><path d="M13 7h7v10h-7z"/><path d="M11 12h2"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/projection.ts',
@@ -127,13 +126,7 @@ export async function load(api: HostApi): Promise<void> {
  * `inheritColumns`). Resolves each source by name so the freshest column
  * definitions are copied.
  */
-async function columnsForSpec(
-  api: HostApi,
-  workspaceId: string,
-  spec: ProjectionSpec,
-  existing: ColumnSpec[],
-  deletedColumns: string[],
-): Promise<ColumnSpec[]> {
+async function columnsForSpec(api: HostApi, workspaceId: string, spec: ProjectionSpec, existing: ColumnSpec[], deletedColumns: string[]): Promise<ColumnSpec[]> {
   const all = await api.store.tables.find({ workspaceId });
   const byName = new Map<string, Table>();
   for (const t of all) if (!byName.has(t.name)) byName.set(t.name, t);
@@ -149,10 +142,7 @@ async function columnsForSpec(
  * starts a new projection with that table as the fixed base (first source), so
  * only the join table(s) still need choosing.
  */
-async function openProjectionEditor(
-  api: HostApi,
-  opts: { baseTableId?: string; editTableId?: string },
-): Promise<void> {
+async function openProjectionEditor(api: HostApi, opts: { baseTableId?: string; editTableId?: string }): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) return;
   const all = await api.store.tables.find({ workspaceId });
@@ -189,20 +179,9 @@ async function openProjectionEditor(
  * are carried over so the projection opens showing what the user was looking at.
  * (Hidden columns ride on the spec itself, so they survive later edits too.)
  */
-function makeOnSave(
-  api: HostApi,
-  workspaceId: string,
-  editing: Table | null,
-  base?: Table,
-): (name: string, spec: ProjectionSpec) => Promise<void> {
+function makeOnSave(api: HostApi, workspaceId: string, editing: Table | null, base?: Table): (name: string, spec: ProjectionSpec) => Promise<void> {
   return async (name, spec) => {
-    const columns = await columnsForSpec(
-      api,
-      workspaceId,
-      spec,
-      editing?.columns ?? [],
-      editing?.deletedColumns ?? [],
-    );
+    const columns = await columnsForSpec(api, workspaceId, spec, editing?.columns ?? [], editing?.deletedColumns ?? []);
     const tableReadonly = resolveWritability(spec).size === 0;
     const source: Table['source'] = {
       type: 'projection',

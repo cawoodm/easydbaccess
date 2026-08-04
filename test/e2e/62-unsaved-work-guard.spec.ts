@@ -48,9 +48,7 @@ test('the columns editor blocks a reload once edited, and releases on close', as
 });
 
 test('the settings dialog blocks a reload once edited, and releases when done', async ({ page }) => {
-  await page.evaluate(() =>
-    document.dispatchEvent(new CustomEvent('easydb:open-settings', { bubbles: true })),
-  );
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('easydb:open-settings', { bubbles: true })));
   const dlg = page.locator('settings-dialog dialog');
   await expect(dlg).toBeVisible();
   await dlg.getByRole('button', { name: 'Gist Sync' }).click();

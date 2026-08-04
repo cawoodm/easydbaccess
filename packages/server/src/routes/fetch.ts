@@ -10,7 +10,12 @@ import type { ServerDeps } from '../index.js';
  */
 export function mountFetch(app: Hono, deps: ServerDeps) {
   app.post('/fetch', async (c) => {
-    const { url, method = 'GET', headers = {}, body } = await c.req.json<{
+    const {
+      url,
+      method = 'GET',
+      headers = {},
+      body,
+    } = await c.req.json<{
       url: string;
       method?: string;
       headers?: Record<string, string>;

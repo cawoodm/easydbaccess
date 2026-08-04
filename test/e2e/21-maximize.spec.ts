@@ -15,16 +15,11 @@ import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js
 // Dispatch a synthetic touch gesture on the canvas overlay. `moves` are the
 // per-touch end coordinates matching `starts` by index; equal deltas across two
 // touches pan (pure translate), unequal deltas pinch (zoom).
-async function gesture(
-  page: import('@playwright/test').Page,
-  starts: Array<[number, number]>,
-  moves: Array<[number, number]>,
-) {
+async function gesture(page: import('@playwright/test').Page, starts: Array<[number, number]>, moves: Array<[number, number]>) {
   await page.evaluate(
     ([starts, moves]) => {
       const outer = document.getElementById('easydb-panels') as HTMLElement;
-      const touch = (idn: number, x: number, y: number) =>
-        new Touch({ identifier: idn, target: outer, clientX: x, clientY: y });
+      const touch = (idn: number, x: number, y: number) => new Touch({ identifier: idn, target: outer, clientX: x, clientY: y });
       const fire = (type: string, ts: Touch[]) =>
         outer.dispatchEvent(
           new TouchEvent(type, {
@@ -140,9 +135,7 @@ test('maximized window stays filling the area through pan and zoom', async ({ pa
   await page.waitForTimeout(120);
   // Compare LAYOUT sizes (offsetWidth) — the visual boundingBox is inflated by
   // the zoomed canvas transform and wouldn't reflect the panel's real size.
-  const viewportW = await page.evaluate(
-    () => document.getElementById('easydb-panels-viewport')!.clientWidth,
-  );
+  const viewportW = await page.evaluate(() => document.getElementById('easydb-panels-viewport')!.clientWidth);
   const panelW = await panel.evaluate((el) => (el as HTMLElement).offsetWidth);
   expect(panelW).toBeLessThan(viewportW - 50);
   // The counter transform is cleared, so the panel rides the canvas normally again.
@@ -178,9 +171,7 @@ test('a maximized grid fills the content box — no dead gap above the footer', 
   expect(gridH).toBeGreaterThan(300); // sanity: it really is a tall panel
 
   // And the grid scrolls internally rather than pushing the panel open.
-  const scrolls = await page
-    .locator(`${panelSel} data-table`)
-    .evaluate((el) => el.scrollHeight > el.clientHeight);
+  const scrolls = await page.locator(`${panelSel} data-table`).evaluate((el) => el.scrollHeight > el.clientHeight);
   expect(scrolls).toBe(true);
 });
 
@@ -192,10 +183,7 @@ test('double-clicking the titlebar maximizes, and again restores', async ({ page
   const status = () => panel.evaluate((el) => (el as HTMLElement & { status: string }).status);
   const title = panel.locator('.jsPanel-title');
 
-  const titlebarCursor = () =>
-    panel
-      .locator('.jsPanel-titlebar')
-      .evaluate((el) => getComputedStyle(el as HTMLElement).cursor);
+  const titlebarCursor = () => panel.locator('.jsPanel-titlebar').evaluate((el) => getComputedStyle(el as HTMLElement).cursor);
 
   expect(await status()).toBe('normalized');
   // Draggable ⇒ the move cursor is honest.
@@ -241,9 +229,7 @@ test('maximized windows re-fit when the browser window is resized', async ({ pag
   // maximized panel covers the second one's button, so a click would be
   // intercepted. The click path is covered by the pan/zoom test above.
   for (const sel of [selA, selB]) {
-    await page
-      .locator(sel)
-      .evaluate((el) => (el as HTMLElement & { maximize(): void }).maximize());
+    await page.locator(sel).evaluate((el) => (el as HTMLElement & { maximize(): void }).maximize());
   }
   await page.waitForTimeout(150);
 
@@ -267,13 +253,9 @@ test('maximized windows re-fit when the browser window is resized', async ({ pag
 
   // The restore size must survive the resizes — a re-fit must not overwrite the
   // panel's remembered normal geometry with the maximized one.
-  await page
-    .locator(selA)
-    .evaluate((el) => (el as HTMLElement & { normalize(): void }).normalize());
+  await page.locator(selA).evaluate((el) => (el as HTMLElement & { normalize(): void }).normalize());
   await page.waitForTimeout(150);
-  const viewportW = await page.evaluate(
-    () => document.getElementById('easydb-panels-viewport')!.clientWidth,
-  );
+  const viewportW = await page.evaluate(() => document.getElementById('easydb-panels-viewport')!.clientWidth);
   const panelW = await page.locator(selA).evaluate((el) => (el as HTMLElement).offsetWidth);
   expect(panelW).toBeLessThan(viewportW - 50);
 });

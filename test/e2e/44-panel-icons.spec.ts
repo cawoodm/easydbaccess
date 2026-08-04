@@ -19,11 +19,7 @@ const REFRESHABLE = '#6d28d9';
 
 /** The chrome colour the shell is painting this panel (or dock bar) with. */
 const panelColorOf = (page: import('@playwright/test').Page, domId: string) =>
-  page.evaluate(
-    (d) =>
-      document.getElementById(d)!.style.getPropertyValue('--eda-panel-color').trim().toLowerCase(),
-    domId,
-  );
+  page.evaluate((d) => document.getElementById(d)!.style.getPropertyValue('--eda-panel-color').trim().toLowerCase(), domId);
 
 test.describe('panel titlebar kind icons', () => {
   test('a plain local table shows the normal icon and the local colour', async ({ page }) => {
@@ -35,9 +31,7 @@ test.describe('panel titlebar kind icons', () => {
     expect(await panelColorOf(page, panelDomId(id))).toBe(LOCAL);
   });
 
-  test('a table with a source shows the connected icon and the refreshable colour', async ({
-    page,
-  }) => {
+  test('a table with a source shows the connected icon and the refreshable colour', async ({ page }) => {
     const id = await createTable(page, 'Widgets', [{ field: 'name' }]);
     await waitForPanel(page, id);
 
@@ -92,9 +86,7 @@ test.describe('panel titlebar kind icons', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const store = (window as any).__easydb.store;
         const templates = await store.viewTemplates.find({ workspaceId: ws });
-        const rss = (templates as Array<{ id: string; name: string }>).find(
-          (t) => t.name === 'RSS Feed',
-        )!;
+        const rss = (templates as Array<{ id: string; name: string }>).find((t) => t.name === 'RSS Feed')!;
         await store.viewInstances.insert({
           id: 'colour-view',
           workspaceId: ws,

@@ -40,10 +40,7 @@ async function readServerEtag(wsId: string): Promise<string | null> {
 }
 
 test.describe('auto-sync', () => {
-  test('seeds an empty workspace via PUT when the server has nothing', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('seeds an empty workspace via PUT when the server has nothing', async ({ page, workspaceId }) => {
     await configureServerUrl(page);
     await createTable(page, 'Seed', [{ field: 'a' }]);
     await addRow(page, '', {}); // no-op; just exercises __easydb readiness
@@ -92,10 +89,7 @@ test.describe('auto-sync', () => {
     expect(dump.tables[0]?.rows[0]?.n).toBe(42);
   });
 
-  test('prompts to pull when the server has new data; Yes replaces local', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('prompts to pull when the server has new data; Yes replaces local', async ({ page, workspaceId }) => {
     await configureServerUrl(page);
     await createTable(page, 'Local', [{ field: 'a' }]);
     await fireTick(page); // seed: server now has the "Local" table
@@ -137,10 +131,7 @@ test.describe('auto-sync', () => {
     expect(names).not.toContain('Local');
   });
 
-  test('No on the prompt suppresses re-prompts until the server changes again', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('No on the prompt suppresses re-prompts until the server changes again', async ({ page, workspaceId }) => {
     await configureServerUrl(page);
     await createTable(page, 'Local', [{ field: 'a' }]);
     await fireTick(page); // seed

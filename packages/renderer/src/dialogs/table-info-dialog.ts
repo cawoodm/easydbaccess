@@ -19,11 +19,7 @@ export interface TableProvenance {
 }
 
 /** Open the info dialog for `name` with the given metadata (mounted lazily). */
-export function openTableInfoDialog(
-  name: string,
-  info: TableInfo,
-  provenance?: TableProvenance,
-): void {
+export function openTableInfoDialog(name: string, info: TableInfo, provenance?: TableProvenance): void {
   const el = TableInfoDialog.instance ?? mount();
   el.show(name, info, provenance);
 }
@@ -48,9 +44,7 @@ function describeProvenance(p: TableProvenance | null): {
     // Both kinds imply `source` is set (see tableKind), but TS can't narrow
     // through the call — read it optionally rather than assert.
     const type = p.source?.type ?? 'remote';
-    const writable = p.source?.writable
-      ? 'Edits you make are written back to the source.'
-      : 'It is read-only — edits are not saved back to the source.';
+    const writable = p.source?.writable ? 'Edits you make are written back to the source.' : 'It is read-only — edits are not saved back to the source.';
     return {
       label: `Connected (live ${type})`,
       note:
@@ -62,9 +56,7 @@ function describeProvenance(p: TableProvenance | null): {
   if (kind === 'imported') {
     return {
       label: 'Imported (snapshot)',
-      note:
-        `This table is a local snapshot imported once from its origin. The rows live in this ` +
-        `browser, so edits stay local; use Refresh to re-fetch the latest data from the origin.`,
+      note: `This table is a local snapshot imported once from its origin. The rows live in this ` + `browser, so edits stay local; use Refresh to re-fetch the latest data from the origin.`,
       // Conditional spread, not `p.origin?.url`: `exactOptionalPropertyTypes`
       // rejects assigning `string | undefined` to an optional `url?: string`.
       ...(p.origin ? { url: p.origin.url } : {}),
@@ -178,23 +170,14 @@ export class TableInfoDialog extends LitElement {
   /** One <dt>/<dd> attribution row: a link when a URL is present, else text. */
   private row(label: string, text?: string, url?: string) {
     if (!text && !url) return nothing;
-    const body = url
-      ? html`<a href=${url} target="_blank" rel="noopener noreferrer">${text || url}</a>`
-      : html`${text}`;
+    const body = url ? html`<a href=${url} target="_blank" rel="noopener noreferrer">${text || url}</a>` : html`${text}`;
     return html`<dt>${label}</dt>
       <dd>${body}</dd>`;
   }
 
   override render() {
     const i = this.info;
-    const hasAttribution = !!(
-      i?.source ||
-      i?.sourceUrl ||
-      i?.license ||
-      i?.licenseUrl ||
-      i?.about ||
-      i?.aboutUrl
-    );
+    const hasAttribution = !!(i?.source || i?.sourceUrl || i?.license || i?.licenseUrl || i?.about || i?.aboutUrl);
     const kind = describeProvenance(this.provenance);
     return html`
       <dialog @cancel=${this.close} @keydown=${ctrlEnterSubmits}>
@@ -213,28 +196,14 @@ export class TableInfoDialog extends LitElement {
                   <p class="kind-note">${kind.note}</p>
                   ${kind.url
                     ? html`<div class="kind-origin">
-                        <a href=${kind.url} target="_blank" rel="noopener noreferrer"
-                          >${kind.url}</a
-                        >
+                        <a href=${kind.url} target="_blank" rel="noopener noreferrer">${kind.url}</a>
                       </div>`
                     : nothing}
                 </div>`
               : nothing}
-            ${i?.descriptionHtml
-              ? html`<div class="desc">${unsafeHTML(i.descriptionHtml)}</div>`
-              : i?.description
-                ? html`<div class="desc">${i.description}</div>`
-                : nothing}
-            ${hasAttribution
-              ? html`<dl>
-                  ${this.row('Source', i?.source, i?.sourceUrl)}
-                  ${this.row('License', i?.license, i?.licenseUrl)}
-                  ${this.row('About', i?.about, i?.aboutUrl)}
-                </dl>`
-              : nothing}
-            ${!i?.description && !i?.descriptionHtml && !hasAttribution && !kind
-              ? html`<p class="empty">No additional information.</p>`
-              : nothing}
+            ${i?.descriptionHtml ? html`<div class="desc">${unsafeHTML(i.descriptionHtml)}</div>` : i?.description ? html`<div class="desc">${i.description}</div>` : nothing}
+            ${hasAttribution ? html`<dl>${this.row('Source', i?.source, i?.sourceUrl)} ${this.row('License', i?.license, i?.licenseUrl)} ${this.row('About', i?.about, i?.aboutUrl)}</dl>` : nothing}
+            ${!i?.description && !i?.descriptionHtml && !hasAttribution && !kind ? html`<p class="empty">No additional information.</p>` : nothing}
           </div>
         </form>
       </dialog>

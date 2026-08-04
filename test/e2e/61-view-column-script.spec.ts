@@ -9,20 +9,13 @@ import { bulkAddRows, createTable, waitForPanel } from './helpers.js';
  */
 
 /** Creates a view instance on `tableId` through the store, and returns its id. */
-function makeView(
-  page: import('@playwright/test').Page,
-  ws: string,
-  tableId: string,
-  inst: Record<string, unknown>,
-) {
+function makeView(page: import('@playwright/test').Page, ws: string, tableId: string, inst: Record<string, unknown>) {
   return page.evaluate(
     async ({ ws, tableId, inst }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__easydb.store;
       const templates = await store.viewTemplates.find({ workspaceId: ws });
-      const gallery = (templates as Array<{ id: string; name: string }>).find(
-        (t) => t.name === 'Gallery',
-      )!;
+      const gallery = (templates as Array<{ id: string; name: string }>).find((t) => t.name === 'Gallery')!;
       const id = crypto.randomUUID();
       await store.viewInstances.insert({
         id,
@@ -62,9 +55,7 @@ async function useTemplate(page: import('@playwright/test').Page, ws: string, ro
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__easydb.store;
       const templates = await store.viewTemplates.find({ workspaceId: ws });
-      const gallery = (templates as Array<{ id: string; name: string }>).find(
-        (t) => t.name === 'Gallery',
-      )!;
+      const gallery = (templates as Array<{ id: string; name: string }>).find((t) => t.name === 'Gallery')!;
       await store.viewTemplates.patch(gallery.id, {
         headerHtml: '<div>',
         rowHtml,
@@ -78,11 +69,7 @@ async function useTemplate(page: import('@playwright/test').Page, ws: string, ro
 
 test('a view shows a scripted column as the script computes it', async ({ page, workspaceId }) => {
   await useTemplate(page, workspaceId, '<p class="line">$TITLE</p>');
-  const id = await createTable(page, 'People', [
-    { field: 'first' },
-    { field: 'last' },
-    { field: 'full', script: 'function render(row) { return row.first + " " + row.last; }' },
-  ]);
+  const id = await createTable(page, 'People', [{ field: 'first' }, { field: 'last' }, { field: 'full', script: 'function render(row) { return row.first + " " + row.last; }' }]);
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [{ first: 'Ada', last: 'Lovelace' }]);
 
@@ -122,10 +109,7 @@ test('a view filters and sorts on the computed value', async ({ page, workspaceI
 
 test('an $input bound to a scripted column is disabled', async ({ page, workspaceId }) => {
   await useTemplate(page, workspaceId, '<p>$input.TITLE</p>');
-  const id = await createTable(page, 'Calc', [
-    { field: 'a' },
-    { field: 'shout', script: 'function render(row) { return String(row.a).toUpperCase(); }' },
-  ]);
+  const id = await createTable(page, 'Calc', [{ field: 'a' }, { field: 'shout', script: 'function render(row) { return String(row.a).toUpperCase(); }' }]);
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [{ a: 'hi' }]);
 

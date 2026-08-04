@@ -67,9 +67,7 @@ export function uniqueTableName(taken: Iterable<string>, base: string): string {
 
 /** Names already used in a workspace, for {@link uniqueTableName}. */
 export async function takenNames(api: HostApi, workspaceId: string): Promise<string[]> {
-  return (await api.store.tables.find())
-    .filter((t) => t.workspaceId === workspaceId)
-    .map((t) => t.name);
+  return (await api.store.tables.find()).filter((t) => t.workspaceId === workspaceId).map((t) => t.name);
 }
 
 /**
@@ -80,12 +78,7 @@ export async function takenNames(api: HostApi, workspaceId: string): Promise<str
  * previously CSV capped while parsing, JSON sliced afterwards, and Datasette
  * ignored the setting entirely in favour of its own 10k ceiling.
  */
-export async function landCandidate(
-  api: HostApi,
-  name: string,
-  batches: AsyncIterable<ImportBatch>,
-  opts: LandOptions,
-): Promise<LandResult | null> {
+export async function landCandidate(api: HostApi, name: string, batches: AsyncIterable<ImportBatch>, opts: LandOptions): Promise<LandResult | null> {
   const { workspaceId, importerId, target, maxRows } = opts;
 
   let tableId: string;
@@ -144,11 +137,7 @@ export async function landCandidate(
       // ones, honouring `deletedColumns` so a column the user removed does not
       // come back on every import.
       if (batch.columns?.length) {
-        const merged = reconcileColumns(
-          existing.columns,
-          batch.columns,
-          existing.deletedColumns ?? [],
-        );
+        const merged = reconcileColumns(existing.columns, batch.columns, existing.deletedColumns ?? []);
         if (merged.newFields.length > 0) {
           await api.store.tables.patch(tableId, {
             columns: merged.columns,

@@ -111,12 +111,7 @@ export class TopProgress extends LitElement {
       aria-valuemax="100"
       aria-valuenow=${determinate ? Math.round((this.frac as number) * 100) : ''}
     >
-      ${determinate
-        ? html`<div
-            class="bar determinate"
-            style="width:${Math.round((this.frac as number) * 100)}%"
-          ></div>`
-        : html`<div class="bar indet"></div>`}
+      ${determinate ? html`<div class="bar determinate" style="width:${Math.round((this.frac as number) * 100)}%"></div>` : html`<div class="bar indet"></div>`}
     </div>`;
   }
 }

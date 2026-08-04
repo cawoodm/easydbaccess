@@ -59,14 +59,10 @@ test('a value that only looks like prose is still plain text in a <pre>', async 
   expect(await pre.textContent()).toContain('sales - marketing\nissue #42 is open');
 });
 
-test('a column still set to the old html-preview name renders through preview-cell', async ({
-  page,
-}) => {
+test('a column still set to the old html-preview name renders through preview-cell', async ({ page }) => {
   // The rename must not break tables already saved. `html-preview` stays a
   // registered alias for exactly this.
-  const tableId = await createTable(page, 'mdlegacy', [
-    { field: 'note', renderer: 'html-preview' },
-  ]);
+  const tableId = await createTable(page, 'mdlegacy', [{ field: 'note', renderer: 'html-preview' }]);
   await waitForPanel(page, tableId);
   await addRow(page, tableId, { note: '# Title' });
 
@@ -85,9 +81,7 @@ test('the columns editor offers "preview" and no longer offers "html-preview"', 
 
   const select = page.locator('new-table-dialog dialog select[title^="Renderer"]').first();
   await expect(select).toBeVisible();
-  const options = await select.locator('option').evaluateAll((els) =>
-    els.map((e) => (e as HTMLOptionElement).value),
-  );
+  const options = await select.locator('option').evaluateAll((els) => els.map((e) => (e as HTMLOptionElement).value));
   expect(options).toContain('preview');
   expect(options).not.toContain('html-preview');
 });
@@ -98,9 +92,7 @@ test('Markdown that mentions a tag is still Markdown, not HTML', async ({ page }
   const tableId = await createTable(page, 'mdtagword', [{ field: 'note', renderer: 'preview' }]);
   await waitForPanel(page, tableId);
   await addRow(page, tableId, {
-    note: ['Use the `/<database>/-/create` API.', '', '- **New** table interface', '- Alter table'].join(
-      '\n',
-    ),
+    note: ['Use the `/<database>/-/create` API.', '', '- **New** table interface', '- Alter table'].join('\n'),
   });
 
   await cellOf(page, tableId).locator('button').click();

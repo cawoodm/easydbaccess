@@ -37,8 +37,7 @@ test.describe('mobile UI', () => {
     const result = await page.evaluate(() => {
       const outer = document.getElementById('easydb-panels') as HTMLElement;
       const vp = document.getElementById('easydb-panels-viewport') as HTMLElement;
-      const touch = (id: number, x: number, y: number) =>
-        new Touch({ identifier: id, target: outer, clientX: x, clientY: y });
+      const touch = (id: number, x: number, y: number) => new Touch({ identifier: id, target: outer, clientX: x, clientY: y });
       const fire = (type: string, touches: Touch[]) =>
         outer.dispatchEvent(
           new TouchEvent(type, {

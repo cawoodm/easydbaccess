@@ -217,17 +217,13 @@ export class DatasetteConnectDialog extends LitElement {
               />
             </label>
             <div class="test-row">
-              <button type="button" class="ghost test" @click=${() => void this.runTest()}>
-                Test connection
-              </button>
+              <button type="button" class="ghost test" @click=${() => void this.runTest()}>Test connection</button>
               <span class="status ${this.statusKind}">${this.status}</span>
             </div>
             <p class="hint">
-              Enter a single table (<code>…/db/table</code>), a whole database (<code>…/db</code>),
-              or an instance root — you'll pick which tables to connect. Opens live tables backed by
-              the remote Datasette: reads stay remote, and edits write back when the token grants
-              them. The token is stored on this device only and is never synced or exported. A blank
-              token opens tables read-only.
+              Enter a single table (<code>…/db/table</code>), a whole database (<code>…/db</code>), or an instance root — you'll pick which tables to connect. Opens live tables backed by the remote
+              Datasette: reads stay remote, and edits write back when the token grants them. The token is stored on this device only and is never synced or exported. A blank token opens tables
+              read-only.
             </p>
           </div>
         </form>

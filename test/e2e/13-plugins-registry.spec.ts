@@ -21,9 +21,7 @@ test.describe('plugins registry', () => {
     });
   });
 
-  test('Plugin Manager dialog shows the server-registry plugin in the unified list when configured', async ({
-    page,
-  }) => {
+  test('Plugin Manager dialog shows the server-registry plugin in the unified list when configured', async ({ page }) => {
     await page.evaluate(async (url) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ctx = (window as any).__easydb;
@@ -57,14 +55,7 @@ test.describe('plugins registry', () => {
     // A separate "by type" filter row carries one tri-state chip per PluginType.
     const typeFilters = dialog.locator('.type-filters .tri');
     await expect(typeFilters).toHaveCount(6);
-    await expect(typeFilters).toContainText([
-      'Importer',
-      'Exporter',
-      'Cell renderer',
-      'Sync',
-      'Source',
-      'UI',
-    ]);
+    await expect(typeFilters).toContainText(['Importer', 'Exporter', 'Cell renderer', 'Sync', 'Source', 'UI']);
     const importer = typeFilters.filter({ hasText: 'Importer' });
     await importer.click();
     await expect(importer).toHaveClass(/\bon\b/);
@@ -78,9 +69,7 @@ test.describe('plugins registry', () => {
     await expect(dialog.getByText('Server Demo')).toBeVisible();
   });
 
-  test('Server-registry plugin is absent from the list when no URL is configured', async ({
-    page,
-  }) => {
+  test('Server-registry plugin is absent from the list when no URL is configured', async ({ page }) => {
     // Fresh workspace fixture — no server-sync:url has been set.
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

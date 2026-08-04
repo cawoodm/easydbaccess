@@ -1,12 +1,5 @@
 import type { HostApi } from '@easydb/shared';
-import {
-  cascadeAllWindows,
-  closeAllWindows,
-  maximizeAllWindows,
-  minimizeAllWindows,
-  restoreAllWindows,
-  tileAllWindows,
-} from '../window-mgr/window-commands.js';
+import { cascadeAllWindows, closeAllWindows, maximizeAllWindows, minimizeAllWindows, restoreAllWindows, tileAllWindows } from '../window-mgr/window-commands.js';
 
 /**
  * Registers the built-in "Windows" commands into the command palette. Called

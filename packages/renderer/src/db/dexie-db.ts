@@ -1,13 +1,5 @@
 import Dexie, { type Table as DexieTable } from 'dexie';
-import type {
-  PluginRecord,
-  Row,
-  Setting,
-  Table,
-  ViewInstance,
-  ViewTemplate,
-  Workspace,
-} from '@easydb/shared';
+import type { PluginRecord, Row, Setting, Table, ViewInstance, ViewTemplate, Workspace } from '@easydb/shared';
 
 /**
  * easyDB local store: one IndexedDB database, one Dexie table per logical
@@ -74,30 +66,31 @@ export function getDexie(): EasyDb {
   // Migration copies every old setting into EVERY existing workspace: each
   // workspace keeps exactly the values it saw before the upgrade, and only later
   // edits diverge.
-  raw.version(3).stores({ settings: 'key, workspaceId, name' }).upgrade(async (tx) => {
-    const settings = tx.table('settings');
-    const old = (await settings.toArray()) as Array<{
-      key: string;
-      workspaceId?: string;
-      name?: string;
-      value: unknown;
-    }>;
-    // Already-scoped rows would be re-keyed a second time on a repeated upgrade.
-    const legacy = old.filter((s) => s.workspaceId == null);
-    if (legacy.length === 0) return;
-    const workspaceIds = ((await tx.table('workspaces').toArray()) as Array<{ id: string }>).map(
-      (w) => w.id,
-    );
-    // No workspace yet (a fresh DB that somehow holds settings): nothing to scope
-    // them to, and app-context creates `default` right after this.
-    const targets = workspaceIds.length > 0 ? workspaceIds : ['default'];
-    for (const s of legacy) {
-      for (const workspaceId of targets) {
-        await settings.put({ key: settingId(workspaceId, s.key), workspaceId, name: s.key, value: s.value });
+  raw
+    .version(3)
+    .stores({ settings: 'key, workspaceId, name' })
+    .upgrade(async (tx) => {
+      const settings = tx.table('settings');
+      const old = (await settings.toArray()) as Array<{
+        key: string;
+        workspaceId?: string;
+        name?: string;
+        value: unknown;
+      }>;
+      // Already-scoped rows would be re-keyed a second time on a repeated upgrade.
+      const legacy = old.filter((s) => s.workspaceId == null);
+      if (legacy.length === 0) return;
+      const workspaceIds = ((await tx.table('workspaces').toArray()) as Array<{ id: string }>).map((w) => w.id);
+      // No workspace yet (a fresh DB that somehow holds settings): nothing to scope
+      // them to, and app-context creates `default` right after this.
+      const targets = workspaceIds.length > 0 ? workspaceIds : ['default'];
+      for (const s of legacy) {
+        for (const workspaceId of targets) {
+          await settings.put({ key: settingId(workspaceId, s.key), workspaceId, name: s.key, value: s.value });
+        }
+        await settings.delete(s.key);
       }
-      await settings.delete(s.key);
-    }
-  });
+    });
 
   // Multi-tab schema-upgrade safety. A schema bump (new object stores) can only
   // run in an IndexedDB `versionchange` transaction, which is BLOCKED while any
@@ -149,9 +142,7 @@ function showUpgradeBlocked(): void {
   el.id = 'easydb-upgrade-blocked';
   el.setAttribute('role', 'alertdialog');
   el.style.cssText =
-    'position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;' +
-    'justify-content:center;background:rgba(15,23,42,0.55);' +
-    'font-family:system-ui,sans-serif;padding:1rem;';
+    'position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;' + 'justify-content:center;background:rgba(15,23,42,0.55);' + 'font-family:system-ui,sans-serif;padding:1rem;';
   el.innerHTML =
     '<div style="max-width:26rem;background:#fff;border-radius:0.6rem;padding:1.5rem 1.75rem;' +
     'box-shadow:0 20px 50px rgba(0,0,0,0.3);text-align:center;">' +

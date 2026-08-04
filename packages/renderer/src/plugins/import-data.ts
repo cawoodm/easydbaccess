@@ -13,15 +13,7 @@
 // the UI too (the datasette-source plugin only registered an unsurfaced URL
 // source and a file-only drop handler, so there was no clickable way in).
 
-import type {
-  ColumnSpec,
-  ColumnType,
-  HostApi,
-  ImporterSpec,
-  ImportSourceInput,
-  PluginModule,
-  Table,
-} from '@easydb/shared';
+import type { ColumnSpec, ColumnType, HostApi, ImporterSpec, ImportSourceInput, PluginModule, Table } from '@easydb/shared';
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { getContext } from '../app-context.js';
@@ -51,23 +43,19 @@ interface PredefinedSource {
   kind: ResolvedKind;
 }
 
-const NORTHWIND_URL =
-  'https://raw.githubusercontent.com/cawoodm/easydbaccess/main/data/northwind.db.json';
+const NORTHWIND_URL = 'https://raw.githubusercontent.com/cawoodm/easydbaccess/main/data/northwind.db.json';
 
 // A public CSV served with CORS (raw.githubusercontent sends
 // `access-control-allow-origin: *`), so it imports straight from the browser
 // build. GitHub "blob" pages are HTML — the raw host serves the file itself.
-const AIR_QUALITY_CSV =
-  'https://raw.githubusercontent.com/MainakRepositor/Datasets/master/Air%20Quality/real_2016_air.csv';
+const AIR_QUALITY_CSV = 'https://raw.githubusercontent.com/MainakRepositor/Datasets/master/Air%20Quality/real_2016_air.csv';
 
 /**
  * Inline "import" glyph (arrow descending into a tray) rendered as an SVG on
  * the header button. The shell renders `icon` strings that begin with `<svg`
  * as inline SVG (fill: currentColor) rather than as a Material Icons ligature.
  */
-const IMPORT_ICON_SVG =
-  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-  '<path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>';
+const IMPORT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' + '<path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>';
 
 /**
  * Curated starting points. The first is our own JSON dump; the rest are public
@@ -95,8 +83,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   name: 'Import Data',
   type: 'importer',
   version: '0.2.0',
-  description:
-    'Header button that imports data from a URL — a JSON dump (e.g. Northwind) or a Datasette table, database, or whole instance — with a picker of sample sources.',
+  description: 'Header button that imports data from a URL — a JSON dump (e.g. Northwind) or a Datasette table, database, or whole instance — with a picker of sample sources.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/import-data.ts',
@@ -157,14 +144,10 @@ async function refreshImported(api: HostApi, tableId: string): Promise<void> {
           `so your own column values for ${res.droppedUserRows === 1 ? 'it' : 'them'} could not be carried over`,
       );
     }
-    api.ui.dialogs.toast(
-      `Refreshed "${t.name}" (${res.rowCount.toLocaleString()} rows)` +
-        `${notes.length ? ` — ${notes.join(', ')}` : ''}.`,
-      {
-        kind: res.newFields.length > 0 || res.droppedUserRows > 0 ? 'warning' : 'success',
-        title: 'Refresh',
-      },
-    );
+    api.ui.dialogs.toast(`Refreshed "${t.name}" (${res.rowCount.toLocaleString()} rows)` + `${notes.length ? ` — ${notes.join(', ')}` : ''}.`, {
+      kind: res.newFields.length > 0 || res.droppedUserRows > 0 ? 'warning' : 'success',
+      title: 'Refresh',
+    });
   } catch (err) {
     api.ui.dialogs.toast(`Couldn't refresh "${t.name}": ${(err as Error).message}`, {
       kind: 'error',
@@ -198,9 +181,7 @@ async function openImport(api: HostApi, presetKind: ImportKind = 'auto'): Promis
   const label = file?.name ?? url;
   // The one common hook, handed to whichever importer runs. Each calls it with
   // the schema it discovered; a multi-table source calls it once per table.
-  const editHook = editColumns
-    ? (columns: ColumnSpec[], subject?: string) => editColumnNames(columns, subject)
-    : undefined;
+  const editHook = editColumns ? (columns: ColumnSpec[], subject?: string) => editColumnNames(columns, subject) : undefined;
   try {
     // A `.sql` script is two things at once: CREATE TABLE + INSERT is tabular
     // data the kernel handles, but a SELECT is a PROJECTION — a spec with no
@@ -227,8 +208,7 @@ async function openImport(api: HostApi, presetKind: ImportKind = 'auto'): Promis
       const sniffed = kind === 'json' ? await sniffJson(api, url, file, maxRows, mode) : null;
       if (sniffed?.isDump) {
         const restore = await api.ui.dialogs.confirm(
-          `"${label}" is a workspace dump, not a plain table. Restore it — tables, window ` +
-            `layout, views and filters? Choose Cancel to import only its tables as data.`,
+          `"${label}" is a workspace dump, not a plain table. Restore it — tables, window ` + `layout, views and filters? Choose Cancel to import only its tables as data.`,
           'Restore workspace',
         );
         if (restore) {
@@ -245,11 +225,7 @@ async function openImport(api: HostApi, presetKind: ImportKind = 'auto'): Promis
       // and the source name has to travel with it — `label` is the whole URL,
       // which is not a table name.
       const sourceName = file ? file.name : filenameFromUrl(url);
-      const input: ImportSourceInput = sniffed
-        ? { kind: 'text', text: sniffed.text, name: sourceName }
-        : file
-          ? { kind: 'file', file }
-          : { kind: 'url', url };
+      const input: ImportSourceInput = sniffed ? { kind: 'text', text: sniffed.text, name: sourceName } : file ? { kind: 'file', file } : { kind: 'url', url };
       const res = await runImport(api, spec, input, {
         mode,
         target,
@@ -311,28 +287,17 @@ async function importSql(
     mode: 'copy' | 'reference';
     target: ImportTarget;
     panel: Record<string, unknown>;
-    editHook:
-      | ((columns: ColumnSpec[], subject?: string) => Promise<ColumnSpec[] | null>)
-      | undefined;
+    editHook: ((columns: ColumnSpec[], subject?: string) => Promise<ColumnSpec[] | null>) | undefined;
   },
 ): Promise<void> {
   const { url, file, label, maxRows, mode, target, panel, editHook } = opts;
   if (mode === 'reference') {
     // A reference re-fetches a rows endpoint on every render. A script is
     // something you RUN once, so there is nothing live to point at.
-    throw new Error(
-      'A .sql script cannot be referenced live — it is a script to run, not a rows endpoint. Import it as a Copy instead.',
-    );
+    throw new Error('A .sql script cannot be referenced live — it is a script to run, not a rows endpoint. Import it as a Copy instead.');
   }
 
-  const script = file
-    ? await file.text()
-    : await fetchImportTextWithBar(
-        api,
-        url,
-        `Reading ${filenameFromUrl(url)}…`,
-        maxRows != null ? { maxBytes: null } : {},
-      );
+  const script = file ? await file.text() : await fetchImportTextWithBar(api, url, `Reading ${filenameFromUrl(url)}…`, maxRows != null ? { maxBytes: null } : {});
 
   if (hasSqlProjections(script)) {
     const res = await restoreSqlScript(api, script, {
@@ -367,24 +332,11 @@ async function importSql(
  * when there is nothing to read. The text is passed back so the caller can
  * hand it straight to whichever path wins, instead of fetching it again.
  */
-async function sniffJson(
-  api: HostApi,
-  url: string,
-  file: File | undefined,
-  maxRows: number | undefined,
-  mode: 'copy' | 'reference',
-): Promise<{ text: string; isDump: boolean } | null> {
+async function sniffJson(api: HostApi, url: string, file: File | undefined, maxRows: number | undefined, mode: 'copy' | 'reference'): Promise<{ text: string; isDump: boolean } | null> {
   // A Reference never reads the whole body to write it, so leave that path to
   // the kernel — and a dump cannot be referenced anyway.
   if (mode === 'reference') return null;
-  const text = file
-    ? await file.text()
-    : await fetchImportTextWithBar(
-        api,
-        url,
-        `Reading ${filenameFromUrl(url)}…`,
-        maxRows != null ? { maxBytes: null } : {},
-      );
+  const text = file ? await file.text() : await fetchImportTextWithBar(api, url, `Reading ${filenameFromUrl(url)}…`, maxRows != null ? { maxBytes: null } : {});
   try {
     return { text, isDump: isWorkspaceDump(JSON.parse(text)) };
   } catch {
@@ -407,10 +359,7 @@ function reportImport(api: HostApi, res: RunImportResult, label: string): void {
   if (res.cancelled && res.landed.length === 0) return;
 
   const rows = res.landed.reduce((n, l) => n + l.rowCount, 0);
-  const what =
-    res.landed.length === 1
-      ? `"${res.landed[0]!.tableName}"`
-      : `${res.landed.length} tables from ${label}`;
+  const what = res.landed.length === 1 ? `"${res.landed[0]!.tableName}"` : `${res.landed.length} tables from ${label}`;
 
   if (res.landed.length > 0) {
     const suffix = res.failed.length > 0 ? ` — ${res.failed.length} failed` : '';
@@ -433,8 +382,7 @@ function reportImport(api: HostApi, res: RunImportResult, label: string): void {
  * or the first array-of-objects property (preferring `rows`/`records`/`data`). */
 function jsonRecords(text: string): Array<Record<string, unknown>> {
   const parsed: unknown = JSON.parse(text);
-  const isRecordArray = (v: unknown): v is Array<Record<string, unknown>> =>
-    Array.isArray(v) && v.every((x) => x != null && typeof x === 'object' && !Array.isArray(x));
+  const isRecordArray = (v: unknown): v is Array<Record<string, unknown>> => Array.isArray(v) && v.every((x) => x != null && typeof x === 'object' && !Array.isArray(x));
   if (isRecordArray(parsed)) return parsed;
   if (parsed && typeof parsed === 'object') {
     const obj = parsed as Record<string, unknown>;
@@ -449,14 +397,7 @@ function jsonRecords(text: string): Array<Record<string, unknown>> {
 /** Infer columns from the union of keys across the first rows of a JSON body. */
 function inferJsonColumns(text: string): ColumnSpec[] {
   const records = jsonRecords(text).slice(0, 50);
-  const typeOf = (v: unknown): ColumnType =>
-    looksLikeArray(v)
-      ? 'array'
-      : typeof v === 'number'
-        ? 'number'
-        : typeof v === 'boolean'
-          ? 'boolean'
-          : 'string';
+  const typeOf = (v: unknown): ColumnType => (looksLikeArray(v) ? 'array' : typeof v === 'number' ? 'number' : typeof v === 'boolean' ? 'boolean' : 'string');
   const cols = new Map<string, ColumnType>();
   for (const rec of records) {
     for (const [k, v] of Object.entries(rec)) {
@@ -514,18 +455,10 @@ async function referenceDatasette(api: HostApi, url: string): Promise<void> {
       failed.push(`${t.table}: ${(err as Error).message}`);
     }
   }
-  api.ui.dialogs.toast(
-    `Referenced ${ok} table${ok === 1 ? '' : 's'}${failed.length ? ` — ${failed.length} failed` : ''}.`,
-    { kind: failed.length ? 'warning' : 'success', title: 'Reference' },
-  );
+  api.ui.dialogs.toast(`Referenced ${ok} table${ok === 1 ? '' : 's'}${failed.length ? ` — ${failed.length} failed` : ''}.`, { kind: failed.length ? 'warning' : 'success', title: 'Reference' });
 }
 
-async function createUrlReference(
-  api: HostApi,
-  url: string,
-  format: 'csv' | 'json',
-  opts: { nameHint?: string; silent?: boolean } = {},
-): Promise<void> {
+async function createUrlReference(api: HostApi, url: string, format: 'csv' | 'json', opts: { nameHint?: string; silent?: boolean } = {}): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('No active workspace.');
   const baseName = opts.nameHint ?? filenameFromUrl(url);
@@ -537,11 +470,7 @@ async function createUrlReference(
   if (columns.length === 0) throw new Error('No columns found in the referenced data.');
 
   // Keep the name unique in the workspace (references don't overwrite).
-  const taken = new Set(
-    (await api.store.tables.find())
-      .filter((t) => t.workspaceId === workspaceId)
-      .map((t) => t.name.toLowerCase()),
-  );
+  const taken = new Set((await api.store.tables.find()).filter((t) => t.workspaceId === workspaceId).map((t) => t.name.toLowerCase()));
   let name = baseName;
   for (let i = 2; taken.has(name.toLowerCase()); i++) name = `${baseName}-${i}`;
 
@@ -940,9 +869,7 @@ export class ImportDialog extends LitElement {
     const registered = [...registries.importers]
       .sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER))
       .map((s) => ({ id: s.id, label: s.label, panel: s.panel, kernel: s.supports?.kernel }));
-    const withDatasette = registered.some((f) => f.id === 'datasette')
-      ? registered
-      : [...registered, { id: 'datasette', label: 'Datasette (table or instance)' }];
+    const withDatasette = registered.some((f) => f.id === 'datasette') ? registered : [...registered, { id: 'datasette', label: 'Datasette (table or instance)' }];
     this.formats = withDatasette;
 
     // The file input's filter is now the union of what the importers declare,
@@ -1038,11 +965,8 @@ export class ImportDialog extends LitElement {
     // If a database was picked for an instance-root URL, narrow the URL to that
     // database and flag it so the importer imports that db's tables directly
     // (no second table-select dialog — the user already committed to the db).
-    const dbChosen =
-      kind === 'datasette' && !!this.selectedDb && isDatasetteInstanceRoot(url, kind);
-    const finalUrl = dbChosen
-      ? `${url.replace(/\/+$/, '')}/${encodeURIComponent(this.selectedDb)}`
-      : url;
+    const dbChosen = kind === 'datasette' && !!this.selectedDb && isDatasetteInstanceRoot(url, kind);
+    const finalUrl = dbChosen ? `${url.replace(/\/+$/, '')}/${encodeURIComponent(this.selectedDb)}` : url;
     this.finish({ url: finalUrl, kind, dbChosen, editColumns, maxRows, mode, panel, target });
   };
 
@@ -1081,22 +1005,12 @@ export class ImportDialog extends LitElement {
           >
             ${this.dbList
               ? html`
-                  <option value="" ?selected=${this.selectedDb === ''}>
-                    — all databases (choose tables next) —
-                  </option>
-                  ${this.dbList.map(
-                    (d) =>
-                      html`<option value=${d} ?selected=${d === this.selectedDb}>${d}</option>`,
-                  )}
+                  <option value="" ?selected=${this.selectedDb === ''}>— all databases (choose tables next) —</option>
+                  ${this.dbList.map((d) => html`<option value=${d} ?selected=${d === this.selectedDb}>${d}</option>`)}
                 `
               : html`<option value="">— not loaded —</option>`}
           </select>
-          <button
-            type="button"
-            class="ghost db-load"
-            ?disabled=${this.dbLoading}
-            @click=${() => void this.loadDatabases()}
-          >
+          <button type="button" class="ghost db-load" ?disabled=${this.dbLoading} @click=${() => void this.loadDatabases()}>
             ${this.dbLoading ? 'Loading…' : this.dbList ? 'Refresh' : 'List databases'}
           </button>
         </div>
@@ -1132,12 +1046,8 @@ export class ImportDialog extends LitElement {
             }}
           >
             <option value="new" ?selected=${this.targetKind === 'new'}>A new table</option>
-            <option value="append" ?selected=${this.targetKind === 'append'}>
-              Append to an existing table
-            </option>
-            <option value="overwrite" ?selected=${this.targetKind === 'overwrite'}>
-              Replace the rows of an existing table
-            </option>
+            <option value="append" ?selected=${this.targetKind === 'append'}>Append to an existing table</option>
+            <option value="overwrite" ?selected=${this.targetKind === 'overwrite'}>Replace the rows of an existing table</option>
           </select>
           ${needsTable
             ? html`<select
@@ -1149,21 +1059,13 @@ export class ImportDialog extends LitElement {
               >
                 ${this.tables.length === 0
                   ? html`<option value="">— no tables yet —</option>`
-                  : this.tables.map(
-                      (t) =>
-                        html`<option value=${t.id} ?selected=${t.id === this.targetTableId}>
-                          ${t.name}
-                        </option>`,
-                    )}
+                  : this.tables.map((t) => html`<option value=${t.id} ?selected=${t.id === this.targetTableId}>${t.name}</option>`)}
               </select>`
             : nothing}
         </div>
       </label>
       ${needsTable
-        ? html`<p class="hint">
-            The table keeps its own columns. Values map onto them the way the format requires — a
-            CSV by column position, so its header names need not match.
-          </p>`
+        ? html`<p class="hint">The table keeps its own columns. Values map onto them the way the format requires — a CSV by column position, so its header names need not match.</p>`
         : nothing}
     `;
   }
@@ -1195,9 +1097,7 @@ export class ImportDialog extends LitElement {
   override render() {
     return html`
       <dialog @cancel=${this.onCancel} @keydown=${ctrlEnterSubmits}>
-        <button type="button" class="close-x" title="Close" @click=${() => this.finish(null)}>
-          ×
-        </button>
+        <button type="button" class="close-x" title="Close" @click=${() => this.finish(null)}>×</button>
         <form @submit=${this.submit}>
           <div class="dialog-header">
             <h2>Import</h2>
@@ -1218,10 +1118,7 @@ export class ImportDialog extends LitElement {
                 }}
               >
                 <option value="auto" ?selected=${this.kind === 'auto'}>Auto-detect</option>
-                ${this.formats.map(
-                  (f) =>
-                    html`<option value=${f.id} ?selected=${this.kind === f.id}>${f.label}</option>`,
-                )}
+                ${this.formats.map((f) => html`<option value=${f.id} ?selected=${this.kind === f.id}>${f.label}</option>`)}
               </select>
             </label>
 
@@ -1229,18 +1126,9 @@ export class ImportDialog extends LitElement {
               <legend>Source and options</legend>
               <label>
                 Sample source
-                <select
-                  data-testid="import-sample"
-                  .value=${String(this.presetIdx)}
-                  @change=${(e: Event) => this.onPresetChange(e)}
-                >
+                <select data-testid="import-sample" .value=${String(this.presetIdx)} @change=${(e: Event) => this.onPresetChange(e)}>
                   <option value="-1" ?selected=${this.presetIdx === -1}>— choose a sample —</option>
-                  ${PREDEFINED.map(
-                    (p, i) =>
-                      html`<option value=${String(i)} ?selected=${i === this.presetIdx}>
-                        ${p.label}
-                      </option>`,
-                  )}
+                  ${PREDEFINED.map((p, i) => html`<option value=${String(i)} ?selected=${i === this.presetIdx}>${p.label}</option>`)}
                 </select>
               </label>
 
@@ -1265,85 +1153,42 @@ export class ImportDialog extends LitElement {
 
               <label>
                 …or upload a file
-                <input
-                  type="file"
-                  accept=${this.acceptAttr}
-                  @change=${(e: Event) => this.onFileChange(e)}
-                />
+                <input type="file" accept=${this.acceptAttr} @change=${(e: Event) => this.onFileChange(e)} />
               </label>
-              ${this.file
-                ? html`<p class="hint">
-                    Importing <strong>${this.file.name}</strong> as
-                    ${this.resolvedKind.toUpperCase()}.
-                  </p>`
-                : nothing}
+              ${this.file ? html`<p class="hint">Importing <strong>${this.file.name}</strong> as ${this.resolvedKind.toUpperCase()}.</p>` : nothing}
 
               <label>
                 Import mode
                 <div class="row mode-row">
                   <label class="check">
-                    <input
-                      type="radio"
-                      name="import-mode"
-                      .checked=${this.mode === 'copy'}
-                      @change=${() => (this.mode = 'copy')}
-                    />
+                    <input type="radio" name="import-mode" .checked=${this.mode === 'copy'} @change=${() => (this.mode = 'copy')} />
                     Copy — a local, editable, synced snapshot you can refresh
                   </label>
                   <label class="check">
-                    <input
-                      type="radio"
-                      name="import-mode"
-                      ?disabled=${!!this.file}
-                      .checked=${this.mode === 'reference'}
-                      @change=${() => (this.mode = 'reference')}
-                    />
+                    <input type="radio" name="import-mode" ?disabled=${!!this.file} .checked=${this.mode === 'reference'} @change=${() => (this.mode = 'reference')} />
                     Reference — live, read-only; rows never stored or synced
                   </label>
                 </div>
               </label>
-              ${this.file
-                ? html`<p class="hint">Uploaded files can only be imported as a Copy.</p>`
-                : nothing}
-              ${this.renderTarget()}
+              ${this.file ? html`<p class="hint">Uploaded files can only be imported as a Copy.</p>` : nothing} ${this.renderTarget()}
 
               <label class="check">
-                <input
-                  type="checkbox"
-                  ?disabled=${this.mode === 'reference'}
-                  .checked=${this.editColumns}
-                  @change=${(e: Event) =>
-                    (this.editColumns = (e.target as HTMLInputElement).checked)}
-                />
+                <input type="checkbox" ?disabled=${this.mode === 'reference'} .checked=${this.editColumns} @change=${(e: Event) => (this.editColumns = (e.target as HTMLInputElement).checked)} />
                 Edit columns before import (rename / hide / fix duplicate names)
               </label>
-              ${this.mode === 'reference'
-                ? html`<p class="hint">
-                    A Reference keeps the source's own schema, so there is nothing to edit.
-                  </p>`
-                : nothing}
+              ${this.mode === 'reference' ? html`<p class="hint">A Reference keeps the source's own schema, so there is nothing to edit.</p>` : nothing}
 
               <label>
                 Limit rows (optional)
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  placeholder="import all rows"
-                  .value=${this.maxRowsInput}
-                  @input=${(e: Event) => (this.maxRowsInput = (e.target as HTMLInputElement).value)}
-                />
+                <input type="number" min="1" step="1" placeholder="import all rows" .value=${this.maxRowsInput} @input=${(e: Event) => (this.maxRowsInput = (e.target as HTMLInputElement).value)} />
               </label>
             </fieldset>
 
             ${this.renderPluginBlock()}
 
             <p class="hint">
-              Paste any URL or pick a sample above — a JSON dump, a <code>.csv</code> or
-              <code>.tsv</code> file, or a Datasette table/database/instance. For a Datasette
-              instance root, click <em>List databases</em> to pick one first. Multi-table sources
-              let you choose which tables to import; Datasette tables are capped at 10,000 rows
-              each.
+              Paste any URL or pick a sample above — a JSON dump, a <code>.csv</code> or <code>.tsv</code> file, or a Datasette table/database/instance. For a Datasette instance root, click
+              <em>List databases</em> to pick one first. Multi-table sources let you choose which tables to import; Datasette tables are capped at 10,000 rows each.
             </p>
           </div>
         </form>

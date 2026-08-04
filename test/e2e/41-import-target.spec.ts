@@ -41,12 +41,7 @@ async function rowsOf(page: import('@playwright/test').Page, ws: string, name: s
 }
 
 /** Import one CSV body from a URL, optionally into an existing table. */
-async function importCsv(
-  page: import('@playwright/test').Page,
-  url: string,
-  body: string,
-  target?: 'append' | 'overwrite',
-) {
+async function importCsv(page: import('@playwright/test').Page, url: string, body: string, target?: 'append' | 'overwrite') {
   await page.route(url, (route) =>
     route.fulfill({
       status: 200,
@@ -96,10 +91,7 @@ test('Reference mode hides the target — a reference always makes a new table',
   await expect(dlg.getByTestId('import-target')).toHaveCount(0);
 });
 
-test('Append adds rows to the chosen table, mapping cells by position', async ({
-  page,
-  workspaceId,
-}) => {
+test('Append adds rows to the chosen table, mapping cells by position', async ({ page, workspaceId }) => {
   await importCsv(page, 'https://ex.example/a.csv', FIRST);
   await expect.poll(async () => (await rowsOf(page, workspaceId, 'a'))?.values.length).toBe(2);
 
@@ -107,17 +99,12 @@ test('Append adds rows to the chosen table, mapping cells by position', async ({
 
   // The existing schema is untouched by the incoming CSV's different header
   // names, and its cells land in `city`/`pop` by position.
-  await expect
-    .poll(async () => (await rowsOf(page, workspaceId, 'a'))?.values)
-    .toEqual(['Bern|133000', 'Chur|37000', 'Zug|30000']);
+  await expect.poll(async () => (await rowsOf(page, workspaceId, 'a'))?.values).toEqual(['Bern|133000', 'Chur|37000', 'Zug|30000']);
   expect((await rowsOf(page, workspaceId, 'a'))?.fields).toEqual(['city', 'pop']);
   expect(await rowsOf(page, workspaceId, 'b')).toBeNull(); // no second table
 });
 
-test('Replace drops the old rows and keeps the table and its columns', async ({
-  page,
-  workspaceId,
-}) => {
+test('Replace drops the old rows and keeps the table and its columns', async ({ page, workspaceId }) => {
   await importCsv(page, 'https://ex.example/c.csv', FIRST);
   await expect.poll(async () => (await rowsOf(page, workspaceId, 'c'))?.values.length).toBe(2);
 
@@ -125,17 +112,12 @@ test('Replace drops the old rows and keeps the table and its columns', async ({
 
   // Poll: the dialog closes as soon as it has the answer, so the write is
   // still in flight when `importCsv` returns.
-  await expect
-    .poll(async () => (await rowsOf(page, workspaceId, 'c'))?.values)
-    .toEqual(['Chur|37000']);
+  await expect.poll(async () => (await rowsOf(page, workspaceId, 'c'))?.values).toEqual(['Chur|37000']);
   expect((await rowsOf(page, workspaceId, 'c'))?.fields).toEqual(['city', 'pop']);
   expect(await rowsOf(page, workspaceId, 'd')).toBeNull();
 });
 
-test('a name clash with target "new" makes a second table instead of prompting', async ({
-  page,
-  workspaceId,
-}) => {
+test('a name clash with target "new" makes a second table instead of prompting', async ({ page, workspaceId }) => {
   await importCsv(page, 'https://ex.example/e.csv', FIRST);
   await expect.poll(async () => (await rowsOf(page, workspaceId, 'e'))?.values.length).toBe(2);
 
@@ -146,9 +128,7 @@ test('a name clash with target "new" makes a second table instead of prompting',
 
   // A NEW table takes its schema from its own CSV, so it gets the second
   // file's headers rather than the first table's columns.
-  await expect
-    .poll(async () => (await rowsOf(page, workspaceId, 'e-2'))?.fields)
-    .toEqual(['town', 'inhabitants']);
+  await expect.poll(async () => (await rowsOf(page, workspaceId, 'e-2'))?.fields).toEqual(['town', 'inhabitants']);
   expect((await rowsOf(page, workspaceId, 'e'))?.values).toEqual(['Bern|133000', 'Zug|30000']);
 });
 
@@ -187,10 +167,7 @@ async function openJsonImport(page: import('@playwright/test').Page, url: string
   return dlg;
 }
 
-test('plain tabular JSON runs on the kernel with no restore prompt', async ({
-  page,
-  workspaceId,
-}) => {
+test('plain tabular JSON runs on the kernel with no restore prompt', async ({ page, workspaceId }) => {
   await openJsonImport(page, 'https://ex.example/plain.json', PLAIN);
 
   // No question asked — an array of objects is just data. (The element is
@@ -204,10 +181,7 @@ test('plain tabular JSON runs on the kernel with no restore prompt', async ({
     .toEqual(['name']);
 });
 
-test('a workspace dump offers to restore, and restoring keeps the window geometry', async ({
-  page,
-  workspaceId,
-}) => {
+test('a workspace dump offers to restore, and restoring keeps the window geometry', async ({ page, workspaceId }) => {
   await openJsonImport(page, 'https://ex.example/space.db.json', DUMP);
 
   const ask = page.locator('host-dialogs dialog');

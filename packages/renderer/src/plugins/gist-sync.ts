@@ -1,12 +1,4 @@
-import type {
-  HostApi,
-  PluginModule,
-  Row,
-  Setting,
-  Table,
-  ViewInstance,
-  ViewTemplate,
-} from '@easydb/shared';
+import type { HostApi, PluginModule, Row, Setting, Table, ViewInstance, ViewTemplate } from '@easydb/shared';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 import { withoutRawSecrets } from '../db/secret-guard.js';
 // Type-only: erased at compile time, so importing this module for its type
@@ -69,8 +61,7 @@ export function init(api: HostApi): void {
       label: 'GitHub token (PAT)',
       type: 'secret',
       scope: 'user',
-      description:
-        'Personal access token with the "gist" scope. Stored on this device only (not synced).',
+      description: 'Personal access token with the "gist" scope. Stored on this device only (not synced).',
       help:
         'A classic token with the single "gist" scope is enough — nothing else is ' +
         'needed and nothing else should be granted. Give it an expiry you are ' +
@@ -89,8 +80,7 @@ export function init(api: HostApi): void {
     tooltip: 'Gist sync — push, pull, share…',
     onClick: async (api, ctx) => {
       const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
-      const rect =
-        ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
+      const rect = ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
       const choice = await AnchoredMenu.open(rect, [
         { id: 'push', label: 'Push', icon: 'cloud_upload' },
         { id: 'pull', label: 'Pull', icon: 'cloud_download' },
@@ -130,8 +120,7 @@ export function init(api: HostApi): void {
     tooltip: 'Gist sync for this table — push, pull, view file',
     onClick: async (api, ctx) => {
       const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
-      const rect =
-        ctx.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
+      const rect = ctx.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
       const choice = await AnchoredMenu.open(rect, [
         { id: 'push', label: 'Push this table', icon: 'cloud_upload' },
         { id: 'pull', label: 'Pull this table', icon: 'cloud_download' },
@@ -177,10 +166,7 @@ export async function load(api: HostApi): Promise<void> {
     await api.ui.dialogs.alert('The shared gist link is invalid.', 'Gist sync');
     return;
   }
-  const ok = await api.ui.dialogs.confirm(
-    `Load shared workspace from gist ${creds.gistId || '(new)'} (owner: ${creds.user})?\n\nThis pulls its tables into the current workspace.`,
-    'Gist sync',
-  );
+  const ok = await api.ui.dialogs.confirm(`Load shared workspace from gist ${creds.gistId || '(new)'} (owner: ${creds.user})?\n\nThis pulls its tables into the current workspace.`, 'Gist sync');
   if (!ok) return;
   await saveCreds(api, creds);
   await pull(api);
@@ -266,10 +252,7 @@ function credsToConnectionString(c: GistCreds): string {
 async function openShare(api: HostApi): Promise<void> {
   const creds = await loadCreds(api);
   if (!creds || !creds.gistId) {
-    await api.ui.dialogs.alert(
-      'Configure a gist and Push first — there is nothing to share yet.',
-      'Gist sync',
-    );
+    await api.ui.dialogs.alert('Configure a gist and Push first — there is nothing to share yet.', 'Gist sync');
     return;
   }
   // Use a URL #hash, not a ?query: the fragment is never sent to the server, so
@@ -313,10 +296,7 @@ function isTableFile(name: string): boolean {
  * Exported for the unit tests — a real push needs the GitHub API, which the e2e
  * suite does not talk to.
  */
-export function staleTableFiles(
-  remote: Iterable<string>,
-  pushed: Iterable<string>,
-): string[] {
+export function staleTableFiles(remote: Iterable<string>, pushed: Iterable<string>): string[] {
   const keep = new Set(pushed);
   return [...remote].filter((name) => isTableFile(name) && !keep.has(name)).sort();
 }
@@ -333,10 +313,7 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
 
   const tables = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
   if (includeData && tables.length === 0) {
-    await api.ui.dialogs.alert(
-      'Nothing to push: the current workspace has no tables.',
-      'Gist sync',
-    );
+    await api.ui.dialogs.alert('Nothing to push: the current workspace has no tables.', 'Gist sync');
     return;
   }
 
@@ -365,17 +342,10 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
   // https://github.com/orgs/community/discussions/147837
   if (oversize.length > 0 || large.length > 0) {
     const parts: string[] = [];
-    if (oversize.length > 0)
-      parts.push(
-        `Over Gist's 100 MB per-file limit — GitHub will REJECT these:\n${oversize.join('\n')}`,
-      );
-    if (large.length > 0)
-      parts.push(
-        `Large (over 10 MB) — Gist sync will be slow and less reliable:\n${large.join('\n')}`,
-      );
+    if (oversize.length > 0) parts.push(`Over Gist's 100 MB per-file limit — GitHub will REJECT these:\n${oversize.join('\n')}`);
+    if (large.length > 0) parts.push(`Large (over 10 MB) — Gist sync will be slow and less reliable:\n${large.join('\n')}`);
     const proceed = await api.ui.dialogs.confirm(
-      `${parts.join('\n\n')}\n\nTo reduce size: remove unnecessary columns, limit the number of rows, ` +
-        `or mark the table no-persist/no-sync.\n\nPush anyway?`,
+      `${parts.join('\n\n')}\n\nTo reduce size: remove unnecessary columns, limit the number of rows, ` + `or mark the table no-persist/no-sync.\n\nPush anyway?`,
       'Gist size warning',
     );
     if (!proceed) return;
@@ -386,12 +356,8 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
   // Also carries workspace metadata (view templates/instances + all settings)
   // so a pull can restore more than just tables/rows.
   if (includeSettings) {
-    const viewTemplates = (await api.store.viewTemplates.find()).filter(
-      (v) => v.workspaceId === wsId,
-    );
-    const viewInstances = (await api.store.viewInstances.find()).filter(
-      (v) => v.workspaceId === wsId,
-    );
+    const viewTemplates = (await api.store.viewTemplates.find()).filter((v) => v.workspaceId === wsId);
+    const viewInstances = (await api.store.viewInstances.find()).filter((v) => v.workspaceId === wsId);
     // Name + value only: the physical key and workspaceId are this device's, and
     // the pulling side re-derives both for ITS workspace (see settingsView).
     const all = (await api.store.settings.find()).map((s) => ({ name: s.name, value: s.value }));
@@ -401,9 +367,7 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
     const { kept: settings, withheld } = withoutRawSecrets(all);
     if (withheld.length > 0) {
       api.ui.dialogs.toast(
-        `Not pushed: ${withheld.join(', ')} — a secret is stored as its own value. ` +
-          `Move it into the secrets store (Settings → General) and reference it with ` +
-          `\${secret:name}.`,
+        `Not pushed: ${withheld.join(', ')} — a secret is stored as its own value. ` + `Move it into the secrets store (Settings → General) and reference it with ` + `\${secret:name}.`,
         { kind: 'warning', title: 'Gist sync' },
       );
     }
@@ -469,14 +433,8 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
   }
 
   const url = updated.html_url ?? `https://gist.github.com/${creds.user}/${updated.id}`;
-  const what =
-    scope === 'settings'
-      ? 'settings'
-      : scope === 'data'
-        ? `${tables.length} table${tables.length === 1 ? '' : 's'} (data only)`
-        : `${tables.length} table${tables.length === 1 ? '' : 's'}`;
-  const alsoRemoved =
-    removed.length > 0 ? `  Removed ${removed.length} file${removed.length === 1 ? '' : 's'}.` : '';
+  const what = scope === 'settings' ? 'settings' : scope === 'data' ? `${tables.length} table${tables.length === 1 ? '' : 's'} (data only)` : `${tables.length} table${tables.length === 1 ? '' : 's'}`;
+  const alsoRemoved = removed.length > 0 ? `  Removed ${removed.length} file${removed.length === 1 ? '' : 's'}.` : '';
   api.ui.dialogs.toast(`Pushed ${what}.${alsoRemoved}  ${url}`, {
     kind: 'success',
     title: 'Gist sync',
@@ -490,10 +448,7 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
   const includeSettings = scope !== 'data';
   const creds = await ensureCreds(api);
   if (!creds || !creds.gistId) {
-    await api.ui.dialogs.alert(
-      'No gist id configured for this workspace. Push first or set it via the connection string.',
-      'Gist sync',
-    );
+    await api.ui.dialogs.alert('No gist id configured for this workspace. Push first or set it via the connection string.', 'Gist sync');
     return;
   }
 
@@ -511,9 +466,7 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
     files: Record<string, { content: string; truncated?: boolean; raw_url?: string }>;
   };
 
-  const tableFiles = Object.entries(gist.files).filter(
-    ([name]) => name.endsWith('.table.json') && !name.startsWith('_easydb'),
-  );
+  const tableFiles = Object.entries(gist.files).filter(([name]) => name.endsWith('.table.json') && !name.startsWith('_easydb'));
   if (includeData && tableFiles.length === 0) {
     await api.ui.dialogs.alert('Gist contains no .table.json files.', 'Gist sync');
     return;
@@ -620,11 +573,7 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
       const markerSettings = parsedMarker.settings ?? [];
       pulledViewIds = new Set(markerViewInstances.map((v) => v.id));
 
-      const templateIds = await restoreTemplates(
-        api.store.viewTemplates,
-        wsId,
-        markerViewTemplates,
-      );
+      const templateIds = await restoreTemplates(api.store.viewTemplates, wsId, markerViewTemplates);
 
       for (const inst of markerViewInstances) {
         let tableId: string | undefined;
@@ -648,18 +597,13 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
 
   if (failures.length > 0) {
     const list = failures.map((f) => `• ${f.file}: ${f.error}`).join('\n');
-    api.ui.dialogs.toast(
-      `Pulled ${imported} of ${tableFiles.length} tables. ${failures.length} failed:\n${list}${
-        metadataWarning ? `\n${metadataWarning}` : ''
-      }`,
-      { kind: 'warning', title: 'Gist sync' },
-    );
+    api.ui.dialogs.toast(`Pulled ${imported} of ${tableFiles.length} tables. ${failures.length} failed:\n${list}${metadataWarning ? `\n${metadataWarning}` : ''}`, {
+      kind: 'warning',
+      title: 'Gist sync',
+    });
   } else {
     const viewsSuffix = importedViews > 0 ? ` (+${importedViews} views)` : '';
-    const msg =
-      scope === 'settings'
-        ? `Pulled settings${viewsSuffix}.`
-        : `Pulled ${imported} table${imported === 1 ? '' : 's'}.${viewsSuffix}`;
+    const msg = scope === 'settings' ? `Pulled settings${viewsSuffix}.` : `Pulled ${imported} table${imported === 1 ? '' : 's'}.${viewsSuffix}`;
     api.ui.dialogs.toast(msg, { kind: 'success', title: 'Gist sync' });
     if (metadataWarning) {
       api.ui.dialogs.toast(metadataWarning, { kind: 'warning', title: 'Gist sync' });
@@ -694,11 +638,7 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
  * A failed listing is not a failed push — the gist is left as it is and the
  * tables being pushed still go up.
  */
-async function confirmStaleRemoval(
-  api: HostApi,
-  creds: GistCreds,
-  pushed: string[],
-): Promise<string[]> {
+async function confirmStaleRemoval(api: HostApi, creds: GistCreds, pushed: string[]): Promise<string[]> {
   let remote: string[];
   try {
     const res = await fetch(`https://api.github.com/gists/${creds.gistId}`, {
@@ -737,35 +677,17 @@ function nameList(names: string[], max = 8): string {
  * Exported for the unit tests (like `fetchGistFileContent`) — a real pull needs
  * the GitHub API, which the e2e suite does not talk to.
  */
-export async function offerPrune(
-  api: HostApi,
-  wsId: string,
-  pulled: { tableNames: Set<string> | null; viewInstanceIds: Set<string> | null },
-): Promise<void> {
-  const extraTables = pulled.tableNames
-    ? (await api.store.tables.find()).filter(
-        (t) => t.workspaceId === wsId && !pulled.tableNames!.has(t.name.toLowerCase()),
-      )
-    : [];
-  const extraViews = pulled.viewInstanceIds
-    ? (await api.store.viewInstances.find()).filter(
-        (v) => v.workspaceId === wsId && !pulled.viewInstanceIds!.has(v.id),
-      )
-    : [];
+export async function offerPrune(api: HostApi, wsId: string, pulled: { tableNames: Set<string> | null; viewInstanceIds: Set<string> | null }): Promise<void> {
+  const extraTables = pulled.tableNames ? (await api.store.tables.find()).filter((t) => t.workspaceId === wsId && !pulled.tableNames!.has(t.name.toLowerCase())) : [];
+  const extraViews = pulled.viewInstanceIds ? (await api.store.viewInstances.find()).filter((v) => v.workspaceId === wsId && !pulled.viewInstanceIds!.has(v.id)) : [];
   if (extraTables.length === 0 && extraViews.length === 0) return;
 
   const parts: string[] = [];
   if (extraTables.length > 0) {
-    parts.push(
-      `${extraTables.length} table${extraTables.length === 1 ? '' : 's'}:\n` +
-        nameList(extraTables.map((t) => t.name)),
-    );
+    parts.push(`${extraTables.length} table${extraTables.length === 1 ? '' : 's'}:\n` + nameList(extraTables.map((t) => t.name)));
   }
   if (extraViews.length > 0) {
-    parts.push(
-      `${extraViews.length} view${extraViews.length === 1 ? '' : 's'}:\n` +
-        nameList(extraViews.map((v) => v.name)),
-    );
+    parts.push(`${extraViews.length} view${extraViews.length === 1 ? '' : 's'}:\n` + nameList(extraViews.map((v) => v.name)));
   }
   const yes = await api.ui.dialogs.confirm(
     `The gist does not have these local objects:\n\n${parts.join('\n\n')}\n\n` +
@@ -782,11 +704,10 @@ export async function offerPrune(
   // a static import would break the unit tests' Node environment.
   const { deleteTable } = await import('../window-mgr/table-window-manager.js');
   for (const t of extraTables) await deleteTable(t.id);
-  api.ui.dialogs.toast(
-    `Deleted ${extraTables.length} table${extraTables.length === 1 ? '' : 's'} and ` +
-      `${extraViews.length} view${extraViews.length === 1 ? '' : 's'}.`,
-    { kind: 'success', title: 'Gist sync' },
-  );
+  api.ui.dialogs.toast(`Deleted ${extraTables.length} table${extraTables.length === 1 ? '' : 's'} and ` + `${extraViews.length} view${extraViews.length === 1 ? '' : 's'}.`, {
+    kind: 'success',
+    title: 'Gist sync',
+  });
 }
 
 // -- Per-table push/pull/view --------------------------------------------------
@@ -795,10 +716,7 @@ async function pushTable(api: HostApi, tableId: string): Promise<void> {
   const creds = await ensureCreds(api);
   if (!creds) return;
   if (!creds.gistId) {
-    await api.ui.dialogs.alert(
-      'No gist yet — use the main Gist button to Push the whole workspace first.',
-      'Gist sync',
-    );
+    await api.ui.dialogs.alert('No gist yet — use the main Gist button to Push the whole workspace first.', 'Gist sync');
     return;
   }
   const table = await api.store.tables.findOne(tableId);
@@ -887,11 +805,7 @@ async function viewTableGist(api: HostApi, tableId: string): Promise<void> {
   if (!table) return;
   // GitHub anchors a gist file as #file-<filename with non-alphanumerics as '-'>.
   const fileAnchor = `file-${slugTable(table.name)}-table-json`;
-  window.open(
-    `https://gist.github.com/${creds.user}/${creds.gistId}#${fileAnchor}`,
-    '_blank',
-    'noopener',
-  );
+  window.open(`https://gist.github.com/${creds.user}/${creds.gistId}#${fileAnchor}`, '_blank', 'noopener');
 }
 
 // -- helpers ------------------------------------------------------------------
@@ -943,10 +857,7 @@ function syncedTableFields(p: TableFileMeta): Partial<Table> {
  * gist's raw_url is link-accessible and served with `Access-Control-Allow-Origin: *`,
  * so a plain GET (no auth header → no CORS preflight) works from the browser.
  */
-export async function fetchGistFileContent(
-  file: { content: string; truncated?: boolean; raw_url?: string },
-  doFetch: (url: string) => Promise<Response> = (u) => fetch(u),
-): Promise<string> {
+export async function fetchGistFileContent(file: { content: string; truncated?: boolean; raw_url?: string }, doFetch: (url: string) => Promise<Response> = (u) => fetch(u)): Promise<string> {
   if (!file.truncated) return file.content;
   if (!file.raw_url) throw new Error('GitHub truncated this file but returned no raw_url');
   const res = await doFetch(file.raw_url);

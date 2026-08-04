@@ -40,16 +40,11 @@ test.describe('safe mode', () => {
     const header = page.locator('app-shell header');
     await expect(header.getByRole('button', { name: /New Table/ })).toBeVisible();
     await expect(header.getByTitle('Workspace and plugin settings')).toBeVisible();
-    await expect(
-      header.locator('button.icon-btn[title="Add, disable, or remove plugins"]'),
-    ).toBeVisible();
+    await expect(header.locator('button.icon-btn[title="Add, disable, or remove plugins"]')).toBeVisible();
     void workspaceId;
   });
 
-  test('?safemode1: built-ins still load, only URL plugins skipped', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('?safemode1: built-ins still load, only URL plugins skipped', async ({ page, workspaceId }) => {
     await gotoWithFlags(page, workspaceId, '&safemode1');
 
     const header = page.locator('app-shell header');
@@ -57,10 +52,7 @@ test.describe('safe mode', () => {
     await expect(header.getByTitle('Workspace and plugin settings')).toBeVisible();
   });
 
-  test('?safemode: non-fixed built-in UI is gone, fixed built-ins + Plugin Manager still work', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('?safemode: non-fixed built-in UI is gone, fixed built-ins + Plugin Manager still work', async ({ page, workspaceId }) => {
     await gotoWithFlags(page, workspaceId, '&safemode');
     await closeAutoPluginManager(page);
 
@@ -74,26 +66,18 @@ test.describe('safe mode', () => {
     await settingsBtn.click();
     const settingsDialog = page.locator('settings-dialog dialog');
     await expect(settingsDialog).toBeVisible();
-    await page
-      .locator('settings-dialog')
-      .getByRole('button', { name: 'Done', exact: true })
-      .click();
+    await page.locator('settings-dialog').getByRole('button', { name: 'Done', exact: true }).click();
     await expect(settingsDialog).toBeHidden();
 
     // The core Plugin Manager button (app-shell chrome, not a plugin) is
     // still reachable — the whole recovery path depends on this.
-    const pluginManagerBtn = header.locator(
-      'button.icon-btn[title="Add, disable, or remove plugins"]',
-    );
+    const pluginManagerBtn = header.locator('button.icon-btn[title="Add, disable, or remove plugins"]');
     await expect(pluginManagerBtn).toBeVisible();
     await pluginManagerBtn.click();
     await expect(page.locator('plugin-manager-dialog dialog')).toBeVisible();
   });
 
-  test('both safe-mode flags open the Plugin Manager on boot; no flag does not', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('both safe-mode flags open the Plugin Manager on boot; no flag does not', async ({ page, workspaceId }) => {
     const dlg = page.locator('plugin-manager-dialog dialog');
     // Control: a normal boot must not open anything.
     await expect(dlg).toBeHidden();
@@ -105,10 +89,7 @@ test.describe('safe mode', () => {
     await expect(dlg).toBeVisible();
   });
 
-  test('the Plugin Manager marks safe-mode-skipped plugins instead of showing them enabled', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('the Plugin Manager marks safe-mode-skipped plugins instead of showing them enabled', async ({ page, workspaceId }) => {
     await gotoWithFlags(page, workspaceId, '&safemode');
     // No click needed — safe mode opens the manager itself.
     const dlg = page.locator('plugin-manager-dialog');
@@ -146,9 +127,7 @@ test.describe('safe mode', () => {
 
   test('without a flag nothing is marked skipped', async ({ page, workspaceId }) => {
     void workspaceId;
-    await page
-      .locator('app-shell header button.icon-btn[title="Add, disable, or remove plugins"]')
-      .click();
+    await page.locator('app-shell header button.icon-btn[title="Add, disable, or remove plugins"]').click();
     const dlg = page.locator('plugin-manager-dialog');
     await expect(dlg.locator('dialog')).toBeVisible();
     await expect(dlg.locator('p.safemode')).toHaveCount(0);
@@ -158,10 +137,7 @@ test.describe('safe mode', () => {
     expect(await dlg.locator('.row').count()).toBeGreaterThan(0);
   });
 
-  test('?safemode never persists disabled state to the plugins collection', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('?safemode never persists disabled state to the plugins collection', async ({ page, workspaceId }) => {
     await gotoWithFlags(page, workspaceId, '&safemode');
 
     // Give the boot sequence (init builtins/urls + queueMicrotask loads) a

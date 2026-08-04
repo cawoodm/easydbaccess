@@ -40,11 +40,7 @@ async function routeDatasette(page: import('@playwright/test').Page) {
         // Page 1 hands back a cursor; page 2 ends the walk. A single-page read
         // would see only row 1.
         // A TOKEN cursor and no next_url — what datasette.io actually sends.
-        return route.fulfill(
-          next
-            ? json({ ok: true, rows: [row(2)], next: null })
-            : json({ ok: true, rows: [row(1)], next: '1' }),
-        );
+        return route.fulfill(next ? json({ ok: true, rows: [row(2)], next: null }) : json({ ok: true, rows: [row(1)], next: '1' }));
       case '/db/unwanted.json':
         return route.fulfill(json({ ok: true, rows: [row(9)], next: null }));
       default:
@@ -80,10 +76,7 @@ async function startReference(page: import('@playwright/test').Page, url: string
   return dlg;
 }
 
-test('referencing a database URL asks which tables, and takes only those', async ({
-  page,
-  workspaceId,
-}) => {
+test('referencing a database URL asks which tables, and takes only those', async ({ page, workspaceId }) => {
   await routeDatasette(page);
   await startReference(page, 'https://ds.test/db');
 
@@ -115,10 +108,7 @@ test('cancelling the picker references nothing', async ({ page, workspaceId }) =
   expect(await tableNames(page, workspaceId)).toEqual([]);
 });
 
-test('a reference pages past the first response instead of stopping at it', async ({
-  page,
-  workspaceId,
-}) => {
+test('a reference pages past the first response instead of stopping at it', async ({ page, workspaceId }) => {
   await routeDatasette(page);
   // A single-table URL needs no picker.
   await startReference(page, 'https://ds.test/db/wanted');

@@ -63,10 +63,7 @@ test.describe('panel title row counts', () => {
       .getByRole('button', { name: /Views/ })
       .click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg
-      .locator('ul.list li', { hasText: 'RSS Feed' })
-      .getByRole('button', { name: 'Use' })
-      .click();
+    await dlg.locator('ul.list li', { hasText: 'RSS Feed' }).getByRole('button', { name: 'Use' }).click();
     await dlg.getByRole('button', { name: 'Create view' }).click();
 
     const viewPanel = page.locator('[id^="view-panel-"]');
@@ -81,10 +78,7 @@ test.describe('panel title row counts', () => {
     await expect(viewTitle).toHaveText('RSS Feed — Feed (1/2)');
   });
 
-  test('a view title counts against the view, not the source table', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('a view title counts against the view, not the source table', async ({ page, workspaceId }) => {
     // Six rows in the table; the view keeps only the three "keep" ones through
     // its own stored filter. Its title must talk about those three.
     const id = await createTable(page, 'Feed', [{ field: 'title' }, { field: 'tag' }]);

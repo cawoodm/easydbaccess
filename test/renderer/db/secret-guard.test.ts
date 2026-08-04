@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  hasSecretRef,
-  holdsRawSecret,
-  isRawSecret,
-  looksSecretName,
-  resolvesToSameSecret,
-  withoutRawSecrets,
-} from '../../../packages/renderer/src/db/secret-guard.js';
+import { hasSecretRef, holdsRawSecret, isRawSecret, looksSecretName, resolvesToSameSecret, withoutRawSecrets } from '../../../packages/renderer/src/db/secret-guard.js';
 
 /**
  * A credential may leave the device only as a `${secret:name}` reference. These
@@ -38,26 +31,13 @@ describe('isRawSecret', () => {
 });
 
 describe('looksSecretName', () => {
-  it.each([
-    'gist-sync:gist_token',
-    'datasette:token:https://x.dev',
-    'x:api_key',
-    'x:apikey',
-    'x:password',
-    'x:auth',
-    'x:credentials',
-    'x:pat',
-    'secret',
-  ])('reads %s as a credential', (name) => {
+  it.each(['gist-sync:gist_token', 'datasette:token:https://x.dev', 'x:api_key', 'x:apikey', 'x:password', 'x:auth', 'x:credentials', 'x:pat', 'secret'])('reads %s as a credential', (name) => {
     expect(looksSecretName(name)).toBe(true);
   });
 
-  it.each(['grid:sortDescFirst', 'preview:maxChars', 'x:tokenizer', 'x:keyboard', 'x:author'])(
-    'does not read %s as one',
-    (name) => {
-      expect(looksSecretName(name)).toBe(false);
-    },
-  );
+  it.each(['grid:sortDescFirst', 'preview:maxChars', 'x:tokenizer', 'x:keyboard', 'x:author'])('does not read %s as one', (name) => {
+    expect(looksSecretName(name)).toBe(false);
+  });
 });
 
 describe('holdsRawSecret', () => {
@@ -86,7 +66,7 @@ describe('holdsRawSecret', () => {
     expect(holdsRawSecret({ name: 'x:list', value: ['a', 'b'] })).toBe(false);
   });
 
-  it('takes the caller\'s word for a field the name does not betray', () => {
+  it("takes the caller's word for a field the name does not betray", () => {
     const s = { name: 'gist-sync:handshake', value: 'ghp_x' };
     expect(holdsRawSecret(s)).toBe(false);
     expect(holdsRawSecret(s, (n) => n === 'gist-sync:handshake')).toBe(true);
@@ -101,11 +81,7 @@ describe('withoutRawSecrets', () => {
       { name: 'gist-sync:user', value: 'marc' },
       { name: 'datasette:token:https://x.dev', value: '${secret:ds}' },
     ]);
-    expect(kept.map((s) => s.name)).toEqual([
-      'server-sync:url',
-      'gist-sync:user',
-      'datasette:token:https://x.dev',
-    ]);
+    expect(kept.map((s) => s.name)).toEqual(['server-sync:url', 'gist-sync:user', 'datasette:token:https://x.dev']);
     expect(withheld).toEqual(['gist-sync:gist_token']);
   });
 

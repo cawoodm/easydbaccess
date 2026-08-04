@@ -31,10 +31,7 @@ test.describe('filters', () => {
   test('a boolean column always offers both true and false', async ({ page }) => {
     // Every row is true, so "false" is absent from the data — the dropdown must
     // still offer it (at count 0) or there is no way to filter for it.
-    const id = await createTable(page, 'Tasks', [
-      { field: 'name' },
-      { field: 'done', type: 'boolean' },
-    ]);
+    const id = await createTable(page, 'Tasks', [{ field: 'name' }, { field: 'done', type: 'boolean' }]);
     await waitForPanel(page, id);
     await addRow(page, id, { name: 'a', done: true });
     await addRow(page, id, { name: 'b', done: true });
@@ -80,10 +77,7 @@ test.describe('filters', () => {
   });
 
   test('faceted: country filter narrows the city dropdown', async ({ page }) => {
-    const id = await createTable(page, 'Cities', [
-      { field: 'country' },
-      { field: 'city' },
-    ]);
+    const id = await createTable(page, 'Cities', [{ field: 'country' }, { field: 'city' }]);
     await waitForPanel(page, id);
     await addRow(page, id, { country: 'Sweden', city: 'Stockholm' });
     await addRow(page, id, { country: 'Sweden', city: 'Gothenburg' });

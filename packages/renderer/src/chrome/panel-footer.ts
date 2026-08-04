@@ -175,9 +175,7 @@ export class PanelFooter extends LitElement {
     // inherits its column settings from its sources once and then owns them, so
     // the ordinary editor is the right tool; its join is edited from the
     // separate "Edit Join" button the projection plugin registers.
-    document.dispatchEvent(
-      new CustomEvent('easydb:edit-columns', { detail: { tableId: this.tableId } }),
-    );
+    document.dispatchEvent(new CustomEvent('easydb:edit-columns', { detail: { tableId: this.tableId } }));
   }
 
   private runTableButton = async (spec: TableButtonSpec, e?: Event) => {
@@ -223,12 +221,7 @@ export class PanelFooter extends LitElement {
             // Icon-only: the icon shows, the label moves to title/aria-label so
             // the button stays accessible (and screen-reader / test names hold).
             // Buttons with no icon fall back to their text so they aren't blank.
-            html`<button
-              class=${b.danger ? 'danger' : ''}
-              title=${b.tooltip ?? b.label}
-              aria-label=${b.label}
-              @click=${(e: Event) => this.runTableButton(b, e)}
-            >
+            html`<button class=${b.danger ? 'danger' : ''} title=${b.tooltip ?? b.label} aria-label=${b.label} @click=${(e: Event) => this.runTableButton(b, e)}>
               ${b.icon
                 ? b.icon.trimStart().startsWith('<svg')
                   ? html`<span class="icon-svg">${unsafeSVG(b.icon)}</span>`
@@ -264,9 +257,7 @@ declare global {
  * The row-source types whose provider opted out of schema editing. Pulled from
  * the registry so this core chrome never names a plugin.
  */
-function collectFixedSchemaSources(
-  rowSources: Map<string, { schemaEditable?: boolean | undefined }>,
-): Set<string> {
+function collectFixedSchemaSources(rowSources: Map<string, { schemaEditable?: boolean | undefined }>): Set<string> {
   const out = new Set<string>();
   for (const [type, provider] of rowSources) {
     if (provider.schemaEditable === false) out.add(type);

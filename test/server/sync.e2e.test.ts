@@ -54,11 +54,13 @@ async function startServer(kind: StoreKind): Promise<Fixture> {
 }
 
 /** Workspace-dump shape both adapters accept. */
-function dump(tables: Array<{
-  name: string;
-  columns: Array<{ field: string; label?: string; type: string }>;
-  rows: Array<Record<string, unknown>>;
-}>) {
+function dump(
+  tables: Array<{
+    name: string;
+    columns: Array<{ field: string; label?: string; type: string }>;
+    rows: Array<Record<string, unknown>>;
+  }>,
+) {
   return { workspaceId: 'unused', exportedAt: 1, tables };
 }
 
@@ -150,12 +152,8 @@ describe.each(KINDS)('sync API (%s)', (kind) => {
   });
 
   it('PUT with a stale If-Match returns 412 and the current etag, leaving the store unchanged', async () => {
-    const first = dump([
-      { name: 'T', columns: [{ field: 'v', type: 'string' }], rows: [{ v: 'first' }] },
-    ]);
-    const second = dump([
-      { name: 'T', columns: [{ field: 'v', type: 'string' }], rows: [{ v: 'second' }] },
-    ]);
+    const first = dump([{ name: 'T', columns: [{ field: 'v', type: 'string' }], rows: [{ v: 'first' }] }]);
+    const second = dump([{ name: 'T', columns: [{ field: 'v', type: 'string' }], rows: [{ v: 'second' }] }]);
 
     const r1 = await fetch(`${fx.baseUrl}/sync/ws-conflict`, {
       method: 'PUT',
@@ -181,12 +179,8 @@ describe.each(KINDS)('sync API (%s)', (kind) => {
   });
 
   it('PUT with the current If-Match succeeds and rotates the etag', async () => {
-    const first = dump([
-      { name: 'T', columns: [{ field: 'v', type: 'number' }], rows: [{ v: 1 }] },
-    ]);
-    const second = dump([
-      { name: 'T', columns: [{ field: 'v', type: 'number' }], rows: [{ v: 2 }] },
-    ]);
+    const first = dump([{ name: 'T', columns: [{ field: 'v', type: 'number' }], rows: [{ v: 1 }] }]);
+    const second = dump([{ name: 'T', columns: [{ field: 'v', type: 'number' }], rows: [{ v: 2 }] }]);
 
     const r1 = await fetch(`${fx.baseUrl}/sync/ws-rotate`, {
       method: 'PUT',
@@ -211,9 +205,7 @@ describe.each(KINDS)('sync API (%s)', (kind) => {
   });
 
   it('GET /sync lists known workspaces', async () => {
-    const payload = dump([
-      { name: 'T', columns: [{ field: 'v', type: 'string' }], rows: [] },
-    ]);
+    const payload = dump([{ name: 'T', columns: [{ field: 'v', type: 'string' }], rows: [] }]);
     await fetch(`${fx.baseUrl}/sync/ws-1`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -237,9 +229,7 @@ describe.each(KINDS)('sync API (%s)', (kind) => {
   });
 
   it('SSE stream emits an initial event and then a change event on next PUT', async () => {
-    const payload = dump([
-      { name: 'T', columns: [{ field: 'v', type: 'string' }], rows: [{ v: 'seed' }] },
-    ]);
+    const payload = dump([{ name: 'T', columns: [{ field: 'v', type: 'string' }], rows: [{ v: 'seed' }] }]);
     await fetch(`${fx.baseUrl}/sync/ws-sse`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -276,9 +266,7 @@ describe.each(KINDS)('sync API (%s)', (kind) => {
     const initialData = JSON.parse(initial.data) as { etag: string | null };
     expect(initialData.etag).toMatch(/^[a-f0-9]{40}$/);
 
-    const bumped = dump([
-      { name: 'T', columns: [{ field: 'v', type: 'string' }], rows: [{ v: 'updated' }] },
-    ]);
+    const bumped = dump([{ name: 'T', columns: [{ field: 'v', type: 'string' }], rows: [{ v: 'updated' }] }]);
     await fetch(`${fx.baseUrl}/sync/ws-sse`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -381,9 +369,7 @@ describe('sqlite adapter — structural', () => {
     // PRAGMA — proves the adapter built real SQL, not just a JSON column.
     const reader = new DatabaseSync(join(fx.storagePath, 'ws-shape.db'));
     try {
-      const tables = reader
-        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
-        .all() as Array<{ name: string }>;
+      const tables = reader.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all() as Array<{ name: string }>;
       const names = tables.map((t) => t.name);
 
       expect(names).toContain('_easydb_meta');
@@ -404,19 +390,13 @@ describe('sqlite adapter — structural', () => {
       expect(byName.get('avatar')).toBe('TEXT');
 
       // Booleans stored as 0/1, query directly to confirm.
-      const aliceActive = reader
-        .prepare(`SELECT active FROM "People" WHERE name = ?`)
-        .get('Alice') as { active: number };
+      const aliceActive = reader.prepare(`SELECT active FROM "People" WHERE name = ?`).get('Alice') as { active: number };
       expect(aliceActive.active).toBe(1);
-      const bobActive = reader
-        .prepare(`SELECT active FROM "People" WHERE name = ?`)
-        .get('Bob') as { active: number };
+      const bobActive = reader.prepare(`SELECT active FROM "People" WHERE name = ?`).get('Bob') as { active: number };
       expect(bobActive.active).toBe(0);
 
       // Numbers stored as REAL.
-      const aliceAge = reader
-        .prepare(`SELECT age FROM "People" WHERE name = ?`)
-        .get('Alice') as { age: number };
+      const aliceAge = reader.prepare(`SELECT age FROM "People" WHERE name = ?`).get('Alice') as { age: number };
       expect(aliceAge.age).toBe(30);
     } finally {
       reader.close();
@@ -461,11 +441,7 @@ describe('sqlite adapter — structural', () => {
 
     const reader = new DatabaseSync(join(fx.storagePath, 'ws-clobber.db'));
     try {
-      const tables = reader
-        .prepare(
-          `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '_easydb_%' AND name NOT LIKE 'sqlite_%' ORDER BY name`,
-        )
-        .all() as Array<{ name: string }>;
+      const tables = reader.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '_easydb_%' AND name NOT LIKE 'sqlite_%' ORDER BY name`).all() as Array<{ name: string }>;
       expect(tables.map((t) => t.name)).toEqual(['New']);
     } finally {
       reader.close();
@@ -483,7 +459,5 @@ describe('sqlite adapter — structural', () => {
 function stripEtag(value: string | null): string | null {
   if (!value) return null;
   const trimmed = value.trim();
-  return trimmed.startsWith('"') && trimmed.endsWith('"')
-    ? trimmed.slice(1, -1)
-    : trimmed;
+  return trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed;
 }

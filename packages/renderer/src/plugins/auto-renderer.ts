@@ -20,8 +20,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   name: 'Auto Renderer',
   type: 'cell-renderer',
   version: '0.1.0',
-  description:
-    'After any import, gives columns a renderer based on their values: link for URLs, image for image URLs, preview for markup or long text.',
+  description: 'After any import, gives columns a renderer based on their values: link for URLs, image for image URLs, preview for markup or long text.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.5 3 8 6.5 4.5 8 8 9.5 9.5 13 11 9.5 14.5 8 11 6.5 9.5 3z"/><path d="M17.5 12 16.75 14 15 14.75 16.75 15.5 17.5 17.5 18.25 15.5 20 14.75 18.25 14 17.5 12z"/><path d="M4 17h9"/><path d="M4 21h6"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/auto-renderer.ts',
@@ -95,10 +94,7 @@ export function inferRenderer(type: ColumnType, samples: readonly unknown[]): st
  * column that already carries one is returned untouched, so an importer's or a
  * user's choice is never overridden. Idempotent, and a no-op with no rows.
  */
-export function withInferredRenderers(
-  columns: readonly ColumnSpec[],
-  rows: ReadonlyArray<Record<string, unknown>>,
-): ColumnSpec[] {
+export function withInferredRenderers(columns: readonly ColumnSpec[], rows: ReadonlyArray<Record<string, unknown>>): ColumnSpec[] {
   if (rows.length === 0) return [...columns];
   return columns.map((col) => {
     if (col.renderer) return col;
@@ -150,12 +146,10 @@ export function init(api: HostApi): void {
         rows.map((r) => r.data),
       );
       const changed = next.filter((c, i) => c.renderer !== columns[i]?.renderer).length;
-      hostApi.ui.dialogs.toast(
-        changed === 0
-          ? 'No renderer fits these values — columns left as they are.'
-          : `Set ${changed} renderer${changed === 1 ? '' : 's'}. Press Save to keep them.`,
-        { kind: changed === 0 ? 'info' : 'success', title: meta.name },
-      );
+      hostApi.ui.dialogs.toast(changed === 0 ? 'No renderer fits these values — columns left as they are.' : `Set ${changed} renderer${changed === 1 ? '' : 's'}. Press Save to keep them.`, {
+        kind: changed === 0 ? 'info' : 'success',
+        title: meta.name,
+      });
       return next;
     },
   });

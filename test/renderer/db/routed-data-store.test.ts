@@ -1,12 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type {
-  DataCollection,
-  DataStore,
-  Row,
-  RowCollectionProvider,
-  RowSourceCtx,
-  Table,
-} from '@easydb/shared';
+import type { DataCollection, DataStore, Row, RowCollectionProvider, RowSourceCtx, Table } from '@easydb/shared';
 import { createRoutedDataStore } from '../../../packages/renderer/src/db/routed-data-store.js';
 
 /** A stand-in row collection we only ever compare by identity/label. */

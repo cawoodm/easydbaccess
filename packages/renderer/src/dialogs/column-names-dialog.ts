@@ -24,10 +24,7 @@ interface EditRow {
  * Datasette database) opens the editor once per table, so without the name the
  * user cannot tell which one they are looking at.
  */
-export function editColumnNames(
-  columns: ColumnSpec[],
-  subject?: string,
-): Promise<ColumnSpec[] | null> {
+export function editColumnNames(columns: ColumnSpec[], subject?: string): Promise<ColumnSpec[] | null> {
   const el = ColumnNamesDialog.instance ?? mount();
   return el.open(columns, subject);
 }
@@ -210,9 +207,7 @@ export class ColumnNamesDialog extends LitElement {
     const errCount = invalid.size;
     return html`
       <dialog @cancel=${this.onCancel} @keydown=${ctrlEnterSubmits}>
-        <button type="button" class="close-x" title="Close" @click=${() => this.finish(null)}>
-          ×
-        </button>
+        <button type="button" class="close-x" title="Close" @click=${() => this.finish(null)}>×</button>
         <form @submit=${this.submit}>
           <div class="dialog-header">
             <h2>${this.subject ? `Edit columns — ${this.subject}` : 'Edit columns'}</h2>
@@ -223,9 +218,8 @@ export class ColumnNamesDialog extends LitElement {
           </div>
           <div class="dialog-body">
             <p class="intro">
-              Rename columns before importing. A <strong>name</strong> is the field key; duplicate
-              or empty names are shown in red and must be fixed first. Tick <strong>Hide</strong> to
-              import a column hidden — click the <strong>Hide</strong> header to toggle all/none.
+              Rename columns before importing. A <strong>name</strong> is the field key; duplicate or empty names are shown in red and must be fixed first. Tick <strong>Hide</strong> to import a
+              column hidden — click the <strong>Hide</strong> header to toggle all/none.
             </p>
             <div class="grid">
               <div class="head">Name</div>
@@ -251,32 +245,16 @@ export class ColumnNamesDialog extends LitElement {
                     class=${invalid.has(i) ? 'invalid' : ''}
                     .value=${r.field}
                     aria-label=${`Column ${i + 1} name`}
-                    @input=${(e: Event) =>
-                      this.updateRow(i, 'field', (e.target as HTMLInputElement).value)}
+                    @input=${(e: Event) => this.updateRow(i, 'field', (e.target as HTMLInputElement).value)}
                   />
-                  <input
-                    .value=${r.label}
-                    aria-label=${`Column ${i + 1} label`}
-                    @input=${(e: Event) =>
-                      this.updateRow(i, 'label', (e.target as HTMLInputElement).value)}
-                  />
+                  <input .value=${r.label} aria-label=${`Column ${i + 1} label`} @input=${(e: Event) => this.updateRow(i, 'label', (e.target as HTMLInputElement).value)} />
                   <div class="hidecell">
-                    <input
-                      type="checkbox"
-                      .checked=${r.hidden}
-                      aria-label=${`Hide column ${i + 1}`}
-                      @change=${(e: Event) =>
-                        this.setHidden(i, (e.target as HTMLInputElement).checked)}
-                    />
+                    <input type="checkbox" .checked=${r.hidden} aria-label=${`Hide column ${i + 1}`} @change=${(e: Event) => this.setHidden(i, (e.target as HTMLInputElement).checked)} />
                   </div>
                 `,
               )}
             </div>
-            <p class="err">
-              ${errCount > 0
-                ? `Fix ${errCount} column name${errCount === 1 ? '' : 's'} — names must be unique and non-empty.`
-                : nothing}
-            </p>
+            <p class="err">${errCount > 0 ? `Fix ${errCount} column name${errCount === 1 ? '' : 's'} — names must be unique and non-empty.` : nothing}</p>
           </div>
         </form>
       </dialog>

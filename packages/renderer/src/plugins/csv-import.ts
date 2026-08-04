@@ -1,12 +1,4 @@
-import type {
-  ColumnSpec,
-  ColumnType,
-  HostApi,
-  ImporterSpec,
-  ImportSourceInput,
-  PluginModule,
-  TableOrigin,
-} from '@easydb/shared';
+import type { ColumnSpec, ColumnType, HostApi, ImporterSpec, ImportSourceInput, PluginModule, TableOrigin } from '@easydb/shared';
 import { filenameFromUrl } from '../import/fetch-source.js';
 import { isUnsafeIntegerText } from '../import/big-numbers.js';
 import { mapRowsToTarget, type ColumnMapping } from '../import/map-columns.js';
@@ -57,11 +49,7 @@ export function init(api: HostApi): void {
     // offered "Edit columns" and a drop had no way to ask for it. One question
     // for the whole drop, not one per file.
     const subject = csvs.length === 1 ? `"${csvs[0]!.name}"` : `${csvs.length} files`;
-    const choice = await api.ui.dialogs.choice(
-      `Import ${subject} straight away, or review the columns first (rename, hide, fix duplicate names)?`,
-      [DROP_DIRECT, DROP_EDIT],
-      'Import CSV',
-    );
+    const choice = await api.ui.dialogs.choice(`Import ${subject} straight away, or review the columns first (rename, hide, fix duplicate names)?`, [DROP_DIRECT, DROP_EDIT], 'Import CSV');
     // Dismissed ⇒ the drop is cancelled. `true` still claims the event: the file
     // was ours to handle, the user simply changed their mind.
     if (!choice) return true;
@@ -140,11 +128,7 @@ async function dropOntoTable(api: HostApi, event: DragEvent, file: File): Promis
     return false;
   }
 
-  const choice = await api.ui.dialogs.choice(
-    `Import "${file.name}" into "${table.name}"?`,
-    [ONTO_APPEND, ONTO_REPLACE, ONTO_NEW],
-    'Import CSV',
-  );
+  const choice = await api.ui.dialogs.choice(`Import "${file.name}" into "${table.name}"?`, [ONTO_APPEND, ONTO_REPLACE, ONTO_NEW], 'Import CSV');
   if (!choice) return true; // dismissed ⇒ the drop is cancelled, and it was ours
   if (choice === ONTO_NEW) return false; // fall through to the new-table flow
 
@@ -195,8 +179,7 @@ const importerSpec: ImporterSpec = {
       // Honour the cap by STREAMING a prefix rather than reading the whole
       // file. A 150 MB CSV read and parsed whole — before any cap applies —
       // can silently kill a memory-limited tab.
-      text =
-        ctx.maxRows != null ? await readCsvHead(input.file, ctx.maxRows) : await input.file.text();
+      text = ctx.maxRows != null ? await readCsvHead(input.file, ctx.maxRows) : await input.file.text();
     } else if (input.kind === 'url' && input.url) {
       text = await ctx.fetchText(input.url, `Reading ${sourceName(input)}…`);
     } else {
@@ -249,11 +232,7 @@ const importerSpec: ImporterSpec = {
 
 // -- Core: turn one File into a Table + Rows ----------------------------------
 
-async function importCsvFile(
-  api: HostApi,
-  file: File,
-  editColumns?: CsvImportOpts['editColumns'],
-): Promise<void> {
+async function importCsvFile(api: HostApi, file: File, editColumns?: CsvImportOpts['editColumns']): Promise<void> {
   // Keep the extension on the name we pass down: importCsvText strips it and
   // reads it to pin the separator for a .tsv file.
   await importCsvText(api, await file.text(), file.name, editColumns ? { editColumns } : undefined);
@@ -310,21 +289,10 @@ export interface CsvImportOpts {
    *
    * Absent ⇒ the historical by-position mapping.
    */
-  mapFields?:
-    | ((
-        header: string[],
-        targetCols: ColumnSpec[],
-        sample: string[],
-      ) => Promise<ColumnMapping | null>)
-    | undefined;
+  mapFields?: ((header: string[], targetCols: ColumnSpec[], sample: string[]) => Promise<ColumnMapping | null>) | undefined;
 }
 
-export async function importCsvText(
-  api: HostApi,
-  text: string,
-  name: string,
-  opts: CsvImportOpts = {},
-): Promise<void> {
+export async function importCsvText(api: HostApi, text: string, name: string, opts: CsvImportOpts = {}): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('csv-import: no active workspace');
 
@@ -340,11 +308,7 @@ export async function importCsvText(
   // If a table with this name already exists in the workspace, ask the user
   // what to do: append rows, overwrite (clear + insert), or create a new
   // table under a unique name.
-  const existing =
-    chosen ??
-    (await api.store.tables.find()).find(
-      (t) => t.workspaceId === workspaceId && t.name === baseName,
-    );
+  const existing = chosen ?? (await api.store.tables.find()).find((t) => t.workspaceId === workspaceId && t.name === baseName);
 
   let targetId: string;
   let mode: 'new' | 'append' | 'overwrite';
@@ -353,11 +317,7 @@ export async function importCsvText(
     mode = opts.target.mode;
     targetId = chosen.id;
   } else if (existing) {
-    const choice = await api.ui.dialogs.choice(
-      `A table named "${baseName}" already exists in this workspace.`,
-      ['Append rows', 'Overwrite rows', 'Create as new table'],
-      'CSV import',
-    );
+    const choice = await api.ui.dialogs.choice(`A table named "${baseName}" already exists in this workspace.`, ['Append rows', 'Overwrite rows', 'Create as new table'], 'CSV import');
     if (!choice) return; // cancelled
     if (choice === 'Append rows') {
       mode = 'append';
@@ -472,10 +432,7 @@ interface ParseResult {
  * Used by importers that map CSV cells onto an existing table's column
  * schema by index — the existing columns' types drive coercion instead.
  */
-export function parseCsvRaw(
-  text: string,
-  opts: { maxRows?: number | undefined; separator?: string | undefined } = {},
-): { header: string[]; rows: string[][] } {
+export function parseCsvRaw(text: string, opts: { maxRows?: number | undefined; separator?: string | undefined } = {}): { header: string[]; rows: string[][] } {
   const normalized = text.replace(/\uFEFF/, ''); // strip BOM
   const sep = opts.separator ?? detectSeparator(normalized);
   const all = parseLines(normalized, sep, lineCap(opts.maxRows));
@@ -530,10 +487,7 @@ export async function readCsvHead(file: Blob, maxRows: number): Promise<string> 
   return text; // file has fewer rows than the cap
 }
 
-export function parseCsv(
-  text: string,
-  opts: { maxRows?: number | undefined; separator?: string | undefined } = {},
-): ParseResult {
+export function parseCsv(text: string, opts: { maxRows?: number | undefined; separator?: string | undefined } = {}): ParseResult {
   const normalized = text.replace(/\uFEFF/, ''); // strip BOM
   const sep = opts.separator ?? detectSeparator(normalized);
   const rows = parseLines(normalized, sep, lineCap(opts.maxRows));
@@ -612,14 +566,7 @@ interface HeaderSpec {
   hidden?: boolean;
 }
 
-const KNOWN_TYPES = new Set<ColumnType>([
-  'string',
-  'number',
-  'boolean',
-  'date',
-  'datetime',
-  'array',
-]);
+const KNOWN_TYPES = new Set<ColumnType>(['string', 'number', 'boolean', 'date', 'datetime', 'array']);
 
 /**
  * Legacy CSV header type names that map onto renderer names in the post-
@@ -941,11 +888,7 @@ export function dedupeFields(fields: string[]): string[] {
 }
 
 /** Rekey each row's cells from old columns' fields onto new columns' fields (by index). */
-function remapRows(
-  rows: Array<Record<string, unknown>>,
-  oldCols: ColumnSpec[],
-  newCols: ColumnSpec[],
-): Array<Record<string, unknown>> {
+function remapRows(rows: Array<Record<string, unknown>>, oldCols: ColumnSpec[], newCols: ColumnSpec[]): Array<Record<string, unknown>> {
   return rows.map((r) => {
     const out: Record<string, unknown> = {};
     for (let i = 0; i < oldCols.length; i++) {

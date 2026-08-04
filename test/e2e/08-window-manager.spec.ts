@@ -92,10 +92,7 @@ test.describe('window manager', () => {
     const id = await createTable(page, 'Pannable', [{ field: 'x' }]);
     await waitForPanel(page, id);
 
-    const readTransform = () =>
-      page.evaluate(
-        () => (document.getElementById('easydb-panels-viewport') as HTMLElement).style.transform,
-      );
+    const readTransform = () => page.evaluate(() => (document.getElementById('easydb-panels-viewport') as HTMLElement).style.transform);
     const before = await readTransform();
 
     const outer = page.locator('#easydb-panels');
@@ -126,26 +123,16 @@ test.describe('window manager', () => {
 
     // Minimize → the data-table is detached (its subscription torn down and
     // rows released from memory).
-    await page.evaluate(
-      (d) => (document.getElementById(d) as HTMLElement & { minimize(): void }).minimize(),
-      domId,
-    );
+    await page.evaluate((d) => (document.getElementById(d) as HTMLElement & { minimize(): void }).minimize(), domId);
     await expect(content).toHaveCount(0);
 
     // Restore → a fresh data-table remounts and re-reads the store.
-    await page.evaluate(
-      (d) => (document.getElementById(d) as HTMLElement & { normalize(): void }).normalize(),
-      domId,
-    );
+    await page.evaluate((d) => (document.getElementById(d) as HTMLElement & { normalize(): void }).normalize(), domId);
     await expect(content).toHaveCount(1);
-    await expect(
-      page.locator(`#${domId} .jsPanel-content data-table tbody tr:not(.spacer)`),
-    ).toHaveCount(1);
+    await expect(page.locator(`#${domId} .jsPanel-content data-table tbody tr:not(.spacer)`)).toHaveCount(1);
   });
 
-  test('a window that restores minimized does not mount its grid until expanded', async ({
-    page,
-  }) => {
+  test('a window that restores minimized does not mount its grid until expanded', async ({ page }) => {
     // Insert a table already flagged minimized, plus a row, then reload so the
     // window manager opens it minimized from persisted geometry.
     const id = await page.evaluate(async () => {
@@ -185,19 +172,12 @@ test.describe('window manager', () => {
     await expect(grid).toHaveCount(0);
 
     // Expand → the grid mounts and loads its row.
-    await page.evaluate(
-      (d) => (document.getElementById(d) as HTMLElement & { normalize(): void }).normalize(),
-      domId,
-    );
+    await page.evaluate((d) => (document.getElementById(d) as HTMLElement & { normalize(): void }).normalize(), domId);
     await expect(grid).toHaveCount(1);
-    await expect(
-      page.locator(`#${domId} .jsPanel-content data-table tbody tr:not(.spacer)`),
-    ).toHaveCount(1);
+    await expect(page.locator(`#${domId} .jsPanel-content data-table tbody tr:not(.spacer)`)).toHaveCount(1);
   });
 
-  test('tapping the window header blurs an open per-table search, collapsing it', async ({
-    page,
-  }) => {
+  test('tapping the window header blurs an open per-table search, collapsing it', async ({ page }) => {
     const id = await createTable(page, 'Focusable', [{ field: 'x' }]);
     await waitForPanel(page, id);
     const panel = page.locator(`#${panelDomId(id)}`);
@@ -213,19 +193,14 @@ test.describe('window manager', () => {
     await expect(search.locator('input')).toHaveCount(0);
   });
 
-  test('maximizing keeps the titlebar below the header even when the header wraps', async ({
-    page,
-  }) => {
+  test('maximizing keeps the titlebar below the header even when the header wraps', async ({ page }) => {
     // Narrow enough that the header wraps to two rows (taller than the old
     // hardcoded 48px overlay offset).
     await page.setViewportSize({ width: 560, height: 720 });
     const id = await createTable(page, 'Big', [{ field: 'x' }]);
     await waitForPanel(page, id);
 
-    await page.evaluate(
-      (d) => (document.getElementById(d) as HTMLElement & { maximize(): void }).maximize(),
-      panelDomId(id),
-    );
+    await page.evaluate((d) => (document.getElementById(d) as HTMLElement & { maximize(): void }).maximize(), panelDomId(id));
 
     const geo = await page.evaluate((domId) => {
       const header = document.querySelector('app-shell')!.shadowRoot!.querySelector('header')!;
@@ -247,16 +222,9 @@ test.describe('window manager', () => {
     const id = await createTable(page, 'Grow', [{ field: 'x' }]);
     await waitForPanel(page, id);
     const dom = panelDomId(id);
-    const status = () =>
-      page.evaluate(
-        (d) => (document.getElementById(d) as HTMLElement & { status: string }).status,
-        dom,
-      );
+    const status = () => page.evaluate((d) => (document.getElementById(d) as HTMLElement & { status: string }).status, dom);
 
-    await page.evaluate(
-      (d) => (document.getElementById(d) as HTMLElement & { maximize(): void }).maximize(),
-      dom,
-    );
+    await page.evaluate((d) => (document.getElementById(d) as HTMLElement & { maximize(): void }).maximize(), dom);
     await expect.poll(status).toBe('maximized');
     const storedFlags = () =>
       page.evaluate(async (tid) => {
@@ -266,20 +234,14 @@ test.describe('window manager', () => {
       }, id);
     await expect.poll(storedFlags).toEqual({ min: false, max: true });
 
-    await page.evaluate(
-      (d) => (document.getElementById(d) as HTMLElement & { minimize(): void }).minimize(),
-      dom,
-    );
+    await page.evaluate((d) => (document.getElementById(d) as HTMLElement & { minimize(): void }).minimize(), dom);
     await expect.poll(status).toBe('minimized');
     // Both flags stay stored: that is what makes the restore after a reload
     // maximize as well, not only the restore in this session.
     await expect.poll(storedFlags).toEqual({ min: true, max: true });
 
     // Restoring from the dock returns to maximized, not to the normal rect.
-    await page.evaluate(
-      (d) => (document.getElementById(d) as HTMLElement & { normalize(): void }).normalize(),
-      dom,
-    );
+    await page.evaluate((d) => (document.getElementById(d) as HTMLElement & { normalize(): void }).normalize(), dom);
     await expect.poll(status).toBe('maximized');
   });
 
@@ -290,10 +252,7 @@ test.describe('window manager', () => {
     await waitForPanel(page, idB);
 
     // Minimize B → it docks at the bottom.
-    await page.evaluate(
-      (d) => (document.getElementById(d) as HTMLElement & { minimize(): void }).minimize(),
-      panelDomId(idB),
-    );
+    await page.evaluate((d) => (document.getElementById(d) as HTMLElement & { minimize(): void }).minimize(), panelDomId(idB));
 
     const z = await page.evaluate(() => {
       const dock = document.getElementById('easydb-minimized-dock');
@@ -336,9 +295,7 @@ test.describe('window manager', () => {
       const dataTransfer = new DataTransfer();
 
       // Reorder now starts from the small `.col-grip` handle, not the th.
-      (ths[1] as HTMLElement).querySelector('.col-grip')!.dispatchEvent(
-        new DragEvent('dragstart', { bubbles: true, dataTransfer }),
-      );
+      (ths[1] as HTMLElement).querySelector('.col-grip')!.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }));
       await dt.updateComplete;
       ths = dt.shadowRoot.querySelectorAll('thead th');
 
@@ -359,9 +316,7 @@ test.describe('window manager', () => {
         targetClasses: (ths[0] as HTMLElement).className,
       };
 
-      (ths[1] as HTMLElement).querySelector('.col-grip')!.dispatchEvent(
-        new DragEvent('dragend', { bubbles: true, dataTransfer }),
-      );
+      (ths[1] as HTMLElement).querySelector('.col-grip')!.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer }));
       return snapshot;
     }, panelDomId(id));
 

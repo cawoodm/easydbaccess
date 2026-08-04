@@ -25,12 +25,7 @@ const SKIP = '';
  * `tableName` names the table being appended to — the whole point of the dialog
  * is which table the values are going into.
  */
-export function mapColumnsToTable(
-  header: string[],
-  targetCols: ColumnSpec[],
-  tableName: string,
-  sample?: string[] | undefined,
-): Promise<ColumnMapping | null> {
+export function mapColumnsToTable(header: string[], targetCols: ColumnSpec[], tableName: string, sample?: string[] | undefined): Promise<ColumnMapping | null> {
   const el = ColumnMapDialog.instance ?? mount();
   return el.open(header, targetCols, tableName, sample);
 }
@@ -151,12 +146,7 @@ export class ColumnMapDialog extends LitElement {
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
   }
 
-  open(
-    header: string[],
-    targetCols: ColumnSpec[],
-    tableName: string,
-    sample?: string[] | undefined,
-  ): Promise<ColumnMapping | null> {
+  open(header: string[], targetCols: ColumnSpec[], tableName: string, sample?: string[] | undefined): Promise<ColumnMapping | null> {
     this.header = header;
     this.targetCols = targetCols;
     this.tableName = tableName;
@@ -207,9 +197,7 @@ export class ColumnMapDialog extends LitElement {
     const mapped = this.mapping.filter((f) => f !== SKIP).length;
     return html`
       <dialog @cancel=${this.onCancel} @keydown=${ctrlEnterSubmits}>
-        <button type="button" class="close-x" title="Close" @click=${() => this.finish(null)}>
-          ×
-        </button>
+        <button type="button" class="close-x" title="Close" @click=${() => this.finish(null)}>×</button>
         <form @submit=${this.submit}>
           <div class="dialog-header">
             <h2>Map columns — ${this.tableName}</h2>
@@ -220,9 +208,8 @@ export class ColumnMapDialog extends LitElement {
           </div>
           <div class="dialog-body">
             <p class="intro">
-              Choose which column of <strong>${this.tableName}</strong> each column of the file
-              feeds. Columns are matched by name where possible, else by position. Pick
-              <strong>— skip —</strong> to leave a column out.
+              Choose which column of <strong>${this.tableName}</strong> each column of the file feeds. Columns are matched by name where possible, else by position. Pick <strong>— skip —</strong> to
+              leave a column out.
             </p>
             <div class="grid">
               <div class="head">From the file</div>
@@ -234,37 +221,22 @@ export class ColumnMapDialog extends LitElement {
                 return html`
                   <div class="from">
                     <div class="name" title=${h}>${h || `Column ${i + 1}`}</div>
-                    ${this.sample[i]
-                      ? html`<div class="sample" title=${this.sample[i]!}>${this.sample[i]}</div>`
-                      : nothing}
+                    ${this.sample[i] ? html`<div class="sample" title=${this.sample[i]!}>${this.sample[i]}</div>` : nothing}
                   </div>
                   <div class="arrow">→</div>
                   <select
                     class=${value === SKIP ? 'skipped' : isDup ? 'invalid' : ''}
                     aria-label=${`Target column for ${h || `column ${i + 1}`}`}
                     .value=${value}
-                    @change=${(e: Event) =>
-                      this.setTarget(i, (e.target as HTMLSelectElement).value)}
+                    @change=${(e: Event) => this.setTarget(i, (e.target as HTMLSelectElement).value)}
                   >
                     <option value=${SKIP} ?selected=${value === SKIP}>— skip —</option>
-                    ${this.targetCols.map(
-                      (c) => html`
-                        <option value=${c.field} ?selected=${c.field === value}>
-                          ${c.label || c.field}
-                        </option>
-                      `,
-                    )}
+                    ${this.targetCols.map((c) => html` <option value=${c.field} ?selected=${c.field === value}>${c.label || c.field}</option> `)}
                   </select>
                 `;
               })}
             </div>
-            <p class="err">
-              ${dup.size > 0
-                ? `Two columns point at the same target: ${[...dup].join(', ')}.`
-                : mapped === 0
-                  ? 'Every column is skipped — the append would add empty rows.'
-                  : nothing}
-            </p>
+            <p class="err">${dup.size > 0 ? `Two columns point at the same target: ${[...dup].join(', ')}.` : mapped === 0 ? 'Every column is skipped — the append would add empty rows.' : nothing}</p>
           </div>
         </form>
       </dialog>

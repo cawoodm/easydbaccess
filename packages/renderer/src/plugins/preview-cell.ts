@@ -154,8 +154,7 @@ export class PreviewCell extends HTMLElement {
     const text = htmlToPreviewText(this.toHtml(this._value) ?? this._value);
     view.textContent = text.length > maxChars ? text.slice(0, maxChars) + '…' : text;
     view.title = this._readonly ? 'Click to view the source' : 'Click to edit';
-    view.style.cssText =
-      'flex:0 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:text';
+    view.style.cssText = 'flex:0 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:text';
     view.addEventListener('click', (e) => {
       e.stopPropagation();
       this.openEditor();
@@ -189,8 +188,7 @@ export class PreviewCell extends HTMLElement {
       // instead of letting innerHTML collapse whitespace and parse them as
       // markup.
       const pre = document.createElement('pre');
-      pre.style.cssText =
-        'white-space:pre-wrap;word-break:break-word;margin:0;font-family:ui-monospace, monospace;';
+      pre.style.cssText = 'white-space:pre-wrap;word-break:break-word;margin:0;font-family:ui-monospace, monospace;';
       pre.textContent = this._value;
       content.append(pre);
     }
@@ -237,9 +235,7 @@ export class PreviewCell extends HTMLElement {
         this._value = next;
         this.render();
       }
-      this.dispatchEvent(
-        new CustomEvent('change', { detail: { value: next }, bubbles: true, composed: true }),
-      );
+      this.dispatchEvent(new CustomEvent('change', { detail: { value: next }, bubbles: true, composed: true }));
     });
   }
 }

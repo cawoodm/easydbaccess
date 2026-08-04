@@ -34,15 +34,7 @@ import {
   type MetadataTablePatch,
 } from './datasette-client.js';
 import { askViewImportMode, findViews, offerViewImport, runViewImport } from './datasette-views.js';
-import {
-  type DatasetteSettings,
-  getDatasetteSettings,
-  importRowCap,
-  registerDatasetteSettings,
-  resolveChosenTables,
-  uniqueTableName,
-  withDatasetteSourceInfo,
-} from './datasette-common.js';
+import { type DatasetteSettings, getDatasetteSettings, importRowCap, registerDatasetteSettings, resolveChosenTables, uniqueTableName, withDatasetteSourceInfo } from './datasette-common.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -63,12 +55,7 @@ function resumeDelayMs(retryWaitSeconds: number): number {
  * with a resume cursor) is resumable — the deliberate row cap is not. Returns
  * `undefined` for a clean/complete fetch, which clears any prior resume marker.
  */
-function resumeStateFor(
-  error: string | undefined,
-  nextUrl: string | undefined,
-  loadedRows: number,
-  count: number | null,
-): ImportResume | undefined {
+function resumeStateFor(error: string | undefined, nextUrl: string | undefined, loadedRows: number, count: number | null): ImportResume | undefined {
   if (!error || !nextUrl) return undefined;
   return { nextUrl, loadedRows, ...(count != null ? { totalCount: count } : {}) };
 }
@@ -78,8 +65,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   name: 'Datasette Import',
   type: 'importer',
   version: '0.3.0',
-  description:
-    'Import snapshot tables from any online Datasette instance, database, or single table by URL',
+  description: 'Import snapshot tables from any online Datasette instance, database, or single table by URL',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/datasette-import.ts',
@@ -119,13 +105,7 @@ export function init(api: HostApi): void {
     id: 'datasette',
     label: 'Datasette (table or instance)…',
     async run(api, { url }) {
-      const input =
-        url ||
-        (await api.ui.dialogs.prompt(
-          `Datasette URL — a single table, a database, or an instance root.\n\ne.g. ${EXAMPLE}`,
-          '',
-          'Import from Datasette',
-        ));
+      const input = url || (await api.ui.dialogs.prompt(`Datasette URL — a single table, a database, or an instance root.\n\ne.g. ${EXAMPLE}`, '', 'Import from Datasette'));
       if (!input) return;
       await runImport(api, input);
     },
@@ -153,9 +133,7 @@ export function init(api: HostApi): void {
         }
         const mode = await askViewImportMode(api, views, 'This database defines');
         if (!mode) return;
-        await runViewImport(api, parseDatasetteUrl(input).base, views, mode, (urls) =>
-          importViewsAsTables(api, urls, {}),
-        );
+        await runViewImport(api, parseDatasetteUrl(input).base, views, mode, (urls) => importViewsAsTables(api, urls, {}));
       } catch (err) {
         await api.ui.dialogs.alert((err as Error)?.message ?? String(err), 'Datasette views');
       }
@@ -233,9 +211,7 @@ export interface DatasetteImportOpts {
    * that table empty. Only for a table being populated for the FIRST time — a
    * re-import keeps the arrangement the user already has.
    */
-  editColumns?:
-    | ((columns: ColumnSpec[], tableName: string) => Promise<ColumnSpec[] | null>)
-    | undefined;
+  editColumns?: ((columns: ColumnSpec[], tableName: string) => Promise<ColumnSpec[] | null>) | undefined;
 }
 
 /**
@@ -244,11 +220,7 @@ export interface DatasetteImportOpts {
  * discovers its tables and opens a checklist (all pre-selected) so the user
  * chooses what to pull in.
  */
-export async function importDatasette(
-  api: HostApi,
-  input: string,
-  opts: DatasetteImportOpts = {},
-): Promise<void> {
+export async function importDatasette(api: HostApi, input: string, opts: DatasetteImportOpts = {}): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) throw new Error('datasette-source: no active workspace');
 
@@ -302,15 +274,7 @@ export async function importDatasette(
   const failed: string[] = [];
   for (const p of plans) {
     try {
-      const r = await fillImportTable(
-        api,
-        p.tableId,
-        p.ref,
-        p.overwrite,
-        p.knownCount,
-        opts,
-        settings,
-      );
+      const r = await fillImportTable(api, p.tableId, p.ref, p.overwrite, p.knownCount, opts, settings);
       imported += 1;
       totalRows += r.rowCount;
       // A partial import (paging stopped on a failure, e.g. rate limiting) still
@@ -371,28 +335,18 @@ async function importViewsAsTables(api: HostApi, urls: string[], opts: Datasette
  * create the destination table as an EMPTY shell so its window appears right
  * away. No rows are fetched here. Returns the target table id, or `skipped`.
  */
-async function prepareImportTable(
-  api: HostApi,
-  workspaceId: string,
-  ref: DatasetteRef,
-): Promise<{ tableId: string; overwrite: boolean; skipped?: boolean }> {
+async function prepareImportTable(api: HostApi, workspaceId: string, ref: DatasetteRef): Promise<{ tableId: string; overwrite: boolean; skipped?: boolean }> {
   const name = `${ref.db}/${ref.table}`;
   const origin = {
     type: 'datasette',
     url: `${ref.base}/${encodeURIComponent(ref.db!)}/${encodeURIComponent(ref.table!)}`,
   } as const;
 
-  const workspaceTables = (await api.store.tables.find()).filter(
-    (t) => t.workspaceId === workspaceId,
-  );
+  const workspaceTables = (await api.store.tables.find()).filter((t) => t.workspaceId === workspaceId);
   const existing = workspaceTables.find((t) => t.name.toLowerCase() === name.toLowerCase());
   let targetName = name;
   if (existing) {
-    const choice = await api.ui.dialogs.choice(
-      `A table named "${name}" already exists in this workspace.`,
-      ['Overwrite', 'Rename', 'Skip'],
-      'Import — table already exists',
-    );
+    const choice = await api.ui.dialogs.choice(`A table named "${name}" already exists in this workspace.`, ['Overwrite', 'Rename', 'Skip'], 'Import — table already exists');
     if (!choice || choice === 'Skip') return { tableId: '', overwrite: false, skipped: true };
     if (choice === 'Overwrite') {
       // Reuse the existing table/window; keep its columns visible until the new
@@ -476,8 +430,7 @@ async function fillImportTable(
     // is a floor (`countTruncated`) and the cap exceeds it: then we genuinely
     // don't know when we'll finish, so a determinate bar would falsely read
     // 100% the moment we cross that floor. Fall back to indeterminate instead.
-    const target =
-      count && count > 0 && (!countTruncated || rowCap <= count) ? Math.min(count, rowCap) : 0;
+    const target = count && count > 0 && (!countTruncated || rowCap <= count) ? Math.min(count, rowCap) : 0;
 
     // Page through with an interactive resume. If a page hop fails (commonly the
     // instance rate-limiting a large import), keep the rows fetched so far and
@@ -538,12 +491,7 @@ async function fillImportTable(
 
     // Prefer the schema's columns; infer from rows if none; refine types when
     // only bare names came back (e.g. datasette.io's `?_extra=columns`).
-    const columns =
-      metaColumns.length === 0
-        ? inferColumnsFromRows(rows)
-        : typed
-          ? metaColumns
-          : refineColumnTypes(metaColumns, rows);
+    const columns = metaColumns.length === 0 ? inferColumnsFromRows(rows) : typed ? metaColumns : refineColumnTypes(metaColumns, rows);
 
     // Apply the table's Datasette metadata (default sort, …) onto columns +
     // table fields. Best-effort: no metadata endpoint ⇒ no-op.
@@ -592,8 +540,7 @@ async function fillImportTable(
     const resume = resumeStateFor(error, nextUrl, rows.length, count);
     // Remember the remote primary key(s) on the snapshot's origin so a later
     // refresh can match rows and preserve user-added columns (see refreshSnapshot).
-    const originPatch =
-      pks.length > 0 && current?.origin ? { origin: { ...current.origin, pks } } : {};
+    const originPatch = pks.length > 0 && current?.origin ? { origin: { ...current.origin, pks } } : {};
     const patch = isInitial
       ? { columns: mergedCols, ...metaPatch, ...originPatch, importResume: resume, updatedAt: now }
       : {
@@ -632,11 +579,7 @@ async function fillImportTable(
  * Refresh sees the remote column as new and re-adds it. That is the user's
  * choice to make — hiding a column has no such effect.
  */
-function remapRowKeys(
-  rows: Array<Record<string, unknown>>,
-  oldCols: ColumnSpec[],
-  newCols: ColumnSpec[],
-): Array<Record<string, unknown>> {
+function remapRowKeys(rows: Array<Record<string, unknown>>, oldCols: ColumnSpec[], newCols: ColumnSpec[]): Array<Record<string, unknown>> {
   const rekey = rowRekeyer(oldCols, newCols);
   return rekey ? rows.map(rekey) : rows;
 }
@@ -668,10 +611,7 @@ function summariseBatch(
     return;
   }
   if (s.failed.length > 0) {
-    api.ui.dialogs.toast(
-      `Imported ${tables} (${rows});${skippedNote} ${s.failed.length} failed:\n${s.failed.join('\n')}`,
-      { kind: 'error', title: 'Datasette import' },
-    );
+    api.ui.dialogs.toast(`Imported ${tables} (${rows});${skippedNote} ${s.failed.length} failed:\n${s.failed.join('\n')}`, { kind: 'error', title: 'Datasette import' });
     return;
   }
   // Some tables loaded only partially (paging stopped early — e.g. rate
@@ -689,11 +629,10 @@ function summariseBatch(
     // An unlimited setting (cap === MAX_SAFE_INTEGER) still hits Datasette's own
     // truncation sometimes — show that as "capped", just without a silly number.
     const capNote = s.cap < Number.MAX_SAFE_INTEGER ? ` at ${s.cap.toLocaleString()}` : '';
-    api.ui.dialogs.toast(
-      `Imported ${tables} (${rows}).${skippedNote} ${s.capped.length} capped${capNote} — ` +
-        `more available: ${s.capped.join(', ')}.`,
-      { kind: 'warning', title: 'Datasette import' },
-    );
+    api.ui.dialogs.toast(`Imported ${tables} (${rows}).${skippedNote} ${s.capped.length} capped${capNote} — ` + `more available: ${s.capped.join(', ')}.`, {
+      kind: 'warning',
+      title: 'Datasette import',
+    });
     return;
   }
   api.ui.dialogs.toast(`Imported ${tables} (${rows}) from Datasette.${skippedNote}`, {
@@ -715,8 +654,7 @@ async function refreshSnapshotTable(api: HostApi, tableId: string): Promise<void
     const settings = await getDatasetteSettings(api);
     await refreshSnapshot(api, t, settings);
   } catch (err) {
-    const msg =
-      err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
+    const msg = err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
     api.ui.dialogs.toast(`Refresh failed: ${msg}`, { kind: 'error', title: 'Refresh' });
   }
 }
@@ -774,8 +712,7 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
 
     // See the matching comment in fillImportTable: a truncated count is only a
     // trustworthy denominator when the cap is at or below it.
-    const target =
-      count && count > 0 && (!countTruncated || rowCap <= count) ? Math.min(count, rowCap) : 0;
+    const target = count && count > 0 && (!countTruncated || rowCap <= count) ? Math.min(count, rowCap) : 0;
     const { rows, hasMore, truncated, error, nextUrl } = await fetchRows(fetchFn, ref, {
       maxRows: rowCap,
       pageSize: settings.pageSize,
@@ -786,12 +723,7 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
 
     // Build the discovered columns (schema → rows → type refinement), then layer
     // on the Datasette metadata (descriptions, units, default sort, …).
-    let cols =
-      metaColumns.length === 0
-        ? inferColumnsFromRows(rows)
-        : typed
-          ? metaColumns
-          : refineColumnTypes(metaColumns, rows);
+    let cols = metaColumns.length === 0 ? inferColumnsFromRows(rows) : typed ? metaColumns : refineColumnTypes(metaColumns, rows);
     let metaPatch: MetadataTablePatch = {};
     try {
       const md = await fetchTableMetadata(fetchFn, ref);
@@ -830,9 +762,7 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
     // known pks this falls back to a plain replace (no per-row preservation).
     const pks = t.origin?.pks ?? [];
     const remoteFields = new Set(cols.map((c) => c.field));
-    const userAddedFields = t.columns
-      .map((c) => c.field)
-      .filter((f) => !remoteFields.has(f) && !pks.includes(f));
+    const userAddedFields = t.columns.map((c) => c.field).filter((f) => !remoteFields.has(f) && !pks.includes(f));
     const deletedRemoteFields = (t.deletedColumns ?? []).filter((f) => remoteFields.has(f));
     const rowColl = api.store.rows(t.id);
     const old = await rowColl.find();
@@ -844,9 +774,7 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
       deletedRemoteFields,
     });
     await rowColl.bulkRemove(old.map((r) => r.id));
-    await rowColl.bulkInsert(
-      mergedData.map((data) => ({ id: cryptoUUID(), tableId: t.id, data, updatedAt: now })),
-    );
+    await rowColl.bulkInsert(mergedData.map((data) => ({ id: cryptoUUID(), tableId: t.id, data, updatedAt: now })));
     outcome = { rowCount: mergedData.length, hasMore, truncated, error, droppedUserRows };
   } finally {
     setTableLoading(t.id, false);
@@ -860,8 +788,7 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
     const capNote = rowCap < Number.MAX_SAFE_INTEGER ? ` at ${rowCap.toLocaleString()}` : '';
     parts.push(`capped${capNote}`);
   }
-  if (newFields.length > 0)
-    parts.push(`${newFields.length} new column${newFields.length === 1 ? '' : 's'}`);
+  if (newFields.length > 0) parts.push(`${newFields.length} new column${newFields.length === 1 ? '' : 's'}`);
   // A view (or any table Datasette reports no pk for) is matched on content, so
   // a row whose remote values changed loses the user's own column values. Say so.
   if (outcome.droppedUserRows > 0) {
@@ -872,10 +799,7 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
   }
   const note = parts.length ? ` — ${parts.join(', ')}` : '';
   api.ui.dialogs.toast(`Refreshed ${outcome.rowCount} rows from ${ref.db}/${ref.table}${note}.`, {
-    kind:
-      outcome.error || outcome.hasMore || outcome.truncated || newFields.length > 0 || outcome.droppedUserRows > 0
-        ? 'warning'
-        : 'success',
+    kind: outcome.error || outcome.hasMore || outcome.truncated || newFields.length > 0 || outcome.droppedUserRows > 0 ? 'warning' : 'success',
     title: 'Refresh',
   });
 
@@ -920,9 +844,7 @@ async function resumeImport(api: HostApi, tableId: string): Promise<void> {
     });
     added = res.rows.length;
     const now = Date.now();
-    await api.store
-      .rows(tableId)
-      .bulkInsert(res.rows.map((data) => ({ id: cryptoUUID(), tableId, data, updatedAt: now })));
+    await api.store.rows(tableId).bulkInsert(res.rows.map((data) => ({ id: cryptoUUID(), tableId, data, updatedAt: now })));
     outcome = { error: res.error, nextUrl: res.nextUrl };
     // Update or clear the resume marker for the next round.
     const nextResume = resumeStateFor(res.error, res.nextUrl, base + added, total);
@@ -930,8 +852,7 @@ async function resumeImport(api: HostApi, tableId: string): Promise<void> {
   } catch (err) {
     // The resume cursor itself failed hard (still unreachable) — keep the marker
     // so the user can try again, and report why.
-    const msg =
-      err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
+    const msg = err instanceof DatasetteError ? err.message : ((err as Error)?.message ?? String(err));
     api.ui.dialogs.toast(`Couldn't resume ${ref.db}/${ref.table}: ${msg}. Try again later.`, {
       kind: 'error',
       title: 'Resume import',
@@ -943,10 +864,7 @@ async function resumeImport(api: HostApi, tableId: string): Promise<void> {
 
   const totalNow = base + added;
   if (outcome.error) {
-    api.ui.dialogs.toast(
-      `Resumed ${ref.db}/${ref.table}: +${added} rows (${totalNow} total) — interrupted again (${outcome.error}). Resume to continue.`,
-      { kind: 'warning', title: 'Resume import' },
-    );
+    api.ui.dialogs.toast(`Resumed ${ref.db}/${ref.table}: +${added} rows (${totalNow} total) — interrupted again (${outcome.error}). Resume to continue.`, { kind: 'warning', title: 'Resume import' });
   } else {
     api.ui.dialogs.toast(`Finished ${ref.db}/${ref.table}: +${added} rows (${totalNow} total).`, {
       kind: 'success',
@@ -956,15 +874,9 @@ async function resumeImport(api: HostApi, tableId: string): Promise<void> {
 }
 
 /** Open the column editor for a table, flagging the newly-discovered columns. */
-function openColumnEditorForNewColumns(
-  tableId: string,
-  ref: DatasetteRef,
-  newFields: string[],
-): void {
+function openColumnEditorForNewColumns(tableId: string, ref: DatasetteRef, newFields: string[]): void {
   const list = newFields.join(', ');
   const many = newFields.length !== 1;
-  const notice =
-    `Refreshing ${ref.db}/${ref.table} revealed ${newFields.length} new ` +
-    `column${many ? 's' : ''}: ${list}. Review, reorder or hide ${many ? 'them' : 'it'} here.`;
+  const notice = `Refreshing ${ref.db}/${ref.table} revealed ${newFields.length} new ` + `column${many ? 's' : ''}: ${list}. Review, reorder or hide ${many ? 'them' : 'it'} here.`;
   document.dispatchEvent(new CustomEvent('easydb:edit-columns', { detail: { tableId, notice } }));
 }

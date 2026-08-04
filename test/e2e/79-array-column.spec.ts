@@ -18,11 +18,7 @@ const rows = [
   { name: 'c', tags: 'red' },
 ];
 
-async function tagTable(
-  page: import('@playwright/test').Page,
-  name: string,
-  type: 'array' | 'string',
-) {
+async function tagTable(page: import('@playwright/test').Page, name: string, type: 'array' | 'string') {
   const id = await createTable(page, name, [{ field: 'name' }, { field: 'tags', type }]);
   await waitForPanel(page, id);
   for (const r of rows) await addRow(page, id, r);
@@ -107,24 +103,17 @@ test('a list with no members shows an empty cell, not the brackets', async ({ pa
   const cells = page.locator(`#${panelDomId(id)} data-table tbody td.t-array`);
   await expect(cells).toHaveCount(3);
   // Rows come back in row-id order, which is random, so compare them as a set.
-  const values = () =>
-    cells
-      .locator('input')
-      .evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value).sort());
+  const values = () => cells.locator('input').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value).sort());
   await expect.poll(values).toEqual(['', '', 'red']);
 
   // Both empty lists are marked empty, like any other blank cell, and carry no
   // tooltip — there is nothing to read.
-  await expect(page.locator(`#${panelDomId(id)} data-table tbody td.t-array.is-null`)).toHaveCount(
-    2,
-  );
+  await expect(page.locator(`#${panelDomId(id)} data-table tbody td.t-array.is-null`)).toHaveCount(2);
   const titles = await cells.evaluateAll((els) => els.map((e) => e.getAttribute('title')).sort());
   expect(titles).toEqual(['', '', 'red']);
 });
 
-test('typing a member in the filter box matches, and NULL finds the empty lists', async ({
-  page,
-}) => {
+test('typing a member in the filter box matches, and NULL finds the empty lists', async ({ page }) => {
   const id = await createTable(page, 'Typed', [{ field: 'name' }, { field: 'tags', type: 'array' }]);
   await waitForPanel(page, id);
   await addRow(page, id, { name: 'a', tags: 'red,blue' });

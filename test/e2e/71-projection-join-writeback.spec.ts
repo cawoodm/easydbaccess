@@ -16,18 +16,12 @@ import { bulkAddRows, createTable, waitForPanel } from './helpers.js';
 
 /** People ⋈ Dept on the two primary keys, 1:1. */
 async function setup(page: import('@playwright/test').Page) {
-  const deptId = await createTable(page, 'Dept', [
-    { field: 'id' },
-    { field: 'label' },
-  ]);
+  const deptId = await createTable(page, 'Dept', [{ field: 'id' }, { field: 'label' }]);
   await bulkAddRows(page, deptId, [
     { id: 'd1', label: 'Sales' },
     { id: 'd2', label: 'Support' },
   ]);
-  const peopleId = await createTable(page, 'People', [
-    { field: 'name' },
-    { field: 'deptId' },
-  ]);
+  const peopleId = await createTable(page, 'People', [{ field: 'name' }, { field: 'deptId' }]);
   await bulkAddRows(page, peopleId, [
     { name: 'Alice', deptId: 'd1' },
     { name: 'Bob', deptId: 'd2' },
@@ -91,11 +85,7 @@ async function rowsOf(page: import('@playwright/test').Page, tableId: string) {
   return page.evaluate(async (id) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows = await (window as any).__easydb.store.rows(id).find();
-    return rows
-      .map((r: { data: Record<string, unknown> }) => r.data)
-      .sort((a: unknown, b: unknown) =>
-        JSON.stringify(a).localeCompare(JSON.stringify(b)),
-      );
+    return rows.map((r: { data: Record<string, unknown> }) => r.data).sort((a: unknown, b: unknown) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   }, tableId);
 }
 
@@ -105,22 +95,13 @@ async function rowsOf(page: import('@playwright/test').Page, tableId: string) {
  * The row is picked by the value of `matchField`, never by index — `rowsOf`
  * sorts and the store does not, so an index would silently edit a different row.
  */
-async function editCell(
-  page: import('@playwright/test').Page,
-  tableId: string,
-  match: { field: string; value: unknown },
-  field: string,
-  value: string,
-) {
+async function editCell(page: import('@playwright/test').Page, tableId: string, match: { field: string; value: unknown }, field: string, value: string) {
   return page.evaluate(
     async ({ tableId, match, field, value }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__easydb.store;
       const rows = await store.rows(tableId).find();
-      const r = rows.find(
-        (x: { data: Record<string, unknown> }) =>
-          x.data[match.field] === match.value,
-      );
+      const r = rows.find((x: { data: Record<string, unknown> }) => x.data[match.field] === match.value);
       if (!r)
         return {
           ok: false,
@@ -129,12 +110,10 @@ async function editCell(
       try {
         // The whole row, which is what data-table sends — that is what made the
         // joined edit look writable and then disappear.
-        await store
-          .rows(tableId)
-          .patch(r.id, {
-            data: { ...r.data, [field]: value },
-            updatedAt: Date.now(),
-          });
+        await store.rows(tableId).patch(r.id, {
+          data: { ...r.data, [field]: value },
+          updatedAt: Date.now(),
+        });
         return { ok: true, error: '' };
       } catch (err) {
         return { ok: false, error: (err as Error).message };
@@ -144,9 +123,7 @@ async function editCell(
   );
 }
 
-test('a joined column is editable once the projection loads', async ({
-  page,
-}) => {
+test('a joined column is editable once the projection loads', async ({ page }) => {
   const { projId } = await setup(page);
 
   // The stale readonly flag from the old rule is cleared at load.
@@ -155,9 +132,7 @@ test('a joined column is editable once the projection loads', async ({
       page.evaluate(async (id) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const t = await (window as any).__easydb.store.tables.findOne(id);
-        return t.columns.map(
-          (c: { readonly?: boolean }) => c.readonly === true,
-        );
+        return t.columns.map((c: { readonly?: boolean }) => c.readonly === true);
       }, projId),
     )
     .toEqual([false, false]);
@@ -167,13 +142,7 @@ test('editing a joined field writes it to THAT table', async ({ page }) => {
   const { projId: id, deptId, peopleId } = await setup(page);
 
   await expect.poll(async () => (await rowsOf(page, id)).length).toBe(2);
-  const res = await editCell(
-    page,
-    id,
-    { field: 'who', value: 'Alice' },
-    'dept',
-    'Revenue',
-  );
+  const res = await editCell(page, id, { field: 'who', value: 'Alice' }, 'dept', 'Revenue');
   expect(res).toEqual({ ok: true, error: '' });
 
   // Dept — the joined table — is the one that changed…
@@ -197,21 +166,11 @@ test('editing a joined field writes it to THAT table', async ({ page }) => {
     ]);
 });
 
-test('editing a base field still writes to the base table', async ({
-  page,
-}) => {
+test('editing a base field still writes to the base table', async ({ page }) => {
   const { projId, peopleId, deptId } = await setup(page);
   await expect.poll(async () => (await rowsOf(page, projId)).length).toBe(2);
 
-  expect(
-    await editCell(
-      page,
-      projId,
-      { field: 'who', value: 'Alice' },
-      'who',
-      'Alicia',
-    ),
-  ).toEqual({
+  expect(await editCell(page, projId, { field: 'who', value: 'Alice' }, 'who', 'Alicia')).toEqual({
     ok: true,
     error: '',
   });
@@ -227,9 +186,7 @@ test('editing a base field still writes to the base table', async ({
   ]);
 });
 
-test('a joined edit made through a VIEW of the projection reaches the joined table', async ({
-  page,
-}) => {
+test('a joined edit made through a VIEW of the projection reaches the joined table', async ({ page }) => {
   // The exact path in the report: the edit goes through the view's grid, which
   // writes to the projection's row collection just like the table window does.
   const { projId, deptId } = await setup(page);
@@ -257,15 +214,7 @@ test('a joined edit made through a VIEW of the projection reaches the joined tab
 
   // A view edits the SAME collection the grid does, so writing through the
   // projection's rows is exactly what the view's grid does on a cell change.
-  expect(
-    await editCell(
-      page,
-      projId,
-      { field: 'who', value: 'Bob' },
-      'dept',
-      'Helpdesk',
-    ),
-  ).toEqual({
+  expect(await editCell(page, projId, { field: 'who', value: 'Bob' }, 'dept', 'Helpdesk')).toEqual({
     ok: true,
     error: '',
   });
@@ -278,41 +227,23 @@ test('a joined edit made through a VIEW of the projection reaches the joined tab
     ]);
 });
 
-test('a joined edit with no matching row is refused, loudly, and changes nothing', async ({
-  page,
-}) => {
+test('a joined edit with no matching row is refused, loudly, and changes nothing', async ({ page }) => {
   const { projId, peopleId, deptId } = await setup(page);
   // Point Bob at a department that does not exist, so his `dept` is empty.
   await page.evaluate(async (id) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const store = (window as any).__easydb.store;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const bob = (await store.rows(id).find()).find(
-      (r: any) => r.data.name === 'Bob',
-    );
-    await store
-      .rows(id)
-      .patch(bob.id, {
-        data: { ...bob.data, deptId: 'gone' },
-        updatedAt: Date.now(),
-      });
+    const bob = (await store.rows(id).find()).find((r: any) => r.data.name === 'Bob');
+    await store.rows(id).patch(bob.id, {
+      data: { ...bob.data, deptId: 'gone' },
+      updatedAt: Date.now(),
+    });
   }, peopleId);
 
-  await expect
-    .poll(async () =>
-      (await rowsOf(page, projId)).find(
-        (r) => (r as { who: string }).who === 'Bob',
-      ),
-    )
-    .toEqual({ who: 'Bob', dept: null });
+  await expect.poll(async () => (await rowsOf(page, projId)).find((r) => (r as { who: string }).who === 'Bob')).toEqual({ who: 'Bob', dept: null });
 
-  const res = await editCell(
-    page,
-    projId,
-    { field: 'who', value: 'Bob' },
-    'dept',
-    'Nowhere',
-  );
+  const res = await editCell(page, projId, { field: 'who', value: 'Bob' }, 'dept', 'Nowhere');
 
   expect(res.ok).toBe(false);
   expect(res.error).toMatch(/no matching "Dept" row/);

@@ -35,9 +35,7 @@ export class TableList extends LitElement {
     super.connectedCallback();
     const ctx = await getContext();
     this.workspaceId = ctx.workspaceId;
-    this.unsubscribe = ctx.store.tables.subscribe(
-      (t) => (this.tables = t.filter((x) => x.workspaceId === this.workspaceId)),
-    );
+    this.unsubscribe = ctx.store.tables.subscribe((t) => (this.tables = t.filter((x) => x.workspaceId === this.workspaceId)));
     const all = await ctx.store.tables.find();
     this.tables = all.filter((t) => t.workspaceId === this.workspaceId);
     await initWindowManager();
@@ -51,10 +49,7 @@ export class TableList extends LitElement {
 
   override render() {
     if (this.tables.length > 0) return html``;
-    return html`<div class="empty">
-      No tables yet. Drop a <strong>.csv</strong> or <strong>.json</strong> file anywhere on the
-      page, or click <strong>+ New Table</strong> above.
-    </div>`;
+    return html`<div class="empty">No tables yet. Drop a <strong>.csv</strong> or <strong>.json</strong> file anywhere on the page, or click <strong>+ New Table</strong> above.</div>`;
   }
 }
 

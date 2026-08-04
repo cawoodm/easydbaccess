@@ -840,12 +840,7 @@ export class DataTable extends LitElement {
     // built-in that never honoured it (the `preview` cell opened a Save-able
     // editor on a read-only table). Nothing should be able to write through it.
     if (this.readOnly || col?.readonly === true) {
-      ctx.api.ui.dialogs.toast(
-        this.readOnly
-          ? 'This table is read-only.'
-          : `“${col?.label ?? field}” is a read-only column.`,
-        { kind: 'warning', title: 'Not saved' },
-      );
+      ctx.api.ui.dialogs.toast(this.readOnly ? 'This table is read-only.' : `“${col?.label ?? field}” is a read-only column.`, { kind: 'warning', title: 'Not saved' });
       // Re-render so an editor that got this far snaps back to the stored value.
       this.requestUpdate();
       return;

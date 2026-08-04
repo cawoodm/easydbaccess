@@ -35,9 +35,7 @@ async function init(): Promise<AppContext> {
   // `getDb()` — and the Dexie database it opens — is skipped on the IPC path;
   // nothing downstream (routing, workspace resolution, plugin host) branches
   // on which one is active.
-  const baseStore = window.easydb?.store
-    ? createIpcDataStore(window.easydb.store, () => activeWorkspaceId)
-    : createDataStore(await getDb(), () => activeWorkspaceId);
+  const baseStore = window.easydb?.store ? createIpcDataStore(window.easydb.store, () => activeWorkspaceId) : createDataStore(await getDb(), () => activeWorkspaceId);
   const events = createEventBus();
   const registries = createRegistries();
 
@@ -163,10 +161,7 @@ async function init(): Promise<AppContext> {
   events.on('import:after', ({ source, tableId, rowCount }) => {
     if (source === 'datasette') return;
     void api.store.tables.findOne(tableId).then((t) => {
-      api.ui.dialogs.toast(
-        `Imported ${rowCount} row${rowCount === 1 ? '' : 's'} into "${t?.name ?? tableId}".`,
-        { kind: 'success', title: source.toUpperCase() + ' import' },
-      );
+      api.ui.dialogs.toast(`Imported ${rowCount} row${rowCount === 1 ? '' : 's'} into "${t?.name ?? tableId}".`, { kind: 'success', title: source.toUpperCase() + ' import' });
     });
   });
   events.on('plugin:error', ({ url, phase, error }) => {
@@ -201,11 +196,10 @@ async function init(): Promise<AppContext> {
         { kind: 'warning', title: 'Safe mode' },
       );
     } else if (SAFE_MODE === 'url-plugins') {
-      api.ui.dialogs.toast(
-        'Safe mode (URL plugins) is ON: URL-installed plugins were not loaded this ' +
-          'session. Built-in plugins are unaffected. Reload without ?safemode1 to restore them.',
-        { kind: 'warning', title: 'Safe mode' },
-      );
+      api.ui.dialogs.toast('Safe mode (URL plugins) is ON: URL-installed plugins were not loaded this ' + 'session. Built-in plugins are unaffected. Reload without ?safemode1 to restore them.', {
+        kind: 'warning',
+        title: 'Safe mode',
+      });
     }
 
     // Safe mode exists to reach the Plugin Manager when a plugin breaks the

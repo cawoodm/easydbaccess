@@ -16,10 +16,7 @@
 
 /** Random id for a Table or Row. Falls back when `crypto.randomUUID` is absent. */
 export function cryptoUUID(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  );
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 /** Table `code`: lowercase, dash-separated. Empty input yields 'table'. */

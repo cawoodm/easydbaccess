@@ -73,8 +73,7 @@ const RSS: BuiltinTemplate = {
 const TODO: BuiltinTemplate = {
   slug: 'todo-list',
   name: 'Todo List',
-  header:
-    '<div style="display:flex;flex-direction:column;gap:6px;padding:12px;max-width:720px;margin:0 auto;">',
+  header: '<div style="display:flex;flex-direction:column;gap:6px;padding:12px;max-width:720px;margin:0 auto;">',
   row: [
     '<div style="display:flex;align-items:center;gap:10px;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;background:#ffffff;">',
     '$input.DONE',
@@ -90,8 +89,7 @@ const TODO: BuiltinTemplate = {
 const GALLERY: BuiltinTemplate = {
   slug: 'gallery',
   name: 'Gallery',
-  header:
-    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;padding:12px;">',
+  header: '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;padding:12px;">',
   row: [
     '<figure style="margin:0;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;background:#ffffff;box-shadow:0 1px 2px rgba(0,0,0,0.06);">',
     '<a href="$LINK" target="_blank" rel="noopener noreferrer" style="display:block;text-decoration:none;color:inherit;">',
@@ -107,8 +105,7 @@ const GALLERY: BuiltinTemplate = {
 const CONTACTS: BuiltinTemplate = {
   slug: 'contact-cards',
   name: 'Contact Cards',
-  header:
-    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;padding:12px;">',
+  header: '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;padding:12px;">',
   row: [
     '<div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;background:#ffffff;box-shadow:0 1px 2px rgba(0,0,0,0.06);">',
     '<div style="font-weight:600;color:#111827;font-size:0.95rem;">$NAME</div>',
@@ -168,12 +165,7 @@ async function seedDefaults(api: HostApi): Promise<void> {
   }
 }
 
-async function reconcileBuiltin(
-  api: HostApi,
-  wsId: string,
-  t: BuiltinTemplate,
-  existing: Awaited<ReturnType<HostApi['store']['viewTemplates']['find']>>,
-): Promise<void> {
+async function reconcileBuiltin(api: HostApi, wsId: string, t: BuiltinTemplate, existing: Awaited<ReturnType<HostApi['store']['viewTemplates']['find']>>): Promise<void> {
   const seededKey = `views:seeded:${t.slug}:${wsId}`;
   const sigKey = `views:sig:${t.slug}:${wsId}`;
   const shipped = signatureOf(t);
@@ -213,8 +205,5 @@ async function reconcileBuiltin(
 }
 
 function uuid(): string {
-  return (
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  );
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }

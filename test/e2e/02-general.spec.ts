@@ -93,10 +93,7 @@ test.describe('general', () => {
     expect(ws?.name).toBe(newName);
   });
 
-  test('opening the app without ?space restores the last-active workspace', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('opening the app without ?space restores the last-active workspace', async ({ page, workspaceId }) => {
     // The fixture booted workspace A (its id "e2e-…" sorts before "zzz-last").
     const idA = await createTable(page, 'AlphaOnly', [{ field: 'a' }]);
     await waitForPanel(page, idA);
@@ -147,18 +144,14 @@ test.describe('general', () => {
     // Only the matching row remains visible. (Cell values are rendered as
     // <input value="…"> not text nodes, so we assert via the input's value.)
     await expect(panel.locator('data-table').locator('tbody tr:visible')).toHaveCount(1);
-    await expect(panel.locator('data-table').locator('tbody tr:visible input').first()).toHaveValue(
-      'Bob',
-    );
+    await expect(panel.locator('data-table').locator('tbody tr:visible input').first()).toHaveValue('Bob');
 
     // Clear → all rows return.
     await searchInput.fill('');
     await expect(panel.locator('data-table').locator('tbody tr:visible')).toHaveCount(3);
   });
 
-  test('per-table search focuses the input on open and collapses on click-outside', async ({
-    page,
-  }) => {
+  test('per-table search focuses the input on open and collapses on click-outside', async ({ page }) => {
     const id = await createTable(page, 'Focusable', [{ field: 'name' }]);
     await waitForPanel(page, id);
     await addRow(page, id, { name: 'Alice' });

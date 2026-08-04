@@ -6,10 +6,7 @@ import { mergeRefreshedRows } from '../../../packages/renderer/src/table/refresh
 describe('mergeRefreshedRows', () => {
   it('preserves a user-added column value on the correct row after a remote refresh', () => {
     const result = mergeRefreshedRows({
-      oldRows: [
-        { data: { id: 1, title: 'Old Title', read: true } },
-        { data: { id: 2, title: 'Other', read: false } },
-      ],
+      oldRows: [{ data: { id: 1, title: 'Old Title', read: true } }, { data: { id: 2, title: 'Other', read: false } }],
       freshRows: [
         { id: 1, title: 'Old Title' },
         { id: 2, title: 'Other' },
@@ -83,10 +80,7 @@ describe('mergeRefreshedRows', () => {
 
   it('supports composite/multi-pk matching', () => {
     const result = mergeRefreshedRows({
-      oldRows: [
-        { data: { a: 1, b: 'x', title: 'One', read: true } },
-        { data: { a: 1, b: 'y', title: 'Two', read: false } },
-      ],
+      oldRows: [{ data: { a: 1, b: 'x', title: 'One', read: true } }, { data: { a: 1, b: 'y', title: 'Two', read: false } }],
       freshRows: [
         { a: 1, b: 'y', title: 'Two Fresh' },
         { a: 1, b: 'x', title: 'One Fresh' },
@@ -113,10 +107,7 @@ describe('keyless sources still keep the user’s own columns', () => {
   // in the way positional matching would be.
   it('carries user columns across when the remote values are unchanged', () => {
     const result = mergeRefreshedRows({
-      oldRows: [
-        { data: { city: 'Bern', pop: 100, note: 'visited' } },
-        { data: { city: 'Zug', pop: 30, note: 'todo' } },
-      ],
+      oldRows: [{ data: { city: 'Bern', pop: 100, note: 'visited' } }, { data: { city: 'Zug', pop: 30, note: 'todo' } }],
       freshRows: [
         { city: 'Bern', pop: 100 },
         { city: 'Zug', pop: 31 },
@@ -166,7 +157,10 @@ describe('keyless sources still keep the user’s own columns', () => {
     // One missing pk used to abandon the merge for the whole table.
     const result = mergeRefreshedRows({
       oldRows: [{ data: { id: 1, city: 'Bern', note: 'a' } }, { data: { id: null, city: 'Zug', note: 'b' } }],
-      freshRows: [{ id: 1, city: 'Bern' }, { id: null, city: 'Zug' }],
+      freshRows: [
+        { id: 1, city: 'Bern' },
+        { id: null, city: 'Zug' },
+      ],
       pks: ['id'],
       userAddedFields: ['note'],
     });

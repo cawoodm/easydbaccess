@@ -27,9 +27,7 @@ test('dialogs fill the screen on a phone viewport', async ({ page }) => {
   expect(box!.width).toBeLessThanOrEqual(376);
 });
 
-test('a full-screen dialog actually closes on a phone viewport (not stuck visible)', async ({
-  page,
-}) => {
+test('a full-screen dialog actually closes on a phone viewport (not stuck visible)', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
 
   // Regression: the mobile full-screen rule once forced `display:flex` on ALL

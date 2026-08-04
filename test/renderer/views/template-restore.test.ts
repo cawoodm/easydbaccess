@@ -38,9 +38,7 @@ describe('restoreTemplates', () => {
     // another device names the same template under a foreign id.
     const coll = fakeColl([tpl({ id: 'local-1', name: 'Gallery', builtin: true, rowHtml: 'old' })]);
 
-    const remap = await restoreTemplates(coll, 'ws', [
-      tpl({ id: 'foreign-1', name: 'Gallery', builtin: true, rowHtml: 'new' }),
-    ]);
+    const remap = await restoreTemplates(coll, 'ws', [tpl({ id: 'foreign-1', name: 'Gallery', builtin: true, rowHtml: 'new' })]);
 
     expect(coll.all).toHaveLength(1);
     expect(coll.all[0]!.id).toBe('local-1');
@@ -78,10 +76,7 @@ describe('restoreTemplates', () => {
   it('collapses two incoming templates that share a name onto one record', async () => {
     const coll = fakeColl([]);
 
-    const remap = await restoreTemplates(coll, 'ws', [
-      tpl({ id: 'a', name: 'Cards', rowHtml: 'first' }),
-      tpl({ id: 'b', name: 'Cards', rowHtml: 'second' }),
-    ]);
+    const remap = await restoreTemplates(coll, 'ws', [tpl({ id: 'a', name: 'Cards', rowHtml: 'first' }), tpl({ id: 'b', name: 'Cards', rowHtml: 'second' })]);
 
     expect(coll.all).toHaveLength(1);
     expect(coll.all[0]!.rowHtml).toBe('second');

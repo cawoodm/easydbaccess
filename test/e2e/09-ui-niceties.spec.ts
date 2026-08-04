@@ -24,9 +24,7 @@ test.describe('ui niceties', () => {
     }
   });
 
-  test('header search focuses on open, collapses on click-outside, and sits far-right', async ({
-    page,
-  }) => {
+  test('header search focuses on open, collapses on click-outside, and sits far-right', async ({ page }) => {
     const header = page.locator('app-shell header');
     // By accessible name, not `button.icon-btn` — the header carries three of
     // those now (search, plugins, help).
@@ -35,10 +33,7 @@ test.describe('ui niceties', () => {
     // The collapsed search icon is the last (right-most) element in the header,
     // to the right of the action buttons (e.g. "New Table").
     const newTableBtn = header.getByRole('button', { name: /New Table/ });
-    const [btnBox, searchBox] = await Promise.all([
-      newTableBtn.boundingBox(),
-      searchBtn.boundingBox(),
-    ]);
+    const [btnBox, searchBox] = await Promise.all([newTableBtn.boundingBox(), searchBtn.boundingBox()]);
     expect(btnBox).not.toBeNull();
     expect(searchBox).not.toBeNull();
     expect(searchBox!.x).toBeGreaterThan(btnBox!.x);
@@ -64,9 +59,7 @@ test.describe('ui niceties', () => {
     await expect(header.locator('input.search')).toHaveValue('widget');
   });
 
-  test('header search has a clear (×) button that empties the query and keeps focus', async ({
-    page,
-  }) => {
+  test('header search has a clear (×) button that empties the query and keeps focus', async ({ page }) => {
     const header = page.locator('app-shell header');
     await header.getByRole('button', { name: 'Search' }).click();
     const input = header.locator('input.search');
@@ -86,9 +79,7 @@ test.describe('ui niceties', () => {
     await expect(header.locator('.search-clear')).toHaveCount(0);
   });
 
-  test('the consolidated server-sync button uses the cloud_sync (cloud + refresh) icon', async ({
-    page,
-  }) => {
+  test('the consolidated server-sync button uses the cloud_sync (cloud + refresh) icon', async ({ page }) => {
     const footer = page.locator('app-shell footer');
     // Push/Pull were merged into one "Sync" button that opens a menu.
     const syncBtn = footer.getByRole('button', { name: 'Sync', exact: true });

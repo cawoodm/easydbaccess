@@ -28,9 +28,7 @@ test.describe('column round-trip through the editor', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ctx = (window as any).__easydb;
         const t = await ctx.store.tables.findOne(tableId);
-        const columns = t.columns.map((c: { field: string }) =>
-          c.field === 'name' ? { ...c, width: 222 } : c,
-        );
+        const columns = t.columns.map((c: { field: string }) => (c.field === 'name' ? { ...c, width: 222 } : c));
         await ctx.store.tables.patch(tableId, { columns, updatedAt: Date.now() });
       },
       { tableId: id },
@@ -63,9 +61,7 @@ test.describe('column round-trip through the editor', () => {
       .toBe(222);
   });
 
-  test('a boolean column with no renderer shows its raw value, not a checkbox', async ({
-    page,
-  }) => {
+  test('a boolean column with no renderer shows its raw value, not a checkbox', async ({ page }) => {
     const id = await createTable(page, 'Flags', [{ field: 'flag', type: 'boolean' }]);
     await waitForPanel(page, id);
     await addRow(page, id, { flag: 'maybe' });

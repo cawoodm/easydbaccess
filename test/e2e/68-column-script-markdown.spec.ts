@@ -11,9 +11,7 @@ import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js
 
 const MD = '# Title\n\nSome **bold** and a [link](https://x.dev).\n\n- one\n- two';
 
-test('a column script can call markdownToHtml, and the html renderer shows it', async ({
-  page,
-}) => {
+test('a column script can call markdownToHtml, and the html renderer shows it', async ({ page }) => {
   const id = await createTable(page, 'Notes', [
     { field: 'notes' },
     {
@@ -72,9 +70,7 @@ test('HTML embedded in the DATA is sanitized, not executed', async ({ page }) =>
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [
     {
-      notes:
-        '<img src=x onerror="window.__pwned=1">\n\n' +
-        '<p>kept <b>bold</b></p><script>window.__pwned=2</script>',
+      notes: '<img src=x onerror="window.__pwned=1">\n\n' + '<p>kept <b>bold</b></p><script>window.__pwned=2</script>',
     },
   ]);
 
@@ -102,10 +98,7 @@ test('the script editor tells you the helper exists', async ({ page }) => {
 
   const dlg = page.locator('new-table-dialog dialog');
   await expect(dlg).toBeVisible();
-  await dlg
-    .locator('button.icon-btn[title*="script" i], button.icon-btn:has(.mi:text-is("edit"))')
-    .first()
-    .click();
+  await dlg.locator('button.icon-btn[title*="script" i], button.icon-btn:has(.mi:text-is("edit"))').first().click();
 
   // Both the bare helper and the namespace are mentioned; assert on each.
   const hint = page.locator('script-editor-dialog dialog');
