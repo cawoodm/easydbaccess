@@ -9,7 +9,7 @@ import type { Page } from '@playwright/test';
 export interface TestColumn {
   field: string;
   label?: string;
-  type?: 'string' | 'number' | 'boolean' | 'date' | 'datetime';
+  type?: 'string' | 'number' | 'boolean' | 'date' | 'datetime' | 'array';
   /**
    * Cell renderer name. The app stopped auto-picking renderers in v0.0.5
    * — a column without one renders as read-only HTML-encoded text. Tests

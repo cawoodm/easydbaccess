@@ -14,6 +14,8 @@
  * so the app has exactly one "this is wrong" colour.
  */
 
+import { arrayMembers } from './array-cell.js';
+
 /** The one invalid-value red used everywhere. Do not introduce another. */
 export const INVALID_COLOR = '#dc2626';
 
@@ -68,6 +70,11 @@ export function cellState(value: unknown, type?: string): CellState {
     case 'date':
     case 'datetime':
       return Number.isNaN(Date.parse(String(value))) ? 'invalid' : 'ok';
+    case 'array':
+      // `[]` and `""` are both "no values here" — an array cell is empty when it
+      // has no members, whichever of the three spellings it uses. Nothing about
+      // an array is ever invalid: unparseable JSON reads as a comma list.
+      return arrayMembers(value).length === 0 ? 'empty' : 'ok';
     default:
       // A string column takes anything — only emptiness is worth marking.
       return 'ok';

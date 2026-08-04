@@ -434,7 +434,7 @@ export class ViewWindow extends LitElement {
     // Scripted columns first: a view shows, filters, sorts and searches the
     // values the grid computes, not the (empty) stored cells behind them.
     const evaluated = evaluateRows(this.allRows, this.tableColumns);
-    const viewData = viewRows(evaluated, this.instance);
+    const viewData = viewRows(evaluated, this.instance, this.tableColumns);
     let rows = viewData;
     // Free-text search across field values — supports `field:value` (with
     // !/^/comma-OR/NULL), boolean AND/OR, and the phrase→AND→OR fallback,
@@ -530,10 +530,11 @@ export class ViewWindow extends LitElement {
     if (!this.instance) return [];
     const pills = { ...(this.instance.pillFilters ?? {}) };
     delete pills[field];
-    return viewRows(evaluateRows(this.allRows, this.tableColumns), {
-      ...this.instance,
-      pillFilters: pills,
-    });
+    return viewRows(
+      evaluateRows(this.allRows, this.tableColumns),
+      { ...this.instance, pillFilters: pills },
+      this.tableColumns,
+    );
   }
 
   /** Write a field's whole pill-filter string (the value checklist applies live). */
@@ -570,8 +571,8 @@ export class ViewWindow extends LitElement {
     const popover = FilterPopover.instance;
     if (!popover) return;
     const rows = this.rowsFacetedFor(field);
-    if (!facetable(rows, field)) return;
     const type = this.tableColumns.find((c) => c.field === field)?.type;
+    if (!facetable(rows, field, { type })) return;
     const { values, blanks } = facetCounts(rows, field, { type });
     if (values.length === 0) return;
     const result = await popover.open(

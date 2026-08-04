@@ -52,6 +52,15 @@
 // null test wins. `^` and `=` both beat it: `^NULL` looks for cells starting
 // with the TEXT "null", `=NULL` looks for cells that ARE exactly "null". Quote
 // a token to search for a literal leading `!`, `^` or `=` (`"^caret"`).
+//
+// An `array` column (pass `{ type: 'array' }`) matches PER MEMBER: the cell is
+// taken apart by `util/array-cell.ts` and a token that hits any one member hits
+// the cell. `=Foo` therefore selects the rows whose list CONTAINS exactly `Foo`,
+// which is what the funnel dropdown needs — its tokens are exact, and the whole
+// cell (`Foo,Bar`) is never exactly one value. Negation still reads as "no
+// member matches", and `NULL` as "no members at all".
+
+import { arrayMembers } from '../util/array-cell.js';
 
 /**
  * One term of a column filter. `negate` excludes instead of includes; `prefix`
@@ -235,31 +244,62 @@ export function groupColumnFilter(tokens: FilterToken[]): FilterToken[][] {
   return groups;
 }
 
-/** Does `value` satisfy a single filter token? */
-function matchesTerm(value: unknown, token: FilterToken): boolean {
-  const term = token.term;
-  // An empty term (a lone `!`) always tests emptiness — `^`/`=` cannot anchor
-  // nothing. `NULL` tests emptiness too, unless `^` or `=` asked for the
-  // literal text.
-  if (term.trim() === '') return isNullish(value);
-  if (!token.prefix && !token.exact && term.toUpperCase() === 'NULL') return isNullish(value);
-  // Not trimmed — `=` is an exact match against the whole cell, so " foo " is
-  // not `=foo`.
+/**
+ * Does one piece of text satisfy a token's anchoring? Not trimmed — `=` is an
+ * exact match against the whole thing, so " foo " is not `=foo`.
+ */
+function matchesText(value: unknown, token: FilterToken): boolean {
   const haystack = String(value ?? '').toLowerCase();
-  const needle = term.toLowerCase();
+  const needle = token.term.toLowerCase();
   if (token.exact) return haystack === needle;
   return token.prefix ? haystack.startsWith(needle) : haystack.includes(needle);
 }
 
-/** Does the cell satisfy every token of one AND-group? */
-function matchesGroup(value: unknown, group: FilterToken[]): boolean {
-  return group.every((t) => (t.negate ? !matchesTerm(value, t) : matchesTerm(value, t)));
+/** An array cell is empty when it has no members, whatever its spelling. */
+function isEmptyCell(value: unknown, members: string[] | null): boolean {
+  return members ? members.length === 0 : isNullish(value);
 }
 
-/** Does `value` satisfy the per-column filter `rawQuery`? */
-export function matchesColumnFilter(value: unknown, rawQuery: string): boolean {
+/**
+ * Does `value` satisfy a single filter token? `members` is non-null for an
+ * `array` column, in which case the token tests each member and one hit is
+ * enough.
+ */
+function matchesTerm(value: unknown, token: FilterToken, members: string[] | null): boolean {
+  const term = token.term;
+  // An empty term (a lone `!`) always tests emptiness — `^`/`=` cannot anchor
+  // nothing. `NULL` tests emptiness too, unless `^` or `=` asked for the
+  // literal text.
+  if (term.trim() === '') return isEmptyCell(value, members);
+  if (!token.prefix && !token.exact && term.toUpperCase() === 'NULL') {
+    return isEmptyCell(value, members);
+  }
+  if (members) return members.some((m) => matchesText(m, token));
+  return matchesText(value, token);
+}
+
+/** Does the cell satisfy every token of one AND-group? */
+function matchesGroup(value: unknown, group: FilterToken[], members: string[] | null): boolean {
+  return group.every((t) =>
+    t.negate ? !matchesTerm(value, t, members) : matchesTerm(value, t, members),
+  );
+}
+
+/**
+ * Does `value` satisfy the per-column filter `rawQuery`?
+ *
+ * `opts.type` is the column's type. Only `array` changes anything — it switches
+ * matching to per-member (see the header). Every other type reads the cell as
+ * one value, so a caller that knows no type can leave it out.
+ */
+export function matchesColumnFilter(
+  value: unknown,
+  rawQuery: string,
+  opts?: { type?: string | undefined },
+): boolean {
   const groups = groupColumnFilter(parseColumnFilter(rawQuery));
   if (groups.length === 0) return true;
+  const members = opts?.type === 'array' ? arrayMembers(value) : null;
 
   // A comma-separated NEGATIVE token on its own still excludes outright, which
   // is what makes `Open,!urgent` mean "Open but not urgent" rather than "Open OR
@@ -267,9 +307,9 @@ export function matchesColumnFilter(value: unknown, rawQuery: string): boolean {
   // is one condition among several instead of a veto over the whole filter.
   const vetoes = groups.filter((g) => g.length === 1 && g[0]!.negate);
   for (const g of vetoes) {
-    if (matchesTerm(value, g[0]!)) return false;
+    if (matchesTerm(value, g[0]!, members)) return false;
   }
   const required = groups.filter((g) => !(g.length === 1 && g[0]!.negate));
   if (required.length === 0) return true;
-  return required.some((g) => matchesGroup(value, g));
+  return required.some((g) => matchesGroup(value, g, members));
 }

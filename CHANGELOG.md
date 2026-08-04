@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 4 Aug 2026
+
+### Features
+
+- 🪶 New `array` column type: a cell holds several values (`foo,bar` or `["Foo","Bar"]`) and the filter dropdown offers each one (v0.0.295)
+
 ## 3 Aug 2026
 
 ### Features

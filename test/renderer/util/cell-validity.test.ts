@@ -73,6 +73,17 @@ describe('cellState', () => {
     expect(cellState('maybe', 'boolean')).toBe('invalid');
   });
 
+  it('calls an array cell with no members empty, and never invalid', () => {
+    expect(cellState('foo,bar', 'array')).toBe('ok');
+    expect(cellState(['foo'], 'array')).toBe('ok');
+    // `[]` prints as "[]" — non-empty as text, but no values in it.
+    expect(cellState('[]', 'array')).toBe('empty');
+    expect(cellState([], 'array')).toBe('empty');
+    expect(cellState('', 'array')).toBe('empty');
+    // Text that does not parse as JSON is read as a comma list, not as broken.
+    expect(cellState('[a, b]', 'array')).toBe('ok');
+  });
+
   it('marks 0 and false as present, not empty — they are real values', () => {
     expect(cellState(0, 'number')).toBe('ok');
     expect(cellState(false, 'boolean')).toBe('ok');

@@ -122,6 +122,29 @@ via `rowsFacetedFor()`. That's what gives drill-down behavior: picking
 `Country` dropdown itself keeps showing every country (its own filter is
 excluded from its own facet).
 
+**`array` columns filter per member.** A cell of an `array` column holds several
+values, written either as a comma list (`foo,bar,baz`) or as a JSON array
+(`["Foo","Bar"]`, or a real JS array from a JSON import). All three are read by
+[`util/array-cell.ts`](../../packages/renderer/src/util/array-cell.ts), and the
+column's type — not the shape of the cell — is what turns member reading on.
+
+Both filter layers take the members instead of the whole cell: the dropdown
+offers each member as its own option (with the count of rows that carry it, so
+the counts add up to more than the row count), and a token matches when ANY
+member matches it. That is what makes the dropdown work at all here: it writes
+an EXACT token (`=Foo`), and a cell holding several values never equals one of
+them. `NULL` means "no members", so `[]` counts as empty. The stored cell is
+never rewritten — the type only changes how it is read.
+
+A list with no members also SHOWS as an empty cell (pink, no tooltip) instead of
+as the text it is stored in: `[]` is how an absent list arrives from most exports,
+and two brackets read as content where there is none.
+
+Type inference marks a column `array` for a real array or a JSON-array text,
+**never** for bare commas: ordinary prose is full of commas. A comma list becomes
+an `array` column when the user picks the type in the columns editor or a CSV
+header says so (`tags:Tags:array`).
+
 ## Column reorder and resize
 
 **Reorder** is native HTML5 drag-and-drop, deliberately scoped to a small

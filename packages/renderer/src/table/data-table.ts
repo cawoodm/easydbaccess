@@ -12,6 +12,7 @@ import { facetable, facetCounts, facetValues } from '../search/facet-values.js';
 import { readSortDescFirst } from './grid-settings.js';
 import { nextSortSpecs } from './sort-cycle.js';
 import { runColumnScript } from '../util/column-script.js';
+import { arrayCellText, arrayMembers } from '../util/array-cell.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
 
@@ -755,6 +756,9 @@ export class DataTable extends LitElement {
       return html`<input type="checkbox" .checked=${checked} disabled />`;
     }
     if (raw == null || raw === '') return html``;
+    // Same rule as the editable cell: an empty list shows nothing, whichever way
+    // the emptiness is spelled (`[]`, `[ ]`, an empty array).
+    if (col.type === 'array' && arrayMembers(raw).length === 0) return html``;
     if (col.type === 'date') return html`${toDateIso(raw)}`;
     if (col.type === 'datetime') return html`${toDatetimeLocal(raw).replace('T', ' ')}`;
     return html`${String(raw)}`;
@@ -905,6 +909,20 @@ export class DataTable extends LitElement {
           }}
         />`;
       }
+      case 'array': {
+        // A list with no members is an EMPTY cell, not the text it happens to be
+        // stored as: `[]` — how an absent list arrives from most exports — would
+        // otherwise read as two brackets. The stored value is untouched; only
+        // what the cell SHOWS changes, and typing in the box writes text as usual.
+        const list = arrayMembers(raw).length === 0 ? '' : String(raw);
+        return html`<input
+          type="text"
+          .value=${list}
+          @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, list)}
+          @change=${(e: Event) =>
+            this.setCell(row, col.field, (e.target as HTMLInputElement).value)}
+        />`;
+      }
       default:
         return html`<input
           type="text"
@@ -963,6 +981,21 @@ export class DataTable extends LitElement {
     else await ctx.store.tables.patch(this.tableId, patch);
   }
 
+  /**
+   * The active per-column filters with each column's TYPE attached — resolved
+   * once here rather than per row, since only `array` changes how a cell is read
+   * (per member instead of as one value) and finding that out is a column scan.
+   */
+  private typedFilters(
+    active: Array<[string, string]>,
+  ): Array<{ field: string; query: string; type: string | undefined }> {
+    return active.map(([field, query]) => ({
+      field,
+      query,
+      type: this.columns.find((c) => c.field === field)?.type,
+    }));
+  }
+
   private filteredRows(): Row[] {
     // A column flagged `filterable: false` is excluded from free-text search
     // as well as from the per-column funnel. A stored per-column filter that
@@ -979,8 +1012,9 @@ export class DataTable extends LitElement {
     // Per-column filters first (per-row substring), then the free-text searches.
     let rows = this.rows;
     if (active.length > 0) {
+      const typed = this.typedFilters(active);
       rows = rows.filter((r) =>
-        active.every(([field, query]) => matchesColumnFilter(r.data[field], query)),
+        typed.every((f) => matchesColumnFilter(r.data[f.field], f.query, { type: f.type })),
       );
     }
     // Free-text search supports `field:value` (with !/^/comma-OR/NULL), boolean
@@ -1079,7 +1113,10 @@ export class DataTable extends LitElement {
       ([f, q]) => q && q.trim().length > 0 && f !== focusField && !unfilterable.has(f),
     );
     if (active.length === 0) return this.rows;
-    return this.rows.filter((r) => active.every(([f, q]) => matchesColumnFilter(r.data[f], q)));
+    const typed = this.typedFilters(active);
+    return this.rows.filter((r) =>
+      typed.every((f) => matchesColumnFilter(r.data[f.field], f.query, { type: f.type })),
+    );
   }
 
   /**
@@ -1092,9 +1129,10 @@ export class DataTable extends LitElement {
   private computeFilterSuggestions(): Map<string, string[]> {
     const out = new Map<string, string[]>();
     for (const c of this.visibleColumns) {
-      if (!facetable(this.rows, c.field)) continue;
-      // Faceted source: rows passing every other column's filter.
-      out.set(c.field, facetValues(this.rowsFacetedFor(c.field), c.field));
+      if (!facetable(this.rows, c.field, { type: c.type })) continue;
+      // Faceted source: rows passing every other column's filter. An `array`
+      // column suggests its MEMBERS, not the whole comma list.
+      out.set(c.field, facetValues(this.rowsFacetedFor(c.field), c.field, { type: c.type }));
     }
     return out;
   }
@@ -1527,6 +1565,8 @@ function cellTooltip(row: Row, col: ColumnSpec): string {
   if (col.script) return '';
   const v = row.data[col.field];
   if (v == null) return '';
+  // Nothing to explain about a cell that shows nothing.
+  if (col.type === 'array' && arrayMembers(v).length === 0) return '';
   const text = typeof v === 'string' ? v : String(v);
   if (text.trim() === '') return '';
   return text.length > MAX_TOOLTIP_CHARS ? `${text.slice(0, MAX_TOOLTIP_CHARS)}…` : text;
@@ -1646,6 +1686,13 @@ function compareValues(a: unknown, b: unknown, type: ColumnType): number {
     }
     case 'boolean':
       return (a ? 1 : 0) - (b ? 1 : 0);
+    case 'array':
+      // Sort on the members as they READ (`a, b`), so a JSON-array cell and a
+      // comma-list cell in the same column order against each other.
+      return arrayCellText(a).localeCompare(arrayCellText(b), undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      });
     case 'date': {
       const ta = new Date(String(a)).getTime();
       const tb = new Date(String(b)).getTime();
