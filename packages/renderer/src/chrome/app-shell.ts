@@ -17,6 +17,7 @@ import type { CommandPaletteDialog } from '../dialogs/command-palette-dialog.js'
 import '../dialogs/script-editor-dialog.js';
 import '../dialogs/toast-host.js';
 import { materialIconStyles } from './material-icon-css.js';
+import './app-progress.js';
 import './table-list.js';
 import './workspace-selector.js';
 
@@ -482,7 +483,7 @@ export class AppShell extends LitElement {
             target="_blank"
             rel="noopener"
             title="View the changelog on GitHub"
-            ><span class="version">v0.0.300</span></a
+            ><span class="version">v0.0.301</span></a
           ></strong
         >
         ${this.headerButtons
@@ -541,6 +542,7 @@ export class AppShell extends LitElement {
           .filter((b) => b.variant === 'secondary')
           .map((b) => this.renderSlotButton(b, 'header'))}
       </header>
+      <app-progress></app-progress>
       <main><table-list></table-list></main>
       <footer>
         <workspace-selector></workspace-selector>

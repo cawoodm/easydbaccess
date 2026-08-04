@@ -193,7 +193,9 @@ describe('previewImport / commitImport — a FOREIGN SQLite file (no easydb meta
     new DatabaseSync(sourcePath).close();
     const target = new SqliteStore({ path: targetPath });
     const preview = previewImport(sourcePath, target, 'ws1');
-    expect(preview).toEqual({ kind: 'foreign', candidates: [] });
+    // `sizeBytes` is whatever the file happens to be; the point is that nothing
+    // is offered, not how big an empty database is on this platform.
+    expect(preview).toEqual({ kind: 'foreign', candidates: [], sizeBytes: expect.any(Number) });
     const results = commitImport(sourcePath, target, 'ws1', {});
     expect(results).toEqual([]);
     target.close();

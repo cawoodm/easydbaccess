@@ -27,6 +27,8 @@ import type {
   EasydbImportedTableResult,
 } from '../db/data-store-ipc.js';
 import { IMPORT_PROGRESS_EVENT, type ImportProgressDetail } from '../window-mgr/panel-title.js';
+import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
+import { ImportProgress } from './import-progress.js';
 
 /**
  * Where an unfinished conversion records the rows it still owes. Must match
@@ -34,6 +36,49 @@ import { IMPORT_PROGRESS_EVENT, type ImportProgressDetail } from '../window-mgr/
  * packages are separate `tsc -b` projects, so this cannot be imported.
  */
 const PENDING_IMPORT_SETTING = 'electron-db:pendingImport';
+
+/**
+ * Above this source-file size, EVERY window the import creates stays minimized —
+ * the tables (which already do, see `db-import.ts`'s phase 1) and the
+ * projections made from the file's views (which did not).
+ *
+ * A projection holds no rows: opening one computes its join over whole source
+ * tables. `northwind.db` carries 17 views over tables of 609,283 rows, and
+ * letting those windows open on arrival meant reading 1.9 million rows before the
+ * first paint — the main process died outright. Minimized, they cost nothing
+ * until the user asks for one.
+ *
+ * 15 MB is well above a hand-made database and far below the ones that hurt, so
+ * a small file still opens its projections where you can see them.
+ */
+export const LARGE_SOURCE_BYTES = 15 * 1024 * 1024;
+
+/**
+ * The file name out of a path, for a label — a full Windows path is far too long
+ * for a progress bar. Splits on either separator because the path comes from the
+ * OS dialog, and falls back to the whole thing when there is no separator.
+ */
+function baseName(path: string): string {
+  const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return cut >= 0 ? path.slice(cut + 1) || path : path;
+}
+
+/** A size for a toast: "40.2 MB". */
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} bytes`;
+}
+
+/**
+ * The run currently reporting progress, so the ONE `onImportProgress` relay
+ * registered at init can feed it.
+ *
+ * A module-level handle rather than a per-run listener because the bridge
+ * subscription is a single IPC channel set up once; re-subscribing per import
+ * would leak a listener for every file the user ever opens.
+ */
+let progressTracker: { tracker: ImportProgress; label: string } | null = null;
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'electron-db',
@@ -91,6 +136,18 @@ export function init(api: HostApi): void {
         detail: { tableId: p.tableId, rows: p.rows, total: p.total, ...(p.done ? { done: true } : {}) },
       }),
     );
+    // The same messages also drive the one app-wide bar. It is the only progress
+    // a convert can show: every window it makes is minimized, so none of the
+    // per-grid bars is on screen.
+    if (!progressTracker) return;
+    const { tracker, label } = progressTracker;
+    if (p.done) tracker.complete(p.tableId);
+    else tracker.observe(p.tableId, p.rows);
+    setAppProgress({
+      label,
+      fraction: tracker.fraction(),
+      detail: `${tracker.completedTables()} of ${tracker.tableCount} table${tracker.tableCount === 1 ? '' : 's'}`,
+    });
   });
 
   api.ui.registerFooterButton({
@@ -395,6 +452,10 @@ export async function importFlow(api: HostApi, bridge: EasydbDbBridge, sourcePat
     return;
   }
 
+  // How big the file is decides whether what the import creates opens or waits
+  // minimized. Absent from an older preload; 0 reads as small.
+  const sizeBytes = preview.sizeBytes ?? 0;
+
   // Which of them, and for a view HOW. Anything not chosen is passed to the
   // commit as an explicit `skip`, so the main process imports exactly what the
   // user picked.
@@ -453,11 +514,12 @@ export async function importFlow(api: HostApi, bridge: EasydbDbBridge, sourcePat
     title: 'Import database',
   });
 
-  const results = await runRowPhase(api, bridge, picked.path, plan, skipped);
+  const sourceName = baseName(picked.path);
+  const results = await runRowPhase(api, bridge, picked.path, plan, skipped, `Importing ${sourceName}${sizeBytes > 0 ? ` (${formatBytes(sizeBytes)})` : ''}`);
   reportImportResults(api, picked.path, results);
   // AFTER the rows: a projection resolves its sources by NAME, so the tables it
   // reads have to be in the workspace before it is created.
-  if (asProjections.length > 0) await createViewProjections(api, workspaceId, asProjections);
+  if (asProjections.length > 0) await createViewProjections(api, workspaceId, asProjections, sizeBytes > LARGE_SOURCE_BYTES);
 }
 
 /**
@@ -473,7 +535,7 @@ export async function importFlow(api: HostApi, bridge: EasydbDbBridge, sourcePat
  * function — is reported rather than half-created, with the suggestion that names
  * the alternative that does work.
  */
-async function createViewProjections(api: HostApi, workspaceId: string, picked: PickedCandidate[]): Promise<void> {
+async function createViewProjections(api: HostApi, workspaceId: string, picked: PickedCandidate[], minimize = false): Promise<void> {
   const [{ parseSqlScript }, { createProjectionTable }] = await Promise.all([import('./sql-parse.js'), import('./projection-create.js')]);
 
   const created: string[] = [];
@@ -505,14 +567,29 @@ async function createViewProjections(api: HostApi, workspaceId: string, picked: 
       failed.push({ name: candidate.name, why: `it reads tables this workspace does not have (${missing}) — import them too` });
       continue;
     }
+    // A projection holds no rows of its own, so an OPEN one computes its whole
+    // join before it can paint. On a big file that is the difference between a
+    // workspace that appears and one that dies trying — see LARGE_SOURCE_BYTES.
+    // Cascaded so restoring them does not stack them all on one spot, matching
+    // what phase 1 does for the tables.
+    if (minimize) {
+      const n = created.length;
+      await api.store.tables.patch(table.id, {
+        windowGeometry: { x: 40 + (n % 10) * 24, y: 40 + (n % 10) * 24, w: 640, h: 360, z: n, minimized: true, maximized: false },
+        updatedAt: Date.now(),
+      });
+    }
     created.push(table.name);
   }
 
   if (created.length > 0) {
-    api.ui.dialogs.toast(`Created ${created.length} projection${created.length === 1 ? '' : 's'} from views: ${created.join(', ')}.`, {
-      kind: 'success',
-      title: 'Import database',
-    });
+    api.ui.dialogs.toast(
+      `Created ${created.length} projection${created.length === 1 ? '' : 's'} from views: ${created.join(', ')}.${minimize ? ' Left minimized — this file is big enough that opening them all would stall the app.' : ''}`,
+      {
+        kind: 'success',
+        title: 'Import database',
+      },
+    );
   }
   if (failed.length > 0) {
     api.ui.dialogs.toast(
@@ -533,10 +610,22 @@ async function createViewProjections(api: HostApi, workspaceId: string, picked: 
  * Shared by Import and by the post-reload half of Convert — the two differ only
  * in how they came by the plan.
  */
-async function runRowPhase(api: HostApi, bridge: EasydbDbBridge, sourcePath: string, plan: EasydbImportPlanEntry[], already: EasydbImportedTableResult[] = []): Promise<EasydbImportedTableResult[]> {
+async function runRowPhase(
+  api: HostApi,
+  bridge: EasydbDbBridge,
+  sourcePath: string,
+  plan: EasydbImportPlanEntry[],
+  already: EasydbImportedTableResult[] = [],
+  progressLabel = 'Importing',
+): Promise<EasydbImportedTableResult[]> {
   const results: EasydbImportedTableResult[] = [...already];
   importInFlight = { cancelled: false };
   const token = importInFlight;
+  const tracker = new ImportProgress(plan.map((e) => ({ tableId: e.tableId, total: e.total })));
+  progressTracker = { tracker, label: progressLabel };
+  // Indeterminate to start with: work has begun and the first batch has not
+  // reported, so any number here would be invented.
+  setAppProgress({ label: progressLabel, detail: `0 of ${plan.length} table${plan.length === 1 ? '' : 's'}` });
   try {
     for (const entry of plan) {
       // Checked between tables, which is the only safe place to stop: a table is
@@ -569,6 +658,8 @@ async function runRowPhase(api: HostApi, bridge: EasydbDbBridge, sourcePath: str
     }
   } finally {
     if (importInFlight === token) importInFlight = null;
+    if (progressTracker?.tracker === tracker) progressTracker = null;
+    clearAppProgress();
   }
   return results;
 }
@@ -610,7 +701,7 @@ export function cancelImport(): void {
  */
 export async function resumePendingImport(api: HostApi, bridge: EasydbDbBridge): Promise<void> {
   const setting = await api.store.settings.findOne(PENDING_IMPORT_SETTING);
-  const pending = setting?.value as { sourcePath?: string; plan?: EasydbImportPlanEntry[] } | undefined;
+  const pending = setting?.value as { sourcePath?: string; plan?: EasydbImportPlanEntry[]; sizeBytes?: number } | undefined;
   if (!pending?.sourcePath || !pending.plan?.length) return;
 
   const tables = pending.plan.length;
@@ -632,7 +723,9 @@ export async function resumePendingImport(api: HostApi, bridge: EasydbDbBridge):
     return;
   }
 
-  const results = await runRowPhase(api, bridge, pending.sourcePath, pending.plan);
+  const fileName = baseName(pending.sourcePath);
+  const size = pending.sizeBytes ?? 0;
+  const results = await runRowPhase(api, bridge, pending.sourcePath, pending.plan, [], `Converting ${fileName}${size > 0 ? ` (${formatBytes(size)})` : ''}`);
   // Clear the note only after the rows are in, so a crash halfway offers to
   // resume rather than silently giving up. A re-run overwrites the same rows.
   await api.store.settings.remove(PENDING_IMPORT_SETTING);

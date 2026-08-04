@@ -55,6 +55,12 @@ export interface EasydbImportPreview {
   /** Whether the source carries this app's own `_easydb_tables` registry, or is a foreign file. */
   kind: 'easydb' | 'foreign';
   candidates: EasydbImportCandidate[];
+  /**
+   * The source file's size on disk. Above the renderer's `LARGE_SOURCE_BYTES` it
+   * leaves every window it creates minimized. Absent from
+   * an older preload; read as 0, which means "small".
+   */
+  sizeBytes?: number;
 }
 
 /** `append` adds rows to the existing table and leaves its schema alone. */

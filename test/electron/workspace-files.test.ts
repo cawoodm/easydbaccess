@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { isWorkspaceFileName, workspaceFromArgv, WORKSPACE_EXTENSION } from '../../packages/electron/src/db-files.js';
 import { suggestConvertedName } from '../../packages/electron/src/db-convert.js';
+import { sourceSizeBytes } from '../../packages/electron/src/db-import.js';
 
 /**
  * `.edb` is a SQLite database carrying our metadata; a plain `.db` is somebody
@@ -77,5 +78,28 @@ describe('workspaceFromArgv', () => {
 
   it('is null with no arguments at all', () => {
     expect(workspaceFromArgv(['electron.exe'])).toBeNull();
+  });
+});
+
+/**
+ * The size a convert/import reports so the renderer can decide whether the
+ * windows it makes are worth opening. It must never be the thing that fails.
+ */
+describe('sourceSizeBytes', () => {
+  it('reports the file size on disk', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'easydb-size-'));
+    try {
+      const p = join(dir, 'x.db');
+      writeFileSync(p, Buffer.alloc(4096, 7));
+      expect(sourceSizeBytes(p)).toBe(4096);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('answers 0 for a path that is not there, rather than throwing', () => {
+    // A size only picks a default. Failing to stat must not abort an import that
+    // would otherwise work — 0 reads as "small", the behaviour that predates it.
+    expect(sourceSizeBytes(join(tmpdir(), 'definitely-not-here-9e1f.db'))).toBe(0);
   });
 });

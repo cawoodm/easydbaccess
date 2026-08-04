@@ -44,6 +44,8 @@ interface Recorded {
   importedTableIds: string[];
   browsedPaths: string[];
   inserted: Array<Record<string, unknown>>;
+  /** `tables.patch` calls, so a window left minimized can be asserted. */
+  patched: Array<{ id: string; patch: Record<string, unknown> }>;
   settingsRemoved: string[];
 }
 
@@ -80,6 +82,10 @@ function harness(opts: {
   sourceColumns?: string[];
   /** The existing table an append would target. */
   existingTable?: { name: string; columns: Array<{ field: string; label: string; type: string }> };
+  /** The source file's size, as `previewImport` reports it. */
+  sizeBytes?: number;
+  /** Offer a VIEW alongside the table, with SQL a projection can be built from. */
+  withView?: boolean;
 }): { api: HostApi; bridge: EasydbDbBridge; rec: Recorded } {
   const rec: Recorded = {
     alerts: [],
@@ -94,6 +100,7 @@ function harness(opts: {
     importedTableIds: [],
     browsedPaths: [],
     inserted: [],
+    patched: [],
     settingsRemoved: [],
   };
   const answers = [...(opts.choices ?? [])];
@@ -112,7 +119,11 @@ function harness(opts: {
         path: sourcePath ?? opts.path,
         preview: {
           kind: 'foreign' as const,
-          candidates: [{ name: 'bookmarks', rowCount: 1, collides: opts.collides ?? false, columns: opts.sourceColumns ?? ['url', 'title'] }],
+          ...(opts.sizeBytes == null ? {} : { sizeBytes: opts.sizeBytes }),
+          candidates: [
+            { name: 'bookmarks', rowCount: 1, collides: opts.collides ?? false, columns: opts.sourceColumns ?? ['url', 'title'] },
+            ...(opts.withView ? [{ name: 'popular', rowCount: -1, collides: false, isView: true, columns: ['url'], sql: 'CREATE VIEW popular AS SELECT url FROM bookmarks' }] : []),
+          ],
         },
       };
     },
@@ -174,6 +185,10 @@ function harness(opts: {
         insert: async (doc: Record<string, unknown>) => {
           rec.inserted.push(doc);
           return doc;
+        },
+        patch: async (id: string, patch: Record<string, unknown>) => {
+          rec.patched.push({ id, patch });
+          return { id, ...patch };
         },
       },
       settings: {
@@ -598,5 +613,68 @@ describe('electron-db — Append onto an existing table', () => {
     // The mapper is a separate dialog; only the two choice prompts should appear.
     expect(rec.choices).toHaveLength(2);
     expect(rec.preparedPaths).toEqual(['C:/northwind.db']);
+  });
+});
+
+/**
+ * A projection holds no rows: an OPEN one computes its join over whole source
+ * tables before it can paint. On a big file that is what killed the main process
+ * — 17 views over three 609,283-row tables, 1.9 million rows read on arrival — so
+ * above `LARGE_SOURCE_BYTES` the windows an import creates all stay minimized.
+ *
+ * The tables already did (phase 1 minimizes them unconditionally); the
+ * projections built from the file's views did not, and that was the whole leak.
+ */
+describe('big files leave their windows minimized', () => {
+  const MB = 1024 * 1024;
+  const withView = true;
+  /** The source table a projection over `bookmarks` needs to resolve against. */
+  const pool = { name: 'bookmarks', columns: [{ field: 'url', label: 'Url', type: 'string' }] };
+
+  /** Take the view as a PROJECTION, which is the case that creates a window. */
+  async function importAsProjection(sizeBytes: number) {
+    const saved = importDeps.pickCandidates;
+    importDeps.pickCandidates = async (_api, candidates) => candidates.map((candidate) => ({ candidate, mode: candidate.isView ? ('projection' as const) : ('data' as const) }));
+    try {
+      const { api, bridge, rec } = harness({ kind: 'foreign', path: 'C:/northwind.db', sizeBytes, withView, existingTable: pool });
+      await handleDroppedFile(api, bridge, 'C:/northwind.db', false);
+      return rec;
+    } finally {
+      importDeps.pickCandidates = saved;
+    }
+  }
+
+  it('minimizes a projection made from a view when the source is over 15 MB', async () => {
+    const rec = await importAsProjection(40 * MB);
+    // The projection was created…
+    expect(rec.inserted.some((d) => d.name === 'popular')).toBe(true);
+    // …and immediately parked, rather than opening and computing its join.
+    const geo = rec.patched.map((p) => p.patch.windowGeometry as { minimized?: boolean } | undefined);
+    expect(geo.some((g) => g?.minimized === true)).toBe(true);
+  });
+
+  it('leaves a small file’s projection open, where the user can see it', async () => {
+    const rec = await importAsProjection(2 * MB);
+    expect(rec.inserted.some((d) => d.name === 'popular')).toBe(true);
+    expect(rec.patched).toEqual([]);
+  });
+
+  it('treats a missing size as small, so an older preload behaves as before', async () => {
+    // `sizeBytes` is absent from a preload built before it existed; guessing
+    // "large" would silently minimize everything for those users.
+    const saved = importDeps.pickCandidates;
+    importDeps.pickCandidates = async (_api, candidates) => candidates.map((candidate) => ({ candidate, mode: candidate.isView ? ('projection' as const) : ('data' as const) }));
+    try {
+      const { api, bridge, rec } = harness({ kind: 'foreign', path: 'C:/small.db', withView, existingTable: pool });
+      await handleDroppedFile(api, bridge, 'C:/small.db', false);
+      expect(rec.patched).toEqual([]);
+    } finally {
+      importDeps.pickCandidates = saved;
+    }
+  });
+
+  it('says why the windows are minimized instead of leaving it a mystery', async () => {
+    const rec = await importAsProjection(40 * MB);
+    expect(rec.toasts.join(' ')).toMatch(/minimized/i);
   });
 });

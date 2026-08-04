@@ -17,7 +17,7 @@
  */
 
 import { SqliteStore } from './sqlite-store';
-import { commitImport, prepareImport, previewImport, type ImportDecision, type ImportPlan, type ImportProgress, type ImportedTableResult } from './db-import';
+import { commitImport, prepareImport, previewImport, sourceSizeBytes, type ImportDecision, type ImportPlan, type ImportProgress, type ImportedTableResult } from './db-import';
 
 /**
  * The workspace id a converted file gets. `default` is what the renderer's own
@@ -107,6 +107,12 @@ export interface PendingImport {
   sourcePath: string;
   /** Tables already created (empty) in this file, each waiting for its rows. */
   plan: ImportPlan['plan'];
+  /**
+   * The source file's size on disk, carried across the reload because the
+   * renderer decides what to leave minimized and cannot stat the file itself.
+   * Absent in a note written before this field existed — read as 0 (small).
+   */
+  sizeBytes?: number;
 }
 
 export interface PrepareConvertResult {
@@ -130,7 +136,7 @@ export function prepareConvert(sourcePath: string, destPath: string, only?: stri
     ensureWorkspace(dest);
     const decisions = decisionsFor(sourcePath, dest, only);
     const { plan } = prepareImport(sourcePath, dest, CONVERTED_WORKSPACE_ID, decisions);
-    const pending: PendingImport = { sourcePath, plan };
+    const pending: PendingImport = { sourcePath, plan, sizeBytes: sourceSizeBytes(sourcePath) };
     dest.upsert('settings', {
       key: `${CONVERTED_WORKSPACE_ID}::${PENDING_IMPORT_SETTING}`,
       workspaceId: CONVERTED_WORKSPACE_ID,

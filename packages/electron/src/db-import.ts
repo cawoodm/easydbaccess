@@ -28,6 +28,7 @@
 
 import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import { statSync } from 'node:fs';
 import { columnTypeFromSqlType, decodeValue, quoteIdent, type ColumnSpec } from '@easydb/shared';
 import type { SqliteStore } from './sqlite-store';
 
@@ -137,6 +138,27 @@ export interface ImportPreview {
   /** Whether the source carries our own `_easydb_tables` registry, or is a foreign file. */
   kind: 'easydb' | 'foreign';
   candidates: ImportCandidate[];
+  /** The source file's size on disk; the renderer decides what a big file means. */
+  sizeBytes: number;
+}
+
+/**
+ * The source file's size, or 0 when it cannot be read.
+ *
+ * Reported rather than acted on here: what a size MEANS — whether the windows an
+ * import produces are worth opening on arrival — is a renderer decision, and
+ * lives with the windows (`plugins/electron-db.ts`'s `LARGE_SOURCE_BYTES`).
+ *
+ * 0 rather than throwing, because a size only picks a default: failing to stat a
+ * file we then read successfully must not abort the import. It reads as "small",
+ * which is the behaviour that predates this field.
+ */
+export function sourceSizeBytes(sourcePath: string): number {
+  try {
+    return statSync(sourcePath).size;
+  } catch {
+    return 0;
+  }
 }
 
 /** True when `_easydb_tables` exists — the app's bookkeeping has touched this file. */
@@ -302,6 +324,7 @@ export function previewImport(sourcePath: string, targetStore: SqliteStore, work
     const existingNames = new Set((targetStore.find('tables', { workspaceId }) as Array<{ name: string }>).map((t) => t.name.toLowerCase()));
     return {
       kind,
+      sizeBytes: sourceSizeBytes(sourcePath),
       candidates: raw.map((c) => ({
         name: c.name,
         rowCount: c.rowCount,
