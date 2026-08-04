@@ -20,6 +20,7 @@ import * as cellColor from '../plugins/cell-color.js';
 import * as cellImage from '../plugins/cell-image.js';
 import * as preview from '../plugins/preview.js';
 import * as htmlRender from '../plugins/html-render.js';
+import * as cellMarkdown from '../plugins/cell-markdown.js';
 import * as cellLink from '../plugins/cell-link.js';
 import * as cellTags from '../plugins/cell-tags.js';
 import * as autoRenderer from '../plugins/auto-renderer.js';
@@ -76,6 +77,7 @@ const modules: PluginModule[] = [
   cellImage,
   preview,
   htmlRender,
+  cellMarkdown,
   cellLink,
   cellTags,
   autoRenderer,

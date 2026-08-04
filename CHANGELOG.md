@@ -6,6 +6,11 @@
 
 - ✨ An `array` column shows its values as pills, one per value, with a pencil for the raw list (v0.0.296)
 - 🪶 New `array` column type: a cell holds several values (`foo,bar` or `["Foo","Bar"]`) and the filter dropdown offers each one (v0.0.295)
+- ✨ New `markdown` cell renderer: one line of text in the grid, the formatted value in the popup, and never guessed at (v0.0.298)
+
+### Bugs
+
+- 🪲 Markdown that mentions a tag, like `/<database>/-/create`, was read as HTML: the word vanished and the formatting stayed literal (v0.0.297)
 
 ## 3 Aug 2026
 

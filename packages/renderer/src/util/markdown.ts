@@ -26,6 +26,7 @@
 // Anything else passes through as escaped text. Unit tests in markdown.test.ts.
 
 import { esc, escEntityAware, safeUrl, sanitizeHtml, sanitizeTag, stripUnsafe, TAG_RE } from './sanitize-html.js';
+import { looksLikeHtml } from './html-text.js';
 
 /**
  * Placeholder wrapper for an extracted code span. A private-use code point, so
@@ -186,6 +187,30 @@ const MD_INLINE: readonly RegExp[] = [
  * `` `code` `` or a `[link](url)`. Everything else is text. HTML is not tested
  * for here — a caller that has both decides which one wins.
  */
+/**
+ * Which markup language a value is written in, if either — the decision a cell
+ * renderer has to make before it shows a value.
+ *
+ * MARKDOWN IS TESTED FIRST, and that order is the point. `looksLikeHtml` reads
+ * any `<word>` as a tag, and Markdown prose is full of angle-bracket words that
+ * are not tags at all: a Datasette changelog says `/<database>/-/create` in
+ * every second line. Treated as HTML, those "tags" are swallowed and the text
+ * loses them (plus every `**bold**` and `[link](url)` stays literal). Converted
+ * as Markdown, they come back as `&lt;database&gt;` and the formatting works.
+ *
+ * A value that OPENS with a tag is HTML whatever else it holds — that is a
+ * document or a fragment, not prose that happens to mention a tag.
+ */
+export function markupKind(value: unknown): 'html' | 'markdown' | null {
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  if (!OPENS_WITH_TAG.test(value) && looksLikeMarkdown(value)) return 'markdown';
+  if (looksLikeHtml(value)) return 'html';
+  return looksLikeMarkdown(value) ? 'markdown' : null;
+}
+
+/** A value whose FIRST non-space character starts a real tag. */
+const OPENS_WITH_TAG = /^\s*<\/?[a-z][a-z0-9]*(\s|\/?>)/i;
+
 export function looksLikeMarkdown(src: unknown): boolean {
   if (typeof src !== 'string' || src.trim() === '') return false;
   const lines = src.replace(/\r\n?/g, '\n').split('\n');
