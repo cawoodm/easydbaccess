@@ -8,6 +8,7 @@
 
 import type { ColumnSpec, Row, ViewInstance } from '@easydb/shared';
 import { composeColumnFilter, matchesColumnFilter, parseColumnFilter, type FilterToken } from '../search/column-filter.js';
+import { arrayMembers } from '../util/array-cell.js';
 import { runColumnScript } from '../util/column-script.js';
 
 /**
@@ -66,25 +67,50 @@ function renderInput(field: string, value: unknown, rowId: string, spec: ColumnS
   return `<label class="eda-input-field" title="${caption}">${control}<span class="eda-input-label">${caption}</span></label>`;
 }
 
-/**
- * Render a `$filter.TOKEN` as a clickable pill showing the row's value for the
- * mapped field. Clicking it (wired up in the view window) OR-appends an
- * exact-match pill filter for that field/value. A null/empty value renders
- * nothing — there is no pill for an empty cell.
- */
-function renderFilterPill(field: string, value: unknown): string {
-  if (value == null || value === '') return '';
-  const text = String(value);
+/** One clickable pill for one value of one field. */
+function pillButton(field: string, text: string): string {
   const field_ = escapeAttr(field);
   const value_ = escapeAttr(text);
   return `<button type="button" class="eda-filter-pill" data-eda-filter-field="${field_}" ` + `data-eda-filter-value="${value_}" title="Filter by ${field_}: ${value_}">${escapeHtml(text)}</button>`;
 }
 
 /**
+ * The members of a LIST cell, or null when the cell is one value.
+ *
+ * An `array` column is the declared case; a real JS array is taken apart too,
+ * whatever the column says, because `String(['a','b'])` is `a,b` and a pill of
+ * that text can never match anything.
+ */
+function listMembers(value: unknown, spec: ColumnSpec | undefined): string[] | null {
+  return spec?.type === 'array' || Array.isArray(value) ? arrayMembers(value) : null;
+}
+
+/**
+ * Render a `$filter.TOKEN` as a clickable pill showing the row's value for the
+ * mapped field. Clicking it (wired up in the view window) OR-appends an
+ * exact-match pill filter for that field/value. A null/empty value renders
+ * nothing — there is no pill for an empty cell.
+ *
+ * An `array` field renders ONE PILL PER MEMBER, each carrying that member alone.
+ * A single pill for the whole cell would have filtered on `=foo,bar`, and a list
+ * cell is never exactly one value, so the view emptied itself on the click. Per
+ * member it does what it looks like: the filter matches an array column per
+ * member (see `search/column-filter.ts`), so a pill for one tag keeps every row
+ * carrying that tag. An empty list renders nothing, like an empty cell.
+ */
+function renderFilterPill(field: string, value: unknown, spec: ColumnSpec | undefined): string {
+  const members = listMembers(value, spec);
+  if (members) return members.map((m) => pillButton(field, m)).join('');
+  if (value == null || value === '') return '';
+  return pillButton(field, String(value));
+}
+
+/**
  * Replace every `$TOKEN` in `html` with the row's value for the column mapped to
  * that token. An `$input.TOKEN` instead renders an editable control (checkbox /
  * number / text) bound to the mapped field (see {@link renderInput}); a
- * `$filter.TOKEN` renders a clickable pill (see {@link renderFilterPill}).
+ * `$filter.TOKEN` renders a clickable pill per value (see
+ * {@link renderFilterPill}) — several of them for an `array` field.
  * Unmapped tokens (or null values) become an empty string, so a
  * partially-mapped template never shows a raw `$TOKEN`.
  *
@@ -97,8 +123,8 @@ export function substituteRow(html: string, row: Row, mapping: Record<string, st
     if (!field) return '';
     const v = row.data[field];
     if (!prefix) return v == null ? '' : String(v);
-    if (prefix.startsWith('filter')) return renderFilterPill(field, v);
     const spec = opts.columns?.get(field);
+    if (prefix.startsWith('filter')) return renderFilterPill(field, v, spec);
     // A scripted column is computed from the rest of the row, so there is
     // nowhere to write an edit back to — the grid treats such a cell as
     // read-only, and so does an `$input.TOKEN` bound to one.

@@ -135,6 +135,64 @@ describe('view-render', () => {
     expect(substituteRow('$filter.NOPE', row({}), {})).toBe('');
   });
 
+  /**
+   * An `array` cell holds several values, so `$filter.TAGS` is several chips —
+   * one per member, each filtering on that member alone. One chip for the whole
+   * cell filtered on `=foo,bar`, which no list cell is ever exactly equal to, so
+   * clicking it emptied the view.
+   */
+  describe('$filter.TOKEN over an array field', () => {
+    const arrayCols = new Map([['tags', col('tags', 'array')]]);
+    const pills = (out: string) => [...out.matchAll(/data-eda-filter-value="([^"]*)"/g)].map((m) => m[1]);
+
+    it('renders one pill per member of a comma list', () => {
+      const out = substituteRow('$filter.TAGS', row({ tags: 'foo, bar' }), { TAGS: 'tags' }, { columns: arrayCols });
+      expect(pills(out)).toEqual(['foo', 'bar']);
+      expect(out).toContain('>foo</button>');
+      expect(out).toContain('>bar</button>');
+    });
+
+    it('renders one pill per member of a JSON-array cell', () => {
+      const out = substituteRow('$filter.TAGS', row({ tags: '["Foo","Bar"]' }), { TAGS: 'tags' }, { columns: arrayCols });
+      expect(pills(out)).toEqual(['Foo', 'Bar']);
+    });
+
+    it('takes a real JS array apart even where the column says otherwise', () => {
+      // `String(['a','b'])` is `a,b`, so a pill of the whole value could never
+      // match — a real array is a list whatever the column type claims.
+      const out = substituteRow('$filter.TAGS', row({ tags: ['a', 'b'] }), { TAGS: 'tags' }, { columns: new Map([['tags', col('tags', 'string')]]) });
+      expect(pills(out)).toEqual(['a', 'b']);
+    });
+
+    it('renders nothing for an empty list', () => {
+      for (const tags of ['', '[]', null, []]) {
+        expect(substituteRow('$filter.TAGS', row({ tags }), { TAGS: 'tags' }, { columns: arrayCols })).toBe('');
+      }
+    });
+
+    it('escapes each member', () => {
+      const out = substituteRow('$filter.TAGS', row({ tags: '<script>,ok' }), { TAGS: 'tags' }, { columns: arrayCols });
+      expect(out).not.toContain('<script>');
+      expect(out).toContain('&lt;script&gt;');
+      expect(pills(out)).toEqual(['&lt;script&gt;', 'ok']);
+    });
+
+    it('a chip keeps the rows carrying that one member', () => {
+      const rows = [
+        { id: 'a', tableId: 't', data: { tags: 'foo,bar' }, updatedAt: 0 },
+        { id: 'b', tableId: 't', data: { tags: 'bar' }, updatedAt: 0 },
+        { id: 'c', tableId: 't', data: { tags: 'baz' }, updatedAt: 0 },
+      ];
+      const kept = filterRows(rows, { tags: addPillValue(undefined, 'foo') }, [col('tags', 'array')]);
+      expect(kept.map((r) => r.id)).toEqual(['a']);
+    });
+
+    it('a non-array column still renders the one pill it always did', () => {
+      const out = substituteRow('$filter.TAGS', row({ tags: 'foo,bar' }), { TAGS: 'tags' }, { columns: new Map([['tags', col('tags', 'string')]]) });
+      expect(pills(out)).toEqual(['foo,bar']);
+    });
+  });
+
   it('$TOKEN and $input.TOKEN rendering is unchanged', () => {
     expect(substituteRow('$TAG', row({ tag: 'foo' }), { TAG: 'tag' })).toBe('foo');
     const cols = new Map([['tag', col('tag', 'string')]]);

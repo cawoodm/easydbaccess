@@ -531,6 +531,25 @@ An instance also carries an optional `limit` (0/absent = show all) — a
 "Show at most (rows)" field in the dialog — applied as a simple slice after
 sort/filter in `view-window.ts`'s `recompute()`.
 
+A token's PREFIX decides how it renders; the name after it is the mapping key,
+so `$TITLE`, `$input.TITLE` and `$filter.TITLE` all read the same column
+(`views/view-render.ts`):
+
+- `$TOKEN` — the value, read-only.
+- `$input.TOKEN` — an editable control bound to the cell (checkbox for a
+  boolean, number/text otherwise), disabled for a read-only view or a scripted
+  column, which has nowhere to write back to.
+- `$filter.TOKEN` — a clickable chip. Clicking it OR-appends an exact-match
+  filter for that value onto the instance's separate `pillFilters`, and the chip
+  appears in the view's toolbar where its field cycles `=` → `≠` → off and its
+  value opens the field's other values as a checklist.
+
+An **`array` field renders one `$filter.` chip per member** (and a real JS array
+is taken apart whatever the column type says). One chip for the whole cell
+filtered on `=red,blue`, and no list cell is ever exactly equal to that, so the
+click emptied the view. Per member it matches per member, which is what an
+`array` column's filter already does — see `search/column-filter.ts`.
+
 The plugin itself only owns *intent*: it adds the footer "Views" button (opens
 the manager dialog, which flips `ViewInstance.open`) and seeds/repairs a
 built-in "RSS Feed" template on `load()`, reconciling it against a hash of
