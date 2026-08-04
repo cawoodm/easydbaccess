@@ -39,6 +39,10 @@ function fakeBridge(): EasydbStoreBridge & { broadcast(coll: string, scope?: str
     async findOne(coll, key) {
       return collOf(coll).get(key) ?? null;
     },
+    // Mirrors `SqliteStore.countRowsIn`: one table's rows, none of them read.
+    async countRows(tableId) {
+      return [...collOf('rows').values()].filter((d) => d.tableId === tableId).length;
+    },
     async insert(coll, doc) {
       collOf(coll).set(keyOf(coll, doc), doc);
       return doc;
@@ -378,5 +382,33 @@ describe('rows().watch', () => {
     calls = 0;
     bridge.broadcast('rows');
     expect(calls).toBe(0);
+  });
+});
+
+/**
+ * `count` is the TABLE's row count, which is not the same number as how many a
+ * filter matched (`QueryPage.total`). The panel title needs both, and once the
+ * grid stopped fetching everything it could no longer derive this one.
+ */
+describe('rows().count', () => {
+  it('counts without reading a row', async () => {
+    const bridge = fakeBridge();
+    const store = createIpcDataStore(bridge, () => 'ws1');
+    const spy = vi.spyOn(bridge, 'find');
+    const n = await store.rows('t1').count!();
+    expect(n).toBe(0);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('counts only this table, not every table sharing the collection', async () => {
+    const bridge = fakeBridge();
+    const store = createIpcDataStore(bridge, () => 'ws1');
+    await store.rows('t1').bulkInsert([
+      { id: 'a', tableId: 't1', data: {}, updatedAt: 1 },
+      { id: 'b', tableId: 't1', data: {}, updatedAt: 1 },
+    ] as Row[]);
+    await store.rows('t2').insert({ id: 'c', tableId: 't2', data: {}, updatedAt: 1 } as Row);
+    expect(await store.rows('t1').count!()).toBe(2);
+    expect(await store.rows('t2').count!()).toBe(1);
   });
 });

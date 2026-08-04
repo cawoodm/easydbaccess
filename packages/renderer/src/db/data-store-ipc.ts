@@ -382,6 +382,12 @@ function rowsViewIpc(bridge: EasydbStoreBridge, tableId: string): DataCollection
      * Fires once immediately, matching `subscribe`'s initial emission, so a
      * caller has one code path for "load now" and "load again".
      */
+    /**
+     * The table's own row count, straight from SQL's `COUNT(*)` — no rows decoded
+     * and none cloned over IPC. This is the denominator a panel title needs once
+     * the grid stopped fetching the whole table to measure it.
+     */
+    ...(bridge.countRows ? { count: (): Promise<number> => bridge.countRows!(tableId) } : {}),
     watch(fn): Unsubscribe {
       fn();
       return bridge.onChanged((changed, changedScope) => {

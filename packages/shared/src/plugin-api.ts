@@ -103,6 +103,15 @@ export interface DataCollection<T> {
    */
   watch?(fn: () => void): Unsubscribe;
   /**
+   * Optional: how many documents there are, without returning any.
+   *
+   * Distinct from `QueryPage.total`, which counts what MATCHES a query. A panel
+   * title needs both — "3 of 1,204" is the filtered count over the table count —
+   * and once a reader stops fetching everything it no longer knows the second
+   * one. Callers must feature-detect.
+   */
+  count?(): Promise<number>;
+  /**
    * Optional: force a re-read from the backing store and notify subscribers.
    * Local (Dexie) collections are always live so they don't implement it;
    * remote-backed collections (e.g. Datasette) that cache reads expose it so a

@@ -104,6 +104,14 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string): DataCollectio
       if (ids.length === 0) return;
       await coll.bulkDelete(ids);
     },
+    /**
+     * Rows in this table, counted on the `tableId` index without reading any of
+     * them — the denominator for a panel title, which is a different number from
+     * how many a filter matched.
+     */
+    async count() {
+      return coll.where('tableId').equals(tableId).count();
+    },
     subscribe(fn): Unsubscribe {
       const obs = liveQuery(() => coll.where('tableId').equals(tableId).toArray());
       const sub = obs.subscribe({

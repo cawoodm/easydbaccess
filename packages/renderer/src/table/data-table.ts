@@ -434,6 +434,18 @@ export class DataTable extends LitElement {
    */
   @state() private matchingTotal = 0;
   /**
+   * Rows in the TABLE, filter and search ignored — the denominator of the panel
+   * title's "3 of 1,204".
+   *
+   * A third number, because the other two cannot stand in for it. `rows.length` is
+   * what was fetched and `matchingTotal` is what the filter matched, so once the
+   * grid stopped fetching everything, both shrink the moment a filter is typed and
+   * the title collapsed from "2/4" to "2" — the count vanishing exactly when it
+   * became interesting. Counting is cheap (`COUNT(*)`, or a Dexie index count);
+   * fetching to measure is what was not.
+   */
+  @state() private tableTotal = 0;
+  /**
    * The fetch stopped short of the matching set, so `matchingTotal` is a floor and
    * what is on screen is a slice. Said out loud rather than implied — a truncated
    * grid that looks complete is how the old cap misled.
@@ -615,10 +627,10 @@ export class DataTable extends LitElement {
     const key = this.viewMode ? this.viewInstanceId : this.tableId;
     if (!key) return;
     const count = this.renderedCount;
-    // The MATCHING total, which is not `rows.length`: the fetch is capped, so on
-    // a big table the rows held are a slice and their length would understate the
-    // table by any amount. The store counts without returning.
-    const total = Math.max(this.matchingTotal, this.rows.length);
+    // The TABLE's count, not the fetch's and not the filter's — see `tableTotal`.
+    // `matchingTotal`/`rows.length` are the floor for a store that cannot count,
+    // which keeps the old behaviour rather than reporting zero.
+    const total = Math.max(this.tableTotal, this.matchingTotal, this.rows.length);
     if (count === this.lastEmittedCount && total === this.lastEmittedTotal) return;
     this.lastEmittedCount = count;
     this.lastEmittedTotal = total;
@@ -711,6 +723,18 @@ export class DataTable extends LitElement {
       this.rows = page.rows;
       this.matchingTotal = page.total;
       this.truncated = page.truncated === true;
+      // The table count travels separately because the page's `total` is the
+      // FILTERED one. Counted, never fetched, and only when the store can do it
+      // without reading rows.
+      if (coll.count) {
+        const n = await coll.count();
+        if (gen !== this.loadGeneration) return;
+        this.tableTotal = n;
+      } else {
+        // No cheap count: an unfiltered read already told us, and a filtered one
+        // can only report what it matched.
+        this.tableTotal = page.total;
+      }
     } catch (err) {
       if (gen !== this.loadGeneration) return;
       // A remote-backed table (e.g. a live Datasette source) can fail to load
@@ -718,6 +742,7 @@ export class DataTable extends LitElement {
       // error. Surface it instead of leaving a silently empty grid.
       this.rows = [];
       this.matchingTotal = 0;
+      this.tableTotal = 0;
       const ctx = await getContext();
       ctx.api.ui.dialogs.toast(`Couldn't load rows: ${(err as Error)?.message ?? String(err)}`, {
         kind: 'error',
