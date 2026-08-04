@@ -15,21 +15,9 @@
 // closes over `api.store` (the routed store — hence projection-on-projection
 // composes) and needs nothing store-related from `RowSourceCtx`.
 
-import type {
-  DataCollection,
-  DataStore,
-  ProjectionSpec,
-  Row,
-  Table,
-  Unsubscribe,
-} from '@easydb/shared';
-import {
-  computeProjectionRows,
-  hasProjectionCycle,
-  writebackTarget,
-  type SourceRowsByAlias,
-  type RowProvenance,
-} from './projection-compute.js';
+import type { DataCollection, DataStore, ProjectionSpec, Row, Table, Unsubscribe } from '@easydb/shared';
+import { computeProjectionRows, hasProjectionCycle, projectionSourceFields, writebackTarget, type SourceRowsByAlias, type RowProvenance } from './projection-compute.js';
+import { readRows } from '../db/row-reader.js';
 
 /** Thrown when a write is attempted against a read-only projection cell. */
 export class ProjectionReadOnlyError extends Error {
@@ -99,11 +87,24 @@ export function createProjectionCollection(store: DataStore, table: Table): Data
     const empty = { rows: [] as Row[], provenance: new Map<string, RowProvenance>() };
     if (hasProjectionCycle(table.id, all)) return empty;
     const ids = mapSourceIds(all);
+    const byId = new Map(all.map((t) => [t.id, t] as const));
+    // Only the fields the join and the SELECT actually read. A projection holds
+    // no rows of its own, so every open recomputes from the sources — and it was
+    // reading them whole, all forty columns of each, to use three.
+    const needed = projectionSourceFields(spec);
     const sourceRows: SourceRowsByAlias = {};
     for (const s of spec.sources) {
       const tid = ids.get(s.alias);
       if (!tid) return empty; // a source table is missing → render empty
-      sourceRows[s.alias] = await store.rows(tid).find();
+      const fields = needed[s.alias] ?? [];
+      const page = await readRows(store.rows(tid), {
+        columns: byId.get(tid)?.columns ?? [],
+        // No fields at all would mean "every column" to the store, which is the
+        // opposite of what an unused source needs. Ask for one, and the ids that
+        // come with every row are what the join has to work with anyway.
+        fields: fields.length > 0 ? fields : ['id'],
+      });
+      sourceRows[s.alias] = page.rows;
     }
     const computed = computeProjectionRows(spec, sourceRows);
     return {
@@ -151,7 +152,13 @@ export function createProjectionCollection(store: DataStore, table: Table): Data
       }
     }
     for (const tid of wanted) {
-      if (!sourceSubs.has(tid)) sourceSubs.set(tid, store.rows(tid).subscribe(scheduleRecompute));
+      if (!sourceSubs.has(tid)) {
+        // `watch` when the store offers it: the rows it would hand `subscribe`
+        // are thrown away here — a change means recompute, and the recompute
+        // does its own narrow read.
+        const coll = store.rows(tid);
+        sourceSubs.set(tid, coll.watch ? coll.watch(scheduleRecompute) : coll.subscribe(scheduleRecompute));
+      }
     }
   }
 

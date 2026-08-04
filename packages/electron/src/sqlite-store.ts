@@ -659,13 +659,21 @@ export class SqliteStore {
     const columns = this.readColumnsJson(t.sql_table);
     const table = quoteIdent(t.sql_table);
 
-    // A scripted column is computed in the renderer, so it has no SQL form.
+    // Two kinds of column have no SQL form:
+    //  - a SCRIPTED one, whose value only exists once the renderer runs it;
+    //  - an ARRAY one, whose cell holds SEVERAL values (`a,b` or `["a","b"]`) and
+    //    is matched per MEMBER. `=b` and `NULL` mean different things member-wise
+    //    than they do against the whole text, so a SQL LIKE over the raw cell is
+    //    NARROWER than the matcher and would drop rows the user did not exclude.
+    // Either way the answer is the same: leave the predicate out, let
+    // `expressible` go false, and the caller re-filters the superset.
     const specOf = new Map(columns.map((c) => [c.field, c] as const));
     const sqlOf = (field: string): string | null => {
       const spec = specOf.get(field);
-      return spec && !spec.script ? quoteIdent(spec.field) : null;
+      if (!spec || spec.script || spec.type === 'array') return null;
+      return quoteIdent(spec.field);
     };
-    const searchFields = columns.filter((c) => !c.script && c.filterable !== false).map((c) => c.field);
+    const searchFields = columns.filter((c) => !c.script && c.type !== 'array' && c.filterable !== false).map((c) => c.field);
 
     const where = buildWhere(q.filters, q.search, sqlOf, searchFields);
     const whereSql = where.sql ? ` WHERE ${where.sql}` : '';
@@ -673,7 +681,9 @@ export class SqliteStore {
 
     const totalRow = this.db.prepare(`SELECT COUNT(*) AS n FROM ${table}${whereSql}`).get(...params) as { n: number };
 
-    // A sort on a computed column cannot be done here either; the caller re-sorts.
+    // Same for the sort: a computed column has nothing to order by, and an array
+    // column orders by its MEMBERS as they read (`arrayCellText`), which is not
+    // the raw stored text — `a,b` reads as `a, b`. The caller re-sorts.
     let sortPartial = false;
     const orderParts: string[] = [];
     for (const key of q.sort ?? []) {

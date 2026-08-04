@@ -3,6 +3,7 @@ import type { ProjectionSpec, Row, Table } from '@easydb/shared';
 import {
   computeProjection,
   computeProjectionRows,
+  projectionSourceFields,
   guessJoinKeys,
   hasProjectionCycle,
   inheritColumns,
@@ -513,5 +514,131 @@ describe('writeback targets: a joined column knows exactly which row it came fro
     expect(rows.map((r) => r.id)).toEqual(['p1#0', 'p1#1']);
     expect(writebackTarget(spec, 'p1#0', 'dept', provenance.get('p1#0'))?.rowId).toBe('d1');
     expect(writebackTarget(spec, 'p1#1', 'dept', provenance.get('p1#1'))?.rowId).toBe('d2');
+  });
+});
+
+/**
+ * `projectionSourceFields` is a CLAIM about what `computeProjectionRows` reads,
+ * and the projection collection narrows its source fetch to exactly that. Miss a
+ * field and the join silently matches nothing, or a column renders blank — so the
+ * decisive test is not the field list, it is that the compute produces the SAME
+ * rows when the sources are cut down to the claimed fields.
+ */
+describe('projectionSourceFields', () => {
+  const twoSourceSpec: ProjectionSpec = {
+    version: 1,
+    sources: [
+      { alias: 'o', tableName: 'Orders' },
+      { alias: 'c', tableName: 'Cust', join: { type: 'inner', on: [{ field: 'id', eqAlias: 'o', eqField: 'custId' }] } },
+    ],
+    columns: [
+      { field: 'ref', label: 'Ref', type: 'string', from: { kind: 'source', alias: 'o', field: 'ref' } },
+      { field: 'who', label: 'Who', type: 'string', from: { kind: 'source', alias: 'c', field: 'name' } },
+      { field: 'shout', label: 'Shout', type: 'string', from: { kind: 'script', script: 'return String(row.who).toUpperCase()' } },
+    ],
+  };
+
+  /** Keep only `fields` in each row's data, as a narrow fetch would return. */
+  const narrow = (rows: Row[], fields: string[]): Row[] => rows.map((r) => ({ ...r, data: Object.fromEntries(Object.entries(r.data).filter(([k]) => fields.includes(k))) }));
+
+  it('names the selected columns and BOTH sides of every join key', () => {
+    const got = projectionSourceFields(twoSourceSpec);
+    expect([...got.o!].sort()).toEqual(['custId', 'ref']); // selected + the key it is matched on
+    expect([...got.c!].sort()).toEqual(['id', 'name']);
+  });
+
+  it('gives every source an entry, even one nothing reads', () => {
+    // Distinguishes "needs no fields" from "not in this spec" — the caller has to
+    // ask for something, and an empty list would read as "give me everything".
+    const spec: ProjectionSpec = {
+      version: 1,
+      sources: [
+        { alias: 'a', tableName: 'People' },
+        { alias: 'b', tableName: 'Spare' },
+      ],
+      columns: [{ field: 'n', label: 'N', type: 'string', from: { kind: 'source', alias: 'a', field: 'name' } }],
+    };
+    const got = projectionSourceFields(spec);
+    expect(got.a).toEqual(['name']);
+    expect(got.b).toEqual([]);
+  });
+
+  it('asks for nothing extra for a script column, which only sees OUTPUT fields', () => {
+    const got = projectionSourceFields(twoSourceSpec);
+    // `shout` reads `row.who`, an output field — no source column of its own.
+    expect(got.o).not.toContain('shout');
+    expect(got.c).not.toContain('shout');
+  });
+
+  it('computes the SAME rows from sources narrowed to the claimed fields', () => {
+    const fat = {
+      o: [row('o1', { ref: 'A-1', custId: 'c1', note: 'ignored', secret: 'x' }), row('o2', { ref: 'A-2', custId: 'c2', note: 'ignored', secret: 'y' })],
+      c: [row('c1', { id: 'c1', name: 'Ada', address: 'ignored' }), row('c2', { id: 'c2', name: 'Bo', address: 'ignored' })],
+    };
+    const need = projectionSourceFields(twoSourceSpec);
+    const lean = { o: narrow(fat.o, need.o!), c: narrow(fat.c, need.c!) };
+
+    const fromFat = computeProjection(twoSourceSpec, fat);
+    const fromLean = computeProjection(twoSourceSpec, lean);
+    expect(fromLean).toEqual(fromFat);
+    // And the join really did happen, so this is not two empty results agreeing.
+    expect(fromFat.map((r) => r.data.who)).toEqual(['Ada', 'Bo']);
+  });
+
+  it('keeps a LEFT join and its fan-out identical when narrowed', () => {
+    const spec: ProjectionSpec = {
+      version: 1,
+      sources: [
+        { alias: 'a', tableName: 'A' },
+        { alias: 'b', tableName: 'B', join: { type: 'left', on: [{ field: 'aid', eqAlias: 'a', eqField: 'id' }] } },
+      ],
+      columns: [
+        { field: 'aName', label: 'A', type: 'string', from: { kind: 'source', alias: 'a', field: 'name' } },
+        { field: 'bTag', label: 'B', type: 'string', from: { kind: 'source', alias: 'b', field: 'tag' } },
+      ],
+    };
+    const fat = {
+      a: [row('a1', { id: 'a1', name: 'One', junk: 1 }), row('a2', { id: 'a2', name: 'Two', junk: 2 })],
+      b: [row('b1', { aid: 'a1', tag: 'x', junk: 3 }), row('b2', { aid: 'a1', tag: 'y', junk: 4 })],
+    };
+    const need = projectionSourceFields(spec);
+    const lean = { a: narrow(fat.a, need.a!), b: narrow(fat.b, need.b!) };
+    const fromFat = computeProjection(spec, fat);
+    expect(computeProjection(spec, lean)).toEqual(fromFat);
+    // a1 fans out to two rows, a2 keeps its unmatched row — the shape that would
+    // collapse if a join key went missing.
+    expect(fromFat).toHaveLength(3);
+  });
+
+  it('covers a multi-key join, where dropping one key would over-match', () => {
+    const spec: ProjectionSpec = {
+      version: 1,
+      sources: [
+        { alias: 'a', tableName: 'A' },
+        {
+          alias: 'b',
+          tableName: 'B',
+          join: {
+            type: 'inner',
+            on: [
+              { field: 'k1', eqAlias: 'a', eqField: 'j1' },
+              { field: 'k2', eqAlias: 'a', eqField: 'j2' },
+            ],
+          },
+        },
+      ],
+      columns: [{ field: 'v', label: 'V', type: 'string', from: { kind: 'source', alias: 'b', field: 'val' } }],
+    };
+    const need = projectionSourceFields(spec);
+    expect([...need.a!].sort()).toEqual(['j1', 'j2']);
+    expect([...need.b!].sort()).toEqual(['k1', 'k2', 'val']);
+
+    const fat = {
+      a: [row('a1', { j1: 'x', j2: 'p', noise: 1 })],
+      b: [row('b1', { k1: 'x', k2: 'p', val: 'hit', noise: 2 }), row('b2', { k1: 'x', k2: 'q', val: 'miss', noise: 3 })],
+    };
+    const lean = { a: narrow(fat.a, need.a!), b: narrow(fat.b, need.b!) };
+    expect(computeProjection(spec, lean)).toEqual(computeProjection(spec, fat));
+    expect(computeProjection(spec, fat).map((r) => r.data.v)).toEqual(['hit']);
   });
 });

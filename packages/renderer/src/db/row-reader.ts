@@ -103,7 +103,14 @@ export function applyRowRequest(rows: Row[], req: RowRequest): RowPage {
   let out = rows;
 
   const active = activeFilters(req);
-  if (active.length > 0) out = out.filter((r) => active.every(([field, q]) => matchesColumnFilter(r.data[field], q)));
+  if (active.length > 0) {
+    // The column TYPE is part of the match, not decoration: on an `array` column
+    // the matcher tests each MEMBER instead of the whole cell, so `=bar` and
+    // `NULL` mean different things with it than without. Leaving it out filtered
+    // `["a","b"]` as one string and quietly dropped rows the grid would keep.
+    const typeOf = new Map(req.columns.map((c) => [c.field, c.type as string | undefined]));
+    out = out.filter((r) => active.every(([field, q]) => matchesColumnFilter(r.data[field], q, { type: typeOf.get(field) })));
+  }
 
   const term = (req.search ?? '').trim();
   if (term !== '') out = searchRowsByField(out, term, searchFieldsOf(req.columns));

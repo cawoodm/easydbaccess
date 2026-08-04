@@ -14,6 +14,8 @@ const COLUMNS: ColumnSpec[] = [
   { field: 'country', label: 'Country', type: 'string' },
   { field: 'age', label: 'Age', type: 'number' },
   { field: 'secret', label: 'Secret', type: 'string', filterable: false },
+  // An `array` cell holds SEVERAL values and is matched per MEMBER.
+  { field: 'tags', label: 'Tags', type: 'array' },
 ];
 
 const ROWS: Row[] = [
@@ -100,6 +102,31 @@ describe('applyRowRequest', () => {
   it('applies the offset after sorting, not before', () => {
     const page = applyRowRequest(ROWS, req({ sort: [{ field: 'age', asc: false }], offset: 1, limit: 1 }));
     expect(page.rows.map((r) => r.data.age)).toEqual([44]);
+  });
+});
+
+/**
+ * An `array` column is matched per MEMBER, and the column TYPE is what says so.
+ * Read as one string instead, `=b` fails on `a,b` and `NULL` calls `[]` non-empty
+ * — narrower than the grid, so rows the user did not exclude go missing.
+ */
+describe('applyRowRequest respects the column type', () => {
+  const tagged = (id: string, tags: unknown): Row => ({ id, tableId: 't', data: { name: id, tags }, updatedAt: 1 });
+  const rows = [tagged('r1', 'alpha,beta'), tagged('r2', '["beta","gamma"]'), tagged('r3', 'gamma'), tagged('r4', '[]')];
+
+  it('matches an exact member, which whole-cell matching would miss', () => {
+    const page = applyRowRequest(rows, req({ filters: { tags: '=beta' } }));
+    expect(page.rows.map((r) => r.id)).toEqual(['r1', 'r2']);
+  });
+
+  it('reads an empty list as NULL, whichever spelling it uses', () => {
+    const page = applyRowRequest(rows, req({ filters: { tags: 'NULL' } }));
+    expect(page.rows.map((r) => r.id)).toEqual(['r4']);
+  });
+
+  it('excludes by member, so a row keeping another member survives', () => {
+    const page = applyRowRequest(rows, req({ filters: { tags: '=gamma' } }));
+    expect(page.rows.map((r) => r.id)).toEqual(['r2', 'r3']);
   });
 });
 

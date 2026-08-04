@@ -134,6 +134,54 @@ describe('queryRows', () => {
   });
 
   /**
+   * An `array` cell holds several values in one column and is matched per MEMBER
+   * (`a,b` or `["a","b"]`). SQL sees one string, so `=b` and `NULL` would answer
+   * differently — NARROWER than the matcher, which is the one failure `partial`
+   * cannot excuse. So the predicate is not applied at all and the page says so.
+   */
+  it('will not narrow on an array column, and admits it', () => {
+    const arr = 'arr';
+    store.insert('tables', {
+      id: arr,
+      workspaceId: 'ws',
+      name: 'Tagged',
+      columns: [
+        { field: 'name', label: 'Name', type: 'text' },
+        { field: 'tags', label: 'Tags', type: 'array' },
+      ],
+      view: 'table',
+      updatedAt: 1,
+    });
+    store.bulkInsert('rows', [
+      { id: 'x1', tableId: arr, data: { name: 'one', tags: 'alpha,beta' }, updatedAt: 1 },
+      { id: 'x2', tableId: arr, data: { name: 'two', tags: 'gamma' }, updatedAt: 1 },
+    ]);
+
+    const page = store.queryRows(arr, { filters: { tags: '=beta' } });
+    expect(page.partial).toBe(true);
+    // Every row comes back — a superset the caller re-filters with the member
+    // rules. Two rows here, NOT the one a raw LIKE would have let through.
+    expect(page.total).toBe(2);
+    expect(page.rows).toHaveLength(2);
+  });
+
+  it('will not sort by an array column either', () => {
+    // The grid orders array cells by their members as they READ (`a, b`), which
+    // is not the stored text — so ORDER BY on the raw column is a different order.
+    const arr2 = 'arr2';
+    store.insert('tables', {
+      id: arr2,
+      workspaceId: 'ws',
+      name: 'Tagged2',
+      columns: [{ field: 'tags', label: 'Tags', type: 'array' }],
+      view: 'table',
+      updatedAt: 1,
+    });
+    store.bulkInsert('rows', [{ id: 'y1', tableId: arr2, data: { tags: 'b,a' }, updatedAt: 1 }]);
+    expect(store.queryRows(arr2, { sort: [{ field: 'tags', asc: true }] }).partial).toBe(true);
+  });
+
+  /**
    * The reason the contract exists: asking for a screenful must not cost what
    * asking for everything costs. Ratio rather than absolute times, so the test
    * does not become a flaky benchmark on a loaded machine.

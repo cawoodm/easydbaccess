@@ -40,6 +40,46 @@ export interface ComputedProjection {
 }
 
 /**
+ * Which stored fields the compute below actually READS, per source alias.
+ *
+ * Lives next to `computeProjectionRows` on purpose: it is a claim about what that
+ * function touches, and the two would drift if they sat apart. Exactly three
+ * things are read — a selected `{kind:'source'}` column, and each side of every
+ * equijoin key — so anything else a source table holds is payload the projection
+ * pays for and never looks at. A forty-column source feeding a three-column
+ * projection was shipping thirty-seven columns per row for nothing.
+ *
+ * A `{kind:'script'}` column adds nothing: a script is handed the joined OUTPUT
+ * row, so it can only see fields already selected above.
+ *
+ * `Row.id` is not listed because it is not part of `data` — the store always
+ * returns it, and provenance (writeback) depends on that.
+ */
+export function projectionSourceFields(spec: ProjectionSpec): Record<string, string[]> {
+  const byAlias = new Map<string, Set<string>>();
+  const want = (alias: string, field: string): void => {
+    if (!alias || !field) return;
+    let set = byAlias.get(alias);
+    if (!set) byAlias.set(alias, (set = new Set()));
+    set.add(field);
+  };
+  for (const col of spec.columns) {
+    if (col.from.kind === 'source') want(col.from.alias, col.from.field);
+  }
+  for (const src of spec.sources) {
+    for (const k of src.join?.on ?? []) {
+      want(src.alias, k.field);
+      want(k.eqAlias, k.eqField);
+    }
+  }
+  // Every source gets an entry, so a caller can tell "no fields needed" (a source
+  // that is joined on nothing and selected from nowhere) from "not in the spec".
+  const out: Record<string, string[]> = {};
+  for (const src of spec.sources) out[src.alias] = [...(byAlias.get(src.alias) ?? [])];
+  return out;
+}
+
+/**
  * Compute a projection's rows. Each output row's id is `${baseRowId}#${ordinal}`
  * so a left-join fan-out stays unique yet every row traces back to exactly one
  * base row.
