@@ -18,17 +18,33 @@ export const meta: NonNullable<PluginModule['meta']> = {
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/preview.ts',
 };
 
-/** How many characters of the plain text to show inline before truncating.
- *  Configurable via Settings → Preview; read at init and on `app:ready`. */
-let maxChars = 30;
+/** The safety cap on cell text — long enough that the column width, not this
+ *  number, is what cuts the line on any realistic column. */
+const DEFAULT_MAX_CHARS = 2000;
+
+/**
+ * How much text goes INTO the cell. Not how much is visible: the cell clips with
+ * CSS (`text-overflow: ellipsis`), so what you see follows the COLUMN WIDTH,
+ * exactly as it does for a cell with no renderer. Widen the column and more of
+ * the value appears; narrow it and less does.
+ *
+ * The number is only a safety cap, which is why the default is generous. It used
+ * to be 30, and a 30-character cut is what "auto ellipsis stops working when a
+ * renderer is involved" meant: the renderer replaced the column-width ellipsis
+ * with a fixed count, so a wide column still showed 30 characters. A workspace
+ * that deliberately set a small number keeps it — a stored value still wins.
+ *
+ * Configurable via Settings → Preview; read at init and on `app:ready`.
+ */
+let maxChars = DEFAULT_MAX_CHARS;
 
 async function refreshMaxChars(api: HostApi): Promise<void> {
   // Read under the `preview` id. A workspace that set this number while the
-  // plugin was still `html-preview` (to v0.0.281) is back on the default of 30:
+  // plugin was still `html-preview` (to v0.0.281) is back on the default:
   // `settings.get` resolves the field default, so a value under the old id
   // cannot be told apart from one that was never set.
   const v = await api.settings.get<number>('preview', 'maxChars');
-  if (typeof v === 'number' && Number.isFinite(v) && v > 0) maxChars = Math.floor(v);
+  maxChars = typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : DEFAULT_MAX_CHARS;
 }
 
 export function init(api: HostApi): void {
@@ -45,10 +61,10 @@ export function init(api: HostApi): void {
       key: 'maxChars',
       label: 'Max characters shown',
       type: 'number',
-      default: 30,
+      default: DEFAULT_MAX_CHARS,
       scope: 'workspace',
       description:
-        'Preview cells show the first N characters of the text; use the popup icon on the right to open the full value in a window. Applies to cells rendered after the change (reload to refresh all).',
+        'A safety cap on how much text goes into a preview cell. What you SEE follows the column width — the cell ellipsizes like any other, so widen the column to read more. Lower this only to cut long values short regardless of width. Applies to cells rendered after the change (reload to refresh all).',
     },
   ]);
   void refreshMaxChars(api);
@@ -130,9 +146,12 @@ class PreviewCell extends HTMLElement {
     // Show the value's PLAIN TEXT, not the rendered markup — rendering arbitrary
     // HTML in a grid cell is unpredictable and can be huge. Markdown is
     // converted first so its `#` and `**` markers do not show up as noise in a
-    // line of text. Take the first `maxChars` characters and ellipsize the rest.
-    // Clicking edits the source in a dialog; the popup icon (right) views the
-    // full rendered value.
+    // line of text. Clicking edits the source in a dialog; the popup icon
+    // (right) views the full rendered value.
+    //
+    // The line is cut by the COLUMN, not by a character count: the span below
+    // ellipsizes with CSS, so the cell behaves like one with no renderer at all.
+    // `maxChars` only bounds what is put in the DOM.
     const text = htmlToPreviewText(asHtml(this._value) ?? this._value);
     view.textContent = text.length > maxChars ? text.slice(0, maxChars) + '…' : text;
     view.title = 'Click to edit';

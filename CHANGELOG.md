@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 4 Aug 2026
+
+### Features
+
+- ✨ An `array` column shows its values as pills, one per value, with a pencil for the raw list (v0.0.296)
+- 🪶 New `array` column type: a cell holds several values (`foo,bar` or `["Foo","Bar"]`) and the filter dropdown offers each one (v0.0.295)
+
 ## 3 Aug 2026
 
 ### Features
@@ -25,6 +32,7 @@
 
 ### Bugs
 
+- 🪲 A cell with a renderer ignored the column width: `preview` cut at 30 characters and a long value widened the whole column (v0.0.294)
 - 🪲 An id past 2^53 (e.g. 1298624375692894210) was rounded on import — silently a different id (v0.0.292)
 - 🪲 The app crashed on startup after converting a large database: every open window fetched its whole table, 1.9 million rows between them (v0.0.288)
 - 🪲 An unfinished conversion restarted its import on every launch, unprompted and with no way to stop it (v0.0.288)

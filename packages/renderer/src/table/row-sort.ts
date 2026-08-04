@@ -10,6 +10,7 @@
  */
 
 import type { ColumnSpec, ColumnType, Row, SortSpec } from '@easydb/shared';
+import { arrayCellText } from '@easydb/shared';
 
 /**
  * One sort key applied to one pair of rows, direction included, so several keys
@@ -40,6 +41,13 @@ export function compareValues(a: unknown, b: unknown, type: ColumnType): number 
     }
     case 'boolean':
       return (a ? 1 : 0) - (b ? 1 : 0);
+    case 'array':
+      // Sort on the members as they READ (`a, b`), so a JSON-array cell and a
+      // comma-list cell in the same column order against each other.
+      return arrayCellText(a).localeCompare(arrayCellText(b), undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      });
     case 'date': {
       const ta = new Date(String(a)).getTime();
       const tb = new Date(String(b)).getTime();

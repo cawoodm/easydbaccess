@@ -9,6 +9,8 @@
  * list to pick from, a second value on the same field is unreachable by clicking.
  */
 
+import { arrayMembers } from '@easydb/shared';
+
 /** Longest a value may be to appear in a dropdown. Beyond this a column is
  *  prose (a description, a body) and its "values" are not a list. */
 export const FACET_MAX_LEN = 50;
@@ -30,16 +32,40 @@ function asText(v: unknown): string {
 }
 
 /**
+ * The value(s) one cell contributes to a dropdown. An `array` column contributes
+ * each MEMBER separately — a cell of `foo,bar,baz` is three options, not one —
+ * which is the whole reason the type exists. Every other type contributes the
+ * cell itself, or nothing when it is empty.
+ */
+function cellValues(value: unknown, type: string | undefined): string[] {
+  if (type === 'array') return arrayMembers(value);
+  return value == null || value === '' ? [] : [asText(value)];
+}
+
+/**
  * Is `field` worth offering a value list for? Every value in the first
  * {@link ELIGIBILITY_SAMPLE} rows must be shorter than `maxLen` — one long value
  * disqualifies the column, so a description field never fills a dropdown with
  * multi-line content. An empty row set is not eligible: there is nothing to show.
+ *
+ * An `array` column is judged by its longest MEMBER: a list of short tags easily
+ * runs past the limit as one string, and would otherwise lose its dropdown
+ * exactly when it has enough values to need one.
  */
-export function facetable(rows: readonly HasData[], field: string, maxLen = FACET_MAX_LEN): boolean {
+export function facetable(
+  rows: readonly HasData[],
+  field: string,
+  opts?: { maxLen?: number; type?: string | undefined },
+): boolean {
+  const maxLen = opts?.maxLen ?? FACET_MAX_LEN;
   if (rows.length === 0) return false;
   for (const r of rows.slice(0, ELIGIBILITY_SAMPLE)) {
     const v = r.data[field];
     if (v == null) continue;
+    if (opts?.type === 'array') {
+      if (arrayMembers(v).some((m) => m.length >= maxLen)) return false;
+      continue;
+    }
     if (asText(v).length >= maxLen) return false;
   }
   return true;
@@ -56,18 +82,17 @@ export function facetable(rows: readonly HasData[], field: string, maxLen = FACE
 export function facetValues(
   rows: readonly HasData[],
   field: string,
-  opts?: { maxLen?: number; maxOptions?: number },
+  opts?: { maxLen?: number; maxOptions?: number; type?: string | undefined },
 ): string[] {
   const maxLen = opts?.maxLen ?? FACET_MAX_LEN;
   const maxOptions = opts?.maxOptions ?? FACET_MAX_OPTIONS;
   const seen = new Set<string>();
   for (const r of rows) {
-    const v = r.data[field];
-    if (v == null || v === '') continue;
-    const s = asText(v);
-    if (s.length >= maxLen) continue;
-    seen.add(s);
-    if (seen.size >= maxOptions) break;
+    for (const s of cellValues(r.data[field], opts?.type)) {
+      if (s.length >= maxLen) continue;
+      seen.add(s);
+      if (seen.size >= maxOptions) return [...seen].sort();
+    }
   }
   return [...seen].sort();
 }
@@ -87,6 +112,10 @@ export interface FacetCount {
  * when the rows carry only one of them: a column of all-true rows would
  * otherwise leave no way to filter for false. A count of 0 says none are there.
  * Any other stored spelling (`yes`, `1`) keeps its own entry below.
+ *
+ * An `array` column counts each MEMBER, so the counts add up to more than the
+ * row count — a row carrying `foo,bar` is one for `foo` AND one for `bar`. A
+ * cell with no members at all counts as blank.
  */
 export function facetCounts(
   rows: readonly HasData[],
@@ -97,12 +126,17 @@ export function facetCounts(
   let blanks = 0;
   for (const r of rows) {
     const v = r.data[field];
-    if (v == null || asText(v).trim() === '') {
+    const values =
+      opts?.type === 'array'
+        ? arrayMembers(v)
+        : v == null || asText(v).trim() === ''
+          ? []
+          : [asText(v)];
+    if (values.length === 0) {
       blanks++;
       continue;
     }
-    const s = asText(v);
-    counts.set(s, (counts.get(s) ?? 0) + 1);
+    for (const s of values) counts.set(s, (counts.get(s) ?? 0) + 1);
   }
   let values = [...counts.entries()]
     .map(([value, count]) => ({ value, count }))

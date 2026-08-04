@@ -38,6 +38,7 @@ import { hasSqlProjections, reportSqlRestore, restoreSqlScript } from './sql-imp
 import { fetchImportTextWithBar, filenameFromUrl } from '../import/fetch-source.js';
 import { runImport, type RunImportResult } from '../import/import-kernel.js';
 import { refreshFromOrigin } from '../import/refresh.js';
+import { looksLikeArray } from '@easydb/shared';
 import type { ImportTarget } from '../import/land-tables.js';
 
 /** How a URL should be imported. `auto` is resolved to a concrete kind on submit. */
@@ -449,7 +450,13 @@ function jsonRecords(text: string): Array<Record<string, unknown>> {
 function inferJsonColumns(text: string): ColumnSpec[] {
   const records = jsonRecords(text).slice(0, 50);
   const typeOf = (v: unknown): ColumnType =>
-    typeof v === 'number' ? 'number' : typeof v === 'boolean' ? 'boolean' : 'string';
+    looksLikeArray(v)
+      ? 'array'
+      : typeof v === 'number'
+        ? 'number'
+        : typeof v === 'boolean'
+          ? 'boolean'
+          : 'string';
   const cols = new Map<string, ColumnType>();
   for (const rec of records) {
     for (const [k, v] of Object.entries(rec)) {

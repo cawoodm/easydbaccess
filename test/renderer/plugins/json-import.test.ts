@@ -258,7 +258,20 @@ describe('parsedToTables: single bare object -> one-row table', () => {
 });
 
 describe('parsedToTables: nested / heterogeneous objects (inferTypeFromValues via inferTableFromRows)', () => {
-  it('keeps a nested object/array value as-is (typed "string" since it is neither number/boolean/date)', () => {
+  it('types an array-valued column "array", keeping the array itself as the cell', () => {
+    const rows = [{ tags: ['a', 'b'] }, { tags: ['c'] }];
+    const [t] = parsedToTables(rows, 'fallback');
+    expect(t?.columns.find((c) => c.field === 'tags')?.type).toBe('array');
+    expect(t?.rows[0]?.tags).toEqual(['a', 'b']);
+  });
+
+  it('types a column of JSON-array STRINGS "array" too — same list, other spelling', () => {
+    const rows = [{ tags: '["a","b"]' }, { tags: '[]' }];
+    const [t] = parsedToTables(rows, 'fallback');
+    expect(t?.columns.find((c) => c.field === 'tags')?.type).toBe('array');
+  });
+
+  it('keeps a nested object value as-is (typed "string" since it is neither number/boolean/date)', () => {
     const rows = [
       { id: 1, meta: { nested: true } },
       { id: 2, meta: { nested: false } },

@@ -81,10 +81,15 @@ export function searchRows<T>(rows: T[], query: string, contains: ContainsFn<T>)
   return rows.filter((r) => words.some((w) => contains(r, w)));
 }
 
-/** A searchable column: the data key plus an optional human label to also match on. */
+/**
+ * A searchable column: the data key plus an optional human label to also match
+ * on, and its type — `array` makes a `field:value` term match one MEMBER of the
+ * cell rather than the whole list (see `column-filter.ts`).
+ */
 export interface SearchField {
   field: string;
   label?: string | undefined;
+  type?: string | undefined;
 }
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -108,9 +113,11 @@ export function searchRowsByField<T extends { data: Record<string, unknown> }>(
 ): T[] {
   // Lower-cased field name / label → the real data key.
   const byName = new Map<string, string>();
+  const typeOf = new Map<string, string | undefined>();
   for (const f of fields) {
     byName.set(f.field.toLowerCase(), f.field);
     if (f.label) byName.set(f.label.toLowerCase(), f.field);
+    typeOf.set(f.field, f.type);
   }
   // Collapse `field: value` → `field:value` for KNOWN fields only, so a value
   // typed after a space survives whitespace tokenisation. Longest names first
@@ -124,7 +131,11 @@ export function searchRowsByField<T extends { data: Record<string, unknown> }>(
     const colon = needle.indexOf(':');
     if (colon > 0) {
       const real = byName.get(needle.slice(0, colon));
-      if (real) return matchesColumnFilter(row.data[real], needle.slice(colon + 1));
+      if (real) {
+        return matchesColumnFilter(row.data[real], needle.slice(colon + 1), {
+          type: typeOf.get(real),
+        });
+      }
     }
     return Object.values(row.data).some(
       (v) => v != null && String(v).toLowerCase().includes(needle),

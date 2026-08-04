@@ -11,6 +11,7 @@ import { filenameFromUrl } from '../import/fetch-source.js';
 import { isUnsafeIntegerText } from '../import/big-numbers.js';
 import { mapRowsToTarget, type ColumnMapping } from '../import/map-columns.js';
 import { cryptoUUID, slugField } from '../util/ids.js';
+import { looksLikeArray } from '@easydb/shared';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'csv-import',
@@ -611,7 +612,14 @@ interface HeaderSpec {
   hidden?: boolean;
 }
 
-const KNOWN_TYPES = new Set<ColumnType>(['string', 'number', 'boolean', 'date', 'datetime']);
+const KNOWN_TYPES = new Set<ColumnType>([
+  'string',
+  'number',
+  'boolean',
+  'date',
+  'datetime',
+  'array',
+]);
 
 /**
  * Legacy CSV header type names that map onto renderer names in the post-
@@ -626,6 +634,9 @@ const LEGACY_TYPE_TO_RENDERER: Record<string, string> = {
 /** Returns the matching renderer name for an inferred type, or undefined. */
 function rendererForType(t: ColumnType): string | undefined {
   if (t === 'date' || t === 'datetime' || t === 'boolean') return t;
+  // An `array` column's renderer is not named after its type: `tags` is what
+  // draws one pill per value (see plugins/cell-tags.ts).
+  if (t === 'array') return 'tags';
   return undefined;
 }
 
@@ -732,6 +743,11 @@ function parseLines(text: string, sep: string, maxLines?: number): string[][] {
 
 function inferType(samples: string[]): ColumnType {
   if (samples.length === 0) return 'string';
+  // A cell spelled `["a","b"]` is a list, whoever exported it. A cell with bare
+  // commas is NOT — prose is full of commas, so a comma list only becomes an
+  // `array` column when the header says so (`tags:Tags:array`) or the user picks
+  // the type in the columns editor.
+  if (samples.every(looksLikeArray)) return 'array';
   if (samples.every(isBool)) return 'boolean';
   if (samples.every(isNumber)) return 'number';
   if (samples.every(isDateTime)) return 'datetime';
@@ -781,6 +797,10 @@ function isDateTime(s: string): boolean {
 function coerce(raw: string, type: ColumnType): unknown {
   const s = raw.trim();
   switch (type) {
+    case 'array':
+      // Kept verbatim: `array-cell.ts` reads the members out of whichever
+      // spelling arrived, so rewriting the cell would only lose the original.
+      return s === '' ? null : s;
     case 'number': {
       if (s === '') return null;
       // Keep the digits when they do not fit a JS number — the same reason

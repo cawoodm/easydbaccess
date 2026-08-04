@@ -20,7 +20,7 @@ import {
   type TableReferences,
 } from '../table/table-references.js';
 
-const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'datetime'];
+const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'datetime', 'array'];
 
 /** Registered renderer names worth offering, sorted; legacy aliases dropped. */
 function offerableRenderers(registered: ReadonlyMap<string, string>): string[] {

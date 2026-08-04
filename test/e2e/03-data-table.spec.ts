@@ -329,21 +329,33 @@ test.describe('data-table rendering', () => {
     const dt = page.locator(`#${panelDomId(id)} data-table`);
     await expect(dt.locator('tbody tr:not(.spacer)')).toHaveCount(4);
 
-    // One click: a first click sorts DESCENDING (grid:sortDescFirst, on by
-    // default — see table/sort-cycle.ts).
-    const scoreHeader = dt.locator('thead th', { hasText: 'score' }).locator('.sort-icon');
-    await scoreHeader.click();
+    // Sort descending through the store, not through clicks: what is under test
+    // here is where empties land. How many clicks a direction takes is a
+    // separate question (a setting — see 77-sort-desc-first), and driving it by
+    // click made this test depend on the answer.
+    await page.evaluate(async (tid) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (window as any).__easydb.store.tables.patch(tid, {
+        sortBy: [{ field: 'score', asc: false }],
+        sortColumn: 'score',
+        sortAsc: false,
+        updatedAt: Date.now(),
+      });
+    }, id);
 
     // Descending orders the present values 3,2,1 — and the empty score (Bob)
     // stays at the BOTTOM rather than floating to the top.
-    const names = await dt.evaluate((el) =>
-      [
-        ...(el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelectorAll(
-          'tbody tr:not(.spacer)',
+    await expect
+      .poll(() =>
+        dt.evaluate((el) =>
+          [
+            ...(el as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot.querySelectorAll(
+              'tbody tr:not(.spacer)',
+            ),
+          ].map((tr) => tr.querySelector('input')?.value ?? null),
         ),
-      ].map((tr) => tr.querySelector('input')?.value ?? null),
-    );
-    expect(names).toEqual(['Alice', 'Dave', 'Carol', 'Bob']);
+      )
+      .toEqual(['Alice', 'Dave', 'Carol', 'Bob']);
   });
 
   test('ascending sort puts nulls at the top, ahead of blanks', async ({ page }) => {

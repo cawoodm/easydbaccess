@@ -162,6 +162,29 @@ describe('parseCsv: type inference', () => {
 
 // -- RFC-4180 edge cases -------------------------------------------------------
 
+describe('parseCsv: array columns', () => {
+  it('infers "array" for a column of JSON-array cells, keeping the text verbatim', () => {
+    const { columns, rows } = parseCsv('tags\n"[""a"",""b""]"\n"[""c""]"\n');
+    // The `tags` renderer comes with the type — one pill per value.
+    expect(columns[0]).toMatchObject({ field: 'tags', type: 'array', renderer: 'tags' });
+    // The cell is not rewritten — the reader takes the members out of whichever
+    // spelling arrived (see array-cell.ts).
+    expect(rows.map((r) => r.tags)).toEqual(['["a","b"]', '["c"]']);
+  });
+
+  it('does NOT infer "array" from bare commas — prose is full of them', () => {
+    const { columns } = parseCsv('note\n"Hello, world"\n"Bye, now"\n');
+    expect(columns[0]).toMatchObject({ field: 'note', type: 'string' });
+  });
+
+  it('takes "array" from a header annotation, for a comma list', () => {
+    const { columns, rows } = parseCsv('tags:Tags:array\n"foo,bar"\n" "\n');
+    expect(columns[0]).toMatchObject({ field: 'tags', label: 'Tags', type: 'array' });
+    // A blank cell holds no values, so it is stored as null rather than as text.
+    expect(rows.map((r) => r.tags)).toEqual(['foo,bar', null]);
+  });
+});
+
 describe('parseCsv: RFC-4180 quoting edge cases', () => {
   it('unescapes doubled quotes ("") inside a quoted field', () => {
     const text = 'a,b\n"He said ""hi""",2\n';

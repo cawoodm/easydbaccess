@@ -59,15 +59,18 @@ function isImageValue(s: string): boolean {
 
 /**
  * The renderer a newly imported column should start with, or `undefined` for
- * none (plain text). Only string columns are considered: a `date` / `datetime` /
- * `boolean` column already gets its renderer from the importer's type inference,
- * and a number needs none.
+ * none (plain text). An `array` column always takes `tags`; otherwise only string
+ * columns are considered, since a `date` / `datetime` / `boolean` column already
+ * gets its renderer from the importer's type inference, and a number needs none.
  *
  * A rule fires only when EVERY sampled value agrees, so a mixed column is left
  * as plain text rather than guessed at. Long text is the exception — it uses the
  * average length, since prose columns vary.
  */
 export function inferRenderer(type: ColumnType, samples: readonly unknown[]): string | undefined {
+  // An `array` column needs no sampling: its values ARE a list, so the pills fit
+  // by definition. The name is `tags`, not the type name.
+  if (type === 'array') return 'tags';
   if (type !== 'string') return undefined;
 
   const values: string[] = [];

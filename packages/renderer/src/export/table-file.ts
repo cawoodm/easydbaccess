@@ -46,11 +46,15 @@ export function scopedTable(table: Table, scope: ExportScope): Table {
 export function scopedRows(table: Table, rows: Row[], scope: ExportScope): Row[] {
   if (scope === 'structure') return [];
   if (scope === 'raw') return rows;
-  return viewRows(rows, {
-    filters: table.filters ?? {},
-    sortColumn: table.sortColumn,
-    sortAsc: table.sortAsc,
-  });
+  return viewRows(
+    rows,
+    {
+      filters: table.filters ?? {},
+      sortColumn: table.sortColumn,
+      sortAsc: table.sortAsc,
+    },
+    table.columns,
+  );
 }
 
 /**

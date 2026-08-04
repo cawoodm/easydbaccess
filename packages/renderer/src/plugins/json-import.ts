@@ -18,6 +18,7 @@ import { runImport } from '../import/import-kernel.js';
 import { rowRekeyer } from '../table/column-merge.js';
 import { filenameFromUrl } from '../import/fetch-source.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
+import { looksLikeArray } from '@easydb/shared';
 import { restoreTemplates } from '../views/template-restore.js';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a
@@ -806,6 +807,9 @@ function inferTableFromRows(rows: Array<Record<string, unknown>>): {
 function inferTypeFromValues(values: unknown[]): ColumnType {
   const samples = values.filter((v) => v !== null && v !== undefined && v !== '');
   if (samples.length === 0) return 'string';
+  // A real JS array, or the same thing as text (`["a","b"]`) — both are lists
+  // and both read per member once the column is typed `array`.
+  if (samples.every(looksLikeArray)) return 'array';
   if (samples.every((v) => typeof v === 'boolean')) return 'boolean';
   if (samples.every((v) => typeof v === 'number' && Number.isFinite(v))) return 'number';
   if (samples.every((v) => typeof v === 'string' && isDateString(v))) return 'date';

@@ -170,11 +170,26 @@ export function evaluateRows(rows: Row[], columns: readonly ColumnSpec[]): Row[]
   return rows.map((r) => evaluateRow(r, columns));
 }
 
-/** Apply an instance's snapshotted per-column filters (case-insensitive, AND). */
-export function filterRows(rows: Row[], filters: Record<string, string>): Row[] {
+/**
+ * Apply an instance's snapshotted per-column filters (case-insensitive, AND).
+ *
+ * `columns` is optional and only carries the column TYPES: an `array` column
+ * matches per member, so a chip for one tag keeps the rows whose list contains
+ * it. Without the columns every cell reads as one value, as it always did.
+ */
+export function filterRows(
+  rows: Row[],
+  filters: Record<string, string>,
+  columns?: readonly ColumnSpec[],
+): Row[] {
   const active = Object.entries(filters).filter(([, v]) => v != null && String(v).trim() !== '');
   if (active.length === 0) return rows;
-  return rows.filter((r) => active.every(([field, needle]) => matchesColumnFilter(r.data[field], needle)));
+  const typeOf = new Map((columns ?? []).map((c) => [c.field, c.type as string | undefined]));
+  return rows.filter((r) =>
+    active.every(([field, needle]) =>
+      matchesColumnFilter(r.data[field], needle, { type: typeOf.get(field) }),
+    ),
+  );
 }
 
 /** Does an exact-match token's term equal `value`, case-insensitively? */
@@ -274,9 +289,10 @@ export function viewRows(
   inst: Pick<ViewInstance, 'filters' | 'sortColumn' | 'sortAsc'> & {
     pillFilters?: Record<string, string> | undefined;
   },
+  columns?: readonly ColumnSpec[],
 ): Row[] {
-  const filtered = filterRows(rows, inst.filters ?? {});
-  const pilled = filterRows(filtered, inst.pillFilters ?? {});
+  const filtered = filterRows(rows, inst.filters ?? {}, columns);
+  const pilled = filterRows(filtered, inst.pillFilters ?? {}, columns);
   return sortRows(pilled, inst.sortColumn, inst.sortAsc ?? true);
 }
 

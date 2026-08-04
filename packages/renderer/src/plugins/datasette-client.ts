@@ -11,6 +11,7 @@
 import type { ColumnSpec, ColumnType, FetchOpts, TableInfo } from '@easydb/shared';
 import { parseColumnFilter } from '@easydb/shared';
 import { isInternalField } from '../util/internal-fields.js';
+import { looksLikeArray } from '@easydb/shared';
 
 export interface DatasetteRef {
   base: string;
@@ -361,6 +362,9 @@ export function inferColumnsFromRows(rows: Array<Record<string, unknown>>): Colu
 function inferColumnType(values: unknown[]): ColumnType {
   const samples = values.filter((v) => v !== null && v !== undefined && v !== '');
   if (samples.length === 0) return 'string';
+  // SQLite has no array type, so a list arrives as a JSON string — which is
+  // exactly what an `array` column reads.
+  if (samples.every(looksLikeArray)) return 'array';
   if (samples.every((v) => typeof v === 'boolean')) return 'boolean';
   if (samples.every((v) => typeof v === 'number' && Number.isFinite(v))) return 'number';
   if (samples.every((v) => typeof v === 'string' && isIsoDateish(v))) return 'datetime';

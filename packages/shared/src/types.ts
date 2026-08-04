@@ -1,4 +1,10 @@
-export type ColumnType = 'string' | 'number' | 'date' | 'datetime' | 'boolean';
+/**
+ * `array` is a cell holding SEVERAL values — `foo,bar,baz`, `["Foo","Bar"]`, or
+ * a real JS array. The stored value is never rewritten; the type only tells the
+ * reader (filter matcher, funnel dropdown, renderer) to take the cell apart into
+ * its members. See `array-cell.ts` for the three spellings.
+ */
+export type ColumnType = 'string' | 'number' | 'date' | 'datetime' | 'boolean' | 'array';
 
 export interface ColumnSpec {
   field: string;

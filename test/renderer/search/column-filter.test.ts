@@ -294,3 +294,65 @@ describe('exact match (=)', () => {
     expect(composeColumnFilter([{ term: 'foo', negate: true, exact: true }])).toBe('!=foo');
   });
 });
+
+/**
+ * An `array` column matches PER MEMBER. The funnel dropdown is why: its tokens
+ * are exact (`=Foo`), and a cell holding several values is never exactly one of
+ * them — so without this, picking a value from the dropdown of a list column
+ * selected nothing at all.
+ */
+describe('matchesColumnFilter on an array column', () => {
+  const arr = { type: 'array' };
+
+  it('matches a member exactly, in every spelling of a list', () => {
+    expect(matchesColumnFilter('foo,bar', '=foo', arr)).toBe(true);
+    expect(matchesColumnFilter('["Foo","Bar"]', '=foo', arr)).toBe(true);
+    expect(matchesColumnFilter(['foo', 'bar'], '=foo', arr)).toBe(true);
+  });
+
+  it('does not match a value that is only PART of a member', () => {
+    expect(matchesColumnFilter('foobar,baz', '=foo', arr)).toBe(false);
+  });
+
+  it('still substring-matches without an anchor', () => {
+    expect(matchesColumnFilter('foo,bar', 'oo', arr)).toBe(true);
+    expect(matchesColumnFilter('foo,bar', 'zzz', arr)).toBe(false);
+  });
+
+  it('anchors ^ to the start of a MEMBER, not of the cell', () => {
+    // The whole cell starts with "foo", so a cell-wide ^bar would fail.
+    expect(matchesColumnFilter('foo,bar', '^bar', arr)).toBe(true);
+    expect(matchesColumnFilter('foo,bar', '^ba', arr)).toBe(true);
+    expect(matchesColumnFilter('foo,bar', '^zz', arr)).toBe(false);
+  });
+
+  it('reads a negation as "no member matches"', () => {
+    expect(matchesColumnFilter('foo,bar', '!=foo', arr)).toBe(false);
+    expect(matchesColumnFilter('foo,bar', '!=baz', arr)).toBe(true);
+  });
+
+  it('ORs several members, so two picked values keep either row', () => {
+    expect(matchesColumnFilter('foo,bar', '=foo,=baz', arr)).toBe(true);
+    expect(matchesColumnFilter('qux', '=foo,=baz', arr)).toBe(false);
+  });
+
+  it('ANDs two tokens against the SAME cell, over different members', () => {
+    // The point of AND on a list: both values must be present, in any order.
+    expect(matchesColumnFilter('foo,bar', '=foo AND =bar', arr)).toBe(true);
+    expect(matchesColumnFilter('foo,baz', '=foo AND =bar', arr)).toBe(false);
+  });
+
+  it('reads NULL as "no members at all"', () => {
+    expect(matchesColumnFilter('[]', 'NULL', arr)).toBe(true);
+    expect(matchesColumnFilter([], 'NULL', arr)).toBe(true);
+    expect(matchesColumnFilter('', 'NULL', arr)).toBe(true);
+    expect(matchesColumnFilter(null, 'NULL', arr)).toBe(true);
+    expect(matchesColumnFilter('foo,bar', 'NULL', arr)).toBe(false);
+    expect(matchesColumnFilter('foo,bar', '!NULL', arr)).toBe(true);
+  });
+
+  it('leaves a column of any other type reading the whole cell', () => {
+    expect(matchesColumnFilter('foo,bar', '=foo')).toBe(false);
+    expect(matchesColumnFilter('foo,bar', '=foo,bar')).toBe(true);
+  });
+});

@@ -4,3 +4,4 @@ export * from './row-query.js';
 export * from './column-filter.js';
 export * from './filter-sql.js';
 export * from './sql-mapping.js';
+export * from './array-cell.js';

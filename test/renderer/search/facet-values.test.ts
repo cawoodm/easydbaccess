@@ -98,3 +98,46 @@ describe('facetCounts', () => {
     expect(values.map((v) => v.value)).toEqual(['true', 'false', 'yes']);
   });
 });
+
+/**
+ * A list column's dropdown must offer the MEMBERS. Offering whole cells is
+ * useless: every row is its own "value", and picking one of them matches nothing
+ * once the exact token reaches the matcher.
+ */
+describe('an array column', () => {
+  const arr = { type: 'array' };
+
+  it('counts each member, so the counts exceed the row count', () => {
+    const r = rows('foo,bar', '["bar","baz"]', ['baz']);
+    const { values, blanks } = facetCounts(r, 'tag', arr);
+    expect(values).toEqual([
+      { value: 'bar', count: 2 },
+      { value: 'baz', count: 2 },
+      { value: 'foo', count: 1 },
+    ]);
+    expect(blanks).toBe(0);
+  });
+
+  it('counts a cell with no members as blank', () => {
+    const { values, blanks } = facetCounts(rows('a', '[]', '', null), 'tag', arr);
+    expect(values).toEqual([{ value: 'a', count: 1 }]);
+    expect(blanks).toBe(3);
+  });
+
+  it('suggests the members, distinct and sorted', () => {
+    expect(facetValues(rows('foo,bar', '["bar"]'), 'tag', arr)).toEqual(['bar', 'foo']);
+  });
+
+  it('stays facetable when the LIST is long but its members are short', () => {
+    // As one string this cell is past the limit; as a list of tags it is exactly
+    // the column that needs a dropdown.
+    const long = Array.from({ length: 20 }, (_, i) => `tag${i}`).join(',');
+    expect(long.length).toBeGreaterThan(FACET_MAX_LEN);
+    expect(facetable(rows(long), 'tag', arr)).toBe(true);
+    expect(facetable(rows(long), 'tag')).toBe(false);
+  });
+
+  it('is still rejected when one MEMBER is prose', () => {
+    expect(facetable(rows(`a,${'x'.repeat(FACET_MAX_LEN)}`), 'tag', arr)).toBe(false);
+  });
+});

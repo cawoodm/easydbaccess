@@ -49,6 +49,13 @@ describe('inferRenderer', () => {
     expect(inferRenderer('number', [1, 2])).toBeUndefined();
   });
 
+  it('gives an array column the tags renderer, whatever its values look like', () => {
+    // No sampling: an array cell holds a list by definition, so the pills fit.
+    expect(inferRenderer('array', ['foo,bar'])).toBe('tags');
+    expect(inferRenderer('array', ['["a","b"]'])).toBe('tags');
+    expect(inferRenderer('array', [])).toBe('tags');
+  });
+
   it('stringifies non-string values before testing them', () => {
     expect(inferRenderer('string', [{ toString: () => 'https://example.com/a' }])).toBe('link');
   });
