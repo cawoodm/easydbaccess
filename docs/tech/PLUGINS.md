@@ -115,7 +115,7 @@ defaults to enabled but **can** be turned off by the user.
 | `cell-color` | cell-renderer | | `color` renderer: a native `<input type=color>` swatch picker for hex values. | `registerCellRenderer` |
 | `cell-image` | cell-renderer | | `image` renderer: thumbnail + upload button; stores images as `data:` URIs. | `registerCellRenderer` |
 | `cell-tags` | cell-renderer | | `tags` renderer for `array` columns: one pill per value of the list, with a pencil to edit the raw list. Set automatically on an `array` column at import time. | `registerCellRenderer` |
-| `cell-markdown` | cell-renderer | | `markdown` renderer: shows a cell written in Markdown as formatted text, in full, with a pencil that edits the Markdown source. Shares its cell with `html-render` (`markup-cell.ts`). | `registerCellRenderer` |
+| `cell-markdown` | cell-renderer | | `markdown` renderer for a column written in Markdown: one line of flattened plain text in the cell, the formatted value in the popup, clicking the text edits the source. Shares its cell with `preview` (`preview-cell.ts`) but never guesses the language. | `registerCellRenderer` |
 | `cell-link` | cell-renderer | | `link` renderer: detects http(s) URLs, email addresses, and phone numbers per-value and renders the matching `<a>` (target `_blank`/`mailto:`/`tel:`), with a pencil to switch to raw-text edit mode. | `registerCellRenderer` |
 | `import-data` | importer | | Header "Import" button — a URL/file dialog with curated sample sources (Northwind JSON, a public CSV, Datasette examples) that runs `csv-import` and `json-import` through the import kernel and still routes Datasette to `datasette-import`; recognises a native `.db.json` dump and offers to restore the workspace instead of importing its tables; adds a per-table Refresh button for CSV/JSON snapshot origins. | `registerHeaderButton`, `registerTableButton` |
 | `auto-sync` | sync | | Background timer (1 min) that silently pushes local changes to the configured sync server and prompts to pull when the server has diverged. Shares its config with `server-sync` via `api.settings`. | `load()` (timer) |
@@ -152,9 +152,11 @@ popup for the full markup.
 
 ### HTML or Markdown — who decides
 
-Three renderers show a value as markup: `html` takes it as HTML, `markdown`
-converts it from Markdown, and `preview` has to GUESS, because it converts a
-column nobody configured. The guess is `markupKind` in `util/markdown.ts`, and it
+Three renderers show a value as markup: `html` puts it in the cell as HTML,
+`markdown` converts it from Markdown into the popup, and `preview` has to GUESS,
+because it converts a column nobody configured. `markdown` and `preview` share one
+cell (`preview-cell.ts`): one line of plain text in the grid, the render in the
+popup — a grid row is one line high, so headings and lists belong in a window. The guess is `markupKind` in `util/markdown.ts`, and it
 tests **Markdown first**: `looksLikeHtml` reads any `<word>` as a tag, and
 Markdown prose is full of angle-bracket words that are not tags — a Datasette
 changelog says `/<database>/-/create` in every second line. Read as HTML, those
