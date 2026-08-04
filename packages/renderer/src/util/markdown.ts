@@ -14,6 +14,10 @@
 // formatting survives, and a `<script>` or an `onerror=` from a CSV cannot.
 // This is CommonMark's HTML behaviour minus what can execute.
 //
+// A `<word>` that is no HTML element at all is the exception: it is escaped and
+// shown. `/<database>/-/create` in a release note is prose, and dropping it as an
+// unknown tag left a hole in the sentence.
+//
 // The supported subset, and nothing else:
 //   # h1 … ###### h6        **bold**  __bold__      *em*  _em_
 //   ~~strike~~              `code`    ```fenced```  (``` or ~~~, optional lang)
@@ -25,7 +29,7 @@
 //
 // Anything else passes through as escaped text. Unit tests in markdown.test.ts.
 
-import { esc, escEntityAware, safeUrl, sanitizeHtml, sanitizeTag, stripUnsafe, TAG_RE } from './sanitize-html.js';
+import { esc, escEntityAware, safeUrl, sanitizeHtml, sanitizeTagOrText, stripUnsafe, TAG_RE } from './sanitize-html.js';
 import { looksLikeHtml } from './html-text.js';
 
 /**
@@ -90,8 +94,8 @@ function inline(src: string): string {
   // spans, so a sanitized tag is opaque to every rule below it: no emphasis
   // marker inside an `href` can be read as emphasis, and no rule can graft a
   // `<em>` into the middle of an attribute value.
-  s = stripUnsafe(s).replace(TAG_RE, (_m, closing: string, name: string, attrs: string) => {
-    const tag = sanitizeTag(closing === '/', name, attrs);
+  s = stripUnsafe(s).replace(TAG_RE, (m: string, closing: string, name: string, attrs: string) => {
+    const tag = sanitizeTagOrText(m, closing === '/', name, attrs);
     if (tag === '') return '';
     spans.push(tag);
     return `${SENTINEL}${spans.length - 1}${SENTINEL}`;

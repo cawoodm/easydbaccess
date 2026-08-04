@@ -118,3 +118,26 @@ describe('sanitizeHtml: malformed input', () => {
     expect(sanitizeHtml('')).toBe('');
   });
 });
+
+describe('sanitizeHtml: a word that is not an element', () => {
+  /**
+   * `<database>` is not HTML — it is a word someone typed in a sentence. Dropped
+   * as an unknown tag, the sentence loses it silently, and the reader cannot tell
+   * anything was ever there. So a name HTML does not have is escaped and shown.
+   */
+  it('escapes it instead of dropping it', () => {
+    expect(sanitizeHtml('/<database>/-/create')).toBe('/&lt;database&gt;/-/create');
+    expect(sanitizeHtml('use <table_name> here')).toBe('use &lt;table_name&gt; here');
+  });
+
+  it('still drops a REAL element that is not allowed, keeping its words', () => {
+    // The distinction: `font` and `center` are elements, so the wrapper goes and
+    // the text stays. That is what an Atom-feed body needs.
+    expect(sanitizeHtml('a <font size="7">big</font> word')).toBe('a big word');
+    expect(sanitizeHtml('<center>middle</center>')).toBe('middle');
+  });
+
+  it('treats a hyphenated name as a custom element, not as a word', () => {
+    expect(sanitizeHtml('<my-widget>x</my-widget>')).toBe('x');
+  });
+});

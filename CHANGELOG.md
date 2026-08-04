@@ -11,6 +11,7 @@
 ### Bugs
 
 - 🪲 Markdown that mentions a tag, like `/<database>/-/create`, was read as HTML: the word vanished and the formatting stayed literal (v0.0.297)
+- 🪲 A `<word>` that is no HTML element, like `<database>`, was dropped from a rendered Markdown value (v0.0.299)
 
 ## 3 Aug 2026
 
