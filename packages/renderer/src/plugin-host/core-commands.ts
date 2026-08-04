@@ -1,5 +1,6 @@
 import type { HostApi } from '@easydb/shared';
 import { cascadeAllWindows, closeAllWindows, maximizeAllWindows, minimizeAllWindows, restoreAllWindows, tileAllWindows } from '../window-mgr/window-commands.js';
+import { deleteWorkspaceFlow, newWorkspaceFlow, switchWorkspaceFlow } from '../chrome/workspace-actions.js';
 
 /**
  * Registers the built-in "Windows" commands into the command palette. Called
@@ -18,6 +19,17 @@ export function registerCoreCommands(api: HostApi): void {
   ];
   for (const c of windowCommands) {
     api.ui.registerCommand({ id: c.id, title: c.title, group: 'Windows', icon: c.icon, run: c.run });
+  }
+
+  // Workspace commands. The header selector drives the same flows with a mouse;
+  // these make switching, adding and deleting reachable from the keyboard.
+  const workspaceCommands: Array<{ id: string; title: string; icon: string; keywords: string[]; run: () => Promise<void> }> = [
+    { id: 'workspace:switch', title: 'Switch workspace', icon: 'swap_horiz', keywords: ['space', 'open', 'change'], run: switchWorkspaceFlow },
+    { id: 'workspace:new', title: 'New workspace', icon: 'add', keywords: ['space', 'add', 'create', 'clone'], run: newWorkspaceFlow },
+    { id: 'workspace:delete', title: 'Delete workspace', icon: 'delete', keywords: ['space', 'remove', 'drop'], run: deleteWorkspaceFlow },
+  ];
+  for (const c of workspaceCommands) {
+    api.ui.registerCommand({ id: c.id, title: c.title, group: 'Workspace', icon: c.icon, keywords: c.keywords, run: c.run });
   }
 
   const CHANGELOG_URL = 'https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md';

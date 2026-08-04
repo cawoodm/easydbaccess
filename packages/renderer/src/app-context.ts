@@ -239,6 +239,22 @@ function readLastWorkspace(): string | null {
   }
 }
 
+/**
+ * Drop the remembered workspace if it is `id`. Called when a workspace is
+ * deleted: otherwise the next reload without `?space=` resolves step 2 to a
+ * workspace that no longer exists, and lands on whichever one happens to be
+ * first instead of the one the user was sent to.
+ */
+export function forgetLastWorkspace(id: string): void {
+  try {
+    if (globalThis.localStorage?.getItem(LAST_WORKSPACE_KEY) === id) {
+      globalThis.localStorage.removeItem(LAST_WORKSPACE_KEY);
+    }
+  } catch {
+    /* ignore — persistence is best-effort */
+  }
+}
+
 function persistLastWorkspace(id: string): void {
   try {
     globalThis.localStorage?.setItem(LAST_WORKSPACE_KEY, id);

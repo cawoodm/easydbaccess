@@ -32,7 +32,8 @@ Tables → (other groups)**; within a group, registration order is preserved.
 ## Built-in commands
 
 Registered in `plugin-host/core-commands.ts` (`registerCoreCommands`, called
-once at boot from `app-context.ts`), all in the **Windows** group. The bulk
+once at boot from `app-context.ts`), in the **Windows**, **Workspace** and
+**App** groups. The bulk
 window operations live in `window-mgr/window-commands.ts` and act on **every**
 open panel — table windows *and* view-instance windows — via the panel
 shell's global `getPanels()` registry:
@@ -45,6 +46,29 @@ shell's global `getPanels()` registry:
 | Cascade windows | Normalize + stagger each window down-right. |
 | Tile windows | Normalize + arrange in a grid. |
 | Close all windows | Close every panel. |
+
+The **Workspace** group holds the three things you can do to a workspace. The
+flows themselves are in `chrome/workspace-actions.ts`, shared with the header's
+workspace selector so the mouse and the keyboard take the same path:
+
+| Command | Action |
+|---|---|
+| Switch workspace | Pick another workspace by name and open it. |
+| New workspace | Name it, choose what it inherits (everything / settings / nothing), open it. |
+| Delete workspace | Pick one, see what that removes, delete it and everything in it. |
+
+Opening a workspace RELOADS the page with `?space=<name>`. Dexie collections,
+panel windows and the plugin host all bind to one `workspaceId` at boot, so
+switching live would mean tearing down every panel and rebinding every
+subscription.
+
+Deleting takes the workspace's tables and their rows, its view instances and
+templates, and its settings (`db/delete-workspace.ts`). That last one is not
+housekeeping: a workspace id is its slugified name, so a leftover settings row
+would be inherited by the next workspace created under the same name. Device-
+local `user` settings and cached plugin bodies stay — they belong to the device,
+not the workspace. Deleting the ACTIVE workspace reloads into a survivor, or
+into a fresh `default` when it was the last one.
 
 Cascade/tile position windows within the **currently visible** region of the
 pan/zoom canvas (geometry is computed in viewport-local coordinates from the
