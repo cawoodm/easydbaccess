@@ -70,6 +70,8 @@ export class PreviewCell extends HTMLElement {
   /** The STORED cell, set by data-table only on a scripted column. */
   private _source: string | undefined;
   private _label: string | undefined;
+  /** The STORED value may not be written: show the source, offer no edit. */
+  private _readonly = false;
 
   set value(v: string) {
     const next = v ?? '';
@@ -92,6 +94,27 @@ export class PreviewCell extends HTMLElement {
     this._label = c?.label;
   }
 
+  /**
+   * data-table binds `.sourceReadonly` when the STORED value may not be written:
+   * a read-only table or view, or a read-only column. The cell still opens its
+   * source — reading a value the column is too narrow for is the whole point —
+   * but as a viewer.
+   *
+   * Deliberately NOT `.readonly`, which a scripted column always sets: there the
+   * displayed value is computed and uneditable while the source behind it is
+   * still fair game (that is what the pencil is for). The two mean different
+   * things, so they are different properties.
+   */
+  set sourceReadonly(v: boolean) {
+    const next = v === true;
+    if (this._readonly === next) return;
+    this._readonly = next;
+    this.render();
+  }
+  get sourceReadonly(): boolean {
+    return this._readonly;
+  }
+
   private get title_(): string {
     return this._label ?? this.language;
   }
@@ -104,10 +127,13 @@ export class PreviewCell extends HTMLElement {
     this.innerHTML = '';
     if (!this._value) {
       const empty = document.createElement('span');
-      empty.style.cssText = 'color:#9ca3af;cursor:text';
+      empty.style.cssText = this._readonly ? 'color:#9ca3af' : 'color:#9ca3af;cursor:text';
       empty.textContent = 'empty';
-      empty.title = 'Click to edit';
-      empty.addEventListener('click', () => this.openEditor());
+      // Nothing to read and nothing to write: a read-only empty cell is inert.
+      if (!this._readonly) {
+        empty.title = 'Click to edit';
+        empty.addEventListener('click', () => this.openEditor());
+      }
       this.append(empty);
       return;
     }
@@ -127,7 +153,7 @@ export class PreviewCell extends HTMLElement {
     // `maxChars` only bounds what is put in the DOM.
     const text = htmlToPreviewText(this.toHtml(this._value) ?? this._value);
     view.textContent = text.length > maxChars ? text.slice(0, maxChars) + '…' : text;
-    view.title = 'Click to edit';
+    view.title = this._readonly ? 'Click to view the source' : 'Click to edit';
     view.style.cssText =
       'flex:0 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:text';
     view.addEventListener('click', (e) => {
@@ -197,7 +223,14 @@ export class PreviewCell extends HTMLElement {
    */
   private openEditor() {
     const scripted = this._source !== undefined;
-    openHtmlEditor(`Edit ${this.title_}`, scripted ? this._source! : this._value, (next) => {
+    const source = scripted ? this._source! : this._value;
+    // Read-only: the same panel, opened to READ. Nothing here can save, and the
+    // core refuses the write anyway (see data-table's `commitCell`).
+    if (this._readonly) {
+      openHtmlEditor(`View ${this.title_}`, source, () => undefined, { readonly: true });
+      return;
+    }
+    openHtmlEditor(`Edit ${this.title_}`, source, (next) => {
       if (scripted) {
         this._source = next;
       } else {

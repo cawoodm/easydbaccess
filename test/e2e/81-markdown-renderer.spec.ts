@@ -82,15 +82,29 @@ test('a value that reads like HTML is still converted as Markdown', async ({ pag
   // `preview` would call this HTML — it opens with a tag — and then show the
   // `**` as text. A declared Markdown column is never guessed at.
   //
-  // The angle-bracket word survives because it is in a code span. Raw HTML in a
-  // Markdown source is still SANITIZED (see util/markdown.ts), so a bare
-  // `<database>` outside code is dropped as an unknown tag either way.
+  // The angle-bracket word survives whether or not it sits in a code span: a
+  // `<word>` HTML does not have is escaped, not dropped (see util/markdown.ts).
+  // A real element that is not allowed still loses its wrapper.
   const id = await mdTable(page, 'mdnoguess', '`<database>` is **the** word');
   await cellOf(page, id).locator('button').click();
 
   const popup = popupOf(page);
   await expect(popup.locator('.jsPanel-content strong')).toHaveText('the');
   await expect(popup.locator('.jsPanel-content code')).toHaveText('<database>');
+});
+
+test('an angle-bracket word outside a code span is shown, not dropped', async ({ page }) => {
+  const id = await mdTable(page, 'mdbaretag', 'Call /<database>/-/create for **new** tables.');
+  const cell = cellOf(page, id);
+
+  // Visible in the one-line cell…
+  expect(await cell.textContent()).toContain('/<database>/-/create');
+
+  // …and in the popup, with the formatting around it working.
+  await cell.locator('button').click();
+  const popup = popupOf(page);
+  await expect(popup.locator('.jsPanel-content strong')).toHaveText('new');
+  expect(await popup.locator('.jsPanel-content').textContent()).toContain('/<database>/-/create');
 });
 
 test('an empty cell says so, and a script column keeps its source', async ({ page }) => {

@@ -20,6 +20,7 @@ import {
   removeUserSetting,
   writeUserSetting,
 } from '../db/user-settings.js';
+import { resolvesToSameSecret } from '../db/secret-guard.js';
 
 export interface ApiFactoryOpts {
   store: DataStore;
@@ -147,6 +148,19 @@ function createSettingsApi(store: DataStore, registries: Registries): SettingsAp
   const resolveSecrets = (value: unknown): unknown =>
     typeof value === 'string' ? interpolateSecrets(value, parseSecrets(readSecretsText())) : value;
 
+  /** The RAW stored value of a key — the reference text, not what it resolves to. */
+  const rawOf = async (k: string): Promise<unknown> =>
+    hasUserSetting(k) ? readUserSetting(k) : (await store.settings.findOne(k))?.value;
+
+  /**
+   * Would this write replace a stored `${secret:name}` reference with the secret
+   * it resolves to? The rule and the reasoning are in `db/secret-guard.ts`;
+   * gist-sync saving a new gist id alongside the credentials it had just read is
+   * how it was found.
+   */
+  const isResolvedRefWrite = async (k: string, next: unknown): Promise<boolean> =>
+    resolvesToSameSecret(await rawOf(k), next, parseSecrets(readSecretsText()));
+
   return {
     async get<T = unknown>(pluginId: string, key: string): Promise<T | undefined> {
       const k = fullKey(pluginId, key);
@@ -162,6 +176,9 @@ function createSettingsApi(store: DataStore, registries: Registries): SettingsAp
 
     async set(pluginId, key, value, scope): Promise<void> {
       const k = fullKey(pluginId, key);
+      // Keep a `${secret:name}` reference rather than let its own resolved value
+      // overwrite it — see `isResolvedRefWrite`.
+      if (await isResolvedRefWrite(k, value)) return;
       const target: SettingScope = scope ?? fieldOf(pluginId, key)?.scope ?? 'workspace';
       if (target === 'user') {
         writeUserSetting(k, value);

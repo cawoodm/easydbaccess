@@ -8,6 +8,7 @@ import type {
   ViewTemplate,
 } from '@easydb/shared';
 import { cryptoUUID, slugTable } from '../util/ids.js';
+import { withoutRawSecrets } from '../db/secret-guard.js';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a
 // custom element on import, which would blow up under Vitest's default
@@ -295,6 +296,31 @@ async function openViewGist(api: HostApi): Promise<void> {
 /** Which slice of the workspace a push/pull touches. */
 type SyncScope = 'all' | 'data' | 'settings';
 
+/** Is this a table file THIS plugin wrote? The marker file is not one. */
+function isTableFile(name: string): boolean {
+  return name.endsWith('.table.json') && !name.startsWith('_easydb');
+}
+
+/**
+ * The gist's table files that this push is not writing — the files of tables that
+ * were deleted locally, and of any table that was RENAMED (the slug goes into the
+ * file name, so a rename leaves the old name behind).
+ *
+ * A PATCH only touches the files it names, so without this they stay in the gist
+ * for good and the next pull brings the deleted table back. Files that are not
+ * ours are never listed: a gist the user pointed at may hold anything else.
+ *
+ * Exported for the unit tests — a real push needs the GitHub API, which the e2e
+ * suite does not talk to.
+ */
+export function staleTableFiles(
+  remote: Iterable<string>,
+  pushed: Iterable<string>,
+): string[] {
+  const keep = new Set(pushed);
+  return [...remote].filter((name) => isTableFile(name) && !keep.has(name)).sort();
+}
+
 async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
   const creds = await ensureCreds(api);
   if (!creds) return;
@@ -368,10 +394,19 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
     );
     // Name + value only: the physical key and workspaceId are this device's, and
     // the pulling side re-derives both for ITS workspace (see settingsView).
-    const settings = (await api.store.settings.find()).map((s) => ({
-      name: s.name,
-      value: s.value,
-    }));
+    const all = (await api.store.settings.find()).map((s) => ({ name: s.name, value: s.value }));
+    // A credential setting may only leave this device as a `${secret:name}`
+    // reference. Anything holding the value itself stays behind, whatever put it
+    // there — see db/secret-guard.ts. This is the last gate before the network.
+    const { kept: settings, withheld } = withoutRawSecrets(all);
+    if (withheld.length > 0) {
+      api.ui.dialogs.toast(
+        `Not pushed: ${withheld.join(', ')} — a secret is stored as its own value. ` +
+          `Move it into the secrets store (Settings → General) and reference it with ` +
+          `\${secret:name}.`,
+        { kind: 'warning', title: 'Gist sync' },
+      );
+    }
     files['_easydb.workspace.json'] = {
       content: JSON.stringify(
         {
@@ -388,6 +423,15 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
     };
   }
 
+  // `null` is how the API deletes a gist file. Only a data push prunes: a
+  // settings-only push says nothing about which tables exist.
+  const body: Record<string, { content: string } | null> = { ...files };
+  let removed: string[] = [];
+  if (includeData && creds.gistId) {
+    removed = await confirmStaleRemoval(api, creds, Object.keys(files));
+    for (const name of removed) body[name] = null;
+  }
+
   let updated: { id: string; html_url?: string };
   if (creds.gistId) {
     const res = await fetch(`https://api.github.com/gists/${creds.gistId}`, {
@@ -397,7 +441,7 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
         Accept: 'application/vnd.github+json',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ files, description: `easyDBAccess workspace: ${wsId}` }),
+      body: JSON.stringify({ files: body, description: `easyDBAccess workspace: ${wsId}` }),
     });
     if (!res.ok) throw new Error(await readError(res));
     updated = await res.json();
@@ -417,8 +461,11 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
     });
     if (!res.ok) throw new Error(await readError(res));
     updated = await res.json();
+    // Only the id is new. Writing the whole credential set back would push the
+    // RESOLVED token into the setting that holds the reference (settings.set
+    // refuses that now, but there is no reason to ask).
     creds.gistId = updated.id;
-    await saveCreds(api, creds);
+    await api.settings.set('gist-sync', 'gist_id', updated.id);
   }
 
   const url = updated.html_url ?? `https://gist.github.com/${creds.user}/${updated.id}`;
@@ -428,7 +475,9 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
       : scope === 'data'
         ? `${tables.length} table${tables.length === 1 ? '' : 's'} (data only)`
         : `${tables.length} table${tables.length === 1 ? '' : 's'}`;
-  api.ui.dialogs.toast(`Pushed ${what}.  ${url}`, {
+  const alsoRemoved =
+    removed.length > 0 ? `  Removed ${removed.length} file${removed.length === 1 ? '' : 's'}.` : '';
+  api.ui.dialogs.toast(`Pushed ${what}.${alsoRemoved}  ${url}`, {
     kind: 'success',
     title: 'Gist sync',
   });
@@ -632,6 +681,44 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
   // (liveQuery fires per write, so the window manager's z-sort never sees them
   // as a batch). Ask the window manager to restack the panels by saved z.
   document.dispatchEvent(new CustomEvent('easydb:restack-windows'));
+}
+
+/**
+ * Which of the gist's table files this push should DELETE, after asking.
+ *
+ * It asks for the same reason the pull side asks before deleting local tables
+ * (`offerPrune`): a push from a device that has not pulled lately would otherwise
+ * remove a table another device added. Answering no keeps every remote file, so
+ * the push is exactly what it always was.
+ *
+ * A failed listing is not a failed push — the gist is left as it is and the
+ * tables being pushed still go up.
+ */
+async function confirmStaleRemoval(
+  api: HostApi,
+  creds: GistCreds,
+  pushed: string[],
+): Promise<string[]> {
+  let remote: string[];
+  try {
+    const res = await fetch(`https://api.github.com/gists/${creds.gistId}`, {
+      headers: { Authorization: `Bearer ${creds.token}`, Accept: 'application/vnd.github+json' },
+    });
+    if (!res.ok) return [];
+    const gist = (await res.json()) as { files?: Record<string, unknown> };
+    remote = Object.keys(gist.files ?? {});
+  } catch {
+    return [];
+  }
+  const stale = staleTableFiles(remote, pushed);
+  if (stale.length === 0) return [];
+  const yes = await api.ui.dialogs.confirm(
+    `The gist has these table files that this workspace no longer has:\n\n${nameList(stale)}\n\n` +
+      `Delete them from the gist, so it matches this workspace? Keep them if another ` +
+      `device pushed them and you have not pulled yet.`,
+    'Delete table files missing from this workspace?',
+  );
+  return yes ? stale : [];
 }
 
 /** At most `max` names, with a "+n more" tail so a long list stays readable. */

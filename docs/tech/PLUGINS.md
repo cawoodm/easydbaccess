@@ -164,6 +164,27 @@ changelog says `/<database>/-/create` in every second line. Read as HTML, those
 words are swallowed by the parser and every `**bold**` stays literal. A value
 whose first character opens a tag is HTML whatever else it holds.
 
+### Read-only: two different questions
+
+A cell renderer is handed two flags, and they are not the same question:
+
+- **`readonly`** — may the DISPLAYED value be edited? A scripted column always
+  sets it, because what the cell shows is computed. The editor renderers
+  (`date`, `datetime`, `boolean`, `tags`) key on this and render display-only.
+- **`sourceReadonly`** — may the STORED value be written at all? True for a
+  read-only table or view, and for a read-only column. A renderer with a SOURCE
+  editor (`html`'s pencil, `preview` / `markdown`'s click) keys on this one: a
+  scripted column in an editable table has `readonly` true and `sourceReadonly`
+  false, so the pencil still opens the Markdown the script reads.
+
+With `sourceReadonly`, `preview` and `markdown` open their source as a VIEWER —
+the textarea is read-only and there is no Save button — because a truncated cell
+still has to be readable. `html` keeps rendering and drops its pencil.
+
+`commitCell` in `data-table.ts` refuses the write regardless, so a renderer that
+ignores either flag (a third-party one, or a built-in that never honoured them)
+cannot write through to a read-only table or column; a toast says why.
+
 ### Invalid stored values
 
 A stored value that doesn't fit its column must never be silently blanked or
@@ -411,14 +432,27 @@ boot to bootstrap a fresh device onto an existing workspace), and as a
 migration path `loadCreds` falls back to if the new per-field settings
 aren't populated yet.
 
+A push also asks to DELETE the gist's table files that this workspace no longer
+has (`staleTableFiles` + `confirmStaleRemoval`). A PATCH only touches the files it
+names, so the file of a deleted table — or the old name of a renamed one, since the
+slug is in the file name — stayed in the gist and the next pull brought the table
+back. It asks for the same reason the pull side asks (`offerPrune`): a push from a
+device that has not pulled lately would otherwise remove a table another device
+added. Only a data push prunes, and only files matching `*.table.json`.
+
 Push now bundles more than tables: alongside each table's own
 `<slug>.table.json` file and the `_easydb.workspace.json` marker (which
 lets Pull tell an easyDBAccess gist from an unrelated one), that marker file
-also carries the workspace's `viewTemplates`, `viewInstances`, and every
-**non-secret** `settings` entry — `isSyncableSetting()` excludes any key
-starting with `gist:`, `datasette:token:`, or `server-sync:` before
-including it, so a pull can restore views and plugin config too, without
-ever round-tripping a credential through the gist itself. Each table's own
+also carries the workspace's `viewTemplates`, `viewInstances`, and its
+`settings` entries, so a pull can restore views and plugin config too. Key
+prefixes are no longer excluded (they were, until secrets moved into
+`secrets.txt`); instead `withoutRawSecrets()` from
+[`db/secret-guard.ts`](../../packages/renderer/src/db/secret-guard.ts) withholds
+any setting that actually HOLDS a credential — a credential-named key whose value
+is neither empty nor a `${secret:name}` reference, or a composite record with such
+a member (the legacy `gist:<id>` value, or `datasette:token:<base>` which is
+written straight to the settings table). The whole entry is left out rather than
+blanked, and the push toast names what stayed behind. Each table's own
 file is likewise more than rows: `tableToFile()` also carries `title`,
 `view`, `windowGeometry`, `sortColumn`/`sortAsc`, `filters`, `labelColumn`,
 `deletedColumns`, `readonly`, and `info`, so a pull restores a table's window

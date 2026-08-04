@@ -393,9 +393,7 @@ export class AppShell extends LitElement {
     });
   }
 
-  private snapshotRegistries(ctx: {
-    registries: { footerButtons: ButtonSpec[]; headerButtons: ButtonSpec[] };
-  }) {
+  private snapshotRegistries(ctx: { registries: { footerButtons: ButtonSpec[]; headerButtons: ButtonSpec[] } }) {
     this.footerButtons = [...ctx.registries.footerButtons];
     this.headerButtons = [...ctx.registries.headerButtons];
   }
@@ -452,16 +450,7 @@ export class AppShell extends LitElement {
     // utility actions like Settings. Otherwise header buttons get the primary
     // treatment; the footer distinguishes primary vs slot.
     if (b.variant === 'secondary') {
-      return html`
-        <button
-          class="icon-btn"
-          title=${b.tooltip ?? b.label}
-          aria-label=${b.tooltip ?? b.label}
-          @click=${() => this.runSlot(b)}
-        >
-          ${renderButtonIcon(b.icon)}
-        </button>
-      `;
+      return html` <button class="icon-btn" title=${b.tooltip ?? b.label} aria-label=${b.tooltip ?? b.label} @click=${() => this.runSlot(b)}>${renderButtonIcon(b.icon)}</button> `;
     }
     const cls = where === 'header' || b.variant === 'primary' ? 'primary' : 'slot';
     return html`
@@ -477,55 +466,25 @@ export class AppShell extends LitElement {
       <header>
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
-          <a
-            class="version-link"
-            href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md"
-            target="_blank"
-            rel="noopener"
-            title="View the changelog on GitHub"
-            ><span class="version">v0.0.306</span></a
+          <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
+            ><span class="version">v0.0.307</span></a
           ></strong
         >
-        ${this.headerButtons
-          .filter((b) => b.variant !== 'secondary')
-          .map((b) => this.renderSlotButton(b, 'header'))}
+        ${this.headerButtons.filter((b) => b.variant !== 'secondary').map((b) => this.renderSlotButton(b, 'header'))}
         ${this.searchOpen
           ? html`<span class="search-wrap">
-              <input
-                class="search"
-                type="search"
-                placeholder="search all tables…"
-                .value=${this.searchQuery}
-                @input=${this.onSearchInput}
-                @blur=${this.closeSearchOnBlur}
-              />
-              ${this.searchQuery.length > 0
-                ? html`<button
-                    class="search-clear"
-                    title="Clear search"
-                    aria-label="Clear search"
-                    @mousedown=${this.clearSearch}
-                  >
-                    ×
-                  </button>`
-                : ''}
+              <input class="search" type="search" placeholder="search all tables…" .value=${this.searchQuery} @input=${this.onSearchInput} @blur=${this.closeSearchOnBlur} />
+              ${this.searchQuery.length > 0 ? html`<button class="search-clear" title="Clear search" aria-label="Clear search" @mousedown=${this.clearSearch}>×</button>` : ''}
             </span>`
           : html`<button
               class="icon-btn ${this.searchQuery.trim().length > 0 ? 'active' : ''}"
-              title=${this.searchQuery.trim().length > 0
-                ? `Filtering all tables: ${this.searchQuery}`
-                : 'Search across all tables in this workspace'}
+              title=${this.searchQuery.trim().length > 0 ? `Filtering all tables: ${this.searchQuery}` : 'Search across all tables in this workspace'}
               aria-label="Search"
               @click=${this.openSearch}
             >
               <span class="mi" aria-hidden="true">search</span>
             </button>`}
-        <button
-          class="icon-btn"
-          title="Add, disable, or remove plugins"
-          aria-label="Plugins"
-          @click=${() => this.api?.ui.openPluginManager()}
-        >
+        <button class="icon-btn" title="Add, disable, or remove plugins" aria-label="Plugins" @click=${() => this.api?.ui.openPluginManager()}>
           <span class="mi" aria-hidden="true">extension</span>
         </button>
         <a
@@ -538,9 +497,7 @@ export class AppShell extends LitElement {
         >
           <span class="mi" aria-hidden="true">help</span>
         </a>
-        ${this.headerButtons
-          .filter((b) => b.variant === 'secondary')
-          .map((b) => this.renderSlotButton(b, 'header'))}
+        ${this.headerButtons.filter((b) => b.variant === 'secondary').map((b) => this.renderSlotButton(b, 'header'))}
       </header>
       <app-progress></app-progress>
       <main><table-list></table-list></main>

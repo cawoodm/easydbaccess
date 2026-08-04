@@ -258,9 +258,54 @@ export function stripUnsafe(src: string): string {
 }
 
 /**
- * Sanitize a run of HTML: allowed tags are rebuilt, everything else becomes
- * text. Text keeps its entities (see `escEntityAware`), so `&amp;` in the
- * source still shows as `&`.
+ * Element names HTML actually HAS — the allowlist plus everything it leaves out.
+ * Used only to tell a tag from a word: `<font>` is a real element (dropped, its
+ * words kept), while `<database>` is not an element at all.
+ *
+ * The dangerous ones are in here too, and that is safe: `stripUnsafe` removes
+ * `<script>` / `<style>` and their contents before any of this runs.
+ */
+const KNOWN_HTML = new Set([
+  'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio', 'b', 'base', 'bdi', 'bdo', 'big',
+  'blockquote', 'body', 'br', 'button', 'canvas', 'caption', 'center', 'circle', 'cite', 'code',
+  'col', 'colgroup', 'data', 'datalist', 'dd', 'defs', 'del', 'details', 'dfn', 'dialog', 'div',
+  'dl', 'dt', 'em', 'embed', 'fieldset', 'figcaption', 'figure', 'font', 'footer', 'form', 'g',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html', 'i', 'iframe',
+  'img', 'input', 'ins', 'kbd', 'label', 'legend', 'li', 'line', 'link', 'main', 'map', 'mark',
+  'marquee', 'menu', 'meta', 'meter', 'nav', 'noscript', 'object', 'ol', 'optgroup', 'option',
+  'output', 'p', 'param', 'path', 'picture', 'polygon', 'polyline', 'pre', 'progress', 'q', 'rect',
+  'rp', 'rt', 'ruby', 's', 'samp', 'script', 'section', 'select', 'slot', 'small', 'source', 'span',
+  'strike', 'strong', 'style', 'sub', 'summary', 'sup', 'svg', 'table', 'tbody', 'td', 'template',
+  'text', 'textarea', 'tfoot', 'th', 'thead', 'time', 'title', 'tr', 'track', 'tt', 'u', 'ul',
+  'use', 'var', 'video', 'wbr',
+]);
+
+/**
+ * One tag from the source: rebuilt if it is allowed, dropped if it is a real
+ * element that is not, and ESCAPED AS TEXT if it is no element at all.
+ *
+ * That last case is the `<database>` case. A Datasette changelog says
+ * `/<database>/-/create` in prose, and dropping it left the sentence with a hole
+ * in it — the reader cannot tell that a word was ever there. Escaped, it reads as
+ * written and still cannot execute. A hyphenated name (`<my-widget>`) is a valid
+ * custom element, so it counts as a tag and is dropped like any other.
+ */
+export function sanitizeTagOrText(
+  match: string,
+  closing: boolean,
+  rawName: string,
+  rawAttrs: string,
+): string {
+  const name = rawName.toLowerCase();
+  const isTag = ALLOWED.has(name) || KNOWN_HTML.has(name) || name.includes('-');
+  return isTag ? sanitizeTag(closing, rawName, rawAttrs) : esc(match);
+}
+
+/**
+ * Sanitize a run of HTML: allowed tags are rebuilt, a real element that is not
+ * allowed is dropped with its words kept, and a `<word>` that is no element at
+ * all is escaped and shown. Text keeps its entities (see `escEntityAware`), so
+ * `&amp;` in the source still shows as `&`.
  */
 export function sanitizeHtml(src: string): string {
   const cleaned = stripUnsafe(src);
@@ -268,7 +313,7 @@ export function sanitizeHtml(src: string): string {
   let at = 0;
   for (const m of cleaned.matchAll(TAG_RE)) {
     out += escEntityAware(cleaned.slice(at, m.index));
-    out += sanitizeTag(m[1] === '/', m[2]!, m[3]!);
+    out += sanitizeTagOrText(m[0], m[1] === '/', m[2]!, m[3]!);
     at = m.index + m[0].length;
   }
   return out + escEntityAware(cleaned.slice(at));

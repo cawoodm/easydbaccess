@@ -82,6 +82,14 @@ describe('markdownToHtml: HTML in the source', () => {
     expect(markdownToHtml('a <font size="7">dropped wrapper</font>')).toBe('<p>a dropped wrapper</p>');
   });
 
+  it('shows an angle-bracket WORD as text, and keeps formatting around it', () => {
+    // `<database>` is no element, so escaping it is the only way the word
+    // survives — see sanitize-html.ts. The Markdown around it still runs.
+    const html = markdownToHtml('Call /<database>/-/create for **new** tables.');
+    expect(html).toContain('/&lt;database&gt;/-/create');
+    expect(html).toContain('<strong>new</strong>');
+  });
+
   it('does not double-encode an entity that the source already had', () => {
     expect(markdownToHtml('<p>Tom &amp; Jerry</p>')).toBe('<p>Tom &amp; Jerry</p>');
   });
