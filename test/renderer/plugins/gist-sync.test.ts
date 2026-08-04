@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { HostApi, Table, ViewInstance } from '@easydb/shared';
-import { fetchGistFileContent, offerPrune } from '../../../packages/renderer/src/plugins/gist-sync.js';
+import {
+  fetchGistFileContent,
+  offerPrune,
+  staleTableFiles,
+} from '../../../packages/renderer/src/plugins/gist-sync.js';
 
 // offerPrune reaches the window manager through a dynamic import; the real module
 // registers custom elements and cannot load in this Node environment.
@@ -130,5 +134,41 @@ describe('offerPrune', () => {
     );
     await offerPrune(f.api, WS, { tableNames: new Set(), viewInstanceIds: new Set() });
     expect(f.confirm).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A gist PATCH only touches the files it names, so the file of a table that was
+ * deleted locally stayed in the gist and the next pull brought the table back.
+ * These are the files a push must ask to delete.
+ */
+describe('staleTableFiles', () => {
+  it('names a table file the push is not writing', () => {
+    const remote = ['pets.table.json', 'cities.table.json', '_easydb.workspace.json'];
+    expect(staleTableFiles(remote, ['pets.table.json'])).toEqual(['cities.table.json']);
+  });
+
+  it('catches the old name of a RENAMED table — the slug is in the file name', () => {
+    expect(staleTableFiles(['old_name.table.json'], ['new_name.table.json'])).toEqual([
+      'old_name.table.json',
+    ]);
+  });
+
+  it('never touches the marker file or anything that is not ours', () => {
+    const remote = ['_easydb.workspace.json', 'README.md', 'notes.txt', 'x.table.json'];
+    expect(staleTableFiles(remote, [])).toEqual(['x.table.json']);
+  });
+
+  it('answers nothing when the gist matches the push', () => {
+    const files = ['a.table.json', 'b.table.json'];
+    expect(staleTableFiles(files, files)).toEqual([]);
+    expect(staleTableFiles([], files)).toEqual([]);
+  });
+
+  it('sorts, so the confirm dialog reads the same way twice', () => {
+    expect(staleTableFiles(['b.table.json', 'a.table.json'], [])).toEqual([
+      'a.table.json',
+      'b.table.json',
+    ]);
   });
 });

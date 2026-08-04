@@ -403,6 +403,14 @@ boot to bootstrap a fresh device onto an existing workspace), and as a
 migration path `loadCreds` falls back to if the new per-field settings
 aren't populated yet.
 
+A push also asks to DELETE the gist's table files that this workspace no longer
+has (`staleTableFiles` + `confirmStaleRemoval`). A PATCH only touches the files it
+names, so the file of a deleted table — or the old name of a renamed one, since the
+slug is in the file name — stayed in the gist and the next pull brought the table
+back. It asks for the same reason the pull side asks (`offerPrune`): a push from a
+device that has not pulled lately would otherwise remove a table another device
+added. Only a data push prunes, and only files matching `*.table.json`.
+
 Push now bundles more than tables: alongside each table's own
 `<slug>.table.json` file and the `_easydb.workspace.json` marker (which
 lets Pull tell an easyDBAccess gist from an unrelated one), that marker file
