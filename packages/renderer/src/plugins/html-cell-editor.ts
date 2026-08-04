@@ -41,8 +41,21 @@ export const PENCIL_SVG =
 export const POPOUT_SVG =
   '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7"/><path d="M21 3l-9 9"/><path d="M19 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6"/></svg>';
 
-/** Edit a cell's raw source in a textarea panel. Save calls `onSave`. */
-export function openHtmlEditor(title: string, value: string, onSave: (next: string) => void): void {
+/**
+ * Edit a cell's raw source in a textarea panel. Save calls `onSave`.
+ *
+ * `opts.readonly` opens the same panel to READ: the textarea cannot be typed in,
+ * there is no Save button and Ctrl+Enter does nothing. A read-only table still
+ * shows the source behind a `preview` / `markdown` cell — that is what a
+ * truncated cell is for — without offering an edit the core would refuse.
+ */
+export function openHtmlEditor(
+  title: string,
+  value: string,
+  onSave: (next: string) => void,
+  opts?: { readonly?: boolean },
+): void {
+  const readonly = opts?.readonly === true;
   const content = document.createElement('div');
   content.style.cssText = 'display:flex;flex-direction:column;gap:0.5rem;height:100%;box-sizing:border-box;padding:0.5rem';
   const ta = document.createElement('textarea');
@@ -52,13 +65,19 @@ export function openHtmlEditor(title: string, value: string, onSave: (next: stri
   bar.style.cssText = 'display:flex;justify-content:flex-end;gap:0.5rem;flex:none';
   const cancel = document.createElement('button');
   cancel.type = 'button';
-  cancel.textContent = 'Cancel';
+  cancel.textContent = readonly ? 'Close' : 'Cancel';
   cancel.style.cssText = 'padding:0.3rem 0.8rem;cursor:pointer';
   const save = document.createElement('button');
   save.type = 'button';
   save.textContent = 'Save';
   save.style.cssText = 'padding:0.3rem 0.8rem;cursor:pointer;background:#7c3aed;color:#fff;border:0;border-radius:0.25rem';
-  bar.append(cancel, save);
+  if (readonly) {
+    ta.readOnly = true;
+    ta.style.background = '#f9fafb';
+    bar.append(cancel);
+  } else {
+    bar.append(cancel, save);
+  }
   content.append(ta, bar);
 
   const panel = createPanel({
@@ -89,6 +108,7 @@ export function openHtmlEditor(title: string, value: string, onSave: (next: stri
   // Ctrl+Enter saves. Escape cancels through the shell's `closeOnEscape`, which
   // is why there is no Escape branch here.
   ta.addEventListener('keydown', (e) => {
+    if (readonly) return;
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       save.click();

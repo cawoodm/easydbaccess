@@ -163,6 +163,27 @@ changelog says `/<database>/-/create` in every second line. Read as HTML, those
 words are swallowed by the parser and every `**bold**` stays literal. A value
 whose first character opens a tag is HTML whatever else it holds.
 
+### Read-only: two different questions
+
+A cell renderer is handed two flags, and they are not the same question:
+
+- **`readonly`** — may the DISPLAYED value be edited? A scripted column always
+  sets it, because what the cell shows is computed. The editor renderers
+  (`date`, `datetime`, `boolean`, `tags`) key on this and render display-only.
+- **`sourceReadonly`** — may the STORED value be written at all? True for a
+  read-only table or view, and for a read-only column. A renderer with a SOURCE
+  editor (`html`'s pencil, `preview` / `markdown`'s click) keys on this one: a
+  scripted column in an editable table has `readonly` true and `sourceReadonly`
+  false, so the pencil still opens the Markdown the script reads.
+
+With `sourceReadonly`, `preview` and `markdown` open their source as a VIEWER —
+the textarea is read-only and there is no Save button — because a truncated cell
+still has to be readable. `html` keeps rendering and drops its pencil.
+
+`commitCell` in `data-table.ts` refuses the write regardless, so a renderer that
+ignores either flag (a third-party one, or a built-in that never honoured them)
+cannot write through to a read-only table or column; a toast says why.
+
 ### Invalid stored values
 
 A stored value that doesn't fit its column must never be silently blanked or

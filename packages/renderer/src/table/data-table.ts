@@ -686,6 +686,21 @@ export class DataTable extends LitElement {
     value: unknown,
   ) {
     const col = this.columns.find((c) => c.field === field);
+    // The CORE refuses the write, whatever the renderer offered. A renderer is a
+    // display concern and may ignore `.readonly` — a third-party one, or a
+    // built-in that never honoured it (the `preview` cell opened a Save-able
+    // editor on a read-only table). Nothing should be able to write through it.
+    if (this.readOnly || col?.readonly === true) {
+      ctx.api.ui.dialogs.toast(
+        this.readOnly
+          ? 'This table is read-only.'
+          : `“${col?.label ?? field}” is a read-only column.`,
+        { kind: 'warning', title: 'Not saved' },
+      );
+      // Re-render so an editor that got this far snaps back to the stored value.
+      this.requestUpdate();
+      return;
+    }
     if (col) {
       const reason = validate(col, value, this.rows, row.id);
       if (reason) {
@@ -772,7 +787,8 @@ export class DataTable extends LitElement {
    *
    * `readonly` stays true — the computed value itself cannot be edited — but the
    * renderer also gets `rawValue`, the STORED cell, and its `change` event now
-   * writes there. A renderer that offers an editor can therefore edit the value
+   * writes there. `sourceReadonly` is therefore NOT true here unless the table
+   * itself is read-only: the pencil must keep opening the source. A renderer that offers an editor can therefore edit the value
    * the script works FROM: the link renderer's pencil used to open the computed
    * URL and then throw the edit away, because this branch wired no `change`
    * handler at all. Renderers that honour `readonly` (boolean, date, datetime)
@@ -798,6 +814,7 @@ export class DataTable extends LitElement {
       .column=${col}
       .row=${row.data}
       .readonly=${true}
+      .sourceReadonly=${this.readOnly}
       @change=${this.readOnly
         ? undefined
         : (e: Event) =>
@@ -844,12 +861,16 @@ export class DataTable extends LitElement {
       // `renderScriptedCell` above is where a column's own script gets `.row`).
       // `.readonly` tells editor renderers (date/datetime/boolean) to display,
       // not edit, in a read-only view; display-only renderers (link/image/
-      // html/…) just ignore it.
+      // html/…) just ignore it. `.sourceReadonly` is the other question — may the
+      // STORED value be written at all — which is what a renderer with a source
+      // editor (`html`, `preview`, `markdown`) asks. They differ only on a
+      // scripted column: see `renderScriptedCell`.
       return staticHtml`<${tag}
         .value=${raw ?? ''}
         .column=${col}
         .row=${row.data}
         .readonly=${cellReadonly}
+        .sourceReadonly=${cellReadonly}
         @change=${cellReadonly
           ? undefined
           : (e: Event) =>

@@ -39,6 +39,7 @@ class HtmlRenderCell extends HTMLElement {
   /** The STORED cell, set by data-table only on a scripted column. */
   private _source: string | undefined;
   private _label = 'HTML';
+  private _readonly = false;
 
   set value(v: string) {
     const next = v ?? '';
@@ -60,6 +61,21 @@ class HtmlRenderCell extends HTMLElement {
     this._label = c?.label ?? 'HTML';
   }
 
+  /**
+   * The STORED value may not be written (read-only table, view or column): the
+   * markup still renders, the pencil goes. Not `.readonly` — a scripted column
+   * sets that one for the COMPUTED value while its source stays editable.
+   */
+  set sourceReadonly(v: boolean) {
+    const next = v === true;
+    if (this._readonly === next) return;
+    this._readonly = next;
+    this.render();
+  }
+  get sourceReadonly(): boolean {
+    return this._readonly;
+  }
+
   connectedCallback() {
     this.render();
   }
@@ -78,13 +94,15 @@ class HtmlRenderCell extends HTMLElement {
       view.textContent = 'empty';
     }
 
-    const pencil = iconButton(PENCIL_SVG, 'Edit the HTML');
-    pencil.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.openEditor();
-    });
-
-    wrap.append(view, pencil);
+    wrap.append(view);
+    if (!this._readonly) {
+      const pencil = iconButton(PENCIL_SVG, 'Edit the HTML');
+      pencil.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.openEditor();
+      });
+      wrap.append(pencil);
+    }
     this.append(wrap);
   }
 
