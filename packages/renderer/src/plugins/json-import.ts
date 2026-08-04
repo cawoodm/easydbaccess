@@ -1,17 +1,4 @@
-import type {
-  ColumnSpec,
-  ColumnType,
-  HostApi,
-  ImporterSpec,
-  ImportSourceInput,
-  PluginModule,
-  TableInfo,
-  TableOrigin,
-  TableSource,
-  ViewInstance,
-  ViewTemplate,
-  WindowGeometry,
-} from '@easydb/shared';
+import type { ColumnSpec, ColumnType, HostApi, ImporterSpec, ImportSourceInput, PluginModule, TableInfo, TableOrigin, TableSource, ViewInstance, ViewTemplate, WindowGeometry } from '@easydb/shared';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
 import { quoteBigIntegers } from '../import/big-numbers.js';
 import { runImport } from '../import/import-kernel.js';
@@ -156,9 +143,7 @@ const importerSpec: ImporterSpec = {
     // document held exactly one, so refuse a multi-table dump rather than
     // silently referencing the wrong rows.
     if (!single) {
-      throw new Error(
-        'That URL holds several tables, so a reference would be ambiguous. Import a copy instead.',
-      );
+      throw new Error('That URL holds several tables, so a reference would be ambiguous. Import a copy instead.');
     }
     return { type: 'url', config: { url: input.url, format: 'json' } };
   },
@@ -203,12 +188,7 @@ async function importJsonFile(api: HostApi, file: File): Promise<void> {
     return;
   }
 
-  const res = await runImport(
-    api,
-    importerSpec,
-    { kind: 'text', text, name: file.name },
-    { mode: 'copy', target: { kind: 'new' } },
-  );
+  const res = await runImport(api, importerSpec, { kind: 'text', text, name: file.name }, { mode: 'copy', target: { kind: 'new' } });
   const rows = res.landed.reduce((n, l) => n + l.rowCount, 0);
   if (res.landed.length > 0) {
     api.ui.dialogs.toast(`Imported ${file.name} (${rows.toLocaleString()} rows).`, {
@@ -243,9 +223,7 @@ export async function restoreWorkspaceDump(
      * Matched tables in overwrite mode reuse their existing schema, so they
      * never open the editor — the same rule the CSV importer follows.
      */
-    editColumns?:
-      | ((columns: ColumnSpec[], tableName: string) => Promise<ColumnSpec[] | null>)
-      | undefined;
+    editColumns?: ((columns: ColumnSpec[], tableName: string) => Promise<ColumnSpec[] | null>) | undefined;
   } = {},
 ): Promise<void> {
   const workspaceId = api.workspaceId();
@@ -294,19 +272,10 @@ export async function restoreWorkspaceDump(
   if (collisions.length === 0 && tables.length === 1) {
     mode = 'append-new';
   } else {
-    const opts =
-      collisions.length > 0
-        ? [
-            `Overwrite matching (${collisions.length})`,
-            'Replace entire workspace',
-            'Add as new tables',
-          ]
-        : ['Add to current workspace', 'Replace entire workspace'];
+    const opts = collisions.length > 0 ? [`Overwrite matching (${collisions.length})`, 'Replace entire workspace', 'Add as new tables'] : ['Add to current workspace', 'Replace entire workspace'];
     const choice = await api.ui.dialogs.choice(
       `Importing ${tables.length} table${tables.length === 1 ? '' : 's'} from "${filename}".${
-        collisions.length > 0
-          ? `\n\n${collisions.length} table${collisions.length === 1 ? '' : 's'} share a name with existing data.`
-          : ''
+        collisions.length > 0 ? `\n\n${collisions.length} table${collisions.length === 1 ? '' : 's'} share a name with existing data.` : ''
       }`,
       opts,
       'JSON import',
@@ -325,10 +294,7 @@ export async function restoreWorkspaceDump(
   // row counts up front, and they're a fair proxy for how long bulkInsert
   // will take. Small imports skip the bar entirely rather than flashing it.
   const ROW_THRESHOLD = 2000;
-  const totalRows = tables.reduce(
-    (sum, t) => sum + (t.source ? 0 : Math.min(t.rows.length, opts.maxRows ?? Infinity)),
-    0,
-  );
+  const totalRows = tables.reduce((sum, t) => sum + (t.source ? 0 : Math.min(t.rows.length, opts.maxRows ?? Infinity)), 0);
   let handle: ProgressHandle | null = null;
   if (totalRows >= ROW_THRESHOLD) {
     const { TopProgress } = await import('../chrome/top-progress.js');
@@ -349,17 +315,15 @@ export async function restoreWorkspaceDump(
     // Maps each imported table's name → its (new or matched) id, so view
     // instances in the dump can be re-pointed at the freshly-minted table ids.
     const nameToId = new Map<string, string>();
+    /** Tables the store had to rename to keep names unique: dump name → stored name. */
+    const renamed: Array<[string, string]> = [];
     let rowsDone = 0;
     for (const t of tables) {
       // Prefer backing info embedded in the dump (another device's export); else,
       // if we fetched this dump from a URL, record a snapshot origin so the table
       // can be refreshed/reloaded later.
       const source = t.source;
-      const origin =
-        t.origin ??
-        (!source && opts.originUrl
-          ? ({ type: 'json', url: opts.originUrl } as TableOrigin)
-          : undefined);
+      const origin = t.origin ?? (!source && opts.originUrl ? ({ type: 'json', url: opts.originUrl } as TableOrigin) : undefined);
 
       let tableId: string;
       const match = mode === 'overwrite-matching' ? existingByName.get(t.name) : undefined;
@@ -392,9 +356,7 @@ export async function restoreWorkspaceDump(
           columns: cols,
           ...(t.title ? { title: t.title } : {}),
           ...(t.windowGeometry ? { windowGeometry: t.windowGeometry } : {}),
-          ...(t.sortColumn
-            ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true }
-            : { sortColumn: undefined, sortAsc: undefined }),
+          ...(t.sortColumn ? { sortColumn: t.sortColumn, sortAsc: t.sortAsc ?? true } : { sortColumn: undefined, sortAsc: undefined }),
           ...(t.filters ? { filters: t.filters } : {}),
           ...(t.labelColumn ? { labelColumn: t.labelColumn } : {}),
           ...(t.info ? { info: t.info } : {}),
@@ -407,7 +369,11 @@ export async function restoreWorkspaceDump(
       } else {
         tableId = cryptoUUID();
         api.events.emit('import:before', { source: 'json', tableId });
-        await api.store.tables.insert({
+        // "Add as new tables" on a dump whose names are already taken: the store
+        // uniques the name (`orders` → `orders-2`) rather than making a second
+        // `orders`, and hands back what it stored. Say so, or the new table
+        // looks like it silently overwrote the old one.
+        const stored = await api.store.tables.insert({
           id: tableId,
           workspaceId,
           name: t.name,
@@ -426,7 +392,9 @@ export async function restoreWorkspaceDump(
           ...(origin ? { origin } : {}),
           updatedAt: Date.now(),
         });
+        if (stored.name !== t.name) renamed.push([t.name, stored.name]);
       }
+      // Keyed by the name the DUMP used — that is what its view instances name.
       nameToId.set(t.name, tableId);
 
       // Snapshot rows are stored locally; a live (`source`) table pulls its own
@@ -458,6 +426,10 @@ export async function restoreWorkspaceDump(
     // re-pointing each instance at the freshly-imported table id by name. Only
     // native dumps carry these; other JSON shapes leave them undefined.
     await restoreViews(api, parsed, workspaceId, nameToId, mode === 'replace-workspace');
+
+    if (renamed.length > 0) {
+      api.ui.dialogs.toast(renamed.map(([from, to]) => `“${from}” came in as “${to}”`).join('\n'), { kind: 'info', title: 'Names must be unique' });
+    }
   } finally {
     handle?.done();
   }
@@ -477,13 +449,7 @@ export async function restoreWorkspaceDump(
  * table that was actually imported, and its `templateId` via the remap
  * `restoreTemplates` returns.
  */
-async function restoreViews(
-  api: HostApi,
-  parsed: unknown,
-  workspaceId: string,
-  nameToId: Map<string, string>,
-  replaceWorkspace: boolean,
-): Promise<void> {
+async function restoreViews(api: HostApi, parsed: unknown, workspaceId: string, nameToId: Map<string, string>, replaceWorkspace: boolean): Promise<void> {
   if (!isObject(parsed)) return;
   const p = parsed as { viewTemplates?: unknown; viewInstances?: unknown };
   const templates = Array.isArray(p.viewTemplates) ? (p.viewTemplates as ViewTemplate[]) : [];
@@ -491,9 +457,7 @@ async function restoreViews(
   if (templates.length === 0 && instances.length === 0) return;
 
   if (replaceWorkspace) {
-    const stale = (await api.store.viewInstances.find()).filter(
-      (v) => v.workspaceId === workspaceId,
-    );
+    const stale = (await api.store.viewInstances.find()).filter((v) => v.workspaceId === workspaceId);
     await api.store.viewInstances.bulkRemove(stale.map((v) => v.id));
   }
 
@@ -640,11 +604,7 @@ function convertV1Dump(obj: Record<string, unknown>): NormalizedTable[] {
       });
 
     const nt: NormalizedTable = { name, columns, rows };
-    if (
-      t.elementRect &&
-      typeof t.elementRect.x === 'number' &&
-      typeof t.elementRect.y === 'number'
-    ) {
+    if (t.elementRect && typeof t.elementRect.x === 'number' && typeof t.elementRect.y === 'number') {
       // Only honor the saved geometry when both x/y are present. Without an
       // actual position from the dump, leave windowGeometry unset so the
       // window manager cascades the new panel instead of stacking it at 0,0.
@@ -687,12 +647,7 @@ function normalizeV1Column(c: V1Column): ColumnSpec {
 }
 
 function isNativeTable(v: unknown): v is { name: unknown; columns: unknown[]; rows?: unknown } {
-  return (
-    isObject(v) &&
-    'name' in v &&
-    'columns' in v &&
-    Array.isArray((v as { columns: unknown }).columns)
-  );
+  return isObject(v) && 'name' in v && 'columns' in v && Array.isArray((v as { columns: unknown }).columns);
 }
 
 /**
@@ -713,11 +668,7 @@ function isSingleNativeTable(v: unknown): v is { name: unknown; columns: unknown
  * Shared by the `{ tables: [...] }` dump loop and a top-level single native
  * table, so both carry the exact same fields.
  */
-function nativeTableToNormalized(entry: {
-  name: unknown;
-  columns: unknown[];
-  rows?: unknown;
-}): NormalizedTable {
+function nativeTableToNormalized(entry: { name: unknown; columns: unknown[]; rows?: unknown }): NormalizedTable {
   const e = entry as Record<string, unknown>;
   const geom = isObject(e.windowGeometry) ? (e.windowGeometry as WindowGeometry) : undefined;
   const sortColumn = typeof e.sortColumn === 'string' ? e.sortColumn : undefined;
@@ -726,27 +677,16 @@ function nativeTableToNormalized(entry: {
   const filters = isObject(e.filters) ? (e.filters as Record<string, string>) : undefined;
   const labelColumn = typeof e.labelColumn === 'string' ? e.labelColumn : undefined;
   const info = isObject(e.info) ? (e.info as TableInfo) : undefined;
-  const deletedColumns = Array.isArray(e.deletedColumns)
-    ? (e.deletedColumns.filter((c) => typeof c === 'string') as string[])
-    : undefined;
+  const deletedColumns = Array.isArray(e.deletedColumns) ? (e.deletedColumns.filter((c) => typeof c === 'string') as string[]) : undefined;
   const readonly = e.readonly === true ? true : undefined;
   // Carry a live `source` or snapshot `origin` if the dump recorded one.
-  const source =
-    isObject(e.source) && typeof (e.source as { type?: unknown }).type === 'string'
-      ? (e.source as unknown as TableSource)
-      : undefined;
+  const source = isObject(e.source) && typeof (e.source as { type?: unknown }).type === 'string' ? (e.source as unknown as TableSource) : undefined;
   const origin =
-    isObject(e.origin) &&
-    typeof (e.origin as { type?: unknown }).type === 'string' &&
-    typeof (e.origin as { url?: unknown }).url === 'string'
-      ? (e.origin as unknown as TableOrigin)
-      : undefined;
+    isObject(e.origin) && typeof (e.origin as { type?: unknown }).type === 'string' && typeof (e.origin as { url?: unknown }).url === 'string' ? (e.origin as unknown as TableOrigin) : undefined;
   return {
     name: String(entry.name),
     columns: entry.columns.map(normalizeColumn),
-    rows: Array.isArray(entry.rows)
-      ? (entry.rows.filter(isObject) as Array<Record<string, unknown>>)
-      : [],
+    rows: Array.isArray(entry.rows) ? (entry.rows.filter(isObject) as Array<Record<string, unknown>>) : [],
     ...(title ? { title } : {}),
     ...(geom ? { windowGeometry: geom } : {}),
     ...(sortColumn ? { sortColumn, sortAsc: sortAsc ?? true } : {}),
@@ -835,11 +775,7 @@ function isDateString(s: string): boolean {
 // -- helpers ------------------------------------------------------------------
 
 /** Apply a pre-import column rename to a whole table's rows. */
-function remapRows(
-  rows: Array<Record<string, unknown>>,
-  oldCols: ColumnSpec[],
-  newCols: ColumnSpec[],
-): Array<Record<string, unknown>> {
+function remapRows(rows: Array<Record<string, unknown>>, oldCols: ColumnSpec[], newCols: ColumnSpec[]): Array<Record<string, unknown>> {
   const rekey = rowRekeyer(oldCols, newCols);
   return rekey ? rows.map(rekey) : rows;
 }

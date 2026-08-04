@@ -11,6 +11,7 @@
 import type { ColumnSpec, HostApi, ImportBatch, Row, Table, TableOrigin } from '@easydb/shared';
 import { reconcileColumns, rowRekeyer } from '../table/column-merge.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
+import { uniqueTableName } from '../util/table-names.js';
 
 /** Where an import's rows should go. Chosen up front, never mid-import. */
 export type ImportTarget =
@@ -47,29 +48,15 @@ export interface LandResult {
   created: boolean;
 }
 
-/**
- * One naming policy for every importer. `taken` is compared case-insensitively,
- * because the workspace treats names case-insensitively elsewhere (a Datasette
- * connect clash check does) and two tables differing only in case is a trap.
- *
- * Replaces three competing rules: `-2` (references), ` (2)` (Datasette) and a
- * base36 timestamp (CSV, which produced names like `places (m8x1k2)`).
- */
-export function uniqueTableName(taken: Iterable<string>, base: string): string {
-  const lower = new Set([...taken].map((n) => n.toLowerCase()));
-  const seed = base.trim() || 'imported';
-  if (!lower.has(seed.toLowerCase())) return seed;
-  for (let i = 2; ; i++) {
-    const candidate = `${seed}-${i}`;
-    if (!lower.has(candidate.toLowerCase())) return candidate;
-  }
-}
+// The naming policy moved to `util/table-names.ts` when the STORE started to
+// enforce it (`db/unique-table-names.ts`) — an importer is no longer the only
+// writer that has to obey it. Re-exported here because every importer already
+// reads it from this module.
+export { uniqueTableName };
 
 /** Names already used in a workspace, for {@link uniqueTableName}. */
 export async function takenNames(api: HostApi, workspaceId: string): Promise<string[]> {
-  return (await api.store.tables.find())
-    .filter((t) => t.workspaceId === workspaceId)
-    .map((t) => t.name);
+  return (await api.store.tables.find()).filter((t) => t.workspaceId === workspaceId).map((t) => t.name);
 }
 
 /**
@@ -80,12 +67,7 @@ export async function takenNames(api: HostApi, workspaceId: string): Promise<str
  * previously CSV capped while parsing, JSON sliced afterwards, and Datasette
  * ignored the setting entirely in favour of its own 10k ceiling.
  */
-export async function landCandidate(
-  api: HostApi,
-  name: string,
-  batches: AsyncIterable<ImportBatch>,
-  opts: LandOptions,
-): Promise<LandResult | null> {
+export async function landCandidate(api: HostApi, name: string, batches: AsyncIterable<ImportBatch>, opts: LandOptions): Promise<LandResult | null> {
   const { workspaceId, importerId, target, maxRows } = opts;
 
   let tableId: string;
@@ -144,11 +126,7 @@ export async function landCandidate(
       // ones, honouring `deletedColumns` so a column the user removed does not
       // come back on every import.
       if (batch.columns?.length) {
-        const merged = reconcileColumns(
-          existing.columns,
-          batch.columns,
-          existing.deletedColumns ?? [],
-        );
+        const merged = reconcileColumns(existing.columns, batch.columns, existing.deletedColumns ?? []);
         if (merged.newFields.length > 0) {
           await api.store.tables.patch(tableId, {
             columns: merged.columns,

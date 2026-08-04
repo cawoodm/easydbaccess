@@ -18,8 +18,7 @@ import { panelDomId } from './helpers.js';
  *    must follow it to pull every row, not stop at the first 100.
  */
 
-const readFixture = (name: string): unknown =>
-  JSON.parse(readFileSync(new URL(`./fixtures/datasette/${name}`, import.meta.url), 'utf8'));
+const readFixture = (name: string): unknown => JSON.parse(readFileSync(new URL(`./fixtures/datasette/${name}`, import.meta.url), 'utf8'));
 
 const DB_LISTING = readFixture('legislators.db-listing.json');
 const EXECUTIVES = readFixture('executives.json');
@@ -66,18 +65,14 @@ test.describe('datasette import — whole database', () => {
         case '/legislators/executives.json':
           return route.fulfill(json(EXECUTIVES));
         case '/legislators/executive_terms.json':
-          return route.fulfill(
-            json(url.searchParams.get('_next') ? EXECUTIVE_TERMS_PAGE2 : EXECUTIVE_TERMS_PAGE1),
-          );
+          return route.fulfill(json(url.searchParams.get('_next') ? EXECUTIVE_TERMS_PAGE2 : EXECUTIVE_TERMS_PAGE1));
         default:
           return route.fulfill({ status: 404, body: '{"ok":false}' });
       }
     });
   });
 
-  test('the sample dropdown offers the datasette.io instance root, not power plants', async ({
-    page,
-  }) => {
+  test('the sample dropdown offers the datasette.io instance root, not power plants', async ({ page }) => {
     await page.getByTitle('Import data from a URL').click();
     const dialog = page.locator('import-dialog dialog');
     await expect(dialog).toBeVisible();
@@ -89,19 +84,14 @@ test.describe('datasette import — whole database', () => {
     expect(joined.toLowerCase()).not.toContain('power');
 
     // Choosing it fills the URL box with the bare instance root.
-    const dsValue = await presets
-      .locator('option', { hasText: 'datasette.io' })
-      .getAttribute('value');
+    const dsValue = await presets.locator('option', { hasText: 'datasette.io' }).getAttribute('value');
     await presets.selectOption(dsValue!);
     await expect(dialog.locator('input[type="text"]').first()).toHaveValue('https://datasette.io');
 
     await dialog.getByRole('button', { name: 'Cancel' }).click();
   });
 
-  test('lists every table with sizes, then imports the chosen subset with typed columns', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('lists every table with sizes, then imports the chosen subset with typed columns', async ({ page, workspaceId }) => {
     // Open the Import dialog from the header button (inline import SVG icon).
     await page.getByTitle('Import data from a URL').click();
     const importDialog = page.locator('import-dialog dialog');
@@ -123,14 +113,7 @@ test.describe('datasette import — whole database', () => {
     // db name also appears as each row's .detail, so a plain text match would
     // be ambiguous).
     const names = await picker.locator('ul.tables li .name').allInnerTexts();
-    expect(names.map((s) => s.trim()).sort()).toEqual([
-      'executive_terms',
-      'executives',
-      'legislator_terms',
-      'legislators',
-      'offices',
-      'social_media',
-    ]);
+    expect(names.map((s) => s.trim()).sort()).toEqual(['executive_terms', 'executives', 'legislator_terms', 'legislators', 'offices', 'social_media']);
     // Sizes come straight from the database listing's counts.
     const sizes = (await picker.locator('ul.tables li .size').allInnerTexts()).map((s) => s.trim());
     expect(sizes).toContain('80 rows'); // executives
@@ -161,9 +144,7 @@ test.describe('datasette import — whole database', () => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const store = (window as any).__easydb.store;
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const tables = (await store.tables.find()).filter(
-              (t: { workspaceId: string }) => t.workspaceId === ws,
-            );
+            const tables = (await store.tables.find()).filter((t: { workspaceId: string }) => t.workspaceId === ws);
             const counts: Record<string, number> = {};
             for (const t of tables) counts[t.name] = (await store.rows(t.id).find()).length;
             return counts;
@@ -176,17 +157,13 @@ test.describe('datasette import — whole database', () => {
     const summary = await page.evaluate(async (ws) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__easydb.store;
-      const tables = (await store.tables.find()).filter(
-        (t: { workspaceId: string }) => t.workspaceId === ws,
-      );
+      const tables = (await store.tables.find()).filter((t: { workspaceId: string }) => t.workspaceId === ws);
       const out: Record<string, { rowCount: number; columns: Record<string, string> }> = {};
       for (const t of tables) {
         const rows = await store.rows(t.id).find();
         out[t.name] = {
           rowCount: rows.length,
-          columns: Object.fromEntries(
-            t.columns.map((c: { field: string; type: string }) => [c.field, c.type]),
-          ),
+          columns: Object.fromEntries(t.columns.map((c: { field: string; type: string }) => [c.field, c.type])),
         };
       }
       return { names: tables.map((t: { name: string }) => t.name).sort(), tables: out };
@@ -211,10 +188,7 @@ test.describe('datasette import — whole database', () => {
     expect(execTerms.columns.type).toBe('string');
   });
 
-  test('an imported table records its origin and the Refresh button re-pulls it', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('an imported table records its origin and the Refresh button re-pulls it', async ({ page, workspaceId }) => {
     // Override the suite route with a controllable single-table database.
     let people = [{ id: 1, name: 'Alice' }];
     await page.route('https://datasette.io/**', (route) => {
@@ -227,8 +201,7 @@ test.describe('datasette import — whole database', () => {
           }),
         );
       if (u.pathname === '/mini/people.json') {
-        if ((u.searchParams.get('_extra') ?? '').includes('columns'))
-          return route.fulfill(json({ ok: true, columns: ['id', 'name'], rows: [] }));
+        if ((u.searchParams.get('_extra') ?? '').includes('columns')) return route.fulfill(json({ ok: true, columns: ['id', 'name'], rows: [] }));
         return route.fulfill(json({ ok: true, next: null, rows: people }));
       }
       return route.fulfill({ status: 404, body: '{"ok":false}' });
@@ -285,22 +258,16 @@ test.describe('datasette import — whole database', () => {
     await expect(footer).toContainText('2 rows');
   });
 
-  test('a single-table import shows a proportional (determinate) progress bar', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('a single-table import shows a proportional (determinate) progress bar', async ({ page, workspaceId }) => {
     // datasette.io omits `count` from schema responses, so a single-table import
     // must fetch `?_extra=count` to get a denominator. Two pages, the second
     // delayed, so the determinate 50% bar is observable mid-import.
     await page.route('https://datasette.io/**', async (route) => {
       const u = new URL(route.request().url());
-      if (u.pathname !== '/mini/people.json')
-        return route.fulfill({ status: 404, body: '{"ok":false}' });
+      if (u.pathname !== '/mini/people.json') return route.fulfill({ status: 404, body: '{"ok":false}' });
       const extra = u.searchParams.get('_extra') ?? '';
-      if (extra === 'column_details')
-        return route.fulfill(json({ ok: true, next: null, rows: [] }));
-      if (extra === 'columns')
-        return route.fulfill(json({ ok: true, columns: ['id', 'name'], rows: [] }));
+      if (extra === 'column_details') return route.fulfill(json({ ok: true, next: null, rows: [] }));
+      if (extra === 'columns') return route.fulfill(json({ ok: true, columns: ['id', 'name'], rows: [] }));
       if (extra === 'count') return route.fulfill(json({ ok: true, count: 4, rows: [] }));
       if (u.searchParams.get('_next') === '2') {
         await new Promise((r) => setTimeout(r, 1200)); // delay page 2
@@ -355,10 +322,7 @@ test.describe('datasette import — whole database', () => {
     // page 2 is still in flight (not the indeterminate "waiting" sliver).
     const determinate = page.locator(`#${panelDomId(tableId)} .load-bar-fill.determinate`);
     await expect(determinate).toBeVisible({ timeout: 4000 });
-    await expect(page.locator(`#${panelDomId(tableId)} [role="progressbar"]`)).toHaveAttribute(
-      'aria-valuenow',
-      '50',
-    );
+    await expect(page.locator(`#${panelDomId(tableId)} [role="progressbar"]`)).toHaveAttribute('aria-valuenow', '50');
 
     // Import completes with all 4 rows.
     await expect
@@ -371,22 +335,15 @@ test.describe('datasette import — whole database', () => {
       .toBe(4);
   });
 
-  test('an imported Datasette table shows the (i) info button with its source', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('an imported Datasette table shows the (i) info button with its source', async ({ page, workspaceId }) => {
     // Single-table db; the metadata endpoint 404s (as on datasette.io 1.0), so
     // there is no curated description — the (i) button must still appear,
     // carrying where the table came from.
     await page.route('https://datasette.io/**', (route) => {
       const u = new URL(route.request().url());
-      if (u.pathname === '/mini.json')
-        return route.fulfill(
-          json({ ok: true, tables: [{ name: 'people', count: 1, primary_keys: ['id'] }] }),
-        );
+      if (u.pathname === '/mini.json') return route.fulfill(json({ ok: true, tables: [{ name: 'people', count: 1, primary_keys: ['id'] }] }));
       if (u.pathname === '/mini/people.json') {
-        if ((u.searchParams.get('_extra') ?? '').includes('columns'))
-          return route.fulfill(json({ ok: true, columns: ['id', 'name'], rows: [] }));
+        if ((u.searchParams.get('_extra') ?? '').includes('columns')) return route.fulfill(json({ ok: true, columns: ['id', 'name'], rows: [] }));
         return route.fulfill(json({ ok: true, next: null, rows: [{ id: 1, name: 'Alice' }] }));
       }
       return route.fulfill({ status: 404, body: '{"ok":false}' });
@@ -432,10 +389,7 @@ test.describe('datasette import — whole database', () => {
     // The URL appears twice by design — once in the origin block (which explains
     // snapshot + Refresh) and once in the Source metadata row — so assert the
     // origin link rather than matching the href across the whole dialog.
-    await expect(infoDlg.locator('.kind-origin a')).toHaveAttribute(
-      'href',
-      'https://datasette.io/mini/people',
-    );
+    await expect(infoDlg.locator('.kind-origin a')).toHaveAttribute('href', 'https://datasette.io/mini/people');
   });
 
   const importExecutives = async (page: import('@playwright/test').Page) => {
@@ -452,9 +406,7 @@ test.describe('datasette import — whole database', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const store = (window as any).__easydb.store;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return (await store.tables.find()).filter(
-          (t: any) => t.workspaceId === ws && t.name === name,
-        ).length;
+        return (await store.tables.find()).filter((t: any) => t.workspaceId === ws && t.name === name).length;
       },
       { ws, name },
     );
@@ -467,10 +419,7 @@ test.describe('datasette import — whole database', () => {
     await expect(page.locator('toast-host .toast')).toHaveCount(1);
   });
 
-  test('re-importing an existing table offers overwrite / rename', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('re-importing an existing table offers overwrite / rename', async ({ page, workspaceId }) => {
     await importExecutives(page);
     await expect.poll(() => countNamed(page, workspaceId, 'legislators/executives')).toBe(1);
 
@@ -484,11 +433,12 @@ test.describe('datasette import — whole database', () => {
     await choice.getByRole('button', { name: 'Overwrite' }).click();
     await expect.poll(() => countNamed(page, workspaceId, 'legislators/executives')).toBe(1);
 
-    // Third import → Rename → a distinct "… (2)" table is created.
+    // Third import → Rename → a distinct "…-2" table is created. Datasette used
+    // to spell this "… (2)"; there is one workspace-wide naming rule now.
     await importExecutives(page);
     await expect(page.locator('host-dialogs dialog')).toBeVisible();
     await page.locator('host-dialogs dialog').getByRole('button', { name: 'Rename' }).click();
-    await expect.poll(() => countNamed(page, workspaceId, 'legislators/executives (2)')).toBe(1);
+    await expect.poll(() => countNamed(page, workspaceId, 'legislators/executives-2')).toBe(1);
   });
 });
 
@@ -514,12 +464,9 @@ test.describe('datasette import — instance-root database picker', () => {
             }),
           );
         case '/sales.json':
-          return route.fulfill(
-            json({ ok: true, tables: [{ name: 'orders', count: 2, primary_keys: ['id'] }] }),
-          );
+          return route.fulfill(json({ ok: true, tables: [{ name: 'orders', count: 2, primary_keys: ['id'] }] }));
         case '/sales/orders.json':
-          if (url.searchParams.get('_extra') === 'columns')
-            return route.fulfill(json({ ok: true, columns: ['id', 'total'], rows: [] }));
+          if (url.searchParams.get('_extra') === 'columns') return route.fulfill(json({ ok: true, columns: ['id', 'total'], rows: [] }));
           return route.fulfill(
             json({
               ok: true,
@@ -536,10 +483,7 @@ test.describe('datasette import — instance-root database picker', () => {
     });
   });
 
-  test('picking a database imports its tables directly, skipping the table picker', async ({
-    page,
-    workspaceId,
-  }) => {
+  test('picking a database imports its tables directly, skipping the table picker', async ({ page, workspaceId }) => {
     await page.getByTitle('Import data from a URL').click();
     const dlg = page.locator('import-dialog dialog');
     await expect(dlg).toBeVisible();
@@ -568,10 +512,7 @@ test.describe('datasette import — instance-root database picker', () => {
         page.evaluate(async (ws) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const store = (window as any).__easydb.store;
-          const t = (await store.tables.find()).find(
-            (x: { workspaceId: string; name: string }) =>
-              x.workspaceId === ws && x.name === 'sales/orders',
-          );
+          const t = (await store.tables.find()).find((x: { workspaceId: string; name: string }) => x.workspaceId === ws && x.name === 'sales/orders');
           if (!t) return null;
           const rows = await store.rows(t.id).find();
           return rows.length;

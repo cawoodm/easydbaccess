@@ -1,5 +1,5 @@
 import type { DataStore, EventBus, HostApi, RowSourceCtx, Table } from '@easydb/shared';
-import { createDataStore, createRoutedDataStore, getDb } from './db/index.js';
+import { createDataStore, createRoutedDataStore, getDb, withUniqueTableNames } from './db/index.js';
 import { createEventBus } from './events/bus.js';
 import { createRegistries, type Registries } from './plugin-host/registries.js';
 import { createHostApi } from './plugin-host/api-factory.js';
@@ -44,21 +44,30 @@ async function init(): Promise<AppContext> {
     for (const t of all) tableCache.set(t.id, t);
   });
 
-  // Seed the cache synchronously the instant a table is inserted/updated —
-  // before the async subscription above can fire. A freshly-connected live
+  // Seed the cache the instant a table is inserted/updated — the caller's
+  // `await` returns with it already cached, without waiting for the async
+  // subscription above. A freshly-connected live
   // table (source-backed) must be routable the moment its grid panel reads
   // `rows(id)`; otherwise the panel binds to the empty *local* collection and
   // shows its columns but no rows until the next subscription tick (the
   // "Connect shows no rows" bug — Import is unaffected as it has no `source`).
+  //
+  // Both hops go through `withUniqueTableNames`, which is what stops any writer
+  // from creating a second table under a name this workspace already uses. The
+  // cache is seeded from what the guard actually STORED (a uniqued name), not
+  // from what the caller asked for.
+  const uniqueTables = withUniqueTableNames(baseStore.tables);
   const cachingTables: typeof baseStore.tables = {
-    ...baseStore.tables,
-    insert: (doc) => {
-      tableCache.set(doc.id, doc);
-      return baseStore.tables.insert(doc);
+    ...uniqueTables,
+    insert: async (doc) => {
+      const stored = await uniqueTables.insert(doc);
+      tableCache.set(stored.id, stored);
+      return stored;
     },
-    upsert: (doc) => {
-      tableCache.set(doc.id, doc);
-      return baseStore.tables.upsert(doc);
+    upsert: async (doc) => {
+      const stored = await uniqueTables.upsert(doc);
+      tableCache.set(stored.id, stored);
+      return stored;
     },
   };
 
@@ -155,10 +164,7 @@ async function init(): Promise<AppContext> {
   events.on('import:after', ({ source, tableId, rowCount }) => {
     if (source === 'datasette') return;
     void api.store.tables.findOne(tableId).then((t) => {
-      api.ui.dialogs.toast(
-        `Imported ${rowCount} row${rowCount === 1 ? '' : 's'} into "${t?.name ?? tableId}".`,
-        { kind: 'success', title: source.toUpperCase() + ' import' },
-      );
+      api.ui.dialogs.toast(`Imported ${rowCount} row${rowCount === 1 ? '' : 's'} into "${t?.name ?? tableId}".`, { kind: 'success', title: source.toUpperCase() + ' import' });
     });
   });
   events.on('plugin:error', ({ url, phase, error }) => {
@@ -193,11 +199,10 @@ async function init(): Promise<AppContext> {
         { kind: 'warning', title: 'Safe mode' },
       );
     } else if (SAFE_MODE === 'url-plugins') {
-      api.ui.dialogs.toast(
-        'Safe mode (URL plugins) is ON: URL-installed plugins were not loaded this ' +
-          'session. Built-in plugins are unaffected. Reload without ?safemode1 to restore them.',
-        { kind: 'warning', title: 'Safe mode' },
-      );
+      api.ui.dialogs.toast('Safe mode (URL plugins) is ON: URL-installed plugins were not loaded this ' + 'session. Built-in plugins are unaffected. Reload without ?safemode1 to restore them.', {
+        kind: 'warning',
+        title: 'Safe mode',
+      });
     }
 
     // Safe mode exists to reach the Plugin Manager when a plugin breaks the
