@@ -140,6 +140,11 @@ A list with no members also SHOWS as an empty cell (pink, no tooltip) instead of
 as the text it is stored in: `[]` is how an absent list arrives from most exports,
 and two brackets read as content where there is none.
 
+The `tags` renderer (`plugins/cell-tags.ts`) draws one pill per value, and an
+`array` column gets it automatically at import time (`csv-import`'s
+`rendererForType`, `auto-renderer`'s `inferRenderer`). Its pencil edits the raw
+list, not the pills, so an edit never rewrites one spelling into the other.
+
 Type inference marks a column `array` for a real array or a JSON-array text,
 **never** for bare commas: ordinary prose is full of commas. A comma list becomes
 an `array` column when the user picks the type in the columns editor or a CSV

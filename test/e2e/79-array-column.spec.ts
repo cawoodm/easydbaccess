@@ -105,13 +105,21 @@ test('a list with no members shows an empty cell, not the brackets', async ({ pa
   await addRow(page, id, { name: 'c', tags: 'red' });
 
   const cells = page.locator(`#${panelDomId(id)} data-table tbody td.t-array`);
-  await expect(cells.nth(0).locator('input')).toHaveValue('');
-  await expect(cells.nth(1).locator('input')).toHaveValue('');
-  await expect(cells.nth(2).locator('input')).toHaveValue('red');
-  // An empty list is marked empty, like any other blank cell.
-  await expect(cells.nth(0)).toHaveClass(/is-null/);
-  // And it carries no tooltip, since there is nothing to read.
-  await expect(cells.nth(0)).toHaveAttribute('title', '');
+  await expect(cells).toHaveCount(3);
+  // Rows come back in row-id order, which is random, so compare them as a set.
+  const values = () =>
+    cells
+      .locator('input')
+      .evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value).sort());
+  await expect.poll(values).toEqual(['', '', 'red']);
+
+  // Both empty lists are marked empty, like any other blank cell, and carry no
+  // tooltip — there is nothing to read.
+  await expect(page.locator(`#${panelDomId(id)} data-table tbody td.t-array.is-null`)).toHaveCount(
+    2,
+  );
+  const titles = await cells.evaluateAll((els) => els.map((e) => e.getAttribute('title')).sort());
+  expect(titles).toEqual(['', '', 'red']);
 });
 
 test('typing a member in the filter box matches, and NULL finds the empty lists', async ({

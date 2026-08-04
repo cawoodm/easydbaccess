@@ -634,6 +634,9 @@ const LEGACY_TYPE_TO_RENDERER: Record<string, string> = {
 /** Returns the matching renderer name for an inferred type, or undefined. */
 function rendererForType(t: ColumnType): string | undefined {
   if (t === 'date' || t === 'datetime' || t === 'boolean') return t;
+  // An `array` column's renderer is not named after its type: `tags` is what
+  // draws one pill per value (see plugins/cell-tags.ts).
+  if (t === 'array') return 'tags';
   return undefined;
 }
 

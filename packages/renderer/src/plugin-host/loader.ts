@@ -21,6 +21,7 @@ import * as cellImage from '../plugins/cell-image.js';
 import * as preview from '../plugins/preview.js';
 import * as htmlRender from '../plugins/html-render.js';
 import * as cellLink from '../plugins/cell-link.js';
+import * as cellTags from '../plugins/cell-tags.js';
 import * as autoRenderer from '../plugins/auto-renderer.js';
 import * as deleteTable from '../plugins/delete-table.js';
 import * as tableCopy from '../plugins/table-copy.js';
@@ -74,6 +75,7 @@ const modules: PluginModule[] = [
   preview,
   htmlRender,
   cellLink,
+  cellTags,
   autoRenderer,
   deleteTable,
   tableCopy,

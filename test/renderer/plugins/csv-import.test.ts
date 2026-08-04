@@ -165,7 +165,8 @@ describe('parseCsv: type inference', () => {
 describe('parseCsv: array columns', () => {
   it('infers "array" for a column of JSON-array cells, keeping the text verbatim', () => {
     const { columns, rows } = parseCsv('tags\n"[""a"",""b""]"\n"[""c""]"\n');
-    expect(columns[0]).toMatchObject({ field: 'tags', type: 'array' });
+    // The `tags` renderer comes with the type — one pill per value.
+    expect(columns[0]).toMatchObject({ field: 'tags', type: 'array', renderer: 'tags' });
     // The cell is not rewritten — the reader takes the members out of whichever
     // spelling arrived (see util/array-cell.ts).
     expect(rows.map((r) => r.tags)).toEqual(['["a","b"]', '["c"]']);

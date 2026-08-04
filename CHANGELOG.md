@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ An `array` column shows its values as pills, one per value, with a pencil for the raw list (v0.0.296)
 - 🪶 New `array` column type: a cell holds several values (`foo,bar` or `["Foo","Bar"]`) and the filter dropdown offers each one (v0.0.295)
 
 ## 3 Aug 2026
