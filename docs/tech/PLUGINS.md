@@ -151,6 +151,34 @@ HTML it produced. If a script's own output is markup you want rendered, give
 the column the `html` renderer; `preview` shows it as one line of text with a
 popup for the full markup.
 
+### The other column script: `validate`
+
+A column may also carry a `validate` body defining
+`function validate(value, row)`, edited via the SECOND pencil in the column
+editor (right of `max`) and run by `runValidateScript` in the same
+`util/column-script.ts`. It is the escape hatch for constraints the
+`notnull`/`max`/`unique` flags can't express, and it **rejects by throwing** —
+the thrown message is what `data-table`'s `validate()` returns, which is what
+the "Cannot save" dialog shows. A return value is ignored, so the accept path
+is an empty function.
+
+Three deliberate boundaries:
+
+- it runs **after** the declarative constraints, so a script never has to
+  re-check emptiness or length that a tick-box already covers;
+- it runs on `commitCell` only — the MANUAL edit path. Imports, refreshes and
+  sync write through the store and are untouched, because a rule that can
+  abort an import halfway is worse than an import you can then inspect;
+- `row` is the row **as it would be** (`{...row.data, [field]: value}`), so a
+  two-field rule reads the pending edit rather than contradicting itself
+  depending on which cell was touched last.
+
+The two kinds compile to different signatures (`render(row)` vs
+`validate(value, row)`) and so keep separate memo caches, but they share the
+helper set and the trust model. `dialogs/validate-samples.ts` holds the ten
+ready-made rules the editor offers; they are plain data and the unit suite
+compiles and exercises each one.
+
 ### HTML or Markdown — who decides
 
 Three renderers show a value as markup: `html` puts it in the cell as HTML,

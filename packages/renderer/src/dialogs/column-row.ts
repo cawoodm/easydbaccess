@@ -17,6 +17,11 @@ export interface ColumnRow {
    * way into whatever `renderer` this column has (or shows as text with none).
    */
   script?: string | undefined;
+  /**
+   * JS body whose `validate(value, row)` throws to reject a manual cell edit.
+   * The column's other script — see ColumnSpec.validate.
+   */
+  validate?: string | undefined;
   max?: number | undefined;
   unique?: boolean | undefined;
   notnull?: boolean | undefined;
@@ -47,8 +52,8 @@ export interface ColumnRow {
  * field the editor doesn't own rides through unchanged. `field`/`label`/
  * `type` are always overwritten from the draft.
  *
- * Every OTHER editor-owned optional field (`renderer`, `script`, `max`,
- * `unique`, `notnull`, `hidden`, `sortable`, `filterable`) is explicitly set
+ * Every OTHER editor-owned optional field (`renderer`, `script`, `validate`,
+ * `max`, `unique`, `notnull`, `hidden`, `sortable`, `filterable`) is explicitly set
  * OR deleted based on the current draft state — never left to a bare
  * `if (truthy) spec.x = ...`, because with a spread base that pattern would
  * leave the OLD value from `orig` alive when the user clears the field in
@@ -70,6 +75,8 @@ export function buildColumnSpec(row: ColumnRow): ColumnSpec {
   else delete spec.renderer;
   if (row.script) spec.script = row.script;
   else delete spec.script;
+  if (row.validate) spec.validate = row.validate;
+  else delete spec.validate;
   if (row.max != null && row.max > 0) spec.max = row.max;
   else delete spec.max;
   if (row.unique) spec.unique = true;

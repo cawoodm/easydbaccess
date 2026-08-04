@@ -90,3 +90,57 @@ export function runColumnScript(src: string | undefined, row: unknown): ScriptRu
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+// -- Validation scripts -------------------------------------------------------
+//
+// A column's OTHER script: `function validate(value, row) { … }`, run when the
+// user edits a cell by hand. It rejects by THROWING — the message is what the
+// grid shows — so the happy path is an empty return and there is no sentinel
+// value to remember. Same helpers, same trust model, separate cache: the two
+// kinds compile to different signatures, so one source string could otherwise
+// come back compiled for the wrong one.
+
+type CompiledValidator = (value: unknown, row: unknown, ...helpers: unknown[]) => unknown;
+
+const compiledValidators = new Map<string, CompiledValidator>();
+
+/**
+ * Compile a validation body to `(value, row, …helpers) => void`, memoized per
+ * unique source. Throws on a syntax error.
+ */
+export function compileValidateScript(src: string): CompiledValidator {
+  const cached = compiledValidators.get(src);
+  if (cached) return cached;
+  const fn = new Function('value', 'row', ...HELPER_NAMES, 'easydb', `${src}\nreturn validate(value, row);`) as CompiledValidator;
+  compiledValidators.set(src, fn);
+  return fn;
+}
+
+/** Outcome of one validation run: `ok` unless the script rejected the value. */
+export type ValidateRun = { ok: true } | { ok: false; message: string };
+
+/**
+ * Run a column's validation script against a proposed cell value.
+ *
+ * Rejection reasons and broken scripts both come back as `ok: false` with a
+ * message, because to the person editing the cell they are the same event —
+ * the edit didn't stick and here is why. A compile error is labelled as one so
+ * the author can tell "your rule says no" from "your rule doesn't parse". A
+ * blank script is not an error: there is simply nothing to check.
+ */
+export function runValidateScript(src: string | undefined, value: unknown, row: unknown): ValidateRun {
+  if (!src || !src.trim()) return { ok: true };
+  let fn: CompiledValidator;
+  try {
+    fn = compileValidateScript(src);
+  } catch (err) {
+    return { ok: false, message: `Validation script has a compile error: ${errorMessage(err)}` };
+  }
+  try {
+    fn(value, row, ...helperArgs());
+    return { ok: true };
+  } catch (err) {
+    // A `throw 'text'` (no Error) is as valid a rejection as `throw new Error`.
+    return { ok: false, message: errorMessage(err) || 'Rejected by this column’s validation script.' };
+  }
+}

@@ -114,8 +114,10 @@ test('the column editor offers the script button on every column, not just scrip
   const dlg = page.locator('new-table-dialog dialog');
   await expect(dlg).toBeVisible();
 
-  // One script button per column row, whatever the renderer.
-  const scriptBtns = dlg.locator('button.icon-btn[title*="script"]');
+  // One script button per column row, whatever the renderer. Located by the
+  // `script-btn` class, not by title: each row also carries a validation
+  // pencil, and a title match would collect both.
+  const scriptBtns = dlg.locator('button.script-btn');
   await expect(scriptBtns).toHaveCount(2);
 
   // Opening one shows the editor pre-filled with the render(row) boilerplate.

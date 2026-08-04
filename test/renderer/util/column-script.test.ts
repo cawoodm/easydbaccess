@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COLUMN_SCRIPT_HELPERS, compileColumnScript, runColumnScript } from '../../../packages/renderer/src/util/column-script.js';
+import { COLUMN_SCRIPT_HELPERS, compileColumnScript, runColumnScript, runValidateScript } from '../../../packages/renderer/src/util/column-script.js';
 
 describe('runColumnScript', () => {
   it('returns whatever render(row) returns, not just strings', () => {
@@ -93,5 +93,63 @@ describe('script helpers', () => {
     const run = runColumnScript('function markdownToHtml(s) { return "mine:" + s }\nfunction render(row) { return markdownToHtml("x") }', {});
     expect(run.ok).toBe(true);
     if (run.ok) expect(run.value).toBe('mine:x');
+  });
+});
+
+describe('runValidateScript', () => {
+  const RULE = `function validate(value, row) {
+    if (!value) throw new Error('Required.');
+    if (row.max != null && value > row.max) throw new Error('Over the row max.');
+  }`;
+
+  it('accepts a value the rule does not object to', () => {
+    expect(runValidateScript(RULE, 5, { max: 10 })).toEqual({ ok: true });
+  });
+
+  it('rejects with the thrown message, which is what the user sees', () => {
+    expect(runValidateScript(RULE, 50, { max: 10 })).toEqual({ ok: false, message: 'Over the row max.' });
+  });
+
+  it('treats a blank or missing script as nothing to check', () => {
+    expect(runValidateScript(undefined, 1, {})).toEqual({ ok: true });
+    expect(runValidateScript('   \n', 1, {})).toEqual({ ok: true });
+  });
+
+  it('labels a syntax error as a compile error, so the author can tell it apart from a rejection', () => {
+    const out = runValidateScript('function validate(value, row) { if (', 1, {});
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.message).toMatch(/compile error/);
+  });
+
+  it('reports a script that defines no validate() rather than accepting silently', () => {
+    const out = runValidateScript('const x = 1;', 'anything', {});
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.message).toMatch(/validate is not defined/);
+  });
+
+  it('accepts a bare `throw "text"` as a rejection', () => {
+    const out = runValidateScript('function validate(v) { throw "no good" }', 1, {});
+    expect(out).toEqual({ ok: false, message: 'no good' });
+  });
+
+  it('falls back to a message when something throws with no text at all', () => {
+    const out = runValidateScript('function validate(v) { throw new Error() }', 1, {});
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.message).toMatch(/validation script/i);
+  });
+
+  it('gives a validator the same helpers a render script gets', () => {
+    const out = runValidateScript('function validate(v) { if (typeof easydb.markdownToHtml !== "function") throw new Error("missing") }', 1, {});
+    expect(out).toEqual({ ok: true });
+  });
+
+  it('compiles the same source separately from a render script of that source', () => {
+    // Both caches key on the raw string. A source that happens to define BOTH
+    // functions must work either way round — the compiled wrappers differ in
+    // their parameter list, so a shared cache would hand back the wrong one.
+    const both = 'function render(row) { return row.a } function validate(value, row) { if (value === row.a) throw new Error("same") }';
+    expect(runColumnScript(both, { a: 7 })).toEqual({ ok: true, value: 7 });
+    expect(runValidateScript(both, 7, { a: 7 })).toEqual({ ok: false, message: 'same' });
+    expect(runColumnScript(both, { a: 7 })).toEqual({ ok: true, value: 7 });
   });
 });
