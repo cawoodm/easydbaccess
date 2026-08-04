@@ -7,7 +7,7 @@ import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
 import '../chrome/filter-combobox.js';
 import { searchRowsByField } from '../search/text-search.js';
-import { matchesColumnFilter } from '../search/column-filter.js';
+import { matchesColumnFilter } from '@easydb/shared';
 import { facetable, facetCounts, facetValues } from '../search/facet-values.js';
 import { readSortDescFirst } from './grid-settings.js';
 import { nextSortSpecs } from './sort-cycle.js';

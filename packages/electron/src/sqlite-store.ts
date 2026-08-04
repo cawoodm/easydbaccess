@@ -20,7 +20,7 @@
 
 import { copyFileSync } from 'node:fs';
 import type { DatabaseSync as DatabaseSyncType, SQLInputValue, StatementSync as StatementSyncType } from 'node:sqlite';
-import { decodeValue, encodeValue, quoteIdent, sanitizeTableName, sqlAffinity, type ColumnSpec } from '@easydb/shared';
+import { buildWhere, decodeValue, encodeValue, quoteIdent, sanitizeTableName, sqlAffinity, type ColumnSpec, type RowPage, type RowQuery } from '@easydb/shared';
 
 // node:sqlite is a Node 22.5+ builtin (unflagged on Electron 43's bundled
 // Node 24.18.0). Vite (used by vitest to run this package's tests) doesn't
@@ -636,6 +636,76 @@ export class SqliteStore {
       result = result.filter((r) => matchesRow(r as Record<string, unknown>, remaining));
     }
     return result;
+  }
+
+  /**
+   * Answers a `RowQuery`: these fields, filtered, sorted, this slice — plus how
+   * many rows MATCH, which is not how many are returned.
+   *
+   * This is the point of the whole contract. `find('rows', …)` decodes and hands
+   * over everything, and measured on a 609,283-row table that was 1483ms and
+   * 15.4 MB to display about thirty rows. Narrowing and slicing here means the
+   * payload is the answer rather than the haystack.
+   *
+   * `partial` is set when a predicate had no SQL form — a filter or sort on a
+   * computed (script) column, whose value only exists once the script has run.
+   * The rows are then a SUPERSET and the caller must narrow them itself, and
+   * `total` is an upper bound. Dropping such a predicate silently would return
+   * rows the user excluded and look correct.
+   */
+  queryRows(tableId: string, q: RowQuery = {}): RowPage {
+    const t = this.allRegisteredTables().find((x) => x.id === tableId);
+    if (!t) return { rows: [], total: 0 };
+    const columns = this.readColumnsJson(t.sql_table);
+    const table = quoteIdent(t.sql_table);
+
+    // A scripted column is computed in the renderer, so it has no SQL form.
+    const specOf = new Map(columns.map((c) => [c.field, c] as const));
+    const sqlOf = (field: string): string | null => {
+      const spec = specOf.get(field);
+      return spec && !spec.script ? quoteIdent(spec.field) : null;
+    };
+    const searchFields = columns.filter((c) => !c.script && c.filterable !== false).map((c) => c.field);
+
+    const where = buildWhere(q.filters, q.search, sqlOf, searchFields);
+    const whereSql = where.sql ? ` WHERE ${where.sql}` : '';
+    const params = where.params as SQLInputValue[];
+
+    const totalRow = this.db.prepare(`SELECT COUNT(*) AS n FROM ${table}${whereSql}`).get(...params) as { n: number };
+
+    // A sort on a computed column cannot be done here either; the caller re-sorts.
+    let sortPartial = false;
+    const orderParts: string[] = [];
+    for (const key of q.sort ?? []) {
+      const col = sqlOf(key.field);
+      if (!col) {
+        sortPartial = true;
+        continue;
+      }
+      orderParts.push(`${col} ${key.asc ? 'ASC' : 'DESC'}`);
+    }
+    const orderSql = orderParts.length > 0 ? ` ORDER BY ${orderParts.join(', ')}` : '';
+
+    // A LIMIT without an ORDER BY has no defined answer, so fall back to rowid
+    // rather than letting the slice shift between calls.
+    const stableSql = orderSql || (q.limit != null || q.offset != null ? ` ORDER BY rowid` : '');
+    // SQLite needs a LIMIT before it will take an OFFSET; -1 means "no cap".
+    const limitSql = q.limit != null && q.limit > 0 ? ` LIMIT ${Math.floor(q.limit)}` : q.offset != null && q.offset > 0 ? ` LIMIT -1` : '';
+    const offsetSql = q.offset != null && q.offset > 0 ? ` OFFSET ${Math.floor(q.offset)}` : '';
+
+    // Only the fields asked for, plus the bookkeeping a Row needs. `_extra` comes
+    // along because a requested field may live in it.
+    const wanted = q.fields && q.fields.length > 0 ? columns.filter((c) => q.fields?.includes(c.field)) : columns;
+    const selected = ['_id', '_updatedAt', '_extra', ...wanted.filter((c) => !c.script).map((c) => quoteIdent(c.field))];
+
+    const raws = this.db.prepare(`SELECT ${selected.join(', ')} FROM ${table}${whereSql}${stableSql}${limitSql}${offsetSql}`).all(...params) as Array<Record<string, unknown>>;
+
+    const partial = !where.expressible || sortPartial;
+    return {
+      rows: raws.map((raw) => this.decodeRow(tableId, wanted, raw)) as RowPage['rows'],
+      total: totalRow.n,
+      ...(partial ? { partial: true } : {}),
+    };
   }
 
   /**

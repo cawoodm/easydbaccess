@@ -9,7 +9,7 @@
 // ../../../../eda-datasette-plugin/datasette-client.js (21 node --test cases).
 
 import type { ColumnSpec, ColumnType, FetchOpts, TableInfo } from '@easydb/shared';
-import { parseColumnFilter } from '../search/column-filter.js';
+import { parseColumnFilter } from '@easydb/shared';
 import { isInternalField } from '../util/internal-fields.js';
 
 export interface DatasetteRef {

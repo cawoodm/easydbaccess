@@ -4,7 +4,7 @@ import {
   composeColumnFilter,
   parseColumnFilter,
   type FilterToken,
-} from '../search/column-filter.js';
+} from '@easydb/shared';
 import { materialIconStyles } from './material-icon-css.js';
 
 /** Tri-state of one value in the picker: included, excluded, or unset. */

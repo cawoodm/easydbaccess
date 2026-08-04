@@ -1,8 +1,15 @@
 # @easydb/shared
 
-The contracts every layer agrees on. Pure types + the plugin API. No runtime
-logic, no I/O, no DOM, no Node APIs — anything imported here must work in
-browser, Node, and Electron main equally.
+The contracts every layer agrees on. Types, the plugin API, and the small
+amount of pure logic that has to mean the SAME thing on every side of a wire.
+No I/O, no DOM, no Node APIs — anything imported here must work in browser,
+Node, and Electron main equally.
+
+That last rule is why the filter language lives here. `column-filter.ts` used
+to sit in the renderer, but the Electron main process has to narrow rows in SQL
+using exactly the reading the renderer applies in memory, and a second
+implementation would drift. Pure, deterministic, no-dependency logic of that
+kind belongs here; anything else does not.
 
 ## Files
 
@@ -10,6 +17,10 @@ browser, Node, and Electron main equally.
 |---|---|
 | `src/types.ts` | TS interfaces: `Workspace`, `Table`, `Row`, `ColumnSpec`, `ColumnType`, `WindowGeometry`, `Setting`, `PluginRecord`. |
 | `src/plugin-api.ts` | The `HostApi`, `PluginModule`, `DataCollection<T>`, `DataStore`, `EventBus`, `Dialogs`, `WindowManager`, `Backend`, registry specs, `AppEvents`. **Single source of truth for the plugin contract.** |
+| `src/row-query.ts` | `RowQuery` / `RowPage` — "these fields, this filter, this sort, this slice". The contract that lets a reader stop fetching whole tables, over IPC or HTTP. |
+| `src/column-filter.ts` | The filter LANGUAGE: parses an expression into `FilterToken[]` and matches it in memory. **The specification** every backend must agree with. |
+| `src/filter-sql.ts` | The same tokens as a SQL `WHERE` fragment. Cross-tested against the matcher. |
+| `src/sql-mapping.ts` | SQL type ↔ `ColumnType` mapping, shared by import and export. |
 | `src/index.ts` | Just barrel re-exports. |
 
 ## Hot rule: lockstep across packages

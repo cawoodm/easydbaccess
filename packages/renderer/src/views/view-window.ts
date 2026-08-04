@@ -14,7 +14,7 @@ import {
   substituteRow,
   viewRows,
 } from './view-render.js';
-import { parseColumnFilter } from '../search/column-filter.js';
+import { parseColumnFilter } from '@easydb/shared';
 import { facetable, facetCounts } from '../search/facet-values.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
 import { searchRowsByField } from '../search/text-search.js';

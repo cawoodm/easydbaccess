@@ -17,7 +17,7 @@
 // what "contains" means (here: any field value contains the term, so a phrase
 // spanning two fields is NOT a phrase match, matching the old per-field logic).
 
-import { matchesColumnFilter } from './column-filter.js';
+import { matchesColumnFilter } from '@easydb/shared';
 
 /** Per-row predicate: does the row contain `needle` (already lower-cased)? */
 export type ContainsFn<T> = (row: T, needle: string) => boolean;

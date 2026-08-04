@@ -12,7 +12,7 @@ import {
   matchesColumnFilter,
   parseColumnFilter,
   type FilterToken,
-} from '../search/column-filter.js';
+} from '@easydb/shared';
 import { runColumnScript } from '../util/column-script.js';
 
 /**
