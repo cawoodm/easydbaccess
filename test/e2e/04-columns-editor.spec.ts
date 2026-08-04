@@ -86,8 +86,8 @@ test.describe('columns editor', () => {
     await expect(dialog).toBeVisible();
 
     // Uncheck the "visible" checkbox for the second column (index 1).
-    // The dialog renders columns as .col-row rows; visible is the third
-    // checkbox in each row (after unique + notnull).
+    // Selected by title, not position: the visible box is the FIRST control in
+    // each row now (its header toggles the whole column), and it has moved before.
     const colRows = dialog.locator('.col-row');
     await expect(colRows).toHaveCount(2);
     const secondRowVisible = colRows.nth(1).locator('input[title^="Visible"]');
@@ -108,6 +108,53 @@ test.describe('columns editor', () => {
     // Rendered: the hidden column's label is gone from the header.
     await expect(panel.locator('data-table thead')).not.toContainText('hideme');
     await expect(panel.locator('data-table thead')).toContainText('keep');
+  });
+
+  test('clicking the visible header hides every column, clicking again shows them', async ({ page }) => {
+    // The point of the header toggle: on a wide table, hiding all but a few
+    // columns one checkbox at a time is the tedium it exists to remove.
+    const id = await createTable(page, 'AllOrNone', [{ field: 'a' }, { field: 'b' }, { field: 'c' }]);
+    await waitForPanel(page, id);
+
+    const panel = page.locator(`#${panelDomId(id)}`);
+    await panel
+      .locator('panel-footer')
+      .getByRole('button', { name: /Columns/ })
+      .click();
+    const dialog = page.locator('new-table-dialog dialog');
+    await expect(dialog).toBeVisible();
+
+    // All three start visible, so the first click clears them.
+    const head = dialog.locator('.col-header button.flag-head[title^="Visible"]');
+    await head.click();
+    for (const box of await dialog.locator('.col-row input[title^="Visible"]').all()) {
+      await expect(box).not.toBeChecked();
+    }
+
+    // And the second click puts them all back.
+    await head.click();
+    for (const box of await dialog.locator('.col-row input[title^="Visible"]').all()) {
+      await expect(box).toBeChecked();
+    }
+
+    // One off, then a click: mixed means "select all", so nothing stays hidden.
+    await dialog.locator('.col-row').nth(1).locator('input[title^="Visible"]').uncheck();
+    await head.click();
+    for (const box of await dialog.locator('.col-row input[title^="Visible"]').all()) {
+      await expect(box).toBeChecked();
+    }
+
+    // Hide them all for real and check it SAVES — the toggle writes the draft,
+    // and `hidden` is stored inverted, so a working UI can still persist nothing.
+    await head.click();
+    await dialog.getByRole('button', { name: /Save|Create/ }).click();
+    await expect(dialog).toBeHidden();
+    await expect
+      .poll(async () => {
+        const t = await readTable(page, id);
+        return t?.columns.map((c: { hidden?: boolean }) => c.hidden === true).join(',');
+      })
+      .toBe('true,true,true');
   });
 
   test('max length input persists Column.max', async ({ page }) => {

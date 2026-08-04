@@ -13,7 +13,7 @@ have a working table you can sort, filter, edit, and export.
 | Where it runs | Where your data lives |
 |---|---|
 | Browser tab | Your browser's local storage (IndexedDB). Nothing leaves your device unless you turn on sync. |
-| Desktop app (Electron) | A real file on your disk. |
+| Desktop app (Electron) | One real SQLite `.db` file on your disk, which you can open, save elsewhere and back up like any other file — see [Database Files](database-files.md). |
 
 Because everything is local by default, easyDBAccess works fully offline and
 needs no account.

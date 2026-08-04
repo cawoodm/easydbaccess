@@ -4,7 +4,7 @@ import { askImportOntoMode, columnsLineUp, type ImportOntoMode } from '../import
 import { isUnsafeIntegerText } from '../import/big-numbers.js';
 import { mapRowsToTarget, type ColumnMapping } from '../import/map-columns.js';
 import { cryptoUUID, slugField } from '../util/ids.js';
-import { looksLikeArray } from '../util/array-cell.js';
+import { looksLikeArray } from '@easydb/shared';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'csv-import',
@@ -774,7 +774,7 @@ function coerce(raw: string, type: ColumnType): unknown {
   const s = raw.trim();
   switch (type) {
     case 'array':
-      // Kept verbatim: `util/array-cell.ts` reads the members out of whichever
+      // Kept verbatim: `array-cell.ts` reads the members out of whichever
       // spelling arrived, so rewriting the cell would only lose the original.
       return s === '' ? null : s;
     case 'number': {

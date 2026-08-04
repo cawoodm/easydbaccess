@@ -9,9 +9,9 @@
 // ../../../../eda-datasette-plugin/datasette-client.js (21 node --test cases).
 
 import type { ColumnSpec, ColumnType, FetchOpts, TableInfo } from '@easydb/shared';
-import { parseColumnFilter } from '../search/column-filter.js';
+import { parseColumnFilter } from '@easydb/shared';
 import { isInternalField } from '../util/internal-fields.js';
-import { looksLikeArray } from '../util/array-cell.js';
+import { looksLikeArray } from '@easydb/shared';
 
 export interface DatasetteRef {
   base: string;

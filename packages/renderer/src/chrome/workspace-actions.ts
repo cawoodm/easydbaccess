@@ -106,8 +106,7 @@ export async function deleteWorkspaceFlow(): Promise<void> {
   ].join(', ');
   const isLast = all.length === 1;
   const ok = await ctx.api.ui.dialogs.confirm(
-    `Delete the workspace "${target.name}"?\n\n${what} will be deleted. This cannot be undone.` +
-      (isLast ? '\n\nIt is the only workspace, so an empty one will be created in its place.' : ''),
+    `Delete the workspace "${target.name}"?\n\n${what} will be deleted. This cannot be undone.` + (isLast ? '\n\nIt is the only workspace, so an empty one will be created in its place.' : ''),
     'Delete workspace',
   );
   if (!ok) return;

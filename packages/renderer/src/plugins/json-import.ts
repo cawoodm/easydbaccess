@@ -7,7 +7,7 @@ import { runImport } from '../import/import-kernel.js';
 import { rowRekeyer } from '../table/column-merge.js';
 import { filenameFromUrl } from '../import/fetch-source.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
-import { looksLikeArray } from '../util/array-cell.js';
+import { looksLikeArray } from '@easydb/shared';
 import { restoreTemplates } from '../views/template-restore.js';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a

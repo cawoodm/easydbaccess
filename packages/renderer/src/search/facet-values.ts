@@ -9,7 +9,7 @@
  * list to pick from, a second value on the same field is unreachable by clicking.
  */
 
-import { arrayMembers } from '../util/array-cell.js';
+import { arrayMembers } from '@easydb/shared';
 
 /** Longest a value may be to appear in a dropdown. Beyond this a column is
  *  prose (a description, a body) and its "values" are not a list. */

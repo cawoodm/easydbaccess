@@ -104,6 +104,14 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string): DataCollectio
       if (ids.length === 0) return;
       await coll.bulkDelete(ids);
     },
+    /**
+     * Rows in this table, counted on the `tableId` index without reading any of
+     * them — the denominator for a panel title, which is a different number from
+     * how many a filter matched.
+     */
+    async count() {
+      return coll.where('tableId').equals(tableId).count();
+    },
     subscribe(fn): Unsubscribe {
       const obs = liveQuery(() => coll.where('tableId').equals(tableId).toArray());
       const sub = obs.subscribe({
@@ -111,6 +119,13 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string): DataCollectio
       });
       return () => sub.unsubscribe();
     },
+    // No `watch` here on purpose. `liveQuery` only pushes when its result
+    // CHANGES, so a cheap key (a count, or the last row's stamp) would stay
+    // silent on the commonest write of all — editing a cell in place — and the
+    // grid would not refresh. Reading the rows is the only reliable Dexie
+    // signal, which is what `subscribe` already does, and in-process IndexedDB
+    // reads are not the cost that made this worth avoiding: the IPC store's
+    // structured-clone of every row is (see `data-store-ipc.ts`'s `watch`).
   };
 }
 

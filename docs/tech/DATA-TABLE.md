@@ -125,7 +125,7 @@ excluded from its own facet).
 **`array` columns filter per member.** A cell of an `array` column holds several
 values, written either as a comma list (`foo,bar,baz`) or as a JSON array
 (`["Foo","Bar"]`, or a real JS array from a JSON import). All three are read by
-[`util/array-cell.ts`](../../packages/renderer/src/util/array-cell.ts), and the
+[`array-cell.ts`](../../packages/shared/src/array-cell.ts), and the
 column's type — not the shape of the cell — is what turns member reading on.
 
 Both filter layers take the members instead of the whole cell: the dropdown

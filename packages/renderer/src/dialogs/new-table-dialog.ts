@@ -8,7 +8,7 @@ import { makeDialogDraggable } from './draggable.js';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
-import { buildColumnSpec, type ColumnRow } from './column-row.js';
+import { allColumnsFlagged, buildColumnSpec, toggleColumnFlag, type ColumnFlag, type ColumnRow } from './column-row.js';
 import { renameRowFields, type FieldRename } from '../table/column-merge.js';
 import { HostDialogs } from './host-dialogs.js';
 import { LEGACY_CELL_RENDERERS } from '../plugin-host/registries.js';
@@ -152,8 +152,9 @@ export class NewTableDialog extends LitElement {
       .col-header,
       .col-row {
         display: grid;
+        /* drag | 👁 | field | label | type | renderer | script | max | U ! ⇅ ⚲ | up down del */
         grid-template-columns:
-          1.25rem 1fr 1fr 7rem 7rem 1.5rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem
+          1.25rem 1.5rem 1fr 1fr 7rem 7rem 1.5rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem
           1.5rem;
         gap: 0.4rem;
         align-items: center;
@@ -192,6 +193,26 @@ export class NewTableDialog extends LitElement {
       .col-header .flag-label {
         font-size: 0.7rem;
         text-align: center;
+      }
+      /* A header that toggles its whole column. Styled to sit in the header row
+         like the plain labels beside it — the hover and the pointer are what say
+         it does something. */
+      .col-header button.flag-head {
+        background: transparent;
+        border: 0;
+        padding: 0;
+        color: inherit;
+        font: inherit;
+        font-size: 0.7rem;
+        cursor: pointer;
+        line-height: 1;
+      }
+      .col-header button.flag-head:hover {
+        color: #374151;
+      }
+      .col-header button.flag-head:focus-visible {
+        outline: 2px solid #3b82f6;
+        outline-offset: 1px;
       }
       .col-header {
         font-size: 0.75rem;
@@ -490,6 +511,28 @@ export class NewTableDialog extends LitElement {
 
   private patchColumn(idx: number, patch: Partial<ColumnRow>): void {
     this.columns = this.columns.map((c, i) => (i === idx ? { ...c, ...patch } : c));
+  }
+
+  /**
+   * A clickable header for one checkbox column: click ticks every box, click
+   * again clears them.
+   *
+   * A button rather than a styled span, because the header is now a control and
+   * has to be reachable by keyboard and announced as one — a 40-column table is
+   * exactly where hiding all but three columns by hand is most tedious, so this
+   * is the shortcut those users need most.
+   */
+  private renderFlagHead(flag: ColumnFlag, glyph: string, label: string) {
+    const all = allColumnsFlagged(this.columns, flag);
+    return html`<button
+      type="button"
+      class="flag-label flag-head"
+      title=${`${label} — click to ${all ? 'clear' : 'set'} every column`}
+      aria-pressed=${all ? 'true' : 'false'}
+      @click=${() => (this.columns = toggleColumnFlag(this.columns, flag))}
+    >
+      ${glyph}
+    </button>`;
   }
 
   /**
@@ -811,17 +854,15 @@ export class NewTableDialog extends LitElement {
             <div class="columns">
               <div class="col-header">
                 <span></span>
+                ${this.renderFlagHead('visible', '👁', 'Visible')}
                 <span>Field</span>
                 <span>Label</span>
                 <span>Type</span>
                 <span>Renderer</span>
                 <span></span>
                 <span class="flag-label">Max</span>
-                <span class="flag-label" title="Unique">U</span>
-                <span class="flag-label" title="Not null">!</span>
-                <span class="flag-label" title="Visible">👁</span>
-                <span class="flag-label" title="Sortable">⇅</span>
-                <span class="flag-label" title="Filterable (includes search)">⚲</span>
+                ${this.renderFlagHead('unique', 'U', 'Unique')} ${this.renderFlagHead('notnull', '!', 'Not null')} ${this.renderFlagHead('sortable', '⇅', 'Sortable')}
+                ${this.renderFlagHead('filterable', '⚲', 'Filterable (includes search)')}
                 <span></span>
                 <span></span>
                 <span></span>
@@ -840,8 +881,26 @@ export class NewTableDialog extends LitElement {
                     <span class="drag-handle" title="Drag to reorder" draggable="true" @dragstart=${(e: DragEvent) => this.onRowDragStart(e, i)} @dragend=${() => this.onRowDragEnd()}>
                       <span class="mi sm">drag_indicator</span>
                     </span>
-                    <input type="text" .value=${c.field} @input=${(e: Event) => this.patchColumn(i, { field: (e.target as HTMLInputElement).value })} />
-                    <input type="text" .value=${c.label} @input=${(e: Event) => this.patchColumn(i, { label: (e.target as HTMLInputElement).value })} />
+                    <span class="flag">
+                      <input
+                        type="checkbox"
+                        title="Visible — uncheck to hide the column without losing its data"
+                        .checked=${!c.hidden}
+                        @change=${(e: Event) => this.patchColumn(i, { hidden: !(e.target as HTMLInputElement).checked })}
+                      />
+                    </span>
+                    <input
+                      type="text"
+                      title="Field — the key this column is stored under in each row"
+                      .value=${c.field}
+                      @input=${(e: Event) => this.patchColumn(i, { field: (e.target as HTMLInputElement).value })}
+                    />
+                    <input
+                      type="text"
+                      title="Label — the heading shown above the column"
+                      .value=${c.label}
+                      @input=${(e: Event) => this.patchColumn(i, { label: (e.target as HTMLInputElement).value })}
+                    />
                     <select
                       .value=${c.type}
                       @change=${(e: Event) =>
@@ -886,14 +945,6 @@ export class NewTableDialog extends LitElement {
                     </span>
                     <span class="flag">
                       <input type="checkbox" title="Not null" .checked=${!!c.notnull} @change=${(e: Event) => this.patchColumn(i, { notnull: (e.target as HTMLInputElement).checked })} />
-                    </span>
-                    <span class="flag">
-                      <input
-                        type="checkbox"
-                        title="Visible — uncheck to hide the column without losing its data"
-                        .checked=${!c.hidden}
-                        @change=${(e: Event) => this.patchColumn(i, { hidden: !(e.target as HTMLInputElement).checked })}
-                      />
                     </span>
                     <span class="flag">
                       <input

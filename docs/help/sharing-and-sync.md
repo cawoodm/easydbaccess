@@ -14,6 +14,11 @@ There's no proprietary format — a `.db.json` file is plain JSON you can
 version-control, email, or store anywhere. Drop it back onto the window to
 restore it.
 
+In the desktop app you have a second way: your workspace already **is** a
+file, so **Database → Save As…** makes a backup copy of the whole database,
+and **Database → Open…** opens one again. See
+[Database Files](database-files.md).
+
 ## Syncing to other devices
 
 Two ways to sync, pick one — or neither:

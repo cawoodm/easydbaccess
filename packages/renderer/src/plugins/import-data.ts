@@ -30,7 +30,7 @@ import { hasSqlProjections, reportSqlRestore, restoreSqlScript } from './sql-imp
 import { fetchImportTextWithBar, filenameFromUrl } from '../import/fetch-source.js';
 import { runImport, type RunImportResult } from '../import/import-kernel.js';
 import { refreshFromOrigin } from '../import/refresh.js';
-import { looksLikeArray } from '../util/array-cell.js';
+import { looksLikeArray } from '@easydb/shared';
 import type { ImportTarget } from '../import/land-tables.js';
 
 /** How a URL should be imported. `auto` is resolved to a concrete kind on submit. */

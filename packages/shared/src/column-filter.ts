@@ -54,13 +54,13 @@
 // a token to search for a literal leading `!`, `^` or `=` (`"^caret"`).
 //
 // An `array` column (pass `{ type: 'array' }`) matches PER MEMBER: the cell is
-// taken apart by `util/array-cell.ts` and a token that hits any one member hits
+// taken apart by `array-cell.ts` and a token that hits any one member hits
 // the cell. `=Foo` therefore selects the rows whose list CONTAINS exactly `Foo`,
 // which is what the funnel dropdown needs — its tokens are exact, and the whole
 // cell (`Foo,Bar`) is never exactly one value. Negation still reads as "no
 // member matches", and `NULL` as "no members at all".
 
-import { arrayMembers } from '../util/array-cell.js';
+import { arrayMembers } from './array-cell.js';
 
 /**
  * One term of a column filter. `negate` excludes instead of includes; `prefix`

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { decodeValue, encodeValue, quoteIdent, sanitizeTableName as sanitize, sqlAffinity } from '@easydb/shared';
 import type { Json, StoreAdapter, Unsubscribe, WriteResult } from './types.js';
 
 // node:sqlite is a Node 22.5+ built-in. Vite (used by vitest) doesn't yet
@@ -336,45 +337,9 @@ function validateBody(body: Json): WorkspaceBody {
 }
 
 // -- SQL helpers -------------------------------------------------------------
-
-function quoteIdent(s: string): string {
-  return `"${s.replace(/"/g, '""')}"`;
-}
-
-function sanitize(s: string): string {
-  return s.replace(/[^A-Za-z0-9_]/g, '_');
-}
-
-function sqlAffinity(t: ColumnType): string {
-  switch (t) {
-    case 'number':
-      return 'REAL';
-    case 'boolean':
-      return 'INTEGER';
-    case 'string':
-    case 'date':
-    case 'datetime':
-    default:
-      return 'TEXT';
-  }
-}
-
-function encodeValue(t: ColumnType, v: unknown): unknown {
-  if (v === null || v === undefined) return null;
-  if (t === 'boolean') return v ? 1 : 0;
-  if (t === 'number') {
-    if (typeof v === 'number' && Number.isFinite(v)) return v;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  }
-  return String(v);
-}
-
-function decodeValue(t: ColumnType, v: unknown): unknown {
-  if (v === null || v === undefined) return null;
-  if (t === 'boolean') return !!v;
-  return v;
-}
+// quoteIdent / sanitize(TableName) / sqlAffinity / encodeValue / decodeValue
+// now live in @easydb/shared/sql-mapping — see the import above. They stayed
+// behaviour-identical in the move; only their home changed.
 
 function sha1(text: string): string {
   return createHash('sha1').update(text, 'utf8').digest('hex');

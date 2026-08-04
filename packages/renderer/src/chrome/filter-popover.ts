@@ -1,6 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { composeColumnFilter, parseColumnFilter, type FilterToken } from '../search/column-filter.js';
+import { composeColumnFilter, parseColumnFilter, type FilterToken } from '@easydb/shared';
 import { materialIconStyles } from './material-icon-css.js';
 
 /** Tri-state of one value in the picker: included, excluded, or unset. */

@@ -9,19 +9,26 @@ a local-first, plugin-extensible, multi-table database app that runs both as a
 browser app and as an Electron desktop app, with a small loosely-coupled Node
 backend for multi-device sync and URL-based data ingestion.
 
-The canonical design lives at [`.claude/plans/2026-05-21-rewrite-architecture.md`](./.claude/plans/2026-05-21-rewrite-architecture.md).
-Read it before making structural changes — it is more authoritative than this
-file for the _why_ behind the architecture. Phases 1–6 are landed (skeleton +
+The canonical design lived at `.claude/plans/2026-05-21-rewrite-architecture.md`.
+That file no longer exists; the dated per-feature notes still in
+`.claude/plans/` are what survives of it, and they remain more authoritative
+than this file for the _why_ behind anything they cover. Read the relevant one
+before making structural changes. Phases 1–6 are landed (skeleton +
 shared types + Dexie + plugin host + built-in plugins + jsPanel windows +
-standalone Hono server with `/sync`, `/fetch`, `/plugins/registry`). Phase 7
-(live multi-device replication beyond whole-workspace blob push/pull), Phase 8
-(Electron-in-process Hono + Dexie-over-IPC + better-sqlite3 storage), Phase 9
-(migration from v1 localStorage), and Phase 10 (polish) are ahead.
+standalone Hono server with `/sync`, `/fetch`, `/plugins/registry`). Phase 8's
+storage half is landed too: inside Electron the renderer talks to a
+main-process SQLite store over IPC (`node:sqlite`, not `better-sqlite3`) and
+the user can open / save / import `.db` files. Phase 7 (live multi-device
+replication beyond whole-workspace blob push/pull), the rest of Phase 8
+(Hono in-process, native save dialog), Phase 9 (migration from v1
+localStorage), and Phase 10 (polish) are ahead.
 
 ## Commands
 
 All scripts run from the repo root (`npm` workspaces). Node ≥24 required
-(`engines.node`); the server's `process.loadEnvFile` and Electron 33 expect it.
+(`engines.node`); the server's `process.loadEnvFile` and Electron 43 expect it.
+Electron 43 is also what makes `node:sqlite` available unflagged in the main
+process — the Electron storage layer depends on it.
 
 | Command                    | What it does                                                                                                                                                                                  |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -62,18 +69,22 @@ scripts read the version from `package.json`.
 Three logical pieces:
 
 1. **`packages/renderer`** — Lit web components for the chrome. Identical code
-   runs in the browser (Vite-served) and inside the Electron renderer. Talks
-   to Dexie/IndexedDB locally; sync goes over HTTP to the server.
+   runs in the browser (Vite-served) and inside the Electron renderer. In the
+   browser it talks to Dexie/IndexedDB; in Electron the same `DataStore`
+   contract is served over IPC by the main-process SQLite store. Sync goes
+   over HTTP to the server.
 2. **`packages/server`** — A Hono app exposed by `createServer({ store, fetchFn, ... })`.
    The _same_ exported app is designed to run inside Electron's main process
    **and** as a remote peer (`packages/server/src/standalone.ts`). Routes:
    `/health`, `/sync` (whole-workspace JSON blob push/pull with ETag), `/sync/:workspaceId/stream`
    (SSE), `/fetch` (URL proxy with allowlist + size cap), `/plugins/registry`
    (operator-curated catalog file).
-3. **`packages/electron`** — Thin shell that loads the renderer (Vite in dev,
-   built `frontend/index.html` in prod). IPC bridge in `preload.ts` will later
-   expose a storage adapter so the renderer can talk to a main-process
-   better-sqlite3 store (Phase 8 — not yet wired).
+3. **`packages/electron`** — Shell that loads the renderer (Vite in dev, built
+   `frontend/index.html` in prod) **and** owns the desktop storage: a
+   `node:sqlite` store (`src/sqlite-store.ts`) that keeps user tables as real
+   SQL tables, file operations for Open / Save As / Import (`src/db-files.ts`,
+   `src/db-import.ts`), and the `store:*` / `db:*` IPC surface `preload.ts`
+   hands to the renderer.
 
 `packages/shared` holds the contracts every layer agrees on: TS `types.ts`
 and — most importantly — `plugin-api.ts`, which defines the `HostApi` every
@@ -105,7 +116,8 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
   `table-copy`,
   `import-data`, `auto-sync`, `views`, `settings`, `url-source`,
   `datasette-import` (+ `datasette-views`), `datasette-connect`, `connect-menu`,
-  `projection`, `command-palette-button`. Don't add a feature to
+  `projection`, `command-palette-button`, `electron-db`, `sqlitefile-source`.
+  Don't add a feature to
   the core if it can be a plugin. (Exception: the Plugin Manager button is core
   chrome in `app-shell.ts`, not a plugin — it opens the manager that governs
   plugins.)
@@ -139,20 +151,29 @@ and a join key left on the old name matched nothing.
 The renderer opens a Dexie database (`db/dexie-db.ts`) and wraps each Dexie
 table in the minimal `DataCollection<T>` shape from `plugin-api.ts`
 (`db/data-store-dexie.ts`). The wrapper is the only surface plugins see — the
-storage layer remains swappable. When adding new collections, touch **three**
-places in lockstep:
+storage layer remains swappable, and Electron proves it: there
+`app-context.ts` builds the same contract over IPC instead
+(`db/data-store-ipc.ts` → `packages/electron/src/sqlite-store.ts`). When
+adding new collections, touch **four** places in lockstep:
 
 1. Type → `packages/shared/src/types.ts`
 2. Dexie schema + typed table → `packages/renderer/src/db/dexie-db.ts`
 3. Plugin-facing wrapper → `packages/renderer/src/db/data-store-dexie.ts`
+4. The IPC store's collection list → `packages/renderer/src/db/data-store-ipc.ts`
+   and `packages/electron/src/sqlite-store.ts` (an unknown collection throws
+   there rather than failing silently)
 
 `store.rows(tableId)` returns a _view_ (not a separate Dexie table) that
 auto-injects `tableId` into inserts and queries. There is one underlying
-`rows` table indexed on `tableId`.
+`rows` table indexed on `tableId`. The SQLite store keeps that same view
+semantics, but each logical table there really is its own SQL table, so
+`tableId` selects _which_ table rather than filtering a column.
 
 Subscriptions use Dexie's `liveQuery`, which re-runs the query closure on any
 write to the underlying table. Chrome callers consume the full result set
-each time, so the coarse granularity is harmless.
+each time, so the coarse granularity is harmless. On the IPC path the main
+process broadcasts `store:changed` per collection and the collection re-runs
+its query — same coarse granularity, same contract.
 
 ## Cross-cutting gotchas
 
@@ -183,16 +204,19 @@ These have already bitten this codebase. Don't re-litigate them.
 
 Don't "fix" these without checking the plan section first:
 
-- **Electron in-process Hono + Dexie-over-IPC + better-sqlite3 storage** — Phase 8.
-  `packages/electron/src/main.ts` is still a plain `BrowserWindow` loader;
-  the renderer continues to use Dexie/IndexedDB inside Electron.
+- **Hono in the Electron main process** — Phase 8's other half. `main.ts` boots
+  the storage IPC but does not mount `@easydb/server`, even though the package
+  is already a dependency. (Storage itself IS wired — see the DataStore
+  section.)
 - **Live multi-device replication beyond the JSON-blob `/sync` route** —
   Phase 7. The current `server-sync` plugin and `/sync/:workspaceId` route
   push/pull the entire workspace as one document with ETag concurrency. SSE
   notifies of remote changes; full row-level replication is not yet wired.
 - **Electron native saveFile / openFile** — the `backend.saveFile` plugin
   surface exists, but in Electron it still uses the browser `<a download>`
-  fallback. Native `dialog.showSaveDialog` lands with Phase 8.
+  fallback. `dialog.showSaveDialog` is already used for the `.db` file
+  operations (`src/db-files.ts`); `backend.saveFile` has not been routed
+  through it.
 - **Migration from v1 minniDBMax localStorage** — Phase 9.
 
 ## Every test lives in root `test/`

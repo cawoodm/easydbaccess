@@ -99,7 +99,7 @@ test.describe('projections', () => {
     await footer.getByRole('button', { name: 'Columns' }).click();
     const colEditor = page.locator('new-table-dialog dialog');
     await expect(colEditor).toBeVisible();
-    const labelInput = page.locator('new-table-dialog .col-row input').nth(1);
+    const labelInput = page.locator('new-table-dialog .col-row input[title^="Label"]').first();
     await labelInput.fill('Renamed by hand');
     await page.locator('new-table-dialog').getByRole('button', { name: 'Save', exact: true }).click();
     await expect(colEditor).toBeHidden();

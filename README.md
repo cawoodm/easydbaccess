@@ -158,8 +158,7 @@ npm run package:electron
 ```
 
 See [`CLAUDE.md`](./CLAUDE.md) for the developer-facing architecture overview
-and [`.claude/plans/2026-05-21-rewrite-architecture.md`](./.claude/plans/2026-05-21-rewrite-architecture.md)
-for the full design.
+and [`docs/tech/INDEX.md`](./docs/tech/INDEX.md) for the detailed notes.
 
 ---
 
@@ -174,9 +173,10 @@ for the full design.
 
 ## Status
 
-Active rewrite. The browser app and sync server are working today; the
-Electron shell with native SQLite storage and the URL-loaded plugin manager
-are the next milestones. Track progress in [`TODO.md`](./TODO.md).
+Active rewrite. The browser app, the sync server, the URL-loaded plugin
+manager and the Electron shell with native SQLite storage all work today.
+Live multi-device replication and running the sync server inside Electron are
+the next milestones — see [`docs/tech/TECH.md`](./docs/tech/TECH.md#status).
 
 ## Project layout
 
