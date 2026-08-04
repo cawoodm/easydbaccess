@@ -2,7 +2,7 @@ import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
-import { VALIDATE_SAMPLES } from './validate-samples.js';
+import { RENDER_SAMPLES, VALIDATE_SAMPLES, type ScriptSample } from './script-samples.js';
 
 /**
  * Which of a column's two scripts is being edited. They share this one editor
@@ -181,6 +181,11 @@ export class ScriptEditorDialog extends LitElement {
     this.resolve(this.text);
   };
 
+  /** The sample list for whichever script is being edited. */
+  private get samples(): ReadonlyArray<ScriptSample> {
+    return this.kind === 'validate' ? VALIDATE_SAMPLES : RENDER_SAMPLES;
+  }
+
   /**
    * Replace the editor contents with a sample, remembering what was there. The
    * `<select>` is reset to its placeholder so picking the SAME sample again
@@ -188,7 +193,7 @@ export class ScriptEditorDialog extends LitElement {
    */
   private applySample(e: Event) {
     const select = e.target as HTMLSelectElement;
-    const sample = VALIDATE_SAMPLES[Number(select.value)];
+    const sample = this.samples[Number(select.value)];
     select.value = '';
     if (!sample) return;
     this.undoText = this.text;
@@ -227,7 +232,7 @@ export class ScriptEditorDialog extends LitElement {
       </p>
       <p class="hint">
         Besides the JS globals you can call <code>markdownToHtml(text)</code> (also <code>easydb.markdownToHtml</code>) — set this column's renderer to <code>html</code> so the result shows as
-        formatted text rather than as its own source.
+        formatted text rather than as its own source. A sample that needs a particular renderer says so in its first line; the dropdown can't set it for you.
       </p>
     `;
   }
@@ -247,18 +252,18 @@ export class ScriptEditorDialog extends LitElement {
           </div>
           <div class="dialog-body">
             ${this.renderHints()}
-            ${validating
-              ? html`
-                  <div class="samples">
-                    <label for="sample">Start from a sample</label>
-                    <select id="sample" title="Replace the editor contents with a ready-made rule" @change=${(e: Event) => this.applySample(e)}>
-                      <option value="">— choose —</option>
-                      ${VALIDATE_SAMPLES.map((s, i) => html`<option value=${i}>${s.label}</option>`)}
-                    </select>
-                    ${this.undoText !== null ? html`<button type="button" class="link" @click=${() => this.undoSample()}>Undo</button>` : null}
-                  </div>
-                `
-              : null}
+            <div class="samples">
+              <label for="sample">Start from a sample</label>
+              <select
+                id="sample"
+                title=${validating ? 'Replace the editor contents with a ready-made rule' : 'Replace the editor contents with a ready-made script'}
+                @change=${(e: Event) => this.applySample(e)}
+              >
+                <option value="">— choose —</option>
+                ${this.samples.map((s, i) => html`<option value=${i}>${s.label}</option>`)}
+              </select>
+              ${this.undoText !== null ? html`<button type="button" class="link" @click=${() => this.undoSample()}>Undo</button>` : null}
+            </div>
             <textarea spellcheck="false" autofocus .value=${this.text} @input=${(e: Event) => this.onInput(e)}></textarea>
           </div>
         </form>

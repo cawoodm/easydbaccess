@@ -175,9 +175,13 @@ Three deliberate boundaries:
 
 The two kinds compile to different signatures (`render(row)` vs
 `validate(value, row)`) and so keep separate memo caches, but they share the
-helper set and the trust model. `dialogs/validate-samples.ts` holds the ten
-ready-made rules the editor offers; they are plain data and the unit suite
-compiles and exercises each one.
+helper set and the trust model. `dialogs/script-samples.ts` holds the ten
+ready-made scripts the editor offers for EACH kind (`RENDER_SAMPLES`,
+`VALIDATE_SAMPLES`); they are plain data and the unit suite compiles and
+exercises every one — including a rule that each render sample returns `''`
+for an empty row, since a script runs against the blank row the user just
+added and "undefined undefined" or "NaN%" in the grid is the classic way a
+naive script embarrasses itself.
 
 ### HTML or Markdown — who decides
 

@@ -127,6 +127,54 @@ test('the column editor offers the script button on every column, not just scrip
   await expect(editor.locator('textarea')).toHaveValue(/function render\(row\)/);
 });
 
+test('the script editor offers ready-made render scripts, and can undo picking one', async ({ page }) => {
+  const id = await createTable(page, 'Samples', [{ field: 'notes' }]);
+  await waitForPanel(page, id);
+
+  await page
+    .locator(`#${panelDomId(id)}`)
+    .locator('panel-footer')
+    .getByRole('button', { name: /Columns/ })
+    .click();
+  const dlg = page.locator('new-table-dialog dialog');
+  await dlg.locator('button.script-btn').first().click();
+
+  const editor = page.locator('script-editor-dialog dialog');
+  await expect(editor.locator('h2')).toContainText('Edit script');
+  // Ten render samples plus the "— choose —" placeholder. A different list
+  // from the validation editor's, which the 64- spec covers.
+  const samples = editor.locator('select#sample');
+  await expect(samples.locator('option')).toHaveCount(11);
+  await expect(samples.locator('option', { hasText: 'markdownToHtml' })).toHaveCount(1);
+
+  await samples.selectOption({ label: 'Build a URL from a field' });
+  await expect(editor.locator('textarea')).toHaveValue(/https:\/\/github\.com\//);
+  await editor.getByRole('button', { name: 'Undo' }).click();
+  await expect(editor.locator('textarea')).toHaveValue(/function render\(row\)/);
+});
+
+test('a picked render sample saves onto the column and computes the cell', async ({ page }) => {
+  const id = await createTable(page, 'Totals', [{ field: 'qty', type: 'number' }, { field: 'price', type: 'number' }, { field: 'total' }]);
+  await waitForPanel(page, id);
+  await addRow(page, id, { qty: 3, price: 4.5 });
+
+  await page
+    .locator(`#${panelDomId(id)}`)
+    .locator('panel-footer')
+    .getByRole('button', { name: /Columns/ })
+    .click();
+  const dlg = page.locator('new-table-dialog dialog');
+  await dlg.locator('button.script-btn').nth(2).click();
+
+  const editor = page.locator('script-editor-dialog dialog');
+  await editor.locator('select#sample').selectOption({ label: 'Maths — line total (quantity × price)' });
+  await editor.getByRole('button', { name: 'Save' }).click();
+  await dlg.getByRole('button', { name: /Save|Create/ }).click();
+  await expect(dlg).toBeHidden();
+
+  await expect(cellsOf(page, id).nth(2)).toHaveText('13.50');
+});
+
 test('the renderer dropdown no longer offers a dedicated "script" renderer', async ({ page }) => {
   // The old `script` cell renderer duplicated this generic path (it ran the
   // same column.script and injected the result as raw HTML). Removing it means
