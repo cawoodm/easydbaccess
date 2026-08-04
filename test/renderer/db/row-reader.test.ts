@@ -112,10 +112,20 @@ describe('readRows', () => {
     });
   });
 
-  it('caps the fallback read, because handing over a whole large table is what crashed the app', async () => {
+  it('caps the fallback read and says so, because handing over a whole large table is what crashed the app', async () => {
+    // Silently returning 2 of 4 rows with total:2 reads as "this table has 2
+    // rows". `truncated` is what makes the count a floor.
     const { coll } = fakeColl({ supportsQuery: false });
     const page = await readRows(coll, req(), 2);
     expect(page.rows).toHaveLength(2);
+    expect(page.truncated).toBe(true);
+  });
+
+  it('does not claim truncation when the whole table fitted under the cap', async () => {
+    const { coll } = fakeColl({ supportsQuery: false });
+    const page = await readRows(coll, req(), 100);
+    expect(page.truncated).toBeUndefined();
+    expect(page.total).toBe(4);
   });
 
   it('pushes the filter, the sort and the slice, and never calls find', async () => {
@@ -161,9 +171,10 @@ describe('readRows', () => {
     expect(page.rows.map((r) => r.id)).toEqual(['r1', 'r3']);
   });
 
-  it('caps what it pulls even on the unsound path', async () => {
+  it('caps what it pulls even on the unsound path, and reports the cap as truncation', async () => {
     const { coll, seen } = fakeColl();
-    await readRows(coll, req({ search: 'ada OR bo' }), 3);
+    const page = await readRows(coll, req({ search: 'ada OR bo' }), 3);
     expect(seen.queries[0]?.limit).toBe(3);
+    expect(page.truncated).toBe(true);
   });
 });

@@ -18,8 +18,18 @@
  *   - the Electron SQLite store, where it becomes WHERE / ORDER BY / LIMIT;
  *   - Dexie in the browser, where the existing in-memory matcher applies it;
  *   - HTTP — the sync server, or a Datasette instance, where it becomes query
- *     parameters (`plugins/datasette-client.ts`'s `translateQuery` already does
- *     exactly this translation for filters).
+ *     parameters.
+ *
+ * Neither HTTP implementation exists yet, and there is a trap in the obvious
+ * candidate: `plugins/datasette-client.ts`'s `translateQuery` looks like this
+ * translation but does NOT agree with `column-filter.ts`. It reads a filter as a
+ * comparison ladder (`>n`, `<=n`, `=v`) that the matcher has never had, maps a
+ * comma list to Datasette's `__in` (exact equality) where the matcher means
+ * substring, and uses case-sensitive `__exact`. Each of those is NARROWER than
+ * the matcher, so wiring it would drop rows the user did not exclude — the one
+ * failure `partial` cannot rescue, since that promises a superset. It has no
+ * callers today. Reconciling it needs the treatment `filter-sql.ts` got: every
+ * case run both ways and required to agree.
  *
  * Being serialisable is therefore part of the contract, not a convenience:
  * `filters` and `search` stay in the app's own filter LANGUAGE (the strings
@@ -81,6 +91,16 @@ export interface QueryPage<T> {
    * upper bound rather than a count.
    */
   partial?: boolean | undefined;
+  /**
+   * Set when the backend stopped short of the full answer — a row cap, a paging
+   * limit, an instance that refuses to count past ~10k. `total` is then a FLOOR.
+   *
+   * Distinct from `partial`, and both can be true at once: `partial` is about
+   * which PREDICATES were applied (rows are too many, filter again), `truncated`
+   * is about how many rows came back (rows are too few, there is more out there).
+   * A caller showing a count needs to say "20,000+" rather than "20,000".
+   */
+  truncated?: boolean | undefined;
 }
 
 export type RowPage = QueryPage<Row>;

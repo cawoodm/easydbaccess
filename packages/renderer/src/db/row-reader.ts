@@ -134,8 +134,8 @@ function projectFields(rows: Row[], fields: string[] | undefined): Row[] {
  * `capWhenReadingAll` bounds the fallback read — the collection is about to hand
  * over everything, and an unbounded fetch of a 609k-row table is what crashed
  * the app on boot. It is a cap, not a page: the rows that come back are a
- * TRUNCATION, so `total` is what was read rather than what exists, and a caller
- * showing a count should say so. Pass 0 for no cap.
+ * TRUNCATION, which the result reports as `truncated` so a caller showing a
+ * count can say "20,000+" rather than "20,000". Pass 0 for no cap.
  */
 export async function readRows(coll: DataCollection<Row>, req: RowRequest, capWhenReadingAll = 0): Promise<RowPage> {
   const searchTerm = (req.search ?? '').trim();
@@ -143,7 +143,8 @@ export async function readRows(coll: DataCollection<Row>, req: RowRequest, capWh
 
   if (!coll.query) {
     const all = await coll.find();
-    return applyRowRequest(capWhenReadingAll > 0 ? all.slice(0, capWhenReadingAll) : all, req);
+    const hit = capWhenReadingAll > 0 && all.length >= capWhenReadingAll;
+    return { ...applyRowRequest(hit ? all.slice(0, capWhenReadingAll) : all, req), ...(hit ? { truncated: true } : {}) };
   }
 
   const q: RowQuery = {
@@ -169,9 +170,14 @@ export async function readRows(coll: DataCollection<Row>, req: RowRequest, capWh
   // A superset. Re-run the whole request over it — cheaper than it looks, since
   // whatever the backend DID apply has already thrown most of the rows away.
   const redone = applyRowRequest(page.rows, req);
-  // `page.total` counted the backend's narrower-than-asked set, so it is an
-  // upper bound on the real total, not the total. The re-run's count is exact
-  // for the rows we hold; it under-counts only if the backend truncated, which
-  // is the same caveat the fallback path carries.
-  return { ...redone, ...(page.partial ? { partial: true } : {}) };
+  // `page.total` counted the backend's wider-than-asked set, so it is an upper
+  // bound on the real total, not the total. The re-run's count is exact for the
+  // rows we hold, and `truncated` is what says it may not be all of them —
+  // which the cap we just imposed makes true.
+  const cappedOut = !sliceIsSound && q.limit != null && page.rows.length >= q.limit;
+  return {
+    ...redone,
+    ...(page.partial ? { partial: true } : {}),
+    ...(page.truncated || cappedOut ? { truncated: true } : {}),
+  };
 }
