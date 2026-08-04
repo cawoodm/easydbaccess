@@ -7,17 +7,8 @@
  * host treats it as a mutable namespace.
  */
 
-import type {
-  ColumnSpec,
-  PluginRecord,
-  Row,
-  Setting,
-  Table,
-  TableSource,
-  ViewInstance,
-  ViewTemplate,
-  Workspace,
-} from './types.js';
+import type { ColumnSpec, PluginRecord, Row, Setting, Table, TableSource, ViewInstance, ViewTemplate, Workspace } from './types.js';
+import type { QueryPage, RowQuery } from './row-query.js';
 
 // -- Plugin module shape --------------------------------------------------
 
@@ -107,6 +98,21 @@ export interface DataCollection<T> {
    * user "Refresh" can bypass the cache. Callers must feature-detect it.
    */
   refresh?(): Promise<void>;
+  /**
+   * Optional: answer a `RowQuery` — specific fields, filtered, sorted, one
+   * slice — instead of handing over everything for the caller to narrow.
+   *
+   * Optional because `find()` remains the whole contract a collection must
+   * satisfy, and a caller can always fall back to it. But `find()` is why a
+   * large table is slow: the grid virtualises what it DRAWS and then fetches
+   * every row anyway. Implement this wherever the backing store can narrow
+   * cheaply — SQL, or a remote endpoint that takes query parameters — and
+   * `db/row-reader.ts`'s `readRows` in the renderer will use it.
+   *
+   * Callers must honour `QueryPage.partial`: it means the backend could not
+   * apply some predicate, so `rows` is a SUPERSET and needs narrowing again.
+   */
+  query?(q: RowQuery): Promise<QueryPage<T>>;
 }
 
 export interface DataStore {
@@ -204,10 +210,7 @@ export interface TableButtonSpec {
    * return false to hide the button for that table. Omitted ⇒ always shown.
    */
   visible?(table: Table): boolean;
-  onClick(
-    api: HostApi,
-    ctx: { tableId: string; anchor?: HTMLElement | undefined },
-  ): void | Promise<void>;
+  onClick(api: HostApi, ctx: { tableId: string; anchor?: HTMLElement | undefined }): void | Promise<void>;
 }
 
 // -- Importers -------------------------------------------------------------
@@ -454,15 +457,7 @@ export interface Dialogs {
 
 export type SettingScope = 'workspace' | 'user';
 
-export type SettingsFieldType =
-  | 'string'
-  | 'text'
-  | 'number'
-  | 'boolean'
-  | 'date'
-  | 'secret'
-  | 'option'
-  | 'selection';
+export type SettingsFieldType = 'string' | 'text' | 'number' | 'boolean' | 'date' | 'secret' | 'option' | 'selection';
 
 /**
  * One declarative field in a plugin's settings tab. Stored under the key
@@ -549,10 +544,7 @@ export interface ColumnEditorActionSpec {
   icon?: string;
   tooltip?: string;
   /** The table being edited; absent while a brand-new table is defined. */
-  run(
-    api: HostApi,
-    ctx: { columns: ColumnSpec[]; tableId?: string | undefined },
-  ): Promise<ColumnSpec[] | null> | ColumnSpec[] | null;
+  run(api: HostApi, ctx: { columns: ColumnSpec[]; tableId?: string | undefined }): Promise<ColumnSpec[] | null> | ColumnSpec[] | null;
 }
 
 export interface UiRegistry {

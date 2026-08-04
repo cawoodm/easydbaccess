@@ -20,7 +20,7 @@ import { getStore, pickDatabaseToOpen, switchToDatabase, saveDbAs, importDb, imp
 import { prepareImport, probeDatabaseFile, type ImportPlanEntry } from './db-import';
 import { runImport } from './import-runner';
 import { listBrowsable, readBrowseRows } from './db-browse';
-import type { ColumnSpec } from '@easydb/shared';
+import type { ColumnSpec, RowQuery } from '@easydb/shared';
 import type { ImportDecision } from './db-import';
 
 const isDev = !!process.env.EASYDB_RENDERER_URL;
@@ -82,6 +82,10 @@ function registerStoreIpc(): void {
   // Paired with a capped `store:find`, so a grid can say "20,000 of 609,283"
   // instead of silently presenting a truncated table as the whole thing.
   handle('store:countRows', (tableId: string) => getStore().countRowsIn(tableId));
+  // The narrow read: the caller says which fields, filter, sort and slice it
+  // wants and only that crosses IPC. `store:find` above hands over up to
+  // ROW_FETCH_CAP rows whatever the caller intends to show.
+  handle('store:queryRows', (tableId: string, q: RowQuery) => getStore().queryRows(tableId, q));
   handle('store:findOne', (coll: string, key: string) => getStore().findOne(coll, key));
   handleMutating('store:insert', (coll: string, doc: Record<string, unknown>) => getStore().insert(coll, doc));
   handleMutating('store:bulkInsert', (coll: string, docs: Record<string, unknown>[]) => getStore().bulkInsert(coll, docs));

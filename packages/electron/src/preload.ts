@@ -20,6 +20,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { CurrentDbInfo, DialogResult, CancelledResult } from './db-files';
 import type { DatabaseFileKind, ImportDecision, ImportedTableResult, ImportPreview } from './db-import';
 import type { BrowsableObject, BrowseRow } from './db-browse';
+import type { RowPage, RowQuery } from '@easydb/shared';
 import type { ImportPlan, ImportPlanEntry, ImportProgress } from './db-import';
 
 /** `import:progress` payload — an `ImportProgress` plus which table it is about. */
@@ -28,6 +29,7 @@ type ImportProgressEvent = ImportProgress & { tableId: string; done?: boolean };
 const store = {
   find: (coll: string, query?: Record<string, unknown>, limit?: number): Promise<unknown[]> => ipcRenderer.invoke('store:find', coll, query, limit),
   countRows: (tableId: string): Promise<number> => ipcRenderer.invoke('store:countRows', tableId),
+  queryRows: (tableId: string, q: RowQuery): Promise<RowPage> => ipcRenderer.invoke('store:queryRows', tableId, q),
   findOne: (coll: string, key: string): Promise<unknown | null> => ipcRenderer.invoke('store:findOne', coll, key),
   insert: (coll: string, doc: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('store:insert', coll, doc),
   bulkInsert: (coll: string, docs: Record<string, unknown>[]): Promise<unknown[]> => ipcRenderer.invoke('store:bulkInsert', coll, docs),

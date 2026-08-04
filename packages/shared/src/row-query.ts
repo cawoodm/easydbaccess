@@ -53,8 +53,12 @@ export interface RowQuery {
   limit?: number | undefined;
 }
 
-export interface RowPage {
-  rows: Row[];
+/**
+ * One page of an answer. Generic because `DataCollection<T>.query` is generic —
+ * rows are the case that matters, but a collection of any shape can answer one.
+ */
+export interface QueryPage<T> {
+  rows: T[];
   /**
    * Rows matching the filter and search, IGNORING offset and limit.
    *
@@ -78,6 +82,8 @@ export interface RowPage {
    */
   partial?: boolean | undefined;
 }
+
+export type RowPage = QueryPage<Row>;
 
 /** True when the query asks for nothing to be narrowed — a plain slice. */
 export function isPlainSlice(q: RowQuery): boolean {

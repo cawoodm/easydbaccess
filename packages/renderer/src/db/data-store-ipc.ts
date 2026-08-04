@@ -1,4 +1,4 @@
-import type { ColumnSpec, DataCollection, DataStore, PluginRecord, Row, Setting, Table, Unsubscribe, ViewInstance, ViewTemplate, Workspace } from '@easydb/shared';
+import type { ColumnSpec, DataCollection, DataStore, PluginRecord, Row, RowPage, RowQuery, Setting, Table, Unsubscribe, ViewInstance, ViewTemplate, Workspace } from '@easydb/shared';
 import { settingId } from './dexie-db.js';
 
 /**
@@ -14,6 +14,11 @@ export interface EasydbStoreBridge {
   find(coll: string, query?: Record<string, unknown>, limit?: number): Promise<unknown[]>;
   /** True row count for one table, without fetching any of them. */
   countRows?(tableId: string): Promise<number>;
+  /**
+   * The narrow read — fields, filter, sort, slice — answered in SQL. Optional
+   * because an older preload won't have it; `rowsViewIpc` feature-detects.
+   */
+  queryRows?(tableId: string, q: RowQuery): Promise<RowPage>;
   findOne(coll: string, key: string): Promise<unknown | null>;
   insert(coll: string, doc: Record<string, unknown>): Promise<unknown>;
   bulkInsert(coll: string, docs: Record<string, unknown>[]): Promise<unknown[]>;
@@ -314,9 +319,14 @@ function wrapIpc<T>(bridge: EasydbStoreBridge, collName: CollName): DataCollecti
 export const ROW_FETCH_CAP = 20_000;
 
 function rowsViewIpc(bridge: EasydbStoreBridge, tableId: string): DataCollection<Row> {
-  const queryRows = (query?: Partial<Row>): Promise<Row[]> => bridge.find('rows', { ...(query as Record<string, unknown> | undefined), tableId }, ROW_FETCH_CAP) as Promise<Row[]>;
+  const fetchAll = (query?: Partial<Row>): Promise<Row[]> => bridge.find('rows', { ...(query as Record<string, unknown> | undefined), tableId }, ROW_FETCH_CAP) as Promise<Row[]>;
+  const queryRows = bridge.queryRows?.bind(bridge);
   return {
-    find: (query) => queryRows(query),
+    find: (query) => fetchAll(query),
+    // Present only when the preload offers it, because `DataCollection.query`
+    // is feature-detected by its callers and an implementation that silently
+    // fell back to `find()` would hide the cost it exists to avoid.
+    ...(queryRows ? { query: (q: RowQuery): Promise<RowPage> => queryRows(tableId, q) } : {}),
     async findOne(id) {
       const doc = (await bridge.findOne('rows', id)) as Row | undefined;
       return doc && doc.tableId === tableId ? doc : null;
@@ -353,7 +363,7 @@ function rowsViewIpc(bridge: EasydbStoreBridge, tableId: string): DataCollection
       // view's own `liveQuery` granularity. An import scopes its broadcast to
       // the table it filled, and passing `tableId` here is what lets the other
       // open tables sit that one out.
-      return subscribeToCollection(bridge, 'rows', () => queryRows(), fn, tableId);
+      return subscribeToCollection(bridge, 'rows', () => fetchAll(), fn, tableId);
     },
   };
 }

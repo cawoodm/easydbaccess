@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { html as staticHtml, unsafeStatic } from 'lit/static-html.js';
 import { customElement, property, state } from 'lit/decorators.js';
-import type { ColumnSpec, ColumnType, Row, SortSpec, Table, ViewInstance } from '@easydb/shared';
+import type { ColumnSpec, Row, SortSpec, Table, ViewInstance } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
@@ -10,6 +10,7 @@ import { searchRowsByField } from '../search/text-search.js';
 import { matchesColumnFilter } from '@easydb/shared';
 import { facetable, facetCounts, facetValues } from '../search/facet-values.js';
 import { readSortDescFirst } from './grid-settings.js';
+import { readSortSpecs, sortRowsBySpecs } from './row-sort.js';
 import { nextSortSpecs } from './sort-cycle.js';
 import { runColumnScript } from '../util/column-script.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
@@ -983,24 +984,7 @@ export class DataTable extends LitElement {
   }
 
   private sortedRows(): Row[] {
-    const base = this.filteredRows();
-    if (this.sortSpecs.length === 0) return base;
-    // Resolve each key's column type once, not per comparison.
-    const keys = this.sortSpecs.map((s) => ({
-      field: s.field,
-      factor: s.asc ? 1 : -1,
-      type: (this.columns.find((c) => c.field === s.field)?.type ?? 'string') as ColumnType,
-    }));
-    const arr = [...base];
-    arr.sort((a, b) => {
-      // Walk the keys in order; the next one only speaks when the previous ties.
-      for (const k of keys) {
-        const cmp = compareBySortKey(a.data[k.field], b.data[k.field], k.type, k.factor);
-        if (cmp !== 0) return cmp;
-      }
-      return 0;
-    });
-    return arr;
+    return sortRowsBySpecs(this.filteredRows(), this.sortSpecs, this.columns);
   }
 
   private async openFilterPicker(e: Event, field: string) {
@@ -1582,66 +1566,6 @@ function isNonEmptyButUnparsed(raw: unknown, parsed: string): boolean {
   if (raw == null) return false;
   if (typeof raw === 'string' && raw.trim() === '') return false;
   return parsed === '';
-}
-
-/**
- * One sort key applied to one pair of rows, direction included. Extracted from
- * `sortedRows` so several keys can be walked in priority order.
- *
- * Emptiness is ranked as the *smallest* value: null < blank < present. The rank
- * rides the direction flip, so ascending floats empties to the top (nulls first,
- * then blanks) and descending sinks them to the bottom. null and blank are
- * DISTINCT — a null cell is "no value" and sorts ahead of an empty string.
- */
-function compareBySortKey(
-  av: unknown,
-  bv: unknown,
-  type: ColumnType,
-  factor: number,
-): number {
-  const rank = (v: unknown): number => (v == null ? 0 : v === '' ? 1 : 2);
-  const ar = rank(av);
-  const br = rank(bv);
-  if (ar !== 2 || br !== 2) return (ar - br) * factor;
-  return compareValues(av, bv, type) * factor;
-}
-
-/**
- * The sort keys of a table or view instance: the `sortBy` list when present,
- * else the single legacy `sortColumn`/`sortAsc` pair (a workspace written before
- * multi-sort, or a view whose sort bar still sets one column).
- */
-function readSortSpecs(rec: {
-  sortBy?: SortSpec[] | undefined;
-  sortColumn?: string | undefined;
-  sortAsc?: boolean | undefined;
-}): SortSpec[] {
-  if (rec.sortBy?.length) return rec.sortBy.map((s) => ({ field: s.field, asc: s.asc !== false }));
-  if (!rec.sortColumn) return [];
-  return [{ field: rec.sortColumn, asc: rec.sortAsc !== false }];
-}
-
-// Compares two PRESENT (non-empty) values by column type. Empty handling is
-// the caller's job — `compareBySortKey` deals with blanks before this runs.
-function compareValues(a: unknown, b: unknown, type: ColumnType): number {
-  switch (type) {
-    case 'number': {
-      const na = Number(a);
-      const nb = Number(b);
-      if (Number.isNaN(na) || Number.isNaN(nb)) return String(a).localeCompare(String(b));
-      return na - nb;
-    }
-    case 'boolean':
-      return (a ? 1 : 0) - (b ? 1 : 0);
-    case 'date': {
-      const ta = new Date(String(a)).getTime();
-      const tb = new Date(String(b)).getTime();
-      if (Number.isNaN(ta) || Number.isNaN(tb)) return String(a).localeCompare(String(b));
-      return ta - tb;
-    }
-    default:
-      return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
-  }
 }
 
 /**
