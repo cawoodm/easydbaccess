@@ -1,8 +1,8 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { createPanel } from '../window-mgr/panel-shell/panel-shell.js';
 import { shellViewport } from '../window-mgr/shell-viewport.js';
-import { looksLikeHtml, htmlToPreviewText } from '../util/html-text.js';
-import { looksLikeMarkdown, markdownToHtml } from '../util/markdown.js';
+import { htmlToPreviewText } from '../util/html-text.js';
+import { markdownToHtml, markupKind } from '../util/markdown.js';
 import { isMobileViewport } from '../util/viewport.js';
 import { iconButton, openHtmlEditor, popupContainer, POPOUT_SVG } from './html-cell-editor.js';
 
@@ -79,13 +79,13 @@ let popupSeq = 0;
  *
  * Markdown is converted here rather than left to a column script: a Markdown
  * column is just data, and the value carries enough evidence to recognise
- * itself — see `looksLikeMarkdown`, which is deliberately strict about that.
- * Real markup wins the tie and passes through untouched.
+ * itself. Which language wins is `markupKind`'s decision — Markdown first,
+ * because prose mentioning `<database>` is not an HTML document.
  */
 function asHtml(value: string): string | null {
-  if (looksLikeHtml(value)) return value;
-  if (looksLikeMarkdown(value)) return markdownToHtml(value);
-  return null;
+  const kind = markupKind(value);
+  if (kind === 'html') return value;
+  return kind === 'markdown' ? markdownToHtml(value) : null;
 }
 
 /**

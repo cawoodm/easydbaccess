@@ -91,3 +91,22 @@ test('the columns editor offers "preview" and no longer offers "html-preview"', 
   expect(options).toContain('preview');
   expect(options).not.toContain('html-preview');
 });
+
+test('Markdown that mentions a tag is still Markdown, not HTML', async ({ page }) => {
+  // `<database>` reads as a tag, so this value used to take the HTML path: the
+  // word was swallowed by the parser and the Markdown was left as literal text.
+  const tableId = await createTable(page, 'mdtagword', [{ field: 'note', renderer: 'preview' }]);
+  await waitForPanel(page, tableId);
+  await addRow(page, tableId, {
+    note: ['Use the `/<database>/-/create` API.', '', '- **New** table interface', '- Alter table'].join(
+      '\n',
+    ),
+  });
+
+  await cellOf(page, tableId).locator('button').click();
+  const popup = page.locator('[id^="easydb-preview-popup-"]').last();
+  // Formatted, and the angle-bracket word survives as text.
+  await expect(popup.locator('.jsPanel-content strong')).toHaveText('New');
+  await expect(popup.locator('.jsPanel-content li')).toHaveCount(2);
+  await expect(popup.locator('.jsPanel-content code')).toHaveText('/<database>/-/create');
+});

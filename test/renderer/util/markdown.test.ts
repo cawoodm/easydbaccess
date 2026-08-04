@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { looksLikeMarkdown, markdownToHtml } from '../../../packages/renderer/src/util/markdown.js';
+import { readFileSync } from 'node:fs';
+import {
+  looksLikeMarkdown,
+  markdownToHtml,
+  markupKind,
+} from '../../../packages/renderer/src/util/markdown.js';
 
 describe('markdownToHtml: blocks', () => {
   it('renders headings, paragraphs and a horizontal rule', () => {
@@ -213,5 +218,66 @@ describe('looksLikeMarkdown', () => {
 
   it('recognises Markdown with CRLF line endings', () => {
     expect(looksLikeMarkdown('# Title\r\n\r\nbody')).toBe(true);
+  });
+});
+
+/**
+ * Which language a value is written in, when both detectors could answer. The
+ * order matters and only one case shows why: a Markdown release note that says
+ * `/<database>/-/create`. `looksLikeHtml` reads `<database>` as a tag, so the
+ * value used to be rendered AS HTML — which dropped the word and left every
+ * `**bold**` and `[link](url)` as literal text.
+ */
+describe('markupKind', () => {
+  it('reads Markdown prose that mentions a tag as Markdown', () => {
+    const src = 'Use the `/<database>/-/create` API for **new tables**.';
+    expect(markupKind(src)).toBe('markdown');
+  });
+
+  it('reads a value that OPENS with a tag as HTML, markers or not', () => {
+    expect(markupKind('<p>hello <b>there</b></p>')).toBe('html');
+    expect(markupKind('  <div>**not bold**</div>')).toBe('html');
+    expect(markupKind('</p>trailing')).toBe('html');
+  });
+
+  it('reads plain HTML with no Markdown markers as HTML', () => {
+    expect(markupKind('a <b>bold</b> word inside a sentence')).toBe('html');
+    expect(markupKind('caf&eacute; opens at 8')).toBe('html');
+  });
+
+  it('says nothing for plain text', () => {
+    expect(markupKind('just a sentence')).toBeNull();
+    expect(markupKind('2 < 3 and 4 > 1')).toBeNull();
+    expect(markupKind('')).toBeNull();
+    expect(markupKind(null)).toBeNull();
+    expect(markupKind(42)).toBeNull();
+  });
+
+  /**
+   * The real file this rule came from — a Datasette changelog full of
+   * `<database>` / `<table>` path segments. It is a fixture, not a sample: the
+   * bug it names cannot be written more plainly than it is.
+   */
+  describe('the Datasette changelog fixture (test/data/markdown.md)', () => {
+    const src = readFileSync('test/data/markdown.md', 'utf8');
+
+    it('reads as Markdown', () => {
+      expect(looksLikeMarkdown(src)).toBe(true);
+      expect(markupKind(src)).toBe('markdown');
+    });
+
+    it('keeps the angle-bracket words, as text', () => {
+      const html = markdownToHtml(src);
+      // Escaped inside the code span, not swallowed as a tag.
+      expect(html).toContain('&lt;database&gt;');
+      expect(html).not.toContain('<database>');
+    });
+
+    it('formats what the HTML path left as literal text', () => {
+      const html = markdownToHtml(src);
+      expect(html).toContain('<strong>creating tables</strong>');
+      expect(html).toContain('<ul><li>');
+      expect(html).toContain('href="https://docs.datasette.io');
+    });
   });
 });
