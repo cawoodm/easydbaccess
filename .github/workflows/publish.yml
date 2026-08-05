@@ -1,0 +1,64 @@
+name: publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Pages accepts one deployment at a time. Queue rather than cancel: an aborted
+# deploy can leave the live site half-swapped, and a superseded build is cheap.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read # checkout
+  pages: write # publish the deployment
+  id-token: write # deploy-pages authenticates with an OIDC token
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build shared (the renderer imports its dist)
+        run: npm run build --workspace @easydb/shared
+
+      # Same base path publish.ps1 uses for the production slot, and the path
+      # GitHub serves a project site from: https://cawoodm.github.io/easydbaccess/
+      - name: Build renderer with base /easydbaccess/
+        working-directory: packages/renderer
+        run: npx vite build --base /easydbaccess/
+
+      # publish.ps1 ships the README next to the build; keep the deploys identical.
+      - name: Copy README alongside the build
+        run: cp README.md packages/renderer/dist/README.md
+
+      # enablement: turns Pages on (source = GitHub Actions) if it isn't already,
+      # so a fresh clone/fork needs no click in Settings -> Pages.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: packages/renderer/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
