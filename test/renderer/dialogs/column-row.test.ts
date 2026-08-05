@@ -58,6 +58,21 @@ describe('buildColumnSpec', () => {
     expect(spec.hidden).toBe(true);
   });
 
+  it('persists the validation script, independently of the render script', () => {
+    const src = 'function validate(value) { if (!value) throw new Error("no"); }';
+    const spec = buildColumnSpec(row({ validate: src }));
+    expect(spec.validate).toBe(src);
+    expect('script' in spec).toBe(false);
+  });
+
+  it('removes the validation script when cleared, even though orig had one', () => {
+    // Emptying the editor and saving must actually drop the rule — with `orig`
+    // spread in as the base, a bare `if (truthy)` would leave the old one live.
+    const base = orig({ validate: 'function validate(v) { throw new Error("always") }' });
+    const spec = buildColumnSpec(row({ orig: base, validate: undefined }));
+    expect('validate' in spec).toBe(false);
+  });
+
   it('removes renderer when cleared, even though orig had one', () => {
     const base = orig({ renderer: 'date' });
     const spec = buildColumnSpec(row({ orig: base, renderer: undefined }));

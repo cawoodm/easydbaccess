@@ -152,10 +152,10 @@ export class NewTableDialog extends LitElement {
       .col-header,
       .col-row {
         display: grid;
-        /* drag | 👁 | field | label | type | renderer | script | max | U ! ⇅ ⚲ | up down del */
+        /* drag | 👁 | field | label | type | renderer | script | max | validate | U ! ⇅ ⚲ | up down del */
         grid-template-columns:
           1.25rem 1.5rem 1fr 1fr 7rem 7rem 1.5rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem
-          1.5rem;
+          1.5rem 1.5rem;
         gap: 0.4rem;
         align-items: center;
       }
@@ -246,6 +246,15 @@ export class NewTableDialog extends LitElement {
        state cue. A darker blue keeps hover feedback without discarding it. */
       button.icon-btn.has-script:hover:not(:disabled) {
         color: #1d4ed8;
+      }
+      /* The validation pencil is the same glyph in the next column along, so
+       its "set" state needs a colour of its OWN — two blue pencils would read
+       as one wide control. Amber says "this column polices its edits". */
+      button.icon-btn.has-validate {
+        color: #d97706;
+      }
+      button.icon-btn.has-validate:hover:not(:disabled) {
+        color: #b45309;
       }
       button.row-del {
         color: #9ca3af;
@@ -407,6 +416,7 @@ export class NewTableDialog extends LitElement {
         type: c.type,
         renderer: c.renderer,
         script: c.script,
+        validate: c.validate,
         max: c.max,
         unique: c.unique,
         notnull: c.notnull,
@@ -565,6 +575,7 @@ export class NewTableDialog extends LitElement {
           type: spec.type ?? row.type,
           renderer: spec.renderer,
           script: spec.script,
+          validate: spec.validate,
         };
       });
     } catch (err) {
@@ -587,6 +598,20 @@ export class NewTableDialog extends LitElement {
     const next = await dlg.open(c.script ?? '', c.label || c.field);
     if (next === null) return;
     this.patchColumn(idx, { script: next.trim() ? next : undefined });
+  }
+
+  /**
+   * Same modal, the column's OTHER script: the `validate(value, row)` rule run
+   * before a manual cell edit is written.
+   */
+  private async editValidate(idx: number): Promise<void> {
+    const dlg = ScriptEditorDialog.instance;
+    if (!dlg) return;
+    const c = this.columns[idx];
+    if (!c) return;
+    const next = await dlg.open(c.validate ?? '', c.label || c.field, 'validate');
+    if (next === null) return;
+    this.patchColumn(idx, { validate: next.trim() ? next : undefined });
   }
 
   private async submit(e: Event): Promise<void> {
@@ -861,6 +886,7 @@ export class NewTableDialog extends LitElement {
                 <span>Renderer</span>
                 <span></span>
                 <span class="flag-label">Max</span>
+                <span></span>
                 ${this.renderFlagHead('unique', 'U', 'Unique')} ${this.renderFlagHead('notnull', '!', 'Not null')} ${this.renderFlagHead('sortable', '⇅', 'Sortable')}
                 ${this.renderFlagHead('filterable', '⚲', 'Filterable (includes search)')}
                 <span></span>
@@ -923,7 +949,7 @@ export class NewTableDialog extends LitElement {
                     </select>
                     <button
                       type="button"
-                      class=${`icon-btn${c.script?.trim() ? ' has-script' : ''}`}
+                      class=${`icon-btn script-btn${c.script?.trim() ? ' has-script' : ''}`}
                       title=${c.script?.trim() ? 'Edit the script — its render(row) output is what this column displays' : 'Add a script: render(row) computes what this column displays'}
                       @click=${() => this.editScript(i)}
                     >
@@ -940,6 +966,16 @@ export class NewTableDialog extends LitElement {
                         this.patchColumn(i, { max: v === '' ? undefined : Number(v) });
                       }}
                     />
+                    <button
+                      type="button"
+                      class=${`icon-btn validate-btn${c.validate?.trim() ? ' has-validate' : ''}`}
+                      title=${c.validate?.trim()
+                        ? 'Edit the validation — validate(value, row) throws to reject a manual cell edit'
+                        : 'Add validation: validate(value, row) throws to reject a manual cell edit'}
+                      @click=${() => this.editValidate(i)}
+                    >
+                      <span class="mi sm">edit</span>
+                    </button>
                     <span class="flag">
                       <input type="checkbox" title="Unique" .checked=${!!c.unique} @change=${(e: Event) => this.patchColumn(i, { unique: (e.target as HTMLInputElement).checked })} />
                     </span>

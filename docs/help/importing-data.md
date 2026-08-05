@@ -92,6 +92,24 @@ instance), you choose:
 Referencing a Datasette **database** or **instance** asks which tables you want,
 the same way a copy does.
 
+## What a Datasette import brings across
+
+More than the rows. Whatever the instance is willing to tell us about a table
+is read alongside its data and used to set the table up:
+
+- the **primary key** is marked **unique** and **not null**, so the column that
+  identifies a row is protected from a duplicate or a blank;
+- columns the instance does not allow sorting on (its `sortable_columns`
+  setting) arrive **not sortable** — their header doesn't sort;
+- **column descriptions** become header tooltips and **units** are shown next
+  to the column label;
+- the table's **default sort**, its **description**, and its source, licence
+  and about links (the (i) button) come across too.
+
+None of it is locked in — it is a starting point. Open the column editor and
+tick sortable back on, or change any other flag, and your version is what
+sticks: a later **Refresh** leaves columns you already have alone.
+
 ## Read-only tables
 
 Any table can be marked read-only: open the column editor (the **Columns**

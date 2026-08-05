@@ -15,6 +15,7 @@ import type { ColumnSpec, HostApi, PluginModule } from '@easydb/shared';
 import '../dialogs/datasette-connect-dialog.js';
 import { DatasetteConnectDialog } from '../dialogs/datasette-connect-dialog.js';
 import {
+  applyPrimaryKeyFlags,
   applyTableMetadata,
   DatasetteError,
   fetchPrimaryKeys,
@@ -308,7 +309,7 @@ async function refineLiveColumns(api: HostApi, tableId: string, base: string, c:
     const t = await api.store.tables.findOne(tableId);
     if (!t) return;
     const pks = ((t.source?.config as { pks?: string[] } | undefined)?.pks ?? []) as string[];
-    let columns = baseColumns.map((col) => (pks.includes(col.field) ? { ...col, unique: true, notnull: true } : col));
+    let columns = applyPrimaryKeyFlags(baseColumns, pks);
     let metaPatch: MetadataTablePatch = {};
     try {
       const md = await fetchTableMetadata(fetchFn, ref);

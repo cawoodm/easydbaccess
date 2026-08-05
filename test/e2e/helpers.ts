@@ -24,6 +24,12 @@ export interface TestColumn {
    * renderer).
    */
   script?: string;
+  /**
+   * JS body defining `function validate(value, row) {…}` — throwing rejects a
+   * manual cell edit. Only manual edits run it, so helpers that write rows
+   * directly (like `bulkAddRows`) are unaffected by it.
+   */
+  validate?: string;
 }
 
 /** Creates a table via the data-store. Returns the new table id. */
@@ -45,6 +51,7 @@ export async function createTable(page: Page, name: string, columns: TestColumn[
             type: string;
             renderer?: string;
             script?: string;
+            validate?: string;
           } = {
             field: c.field,
             label: c.label ?? c.field,
@@ -52,6 +59,7 @@ export async function createTable(page: Page, name: string, columns: TestColumn[
           };
           if (c.renderer) col.renderer = c.renderer;
           if (c.script) col.script = c.script;
+          if (c.validate) col.validate = c.validate;
           return col;
         }),
         view: 'table',

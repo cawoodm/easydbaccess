@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FetchOpts } from '@easydb/shared';
 import {
   parseDatabaseList,
@@ -15,6 +15,11 @@ import {
   mapColumns,
   fetchTableMeta,
   extractTableMetadata,
+  extractTableMetadataBlock,
+  mergeTableMetadata,
+  fetchTableMetadata,
+  clearInstanceMetadataCache,
+  applyPrimaryKeyFlags,
   applyTableMetadata,
   fetchTablesForDb,
   DatasetteError,
@@ -945,6 +950,222 @@ describe('applyTableMetadata (label_column)', () => {
   it('ignores label_column naming a missing column', () => {
     const { patch } = applyTableMetadata({ columns: {}, units: {}, labelColumn: 'ghost' }, cols);
     expect(patch.labelColumn).toBeUndefined();
+  });
+});
+
+describe('applyPrimaryKeyFlags', () => {
+  const cols = [
+    { field: 'id', label: 'Id', type: 'number' as const },
+    { field: 'name', label: 'Name', type: 'string' as const },
+  ];
+
+  it('marks every primary-key column unique + not null, and nothing else', () => {
+    const out = applyPrimaryKeyFlags(cols, ['id']);
+    expect(out.find((c) => c.field === 'id')).toMatchObject({ unique: true, notnull: true });
+    expect(out.find((c) => c.field === 'name')!.unique).toBeUndefined();
+    expect(out.find((c) => c.field === 'name')!.notnull).toBeUndefined();
+  });
+
+  it('handles a compound key and ignores pks naming a missing column', () => {
+    const out = applyPrimaryKeyFlags(cols, ['id', 'name', 'ghost']);
+    expect(out.every((c) => c.unique && c.notnull)).toBe(true);
+    expect(out).toHaveLength(2);
+  });
+
+  it('is a no-op (same array identity) when there are no pks', () => {
+    expect(applyPrimaryKeyFlags(cols, [])).toBe(cols);
+  });
+
+  it('leaves an already-flagged column untouched (idempotent)', () => {
+    const flagged = applyPrimaryKeyFlags(cols, ['id']);
+    expect(applyPrimaryKeyFlags(flagged, ['id'])[0]).toBe(flagged[0]);
+  });
+});
+
+describe('fetchTableMeta recovers primary keys without column_details', () => {
+  const jsonRes = (body: unknown): Promise<Response> => Promise.resolve({ json: () => Promise.resolve(body) } as unknown as Response);
+  const ref = parseDatasetteUrl('https://datasette.io/content/repos');
+
+  it('asks ?_extra=primary_keys and marks the key column unique + not null', async () => {
+    // datasette.io's real behaviour: `column_details` comes back empty, `columns`
+    // is a bare name array, and only `primary_keys` knows which one is the key.
+    const seen: string[] = [];
+    const fetchFn = vi.fn((url: string) => {
+      seen.push(url);
+      if (url.includes('_extra=columns')) return jsonRes({ ok: true, columns: ['id', 'name'] });
+      if (url.includes('_extra=primary_keys')) return jsonRes({ ok: true, primary_keys: ['id'] });
+      return jsonRes({ ok: true }); // column_details unsupported
+    });
+    const meta = await fetchTableMeta(fetchFn, ref);
+    expect(meta.pks).toEqual(['id']);
+    expect(meta.columns.find((c) => c.field === 'id')).toMatchObject({ unique: true, notnull: true });
+    expect(meta.columns.find((c) => c.field === 'name')!.unique).toBeUndefined();
+    // Three single-`_`-param probes — none of them trips datasette.io's WAF.
+    expect(seen).toHaveLength(3);
+    expect(seen.every((u) => (u.match(/[?&]_/g) ?? []).length === 1)).toBe(true);
+  });
+
+  it('does not probe when column_details already answered (an empty pk list is the truth)', async () => {
+    const seen: string[] = [];
+    const fetchFn = vi.fn((url: string) => {
+      seen.push(url);
+      return jsonRes({ ok: true, column_details: { rowid: { sqlite_type: 'INTEGER', is_pk: 0 } } });
+    });
+    const meta = await fetchTableMeta(fetchFn, ref);
+    expect(meta.pks).toEqual([]);
+    expect(seen).toHaveLength(1);
+  });
+
+  it('tolerates the pk probe failing — columns still land, just unconstrained', async () => {
+    const fetchFn = vi.fn((url: string) => {
+      if (url.includes('_extra=columns')) return jsonRes({ ok: true, columns: ['id'] });
+      if (url.includes('_extra=primary_keys')) return Promise.reject(new TypeError('Load failed'));
+      return jsonRes({ ok: true });
+    });
+    const meta = await fetchTableMeta(fetchFn, ref);
+    expect(meta.pks).toEqual([]);
+    expect(meta.columns.map((c) => c.field)).toEqual(['id']);
+  });
+});
+
+describe('extractTableMetadataBlock (Datasette 1.0 ?_extra=metadata)', () => {
+  it('reads a bare per-table block', () => {
+    const m = extractTableMetadataBlock({
+      description: 'Roadside attractions',
+      columns: { name: 'The name of the attraction' },
+      units: { distance: 'metres' },
+      license: 'CC0',
+    });
+    expect(m.description).toBe('Roadside attractions');
+    expect(m.columns.name).toBe('The name of the attraction');
+    expect(m.units.distance).toBe('metres');
+    expect(m.license).toBe('CC0');
+  });
+
+  it('is empty for the {"columns": {}} an unconfigured table returns', () => {
+    const m = extractTableMetadataBlock({ columns: {} });
+    expect(m).toEqual({ columns: {}, units: {} });
+  });
+});
+
+describe('extractTableMetadata over a /-/config.json document', () => {
+  const CONFIG = {
+    ok: true,
+    settings: { trace_debug: true },
+    databases: {
+      fixtures: {
+        tables: {
+          sortable: { sortable_columns: ['sortable', 'text'] },
+          attraction_characteristic: { sort_desc: 'pk' },
+          // Datasette redacts a block holding `allow` rules down to a string.
+          no_primary_key: '***',
+        },
+      },
+    },
+  };
+
+  it('reads the behavioural keys config now owns', () => {
+    const m = extractTableMetadata(CONFIG, 'fixtures', 'sortable');
+    expect(m.sortableColumns).toEqual(['sortable', 'text']);
+    expect(extractTableMetadata(CONFIG, 'fixtures', 'attraction_characteristic').sortDesc).toBe('pk');
+  });
+
+  it('reads nothing from a redacted "***" block instead of throwing', () => {
+    expect(extractTableMetadata(CONFIG, 'fixtures', 'no_primary_key')).toEqual({ columns: {}, units: {} });
+  });
+});
+
+describe('mergeTableMetadata', () => {
+  it('lets a later layer win a scalar it defines, and merges maps per field', () => {
+    const merged = mergeTableMetadata(
+      { columns: { a: 'from config' }, units: { a: 'kg' }, description: 'first', sortableColumns: ['a'] },
+      { columns: { a: 'from table', b: 'new' }, units: {}, description: 'second' },
+    );
+    expect(merged.description).toBe('second');
+    expect(merged.columns).toEqual({ a: 'from table', b: 'new' });
+    expect(merged.units).toEqual({ a: 'kg' }); // untouched by the later layer
+    expect(merged.sortableColumns).toEqual(['a']); // not redefined, so not lost
+  });
+
+  it('returns empty metadata for no layers', () => {
+    expect(mergeTableMetadata()).toEqual({ columns: {}, units: {} });
+  });
+});
+
+describe('fetchTableMetadata across Datasette versions', () => {
+  const jsonRes = (body: unknown): Promise<Response> => Promise.resolve({ json: () => Promise.resolve(body) } as unknown as Response);
+  const notFound = (): Promise<Response> =>
+    Promise.resolve({
+      ok: false,
+      status: 404,
+      json: () => Promise.resolve({ ok: false, error: 'Database not found' }),
+    } as unknown as Response);
+
+  beforeEach(() => clearInstanceMetadataCache());
+
+  it('0.x: one /-/metadata.json request, and no 1.0 fallbacks', async () => {
+    const seen: string[] = [];
+    const fetchFn = vi.fn((url: string) => {
+      seen.push(url);
+      return jsonRes({
+        databases: { db: { tables: { t: { sortable_columns: ['a'], columns: { a: 'The A' } } } } },
+      });
+    });
+    const md = await fetchTableMetadata(fetchFn, parseDatasetteUrl('https://old.example.com/db/t'));
+    expect(md.sortableColumns).toEqual(['a']);
+    expect(md.columns.a).toBe('The A');
+    expect(seen).toEqual(['https://old.example.com/-/metadata.json']);
+  });
+
+  it('1.0: falls back to /-/config.json + the table’s ?_extra=metadata block', async () => {
+    const seen: string[] = [];
+    const fetchFn = vi.fn((url: string) => {
+      seen.push(url);
+      if (url.endsWith('/-/metadata.json')) return notFound(); // removed in 1.0
+      if (url.endsWith('/-/config.json')) {
+        return jsonRes({ databases: { fixtures: { tables: { sortable: { sortable_columns: ['sortable', 'text'] } } } } });
+      }
+      return jsonRes({ ok: true, metadata: { columns: { text: 'Some text' }, units: { sortable: 'kg' } }, rows: [] });
+    });
+    const md = await fetchTableMetadata(fetchFn, parseDatasetteUrl('https://latest.datasette.io/fixtures/sortable'));
+    // The allowlist (config) and the descriptions/units (table block) both land.
+    expect(md.sortableColumns).toEqual(['sortable', 'text']);
+    expect(md.columns.text).toBe('Some text');
+    expect(md.units.sortable).toBe('kg');
+    expect(seen[1]).toBe('https://latest.datasette.io/-/config.json');
+    expect(seen[2]).toContain('/fixtures/sortable.json?_extra=metadata');
+
+    // …and applying it marks the columns outside the allowlist as not sortable.
+    const { columns } = applyTableMetadata(md, [
+      { field: 'sortable', label: 'Sortable', type: 'number' },
+      { field: 'text', label: 'Text', type: 'string' },
+      { field: 'content', label: 'Content', type: 'string' },
+    ]);
+    expect(columns.find((c) => c.field === 'content')!.sortable).toBe(false);
+    expect(columns.find((c) => c.field === 'sortable')!.sortable).toBe(true);
+    expect(columns.find((c) => c.field === 'text')!.description).toBe('Some text');
+  });
+
+  it('an instance serving none of the three yields empty metadata, not an error', async () => {
+    const fetchFn = vi.fn(() => notFound());
+    const md = await fetchTableMetadata(fetchFn, parseDatasetteUrl('https://bare.example.com/db/t'));
+    expect(md).toEqual({ columns: {}, units: {} });
+  });
+
+  it('caches the per-instance documents across tables', async () => {
+    const seen: string[] = [];
+    const fetchFn = vi.fn((url: string) => {
+      seen.push(url);
+      if (url.endsWith('/-/metadata.json')) return notFound();
+      if (url.endsWith('/-/config.json')) return jsonRes({ databases: {} });
+      return jsonRes({ ok: true, metadata: {} });
+    });
+    await fetchTableMetadata(fetchFn, parseDatasetteUrl('https://one.example.com/db/t1'));
+    await fetchTableMetadata(fetchFn, parseDatasetteUrl('https://one.example.com/db/t2'));
+    expect(seen.filter((u) => u.endsWith('/-/metadata.json'))).toHaveLength(1);
+    expect(seen.filter((u) => u.endsWith('/-/config.json'))).toHaveLength(1);
+    // Only the per-table block is re-fetched.
+    expect(seen.filter((u) => u.includes('_extra=metadata'))).toHaveLength(2);
   });
 });
 
