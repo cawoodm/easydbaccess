@@ -44,10 +44,25 @@ process — the Electron storage layer depends on it.
 | `npm run test:e2e:ui`      | Same, with Playwright's interactive UI.                                                                                                                                                       |
 | `npm run format`           | Prettier across `packages/` and `test/`.                                                                                                                                                      |
 | `npm run package:electron` | `package-electron.ps1 -Installer` — builds renderer + electron, runs `electron-builder` for the Windows installer.                                                                            |
-| `npm run publish`          | `publish.ps1` — release script.                                                                                                                                                               |
+| `npm run publish`          | `publish.ps1` — release script. Only needed for **branch previews** now; `main` publishes itself (see below).                                                                                  |
 
 The `dev` script chains renderer + server with `&`; on Windows prefer running
 `dev:renderer` and `dev:server` in separate terminals.
+
+## Publishing
+
+`https://cawoodm.github.io/easydbaccess/` is deployed by CI, not by hand:
+`.github/workflows/publish.yml` runs on every push to `main`, builds the
+renderer with `--base /easydbaccess/`, and deploys it to this repo's GitHub
+Pages site (`actions/upload-pages-artifact` + `actions/deploy-pages`). A
+project site is served at the repo-name path, which is the same
+`/easydbaccess/` URL `publish.ps1` writes into the Pages repo — so the project
+site now owns that path and the `easydbaccess` folder in
+`cawoodm/cawoodm.github.io` is no longer what visitors see.
+
+Branch previews are still manual and still go through the Pages repo:
+`npm run publish -- -Target easydbaccess<N>`. Don't point `publish.ps1` at the
+plain `easydbaccess` slot any more — it would deploy to a folder nothing reads.
 
 ## Versioning
 
