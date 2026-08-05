@@ -56,6 +56,12 @@ async function makeArrayPillView(page: import('@playwright/test').Page): Promise
 }
 
 const cards = (page: import('@playwright/test').Page) => page.locator('view-window .card');
+/**
+ * The names the view shows, sorted. NOT in document order: the store hands back
+ * the rows it holds in whatever order it reads them, and this view sets no sort,
+ * so which card comes first is not something the filtering promises.
+ */
+const shownNames = async (page: import('@playwright/test').Page) => (await page.locator('view-window .nm').allTextContents()).sort();
 const pillsOf = (page: import('@playwright/test').Page, name: string) => page.locator('view-window .card', { hasText: name }).locator('.eda-filter-pill');
 
 test('a list cell renders one chip per member', async ({ page }) => {
@@ -77,7 +83,7 @@ test('clicking one member keeps every row carrying it', async ({ page }) => {
 
   // Anna (red,blue) and Cleo (green,red) carry red; Bert and Dora do not.
   await expect(cards(page)).toHaveCount(2);
-  await expect(page.locator('view-window .nm')).toHaveText(['Anna', 'Cleo']);
+  expect(await shownNames(page)).toEqual(['Anna', 'Cleo']);
 
   // The chip in the toolbar names the member, not the whole cell.
   await expect(page.locator('view-window .eda-pill-chip')).toHaveCount(1);
@@ -91,5 +97,6 @@ test('a second member ORs onto the first', async ({ page }) => {
 
   // Anna still shows both her chips, so the sibling value stays reachable.
   await pillsOf(page, 'Anna').filter({ hasText: 'blue' }).click();
-  await expect(page.locator('view-window .nm')).toHaveText(['Anna', 'Bert', 'Cleo']);
+  await expect(cards(page)).toHaveCount(3);
+  expect(await shownNames(page)).toEqual(['Anna', 'Bert', 'Cleo']);
 });
