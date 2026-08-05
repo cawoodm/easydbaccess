@@ -32,6 +32,25 @@ export function extractTokens(...fragments: string[]): string[] {
   return [...seen];
 }
 
+/**
+ * The token names carrying the `filter.` prefix, in the order they appear.
+ *
+ * A `$filter.TOKEN` is a filter the template OFFERS, whether or not anything is
+ * filtered on it yet — which is what lets the view window put a chip for each of
+ * them in its toolbar instead of waiting for someone to find the pill in a row
+ * and click it.
+ */
+export function extractFilterTokens(...fragments: string[]): string[] {
+  const seen = new Set<string>();
+  for (const frag of fragments) {
+    if (!frag) continue;
+    for (const m of frag.matchAll(TOKEN_RE)) {
+      if (m[1]?.startsWith('filter')) seen.add(m[2]!);
+    }
+  }
+  return [...seen];
+}
+
 const escapeHtml = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const escapeAttr = (s: string): string => escapeHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 

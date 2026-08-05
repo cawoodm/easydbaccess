@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { ColumnSpec, Row } from '@easydb/shared';
 import {
   extractTokens,
+  extractFilterTokens,
   evaluateRow,
   evaluateRows,
   substituteRow,
@@ -112,6 +113,25 @@ describe('view-render', () => {
 
   it('extractTokens finds filter.-prefixed tokens under the bare name', () => {
     expect(extractTokens('$filter.TAG $filter:STATUS $TAG').sort()).toEqual(['STATUS', 'TAG']);
+  });
+
+  /**
+   * The view window puts a chip in its toolbar for every filter the TEMPLATE
+   * offers, so it has to know which tokens are `filter.` ones — a plain `$TAG`
+   * offers no filter, and an `$input.TAG` is an editor.
+   */
+  describe('extractFilterTokens', () => {
+    it('returns only the filter.-prefixed tokens, in the order they appear', () => {
+      expect(extractFilterTokens('<div>$NAME $filter.TAG $input.NOTE $filter:STATUS</div>')).toEqual(['TAG', 'STATUS']);
+    });
+
+    it('reads across fragments and returns each name once', () => {
+      expect(extractFilterTokens('$filter.TAG', '', '$filter.TAG $filter.OWNER')).toEqual(['TAG', 'OWNER']);
+    });
+
+    it('is empty when a template offers no filter at all', () => {
+      expect(extractFilterTokens('<div>$NAME $input.AGE</div>', '', '')).toEqual([]);
+    });
   });
 
   it('$filter.TOKEN renders a clickable pill with field/value data attributes', () => {

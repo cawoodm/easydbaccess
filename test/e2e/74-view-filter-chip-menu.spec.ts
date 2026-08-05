@@ -60,6 +60,9 @@ async function makeFilterView(page: import('@playwright/test').Page): Promise<st
 }
 
 const chips = (page: import('@playwright/test').Page) => page.locator('view-window .eda-pill-chip');
+/** Chips that are actually filtering — an idle chip carries `.off`. */
+const activeChips = (page: import('@playwright/test').Page) => page.locator('view-window .eda-pill-chip:not(.off)');
+const idleChips = (page: import('@playwright/test').Page) => page.locator('view-window .eda-pill-chip.off');
 /** The tri-state value checklist — the grid's funnel popover, portaled to body. */
 const checklist = (page: import('@playwright/test').Page) => page.locator('filter-popover:not([hidden])');
 const option = (page: import('@playwright/test').Page, value: string) => checklist(page).locator('li', { hasText: value });
@@ -79,6 +82,7 @@ test('the chips ride in the same bar as the sort controls', async ({ page }) => 
   await expect(bar).toHaveCount(1);
   await expect(bar.locator('select[aria-label="Sort by"]')).toHaveCount(1);
   await expect(bar.locator('.eda-pill-chip')).toHaveCount(1);
+  await expect(idleChips(page)).toHaveCount(0); // the field filters now, so no idle offer
   await expect(vw.locator('.vw-pillbar')).toHaveCount(0);
 });
 
@@ -98,10 +102,47 @@ test('clicking the chip FIELD cycles = then ≠ then off', async ({ page }) => {
   await expect(vw.locator('.nm', { hasText: 'Anna' })).toHaveCount(1);
   await expect(vw.locator('.nm', { hasText: 'Bert' })).toHaveCount(0);
 
-  // ≠ → off : the chip is gone and every row is back.
+  // ≠ → off : every row is back, and the chip STAYS as the idle offer — before
+  // this it vanished, taking the way back to the filter with it.
   await chips(page).locator('.eda-pill-chip-field').click();
-  await expect(chips(page)).toHaveCount(0);
   await expect(names).toHaveCount(4);
+  await expect(activeChips(page)).toHaveCount(0);
+  await expect(idleChips(page)).toHaveCount(1);
+  await expect(idleChips(page)).toHaveText(/tag/);
+});
+
+/**
+ * A `$filter.TOKEN` in the template is a filter the view OFFERS, so its chip is
+ * in the toolbar from the start. Before this, the only way to reach the filter
+ * was to find a row that happened to show the value and click its pill.
+ */
+test('a filter the template offers has an idle chip before anything is filtered', async ({ page }) => {
+  await makeFilterView(page);
+
+  await expect(idleChips(page)).toHaveCount(1);
+  await expect(idleChips(page)).toHaveText(/tag/);
+  // Idle: nothing to remove and no operator to cycle — the checklist and nothing else.
+  await expect(idleChips(page).locator('.eda-pill-chip-remove')).toHaveCount(0);
+  await expect(idleChips(page).locator('.eda-pill-chip-field')).toHaveCount(0);
+  await expect(page.locator('view-window .nm')).toHaveCount(4); // nothing filtered
+});
+
+test('the idle chip opens the checklist, and picking a value filters', async ({ page }) => {
+  await makeFilterView(page);
+  const vw = page.locator('view-window');
+
+  await idleChips(page).locator('.eda-pill-chip-value').click();
+  await expect(checklist(page)).toBeVisible();
+  // Every value of the field, since nothing narrows it yet.
+  await expect(option(page, 'red')).toHaveCount(1);
+  await expect(option(page, 'blue')).toHaveCount(1);
+  await expect(option(page, 'green')).toHaveCount(1);
+
+  await option(page, 'blue').click();
+  await expect(vw.locator('.nm')).toHaveCount(2); // Bert + Dora
+  // The chip is active now, so the idle one for that field is gone.
+  await expect(activeChips(page)).toHaveCount(1);
+  await expect(idleChips(page)).toHaveCount(0);
 });
 
 test("clicking the chip VALUE opens a checklist of the field's other values", async ({ page }) => {

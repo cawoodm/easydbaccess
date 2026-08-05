@@ -587,6 +587,16 @@ filtered on `=red,blue`, and no list cell is ever exactly equal to that, so the
 click emptied the view. Per member it matches per member, which is what an
 `array` column's filter already does — see `search/column-filter.ts`.
 
+**Every field a template offers a `$filter.` on has a chip in the toolbar**, even
+with nothing filtered: an IDLE chip (`field ▾`, dashed) that opens the field's
+value checklist. `view-window.ts` derives them with `extractFilterTokens` over
+the template's three fragments, mapped through the instance's token→column map,
+so the toolbar says what CAN be filtered instead of only what is. Two
+consequences: a filter is reachable without hunting for a row that shows the
+value, and cycling a chip to "off" leaves the idle chip behind rather than
+removing the only way back to it. Grid mode (template off) has no template body
+and so offers none — its chips remain whatever is actually filtering.
+
 The plugin itself only owns *intent*: it adds the footer "Views" button (opens
 the manager dialog, which flips `ViewInstance.open`) and seeds/repairs a
 built-in "RSS Feed" template on `load()`, reconciling it against a hash of

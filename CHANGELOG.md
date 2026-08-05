@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 5 Aug 2026
+
+### Features
+
+- ✨ Every filter a view template offers has a chip in the toolbar, and a chip switched off stays there (v0.0.314)
+
 ## 4 Aug 2026
 
 ### Features

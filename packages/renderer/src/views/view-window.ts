@@ -5,7 +5,7 @@ import type { ColumnSpec, DataCollection, Row, ViewInstance, ViewTemplate } from
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViewsDialog } from '../dialogs/views-dialog.js';
-import { addPillValue, cyclePillValue, evaluateRows, hasRowHtml, removePillValue, substituteRow, viewRows } from './view-render.js';
+import { addPillValue, cyclePillValue, evaluateRows, extractFilterTokens, hasRowHtml, removePillValue, substituteRow, viewRows } from './view-render.js';
 import { parseColumnFilter } from '@easydb/shared';
 import { facetable, facetCounts } from '../search/facet-values.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
@@ -156,6 +156,19 @@ export class ViewWindow extends LitElement {
       .eda-pill-chip-field:hover,
       .eda-pill-chip-value:hover {
         text-decoration: underline;
+      }
+      /* Idle: the template offers this filter, nothing is filtering on it. Quiet
+         and dashed so it reads as an offer, not as an active filter. */
+      .eda-pill-chip.off {
+        background: transparent;
+        border: 1px dashed #7dd3fc;
+        color: #0369a1;
+        opacity: 0.75;
+        padding: 0 0.3rem;
+      }
+      .eda-pill-chip.off:hover {
+        opacity: 1;
+        border-style: solid;
       }
       /* An excluded value reads as excluded at a glance, not only by its ≠. */
       .eda-pill-chip.not {
@@ -801,26 +814,67 @@ export class ViewWindow extends LitElement {
   }
 
   /**
-   * The active filter chips, one per pill-filter token — so two values OR-ed onto
-   * the same field each get their own chip. Shows ONLY the `pillFilters` layer,
-   * never the view's snapshotted `filters`.
+   * The fields the TEMPLATE offers a filter on: one per `$filter.TOKEN`, mapped
+   * through the instance's token→column map. They get a chip whether or not they
+   * are filtering.
    *
-   * Each chip is `field <op> value`, and each half is a button: the field (with
-   * its operator) cycles `=` / `≠` / off, the value opens the field's other
-   * values as a checklist, and `×` drops the token.
+   * Grid mode has no template body, so it offers none — its chips are whatever
+   * is actually filtering, as before.
+   */
+  private get chipFields(): string[] {
+    if (!this.template || !this.templateOn) return [];
+    const mapping = this.instance?.mapping ?? {};
+    const fields = extractFilterTokens(this.template.headerHtml ?? '', this.template.rowHtml ?? '', this.template.footerHtml ?? '')
+      .map((token) => mapping[token])
+      .filter((f): f is string => !!f);
+    return [...new Set(fields)];
+  }
+
+  /**
+   * The filter chips: one per pill-filter token — so two values OR-ed onto the
+   * same field each get their own chip — plus an IDLE chip for every field the
+   * template offers a filter on and nothing is filtering on yet. Shows ONLY the
+   * `pillFilters` layer, never the view's snapshotted `filters`.
+   *
+   * Two things this fixes. A filter used to be reachable only by finding a row
+   * that shows the value and clicking its pill — the toolbar said nothing about
+   * what could be filtered. And cycling a chip to "off" removed it, so the way
+   * back was gone with it; now the chip stays as its idle self.
+   *
+   * An active chip is `field <op> value`, and each half is a button: the field
+   * (with its operator) cycles `=` / `≠` / off, the value opens the field's other
+   * values as a checklist, and `×` drops the token. An idle chip is `field ▾`
+   * alone — no operator to cycle and nothing to remove, so it is the checklist
+   * button and nothing else.
    */
   private renderPillChips() {
-    const pf = this.instance?.pillFilters;
-    if (!pf) return nothing;
+    const pf = this.instance?.pillFilters ?? {};
+    const offered = this.chipFields;
+    if (Object.keys(pf).length === 0 && offered.length === 0) return nothing;
     const chips: Array<{ field: string; value: string; state: 'on' | 'not' }> = [];
-    for (const [field, raw] of Object.entries(pf)) {
+    const filtering = new Set<string>();
+    // Offered fields first, in template order, so the toolbar does not reshuffle
+    // as filters come and go; any other field that filters follows.
+    for (const field of [...new Set([...offered, ...Object.keys(pf)])]) {
+      const raw = pf[field];
       if (!raw) continue;
       for (const tok of parseColumnFilter(raw)) {
         if (!tok.term) continue;
+        filtering.add(field);
         chips.push({ field, value: tok.term, state: tok.negate ? 'not' : 'on' });
       }
     }
-    return chips.map(
+    const idle = offered
+      .filter((f) => !filtering.has(f))
+      .map(
+        (field) =>
+          html`<span class="eda-pill-chip off">
+            <button type="button" class="eda-pill-chip-value" title=${`Filter this view by ${field}`} @click=${(e: Event) => void this.openPillValues(field, e.currentTarget as HTMLElement)}>${field} ▾</button>
+          </span>`,
+      );
+    return [
+      ...idle,
+      ...chips.map(
       (c) =>
         html`<span class=${`eda-pill-chip${c.state === 'not' ? ' not' : ''}`}>
           <button
@@ -838,7 +892,8 @@ export class ViewWindow extends LitElement {
             ×
           </button>
         </span>`,
-    );
+      ),
+    ];
   }
 
   private renderFooter() {
