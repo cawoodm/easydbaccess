@@ -122,12 +122,16 @@ the bundler/transpiler chain mishandles the built-in otherwise. Electron 43
 
 ## What's intentionally not wired yet
 
-`@easydb/server` is a runtime dependency in `package.json` but `src/main.ts`
-does not import or boot it. The remaining Phase 8 work-items are:
+The remaining Phase 8 work-items:
 
 - **Hono in-process** — main process boots `createServer(...)` from
   `@easydb/server` and mounts it on a localhost port, passing it a
-  `StoreAdapter` over the same SQLite file.
+  `StoreAdapter` over the same SQLite file. `@easydb/server` is currently
+  **not** a dependency of this package (removed in v0.0.314 — it sat unused
+  and, as a `file:` dependency, was tripping electron-builder's
+  production-install step under npm workspaces; see "Packaging" below). Add
+  it back to `package.json` `dependencies` (and `../server/dist/**/*` to
+  `electron-builder.json`'s `files`) when this lands.
 - **Native saveFile** — `api.backend.saveFile` still uses a browser
   `<a download>`. The `.db` operations already use
   `dialog.showSaveDialog`; routing `saveFile` through it is the leftover.
@@ -140,6 +144,18 @@ When you add either:
 3. Keep the branch in `app-context.ts` (or a plugin's own `init` guard, as
    `renderer/src/plugins/electron-db.ts` does) — not scattered
    `window.easydb` checks inside `api.backend` / `DataStore` callers.
+
+## Packaging
+
+`electron-builder --config electron-builder.json` runs an "installing
+production dependencies" step (`npm install --omit=dev` scoped to this
+package) whenever `package.json` has real `dependencies` — under npm
+workspaces that install isn't actually scoped: it resolves against the root
+lockfile/hoisted tree, and can prune root-hoisted devDependencies that other
+tooling still needs (this bit `app-builder-bin` itself, electron-builder's own
+packaging helper, causing a same-run `ENOENT`). Keeping this package's
+`dependencies` list as small as possible (ideally empty) avoids triggering
+that step at all.
 
 ## Build / package / test
 

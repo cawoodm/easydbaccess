@@ -9,5 +9,5 @@
     "moduleResolution": "Node"
   },
   "include": ["src/**/*"],
-  "references": [{ "path": "../shared" }, { "path": "../server" }]
+  "references": [{ "path": "../shared" }]
 }
