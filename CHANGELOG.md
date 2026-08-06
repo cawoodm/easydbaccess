@@ -4,6 +4,7 @@
 
 ### Features
 
+- 🪶 Commandlets: `goto/bible?Book=Matthew` opens and filters a table from a cell link, a `#hash`, `?cmdlet=` or the palette (v0.0.322)
 - ✨ Startup tip dialog, compiled from the help page: walk tips with ‹ ›, "Show tip" in the palette, or turn it off (v0.0.319)
 
 ### Chores

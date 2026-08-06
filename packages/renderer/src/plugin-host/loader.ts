@@ -36,6 +36,7 @@ import * as commandPaletteButton from '../plugins/command-palette-button.js';
 import * as electronDb from '../plugins/electron-db.js';
 import * as sqliteFileSource from '../plugins/sqlitefile-source.js';
 import * as tips from '../plugins/tips.js';
+import * as commandlets from '../plugins/commandlets.js';
 
 /** A built-in plugin paired with its id (mirrors `meta.id`, cheaply reachable without importing every module). */
 export interface BuiltinEntry {
@@ -93,6 +94,7 @@ const modules: PluginModule[] = [
   electronDb,
   sqliteFileSource,
   tips,
+  commandlets,
 ];
 
 function requireMeta(p: PluginModule): NonNullable<PluginModule['meta']> {

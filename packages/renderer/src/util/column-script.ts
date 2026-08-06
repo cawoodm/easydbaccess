@@ -16,10 +16,25 @@
 // pencil in the column editor.
 //
 // Besides `row`, a script can call the helpers listed in `HELPERS` below —
-// currently `markdownToHtml(value)`. See its own module for why that one
-// escapes HTML rather than passing it through.
+// `markdownToHtml(value)` (see its own module for why it escapes HTML rather
+// than passing it through) and `cmdlet(path, params)`.
 
 import { markdownToHtml } from './markdown.js';
+import { formatCommandlet } from '../plugins/commandlet-lang.js';
+
+/**
+ * Build the href of a commandlet link, with every value encoded.
+ *
+ *   cmdlet('goto/orders', { Customer: '=' + row.name })
+ *   → '#goto/orders?Customer=%3DSmith+%26+Co'
+ *
+ * A script that concatenates the URL by hand gets this wrong the first time a
+ * value contains `&`, `;` or `#` — the link then silently loses a parameter or
+ * splits the chain, which is why the helper exists rather than a doc note.
+ */
+function cmdlet(path: string | string[], params?: Record<string, string | number | boolean>): string {
+  return formatCommandlet(path, params);
+}
 
 /** Outcome of one script run — never throws, so a broken script stays local. */
 export type ScriptRun = { ok: true; value: unknown } | { ok: false; label: string; message: string };
@@ -36,7 +51,7 @@ export type ScriptRun = { ok: true; value: unknown } | { ok: false; label: strin
  * (`typeof easydb?.markdownToHtml === 'function'`) and so future helpers cost
  * a property rather than another parameter.
  */
-const HELPERS = { markdownToHtml } as const;
+const HELPERS = { markdownToHtml, cmdlet } as const;
 const HELPER_NAMES = Object.keys(HELPERS);
 
 /** What a column script receives besides `row`. Exported for the docs/editor. */
