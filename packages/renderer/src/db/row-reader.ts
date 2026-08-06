@@ -89,7 +89,12 @@ function activeFilters(req: RowRequest): Array<[string, string]> {
   // A column flagged `filterable: false` is excluded from the funnel as well as
   // from search — a stored filter predating the flag must not keep narrowing.
   const unfilterable = new Set(req.columns.filter((c) => c.filterable === false).map((c) => c.field));
-  return Object.entries(req.filters ?? {}).filter(([field, q]) => q && q.trim().length > 0 && !unfilterable.has(field));
+  // A filter on a field NO column has is unreachable: there is no funnel to
+  // clear it from, and it matches nothing (the cell is always undefined), so it
+  // empties the grid with no visible cause. A commandlet naming a column that
+  // does not exist is how this arrives.
+  const known = new Set(req.columns.map((c) => c.field));
+  return Object.entries(req.filters ?? {}).filter(([field, q]) => q && q.trim().length > 0 && !unfilterable.has(field) && known.has(field));
 }
 
 /**

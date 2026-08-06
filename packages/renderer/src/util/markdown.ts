@@ -42,6 +42,19 @@ const SENTINEL = '\uE000';
 const SENTINEL_RE = /\uE000(\d+)\uE000/g;
 
 /**
+ * A link OUT of the app opens a new tab \u2014 navigating this one would throw the
+ * whole workspace away \u2014 and `noopener` denies the opened page a handle back.
+ *
+ * A `#fragment` addresses THIS document, so it never navigates away and gets
+ * neither: a new tab would reload the workspace to go nowhere, and it stopped
+ * same-page links (a commandlet, a `[Genesis 2](#Genesis%202)`) from working at
+ * all. `sanitize-html.ts` makes the same distinction for hand-written HTML.
+ */
+function newTabAttrs(href: string): string {
+  return href.startsWith('#') ? '' : ' target="_blank" rel="noopener noreferrer"';
+}
+
+/**
  * The block openers, one definition each, used BOTH by the branch that consumes
  * the block and by the paragraph fallthrough that must stop in front of it.
  *
@@ -110,14 +123,12 @@ function inline(src: string): string {
   });
   s = s.replace(/\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g, (m, text: string, url: string, title?: string) => {
     const href = safeUrl(url);
-    // External links open in a new tab, and `noopener` denies the opened page
-    // a handle back to this one.
-    return href === null ? m : `<a href="${href}"${title ? ` title="${title}"` : ''} target="_blank" rel="noopener noreferrer">${text}</a>`;
+    return href === null ? m : `<a href="${href}"${title ? ` title="${title}"` : ''}${newTabAttrs(href)}>${text}</a>`;
   });
   // Autolink: <https://…>, already escaped to &lt;…&gt;.
   s = s.replace(/&lt;((?:https?|mailto):[^\s&]+)&gt;/g, (m, url: string) => {
     const href = safeUrl(url);
-    return href === null ? m : `<a href="${href}" target="_blank" rel="noopener noreferrer">${href}</a>`;
+    return href === null ? m : `<a href="${href}"${newTabAttrs(href)}>${href}</a>`;
   });
 
   s = s.replace(/~~([\s\S]+?)~~/g, '<del>$1</del>');

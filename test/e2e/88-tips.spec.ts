@@ -9,6 +9,14 @@ import { test, expect } from './fixtures.js';
  * the reason that override exists.
  */
 
+/** The device-local list of tip ids already shown. */
+async function readSeen(page: import('@playwright/test').Page): Promise<string[]> {
+  return page.evaluate(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async () => ((await (window as any).__easydb.api.settings.get('tips', 'seen')) as string[] | undefined) ?? [],
+  );
+}
+
 async function gotoWithTips(page: import('@playwright/test').Page, ws: string) {
   await page.goto(`/?test=1&tips=1&space=${encodeURIComponent(ws)}`);
   await page.waitForFunction(
@@ -47,6 +55,11 @@ test.describe('tips', () => {
 
     await page.locator('tips-dialog button.primary').click();
     await expect(dialog).toBeHidden();
+
+    // The seen list is written AFTER the dialog resolves, so wait for it rather
+    // than for the dialog — navigating first can outrun the write and the
+    // second boot then shows tip 1 again.
+    await expect.poll(async () => (await readSeen(page)).length).toBeGreaterThan(0);
 
     // The seen list is device-local (localStorage), so the second boot moves on.
     await gotoWithTips(page, workspaceId);

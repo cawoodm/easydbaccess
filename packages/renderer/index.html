@@ -3,16 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Default every hyperlink to a new tab (view templates, cell links, etc.).
-         `target` only — no `href` — so relative URL / module resolution is
-         unaffected. Modern browsers imply rel=noopener for target=_blank. -->
-    <base target="_blank" />
+    <!-- No `<base target="_blank">`. It used to default every hyperlink to a new
+         tab, but it also overrode the links that must NOT open one: a
+         `#fragment` addresses THIS document, so a new tab reloads the whole
+         workspace to go nowhere, and it stopped commandlet links
+         (`#goto/bible?Book=Matthew`) and in-note anchors from working at all.
+         Every link the app renders now states its own target — `markdown.ts`
+         and `sanitize-html.ts` add one to any non-fragment href, and the chrome,
+         the `link` cell renderer and the seeded view templates each set theirs
+         explicitly — so nothing depended on the default. -->
     <!-- `href` is relative so it resolves against the deploy base (the app also
          ships under a GitHub Pages subpath, where a leading "/" would 404). -->
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <!-- The version is kept in sync by scripts/bump-version.mjs. app-shell
          prefixes the workspace title at runtime, keeping this as the base. -->
-    <title>easyDBAccess v0.0.322</title>
+    <title>easyDBAccess v0.0.323</title>
     <style>
       html,
       body {

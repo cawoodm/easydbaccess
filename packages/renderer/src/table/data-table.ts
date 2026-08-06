@@ -1153,7 +1153,12 @@ export class DataTable extends LitElement {
     // as well as from the per-column funnel. A stored per-column filter that
     // predates the flag being set must not silently keep narrowing the grid.
     const unfilterable = new Set(this.columns.filter((c) => c.filterable === false).map((c) => c.field));
-    const active = Object.entries(this.filters).filter(([field, q]) => q && q.trim().length > 0 && !unfilterable.has(field));
+    // ...and a filter on a field no column has is worse than silent: it has no
+    // funnel to clear it from and matches nothing, so the grid empties with
+    // nothing on screen to explain why. See `row-reader.ts`, which drops the
+    // same ones on the store-query path.
+    const known = new Set(this.columns.map((c) => c.field));
+    const active = Object.entries(this.filters).filter(([field, q]) => q && q.trim().length > 0 && !unfilterable.has(field) && known.has(field));
     const gq = this.globalQuery.trim();
     const lq = this.localQuery.trim();
     if (active.length === 0 && gq.length === 0 && lq.length === 0) return this.rows;

@@ -94,6 +94,14 @@ describe('applyRowRequest', () => {
     expect(page.total).toBe(4);
   });
 
+  it('ignores a filter on a field no column has', () => {
+    // Such a filter is unreachable — no funnel exists to clear it — and matches
+    // nothing, so honouring it empties the grid with no visible cause. A
+    // commandlet naming a column that does not exist is how one arrives.
+    const page = applyRowRequest(ROWS, req({ filters: { Nonesuch: 'anything' } }));
+    expect(page.total).toBe(4);
+  });
+
   it('returns only the fields asked for', () => {
     const page = applyRowRequest(ROWS, req({ fields: ['name'], limit: 1 }));
     expect(Object.keys(page.rows[0]!.data)).toEqual(['name']);

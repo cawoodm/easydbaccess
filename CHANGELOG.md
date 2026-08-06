@@ -2,6 +2,11 @@
 
 ## 6 Aug 2026
 
+### Bugs
+
+- 🪲 A link to an anchor on the same page opened a new tab and reloaded the workspace (v0.0.323)
+- 🪲 A filter on a column that does not exist emptied a table, with no funnel to clear it (v0.0.323)
+
 ### Features
 
 - 🪶 Commandlets: `goto/bible?Book=Matthew` opens and filters a table from a cell link, a `#hash`, `?cmdlet=` or the palette (v0.0.322)
