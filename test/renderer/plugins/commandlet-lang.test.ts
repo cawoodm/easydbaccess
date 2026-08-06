@@ -80,6 +80,11 @@ describe('substituteCommandlet', () => {
     expect(cmd.filters).toEqual({ Owner: 'a&b=c;d' });
   });
 
+  it('substitutes the numbered captures an anchor is split into', () => {
+    const cmd = substituteCommandlet(one('goto/bible?Book=$1&Chapter==$2'), { '1': 'Matthew', '2': '5' });
+    expect(cmd.filters).toEqual({ Book: 'Matthew', Chapter: '=5' });
+  });
+
   it('leaves an unknown placeholder visible rather than blanking it', () => {
     expect(one('goto/x?A=$NOPE').filters.A).toBe('$NOPE');
     expect(substituteCommandlet(one('goto/x?A=$NOPE'), {}).filters.A).toBe('$NOPE');

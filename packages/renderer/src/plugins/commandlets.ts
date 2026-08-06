@@ -1,8 +1,9 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
+import { COMMANDLET_HELP_URL } from '../dialogs/commandlet-dialog.js';
 import { tableIdAtNode } from '../window-mgr/table-window-manager.js';
 import { whenWindowsReady } from '../window-mgr/windows-ready.js';
 import { CommandletError, looksLikeCommandlet } from './commandlet-lang.js';
-import { runCommandletString, type CommandletContext } from './commandlet-run.js';
+import { checkCommandletString, runCommandletString, type CommandletContext } from './commandlet-run.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'commandlets',
@@ -18,18 +19,48 @@ export const meta: NonNullable<PluginModule['meta']> = {
 /** Boot deep link: `?cmdlet=goto/bible?Book=Matthew` (the `&` inside needs `%26`). */
 const BOOT_PARAM = 'cmdlet';
 
+/** Setting: the commandlet a plain `#anchor` is turned into. */
+const DEFAULT_KEY = 'default';
+
 export function init(api: HostApi): void {
+  api.ui.registerSettings(meta.id, 'Commandlets', [
+    {
+      key: DEFAULT_KEY,
+      label: 'Default commandlet',
+      type: 'string',
+      scope: 'workspace',
+      description: 'Run this when the URL hash is not a commandlet itself. Blank ⇒ a plain #anchor is ignored, as before.',
+      help:
+        'Anchors like #Matthew carry no verb, so nothing runs unless this template says what to do with one. ' +
+        '$HASH is the whole anchor text and $1…$9 are its /-separated parts, e.g. ' +
+        'goto/bible?Title=$HASH&@sort=Title turns #Matthew into goto/bible?Title=Matthew&@sort=Title. ' +
+        'The text is substituted after parsing, so an anchor containing & or ; cannot break the command.',
+      helpUrl: COMMANDLET_HELP_URL,
+      helpLinkLabel: 'Commandlets guide',
+    },
+  ]);
+
   api.ui.registerCommand({
     id: 'commandlets:run',
     title: 'Run commandlet…',
     group: 'App',
     icon: 'terminal',
     keywords: ['command', 'goto', 'action', 'link', 'url'],
-    run: async (a) => {
-      const input = await a.ui.dialogs.prompt('Commandlet, e.g. goto/bible?Book=Matthew', '', 'Run commandlet');
-      if (input === null || input.trim() === '') return;
-      await runOrToast(a, input);
-    },
+    run: (a) => promptAndRun(a),
+  });
+
+  // Typing a commandlet into the palette matches no command — offer to run it
+  // rather than showing an empty list. Feature-detected: the seam is an
+  // optional addition to the UiRegistry contract.
+  api.ui.registerCommandFallback?.((query) => {
+    if (!looksLikeCommandlet(query)) return null;
+    return {
+      id: 'commandlets:run-this',
+      title: `Run this commandlet: ${query}`,
+      group: 'Commands',
+      icon: 'terminal',
+      run: (a) => runOrToast(a, query),
+    };
   });
 }
 
@@ -55,16 +86,57 @@ async function runBootCommandlets(api: HostApi): Promise<void> {
   await runHash(api);
 }
 
+/** The dialog, then the run. Shared by the palette entry and anything else. */
+async function promptAndRun(api: HostApi, initial = ''): Promise<void> {
+  const { CommandletDialog } = await import('../dialogs/commandlet-dialog.js');
+  const input = await CommandletDialog.open((text) => checkCommandletString(text), initial);
+  if (input === null) return;
+  await runOrToast(api, input);
+}
+
 /**
- * A `#hash` that names a verb is run and then cleared, so the same link works
- * twice. A hash that is NOT a commandlet (`#Matthew`) is left alone — that is
- * ordinary anchor text, and mapping it to an action is the user's own rule.
+ * A `#hash` naming a verb is run as-is. One that does not — `#Matthew` — is fed
+ * to the "Default commandlet" setting as `$HASH`, which is what lets an ordinary
+ * anchor mean something in this workspace. With no setting, a plain anchor is
+ * left alone, exactly as before.
+ *
+ * Either way the hash is cleared first, so clicking the same link twice works
+ * (an unchanged hash fires no `hashchange`).
  */
 async function runHash(api: HostApi): Promise<void> {
   const raw = location.hash.replace(/^#/, '');
-  if (!raw || !looksLikeCommandlet(raw)) return;
+  if (!raw) return;
+
+  if (looksLikeCommandlet(raw)) {
+    clearHash();
+    await runOrToast(api, raw);
+    return;
+  }
+
+  const template = (await api.settings.get<string>(meta.id, DEFAULT_KEY))?.trim();
+  if (!template) return;
+
+  const text = decodeHash(raw);
+  const parts = text.split('/');
+  const vars: Record<string, string> = { HASH: text };
+  parts.forEach((part, i) => {
+    vars[String(i + 1)] = part;
+  });
+
+  clearHash();
+  await runOrToast(api, template, { vars });
+}
+
+function clearHash(): void {
   history.replaceState(null, '', location.pathname + location.search);
-  await runOrToast(api, raw);
+}
+
+function decodeHash(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw; // a malformed escape is still ordinary text to filter on
+  }
 }
 
 async function onDocumentClick(api: HostApi, e: MouseEvent): Promise<void> {

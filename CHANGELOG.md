@@ -2,15 +2,16 @@
 
 ## 6 Aug 2026
 
+### Features
+
+- ✨ Commandlets: a Default commandlet setting maps a plain `#anchor`, the palette offers to run one you type, and the dialog checks it live (v0.0.324)
+- 🪶 Commandlets: `goto/bible?Book=Matthew` opens and filters a table from a cell link, a `#hash`, `?cmdlet=` or the palette (v0.0.322)
+- ✨ Startup tip dialog, compiled from the help page: walk tips with ‹ ›, "Show tip" in the palette, or turn it off (v0.0.319)
+
 ### Bugs
 
 - 🪲 A link to an anchor on the same page opened a new tab and reloaded the workspace (v0.0.323)
 - 🪲 A filter on a column that does not exist emptied a table, with no funnel to clear it (v0.0.323)
-
-### Features
-
-- 🪶 Commandlets: `goto/bible?Book=Matthew` opens and filters a table from a cell link, a `#hash`, `?cmdlet=` or the palette (v0.0.322)
-- ✨ Startup tip dialog, compiled from the help page: walk tips with ‹ ›, "Show tip" in the palette, or turn it off (v0.0.319)
 
 ### Chores
 

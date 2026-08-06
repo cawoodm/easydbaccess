@@ -8,7 +8,7 @@
 //   - search rides the `easydb:table-search` / `easydb:set-search` events,
 //   - `cmd/` looks up the id in `registries.commands`.
 
-import type { SortSpec, Table } from '@easydb/shared';
+import type { CommandSpec, SortSpec, Table, ViewInstance } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { focusTableWindow } from '../window-mgr/table-window-manager.js';
 import { revealViewWindow } from '../window-mgr/view-window-manager.js';
@@ -33,6 +33,61 @@ export async function runCommandletString(input: string, ctx: CommandletContext 
   const vars = await placeholders(ctx);
   for (const parsed of commandlets) {
     await runOne(substituteCommandlet(parsed, vars));
+  }
+}
+
+/**
+ * Is this string a commandlet this workspace can actually run? Same parse and
+ * the same lookups as running it — the table, the columns, the view, the
+ * command id — but nothing is written.
+ *
+ * Exists so the dialog can say whether what is being typed will work BEFORE it
+ * is run, instead of the user finding out from an error toast afterwards.
+ */
+export async function checkCommandletString(input: string, ctx: CommandletContext = {}): Promise<{ ok: boolean; message: string }> {
+  const text = input.trim();
+  if (!text) return { ok: false, message: '' };
+  let parsed: Commandlet[];
+  try {
+    parsed = parseCommandlets(text);
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
+  const vars = await placeholders(ctx);
+  const summaries: string[] = [];
+  for (const cmd of parsed) {
+    try {
+      summaries.push(await describe(substituteCommandlet(cmd, vars)));
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
+  }
+  return { ok: true, message: summaries.join(', then ') };
+}
+
+/** One line saying what a commandlet WOULD do, throwing if it could not. */
+async function describe(cmd: Commandlet): Promise<string> {
+  switch (cmd.verb) {
+    case 'goto': {
+      const table = await findTableByName(cmd.targets[0] ?? '');
+      const fields = Object.keys(cmd.filters).map((k) => resolveField(table, k));
+      const sort = parseSort(cmd.options.sort, table);
+      const parts = [`open ${table.name}`];
+      if (fields.length > 0) parts.push(`filter ${fields.join(' + ')}`);
+      if (cmd.options.clear !== undefined) parts.push('clear filters');
+      if (cmd.options.search !== undefined) parts.push(`search "${cmd.options.search}"`);
+      if (sort && sort.length > 0) parts.push(`sort by ${sort.map((s) => `${s.field}${s.asc ? '' : ' ↓'}`).join(', ')}`);
+      return parts.join(', ');
+    }
+    case 'search':
+      return `search all tables for "${cmd.targets[0] ?? ''}"`;
+    case 'view':
+      return `open view "${(await findViewByName(cmd.targets[0] ?? '')).name}"`;
+    case 'cmd':
+      return `run "${(await findCommandById(cmd.targets[0] ?? '')).title}"`;
+    case 'preview':
+    case 'ui':
+      throw new CommandletError(`"${cmd.verb}" is not wired up yet.`);
   }
 }
 
@@ -73,7 +128,8 @@ async function runGoto(cmd: Commandlet): Promise<void> {
 
   const patch: Partial<Table> = {};
   const merged = cmd.options.clear === undefined ? { ...(table.filters ?? {}) } : {};
-  for (const [field, expr] of Object.entries(cmd.filters)) {
+  for (const [key, expr] of Object.entries(cmd.filters)) {
+    const field = resolveField(table, key);
     // An empty value is how a commandlet REMOVES a filter, so a link can widen a
     // view as well as narrow it.
     if (expr === '') delete merged[field];
@@ -83,7 +139,7 @@ async function runGoto(cmd: Commandlet): Promise<void> {
     patch.filters = Object.keys(merged).length > 0 ? merged : undefined;
   }
 
-  const sort = parseSort(cmd.options.sort);
+  const sort = parseSort(cmd.options.sort, table);
   if (sort) {
     // `sortColumn`/`sortAsc` mirror the first key — the same shape data-table
     // writes, so an older reader still sees the primary sort.
@@ -106,13 +162,37 @@ async function runGoto(cmd: Commandlet): Promise<void> {
 }
 
 /** `-Field` is descending; several keys are comma-separated, priority order. */
-function parseSort(spec: string | undefined): SortSpec[] | null {
+function parseSort(spec: string | undefined, table: Table): SortSpec[] | null {
   if (spec === undefined) return null;
   return spec
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-    .map((s) => (s.startsWith('-') ? { field: s.slice(1), asc: false } : { field: s, asc: true }));
+    .map((s) => (s.startsWith('-') ? { field: resolveField(table, s.slice(1)), asc: false } : { field: resolveField(table, s), asc: true }));
+}
+
+/**
+ * Map what the commandlet wrote to a real column field, by field name OR label,
+ * case-insensitively — the same rule `searchRowsByField` applies to a
+ * `field:value` search term, so `Book` finds the column labelled "Book" even
+ * though its field is `book`.
+ *
+ * An unknown column is refused rather than written. A filter on a field no
+ * column has cannot be seen or cleared in the grid (there is no funnel for it)
+ * and matches nothing, so writing one empties the table with no visible cause.
+ */
+function resolveField(table: Table, key: string): string {
+  const byName = new Map<string, string>();
+  for (const c of table.columns ?? []) {
+    byName.set(c.field.toLowerCase(), c.field);
+    if (c.label) byName.set(c.label.toLowerCase(), c.field);
+  }
+  const real = byName.get(key.trim().toLowerCase());
+  if (!real) {
+    const known = (table.columns ?? []).map((c) => c.field).join(', ');
+    throw new CommandletError(`"${table.name}" has no column "${key}"${known ? ` — it has ${known}` : ''}.`);
+  }
+  return real;
 }
 
 // -- search / view / cmd ------------------------------------------------------
@@ -125,20 +205,30 @@ function runSearch(cmd: Commandlet): void {
 }
 
 async function runView(cmd: Commandlet): Promise<void> {
-  const name = (cmd.targets[0] ?? '').trim();
-  const app = await getContext();
-  const instances = (await app.store.viewInstances.find()).filter((v) => v.workspaceId === app.workspaceId);
-  const match = instances.find((v) => v.name === name) ?? instances.find((v) => v.name.toLowerCase() === name.toLowerCase());
-  if (!match) throw new CommandletError(`No view called "${name}".`);
+  const match = await findViewByName(cmd.targets[0] ?? '');
   await revealViewWindow(match.id);
 }
 
 async function runCommandId(cmd: Commandlet): Promise<void> {
-  const id = cmd.targets[0] ?? '';
+  const spec = await findCommandById(cmd.targets[0] ?? '');
+  const app = await getContext();
+  await spec.run(app.api);
+}
+
+async function findViewByName(rawName: string): Promise<ViewInstance> {
+  const name = rawName.trim();
+  const app = await getContext();
+  const instances = (await app.store.viewInstances.find()).filter((v) => v.workspaceId === app.workspaceId);
+  const match = instances.find((v) => v.name === name) ?? instances.find((v) => v.name.toLowerCase() === name.toLowerCase());
+  if (!match) throw new CommandletError(`No view called "${name}".`);
+  return match;
+}
+
+async function findCommandById(id: string): Promise<CommandSpec> {
   const app = await getContext();
   const spec = app.registries.commands.find((c) => c.id === id) ?? app.registries.commands.find((c) => c.id.toLowerCase() === id.toLowerCase());
   if (!spec) throw new CommandletError(`No command with id "${id}".`);
-  await spec.run(app.api);
+  return spec;
 }
 
 // -- lookup -------------------------------------------------------------------

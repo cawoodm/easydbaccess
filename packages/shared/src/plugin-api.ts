@@ -616,6 +616,17 @@ export interface UiRegistry {
   openSettings(): void;
   /** Registers a command for the Ctrl+K command palette. Returns an unregister fn. */
   registerCommand(spec: CommandSpec): Unregister;
+  /**
+   * Offer a command for text the palette matched NOTHING for.
+   *
+   * Called with the raw query only when no registered command, button or table
+   * matched it; returning null means "not mine". This is what lets the palette
+   * accept something it cannot enumerate in advance — a commandlet the user
+   * typed, say — without the palette knowing what that is.
+   *
+   * Optional: feature-detect (`api.ui.registerCommandFallback?.(fn)`).
+   */
+  registerCommandFallback?(fn: (query: string) => CommandSpec | null): Unregister;
   /** Opens the command palette (also bound to Ctrl+K / Cmd+K). */
   openCommandPalette(): void;
   /**

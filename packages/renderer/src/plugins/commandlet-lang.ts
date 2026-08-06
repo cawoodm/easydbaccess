@@ -137,7 +137,9 @@ function decodeSegment(s: string, raw: string): string {
  * instead of silently becoming empty.
  */
 export function substituteCommandlet(cmd: Commandlet, vars: Record<string, string>): Commandlet {
-  const swap = (s: string): string => s.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (whole, name: string) => vars[name] ?? whole);
+  // `\d+` is its own alternative because the numbered captures (`$1`…`$9`, the
+  // parts of a `/`-separated anchor) do not start with a letter.
+  const swap = (s: string): string => s.replace(/\$([A-Za-z_][A-Za-z0-9_]*|\d+)/g, (whole, name: string) => vars[name] ?? whole);
   const mapValues = (o: Record<string, string>): Record<string, string> => Object.fromEntries(Object.entries(o).map(([k, v]) => [swap(k), swap(v)]));
   return {
     verb: cmd.verb,
