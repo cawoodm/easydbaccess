@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 6 Aug 2026
+
+### Features
+
+- ✨ Startup tip dialog, compiled from the help page: walk tips with ‹ ›, "Show tip" in the palette, or turn it off (v0.0.319)
+
 ## 5 Aug 2026
 
 ### Features

@@ -2,7 +2,9 @@ import { defineConfig, searchForWorkspaceRoot } from 'vite';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { generatePluginCatalog } from '../../scripts/generate-plugin-catalog.mjs';
+import { generateTips } from '../../scripts/generate-tips.mjs';
 import { resolveDevPort } from '../../scripts/dev-port.mjs';
 
 const require = createRequire(import.meta.url);
@@ -13,6 +15,9 @@ const require = createRequire(import.meta.url);
 // actually resolves our deps (a no-op in the primary checkout).
 const cssPath = require.resolve('material-icons/iconfont/material-icons.css');
 const sharedNodeModules = cssPath.slice(0, cssPath.lastIndexOf('node_modules') + 'node_modules'.length);
+
+/** The markdown the `tips` plugin is compiled from — watched by the gen-tips plugin below. */
+const tipsSource = fileURLToPath(new URL('../../docs/help/tips.md', import.meta.url));
 
 export default defineConfig({
   server: {
@@ -72,6 +77,21 @@ export default defineConfig({
       name: 'gen-plugin-catalog',
       async buildStart() {
         await generatePluginCatalog();
+      },
+    },
+    // Recompile src/plugins/tips.json from docs/help/tips.md, the file the
+    // `tips` plugin imports. In dev the markdown is watched as well, so editing
+    // a tip rewrites the JSON and Vite reloads it like any other source change.
+    {
+      name: 'gen-tips',
+      buildStart() {
+        generateTips();
+      },
+      configureServer(server) {
+        server.watcher.add(tipsSource);
+        server.watcher.on('change', (file) => {
+          if (resolve(file) === tipsSource) generateTips();
+        });
       },
     },
   ],

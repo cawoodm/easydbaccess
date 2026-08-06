@@ -1,5 +1,6 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { SAFE_MODE } from './safe-mode.js';
+import { builtinKey } from './builtin-key.js';
 import * as csvImport from '../plugins/csv-import.js';
 import * as csvExport from '../plugins/csv-export.js';
 import * as jsonImport from '../plugins/json-import.js';
@@ -34,6 +35,7 @@ import * as projection from '../plugins/projection.js';
 import * as commandPaletteButton from '../plugins/command-palette-button.js';
 import * as electronDb from '../plugins/electron-db.js';
 import * as sqliteFileSource from '../plugins/sqlitefile-source.js';
+import * as tips from '../plugins/tips.js';
 
 /** A built-in plugin paired with its id (mirrors `meta.id`, cheaply reachable without importing every module). */
 export interface BuiltinEntry {
@@ -90,6 +92,7 @@ const modules: PluginModule[] = [
   commandPaletteButton,
   electronDb,
   sqliteFileSource,
+  tips,
 ];
 
 function requireMeta(p: PluginModule): NonNullable<PluginModule['meta']> {
@@ -106,9 +109,7 @@ const builtins: BuiltinEntry[] = modules.map((module) => {
 export const builtinPlugins = builtins;
 
 /** Synthetic URL used to key built-in disable state in the plugins collection. */
-export function builtinKey(id: string): string {
-  return `builtin:${id}`;
-}
+export { builtinKey } from './builtin-key.js';
 
 /**
  * Runs init() on every built-in plugin (skipping non-fixed ones the user
