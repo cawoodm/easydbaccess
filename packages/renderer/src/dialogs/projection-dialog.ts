@@ -18,6 +18,7 @@ import { customElement, state } from 'lit/decorators.js';
 import type { ProjectionSpec } from '@easydb/shared';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
+import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import {
   addComputedToModel,
   addSourceToModel,
@@ -372,6 +373,7 @@ export class ProjectionDialog extends LitElement {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
     const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
+    if (this.dialogEl) watchDialogDirty('projection', this.dialogEl);
   }
 
   open(opts: ProjectionDialogOpts): void {

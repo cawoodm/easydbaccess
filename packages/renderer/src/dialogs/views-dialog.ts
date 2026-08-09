@@ -4,6 +4,7 @@ import type { ColumnSpec, Table, ViewInstance, ViewTemplate } from '@easydb/shar
 import { getContext } from '../app-context.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
+import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { extractTokens } from '../views/view-render.js';
 import { revealViewWindow } from '../window-mgr/view-window-manager.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
@@ -209,6 +210,7 @@ export class ViewsDialog extends LitElement {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
     const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
+    if (this.dialogEl) watchDialogDirty('views', this.dialogEl);
   }
 
   async open(tableId: string, opts?: { editTemplateId?: string; editInstanceId?: string }): Promise<void> {

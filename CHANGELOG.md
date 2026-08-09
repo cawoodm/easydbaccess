@@ -7,6 +7,10 @@
 - ✨ A view token can carry a script, so a view formats a cell — markdown as HTML, a local date (v0.0.326)
 - ✨ Any script can be added to the samples dropdown, shared by columns and views, and deleted from it again (v0.0.327)
 
+### Bugs
+
+- 🪲 Only the columns editor and Settings warned before a reload, and neither noticed a column added, removed or reordered (v0.0.328)
+
 ### Chores
 
 - 🔧 CI workflows warned that their actions still ran on the deprecated Node 20 (v0.0.325)

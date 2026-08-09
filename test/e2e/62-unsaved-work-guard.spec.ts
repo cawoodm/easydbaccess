@@ -47,6 +47,53 @@ test('the columns editor blocks a reload once edited, and releases on close', as
   expect(await unloadBlocked(page)).toBe(false);
 });
 
+test('removing a column blocks a reload, with nothing typed', async ({ page }) => {
+  const id = await createTable(page, 'Widgets', [{ field: 'name' }, { field: 'note' }]);
+  await waitForPanel(page, id);
+
+  await page
+    .locator(`#${panelDomId(id)}`)
+    .locator('panel-footer')
+    .getByRole('button', { name: /Columns/ })
+    .click();
+  const dlg = page.locator('new-table-dialog dialog');
+  await expect(dlg).toBeVisible();
+
+  // Add / remove / reorder are clicks and drags, so no input or change event
+  // ever reaches the dialog — the guard has to be told by hand.
+  await dlg.locator('button[title="Remove column"]').first().click();
+  expect(await unloadBlocked(page)).toBe(true);
+
+  await dlg.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dlg).toBeHidden();
+  expect(await unloadBlocked(page)).toBe(false);
+});
+
+test('the script editor blocks a reload once typed', async ({ page }) => {
+  const id = await createTable(page, 'Widgets', [{ field: 'name' }]);
+  await waitForPanel(page, id);
+
+  await page
+    .locator(`#${panelDomId(id)}`)
+    .locator('panel-footer')
+    .getByRole('button', { name: /Columns/ })
+    .click();
+  const cols = page.locator('new-table-dialog dialog');
+  await expect(cols).toBeVisible();
+
+  await cols.locator('button[title^="Add a script"]').first().click();
+  const editor = page.locator('script-editor-dialog dialog');
+  await expect(editor).toBeVisible();
+  expect(await unloadBlocked(page)).toBe(false);
+
+  await editor.locator('textarea').fill('return row.name;');
+  expect(await unloadBlocked(page)).toBe(true);
+
+  await editor.getByRole('button', { name: 'Cancel' }).click();
+  await expect(editor).toBeHidden();
+  expect(await unloadBlocked(page)).toBe(false);
+});
+
 test('the settings dialog blocks a reload once edited, and releases when done', async ({ page }) => {
   await page.evaluate(() => document.dispatchEvent(new CustomEvent('easydb:open-settings', { bubbles: true })));
   const dlg = page.locator('settings-dialog dialog');

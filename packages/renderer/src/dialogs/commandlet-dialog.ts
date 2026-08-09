@@ -11,6 +11,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
+import { watchDialogDirty } from '../chrome/dirty-guard.js';
 
 /** The user guide, on GitHub so the link works from a packaged build too. */
 export const COMMANDLET_HELP_URL = 'https://github.com/cawoodm/easydbaccess/blob/main/docs/help/commandlets.md';
@@ -117,6 +118,7 @@ export class CommandletDialog extends LitElement {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
     const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
+    if (this.dialogEl) watchDialogDirty('commandlet', this.dialogEl);
   }
 
   private openDialog(check: CommandletChecker, initial: string): Promise<string | null> {

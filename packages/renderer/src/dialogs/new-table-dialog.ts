@@ -5,7 +5,7 @@ import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 import { makeDialogDraggable } from './draggable.js';
-import { watchDialogDirty } from '../chrome/dirty-guard.js';
+import { markDirty, watchDialogDirty } from '../chrome/dirty-guard.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
 import { allColumnsFlagged, buildColumnSpec, toggleColumnFlag, type ColumnFlag, type ColumnRow } from './column-row.js';
@@ -453,13 +453,25 @@ export class NewTableDialog extends LitElement {
     this.rendererSubUnsub = undefined;
   }
 
+  /**
+   * Adding, removing and reordering a column happen on a button click or a
+   * drag, neither of which fires the `input`/`change` `watchDialogDirty`
+   * listens for. Without this, deleting three columns and hitting reload lost
+   * them with no warning.
+   */
+  private touchDirty(): void {
+    if (this.dialogEl) markDirty('columns-editor', this.dialogEl);
+  }
+
   private addColumn(): void {
     const i = this.columns.length + 1;
     this.columns = [...this.columns, { field: `field_${i}`, label: `Field ${i}`, type: 'string' }];
+    this.touchDirty();
   }
 
   private removeColumn(idx: number): void {
     this.columns = this.columns.filter((_, i) => i !== idx);
+    this.touchDirty();
   }
 
   private moveColumn(idx: number, delta: -1 | 1): void {
@@ -469,6 +481,7 @@ export class NewTableDialog extends LitElement {
     const [item] = next.splice(idx, 1);
     next.splice(j, 0, item!);
     this.columns = next;
+    this.touchDirty();
   }
 
   private onRowDragStart(e: DragEvent, idx: number) {
@@ -511,6 +524,7 @@ export class NewTableDialog extends LitElement {
     if (edge === 'after') toIdx += 1;
     next.splice(toIdx, 0, moved!);
     this.columns = next;
+    this.touchDirty();
   }
 
   private onRowDragEnd() {
@@ -521,6 +535,7 @@ export class NewTableDialog extends LitElement {
 
   private patchColumn(idx: number, patch: Partial<ColumnRow>): void {
     this.columns = this.columns.map((c, i) => (i === idx ? { ...c, ...patch } : c));
+    this.touchDirty();
   }
 
   /**
@@ -539,7 +554,10 @@ export class NewTableDialog extends LitElement {
       class="flag-label flag-head"
       title=${`${label} — click to ${all ? 'clear' : 'set'} every column`}
       aria-pressed=${all ? 'true' : 'false'}
-      @click=${() => (this.columns = toggleColumnFlag(this.columns, flag))}
+      @click=${() => {
+        this.columns = toggleColumnFlag(this.columns, flag);
+        this.touchDirty();
+      }}
     >
       ${glyph}
     </button>`;
@@ -578,6 +596,7 @@ export class NewTableDialog extends LitElement {
           validate: spec.validate,
         };
       });
+      this.touchDirty();
     } catch (err) {
       this.errorMsg = `${action.label} failed: ${(err as Error).message}`;
     }

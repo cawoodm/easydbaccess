@@ -5,6 +5,7 @@ import { parseCsv } from '../plugins/csv-import.js';
 import { slugTable } from '../util/ids.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
+import { watchDialogDirty } from '../chrome/dirty-guard.js';
 
 /**
  * Paste-CSV modal. Lets users drop CSV text into a textarea without dragging
@@ -65,6 +66,7 @@ export class CsvPasteDialog extends LitElement {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
     const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
+    if (this.dialogEl) watchDialogDirty('csv-paste', this.dialogEl);
   }
 
   async open(): Promise<void> {
