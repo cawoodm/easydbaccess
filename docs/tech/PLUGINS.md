@@ -183,6 +183,19 @@ for an empty row, since a script runs against the blank row the user just
 added and "undefined undefined" or "NaN%" in the grid is the classic way a
 naive script embarrasses itself.
 
+**The user's own samples** sit beside them: **Add to samples** names what is in
+the editor and keeps it, and the trash next to the dropdown deletes the one
+currently loaded (after a confirm; a built-in is code and cannot be deleted).
+The whole list is one workspace setting, `scripts:samples` — a sample is
+content, like a view template, so a gist push or a dump carries it rather than
+leaving it on the machine it was written on. There are two lists, not three: a
+VIEW TOKEN's script is `render(row)` like a column's, so one saved on a column is
+offered on a token and the other way round, while a `validate` sample stays out
+of the render list (offering it there could only ever produce a broken script).
+`parseUserSamples` is deliberately tolerant — the list may arrive from another
+device or a hand-edited dump, and one malformed entry must cost that entry, not
+the whole editor.
+
 ### HTML or Markdown — who decides
 
 Three renderers show a value as markup: `html` puts it in the cell as HTML,

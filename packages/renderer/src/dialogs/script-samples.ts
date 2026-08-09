@@ -40,6 +40,81 @@ export interface ScriptSample {
 export type ValidateSample = ScriptSample;
 
 /**
+ * Which function shape a sample defines — the two lists below, and the two
+ * lists a user's own samples fall into.
+ *
+ * A VIEW TOKEN's script is `render(row)` like a column's, so it shares the
+ * `render` list: a sample saved from a column shows up in a view's token editor
+ * and the other way round. There is deliberately no third list.
+ */
+export type SampleKind = 'render' | 'validate';
+
+/** A sample the USER saved, kept in the workspace settings under {@link USER_SAMPLES_SETTING}. */
+export interface UserScriptSample extends ScriptSample {
+  /** Stable identity for delete — labels are free text and may repeat. */
+  id: string;
+  kind: SampleKind;
+}
+
+/**
+ * The settings key holding the user's own samples, as one JSON array.
+ *
+ * A workspace setting rather than a device-local one: a sample is content, like
+ * a view template, so it should travel with the workspace through a gist push or
+ * a dump — not stay behind on the machine it was written on.
+ */
+export const USER_SAMPLES_SETTING = 'scripts:samples';
+
+/** The built-in samples for one kind. */
+export function builtinSamples(kind: SampleKind): ReadonlyArray<ScriptSample> {
+  return kind === 'validate' ? VALIDATE_SAMPLES : RENDER_SAMPLES;
+}
+
+/**
+ * Read the stored list, tolerating anything. The value comes back from a store
+ * that may have been synced from another device or hand-edited in a dump, so a
+ * malformed entry is dropped rather than allowed to break the dialog — a broken
+ * sample list must not cost the user their script editor.
+ */
+export function parseUserSamples(value: unknown): UserScriptSample[] {
+  const raw = typeof value === 'string' ? tryParseJson(value) : value;
+  if (!Array.isArray(raw)) return [];
+  const out: UserScriptSample[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const { id, kind, label, source } = item as Record<string, unknown>;
+    if (typeof id !== 'string' || !id) continue;
+    if (typeof label !== 'string' || !label.trim()) continue;
+    if (typeof source !== 'string' || !source.trim()) continue;
+    out.push({ id, kind: kind === 'validate' ? 'validate' : 'render', label: label.trim(), source });
+  }
+  return out;
+}
+
+function tryParseJson(s: string): unknown {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+/** The user's samples of one kind, in the order they were saved. */
+export function userSamplesFor(all: ReadonlyArray<UserScriptSample>, kind: SampleKind): UserScriptSample[] {
+  return all.filter((s) => s.kind === kind);
+}
+
+/** `all` with one more sample appended. Pure — the caller persists the result. */
+export function addUserSample(all: ReadonlyArray<UserScriptSample>, sample: UserScriptSample): UserScriptSample[] {
+  return [...all, sample];
+}
+
+/** `all` without the sample carrying `id`. */
+export function removeUserSample(all: ReadonlyArray<UserScriptSample>, id: string): UserScriptSample[] {
+  return all.filter((s) => s.id !== id);
+}
+
+/**
  * `render(row)` samples. Between them they cover the three things people
  * actually ask a column script for: text assembled from other fields, a URL
  * built out of a value, and arithmetic over the row.

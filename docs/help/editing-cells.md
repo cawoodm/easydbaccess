@@ -41,6 +41,11 @@ date that isn't in the future, and one column compared against another. Pick
 one, adjust the value at the top of it, and save. Picked the wrong one? **Undo**
 puts back what was there.
 
+Written a rule you will want again? **Add to samples** gives it a name and puts
+it in the same dropdown, under _Your samples_. The 🗑 next to the dropdown
+deletes the one you have picked, after asking; the shipped samples can't be
+deleted. Your samples belong to the workspace, so they travel with it.
+
 The rule runs on **manual edits only**. Importing, refreshing and syncing are
 not edits, so a rule can't stop a table from loading — it tells you about the
 next value someone types.
@@ -97,6 +102,10 @@ covering what people actually ask a column for:
 Same **Undo** as the validation editor if you pick the wrong one. Each sample
 says in its first line which renderer it expects — the dropdown can't set that
 for you, it's the column's own Renderer box.
+
+**Add to samples** works here too, and this list is shared with views: a script
+you save on a column is offered when you script a view's `$TOKEN`, and one you
+save there is offered on your columns. Validation rules stay in their own list.
 
 ### Built-in renderers
 

@@ -5,7 +5,7 @@
 // picked it and got a "compile error" instead of a working script.
 
 import { describe, expect, it } from 'vitest';
-import { RENDER_SAMPLES, VALIDATE_SAMPLES } from '../../../packages/renderer/src/dialogs/script-samples.js';
+import { RENDER_SAMPLES, VALIDATE_SAMPLES, addUserSample, builtinSamples, parseUserSamples, removeUserSample, userSamplesFor } from '../../../packages/renderer/src/dialogs/script-samples.js';
 import { runColumnScript, runValidateScript } from '../../../packages/renderer/src/util/column-script.js';
 
 /** Run a validate sample by label — fails loudly if the label ever drifts. */
@@ -234,5 +234,52 @@ describe('each render sample computes what it says it does', () => {
     // Whole days, so a date-only value reads the same all day long.
     expect(render(L, { due: inDays(0) })).toBe('today');
     expect(render(L, { due: 'not a date' })).toBe('');
+  });
+});
+
+// The user's own samples live in one workspace setting, so the list arrives from
+// a store that may have been synced from another device or hand-edited in a
+// dump. The reader is tolerant on purpose: a broken entry must cost the user
+// that entry, never the script editor.
+describe('user samples', () => {
+  const sample = (over: Record<string, unknown> = {}) => ({ id: 'a', kind: 'render', label: 'Mine', source: 'function render(){return 1}', ...over });
+
+  it('reads a stored list, and a JSON string of one', () => {
+    expect(parseUserSamples([sample()])).toEqual([{ id: 'a', kind: 'render', label: 'Mine', source: 'function render(){return 1}' }]);
+    expect(parseUserSamples(JSON.stringify([sample()]))).toHaveLength(1);
+  });
+
+  it('drops entries with no id, no label or no source, and keeps the rest', () => {
+    const list = parseUserSamples([sample({ id: '' }), sample({ id: 'b', label: '  ' }), sample({ id: 'c', source: '' }), sample({ id: 'd' })]);
+    expect(list.map((s) => s.id)).toEqual(['d']);
+  });
+
+  it('survives anything that is not a list', () => {
+    for (const junk of [null, undefined, 42, 'nonsense', {}, ['x']]) expect(parseUserSamples(junk)).toEqual([]);
+  });
+
+  it('defaults an unknown kind to render — a sample of no known shape is a render sample', () => {
+    expect(parseUserSamples([sample({ kind: 'wat' })])[0]?.kind).toBe('render');
+    expect(parseUserSamples([sample({ kind: 'validate' })])[0]?.kind).toBe('validate');
+  });
+
+  it('splits the two kinds, so a validator is never offered as a renderer', () => {
+    const all = parseUserSamples([sample({ id: 'r' }), sample({ id: 'v', kind: 'validate' })]);
+    expect(userSamplesFor(all, 'render').map((s) => s.id)).toEqual(['r']);
+    expect(userSamplesFor(all, 'validate').map((s) => s.id)).toEqual(['v']);
+  });
+
+  it('adds and removes by id, leaving the others alone', () => {
+    const one = addUserSample([], { id: 'x', kind: 'render', label: 'X', source: 'x' });
+    const two = addUserSample(one, { id: 'y', kind: 'validate', label: 'Y', source: 'y' });
+    expect(two.map((s) => s.id)).toEqual(['x', 'y']);
+    expect(removeUserSample(two, 'x').map((s) => s.id)).toEqual(['y']);
+    // Removing something that isn't there is not an error, just a no-op.
+    expect(removeUserSample(two, 'nope')).toHaveLength(2);
+  });
+
+  it('builtinSamples answers per kind, and a token script shares the render list', () => {
+    expect(builtinSamples('render')).toBe(RENDER_SAMPLES);
+    expect(builtinSamples('validate')).toBe(VALIDATE_SAMPLES);
   });
 });

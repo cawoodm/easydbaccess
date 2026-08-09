@@ -2,7 +2,19 @@ import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
-import { RENDER_SAMPLES, VALIDATE_SAMPLES, type ScriptSample } from './script-samples.js';
+import {
+  USER_SAMPLES_SETTING,
+  addUserSample,
+  builtinSamples,
+  parseUserSamples,
+  removeUserSample,
+  userSamplesFor,
+  type SampleKind,
+  type ScriptSample,
+  type UserScriptSample,
+} from './script-samples.js';
+import { getContext } from '../app-context.js';
+import { HostDialogs } from './host-dialogs.js';
 
 /**
  * Which script is being edited. They share this one editor because everything
@@ -56,6 +68,30 @@ const VALIDATE_BOILERPLATE = `function validate(value, row) {
   if (false) throw new Error('Explain what is wrong here.');
 }
 `;
+
+function newId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+/**
+ * The user's samples out of the workspace settings. Never throws: the editor has
+ * to open even when the store is unhappy, so a failed read is an empty list.
+ */
+async function readUserSamples(): Promise<UserScriptSample[]> {
+  try {
+    const ctx = await getContext();
+    const row = await ctx.store.settings.findOne(USER_SAMPLES_SETTING);
+    return parseUserSamples(row?.value);
+  } catch {
+    return [];
+  }
+}
+
+/** Write the whole list back as one setting. */
+async function writeUserSamples(all: ReadonlyArray<UserScriptSample>): Promise<void> {
+  const ctx = await getContext();
+  await ctx.store.settings.upsert({ name: USER_SAMPLES_SETTING, value: [...all] });
+}
 
 /**
  * Modal editor for a column's `script` source. Mounted once from `<app-shell>` and
@@ -114,6 +150,30 @@ export class ScriptEditorDialog extends LitElement {
         text-decoration: underline;
         cursor: pointer;
       }
+      button.link[disabled] {
+        color: #9ca3af;
+        text-decoration: none;
+        cursor: default;
+      }
+      /* Deletes the user sample currently loaded. Disabled — not hidden — for a
+         built-in, so the dropdown's shape does not jump as you browse it. */
+      button.icon {
+        background: transparent;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+        padding: 0.15rem 0.35rem;
+        font-size: 0.9rem;
+        line-height: 1;
+        cursor: pointer;
+      }
+      button.icon.danger:hover:not([disabled]) {
+        border-color: #fecaca;
+        background: #fef2f2;
+      }
+      button.icon[disabled] {
+        opacity: 0.4;
+        cursor: default;
+      }
       textarea {
         font:
           0.85rem ui-monospace,
@@ -139,6 +199,14 @@ export class ScriptEditorDialog extends LitElement {
    * open.
    */
   @state() private undoText: string | null = null;
+  /** The user's own samples, both kinds, as stored. Re-read on every open. */
+  @state() private userSamples: UserScriptSample[] = [];
+  /**
+   * The user sample currently loaded in the editor, so the trash button knows
+   * WHICH sample it deletes. Null for a built-in or for hand-written text — a
+   * built-in sample is code and cannot be deleted.
+   */
+  @state() private pickedUserId: string | null = null;
   private dialogEl: HTMLDialogElement | null = null;
   private resolver: ((v: string | null) => void) | null = null;
 
@@ -176,11 +244,15 @@ export class ScriptEditorDialog extends LitElement {
     }
     this.kind = kind;
     this.undoText = null;
+    this.pickedUserId = null;
     // Pre-fill with boilerplate so users opening a fresh column-script see
     // the expected shape instead of an intimidating empty textarea. An
     // existing script wins — we never overwrite the user's source.
     this.text = initial && initial.trim() ? initial : this.blankFor(kind, opts?.field ?? '');
     this.columnLabel = columnLabel ?? '';
+    // Read on every open, not once: another dialog (or another device, through
+    // sync) may have added a sample since the last time this one was shown.
+    this.userSamples = await readUserSamples();
     await this.updateComplete;
     this.dialogEl?.showModal();
     return new Promise((resolve) => {
@@ -209,23 +281,42 @@ export class ScriptEditorDialog extends LitElement {
     this.resolve(this.text);
   };
 
-  /** The sample list for whichever script is being edited. */
+  /**
+   * Which sample list this editor draws on. A `token` script is `render(row)`
+   * like a column's, so the two share one list — a sample saved from a column
+   * is offered in a view's token editor and the other way round.
+   */
+  private get sampleKind(): SampleKind {
+    return this.kind === 'validate' ? 'validate' : 'render';
+  }
+
+  /** The shipped samples for whichever script is being edited. */
   private get samples(): ReadonlyArray<ScriptSample> {
-    return this.kind === 'validate' ? VALIDATE_SAMPLES : RENDER_SAMPLES;
+    return builtinSamples(this.sampleKind);
+  }
+
+  /** The user's own samples for this kind. */
+  private get mySamples(): UserScriptSample[] {
+    return userSamplesFor(this.userSamples, this.sampleKind);
   }
 
   /**
    * Replace the editor contents with a sample, remembering what was there. The
    * `<select>` is reset to its placeholder so picking the SAME sample again
    * (after an undo, say) still fires a change event.
+   *
+   * Option values are prefixed (`b:` built-in, `u:` the user's) because the two
+   * groups share one dropdown and a bare index would collide.
    */
   private applySample(e: Event) {
     const select = e.target as HTMLSelectElement;
-    const sample = this.samples[Number(select.value)];
+    const value = select.value;
     select.value = '';
+    const sample = value.startsWith('u:') ? this.mySamples.find((s) => s.id === value.slice(2)) : this.samples[Number(value.slice(2))];
     if (!sample) return;
     this.undoText = this.text;
     this.text = sample.source;
+    this.pickedUserId = value.startsWith('u:') ? value.slice(2) : null;
   }
 
   private undoSample() {
@@ -238,6 +329,36 @@ export class ScriptEditorDialog extends LitElement {
     this.text = (e.target as HTMLTextAreaElement).value;
     // They're editing the sample now, not still deciding about it.
     this.undoText = null;
+  }
+
+  /**
+   * Save what is in the editor as a sample of this kind, under a name the user
+   * gives. Saved from a token editor it still lands in the `render` list, so it
+   * is offered on columns too.
+   */
+  private async saveAsSample() {
+    if (!this.text.trim()) return;
+    const dialogs = HostDialogs.instance;
+    if (!dialogs) return;
+    const label = await dialogs.prompt('Name this sample — it appears in the dropdown for every script of this kind.', '', 'Add to samples');
+    if (label === null || !label.trim()) return;
+    const sample: UserScriptSample = { id: newId(), kind: this.sampleKind, label: label.trim(), source: this.text };
+    this.userSamples = addUserSample(this.userSamples, sample);
+    this.pickedUserId = sample.id;
+    await writeUserSamples(this.userSamples);
+  }
+
+  /** Delete the user sample currently loaded, after a confirm. */
+  private async deletePickedSample() {
+    const id = this.pickedUserId;
+    const sample = id ? this.mySamples.find((s) => s.id === id) : undefined;
+    const dialogs = HostDialogs.instance;
+    if (!id || !sample || !dialogs) return;
+    const ok = await dialogs.confirm(`Delete the sample "${sample.label}"? The script in the editor stays as it is.`, 'Delete sample');
+    if (!ok) return;
+    this.userSamples = removeUserSample(this.userSamples, id);
+    this.pickedUserId = null;
+    await writeUserSamples(this.userSamples);
   }
 
   /** The explanation above the textarea — different job, different contract. */
@@ -279,6 +400,8 @@ export class ScriptEditorDialog extends LitElement {
 
   override render() {
     const validating = this.kind === 'validate';
+    const mine = this.mySamples;
+    const picked = this.pickedUserId ? mine.find((s) => s.id === this.pickedUserId) : undefined;
     return html`
       <dialog @cancel=${this.onCancel} @keydown=${ctrlEnterSubmits}>
         <button type="button" class="close-x" title="Close" @click=${this.onCancel}>×</button>
@@ -300,8 +423,21 @@ export class ScriptEditorDialog extends LitElement {
                 @change=${(e: Event) => this.applySample(e)}
               >
                 <option value="">— choose —</option>
-                ${this.samples.map((s, i) => html`<option value=${i}>${s.label}</option>`)}
+                ${mine.length ? html`<optgroup label="Your samples">${mine.map((s) => html`<option value=${`u:${s.id}`}>${s.label}</option>`)}</optgroup>` : null}
+                <optgroup label="Built in">${this.samples.map((s, i) => html`<option value=${`b:${i}`}>${s.label}</option>`)}</optgroup>
               </select>
+              <button
+                type="button"
+                class="icon danger"
+                title=${picked ? `Delete the sample "${picked.label}"` : 'Pick one of your own samples to delete it'}
+                ?disabled=${!picked}
+                @click=${() => void this.deletePickedSample()}
+              >
+                🗑
+              </button>
+              <button type="button" class="link" title="Add what is in the editor to the sample list for this kind of script" ?disabled=${!this.text.trim()} @click=${() => void this.saveAsSample()}>
+                Add to samples
+              </button>
               ${this.undoText !== null ? html`<button type="button" class="link" @click=${() => this.undoSample()}>Undo</button>` : null}
             </div>
             <textarea spellcheck="false" autofocus .value=${this.text} @input=${(e: Event) => this.onInput(e)}></textarea>
