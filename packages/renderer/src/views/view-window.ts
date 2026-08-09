@@ -13,6 +13,7 @@ import { searchRowsByField } from '../search/text-search.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { readRows, type RowRequest } from '../db/row-reader.js';
 import { ROW_FETCH_CAP } from '../db/data-store-ipc.js';
+import { truncationNote } from '../db/truncation-note.js';
 // Side-effect import: the template-off mode renders the standard interactive
 // grid, bound to this view instance for its presentation state.
 import '../table/data-table.js';
@@ -68,6 +69,17 @@ export class ViewWindow extends LitElement {
         padding: 1rem;
         color: #6b7280;
         font-size: 0.9rem;
+      }
+      /* Says the view is showing a slice of its table. Mirrors the grid's
+         .truncated-note — same colours, same job. (No backticks in here: this
+         is a template literal, and one would end it.) */
+      .vw-note {
+        flex: 0 0 auto;
+        padding: 0.25rem 0.5rem;
+        background: #fef3c7;
+        border-bottom: 1px solid #fcd34d;
+        color: #92400e;
+        font-size: 0.75rem;
       }
       /* Fallback read-only table (used when a template has no row HTML). */
       table.vw-table {
@@ -343,6 +355,18 @@ export class ViewWindow extends LitElement {
   /** Renderer name → custom-element tag, snapshotted from the registries. */
   @state() private cellRenderers: Map<string, string> = new Map();
 
+  /**
+   * The read stopped at the row cap, so what the view shows is a slice of its
+   * table. The grid has said this for a while; a template view said nothing, and
+   * a search inside one looked complete when it had only covered the slice.
+   */
+  @state() private truncated = false;
+
+  /** Is a free-text query part of what is on screen — this view's, or the app's? */
+  private get searchIsActive(): boolean {
+    return this.searchQuery.trim() !== '' || this.globalQuery.trim() !== '';
+  }
+
   /** Template rendering is on unless the instance explicitly disabled it. */
   private get templateOn(): boolean {
     return this.instance?.templateEnabled !== false;
@@ -534,6 +558,7 @@ export class ViewWindow extends LitElement {
     const page = await readRows(coll, req, ROW_FETCH_CAP);
     // A slower earlier read must not land over a newer one.
     if (gen !== this.loadGeneration) return;
+    this.truncated = page.truncated === true;
     this.allRows = page.rows;
     this.recompute();
   }
@@ -1019,7 +1044,11 @@ export class ViewWindow extends LitElement {
     // One toolbar for both: sort controls in template mode, filter chips in
     // either (pill filters apply to the grid too). It renders nothing in grid
     // mode with no chips.
-    return html`${this.renderSortBar()}${body}${this.renderFooter()}`;
+    //
+    // The truncation note is template-mode only: grid mode IS a `<data-table>`,
+    // which carries its own.
+    const note = on && this.truncated ? truncationNote({ shown: this.rows.length, total: this.allRows.length, searching: this.searchIsActive, searched: ROW_FETCH_CAP }) : null;
+    return html`${this.renderSortBar()}${note ? html`<div class="vw-note" role="status">${note}</div>` : nothing}${body}${this.renderFooter()}`;
   }
 }
 

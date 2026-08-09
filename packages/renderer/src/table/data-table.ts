@@ -4,6 +4,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { ColumnSpec, DataCollection, Row, SortSpec, Table, ViewInstance } from '@easydb/shared';
 import { readRows, type RowRequest } from '../db/row-reader.js';
 import { ROW_FETCH_CAP } from '../db/data-store-ipc.js';
+import { truncationNote } from '../db/truncation-note.js';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
@@ -451,6 +452,15 @@ export class DataTable extends LitElement {
    * grid that looks complete is how the old cap misled.
    */
   @state() private truncated = false;
+
+  /**
+   * Is a free-text query part of what is on screen? A truncated read has to say
+   * something different then: the search ran over the rows that were fetched, so
+   * "no matches" means "none in the first 20 000" and a count is a floor.
+   */
+  private get searchIsActive(): boolean {
+    return this.localQuery.trim() !== '' || this.globalQuery.trim() !== '';
+  }
   /**
    * Sort keys in priority order. A plain header click replaces the list; a
    * shift-click adds the column as a tie-breaker behind the ones already there.
@@ -1488,7 +1498,12 @@ export class DataTable extends LitElement {
         : nothing}
       ${this.truncated
         ? html`<div class="truncated-note" role="status">
-            Showing the first ${this.rows.length.toLocaleString()} of ${this.matchingTotal.toLocaleString()}+ matching rows. Narrow the filter to see the rest.
+            ${truncationNote({
+              shown: this.rows.length,
+              total: this.matchingTotal,
+              searching: this.searchIsActive,
+              searched: ROW_FETCH_CAP,
+            })}
           </div>`
         : nothing}
       <table style=${this.tableSizingStyle(cols) ?? nothing}>
