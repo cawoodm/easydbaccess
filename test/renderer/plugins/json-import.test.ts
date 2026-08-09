@@ -494,4 +494,45 @@ describe('parsedToTables: native table columns', () => {
     expect(t?.columns[2]?.script).toContain('render');
     expect(t?.source?.type).toBe('projection');
   });
+
+  // A workspace exported with a hidden column came back with that column
+  // visible: the reader copied five keys and dropped every other flag.
+  it('preserves every column flag a dump carries', () => {
+    const dump = {
+      tables: [
+        {
+          name: 'Bible',
+          columns: [
+            {
+              field: 'link',
+              label: 'Link',
+              type: 'string',
+              hidden: true,
+              unique: true,
+              notnull: true,
+              max: 80,
+              width: 120,
+              description: 'Source URL',
+              units: 'm',
+              default: 'n/a',
+              validate: 'function validate(v){}',
+              sortable: false,
+              filterable: false,
+            },
+          ],
+          rows: [],
+        },
+      ],
+    };
+    const [t] = parsedToTables(dump, 'fallback');
+    expect(t?.columns[0]).toEqual(dump.tables[0]!.columns[0]);
+  });
+
+  // Absent means "allowed" for these two, so an absent flag must stay absent
+  // rather than being written back as an explicit true.
+  it('leaves sortable and filterable unset when the dump omits them', () => {
+    const dump = { tables: [{ name: 'Bible', columns: [{ field: 'a', label: 'A', type: 'string' }], rows: [] }] };
+    const [t] = parsedToTables(dump, 'fallback');
+    expect(t?.columns[0]).toEqual({ field: 'a', label: 'A', type: 'string' });
+  });
 });

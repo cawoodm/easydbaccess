@@ -10,6 +10,7 @@ import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
+import { watchDialogDirty } from '../chrome/dirty-guard.js';
 
 export interface ConnectChoice {
   url: string;
@@ -116,6 +117,7 @@ export class DatasetteConnectDialog extends LitElement {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
     const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
+    if (this.dialogEl) watchDialogDirty('datasette-connect', this.dialogEl);
   }
 
   open(opts: ConnectDialogOpts = {}): Promise<ConnectChoice | null> {

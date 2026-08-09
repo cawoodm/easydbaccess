@@ -849,8 +849,24 @@ function normalizeColumn(c: unknown): ColumnSpec {
   };
   if (renderer) spec.renderer = renderer;
   if (typeof o.script === 'string') spec.script = o.script;
+  if (typeof o.validate === 'string') spec.validate = o.validate;
+  if (o.default !== undefined) spec.default = o.default;
+  if (typeof o.max === 'number') spec.max = o.max;
+  if (typeof o.width === 'number') spec.width = o.width;
+  if (typeof o.description === 'string') spec.description = o.description;
+  if (typeof o.units === 'string') spec.units = o.units;
+  if (o.unique === true) spec.unique = true;
+  if (o.notnull === true) spec.notnull = true;
+  // A hidden column came back visible: dump-export writes the whole column, but
+  // this reader only copied field/label/type/renderer/script, so every flag the
+  // user had set was silently dropped on the way in.
+  if (o.hidden === true) spec.hidden = true;
+  // Only an explicit `false` means anything for these two — absent is the
+  // permissive default (see ColumnSpec).
+  if (o.sortable === false) spec.sortable = false;
+  if (o.filterable === false) spec.filterable = false;
   // Preserve the read-only flag so a dumped Projection's computed / joined
-  // columns come back non-editable (dump-export writes the whole column).
+  // columns come back non-editable.
   if (o.readonly === true) spec.readonly = true;
   return spec;
 }

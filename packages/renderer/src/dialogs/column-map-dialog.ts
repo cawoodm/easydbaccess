@@ -14,6 +14,7 @@ import { customElement, state } from 'lit/decorators.js';
 import type { ColumnSpec } from '@easydb/shared';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
+import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { guessMapping, type ColumnMapping } from '../import/map-columns.js';
 
 /** The value of the "leave this column out" option. Empty ⇒ unmapped. */
@@ -144,6 +145,7 @@ export class ColumnMapDialog extends LitElement {
     this.dialogEl = this.shadowRoot?.querySelector('dialog') ?? null;
     const header = this.shadowRoot?.querySelector('.dialog-header') as HTMLElement | null;
     if (this.dialogEl && header) makeDialogDraggable(this.dialogEl, header);
+    if (this.dialogEl) watchDialogDirty('column-map', this.dialogEl);
   }
 
   open(header: string[], targetCols: ColumnSpec[], tableName: string, sample?: string[] | undefined): Promise<ColumnMapping | null> {
