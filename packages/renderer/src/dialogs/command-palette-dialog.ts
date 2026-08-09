@@ -6,7 +6,7 @@ import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { focusTableWindow } from '../window-mgr/table-window-manager.js';
 import { revealViewWindow } from '../window-mgr/view-window-manager.js';
-import { RECENT_GROUP, RECENT_SETTING, orderByRecent, pushRecent, readRecent } from './palette-recent.js';
+import { RECENT_GROUP, RECENT_SETTING, orderByRecent, pruneRecent, pushRecent, readRecent } from './palette-recent.js';
 
 /** One selectable entry in the palette (flattened from commands/buttons/tables). */
 interface PaletteItem {
@@ -158,6 +158,10 @@ export class CommandPaletteDialog extends LitElement {
     this.commandFallbacks = ctx.registries.commandFallbacks;
     this.recentIds = readRecent((await ctx.api.store.settings.findOne(RECENT_SETTING))?.value);
     this.items = await this.buildItems();
+    // Drop remembered ids that no longer name anything — a deleted table's
+    // "Go to" is one of them — so five dead entries cannot leave Recent looking
+    // full and showing nothing.
+    await this.forgetVanished();
     this.search = '';
     this.selected = 0;
     await this.updateComplete;
@@ -322,6 +326,24 @@ export class CommandPaletteDialog extends LitElement {
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error(`[command:${item.id}]`, err);
+    }
+  }
+
+  /**
+   * Forget remembered ids that no longer resolve, writing the shorter list back.
+   * Silent when nothing changed, so opening the palette is not a store write.
+   */
+  private async forgetVanished(): Promise<void> {
+    const kept = pruneRecent(
+      this.recentIds,
+      this.items.map((it) => it.id),
+    );
+    if (kept.length === this.recentIds.length) return;
+    this.recentIds = kept;
+    try {
+      await this.api?.store.settings.upsert({ name: RECENT_SETTING, value: kept });
+    } catch {
+      // Cosmetic: the list is already pruned in memory for this open.
     }
   }
 

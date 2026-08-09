@@ -29,6 +29,22 @@ The palette composes its list fresh each time it opens, from three sources:
 Entries are grouped by `CommandSpec.group` and ordered **Windows → Actions →
 Tables → (other groups)**; within a group, registration order is preserved.
 
+## Recent
+
+The last five commands that ran move to the front under a **Recent** group
+(`dialogs/palette-recent.ts`, ids in the workspace setting `palette:recent`), so
+Ctrl+K Enter repeats the last one. The entries MOVE rather than being copied, so
+nothing is listed twice and index 0 is always the last command.
+
+A "Go to" id carries its object's id (`goto:<tableId>`, `goto-view:<instanceId>`),
+so deleting the table leaves an id here that names nothing. `pruneRecent` drops
+those when the palette opens, and writes the shorter list back only if something
+actually went — opening the palette is otherwise not a store write. Pruned on READ
+rather than on delete because a table can leave in several ways (the trash button,
+a workspace delete, a sync that pulls a workspace without it) and each of them
+would otherwise have to remember to call a cleanup. A rename needs no cleanup at
+all: the id does not change.
+
 ## Built-in commands
 
 Registered in `plugin-host/core-commands.ts` (`registerCoreCommands`, called

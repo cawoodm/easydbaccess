@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RECENT_GROUP, orderByRecent, pushRecent, readRecent } from '../../../packages/renderer/src/dialogs/palette-recent.js';
+import { RECENT_GROUP, orderByRecent, pruneRecent, pushRecent, readRecent } from '../../../packages/renderer/src/dialogs/palette-recent.js';
 
 const item = (id: string, group = 'Actions') => ({ id, group });
 
@@ -55,5 +55,26 @@ describe('orderByRecent', () => {
   it('leaves the list untouched when nothing is remembered', () => {
     const items = [item('a'), item('b')];
     expect(orderByRecent(items, [])).toBe(items);
+  });
+});
+
+/**
+ * A "Go to <table>" command's id carries the table's id, so a deleted table
+ * leaves an id in the history that names nothing. `orderByRecent` already skips
+ * it, but it keeps occupying one of the five slots.
+ */
+describe('pruneRecent', () => {
+  it('keeps the ids that still resolve, in order', () => {
+    expect(pruneRecent(['goto:a', 'windows:tile', 'goto:gone'], ['windows:tile', 'goto:a'])).toEqual(['goto:a', 'windows:tile']);
+  });
+
+  it('accepts a Set as well as a list', () => {
+    expect(pruneRecent(['a', 'b'], new Set(['b']))).toEqual(['b']);
+  });
+
+  it('drops everything when nothing resolves, and nothing when all do', () => {
+    expect(pruneRecent(['goto:gone'], [])).toEqual([]);
+    const all = ['a', 'b'];
+    expect(pruneRecent(all, all)).toEqual(all);
   });
 });

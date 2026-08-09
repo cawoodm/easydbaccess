@@ -32,6 +32,25 @@ export function readRecent(value: unknown): string[] {
 }
 
 /**
+ * The remembered ids that still resolve to something, in order.
+ *
+ * A "Go to <table>" command's id carries the table's id (`goto:<tableId>`, and
+ * `goto-view:<id>` for a view), so deleting the table leaves an id here that
+ * names nothing. `orderByRecent` already skips it, but it goes on occupying one
+ * of the {@link RECENT_MAX} slots — five deleted tables and the Recent section is
+ * empty while looking full.
+ *
+ * Pruned on READ rather than on delete: a table can leave in several ways (the
+ * trash button, a workspace delete, a sync that pulls a workspace without it),
+ * and every one of them would have to remember to call a cleanup. Checked against
+ * the commands that actually exist, it needs no such cooperation.
+ */
+export function pruneRecent(ids: readonly string[], knownIds: Iterable<string>): string[] {
+  const known = knownIds instanceof Set ? knownIds : new Set(knownIds);
+  return ids.filter((id) => known.has(id));
+}
+
+/**
  * Moves the remembered commands to the front of `items`, in `recentIds` order,
  * and re-groups them under {@link RECENT_GROUP}. A remembered id that no longer
  * resolves to an item (its table was deleted, its plugin was disabled) is
