@@ -338,6 +338,47 @@ describe('view-render', () => {
     });
   });
 
+  // A token script formats what the VIEW shows. The stored cell is not touched,
+  // which is the whole point: the same column can read one way in the grid and
+  // another in a card.
+  describe('token scripts', () => {
+    it('a scripted token shows what the script returns, not the stored value', () => {
+      const out = substituteRow('$WHEN', row({ d: '2026-06-17T10:59:56.937Z' }), { WHEN: 'd' }, { scripts: { WHEN: 'function render(r){ return new Date(r.d).getUTCFullYear() }' } });
+      expect(out).toBe('2026');
+    });
+
+    it('the result is HTML, so markdownToHtml formats the cell', () => {
+      const out = substituteRow('$BODY', row({ body: '# Title' }), { BODY: 'body' }, { scripts: { BODY: 'function render(r){ return markdownToHtml(r.body) }' } });
+      expect(out).toContain('<h1');
+      expect(out).toContain('Title');
+    });
+
+    it('a scripted token needs no mapped column — it reads the whole row', () => {
+      const out = substituteRow('$SUM', row({ a: 2, b: 3 }), {}, { scripts: { SUM: 'function render(r){ return r.a + r.b }' } });
+      expect(out).toBe('5');
+    });
+
+    it('leaves $input and $filter on the mapped column — one writes back, the other must match the stored text', () => {
+      const cols = new Map([['t', col('t', 'string')]]);
+      const scripts = { T: 'function render(){ return "SHOUTED" }' };
+      expect(substituteRow('$input.T', row({ t: 'quiet' }), { T: 't' }, { columns: cols, scripts })).toContain('value="quiet"');
+      expect(substituteRow('$filter.T', row({ t: 'quiet' }), { T: 't' }, { columns: cols, scripts })).toContain('data-eda-filter-value="quiet"');
+    });
+
+    it('shows a broken script as an error chip, never as an empty value', () => {
+      const threw = substituteRow('$X', row({}), {}, { scripts: { X: 'function render(){ boom() }' } });
+      expect(threw).toContain('⚠ runtime error');
+      const wont = substituteRow('$X', row({}), {}, { scripts: { X: 'function render( {' } });
+      expect(wont).toContain('⚠ compile error');
+    });
+
+    it('a blank script or a null result renders nothing, and an unscripted token is untouched', () => {
+      expect(substituteRow('$T', row({ t: 'kept' }), { T: 't' }, { scripts: { T: '   ' } })).toBe('kept');
+      expect(substituteRow('$T', row({ t: 'kept' }), { T: 't' }, { scripts: { OTHER: 'function render(){return 1}' } })).toBe('kept');
+      expect(substituteRow('$T', row({ t: 'kept' }), { T: 't' }, { scripts: { T: 'function render(){ return null }' } })).toBe('');
+    });
+  });
+
   it('viewRows ANDs the filters and pillFilters layers, then sorts', () => {
     const rows = [row({ n: 3, k: 'x', tag: 'a' }), row({ n: 1, k: 'y', tag: 'a' }), row({ n: 2, k: 'x', tag: 'b' }), row({ n: 4, k: 'x', tag: 'a' })];
     const out = viewRows(rows, {

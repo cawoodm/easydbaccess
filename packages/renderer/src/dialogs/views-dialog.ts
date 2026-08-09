@@ -6,6 +6,7 @@ import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 import { extractTokens } from '../views/view-render.js';
 import { revealViewWindow } from '../window-mgr/view-window-manager.js';
+import { ScriptEditorDialog } from './script-editor-dialog.js';
 
 /**
  * Open the Views manager for a table (mounted lazily into <body>). Pass
@@ -43,6 +44,8 @@ interface InstanceDraft {
   name: string;
   tokens: string[];
   mapping: Record<string, string>;
+  /** Token → `render(row)` script formatting what the token shows. */
+  tokenScripts: Record<string, string>;
   limit: number; // 0 = all
   readonly: boolean; // grid (template-off) view shows values with no editors
 }
@@ -163,13 +166,20 @@ export class ViewsDialog extends LitElement {
       }
       .map-row {
         display: grid;
-        grid-template-columns: 8rem 1fr;
+        grid-template-columns: 8rem 1fr auto;
         align-items: center;
         gap: 0.5rem;
       }
       .map-row code {
         font-family: ui-monospace, SFMono-Regular, monospace;
         color: #2563eb;
+      }
+      /* A token whose script is set says so on the button itself — the script
+         lives in a modal, so nothing else in the row would show it. */
+      button.mini.scripted {
+        border-color: #2563eb;
+        color: #2563eb;
+        background: #eff6ff;
       }
     `,
   ];
@@ -270,6 +280,7 @@ export class ViewsDialog extends LitElement {
       name: inst.name,
       tokens,
       mapping: { ...inst.mapping },
+      tokenScripts: { ...(inst.tokenScripts ?? {}) },
       limit: inst.limit ?? 0,
       readonly: inst.readonly ?? false,
     };
@@ -416,6 +427,7 @@ export class ViewsDialog extends LitElement {
       name: `${t.name} — ${this.table?.name ?? 'table'}`,
       tokens,
       mapping,
+      tokenScripts: {},
       limit: 0,
       readonly: false,
     };
@@ -516,17 +528,46 @@ export class ViewsDialog extends LitElement {
     return '';
   }
 
+  /**
+   * The draft's token scripts, dropped when nothing is scripted — the common
+   * case, and `undefined` in a patch is how the field goes away again after the
+   * last script is cleared.
+   */
+  private draftScripts(d: InstanceDraft): Record<string, string> | undefined {
+    const kept = Object.entries(d.tokenScripts).filter(([, src]) => src.trim());
+    return kept.length ? Object.fromEntries(kept) : undefined;
+  }
+
+  /**
+   * Open the script editor for one token. The script formats what the token
+   * SHOWS, so the mapped column is only the starting point offered in the
+   * boilerplate — a token may script without mapping anything.
+   */
+  private async editTokenScript(tok: string): Promise<void> {
+    const dlg = ScriptEditorDialog.instance;
+    const d = this.iDraft;
+    if (!dlg || !d) return;
+    const next = await dlg.open(d.tokenScripts[tok] ?? '', `$${tok}`, { variant: 'token', field: d.mapping[tok] ?? '' });
+    if (next === null) return;
+    const tokenScripts = { ...d.tokenScripts };
+    if (next.trim()) tokenScripts[tok] = next;
+    else delete tokenScripts[tok];
+    this.iDraft = { ...d, tokenScripts };
+  }
+
   private async saveInstance(): Promise<void> {
     if (!this.iDraft || !this.table) return;
     const d = this.iDraft;
     if (!d.name.trim()) return;
     const ctx = await getContext();
+    const tokenScripts = this.draftScripts(d);
     // Editing an existing instance: only the name and token→column mapping
     // change. The snapshotted sort / filter / visible columns are preserved.
     if (d.id) {
       await ctx.store.viewInstances.patch(d.id, {
         name: d.name.trim(),
         mapping: { ...d.mapping },
+        tokenScripts,
         limit: d.limit > 0 ? d.limit : undefined,
         readonly: d.readonly,
         updatedAt: Date.now(),
@@ -554,6 +595,7 @@ export class ViewsDialog extends LitElement {
       updatedAt: Date.now(),
       ...(d.limit > 0 ? { limit: d.limit } : {}),
       ...(d.readonly ? { readonly: true } : {}),
+      ...(tokenScripts ? { tokenScripts } : {}),
     };
     await ctx.store.viewInstances.insert(inst);
     await this.openInstance(inst.id);
@@ -677,9 +719,21 @@ export class ViewsDialog extends LitElement {
                     <option value="" ?selected=${!d.mapping[tok]}>— none —</option>
                     ${this.columns.map((c) => html`<option value=${c.field} ?selected=${d.mapping[tok] === c.field}>${c.label || c.field}</option>`)}
                   </select>
+                  <button
+                    type="button"
+                    class=${d.tokenScripts[tok]?.trim() ? 'mini scripted' : 'mini'}
+                    title=${d.tokenScripts[tok]?.trim() ? `Edit the script formatting $${tok}` : `Format $${tok} with a script (e.g. a local date, markdown as HTML)`}
+                    @click=${() => void this.editTokenScript(tok)}
+                  >
+                    ƒ(x)
+                  </button>
                 </div>`,
             )}
       </div>
+      <p class="hint">
+        <code>ƒ(x)</code> gives a token a <code>render(row)</code> script, so the view can show a formatted value — a local date, markdown as HTML — without changing the stored cell. It applies to
+        <code>$TOKEN</code> only, not to <code>$input.</code> or <code>$filter.</code>.
+      </p>
       <p class="hint">
         ${d.id ? html`Editing name and column mapping. The snapshotted sort, filters and visible columns are kept.` : html`The view snapshots this table's current sort, filters and visible columns.`}
       </p>

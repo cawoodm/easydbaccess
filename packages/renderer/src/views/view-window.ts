@@ -128,6 +128,17 @@ export class ViewWindow extends LitElement {
       .eda-filter-pill:hover {
         background: #bae6fd;
       }
+      /* A token script that will not compile, or that throws. Marked in place —
+         a blank card would read as "no data" and hide the broken script. */
+      .eda-script-error {
+        display: inline-block;
+        padding: 0 0.35rem;
+        border-radius: 0.25rem;
+        background: #fee2e2;
+        color: #b91c1c;
+        font-size: 0.8rem;
+        cursor: help;
+      }
       .eda-pill-chip {
         display: inline-flex;
         align-items: center;
@@ -767,7 +778,10 @@ export class ViewWindow extends LitElement {
       // for a boolean, number/text otherwise). A readonly view disables them.
       const colMap = new Map(this.tableColumns.map((c) => [c.field, c]));
       const readonly = this.instance?.readonly === true;
-      const body = this.rows.map((r) => substituteRow(t.rowHtml, r, mapping, { columns: colMap, readonly })).join('');
+      // Per-token scripts format what a token SHOWS (a date in the reader's
+      // locale, markdown as HTML) without touching the stored value.
+      const scripts = this.instance?.tokenScripts ?? {};
+      const body = this.rows.map((r) => substituteRow(t.rowHtml, r, mapping, { columns: colMap, readonly, scripts })).join('');
       const full = (t.headerHtml ?? '') + body + (t.footerHtml ?? '');
       return html`<div class="vw-root">${unsafeHTML(full)}</div>`;
     }
@@ -869,29 +883,31 @@ export class ViewWindow extends LitElement {
       .map(
         (field) =>
           html`<span class="eda-pill-chip off">
-            <button type="button" class="eda-pill-chip-value" title=${`Filter this view by ${field}`} @click=${(e: Event) => void this.openPillValues(field, e.currentTarget as HTMLElement)}>${field} ▾</button>
+            <button type="button" class="eda-pill-chip-value" title=${`Filter this view by ${field}`} @click=${(e: Event) => void this.openPillValues(field, e.currentTarget as HTMLElement)}>
+              ${field} ▾
+            </button>
           </span>`,
       );
     return [
       ...idle,
       ...chips.map(
-      (c) =>
-        html`<span class=${`eda-pill-chip${c.state === 'not' ? ' not' : ''}`}>
-          <button
-            type="button"
-            class="eda-pill-chip-field"
-            title=${c.state === 'not' ? `Excluding this value — click to stop filtering on ${c.field}` : `Only this value — click to EXCLUDE it instead`}
-            @click=${() => void this.cyclePill(c.field, c.value)}
-          >
-            ${c.field}${c.state === 'not' ? ' ≠' : ' ='}
-          </button>
-          <button type="button" class="eda-pill-chip-value" title=${`Other values of ${c.field}`} @click=${(e: Event) => void this.openPillValues(c.field, e.currentTarget as HTMLElement)}>
-            ${c.value}
-          </button>
-          <button type="button" class="eda-pill-chip-remove" aria-label=${`Remove filter ${c.field}: ${c.value}`} title="Remove this filter" @click=${() => void this.removePill(c.field, c.value)}>
-            ×
-          </button>
-        </span>`,
+        (c) =>
+          html`<span class=${`eda-pill-chip${c.state === 'not' ? ' not' : ''}`}>
+            <button
+              type="button"
+              class="eda-pill-chip-field"
+              title=${c.state === 'not' ? `Excluding this value — click to stop filtering on ${c.field}` : `Only this value — click to EXCLUDE it instead`}
+              @click=${() => void this.cyclePill(c.field, c.value)}
+            >
+              ${c.field}${c.state === 'not' ? ' ≠' : ' ='}
+            </button>
+            <button type="button" class="eda-pill-chip-value" title=${`Other values of ${c.field}`} @click=${(e: Event) => void this.openPillValues(c.field, e.currentTarget as HTMLElement)}>
+              ${c.value}
+            </button>
+            <button type="button" class="eda-pill-chip-remove" aria-label=${`Remove filter ${c.field}: ${c.value}`} title="Remove this filter" @click=${() => void this.removePill(c.field, c.value)}>
+              ×
+            </button>
+          </span>`,
       ),
     ];
   }

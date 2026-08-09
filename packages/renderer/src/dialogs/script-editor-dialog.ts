@@ -19,6 +19,24 @@ const BOILERPLATE = `function render(row) {
 `;
 
 /**
+ * The same boilerplate for a VIEW TOKEN's script, seeded with the field the
+ * token maps to (if it maps to one) — the transform the user wants is almost
+ * always "that cell, formatted", so naming the field saves them looking it up.
+ */
+function tokenBoilerplate(field: string): string {
+  const read = field ? `row.${field}` : 'row.name';
+  return `function render(row) {
+  // \`row\` is the full row object — access any field by name (row.field).
+  // Return what this token should show; HTML is rendered, not escaped.
+  return ${read} ?? '';
+}
+`;
+}
+
+/** Which kind of script is being edited — it changes the hints, not the shape. */
+export type ScriptEditorVariant = 'column' | 'token';
+
+/**
  * Modal editor for a column's `script` source. Mounted once from `<app-shell>` and
  * accessed via the static `instance` accessor (same pattern as
  * `HostDialogs.instance`). `open()` returns a promise that resolves to
@@ -68,6 +86,7 @@ export class ScriptEditorDialog extends LitElement {
 
   @state() private text = '';
   @state() private columnLabel = '';
+  @state() private variant: ScriptEditorVariant = 'column';
   private dialogEl: HTMLDialogElement | null = null;
   private resolver: ((v: string | null) => void) | null = null;
 
@@ -92,18 +111,24 @@ export class ScriptEditorDialog extends LitElement {
    * the new source on Save, or `null` if the user cancels / dismisses.
    * Only one editor instance is active at a time; calling open() again
    * before the previous promise resolves will cancel the previous one.
+   *
+   * `opts.variant: 'token'` edits a VIEW TOKEN's script instead of a column's:
+   * the shape is identical, so only the hints and the boilerplate change.
+   * `opts.field` is the column that token maps to, used in the boilerplate.
    */
-  async open(initial: string, columnLabel: string): Promise<string | null> {
+  async open(initial: string, columnLabel: string, opts?: { variant?: ScriptEditorVariant; field?: string }): Promise<string | null> {
     if (this.resolver) {
       // Caller opened a new editor before resolving the previous one —
       // treat the old promise as cancelled so it doesn't hang.
       this.resolver(null);
       this.resolver = null;
     }
+    this.variant = opts?.variant ?? 'column';
     // Pre-fill with boilerplate so users opening a fresh column-script see
     // the expected shape instead of an intimidating empty textarea. An
     // existing script wins — we never overwrite the user's source.
-    this.text = initial && initial.trim() ? initial : BOILERPLATE;
+    const blank = this.variant === 'token' ? tokenBoilerplate(opts?.field ?? '') : BOILERPLATE;
+    this.text = initial && initial.trim() ? initial : blank;
     this.columnLabel = columnLabel ?? '';
     await this.updateComplete;
     this.dialogEl?.showModal();
@@ -139,14 +164,23 @@ export class ScriptEditorDialog extends LitElement {
             </div>
           </div>
           <div class="dialog-body">
-            <p class="hint">
-              Define <code>function render(row) { … }</code>. <code>row</code> is the full row object. What you return is passed to the column's renderer, so the cell shows a computed value instead of
-              the stored one — and the cell becomes read-only. A script that throws shows a small error chip in the cell.
-            </p>
-            <p class="hint">
-              Besides the JS globals you can call <code>markdownToHtml(text)</code> (also <code>easydb.markdownToHtml</code>) — set this column's renderer to <code>html</code> so the result shows as
-              formatted text rather than as its own source.
-            </p>
+            ${this.variant === 'token'
+              ? html`<p class="hint">
+                    Define <code>function render(row) { … }</code>. <code>row</code> is the full row object. What you return is what this token shows — the stored cell is never changed. The result
+                    goes into the template as HTML, so <code>markdownToHtml(row.body)</code> shows formatted text and <code>new Date(row.date).toLocaleString()</code> shows a local date.
+                  </p>
+                  <p class="hint">
+                    Only a plain <code>$TOKEN</code> runs the script. <code>$input.TOKEN</code> and <code>$filter.TOKEN</code> keep reading the mapped column, because one writes the cell back and the
+                    other must match the stored value. A scripted token needs no column at all.
+                  </p>`
+              : html`<p class="hint">
+                    Define <code>function render(row) { … }</code>. <code>row</code> is the full row object. What you return is passed to the column's renderer, so the cell shows a computed value
+                    instead of the stored one — and the cell becomes read-only. A script that throws shows a small error chip in the cell.
+                  </p>
+                  <p class="hint">
+                    Besides the JS globals you can call <code>markdownToHtml(text)</code> (also <code>easydb.markdownToHtml</code>) — set this column's renderer to <code>html</code> so the result
+                    shows as formatted text rather than as its own source.
+                  </p>`}
             <textarea spellcheck="false" autofocus .value=${this.text} @input=${(e: Event) => (this.text = (e.target as HTMLTextAreaElement).value)}></textarea>
           </div>
         </form>

@@ -587,6 +587,20 @@ filtered on `=red,blue`, and no list cell is ever exactly equal to that, so the
 click emptied the view. Per member it matches per member, which is what an
 `array` column's filter already does — see `search/column-filter.ts`.
 
+**A token can carry its own script** — the `ƒ(x)` button next to its column in
+the mapping list, stored as `ViewInstance.tokenScripts[TOKEN]`. It is the same
+`function render(row) { … }` a column script uses (the same editor, the same
+`markdownToHtml` helper), and what it returns is what the token shows: markdown
+as HTML, a date in the reader's locale, a value computed from several fields.
+The stored cell never changes, so one column can read one way in the grid and
+another in a card, and a scripted token needs no mapped column at all.
+
+It applies to a plain `$TOKEN` only. `$input.TOKEN` writes back to the cell and
+`$filter.TOKEN`'s pill has to carry the stored text to match anything, so both
+keep reading the mapped column. A script that will not compile, or that throws,
+renders a `⚠` chip with the message on hover — a blank card would read as "no
+data" and hide the broken script.
+
 **Every field a template offers a `$filter.` on has a chip in the toolbar**, even
 with nothing filtered: an IDLE chip (`field ▾`, dashed) that opens the field's
 value checklist. `view-window.ts` derives them with `extractFilterTokens` over

@@ -1,4 +1,18 @@
-import type { ColumnSpec, ColumnType, HostApi, ImporterSpec, ImportSourceInput, PluginModule, Table, TableInfo, TableOrigin, TableSource, ViewInstance, ViewTemplate, WindowGeometry } from '@easydb/shared';
+import type {
+  ColumnSpec,
+  ColumnType,
+  HostApi,
+  ImporterSpec,
+  ImportSourceInput,
+  PluginModule,
+  Table,
+  TableInfo,
+  TableOrigin,
+  TableSource,
+  ViewInstance,
+  ViewTemplate,
+  WindowGeometry,
+} from '@easydb/shared';
 import type { ColumnMapping } from '../import/map-columns.js';
 import { chooseTables } from '../dialogs/table-select-dialog.js';
 import { askImportOntoMode, columnsLineUp } from '../import/import-mode.js';

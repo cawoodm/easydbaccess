@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectionSpec, Table, ViewInstance } from '@easydb/shared';
-import { describeReferences, findTableReferences, renameProjectionOutputs, renameProjectionSourceFields, repointProjectionSpec, specOf } from '../../../packages/renderer/src/table/table-references.js';
+import {
+  describeReferences,
+  findTableReferences,
+  renameProjectionOutputs,
+  renameProjectionSourceFields,
+  repointProjectionSpec,
+  specOf,
+} from '../../../packages/renderer/src/table/table-references.js';
 
 const table = (id: string, name: string, spec?: ProjectionSpec): Table => ({
   id,

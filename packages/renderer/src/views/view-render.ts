@@ -124,6 +124,21 @@ function renderFilterPill(field: string, value: unknown, spec: ColumnSpec | unde
 }
 
 /**
+ * What one token's script renders. The result goes into the template as it
+ * stands — the template is raw HTML anyway — so a script may return markup, as
+ * `markdownToHtml(row.body)` does.
+ *
+ * A script that will not compile, or that throws, renders a small error chip
+ * with the message on hover, the way the grid marks a broken column script. A
+ * blank result renders nothing.
+ */
+function renderScripted(src: string, row: Row): string {
+  const run = runColumnScript(src, row.data);
+  if (!run.ok) return `<span class="eda-script-error" title="${escapeAttr(run.message)}">⚠ ${escapeHtml(run.label)}</span>`;
+  return run.value == null ? '' : String(run.value);
+}
+
+/**
  * Replace every `$TOKEN` in `html` with the row's value for the column mapped to
  * that token. An `$input.TOKEN` instead renders an editable control (checkbox /
  * number / text) bound to the mapped field (see {@link renderInput}); a
@@ -132,12 +147,26 @@ function renderFilterPill(field: string, value: unknown, spec: ColumnSpec | unde
  * Unmapped tokens (or null values) become an empty string, so a
  * partially-mapped template never shows a raw `$TOKEN`.
  *
+ * `opts.scripts` (the instance's `tokenScripts`) gives a token its own
+ * `render(row)` script, and that script's result replaces the mapped value —
+ * which is how a view formats a cell it must not change in the table. It applies
+ * to a plain `$TOKEN` ONLY: an `$input.` writes back to the cell and a
+ * `$filter.` pill has to carry the stored text to match anything. A scripted
+ * token needs no mapping, so it may compute from the whole row.
+ *
  * Values are read straight from `row.data`, so pass a row that has been through
  * {@link evaluateRow} when the table has scripted columns.
  */
-export function substituteRow(html: string, row: Row, mapping: Record<string, string>, opts: { columns?: Map<string, ColumnSpec>; readonly?: boolean } = {}): string {
+export function substituteRow(
+  html: string,
+  row: Row,
+  mapping: Record<string, string>,
+  opts: { columns?: Map<string, ColumnSpec>; readonly?: boolean; scripts?: Record<string, string> | undefined } = {},
+): string {
   return html.replace(TOKEN_RE, (_full, prefix: string | undefined, token: string) => {
     const field = mapping[token];
+    const script = opts.scripts?.[token];
+    if (!prefix && script?.trim()) return renderScripted(script, row);
     if (!field) return '';
     const v = row.data[field];
     if (!prefix) return v == null ? '' : String(v);

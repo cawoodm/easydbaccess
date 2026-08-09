@@ -5,6 +5,7 @@
 ### Features
 
 - ✨ Every filter a view template offers has a chip in the toolbar, and a chip switched off stays there (v0.0.314)
+- ✨ A view token can carry a script, so a view formats a cell — markdown as HTML, a local date (v0.0.315)
 
 ## 4 Aug 2026
 

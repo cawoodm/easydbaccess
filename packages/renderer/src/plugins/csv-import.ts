@@ -98,7 +98,6 @@ function candidateName(input: ImportSourceInput): string {
 const DROP_DIRECT = 'Import directly';
 const DROP_EDIT = 'Edit columns first';
 
-
 /**
  * Handle a CSV dropped onto an existing table's window. Returns false when the
  * drop landed anywhere else (the canvas, the chrome), leaving the caller's

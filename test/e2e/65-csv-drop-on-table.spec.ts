@@ -66,9 +66,7 @@ test('Re-Create takes the columns from the file, replacing the table’s', async
 
   // The file decides the schema, so there is nothing to map and no mapper.
   await expect(mapper(page)).toBeHidden();
-  await expect
-    .poll(async () => (await readTable(page, id)).columns.map((c: { field: string }) => c.field))
-    .toEqual(['town', 'inhabitants', 'mayor']);
+  await expect.poll(async () => (await readTable(page, id)).columns.map((c: { field: string }) => c.field)).toEqual(['town', 'inhabitants', 'mayor']);
   const rows = await readRows(page, id);
   expect(rows).toHaveLength(1);
   expect(rows[0]?.data).toMatchObject({ town: 'Zug', inhabitants: 30000, mayor: 'Ada' });

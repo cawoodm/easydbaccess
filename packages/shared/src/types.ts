@@ -415,6 +415,21 @@ export interface ViewInstance {
   /** Template token (without the leading `$`) → column field. */
   mapping: Record<string, string>;
   /**
+   * Template token → a script that computes what the token SHOWS, in the same
+   * `function render(row) { … }` shape a column script uses.
+   *
+   * This is how a view formats a value it must not change in the table:
+   * `markdownToHtml(row.body)`, or a date as the reader's locale wants it. The
+   * script's result is substituted as-is (the template is raw HTML anyway), so a
+   * script may return markup.
+   *
+   * Only a plain `$TOKEN` runs it. An `$input.TOKEN` writes back to the cell and
+   * a `$filter.TOKEN`'s text must equal the stored value to match anything, so
+   * both keep reading the mapped field. A scripted token needs no mapping at all
+   * — it can compute from the whole row.
+   */
+  tokenScripts?: Record<string, string> | undefined;
+  /**
    * When false, the template is bypassed and the view shows the data in the
    * standard interactive grid (sort / filter / show-hide / reorder columns),
    * with those presentation choices stored on THIS instance rather than the
