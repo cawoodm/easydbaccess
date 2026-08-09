@@ -10,6 +10,7 @@
 ### Bugs
 
 - 🪲 Only the columns editor and Settings warned before a reload, and neither noticed a column added, removed or reordered (v0.0.328)
+- 🪲 Importing a workspace dropped every column flag it carried — hidden, unique, not null, width, description (v0.0.329)
 
 ### Chores
 
