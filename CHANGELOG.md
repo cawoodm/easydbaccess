@@ -7,6 +7,7 @@
 - ✨ A view token can carry a script, so a view formats a cell — markdown as HTML, a local date (v0.0.326)
 - ✨ Any script can be added to the samples dropdown, shared by columns and views, and deleted from it again (v0.0.327)
 - 🪶 A view placeholder shows the column's renderer — links, pills — with a 🎨 / 🔤 toggle and `$raw.TOKEN` for the plain value (v0.0.328)
+- 🪶 `view/Reading plan?Book==Matthew` filters a view, and `view?…` inside a template filters the view you are in (v0.0.329)
 
 ### Chores
 

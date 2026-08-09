@@ -21,6 +21,8 @@ import { CommandletError, parseCommandlets, substituteCommandlet, type Commandle
  */
 export interface CommandletContext {
   tableId?: string | undefined;
+  /** The view the click came from — what a target-less `view?…` acts on. */
+  viewInstanceId?: string | undefined;
   field?: string | undefined;
   value?: string | undefined;
   /** Extra placeholders, e.g. `HASH` and `1`…`9` from an anchor rule. */
@@ -32,7 +34,7 @@ export async function runCommandletString(input: string, ctx: CommandletContext 
   const commandlets = parseCommandlets(input);
   const vars = await placeholders(ctx);
   for (const parsed of commandlets) {
-    await runOne(substituteCommandlet(parsed, vars));
+    await runOne(substituteCommandlet(parsed, vars), ctx);
   }
 }
 
@@ -57,7 +59,7 @@ export async function checkCommandletString(input: string, ctx: CommandletContex
   const summaries: string[] = [];
   for (const cmd of parsed) {
     try {
-      summaries.push(await describe(substituteCommandlet(cmd, vars)));
+      summaries.push(await describe(substituteCommandlet(cmd, vars), ctx));
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
     }
@@ -66,7 +68,7 @@ export async function checkCommandletString(input: string, ctx: CommandletContex
 }
 
 /** One line saying what a commandlet WOULD do, throwing if it could not. */
-async function describe(cmd: Commandlet): Promise<string> {
+async function describe(cmd: Commandlet, ctx: CommandletContext = {}): Promise<string> {
   switch (cmd.verb) {
     case 'goto': {
       const table = await findTableByName(cmd.targets[0] ?? '');
@@ -81,8 +83,18 @@ async function describe(cmd: Commandlet): Promise<string> {
     }
     case 'search':
       return `search all tables for "${cmd.targets[0] ?? ''}"`;
-    case 'view':
-      return `open view "${(await findViewByName(cmd.targets[0] ?? '')).name}"`;
+    case 'view': {
+      const inst = await resolveView(cmd, ctx);
+      const table = await tableOfView(inst);
+      const fields = Object.keys(cmd.filters).map((k) => resolveField(table, k));
+      const sort = parseSort(cmd.options.sort, table);
+      const parts = [`open view "${inst.name}"`];
+      if (fields.length > 0) parts.push(`filter ${fields.join(' + ')}`);
+      if (cmd.options.clear !== undefined) parts.push('clear filters');
+      if (cmd.options.search !== undefined) parts.push(`search "${cmd.options.search}"`);
+      if (sort && sort.length > 0) parts.push(`sort by ${sort.map((s) => `${s.field}${s.asc ? '' : ' ↓'}`).join(', ')}`);
+      return parts.join(', ');
+    }
     case 'cmd':
       return `run "${(await findCommandById(cmd.targets[0] ?? '')).title}"`;
     case 'preview':
@@ -104,14 +116,14 @@ async function placeholders(ctx: CommandletContext): Promise<Record<string, stri
   return vars;
 }
 
-async function runOne(cmd: Commandlet): Promise<void> {
+async function runOne(cmd: Commandlet, ctx: CommandletContext = {}): Promise<void> {
   switch (cmd.verb) {
     case 'goto':
       return runGoto(cmd);
     case 'search':
       return runSearch(cmd);
     case 'view':
-      return runView(cmd);
+      return runView(cmd, ctx);
     case 'cmd':
       return runCommandId(cmd);
     case 'preview':
@@ -204,9 +216,77 @@ function runSearch(cmd: Commandlet): void {
   document.dispatchEvent(new CustomEvent('easydb:set-search', { detail: { query } }));
 }
 
-async function runView(cmd: Commandlet): Promise<void> {
-  const match = await findViewByName(cmd.targets[0] ?? '');
-  await revealViewWindow(match.id);
+/**
+ * Open a view, and narrow it the way `goto` narrows a table.
+ *
+ * Filters land on the view's `pillFilters`, NOT its own `filters`. Two reasons:
+ * that layer shows as chips in the view's toolbar, so a link that narrows a view
+ * can be seen and clicked off again, and the view's snapshotted `filters` are
+ * part of how the user DEFINED the view — a navigation link must not quietly
+ * rewrite that. `@clear` empties the chips; an empty value drops one field, as it
+ * does for a table.
+ */
+async function runView(cmd: Commandlet, ctx: CommandletContext): Promise<void> {
+  const inst = await resolveView(cmd, ctx);
+  const table = await tableOfView(inst);
+
+  const patch: Partial<ViewInstance> = {};
+  const merged = cmd.options.clear === undefined ? { ...(inst.pillFilters ?? {}) } : {};
+  for (const [key, expr] of Object.entries(cmd.filters)) {
+    const field = resolveField(table, key);
+    if (expr === '') delete merged[field];
+    else merged[field] = expr;
+  }
+  if (Object.keys(cmd.filters).length > 0 || cmd.options.clear !== undefined) {
+    patch.pillFilters = Object.keys(merged).length > 0 ? merged : undefined;
+  }
+
+  const sort = parseSort(cmd.options.sort, table);
+  if (sort) {
+    patch.sortBy = sort.length > 0 ? sort : undefined;
+    patch.sortColumn = sort[0]?.field;
+    patch.sortAsc = sort[0] ? sort[0].asc : undefined;
+  }
+
+  if (Object.keys(patch).length > 0) {
+    const app = await getContext();
+    await app.store.viewInstances.patch(inst.id, { ...patch, updatedAt: Date.now() } as Partial<ViewInstance>);
+  }
+
+  await revealViewWindow(inst.id);
+
+  const search = cmd.options.search;
+  if (search !== undefined) {
+    // A view's search box is keyed by the INSTANCE id, not the table's — see
+    // `view-window.ts`'s `onSearch` — so a view search never touches the table
+    // window showing the same rows.
+    document.dispatchEvent(new CustomEvent('easydb:table-search', { detail: { tableId: inst.id, query: search } }));
+  }
+}
+
+/**
+ * Which view a `view/…` acts on: the one it names, or — with no target — the one
+ * the click came from. A target-less `view?…` typed into the palette has no such
+ * context, and says so rather than guessing.
+ */
+async function resolveView(cmd: Commandlet, ctx: CommandletContext): Promise<ViewInstance> {
+  const name = (cmd.targets[0] ?? '').trim();
+  if (name) return findViewByName(name);
+  if (!ctx.viewInstanceId) {
+    throw new CommandletError('"view" with no name means the view you are in — this was not run from one, so name the view.');
+  }
+  const app = await getContext();
+  const inst = await app.store.viewInstances.findOne(ctx.viewInstanceId);
+  if (!inst) throw new CommandletError('That view no longer exists.');
+  return inst;
+}
+
+/** The table a view shows, for resolving the field names in its query. */
+async function tableOfView(inst: ViewInstance): Promise<Table> {
+  const app = await getContext();
+  const table = await app.store.tables.findOne(inst.tableId);
+  if (!table) throw new CommandletError(`The view "${inst.name}" has no table.`);
+  return table;
 }
 
 async function runCommandId(cmd: Commandlet): Promise<void> {

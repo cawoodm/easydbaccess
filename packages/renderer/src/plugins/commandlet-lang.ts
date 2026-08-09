@@ -35,12 +35,18 @@ const VERB_ALIASES: Record<string, CommandletVerb> = {
   ui: 'ui',
 };
 
-/** How many targets each verb takes. `rest` ⇒ the remaining segments, joined. */
+/**
+ * How many targets each verb takes. `rest` ⇒ the remaining segments, joined.
+ *
+ * `view` takes NO target at all: `view?Title==Psalms 139` means the view the
+ * click came from, so one template can carry a link that narrows the view it is
+ * already in without naming it.
+ */
 const ARITY: Record<CommandletVerb, { min: number; rest: boolean }> = {
   goto: { min: 1, rest: false },
   search: { min: 1, rest: true },
   preview: { min: 2, rest: false },
-  view: { min: 1, rest: true },
+  view: { min: 0, rest: true },
   cmd: { min: 1, rest: true },
   ui: { min: 1, rest: false },
 };
@@ -66,7 +72,10 @@ export class CommandletError extends Error {}
  * that is input for the user's own hash rules, not an action.
  */
 export function looksLikeCommandlet(input: string): boolean {
-  const first = input.trim().split(/[/?;]/, 1)[0] ?? '';
+  // A leading slash is stripped, not read as an empty first segment: `/view?…`
+  // is how a link inside a template naturally spells a path, and the parser
+  // drops empty segments anyway.
+  const first = input.trim().replace(/^\/+/, '').split(/[/?;]/, 1)[0] ?? '';
   return first.toLowerCase() in VERB_ALIASES;
 }
 
@@ -103,9 +112,12 @@ function parseOne(raw: string): Commandlet {
     throw new CommandletError(`"${verb}" needs ${arity.min} target${arity.min === 1 ? '' : 's'} — got "${raw}".`);
   }
   // A greedy verb owns the rest of the path: a command id contains `:` and may
-  // contain `/`, and a search phrase is free text.
-  if (arity.rest && targets.length > arity.min) {
-    targets = [...targets.slice(0, arity.min - 1), targets.slice(arity.min - 1).join('/')];
+  // contain `/`, and a search phrase is free text. `keep` is where the greedy
+  // segment starts — 0 for a verb whose target is optional, so `view/My/Sub`
+  // is one name and a target-less `view` stays target-less.
+  const keep = Math.max(0, arity.min - 1);
+  if (arity.rest && targets.length > keep) {
+    targets = [...targets.slice(0, keep), targets.slice(keep).join('/')];
   }
 
   const filters: Record<string, string> = {};

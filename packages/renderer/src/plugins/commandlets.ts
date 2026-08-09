@@ -163,6 +163,13 @@ function contextOf(path: EventTarget[]): CommandletContext {
       const id = tableIdAtNode(node);
       if (id) ctx.tableId = id;
     }
+    // A `<view-window>` in the path IS the current view, which is what a
+    // target-less `view?…` acts on. Read off the element rather than looked up:
+    // the view window carries its own instance id as a property.
+    if (!ctx.viewInstanceId && node instanceof HTMLElement && node.tagName === 'VIEW-WINDOW') {
+      const id = (node as HTMLElement & { viewInstanceId?: string }).viewInstanceId;
+      if (id) ctx.viewInstanceId = id;
+    }
     // Cell renderers are given `column` and `value` as properties, so the cell
     // element in the path carries both without the host having to look them up.
     if (ctx.field === undefined && node instanceof HTMLElement) {

@@ -62,13 +62,37 @@ describe('parseCommandlets', () => {
   it('rejects broken percent-encoding instead of throwing a URIError', () => {
     expect(() => parseCommandlets('goto/%zz')).toThrow(CommandletError);
   });
+
+  // `view` is the one verb whose target is optional: with none it means the view
+  // the click came from, so a template can narrow the view it is already in.
+  it('accepts view with no target at all', () => {
+    const [cmd] = parseCommandlets('view?Title==Psalms 139');
+    expect(cmd?.verb).toBe('view');
+    expect(cmd?.targets).toEqual([]);
+    expect(cmd?.filters).toEqual({ Title: '=Psalms 139' });
+  });
+
+  it('accepts a leading slash, which is how a link spells a path', () => {
+    const [cmd] = parseCommandlets('/view?@search=foo');
+    expect(cmd?.verb).toBe('view');
+    expect(cmd?.targets).toEqual([]);
+    expect(cmd?.options).toEqual({ search: 'foo' });
+  });
+
+  it('keeps a named view in one target, trailing slash and all', () => {
+    expect(parseCommandlets('view/AnotherView/?@search=foo')[0]?.targets).toEqual(['AnotherView']);
+    // A `/` inside the name is part of it — `view` owns the rest of the path.
+    expect(parseCommandlets('view/Reading plan/2026')[0]?.targets).toEqual(['Reading plan/2026']);
+  });
 });
 
 describe('looksLikeCommandlet', () => {
   it('is true only for a known verb, so a plain anchor stays an anchor', () => {
     expect(looksLikeCommandlet('goto/bible?Book=Matthew')).toBe(true);
     expect(looksLikeCommandlet('cmd/windows:close-all')).toBe(true);
+    expect(looksLikeCommandlet('/view?Title==Psalms 139')).toBe(true);
     expect(looksLikeCommandlet('Matthew')).toBe(false);
+    expect(looksLikeCommandlet('/Matthew')).toBe(false);
     expect(looksLikeCommandlet('section-2')).toBe(false);
   });
 });

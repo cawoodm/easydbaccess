@@ -51,8 +51,15 @@ a column of your own called `sort` still filters normally.
 | --------------------------------------- | -------------------------------------- |
 | `search/berlin`                         | a search across every open table       |
 | `view/Reading plan`                     | that view's window                     |
+| `view/Reading plan?Book==Matthew`       | that view, narrowed to Matthew         |
+| `view?Book==Matthew`                    | the view you are already in, narrowed  |
 | `cmd/windows:tile`                      | any action from the palette, by its id |
 | `goto/bible?Book=Mark;cmd/windows:tile` | both, in order — `;` joins them        |
+
+A `view/…` narrows the view the way `goto/…` narrows a table, and what it adds
+shows up as a chip in the view's toolbar — so you can click it off again, and the
+filters you gave the view when you made it are left alone. Leave the name out
+(`view?Book==Matthew`) inside a view template and it means *this* view.
 
 ## Links
 

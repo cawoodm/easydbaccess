@@ -29,13 +29,29 @@ stay filterable.
 | ---------------------- | ----------------- | --------------------------------------------------- |
 | `goto` (alias `table`) | `<table>`         | focuses that table's window and applies the filters |
 | `search`               | `<query>`         | sets the global search box                          |
-| `view`                 | `<name>`          | reveals a view window                               |
+| `view`                 | `<name>`?         | reveals a view window and applies the filters        |
 | `cmd`                  | `<commandId>`     | runs any registered command                         |
 | `preview`              | `<table>/<field>` | not wired up yet                                    |
 | `ui`                   | `hide` / `show`   | not wired up yet                                    |
 
 Options: `@search=`, `@sort=` (`-Field` for descending, comma-separated for
 several keys), `@clear=1` (drop the table's existing filters first).
+
+`view` is the one verb whose target is OPTIONAL: `view?Book==Matthew` means the
+view the click came from, so one template can carry a link that narrows the view
+it is already in without naming it. The current view comes from the
+`<view-window>` in the click's composed path (`CommandletContext.viewInstanceId`);
+typed into the palette there is no such context, and the check says to name a view
+rather than guessing. A leading slash is allowed too — `#/view?…` is how a link
+naturally spells a path.
+
+A `view`'s filters land on the instance's **`pillFilters`**, not its own
+`filters`. That layer shows as chips in the view's toolbar, so a link that
+narrows a view can be seen and clicked off again; and the view's snapshotted
+`filters` are part of how the user DEFINED it, which a navigation link must not
+quietly rewrite. `@sort` does patch the instance's sort, and `@search` rides
+`easydb:table-search` keyed by the INSTANCE id, so a view's search never touches
+the table window showing the same rows.
 
 An unknown first segment is read as a table name, so `bible?Book=Matthew` is the
 same as `goto/bible?Book=Matthew`. A table actually called `search` needs the
@@ -104,6 +120,9 @@ nothing on screen to explain why.
 | `search/berlin AND active`              | the search language, so `AND`/`OR` work        |
 | `search/City:Paris,Zurich`              | a field-scoped search term                     |
 | `view/Reading plan`                     | opens (or fronts) that view window             |
+| `view/Reading plan?Book==Matthew`       | opens it and adds a `Book` chip                 |
+| `view?Book==Matthew`                    | the same, on the view the link is in            |
+| `view/Reading plan?@clear`              | drops that view's chips                         |
 | `cmd/windows:tile`                      | runs a registered command — ids keep their `:` |
 | `cmd/app:plugins`                       | opens the Plugin Manager                       |
 | `goto/bible?Book=Mark;cmd/windows:tile` | a chain: filter, then tile the windows         |
