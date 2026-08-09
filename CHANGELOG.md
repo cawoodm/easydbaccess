@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 9 Aug 2026
+
+### Chores
+
+- 🔧 CI workflows warned that their actions still ran on the deprecated Node 20 (v0.0.325)
+
 ## 6 Aug 2026
 
 ### Features
