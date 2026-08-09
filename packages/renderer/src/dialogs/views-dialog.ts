@@ -547,7 +547,7 @@ export class ViewsDialog extends LitElement {
     const dlg = ScriptEditorDialog.instance;
     const d = this.iDraft;
     if (!dlg || !d) return;
-    const next = await dlg.open(d.tokenScripts[tok] ?? '', `$${tok}`, { variant: 'token', field: d.mapping[tok] ?? '' });
+    const next = await dlg.open(d.tokenScripts[tok] ?? '', `$${tok}`, 'token', { field: d.mapping[tok] ?? '' });
     if (next === null) return;
     const tokenScripts = { ...d.tokenScripts };
     if (next.trim()) tokenScripts[tok] = next;

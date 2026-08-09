@@ -1,16 +1,43 @@
 # CHANGELOG
 
+## 9 Aug 2026
+
+### Features
+
+- ✨ A view token can carry a script, so a view formats a cell — markdown as HTML, a local date (v0.0.326)
+
+### Chores
+
+- 🔧 CI workflows warned that their actions still ran on the deprecated Node 20 (v0.0.325)
+
+## 6 Aug 2026
+
+### Features
+
+- ✨ Commandlets: a Default commandlet setting maps a plain `#anchor`, the palette offers to run one you type, and the dialog checks it live (v0.0.324)
+- 🪶 Commandlets: `goto/bible?Book=Matthew` opens and filters a table from a cell link, a `#hash`, `?cmdlet=` or the palette (v0.0.322)
+- ✨ Startup tip dialog, compiled from the help page: walk tips with ‹ ›, "Show tip" in the palette, or turn it off (v0.0.319)
+
+### Bugs
+
+- 🪲 A link to an anchor on the same page opened a new tab and reloaded the workspace (v0.0.323)
+- 🪲 A filter on a column that does not exist emptied a table, with no funnel to clear it (v0.0.323)
+
+### Chores
+
+- 🔧 Desktop app drops its unused `@easydb/server` dependency, which was breaking the installer build (v0.0.321)
+
 ## 5 Aug 2026
 
 ### Features
 
 - ✨ Every filter a view template offers has a chip in the toolbar, and a chip switched off stays there (v0.0.314)
-- ✨ A view token can carry a script, so a view formats a cell — markdown as HTML, a local date (v0.0.315)
 
 ## 4 Aug 2026
 
 ### Features
 
+- 🪶 Move desktop app to SQLite storage and support larger databases. User can import .db files and save as .edb (v0.0.311)
 - ✨ An `array` column shows its values as pills, one per value, with a pencil for the raw list (v0.0.296)
 - 🪶 New `array` column type: a cell holds several values (`foo,bar` or `["Foo","Bar"]`) and the filter dropdown offers each one (v0.0.295)
 - ✨ New `markdown` cell renderer: one line of text in the grid, the formatted value in the popup, and never guessed at (v0.0.298)

@@ -47,6 +47,8 @@ export interface Registries {
   settings: Map<string, RegisteredSettings>;
   /** Commands surfaced in the Ctrl+K command palette, in registration order. */
   commands: CommandSpec[];
+  /** Asked for a command only when the palette query matched nothing. */
+  commandFallbacks: Array<(query: string) => CommandSpec | null>;
 }
 
 /**
@@ -76,6 +78,7 @@ export function createRegistries(): Registries {
     rowSources: new Map(),
     settings: new Map(),
     commands: [],
+    commandFallbacks: [],
   };
 }
 
@@ -121,6 +124,7 @@ export function createUiRegistry(r: Registries): UiRegistry {
       document.dispatchEvent(new CustomEvent('easydb:open-settings'));
     },
     registerCommand: (spec) => pushReg(r.commands, spec),
+    registerCommandFallback: (fn) => pushReg(r.commandFallbacks, fn),
     openCommandPalette: () => {
       document.dispatchEvent(new CustomEvent('easydb:open-command-palette'));
     },

@@ -1,0 +1,17 @@
+{
+  "$schema": "easydb-tips-v1",
+  "tips": [
+    {
+      "id": "press-ctrl-k-to-run-commands",
+      "text": "Press Ctrl+K to run commands"
+    },
+    {
+      "id": "drag-in-a-file-to-import-csv-json",
+      "text": "Drag in a file to import (.csv, .json)"
+    },
+    {
+      "id": "right-click-and-drag-the-workspace-to-pan-deskto",
+      "text": "Right-click and drag the workspace to pan (Desktop)"
+    }
+  ]
+}

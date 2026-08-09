@@ -9,6 +9,6 @@
     "useDefineForClassFields": false,
     "experimentalDecorators": true
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "src/**/*.json"],
   "references": [{ "path": "../shared" }]
 }

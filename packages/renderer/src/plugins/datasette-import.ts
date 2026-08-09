@@ -21,6 +21,7 @@ import { reconcileColumns, rowRekeyer } from '../table/column-merge.js';
 import { mergeRefreshedRows } from '../table/refresh-merge.js';
 import { setTableLoading } from '../table/data-table.js';
 import {
+  applyPrimaryKeyFlags,
   applyTableMetadata,
   DatasetteError,
   fetchRows,
@@ -491,10 +492,15 @@ async function fillImportTable(
 
     // Prefer the schema's columns; infer from rows if none; refine types when
     // only bare names came back (e.g. datasette.io's `?_extra=columns`).
-    const columns = metaColumns.length === 0 ? inferColumnsFromRows(rows) : typed ? metaColumns : refineColumnTypes(metaColumns, rows);
+    const discovered = metaColumns.length === 0 ? inferColumnsFromRows(rows) : typed ? metaColumns : refineColumnTypes(metaColumns, rows);
+    // Carry the remote primary key across as a real constraint. Columns inferred
+    // from rows know nothing about keys, so this is where a snapshot of a
+    // `column_details`-less instance gets its pk marked unique + not-null.
+    const columns = applyPrimaryKeyFlags(discovered, pks);
 
-    // Apply the table's Datasette metadata (default sort, …) onto columns +
-    // table fields. Best-effort: no metadata endpoint ⇒ no-op.
+    // Apply the table's Datasette metadata (column descriptions, units, the
+    // sortable-columns allowlist, default sort, …) onto columns + table fields.
+    // Best-effort: an instance serving no metadata ⇒ no-op.
     let cols = columns;
     let metaPatch: MetadataTablePatch = {};
     try {
@@ -692,12 +698,14 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
     let count: number | null = null;
     let countTruncated = false;
     let typed = false;
+    let metaPks: string[] = [];
     try {
       const meta = await fetchTableMeta(fetchFn, ref);
       metaColumns = meta.columns;
       count = meta.count;
       countTruncated = meta.countTruncated;
       typed = meta.typed;
+      metaPks = meta.pks ?? [];
     } catch {
       /* fall back to row inference */
     }
@@ -721,9 +729,15 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
       },
     });
 
-    // Build the discovered columns (schema → rows → type refinement), then layer
-    // on the Datasette metadata (descriptions, units, default sort, …).
-    let cols = metaColumns.length === 0 ? inferColumnsFromRows(rows) : typed ? metaColumns : refineColumnTypes(metaColumns, rows);
+    // The remote key: freshly discovered when the instance will tell us, else
+    // whatever the original import recorded. Drives both the pk constraint on
+    // the columns and the row matching further down.
+    const pks = metaPks.length > 0 ? metaPks : (t.origin?.pks ?? []);
+
+    // Build the discovered columns (schema → rows → type refinement → pk
+    // constraint), then layer on the Datasette metadata (descriptions, units,
+    // the sortable-columns allowlist, default sort, …).
+    let cols = applyPrimaryKeyFlags(metaColumns.length === 0 ? inferColumnsFromRows(rows) : typed ? metaColumns : refineColumnTypes(metaColumns, rows), pks);
     let metaPatch: MetadataTablePatch = {};
     try {
       const md = await fetchTableMetadata(fetchFn, ref);
@@ -760,7 +774,6 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
     // matching on the remote primary key. Locally-deleted rows return (they're in
     // the fresh set); data for user-deleted remote columns is dropped. With no
     // known pks this falls back to a plain replace (no per-row preservation).
-    const pks = t.origin?.pks ?? [];
     const remoteFields = new Set(cols.map((c) => c.field));
     const userAddedFields = t.columns.map((c) => c.field).filter((f) => !remoteFields.has(f) && !pks.includes(f));
     const deletedRemoteFields = (t.deletedColumns ?? []).filter((f) => remoteFields.has(f));

@@ -20,6 +20,8 @@ built, see the [developer docs](../tech/INDEX.md) instead.
   (desktop app only)
 - [Sharing & Sync](sharing-and-sync.md) — export, your own server, GitHub
   Gist
+- [Commandlets](commandlets.md) — `goto/bible?Book=Matthew` as a link, a
+  `#hash`, or a palette entry
 - [Settings](settings.md) — fields, workspace vs. device scope, secrets
 - [Settings & Plugins](settings-and-plugins.md) — configuration, secrets,
   extending the app

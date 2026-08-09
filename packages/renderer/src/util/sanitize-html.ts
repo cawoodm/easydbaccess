@@ -219,7 +219,7 @@ export function sanitizeTag(closing: boolean, rawName: string, rawAttrs: string)
 
   const allowed = TAG_ATTRS[tag];
   let out = `<${tag}`;
-  let hasHref = false;
+  let href: string | null = null;
   let hasSrc = false;
   for (const m of rawAttrs.matchAll(ATTR_RE)) {
     const name = m[1]!.toLowerCase();
@@ -232,7 +232,7 @@ export function sanitizeTag(closing: boolean, rawName: string, rawAttrs: string)
     if (URL_ATTRS.has(name)) {
       const url = urlAttr(raw);
       if (url === null) continue;
-      if (name === 'href') hasHref = true;
+      if (name === 'href') href = url;
       if (name === 'src') hasSrc = true;
       out += ` ${name}="${escEntityAware(url)}"`;
       continue;
@@ -240,9 +240,14 @@ export function sanitizeTag(closing: boolean, rawName: string, rawAttrs: string)
     out += ` ${name}="${escEntityAware(raw)}"`;
   }
   // The grid is a single-page app. A link that navigates the current tab would
-  // throw the whole workspace away, so every link opens a new tab, and
-  // `noopener` denies the opened page a handle back to this one.
-  if (tag === 'a' && hasHref) out += ' target="_blank" rel="noopener noreferrer"';
+  // throw the whole workspace away, so a link OUT of the app opens a new tab,
+  // and `noopener` denies the opened page a handle back to this one.
+  //
+  // A `#fragment` is the exception: it addresses THIS document, so it never
+  // navigates away and there is nothing to protect. Forcing a new tab on one
+  // reloads the whole workspace to go nowhere — and it broke commandlet links
+  // (`#goto/bible?Book=Matthew`), which are same-page by definition.
+  if (tag === 'a' && href !== null && !href.startsWith('#')) out += ' target="_blank" rel="noopener noreferrer"';
   // An image with no usable source shows a broken-image glyph and nothing else.
   if ((tag === 'img' || tag === 'source') && !hasSrc) return '';
   return `${out}>`;

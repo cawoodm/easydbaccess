@@ -30,6 +30,21 @@ export interface ColumnSpec {
    * Not part of the CSV mini-language.
    */
   script?: string;
+  /**
+   * A JavaScript body that must define `function validate(value, row) { … }`,
+   * edited via the column editor's second pencil (right of `max`). Run on a
+   * MANUAL cell edit only, after the declarative constraints below have
+   * passed: **throwing rejects the edit**, and the thrown message is what the
+   * user is shown. Returning anything is ignored — a validator that has
+   * nothing to say simply returns.
+   *
+   * Bulk writes (import, refresh, sync) deliberately do not run it: they are
+   * not edits, and half-importing a table because row 4 000 fails a rule is
+   * worse than importing it and showing the rule's verdict in the grid.
+   *
+   * Not part of the CSV mini-language.
+   */
+  validate?: string;
   default?: unknown;
   max?: number;
   unique?: boolean;

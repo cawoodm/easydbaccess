@@ -14,7 +14,7 @@ import { facetable, facetCounts, facetValues } from '../search/facet-values.js';
 import { readSortDescFirst } from './grid-settings.js';
 import { readSortSpecs, sortRowsBySpecs } from './row-sort.js';
 import { nextSortSpecs } from './sort-cycle.js';
-import { runColumnScript } from '../util/column-script.js';
+import { runColumnScript, runValidateScript } from '../util/column-script.js';
 import { arrayMembers } from '@easydb/shared';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
@@ -830,8 +830,9 @@ export class DataTable extends LitElement {
 
   /**
    * Validate the proposed value against the column's constraints
-   * (notnull, max, unique) before writing. On rejection: pop a dialog with
-   * the reason and re-render so the cell input reverts to its prior value.
+   * (notnull, max, unique, then its `validate` script) before writing. On
+   * rejection: pop a dialog with the reason and re-render so the cell input
+   * reverts to its prior value.
    */
   private async commitCell(ctx: import('../app-context.js').AppContext, row: Row, field: string, value: unknown) {
     const col = this.columns.find((c) => c.field === field);
@@ -846,7 +847,7 @@ export class DataTable extends LitElement {
       return;
     }
     if (col) {
-      const reason = validate(col, value, this.rows, row.id);
+      const reason = validate(col, value, this.rows, row.id, row);
       if (reason) {
         await ctx.api.ui.dialogs.alert(reason, `Cannot save ${col.label}`);
         // Force re-render so the input snaps back to the stored value.
@@ -1152,7 +1153,12 @@ export class DataTable extends LitElement {
     // as well as from the per-column funnel. A stored per-column filter that
     // predates the flag being set must not silently keep narrowing the grid.
     const unfilterable = new Set(this.columns.filter((c) => c.filterable === false).map((c) => c.field));
-    const active = Object.entries(this.filters).filter(([field, q]) => q && q.trim().length > 0 && !unfilterable.has(field));
+    // ...and a filter on a field no column has is worse than silent: it has no
+    // funnel to clear it from and matches nothing, so the grid empties with
+    // nothing on screen to explain why. See `row-reader.ts`, which drops the
+    // same ones on the store-query path.
+    const known = new Set(this.columns.map((c) => c.field));
+    const active = Object.entries(this.filters).filter(([field, q]) => q && q.trim().length > 0 && !unfilterable.has(field) && known.has(field));
     const gq = this.globalQuery.trim();
     const lq = this.localQuery.trim();
     if (active.length === 0 && gq.length === 0 && lq.length === 0) return this.rows;
@@ -1661,8 +1667,15 @@ function cellStateClass(row: Row, col: ColumnSpec): string {
   return state === 'empty' ? ' is-null' : state === 'invalid' ? ' is-invalid' : '';
 }
 
-/** Returns a human-readable rejection reason, or null if value is acceptable. */
-function validate(col: ColumnSpec, value: unknown, allRows: Row[], rowId: string): string | null {
+/**
+ * Returns a human-readable rejection reason, or null if value is acceptable.
+ *
+ * The declarative constraints run first and the column's `validate` script
+ * last: the boxes are cheap and predictable, and a script author writing
+ * "must be a valid IBAN" shouldn't have to re-check emptiness that the
+ * Not-null box already covers.
+ */
+function validate(col: ColumnSpec, value: unknown, allRows: Row[], rowId: string, row: Row): string | null {
   if (col.notnull) {
     if (value === null || value === undefined) return `${col.label} cannot be empty.`;
     if (typeof value === 'string' && value.trim().length === 0) {
@@ -1680,6 +1693,14 @@ function validate(col: ColumnSpec, value: unknown, allRows: Row[], rowId: string
   if (col.unique && value !== null && value !== undefined && value !== '') {
     const dup = allRows.find((r) => r.id !== rowId && r.data[col.field] === value);
     if (dup) return `${col.label} must be unique. Another row already has "${String(value)}".`;
+  }
+  if (col.validate?.trim()) {
+    // The script sees the row AS IT WOULD BE — a rule comparing this cell to a
+    // sibling field must read the pending edit, not the value on disk, or a
+    // two-field rule contradicts itself depending on which cell you touch last.
+    const proposed = { ...row.data, [col.field]: value };
+    const run = runValidateScript(col.validate, value, proposed);
+    if (!run.ok) return run.message;
   }
   return null;
 }

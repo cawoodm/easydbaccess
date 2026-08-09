@@ -14,8 +14,7 @@
     "package": "electron-builder --config electron-builder.json"
   },
   "dependencies": {
-    "@easydb/shared": "file:../shared",
-    "@easydb/server": "file:../server"
+    "@easydb/shared": "file:../shared"
   },
   "devDependencies": {
     "electron": "^43.2.0",

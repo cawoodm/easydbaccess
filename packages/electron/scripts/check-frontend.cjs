@@ -15,6 +15,7 @@ const path = require('node:path');
 const indexPath = path.join(__dirname, '..', 'frontend', 'index.html');
 
 if (!fs.existsSync(indexPath)) {
+  // eslint-disable-next-line no-console -- the message IS this script's output
   console.error(
     `easyDBAccess — renderer not built\n\nThe renderer bundle is missing:\n  ${indexPath}\n\nBuild it first:\n  npm run build:electron\n`,
   );

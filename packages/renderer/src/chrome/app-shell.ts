@@ -282,6 +282,7 @@ export class AppShell extends LitElement {
     document.addEventListener('easydb:open-settings', this.onOpenSettings);
     document.addEventListener('easydb:open-command-palette', this.onOpenCommandPalette);
     document.addEventListener('easydb:focus-search', this.openSearch);
+    document.addEventListener('easydb:set-search', this.onSetSearch as EventListener);
     document.addEventListener('keydown', this.onGlobalKeydown);
     void this.bindRegistries();
   }
@@ -298,6 +299,7 @@ export class AppShell extends LitElement {
     document.removeEventListener('easydb:open-settings', this.onOpenSettings);
     document.removeEventListener('easydb:open-command-palette', this.onOpenCommandPalette);
     document.removeEventListener('easydb:focus-search', this.openSearch);
+    document.removeEventListener('easydb:set-search', this.onSetSearch as EventListener);
     document.removeEventListener('keydown', this.onGlobalKeydown);
     this.workspaceUnsub?.();
   }
@@ -338,6 +340,18 @@ export class AppShell extends LitElement {
   private openSearch = () => {
     this.searchOpen = true;
     this.searchFocusPending = true;
+  };
+
+  /**
+   * Set the global query from outside — a `search/…` commandlet. It goes through
+   * the box rather than broadcasting directly, so the rows and the field the
+   * user is looking at never disagree about what is being searched for.
+   */
+  private onSetSearch = (e: CustomEvent<{ query: string }>) => {
+    this.searchQuery = e.detail?.query ?? '';
+    if (this.searchTimer != null) window.clearTimeout(this.searchTimer);
+    if (this.searchQuery) this.searchOpen = true;
+    this.broadcastSearch(this.searchQuery);
   };
 
   // Clicking outside the input blurs it; collapse back to the icon. Any active
@@ -467,7 +481,7 @@ export class AppShell extends LitElement {
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
           <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
-            ><span class="version">v0.0.315</span></a
+            ><span class="version">v0.0.326</span></a
           ></strong
         >
         ${this.headerButtons.filter((b) => b.variant !== 'secondary').map((b) => this.renderSlotButton(b, 'header'))}

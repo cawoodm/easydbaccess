@@ -90,6 +90,13 @@ describe('markdownToHtml: HTML in the source', () => {
     expect(markdownToHtml('<p>Tom &amp; Jerry</p>')).toBe('<p>Tom &amp; Jerry</p>');
   });
 
+  it('leaves a #fragment link in this tab — it addresses this document', () => {
+    // A new tab would reload the workspace to go nowhere, and it stopped
+    // same-page links (a commandlet, an anchor into a note) working at all.
+    expect(markdownToHtml('[Genesis 2 →](#Genesis%202)')).toBe('<p><a href="#Genesis%202">Genesis 2 →</a></p>');
+    expect(markdownToHtml('<p><a href="#Genesis%202">t</a></p>')).toBe('<p><a href="#Genesis%202">t</a></p>');
+  });
+
   it('adds target=_blank to a data link, so the grid is never navigated away', () => {
     expect(markdownToHtml('<p><a href="https://x.dev">t</a></p>')).toBe('<p><a href="https://x.dev" target="_blank" rel="noopener noreferrer">t</a></p>');
   });

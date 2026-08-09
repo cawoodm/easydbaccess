@@ -2,6 +2,18 @@ import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
+import { RENDER_SAMPLES, VALIDATE_SAMPLES, type ScriptSample } from './script-samples.js';
+
+/**
+ * Which script is being edited. They share this one editor because everything
+ * around the textarea — draggable modal, Ctrl-Enter save, cancel semantics — is
+ * identical; only the boilerplate, the wording and the samples dropdown differ.
+ *
+ * `render` / `validate` are a column's two scripts. `token` is a VIEW TOKEN's
+ * script: the same `render(row)` shape and the same samples, but it formats what
+ * a view SHOWS and never touches the stored cell.
+ */
+export type ScriptKind = 'render' | 'validate' | 'token';
 
 /**
  * Boilerplate inserted into a fresh script editor. Shows the required
@@ -19,9 +31,9 @@ const BOILERPLATE = `function render(row) {
 `;
 
 /**
- * The same boilerplate for a VIEW TOKEN's script, seeded with the field the
- * token maps to (if it maps to one) — the transform the user wants is almost
- * always "that cell, formatted", so naming the field saves them looking it up.
+ * The same for a VIEW TOKEN, seeded with the field the token maps to (when it
+ * maps to one) — the transform wanted is almost always "that cell, formatted",
+ * so naming the field saves the user looking it up.
  */
 function tokenBoilerplate(field: string): string {
   const read = field ? `row.${field}` : 'row.name';
@@ -33,8 +45,17 @@ function tokenBoilerplate(field: string): string {
 `;
 }
 
-/** Which kind of script is being edited — it changes the hints, not the shape. */
-export type ScriptEditorVariant = 'column' | 'token';
+/**
+ * The same for a validation script. Deliberately a rule that never fires: the
+ * shape is the lesson, and a fresh column shouldn't start rejecting edits just
+ * because the editor was opened and saved.
+ */
+const VALIDATE_BOILERPLATE = `function validate(value, row) {
+  // \`value\` is what the user just typed; \`row\` is the rest of the row.
+  // THROW to reject the edit — the message is what they will see.
+  if (false) throw new Error('Explain what is wrong here.');
+}
+`;
 
 /**
  * Modal editor for a column's `script` source. Mounted once from `<app-shell>` and
@@ -69,6 +90,30 @@ export class ScriptEditorDialog extends LitElement {
         padding: 0.05rem 0.25rem;
         border-radius: 0.2rem;
       }
+      .samples {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.85rem;
+        color: #374151;
+      }
+      .samples select {
+        font: inherit;
+        padding: 0.3rem 0.4rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+        flex: 1;
+        min-width: 0;
+      }
+      button.link {
+        background: transparent;
+        border: 0;
+        padding: 0;
+        color: #2563eb;
+        font: inherit;
+        text-decoration: underline;
+        cursor: pointer;
+      }
       textarea {
         font:
           0.85rem ui-monospace,
@@ -86,7 +131,14 @@ export class ScriptEditorDialog extends LitElement {
 
   @state() private text = '';
   @state() private columnLabel = '';
-  @state() private variant: ScriptEditorVariant = 'column';
+  @state() private kind: ScriptKind = 'render';
+  /**
+   * What the editor held before a sample was applied, so one dropdown pick
+   * can't silently eat a hand-written rule. Cleared once the user types (they
+   * are now editing the sample, not deciding whether to keep it) and on every
+   * open.
+   */
+  @state() private undoText: string | null = null;
   private dialogEl: HTMLDialogElement | null = null;
   private resolver: ((v: string | null) => void) | null = null;
 
@@ -112,29 +164,35 @@ export class ScriptEditorDialog extends LitElement {
    * Only one editor instance is active at a time; calling open() again
    * before the previous promise resolves will cancel the previous one.
    *
-   * `opts.variant: 'token'` edits a VIEW TOKEN's script instead of a column's:
-   * the shape is identical, so only the hints and the boilerplate change.
-   * `opts.field` is the column that token maps to, used in the boilerplate.
+   * `opts.field` is the column a `token` script's token maps to; it only seeds
+   * the boilerplate.
    */
-  async open(initial: string, columnLabel: string, opts?: { variant?: ScriptEditorVariant; field?: string }): Promise<string | null> {
+  async open(initial: string, columnLabel: string, kind: ScriptKind = 'render', opts?: { field?: string }): Promise<string | null> {
     if (this.resolver) {
       // Caller opened a new editor before resolving the previous one —
       // treat the old promise as cancelled so it doesn't hang.
       this.resolver(null);
       this.resolver = null;
     }
-    this.variant = opts?.variant ?? 'column';
+    this.kind = kind;
+    this.undoText = null;
     // Pre-fill with boilerplate so users opening a fresh column-script see
     // the expected shape instead of an intimidating empty textarea. An
     // existing script wins — we never overwrite the user's source.
-    const blank = this.variant === 'token' ? tokenBoilerplate(opts?.field ?? '') : BOILERPLATE;
-    this.text = initial && initial.trim() ? initial : blank;
+    this.text = initial && initial.trim() ? initial : this.blankFor(kind, opts?.field ?? '');
     this.columnLabel = columnLabel ?? '';
     await this.updateComplete;
     this.dialogEl?.showModal();
     return new Promise((resolve) => {
       this.resolver = resolve;
     });
+  }
+
+  /** The boilerplate a fresh editor of this kind starts from. */
+  private blankFor(kind: ScriptKind, field: string): string {
+    if (kind === 'validate') return VALIDATE_BOILERPLATE;
+    if (kind === 'token') return tokenBoilerplate(field);
+    return BOILERPLATE;
   }
 
   private resolve(value: string | null) {
@@ -151,37 +209,102 @@ export class ScriptEditorDialog extends LitElement {
     this.resolve(this.text);
   };
 
+  /** The sample list for whichever script is being edited. */
+  private get samples(): ReadonlyArray<ScriptSample> {
+    return this.kind === 'validate' ? VALIDATE_SAMPLES : RENDER_SAMPLES;
+  }
+
+  /**
+   * Replace the editor contents with a sample, remembering what was there. The
+   * `<select>` is reset to its placeholder so picking the SAME sample again
+   * (after an undo, say) still fires a change event.
+   */
+  private applySample(e: Event) {
+    const select = e.target as HTMLSelectElement;
+    const sample = this.samples[Number(select.value)];
+    select.value = '';
+    if (!sample) return;
+    this.undoText = this.text;
+    this.text = sample.source;
+  }
+
+  private undoSample() {
+    if (this.undoText === null) return;
+    this.text = this.undoText;
+    this.undoText = null;
+  }
+
+  private onInput(e: Event) {
+    this.text = (e.target as HTMLTextAreaElement).value;
+    // They're editing the sample now, not still deciding about it.
+    this.undoText = null;
+  }
+
+  /** The explanation above the textarea — different job, different contract. */
+  private renderHints() {
+    if (this.kind === 'token') {
+      return html`
+        <p class="hint">
+          Define <code>function render(row) { … }</code>. <code>row</code> is the full row object. What you return is what this token shows — the stored cell is never changed. The result goes into the
+          template as HTML, so <code>markdownToHtml(row.body)</code> shows formatted text and <code>new Date(row.date).toLocaleString()</code> shows a local date.
+        </p>
+        <p class="hint">
+          Only a plain <code>$TOKEN</code> runs the script. <code>$input.TOKEN</code> and <code>$filter.TOKEN</code> keep reading the mapped column, because one writes the cell back and the other must
+          match the stored value. A scripted token needs no column at all.
+        </p>
+      `;
+    }
+    if (this.kind === 'validate') {
+      return html`
+        <p class="hint">
+          Define <code>function validate(value, row) { … }</code>. It runs when someone edits a cell in this column by hand, after the Max / Unique / Not-null boxes have had their say.
+          <strong>Throw to reject the edit</strong> — your message is what they are shown, and the cell snaps back. Return without throwing to accept it; the return value is ignored.
+        </p>
+        <p class="hint">
+          <code>value</code> is the proposed new value, <code>row</code> the rest of the row, so a rule can compare columns. Imports, refreshes and sync are not edits and never run it.
+        </p>
+      `;
+    }
+    return html`
+      <p class="hint">
+        Define <code>function render(row) { … }</code>. <code>row</code> is the full row object. What you return is passed to the column's renderer, so the cell shows a computed value instead of the
+        stored one — and the cell becomes read-only. A script that throws shows a small error chip in the cell.
+      </p>
+      <p class="hint">
+        Besides the JS globals you can call <code>markdownToHtml(text)</code> (also <code>easydb.markdownToHtml</code>) — set this column's renderer to <code>html</code> so the result shows as
+        formatted text rather than as its own source. A sample that needs a particular renderer says so in its first line; the dropdown can't set it for you.
+      </p>
+    `;
+  }
+
   override render() {
+    const validating = this.kind === 'validate';
     return html`
       <dialog @cancel=${this.onCancel} @keydown=${ctrlEnterSubmits}>
         <button type="button" class="close-x" title="Close" @click=${this.onCancel}>×</button>
         <form @submit=${this.onSubmit}>
           <div class="dialog-header">
-            <h2>Edit script${this.columnLabel ? ` — ${this.columnLabel}` : ''}</h2>
+            <h2>${validating ? 'Edit validation' : 'Edit script'}${this.columnLabel ? ` — ${this.columnLabel}` : ''}</h2>
             <div class="header-actions">
               <button type="button" class="ghost" @click=${this.onCancel}>Cancel</button>
               <button type="submit" class="primary">Save</button>
             </div>
           </div>
           <div class="dialog-body">
-            ${this.variant === 'token'
-              ? html`<p class="hint">
-                    Define <code>function render(row) { … }</code>. <code>row</code> is the full row object. What you return is what this token shows — the stored cell is never changed. The result
-                    goes into the template as HTML, so <code>markdownToHtml(row.body)</code> shows formatted text and <code>new Date(row.date).toLocaleString()</code> shows a local date.
-                  </p>
-                  <p class="hint">
-                    Only a plain <code>$TOKEN</code> runs the script. <code>$input.TOKEN</code> and <code>$filter.TOKEN</code> keep reading the mapped column, because one writes the cell back and the
-                    other must match the stored value. A scripted token needs no column at all.
-                  </p>`
-              : html`<p class="hint">
-                    Define <code>function render(row) { … }</code>. <code>row</code> is the full row object. What you return is passed to the column's renderer, so the cell shows a computed value
-                    instead of the stored one — and the cell becomes read-only. A script that throws shows a small error chip in the cell.
-                  </p>
-                  <p class="hint">
-                    Besides the JS globals you can call <code>markdownToHtml(text)</code> (also <code>easydb.markdownToHtml</code>) — set this column's renderer to <code>html</code> so the result
-                    shows as formatted text rather than as its own source.
-                  </p>`}
-            <textarea spellcheck="false" autofocus .value=${this.text} @input=${(e: Event) => (this.text = (e.target as HTMLTextAreaElement).value)}></textarea>
+            ${this.renderHints()}
+            <div class="samples">
+              <label for="sample">Start from a sample</label>
+              <select
+                id="sample"
+                title=${validating ? 'Replace the editor contents with a ready-made rule' : 'Replace the editor contents with a ready-made script'}
+                @change=${(e: Event) => this.applySample(e)}
+              >
+                <option value="">— choose —</option>
+                ${this.samples.map((s, i) => html`<option value=${i}>${s.label}</option>`)}
+              </select>
+              ${this.undoText !== null ? html`<button type="button" class="link" @click=${() => this.undoSample()}>Undo</button>` : null}
+            </div>
+            <textarea spellcheck="false" autofocus .value=${this.text} @input=${(e: Event) => this.onInput(e)}></textarea>
           </div>
         </form>
       </dialog>

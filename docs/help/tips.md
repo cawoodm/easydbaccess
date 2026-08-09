@@ -1,3 +1,7 @@
+<!-- Source of the startup tip dialog. Every "- " bullet below is one tip;
+     scripts/generate-tips.mjs compiles them into
+     packages/renderer/src/plugins/tips.json on each dev start and build. -->
+
 # Tips
 
 - Press Ctrl+K to run commands

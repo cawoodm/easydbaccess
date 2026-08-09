@@ -4,6 +4,7 @@ import type { Table } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { initWindowManager } from '../window-mgr/table-window-manager.js';
 import { initViewWindowManager } from '../window-mgr/view-window-manager.js';
+import { markWindowsReady } from '../window-mgr/windows-ready.js';
 
 /**
  * Used to be a card-list renderer. Now it's a thin controller:
@@ -40,6 +41,10 @@ export class TableList extends LitElement {
     this.tables = all.filter((t) => t.workspaceId === this.workspaceId);
     await initWindowManager();
     await initViewWindowManager();
+    // Boot-time commandlets (a `?cmdlet=` link, a `#hash`) wait on this — see
+    // windows-ready.ts for why `app:ready` is too early for anything that
+    // reveals a window.
+    markWindowsReady();
   }
 
   override disconnectedCallback() {

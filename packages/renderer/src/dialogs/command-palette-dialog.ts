@@ -147,12 +147,15 @@ export class CommandPaletteDialog extends LitElement {
   @query('dialog') private dialogEl?: HTMLDialogElement;
   @query('input') private inputEl?: HTMLInputElement;
   private api: HostApi | null = null;
+  /** Providers asked for a command only when the query matched nothing. */
+  private commandFallbacks: Array<(query: string) => CommandSpec | null> = [];
   /** Ids of the last few commands that ran, most recent first. */
   private recentIds: string[] = [];
 
   async open(): Promise<void> {
     const ctx = await getContext();
     this.api = ctx.api;
+    this.commandFallbacks = ctx.registries.commandFallbacks;
     this.recentIds = readRecent((await ctx.api.store.settings.findOne(RECENT_SETTING))?.value);
     this.items = await this.buildItems();
     this.search = '';
@@ -233,9 +236,39 @@ export class CommandPaletteDialog extends LitElement {
   }
 
   private get filtered(): PaletteItem[] {
-    const q = this.search.trim().toLowerCase();
-    if (!q) return this.items;
-    return this.items.filter((it) => it.haystack.includes(q));
+    const raw = this.search.trim();
+    if (!raw) return this.items;
+    const hits = this.items.filter((it) => it.haystack.includes(raw.toLowerCase()));
+    return hits.length > 0 ? hits : this.fallbackItems(raw);
+  }
+
+  /**
+   * What a registered fallback offers for a query nothing matched. This is how
+   * the palette accepts text it could not have listed in advance — a commandlet
+   * the user typed, say — without knowing what one is.
+   */
+  private fallbackItems(query: string): PaletteItem[] {
+    const api = this.api;
+    if (!api) return [];
+    const specs: PaletteItem[] = [];
+    for (const fn of this.commandFallbacks) {
+      let spec;
+      try {
+        spec = fn(query);
+      } catch {
+        continue; // a broken provider must not empty the palette
+      }
+      if (!spec) continue;
+      specs.push({
+        id: spec.id,
+        title: spec.title,
+        group: spec.group ?? 'Commands',
+        ...(spec.icon ? { icon: spec.icon } : {}),
+        haystack: spec.title.toLowerCase(),
+        run: () => spec.run(api),
+      });
+    }
+    return specs;
   }
 
   private close(): void {

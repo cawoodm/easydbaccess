@@ -305,6 +305,25 @@ export function mapColumns(meta: unknown): { columns: ColumnSpec[]; pks: string[
   return { columns, pks };
 }
 
+/**
+ * Mark a table's primary-key columns as `unique` + `notnull`.
+ *
+ * `mapColumns` already does this when the instance answers `?_extra=
+ * column_details` (PRAGMA table_info carries `is_pk`), but plenty of instances
+ * don't — datasette.io answers `column_details` with nothing at all, so its
+ * columns come from `?_extra=columns` or from row inference, both of which are
+ * just names. The pk list is still knowable there (`?_extra=primary_keys`), so
+ * this layers the constraint back on afterwards, whatever the columns' origin.
+ *
+ * Idempotent, and it never clears a flag — a column the user (or a richer
+ * schema response) already marked keeps its flags.
+ */
+export function applyPrimaryKeyFlags(columns: ColumnSpec[], pks: readonly string[]): ColumnSpec[] {
+  if (pks.length === 0) return columns;
+  const pkSet = new Set(pks);
+  return columns.map((c) => (pkSet.has(c.field) && !(c.unique && c.notnull) ? { ...c, unique: true, notnull: true } : c));
+}
+
 function prettifyLabel(field: string): string {
   return String(field)
     .replace(/[_-]+/g, ' ')
@@ -707,7 +726,22 @@ export async function fetchTableMeta(fetchFn: FetchFn, ref: DatasetteRef): Promi
     countTruncated = field(cjson, 'count_truncated') === true || countTruncated;
     raw = cjson;
   }
-  return { columns, pks, count, countTruncated, typed, raw };
+
+  // Without `column_details` nothing so far knew which columns are the primary
+  // key — `?_extra=columns` is a bare name array. Instances that drop
+  // `column_details` still answer `?_extra=primary_keys` (datasette.io does),
+  // so make that one extra single-`_`-param request rather than import a table
+  // whose key column carries no constraint. Skipped when the schema WAS typed
+  // (an empty pk list is then the truth, e.g. a rowid-only table) and
+  // best-effort — a failure just leaves the pks unknown.
+  if (!typed && pks.length === 0) {
+    try {
+      pks = await fetchPrimaryKeys(fetchFn, ref);
+    } catch {
+      /* no pk info available */
+    }
+  }
+  return { columns: applyPrimaryKeyFlags(columns, pks), pks, count, countTruncated, typed, raw };
 }
 
 /**
@@ -758,15 +792,38 @@ export interface DatasetteTableMetadata {
  * Extract a table's metadata from an instance `/-/metadata.json` document,
  * layering top-level source/license/about defaults under the per-table block
  * (Datasette applies attribution top-down). Pure — no I/O.
+ *
+ * Also used for a `/-/config.json` document, which nests its per-table blocks
+ * exactly the same way — see {@link fetchTableMetadata} for why both are read.
  */
 export function extractTableMetadata(metaJson: unknown, db: string | null, table: string | null): DatasetteTableMetadata {
   const root = asObject(metaJson) ?? {};
   const dbBlock = db ? (asObject(field(root['databases'], db)) ?? {}) : {};
   const tables = asObject(dbBlock['tables']) ?? {};
+  // A config block Datasette redacted (it holds `allow` rules) comes back as the
+  // string `"***"`, not an object — asObject rejects it and we read nothing.
   const t = (table ? asObject(tables[table]) : null) ?? (table ? asObject(tables[table.toLowerCase()]) : null) ?? {};
   // Attribution falls back to the database and then top level.
   const attr = (key: string): string | null => asString(t[key]) ?? asString(dbBlock[key]) ?? asString(root[key]);
+  return readMetadataBlock(t, attr);
+}
 
+/**
+ * Extract a table's metadata from a bare per-table block — the shape Datasette
+ * 1.0 returns under the `metadata` key of `<db>/<table>.json?_extra=metadata`.
+ * Same keys as a block inside `/-/metadata.json`, minus the instance around it,
+ * so there is nothing to inherit attribution from.
+ */
+export function extractTableMetadataBlock(block: unknown): DatasetteTableMetadata {
+  const t = asObject(block) ?? {};
+  return readMetadataBlock(t, (key) => asString(t[key]));
+}
+
+/**
+ * Read one table's metadata/config block. `attr` resolves the attribution keys,
+ * which may inherit from enclosing scopes (see {@link extractTableMetadata}).
+ */
+function readMetadataBlock(t: JsonObject, attr: (key: string) => string | null): DatasetteTableMetadata {
   const out: DatasetteTableMetadata = { columns: {}, units: {} };
   const sort = asString(t['sort']);
   if (sort !== null) out.sort = sort;
@@ -807,6 +864,14 @@ export function extractTableMetadata(metaJson: unknown, db: string | null, table
 
 /** Per-instance metadata cache — `/-/metadata.json` is one blob for all tables. */
 const instanceMetaCache = new Map<string, Promise<unknown>>();
+/** Same, for `/-/config.json` (Datasette 1.0's half of the old metadata blob). */
+const instanceConfigCache = new Map<string, Promise<unknown>>();
+
+/** Test seam: forget the cached per-instance metadata/config documents. */
+export function clearInstanceMetadataCache(): void {
+  instanceMetaCache.clear();
+  instanceConfigCache.clear();
+}
 
 /** Fetch (and cache) an instance's `/-/metadata.json`; `{}` if unavailable. */
 export async function fetchInstanceMetadata(fetchFn: FetchFn, base: string): Promise<unknown> {
@@ -820,10 +885,82 @@ export async function fetchInstanceMetadata(fetchFn: FetchFn, base: string): Pro
   return p;
 }
 
-/** Fetch a table's resolved Datasette metadata (see {@link extractTableMetadata}). */
+/**
+ * Fetch (and cache) an instance's `/-/config.json`; `{}` if unavailable.
+ *
+ * Datasette 1.0 split the old metadata blob in two: descriptive fields stayed
+ * "metadata", while the behavioural ones — `sortable_columns`, `sort`,
+ * `sort_desc`, `size`, `label_column` — became "config" and moved here. Absent
+ * on 0.x, where `/-/metadata.json` still carries the lot.
+ */
+export async function fetchInstanceConfig(fetchFn: FetchFn, base: string): Promise<unknown> {
+  let p = instanceConfigCache.get(base);
+  if (!p) {
+    p = fetchJson(fetchFn, `${base}/-/config.json`).catch(() => ({}));
+    instanceConfigCache.set(base, p);
+  }
+  return p;
+}
+
+/**
+ * Fetch a table's own metadata block via `?_extra=metadata` — Datasette 1.0's
+ * only route to per-column descriptions and units, since it serves no
+ * instance-wide metadata document. `{}` if unavailable.
+ *
+ * Single `_`-param, so it stays clear of datasette.io's WAF (see
+ * {@link fetchTableMeta}) — which also means we can't add `_size=0` to suppress
+ * the page of rows that rides along. One request per table, only on instances
+ * that gave us no `/-/metadata.json`.
+ */
+export async function fetchTableMetadataExtra(fetchFn: FetchFn, ref: DatasetteRef): Promise<unknown> {
+  try {
+    const json = await fetchJson(fetchFn, buildTableUrl(ref, { _extra: 'metadata' }));
+    return field(json, 'metadata') ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Merge metadata layers, most-specific last. A later layer wins any scalar it
+ * actually defines; `columns` / `units` merge per field rather than replacing
+ * wholesale, so a description from one layer and a unit from another coexist.
+ */
+export function mergeTableMetadata(...layers: DatasetteTableMetadata[]): DatasetteTableMetadata {
+  const out: DatasetteTableMetadata = { columns: {}, units: {} };
+  for (const layer of layers) {
+    const { columns, units, ...scalars } = layer;
+    Object.assign(out, Object.fromEntries(Object.entries(scalars).filter(([, v]) => v !== undefined)));
+    Object.assign(out.columns, columns);
+    Object.assign(out.units, units);
+  }
+  return out;
+}
+
+/**
+ * Fetch a table's resolved Datasette metadata (see {@link extractTableMetadata}).
+ *
+ * Reads whichever of the two era-specific layouts the instance actually serves:
+ *
+ *   - **0.x** — one `/-/metadata.json` document holding everything. One cached
+ *     request per instance, and we stop there.
+ *   - **1.0** — `/-/metadata.json` is gone (it 404s), so the same information
+ *     comes from `/-/config.json` (sortable_columns, default sort, …) plus the
+ *     table's own `?_extra=metadata` block (column descriptions, units,
+ *     attribution).
+ *
+ * Every layer is best-effort; an instance serving none of them yields empty
+ * metadata and every caller no-ops, exactly as before.
+ */
 export async function fetchTableMetadata(fetchFn: FetchFn, ref: DatasetteRef): Promise<DatasetteTableMetadata> {
-  const json = await fetchInstanceMetadata(fetchFn, ref.base);
-  return extractTableMetadata(json, ref.db, ref.table);
+  const instanceJson = await fetchInstanceMetadata(fetchFn, ref.base);
+  const fromInstance = extractTableMetadata(instanceJson, ref.db, ref.table);
+  // A served metadata document is authoritative and complete — don't pay for the
+  // 1.0 fallbacks on an instance that has one.
+  if (Object.keys(asObject(instanceJson) ?? {}).length > 0) return fromInstance;
+
+  const [configJson, blockJson] = await Promise.all([fetchInstanceConfig(fetchFn, ref.base), ref.db && ref.table ? fetchTableMetadataExtra(fetchFn, ref) : Promise.resolve({})]);
+  return mergeTableMetadata(fromInstance, extractTableMetadata(configJson, ref.db, ref.table), extractTableMetadataBlock(blockJson));
 }
 
 /** Table fields a metadata block contributes (merged into the tables.patch). */
