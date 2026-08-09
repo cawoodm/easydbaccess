@@ -263,6 +263,18 @@ export class NewTableDialog extends LitElement {
       button.row-del:hover:not(:disabled) {
         color: #ef4444;
       }
+      /* The removed-columns offer: chips on one wrapping line under the list. */
+      .deleted-cols {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.4rem;
+        margin-top: 0.35rem;
+      }
+      .deleted-cols button.add {
+        padding: 0.2rem 0.5rem;
+        font-size: 0.85rem;
+      }
       button.add {
         align-self: start;
         background: #f3f4f6;
@@ -348,6 +360,13 @@ export class NewTableDialog extends LitElement {
   @state() private tableTitle = '';
   /** Table-level read-only flag (`Table.readonly`) — no editors, no add/delete row. */
   @state() private tableReadonly = false;
+  /**
+   * Names the user removed from this table before (`Table.deletedColumns`), so a
+   * refresh does not re-add them. Offered back at the bottom of the editor: a
+   * column deleted by mistake was otherwise only recoverable by typing its name
+   * from memory, and the app knew it all along.
+   */
+  @state() private deletedFields: string[] = [];
   @state() private columns: ColumnRow[] = [];
   @state() private errorMsg = '';
   /** Non-error banner (e.g. "a refresh found new columns — review them"). */
@@ -410,6 +429,7 @@ export class NewTableDialog extends LitElement {
       this.name = t.name;
       this.tableTitle = t.title ?? '';
       this.tableReadonly = !!t.readonly;
+      this.deletedFields = [...(t.deletedColumns ?? [])];
       this.columns = t.columns.map((c) => ({
         field: c.field,
         label: c.label,
@@ -437,6 +457,7 @@ export class NewTableDialog extends LitElement {
       this.name = '';
       this.tableTitle = '';
       this.tableReadonly = false;
+      this.deletedFields = [];
       this.columns = [
         { field: 'name', label: 'Name', type: 'string' },
         { field: 'note', label: 'Note', type: 'string' },
@@ -848,6 +869,38 @@ export class NewTableDialog extends LitElement {
   }
 
   /**
+   * The columns removed from this table before, offered back.
+   *
+   * The app already remembers their names — that is what stops a refresh from
+   * re-adding them — so the only thing missing was showing them. Restoring one
+   * brings the COLUMN back, not its values: deleting it purged them from every
+   * local row, which the hint says out loud. A source-backed table is the
+   * exception, and the wording covers it: the values come back on the next
+   * refresh, because they were never ours to delete.
+   */
+  private renderDeleted() {
+    if (this.mode !== 'edit' || this.deletedFields.length === 0) return '';
+    return html`<div class="deleted-cols">
+      <span class="hint">Removed earlier:</span>
+      ${this.deletedFields.map((f) => html`<button type="button" class="add" title=${`Add the column "${f}" back`} @click=${() => this.restoreColumn(f)}>↩ ${f}</button>`)}
+      <div class="hint">These are not re-added by a refresh. Restoring one adds the column back empty — its values were removed with it, unless the table refreshes from a source.</div>
+    </div>`;
+  }
+
+  /**
+   * Put a removed column back as a new row in the editor, and stop offering it.
+   *
+   * Nothing is written here: on save the field is in the table's columns again, so
+   * the recomputation of `deletedColumns` drops the name by itself. Backing out of
+   * the dialog therefore restores nothing, which is what Cancel should mean.
+   */
+  private restoreColumn(field: string): void {
+    this.deletedFields = this.deletedFields.filter((f) => f !== field);
+    if (this.columns.some((c) => c.field.trim().toLowerCase() === field.toLowerCase())) return;
+    this.columns = [...this.columns, { field, label: field, type: 'string' }];
+  }
+
+  /**
    * Pending field renames: the draft's `origField` (the name as SAVED) paired
    * with the name the user has typed. One source of truth for all three
    * consumers — the save-time row re-key, the live preview's re-key, and the
@@ -1039,7 +1092,7 @@ export class NewTableDialog extends LitElement {
 
             <button type="button" class="add" @click=${this.addColumn}>+ Add column</button>
             ${this.columnActions.map((a) => html`<button type="button" class="add" title=${a.tooltip ?? a.label} @click=${() => void this.runColumnAction(a)}>${a.label}</button>`)}
-            ${this.renameDetected() ? html`<div class="hint">Existing rows are re-keyed on save, so renamed fields keep their data.</div>` : ''}
+            ${this.renderDeleted()} ${this.renameDetected() ? html`<div class="hint">Existing rows are re-keyed on save, so renamed fields keep their data.</div>` : ''}
             ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''} ${this.mode === 'edit' ? this.renderPreview() : ''}
           </div>
         </form>

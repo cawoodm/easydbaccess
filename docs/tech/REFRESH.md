@@ -63,7 +63,12 @@ cursor.
 2. **Reconcile columns** — `table/column-merge.ts:reconcileColumns`:
    - every existing column is kept exactly as arranged (order, label, type,
      width, renderer, hidden, description);
-   - a field in `table.deletedColumns` is never re-added;
+   - a field in `table.deletedColumns` is never re-added — and because that list
+     is the only record of what was removed, the columns editor now shows it at
+     the bottom as "Removed earlier", with a button per name that adds the column
+     back. Restoring takes the name off the list, so the next refresh may bring
+     its values with it. Nothing is written until Save, so Cancel restores
+     nothing;
    - anything else incoming is appended, and reported as `newFields`.
 3. **Merge rows** — `table/refresh-merge.ts:mergeRefreshedRows`:
    - fields in `deletedColumns` are stripped from both sides;

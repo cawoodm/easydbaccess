@@ -11,6 +11,7 @@
 - ✨ Searching a table past the row cap says so, in a view too, instead of letting an empty result read as "nothing there" (v0.0.331)
 - ✨ A column computed by a script offers no filter and is skipped by search, because it stores nothing to match (v0.0.332)
 - ✨ The palette's Recent list forgets a deleted table or view, instead of holding a slot for something that is gone (v0.0.333)
+- ✨ The columns editor offers back the columns removed earlier, so one deleted by mistake need not be retyped from memory (v0.0.334)
 
 ### Bugs
 

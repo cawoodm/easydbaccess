@@ -50,6 +50,15 @@ close.
 
 ![Command Palette](./screenshots/command-palette.png)
 
+## Getting a deleted column back
+
+Deleting a column in the column editor removes its values, and the app remembers
+the name so a refresh cannot bring the column back on its own. That list is shown
+at the bottom of the editor as **Removed earlier** — click a name and the column
+is added again. It comes back empty, because the values went with it; a table that
+refreshes from a source fills it again on the next refresh. Nothing changes until
+you press Save.
+
 ## Renaming a table
 
 A table's title bar can show a friendlier name than its technical one — set
