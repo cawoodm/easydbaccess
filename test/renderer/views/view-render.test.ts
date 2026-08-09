@@ -6,6 +6,7 @@ import {
   evaluateRow,
   evaluateRows,
   substituteRow,
+  tokenValue,
   filterRows,
   sortRows,
   viewRows,
@@ -335,6 +336,68 @@ describe('view-render', () => {
     it('evaluateRows returns the same list when nothing is scripted', () => {
       const rows = [row({ a: 1 })];
       expect(evaluateRows(rows, [col('a', 'number')])).toBe(rows);
+    });
+  });
+
+  // A `$TOKEN` shows what the GRID shows — the value through the column's own
+  // cell renderer. A renderer is a custom element fed by properties, so what
+  // lands in the string is an empty slot the view window mounts into; these
+  // tests are about WHEN a slot is emitted and when the token stays plain text.
+  describe('rendered vs raw tokens', () => {
+    const renderers = new Map([['link', 'cell-link']]);
+    const linkCol = new Map([['u', { field: 'u', label: 'u', type: 'string' as const, renderer: 'link' }]]);
+    const sub = (html: string, over: Record<string, unknown> = {}) => substituteRow(html, row({ u: 'http://x', plain: 'text' }), { URL: 'u', P: 'plain' }, { columns: linkCol, renderers, ...over });
+
+    it('emits a slot naming the row, the field, the token and the renderer tag', () => {
+      const out = sub('$URL');
+      expect(out).toContain('class="eda-cell"');
+      expect(out).toContain('data-eda-row="r"');
+      expect(out).toContain('data-eda-field="u"');
+      expect(out).toContain('data-eda-token="URL"');
+      expect(out).toContain('data-eda-tag="cell-link"');
+      // The slot is empty: only the DOM pass can set a renderer's properties.
+      expect(out).toContain('></span>');
+    });
+
+    it('$raw.TOKEN and the per-token toggle both fall back to the plain value', () => {
+      expect(sub('$raw.URL')).toBe('http://x');
+      expect(sub('$URL', { raw: { URL: true } })).toBe('http://x');
+      // The toggle is per token, so its neighbour is unaffected.
+      expect(sub('$URL', { raw: { OTHER: true } })).toContain('eda-cell');
+    });
+
+    it('a column with no renderer, or an unregistered one, stays plain text', () => {
+      expect(sub('$P')).toBe('text');
+      expect(sub('$URL', { renderers: new Map() })).toBe('http://x');
+      // No renderers passed at all — the pre-renderer behaviour, unchanged.
+      expect(substituteRow('$URL', row({ u: 'http://x' }), { URL: 'u' }, { columns: linkCol })).toBe('http://x');
+    });
+
+    it('a token INSIDE a tag stays plain — an element in an attribute is a broken tag', () => {
+      // How the shipped Gallery and RSS templates are written.
+      expect(sub('<img src="$URL">')).toBe('<img src="http://x">');
+      expect(sub("<a href='$URL'>go</a>")).toBe("<a href='http://x'>go</a>");
+      expect(sub('<a data-x=$URL>')).toBe('<a data-x=http://x>');
+      // Text content after the tag closes IS rendered.
+      expect(sub('<a href="$URL">$URL</a>')).toContain('eda-cell');
+    });
+
+    it('a scripted token is not sent through the renderer — the script already decided', () => {
+      const out = sub('$URL', { scripts: { URL: 'function render(){ return "computed" }' } });
+      expect(out).toBe('computed');
+    });
+
+    it('$input. and $filter. are untouched by any of this', () => {
+      expect(sub('$input.URL')).toContain('<input');
+      expect(sub('$filter.URL')).toContain('eda-filter-pill');
+    });
+
+    it('tokenValue is the one rule for what a token shows, script or stored cell', () => {
+      const r = row({ a: 'stored' });
+      expect(tokenValue(r, 'a')).toBe('stored');
+      expect(tokenValue(r, 'a', '  ')).toBe('stored');
+      expect(tokenValue(r, 'a', 'function render(x){ return x.a.toUpperCase() }')).toBe('STORED');
+      expect(tokenValue(r, 'a', 'function render(){ boom() }')).toBe('⚠ runtime error');
     });
   });
 

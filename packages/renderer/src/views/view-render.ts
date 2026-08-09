@@ -11,16 +11,20 @@ import { arrayMembers, composeColumnFilter, matchesColumnFilter, parseColumnFilt
 import { runColumnScript } from '../util/column-script.js';
 
 /**
- * Matches a `$TOKEN` placeholder. An optional `input.` (or `input:`) prefix
- * marks the token as EDITABLE — it renders an `<input>` bound to the mapped
- * field instead of the read-only value. A `filter.` (or `filter:`) prefix
- * instead renders a clickable PILL — see {@link substituteRow}. Group 1 is the
- * prefix (or undefined), group 2 is the token NAME (letters/digits/underscore,
- * not starting with a digit); the name — without any prefix — is the mapping
- * key, so `$TITLE`, `$input.TITLE` and `$filter.TITLE` all map to the same
- * column but render read-only, editable, or as a filter pill.
+ * Matches a `$TOKEN` placeholder. An optional prefix decides how it renders:
+ *
+ *  - none — the value THROUGH the column's cell renderer, so a view shows what
+ *    the grid shows (see {@link substituteRow}),
+ *  - `input.` (or `input:`) — an EDITABLE control bound to the mapped field,
+ *  - `filter.` — a clickable PILL,
+ *  - `raw.` — the value as plain text, skipping the renderer.
+ *
+ * Group 1 is the prefix (or undefined), group 2 is the token NAME
+ * (letters/digits/underscore, not starting with a digit); the name — without any
+ * prefix — is the mapping key, so `$TITLE`, `$input.TITLE`, `$filter.TITLE` and
+ * `$raw.TITLE` all map to the same column and differ only in presentation.
  */
-const TOKEN_RE = /\$((?:input|filter)[.:])?([A-Za-z_][A-Za-z0-9_]*)/g;
+const TOKEN_RE = /\$((?:input|filter|raw)[.:])?([A-Za-z_][A-Za-z0-9_]*)/g;
 
 /** Distinct token names (without the `$` or any `input.`/`filter.` prefix) found across the fragments. */
 export function extractTokens(...fragments: string[]): string[] {
@@ -138,6 +142,50 @@ function renderScripted(src: string, row: Row): string {
   return run.value == null ? '' : String(run.value);
 }
 
+/** Class marking the placeholder a cell renderer is mounted into. */
+export const CELL_SLOT_CLASS = 'eda-cell';
+
+/**
+ * The value a token DISPLAYS, before any renderer: the token's own script if it
+ * has one, else the stored cell.
+ *
+ * Exported because the view window recomputes it when it mounts a renderer into
+ * the slot this module emitted — one rule for what a token shows, in one place,
+ * rather than the string pass and the mount pass each having their own.
+ */
+export function tokenValue(row: Row, field: string, script?: string | undefined): unknown {
+  if (script?.trim()) {
+    const run = runColumnScript(script, row.data);
+    return run.ok ? run.value : `⚠ ${run.label}`;
+  }
+  return row.data[field];
+}
+
+/**
+ * Is the offset inside an HTML tag — i.e. in an attribute value?
+ *
+ * `<img src="$IMAGE">` and `<a href="$URL">` are how the shipped templates are
+ * written, and there a token MUST come out as text: an element spliced into an
+ * attribute is not a renderer, it is a broken tag. Cheaper and more predictable
+ * than parsing the fragment: the last `<` before us is still unclosed.
+ */
+function insideTag(html: string, offset: number): boolean {
+  const lt = html.lastIndexOf('<', offset);
+  return lt >= 0 && lt > html.lastIndexOf('>', offset);
+}
+
+/**
+ * An empty element the view window fills with the column's cell-renderer
+ * element. It cannot be filled here: a renderer takes its value, column and row
+ * as PROPERTIES (see `data-table.ts`), and a property cannot be written into an
+ * HTML string — only the DOM pass can set them.
+ */
+function cellSlot(rowId: string, field: string, token: string, tag: string): string {
+  return (
+    `<span class="${CELL_SLOT_CLASS}" data-eda-row="${escapeAttr(rowId)}" data-eda-field="${escapeAttr(field)}" ` + `data-eda-token="${escapeAttr(token)}" data-eda-tag="${escapeAttr(tag)}"></span>`
+  );
+}
+
 /**
  * Replace every `$TOKEN` in `html` with the row's value for the column mapped to
  * that token. An `$input.TOKEN` instead renders an editable control (checkbox /
@@ -154,6 +202,17 @@ function renderScripted(src: string, row: Row): string {
  * `$filter.` pill has to carry the stored text to match anything. A scripted
  * token needs no mapping, so it may compute from the whole row.
  *
+ * A plain `$TOKEN` goes THROUGH the column's cell renderer, so a view shows what
+ * the grid shows — a `link` column as a link, `tags` as pills. Because a renderer
+ * is a custom element fed by properties, what lands in the string is an empty
+ * slot the view window then mounts into ({@link cellSlot}). Four things send a
+ * token back to plain text instead:
+ *
+ *  - the `raw.` prefix, or `opts.raw[token]` (the mapping dialog's toggle),
+ *  - the column has no renderer, or none is registered under that name,
+ *  - the token sits inside a tag, where an element cannot go ({@link insideTag}),
+ *  - the token has its own script, which already decided what to show.
+ *
  * Values are read straight from `row.data`, so pass a row that has been through
  * {@link evaluateRow} when the table has scripted columns.
  */
@@ -161,16 +220,28 @@ export function substituteRow(
   html: string,
   row: Row,
   mapping: Record<string, string>,
-  opts: { columns?: Map<string, ColumnSpec>; readonly?: boolean; scripts?: Record<string, string> | undefined } = {},
+  opts: {
+    columns?: Map<string, ColumnSpec>;
+    readonly?: boolean;
+    scripts?: Record<string, string> | undefined;
+    /** Renderer name → custom-element tag, from `registries.cellRenderers`. */
+    renderers?: Map<string, string> | undefined;
+    /** Token → true when this token must stay plain text. */
+    raw?: Record<string, boolean> | undefined;
+  } = {},
 ): string {
-  return html.replace(TOKEN_RE, (_full, prefix: string | undefined, token: string) => {
+  return html.replace(TOKEN_RE, (_full, prefix: string | undefined, token: string, offset: number, whole: string) => {
     const field = mapping[token];
     const script = opts.scripts?.[token];
     if (!prefix && script?.trim()) return renderScripted(script, row);
     if (!field) return '';
     const v = row.data[field];
-    if (!prefix) return v == null ? '' : String(v);
     const spec = opts.columns?.get(field);
+    if (!prefix || prefix.startsWith('raw')) {
+      const tag = prefix ? undefined : rendererTag(spec, opts.renderers);
+      if (tag && opts.raw?.[token] !== true && !insideTag(whole, offset)) return cellSlot(row.id, field, token, tag);
+      return v == null ? '' : String(v);
+    }
     if (prefix.startsWith('filter')) return renderFilterPill(field, v, spec);
     // A scripted column is computed from the rest of the row, so there is
     // nowhere to write an edit back to — the grid treats such a cell as
@@ -178,6 +249,12 @@ export function substituteRow(
     const readonly = opts.readonly === true || !!spec?.script?.trim();
     return renderInput(field, v, row.id, spec, readonly);
   });
+}
+
+/** The custom-element tag for a column's renderer, when one is registered. */
+function rendererTag(spec: ColumnSpec | undefined, renderers: Map<string, string> | undefined): string | undefined {
+  const name = spec?.renderer;
+  return name ? renderers?.get(name) : undefined;
 }
 
 function isEmpty(v: unknown): boolean {

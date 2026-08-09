@@ -18,6 +18,20 @@ view for that table.
 
 ![Views](./screenshots/views.png)
 
+## Placeholders
+
+A `$TOKEN` in the template shows the mapped column **the way the table shows
+it** — a column with the Link renderer comes out as a link, one with Tags as
+pills. The mapping list has a 🎨 / 🔤 button per placeholder to switch between
+that and the plain stored value; `$raw.TOKEN` says the same thing in the
+template itself. A placeholder inside a tag, as in `<img src="$IMAGE">`, always
+gives you the plain value — an element inside an attribute would only break the
+tag.
+
+Two other prefixes: `$input.TOKEN` gives an editable control bound to the cell,
+and `$filter.TOKEN` a chip that filters the view by that value when clicked.
+Both always read the stored value, never the renderer.
+
 ## Handy defaults
 
 When you create a view, easyDBAccess tries to auto-map your columns to the

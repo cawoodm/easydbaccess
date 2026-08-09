@@ -46,6 +46,8 @@ interface InstanceDraft {
   mapping: Record<string, string>;
   /** Token → `render(row)` script formatting what the token shows. */
   tokenScripts: Record<string, string>;
+  /** Token → true when it must show plain text, not the column's renderer. */
+  tokenRaw: Record<string, boolean>;
   limit: number; // 0 = all
   readonly: boolean; // grid (template-off) view shows values with no editors
 }
@@ -166,7 +168,7 @@ export class ViewsDialog extends LitElement {
       }
       .map-row {
         display: grid;
-        grid-template-columns: 8rem 1fr auto;
+        grid-template-columns: 8rem 1fr auto auto;
         align-items: center;
         gap: 0.5rem;
       }
@@ -281,6 +283,7 @@ export class ViewsDialog extends LitElement {
       tokens,
       mapping: { ...inst.mapping },
       tokenScripts: { ...(inst.tokenScripts ?? {}) },
+      tokenRaw: { ...(inst.tokenRaw ?? {}) },
       limit: inst.limit ?? 0,
       readonly: inst.readonly ?? false,
     };
@@ -428,6 +431,7 @@ export class ViewsDialog extends LitElement {
       tokens,
       mapping,
       tokenScripts: {},
+      tokenRaw: {},
       limit: 0,
       readonly: false,
     };
@@ -539,6 +543,25 @@ export class ViewsDialog extends LitElement {
   }
 
   /**
+   * The tokens held back to plain text, dropped when every token renders — which
+   * is the default, so the field stays absent on almost every instance.
+   */
+  private draftRaw(d: InstanceDraft): Record<string, boolean> | undefined {
+    const kept = Object.entries(d.tokenRaw).filter(([, on]) => on === true);
+    return kept.length ? Object.fromEntries(kept) : undefined;
+  }
+
+  /** Flip one token between the column's renderer and plain text. */
+  private toggleTokenRaw(tok: string): void {
+    const d = this.iDraft;
+    if (!d) return;
+    const tokenRaw = { ...d.tokenRaw };
+    if (tokenRaw[tok]) delete tokenRaw[tok];
+    else tokenRaw[tok] = true;
+    this.iDraft = { ...d, tokenRaw };
+  }
+
+  /**
    * Open the script editor for one token. The script formats what the token
    * SHOWS, so the mapped column is only the starting point offered in the
    * boilerplate — a token may script without mapping anything.
@@ -561,6 +584,7 @@ export class ViewsDialog extends LitElement {
     if (!d.name.trim()) return;
     const ctx = await getContext();
     const tokenScripts = this.draftScripts(d);
+    const tokenRaw = this.draftRaw(d);
     // Editing an existing instance: only the name and token→column mapping
     // change. The snapshotted sort / filter / visible columns are preserved.
     if (d.id) {
@@ -568,6 +592,7 @@ export class ViewsDialog extends LitElement {
         name: d.name.trim(),
         mapping: { ...d.mapping },
         tokenScripts,
+        tokenRaw,
         limit: d.limit > 0 ? d.limit : undefined,
         readonly: d.readonly,
         updatedAt: Date.now(),
@@ -596,6 +621,7 @@ export class ViewsDialog extends LitElement {
       ...(d.limit > 0 ? { limit: d.limit } : {}),
       ...(d.readonly ? { readonly: true } : {}),
       ...(tokenScripts ? { tokenScripts } : {}),
+      ...(tokenRaw ? { tokenRaw } : {}),
     };
     await ctx.store.viewInstances.insert(inst);
     await this.openInstance(inst.id);
@@ -721,6 +747,14 @@ export class ViewsDialog extends LitElement {
                   </select>
                   <button
                     type="button"
+                    class=${d.tokenRaw[tok] ? 'mini' : 'mini scripted'}
+                    title=${d.tokenRaw[tok] ? `$${tok} shows the plain value — click to render it with the column's renderer` : `$${tok} is shown by the column's renderer — click for the plain value`}
+                    @click=${() => this.toggleTokenRaw(tok)}
+                  >
+                    ${d.tokenRaw[tok] ? '🔤' : '🎨'}
+                  </button>
+                  <button
+                    type="button"
                     class=${d.tokenScripts[tok]?.trim() ? 'mini scripted' : 'mini'}
                     title=${d.tokenScripts[tok]?.trim() ? `Edit the script formatting $${tok}` : `Format $${tok} with a script (e.g. a local date, markdown as HTML)`}
                     @click=${() => void this.editTokenScript(tok)}
@@ -730,6 +764,10 @@ export class ViewsDialog extends LitElement {
                 </div>`,
             )}
       </div>
+      <p class="hint">
+        🎨 shows the token through the column's own cell renderer, so the view looks like the table; 🔤 shows the plain value instead (the same as writing <code>$raw.TOKEN</code>). A token inside a
+        tag, as in <code>&lt;img src="$IMAGE"&gt;</code>, always stays plain.
+      </p>
       <p class="hint">
         <code>ƒ(x)</code> gives a token a <code>render(row)</code> script, so the view can show a formatted value — a local date, markdown as HTML — without changing the stored cell. It applies to
         <code>$TOKEN</code> only, not to <code>$input.</code> or <code>$filter.</code>.

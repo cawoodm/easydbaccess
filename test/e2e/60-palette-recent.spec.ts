@@ -24,6 +24,25 @@ async function runCommand(page: import('@playwright/test').Page, query: string, 
   await expect(palette(page)).toBeHidden();
 }
 
+/**
+ * Wait for the history to reach the store before reloading. The palette writes
+ * it after the command has run, so a reload issued straight away can cut the
+ * write off — and then "the history survives a reload" fails for the wrong
+ * reason.
+ */
+async function historyPersisted(page: import('@playwright/test').Page) {
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__easydb.store;
+        const row = await store.settings.findOne('palette:recent');
+        return Array.isArray(row?.value) ? row.value.length : 0;
+      }),
+    )
+    .toBeGreaterThan(0);
+}
+
 test.describe('command palette recent commands', () => {
   test('the last command runs again on Ctrl+K Enter', async ({ page }) => {
     const id = await createTable(page, 'Widgets', [{ field: 'name' }]);
@@ -37,6 +56,7 @@ test.describe('command palette recent commands', () => {
     await runCommand(page, 'search all', 'Search all tables');
     await expect(search).toBeVisible();
 
+    await historyPersisted(page);
     await page.reload();
     await expect(search).toBeHidden();
 
@@ -61,6 +81,7 @@ test.describe('command palette recent commands', () => {
 
   test('the history survives a reload and lists a command only once', async ({ page }) => {
     await runCommand(page, 'cascade', 'Cascade');
+    await historyPersisted(page);
     await page.reload();
 
     await openPalette(page);

@@ -617,7 +617,9 @@ A token's PREFIX decides how it renders; the name after it is the mapping key,
 so `$TITLE`, `$input.TITLE` and `$filter.TITLE` all read the same column
 (`views/view-render.ts`):
 
-- `$TOKEN` — the value, read-only.
+- `$TOKEN` — the value THROUGH the column's cell renderer, read-only, so a view
+  looks like the grid (a `link` column as a link, `tags` as pills).
+- `$raw.TOKEN` — the value as plain text, skipping the renderer.
 - `$input.TOKEN` — an editable control bound to the cell (checkbox for a
   boolean, number/text otherwise), disabled for a read-only view or a scripted
   column, which has nowhere to write back to.
@@ -631,6 +633,22 @@ is taken apart whatever the column type says). One chip for the whole cell
 filtered on `=red,blue`, and no list cell is ever exactly equal to that, so the
 click emptied the view. Per member it matches per member, which is what an
 `array` column's filter already does — see `search/column-filter.ts`.
+
+**Rendering a `$TOKEN` needs a DOM pass**, not just string substitution: a cell
+renderer is a custom element fed by PROPERTIES (`.value`, `.column`, `.row` — see
+`data-table.ts`), and a property cannot be written into an HTML string. So
+`substituteRow` emits an empty `<span class="eda-cell" data-eda-…>` slot and
+`view-window`'s `updated()` mounts the renderer element into it — every render,
+because `unsafeHTML` replaces the whole block whenever the string changes.
+
+Four things send a token back to plain text: the `raw.` prefix or
+`ViewInstance.tokenRaw[token]` (the mapping dialog's 🎨 / 🔤 toggle, default
+rendered), a column with no renderer or an unregistered name, a token that has
+its own script (which already decided what to show), and — load-bearing — **a
+token INSIDE a tag**. `<img src="$IMAGE">` and `<a href="$URL">` is how the
+shipped templates are written, and an element spliced into an attribute is not a
+renderer, it is a broken tag; `insideTag()` catches it by asking whether the last
+`<` before the token is still unclosed.
 
 **A token can carry its own script** — the `ƒ(x)` button next to its column in
 the mapping list, stored as `ViewInstance.tokenScripts[TOKEN]`. It is the same

@@ -5,7 +5,7 @@ import type { ColumnSpec, DataCollection, Row, ViewInstance, ViewTemplate } from
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViewsDialog } from '../dialogs/views-dialog.js';
-import { addPillValue, cyclePillValue, evaluateRows, extractFilterTokens, hasRowHtml, removePillValue, substituteRow, viewRows } from './view-render.js';
+import { CELL_SLOT_CLASS, addPillValue, cyclePillValue, evaluateRows, extractFilterTokens, hasRowHtml, removePillValue, substituteRow, tokenValue, viewRows } from './view-render.js';
 import { parseColumnFilter } from '@easydb/shared';
 import { facetable, facetCounts } from '../search/facet-values.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
@@ -340,6 +340,9 @@ export class ViewWindow extends LitElement {
   /** The app-wide global search (header search bar), applied to every window. */
   @state() private globalQuery = '';
 
+  /** Renderer name → custom-element tag, snapshotted from the registries. */
+  @state() private cellRenderers: Map<string, string> = new Map();
+
   /** Template rendering is on unless the instance explicitly disabled it. */
   private get templateOn(): boolean {
     return this.instance?.templateEnabled !== false;
@@ -378,10 +381,55 @@ export class ViewWindow extends LitElement {
   };
 
   override async updated(changed: Map<string, unknown>) {
+    // The template's HTML went in through `unsafeHTML`, so any cell-renderer
+    // slot in it is an empty element until this fills it. Every render, because
+    // `unsafeHTML` replaces the whole block whenever the string changes.
+    this.mountCellRenderers();
     if (changed.has('viewInstanceId')) {
       this.rowsUnsub?.();
       this.loaded = false;
       await this.load();
+    }
+  }
+
+  /**
+   * Put the real cell-renderer element inside each slot `substituteRow` left.
+   *
+   * This exists because a renderer is a custom element driven by PROPERTIES
+   * (`.value`, `.column`, `.row` — see `data-table.ts`), and a property cannot be
+   * written into an HTML string. So the string pass marks the spot and this pass
+   * mounts into it, with the same values `data-table` would pass.
+   *
+   * Read-only in both senses: a plain `$TOKEN` displays, it never edits — that is
+   * what `$input.TOKEN` is for — so no `change` listener is wired up.
+   */
+  private mountCellRenderers(): void {
+    const slots = this.renderRoot?.querySelectorAll?.(`.${CELL_SLOT_CLASS}:not([data-eda-mounted])`);
+    if (!slots?.length) return;
+    const byId = new Map(this.rows.map((r) => [r.id, r]));
+    const specs = new Map(this.tableColumns.map((c) => [c.field, c]));
+    const scripts = this.instance?.tokenScripts ?? {};
+    for (const slot of slots) {
+      const el = slot as HTMLElement;
+      el.dataset.edaMounted = '1';
+      const row = byId.get(el.dataset.edaRow ?? '');
+      const field = el.dataset.edaField ?? '';
+      const tag = el.dataset.edaTag ?? '';
+      const spec = specs.get(field);
+      if (!row || !spec || !tag) continue;
+      const cell = document.createElement(tag) as HTMLElement & {
+        value?: unknown;
+        column?: ColumnSpec;
+        row?: Record<string, unknown>;
+        readonly?: boolean;
+        sourceReadonly?: boolean;
+      };
+      cell.value = tokenValue(row, field, scripts[el.dataset.edaToken ?? '']) ?? '';
+      cell.column = spec;
+      cell.row = row.data;
+      cell.readonly = true;
+      cell.sourceReadonly = true;
+      el.replaceChildren(cell);
     }
   }
 
@@ -405,6 +453,11 @@ export class ViewWindow extends LitElement {
       return;
     }
     this.instance = inst;
+    // Which renderers exist, so a `$TOKEN` can go through the column's own —
+    // re-snapshotted on `app:ready`, like the grid does, because a hot-installed
+    // plugin can add one after this view is already open.
+    this.cellRenderers = new Map(ctx.registries.cellRenderers);
+    ctx.events.on('app:ready', () => (this.cellRenderers = new Map(ctx.registries.cellRenderers)));
     this.template = (await ctx.store.viewTemplates.findOne(inst.templateId)) ?? null;
     const table = await ctx.store.tables.findOne(inst.tableId);
     this.tableColumns = table?.columns ?? [];
@@ -781,7 +834,10 @@ export class ViewWindow extends LitElement {
       // Per-token scripts format what a token SHOWS (a date in the reader's
       // locale, markdown as HTML) without touching the stored value.
       const scripts = this.instance?.tokenScripts ?? {};
-      const body = this.rows.map((r) => substituteRow(t.rowHtml, r, mapping, { columns: colMap, readonly, scripts })).join('');
+      // A `$TOKEN` shows what the grid shows, so the column's renderer is
+      // offered the value; `tokenRaw` and `$raw.` are the two ways out.
+      const raw = this.instance?.tokenRaw ?? {};
+      const body = this.rows.map((r) => substituteRow(t.rowHtml, r, mapping, { columns: colMap, readonly, scripts, renderers: this.cellRenderers, raw })).join('');
       const full = (t.headerHtml ?? '') + body + (t.footerHtml ?? '');
       return html`<div class="vw-root">${unsafeHTML(full)}</div>`;
     }

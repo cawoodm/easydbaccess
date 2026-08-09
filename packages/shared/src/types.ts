@@ -445,6 +445,16 @@ export interface ViewInstance {
    */
   tokenScripts?: Record<string, string> | undefined;
   /**
+   * Template token → true when the token must show PLAIN TEXT rather than go
+   * through the mapped column's cell renderer.
+   *
+   * A `$TOKEN` renders like the grid's cell by default, so a view of a `link`
+   * column shows links and a `tags` column shows pills without the template
+   * saying so. Absent (the normal case) ⇒ rendered. This is the mapping dialog's
+   * per-token toggle; `$raw.TOKEN` says the same thing in the template itself.
+   */
+  tokenRaw?: Record<string, boolean> | undefined;
+  /**
    * When false, the template is bypassed and the view shows the data in the
    * standard interactive grid (sort / filter / show-hide / reorder columns),
    * with those presentation choices stored on THIS instance rather than the
