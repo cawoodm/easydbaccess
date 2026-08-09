@@ -240,3 +240,32 @@ describe('readRows', () => {
     expect(page.truncated).toBe(true);
   });
 });
+
+// A scripted column stores nothing, so a free-text search over it scans empties.
+// The reader works this out from the rows it holds — see
+// `search/searchable-columns.ts` for why it is derived and not stored.
+describe('search skips a computed-only column', () => {
+  const cols = [
+    { field: 'a', label: 'a', type: 'string' as const },
+    { field: 'calc', label: 'calc', type: 'string' as const, script: 'function render(row){ return row.a.toUpperCase() }' },
+  ];
+  const rows = [
+    { id: '1', tableId: 't', data: { a: 'ada' }, updatedAt: 0 },
+    { id: '2', tableId: 't', data: { a: 'bob' }, updatedAt: 0 },
+  ];
+
+  it('a field:value term on it finds nothing rather than pretending to work', () => {
+    // `calc` is not offered as a search field, so `calc:ADA` falls through to a
+    // plain substring search for that literal text — which matches no row.
+    expect(applyRowRequest(rows, { columns: cols, search: 'calc:ADA' }).rows).toHaveLength(0);
+  });
+
+  it('a plain term still searches the columns that DO store data', () => {
+    expect(applyRowRequest(rows, { columns: cols, search: 'ada' }).rows.map((r) => r.id)).toEqual(['1']);
+  });
+
+  it('the same column IS searched once it stores something', () => {
+    const filled = [{ id: '1', tableId: 't', data: { a: 'ada', calc: 'ADA' }, updatedAt: 0 }];
+    expect(applyRowRequest(filled, { columns: cols, search: 'calc:ADA' }).rows).toHaveLength(1);
+  });
+});

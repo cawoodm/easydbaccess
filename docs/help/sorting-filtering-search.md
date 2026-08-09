@@ -66,6 +66,13 @@ A column with long, free-text values (a description field, say) won't offer
 a dropdown at all — only a plain typed filter — since a value list wouldn't
 be useful there.
 
+## Columns you cannot search
+
+A column whose value comes from a script holds nothing of its own — the value is
+worked out from the row each time it is shown. Searching it would look at empty
+cells and find nothing, so it offers no funnel and the search skips it. Give the
+column real data and it becomes searchable again by itself.
+
 ## Search
 
 Each table has its own local search box (an icon that expands into a text

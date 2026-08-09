@@ -37,6 +37,7 @@
 import type { ColumnSpec, DataCollection, Row, RowPage, RowQuery, SortSpec } from '@easydb/shared';
 import { matchesColumnFilter } from '@easydb/shared';
 import { searchRowsByField, type SearchField } from '../search/text-search.js';
+import { searchableColumns } from '../search/searchable-columns.js';
 import { sortRowsBySpecs } from '../table/row-sort.js';
 
 /**
@@ -79,9 +80,14 @@ export function isPushableSearch(query: string, fields: readonly SearchField[]):
   return true;
 }
 
-/** Fields a free-text search looks in — everything not flagged unfilterable. */
-function searchFieldsOf(columns: readonly ColumnSpec[]): SearchField[] {
-  return columns.filter((c) => c.filterable !== false).map((c) => ({ field: c.field, label: c.label }));
+/**
+ * Fields a free-text search looks in: everything not flagged unfilterable, and —
+ * when there are rows to judge by — nothing that is computed-only. A scripted
+ * column stores nothing, so searching it scans empties (see
+ * `search/searchable-columns.ts`).
+ */
+function searchFieldsOf(columns: readonly ColumnSpec[], rows: readonly Row[] = []): SearchField[] {
+  return searchableColumns(columns, rows).map((c) => ({ field: c.field, label: c.label }));
 }
 
 /** Per-column filters that are actually active and actually allowed to narrow. */
@@ -118,7 +124,9 @@ export function applyRowRequest(rows: Row[], req: RowRequest): RowPage {
   }
 
   const term = (req.search ?? '').trim();
-  if (term !== '') out = searchRowsByField(out, term, searchFieldsOf(req.columns));
+  // The rows in hand are what decides whether a scripted column stores anything,
+  // so the search fields are worked out here rather than up front.
+  if (term !== '') out = searchRowsByField(out, term, searchFieldsOf(req.columns, rows));
 
   out = sortRowsBySpecs(out, req.sort ?? [], req.columns);
 

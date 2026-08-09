@@ -9,6 +9,7 @@
 - 🪶 A view placeholder shows the column's renderer — links, pills — with a 🎨 / 🔤 toggle and `$raw.TOKEN` for the plain value (v0.0.331)
 - 🪶 `view/Reading plan?Book==Matthew` filters a view, and `view?…` inside a template filters the view you are in (v0.0.331)
 - ✨ Searching a table past the row cap says so, in a view too, instead of letting an empty result read as "nothing there" (v0.0.331)
+- ✨ A column computed by a script offers no filter and is skipped by search, because it stores nothing to match (v0.0.332)
 
 ### Bugs
 

@@ -5,6 +5,7 @@ import type { ColumnSpec, DataCollection, Row, SortSpec, Table, ViewInstance } f
 import { readRows, type RowRequest } from '../db/row-reader.js';
 import { ROW_FETCH_CAP } from '../db/data-store-ipc.js';
 import { truncationNote } from '../db/truncation-note.js';
+import { isComputedOnly, searchableColumns } from '../search/searchable-columns.js';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
@@ -1182,7 +1183,9 @@ export class DataTable extends LitElement {
     // AND/OR, and the phrase→AND→OR fallback. Local and global queries each
     // narrow the set independently. Field names resolve against this view's
     // columns (name or label), excluding non-filterable ones.
-    const searchable = this.columns.filter((c) => c.filterable !== false);
+    // Same rule the reader applies: a scripted column that stores nothing is not
+    // searchable, so it must not be offered as one either.
+    const searchable = searchableColumns(this.columns, this.rows);
     if (lq) rows = searchRowsByField(rows, lq, searchable);
     if (gq) rows = searchRowsByField(rows, gq, searchable);
     return rows;
@@ -1515,7 +1518,7 @@ export class DataTable extends LitElement {
           <tr>
             ${cols.map((c) => {
               const canSort = c.sortable !== false;
-              const canFilter = c.filterable !== false;
+              const canFilter = c.filterable !== false && !isComputedOnly(c, this.rows);
               const sortAt = this.sortSpecs.findIndex((s) => s.field === c.field);
               const spec = sortAt >= 0 ? this.sortSpecs[sortAt] : undefined;
               const sorted = spec ? (spec.asc ? 'asc' : 'desc') : null;

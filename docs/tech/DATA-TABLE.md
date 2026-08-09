@@ -94,6 +94,22 @@ either side fails to parse as its declared type).
 Two independent layers narrow the row set, applied together in
 `filteredRows()`:
 
+**Which columns may be searched or filtered at all** is one rule, in
+[`search/searchable-columns.ts`](../../packages/renderer/src/search/searchable-columns.ts),
+shared by the grid and by `row-reader.ts`. `ColumnSpec.filterable === false` is
+the explicit answer (the ⚲ box in the columns editor). On top of that, a
+**scripted column that stores nothing** is dropped: its value is computed at
+render time and never written back, so `row.data[field]` is empty for every row
+and a search over it scans empties while the grid plainly SHOWS the value being
+searched for. Such a column gets no funnel and is not a field the search looks
+in.
+
+That mark is DERIVED, never written onto the column. Storing `filterable: false`
+would freeze a guess: a column that carried values before a script was added to
+it, or one an import fills later, is searchable and must stay so. With no rows to
+judge by (an empty table, a read still in flight) nothing is dropped — no
+evidence is not evidence of emptiness.
+
 - **Per-column filters** — a substring match typed into each column's
   header `<filter-combobox>`. Changes are debounced 250ms before persisting
   (`onFilterInput` → `saveFilters`), so typing doesn't hammer IndexedDB on
