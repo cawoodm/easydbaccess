@@ -28,6 +28,10 @@ template itself. A placeholder inside a tag, as in `<img src="$IMAGE">`, always
 gives you the plain value — an element inside an attribute would only break the
 tag.
 
+Dates and times are shown the way you write them, not the way they are stored:
+a value with a timezone is converted to your clock, one without is left on its
+own. `$raw.TOKEN` gets the stored text back if you need it.
+
 Two other prefixes: `$input.TOKEN` gives an editable control bound to the cell,
 and `$filter.TOKEN` a chip that filters the view by that value when clicked.
 Both always read the stored value, never the renderer.

@@ -620,6 +620,15 @@ so `$TITLE`, `$input.TITLE` and `$filter.TITLE` all read the same column
 - `$TOKEN` — the value THROUGH the column's cell renderer, read-only, so a view
   looks like the grid (a `link` column as a link, `tags` as pills).
 - `$raw.TOKEN` — the value as plain text, skipping the renderer.
+
+A `date` / `datetime` column with NO renderer is still formatted for the reader,
+by TYPE, in `util/local-datetime.ts` — otherwise a card showed the stored
+`2026-06-17T10:59:56.937Z`. The one distinction that module exists for: a value
+carrying a zone names an INSTANT and is converted to the reader's clock, while an
+unzoned one is already a wall clock and must not be shifted. A date-only value is
+formatted from its parts, never through `new Date(s)`, which parses it as midnight
+UTC and renders the day before west of Greenwich. `$raw.` keeps the stored text,
+and a value the app cannot parse comes back unchanged rather than blank.
 - `$input.TOKEN` — an editable control bound to the cell (checkbox for a
   boolean, number/text otherwise), disabled for a read-only view or a scripted
   column, which has nowhere to write back to.

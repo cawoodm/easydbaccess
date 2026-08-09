@@ -401,6 +401,44 @@ describe('view-render', () => {
     });
   });
 
+  // A view of a date column showed the stored `2026-06-17T10:59:56.937Z`. With no
+  // renderer on the column there was nothing to format it, so the token now
+  // formats by TYPE — and `$raw.` still gets the stored text.
+  describe('date and datetime tokens', () => {
+    const cols = new Map([
+      ['d', col('d', 'date')],
+      ['dt', col('dt', 'datetime')],
+      ['s', col('s', 'string')],
+    ]);
+    const r = row({ d: '2026-06-17', dt: '2026-06-17T09:00', s: '2026-06-17T10:59:56.937Z' });
+
+    it('a date token is formatted for the reader, not shown as stored', () => {
+      const out = substituteRow('$D', r, { D: 'd' }, { columns: cols });
+      expect(out).toBe(new Date(2026, 5, 17).toLocaleDateString());
+      expect(out).not.toBe('2026-06-17');
+    });
+
+    it('a datetime token loses the T, the seconds and the Z', () => {
+      const out = substituteRow('$DT', r, { DT: 'dt' }, { columns: cols });
+      expect(out).toContain('09:00');
+      expect(out).not.toContain('T');
+    });
+
+    it('$raw. still gives the stored text — that is what raw means', () => {
+      expect(substituteRow('$raw.D', r, { D: 'd' }, { columns: cols })).toBe('2026-06-17');
+    });
+
+    it('a string column that happens to hold a date is left alone', () => {
+      // Formatting by TYPE, not by what the value looks like: the column says
+      // what it is, and guessing would rewrite text the user typed.
+      expect(substituteRow('$S', r, { S: 's' }, { columns: cols })).toBe('2026-06-17T10:59:56.937Z');
+    });
+
+    it('with no column specs at all nothing is formatted, as before', () => {
+      expect(substituteRow('$D', r, { D: 'd' })).toBe('2026-06-17');
+    });
+  });
+
   // A token script formats what the VIEW shows. The stored cell is not touched,
   // which is the whole point: the same column can read one way in the grid and
   // another in a card.

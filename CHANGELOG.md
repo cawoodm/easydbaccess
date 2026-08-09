@@ -12,6 +12,7 @@
 - ✨ A column computed by a script offers no filter and is skipped by search, because it stores nothing to match (v0.0.332)
 - ✨ The palette's Recent list forgets a deleted table or view, instead of holding a slot for something that is gone (v0.0.333)
 - ✨ The columns editor offers back the columns removed earlier, so one deleted by mistake need not be retyped from memory (v0.0.334)
+- ✨ A view shows a date or datetime the way its reader writes one, instead of the stored `2026-06-17T10:59:56.937Z` (v0.0.335)
 
 ### Bugs
 

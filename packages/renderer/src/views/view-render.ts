@@ -9,6 +9,7 @@
 import type { ColumnSpec, Row, ViewInstance } from '@easydb/shared';
 import { arrayMembers, composeColumnFilter, matchesColumnFilter, parseColumnFilter, type FilterToken } from '@easydb/shared';
 import { runColumnScript } from '../util/column-script.js';
+import { formatByType } from '../util/local-datetime.js';
 
 /**
  * Matches a `$TOKEN` placeholder. An optional prefix decides how it renders:
@@ -240,7 +241,13 @@ export function substituteRow(
     if (!prefix || prefix.startsWith('raw')) {
       const tag = prefix ? undefined : rendererTag(spec, opts.renderers);
       if (tag && opts.raw?.[token] !== true && !insideTag(whole, offset)) return cellSlot(row.id, field, token, tag);
-      return v == null ? '' : String(v);
+      if (v == null || v === '') return '';
+      // With no renderer to do it, a `date` / `datetime` column is still formatted
+      // for the reader — otherwise a view shows the stored `2026-06-17T10:59:56.937Z`
+      // and a card is unreadable. `$raw.` keeps the stored text, which is what
+      // "raw" is for.
+      const typed = prefix ? null : formatByType(spec?.type, v);
+      return typed ?? String(v);
     }
     if (prefix.startsWith('filter')) return renderFilterPill(field, v, spec);
     // A scripted column is computed from the rest of the row, so there is
