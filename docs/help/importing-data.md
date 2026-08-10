@@ -92,6 +92,17 @@ instance), you choose:
 Referencing a Datasette **database** or **instance** asks which tables you want,
 the same way a copy does.
 
+## Importing many tables at once
+
+All the windows open together, empty, and then fill one at a time. Each window
+shows a moving bar from the moment it appears, so a table that is only waiting
+its turn does not look like a table with no data in it. The bar becomes a
+percentage as soon as that table knows how many rows it is getting.
+
+A bar under the header follows the whole batch, with a count of the tables that
+are done. It is weighted by rows, not by tables, so one big table and ten small
+ones move it at an honest speed.
+
 ## What a Datasette import brings across
 
 More than the rows. Whatever the instance is willing to tell us about a table

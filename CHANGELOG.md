@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 10 Aug 2026
+
+### Features
+
+- ✨ Importing many tables flashes a bar in every window at once, and one bar under the header counts the batch (v0.0.336)
+
 ## 9 Aug 2026
 
 ### Features

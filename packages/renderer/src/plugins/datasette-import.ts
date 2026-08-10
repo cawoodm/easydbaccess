@@ -19,7 +19,9 @@
 import type { ColumnSpec, HostApi, ImportResume, PluginModule, Row, Table } from '@easydb/shared';
 import { reconcileColumns, rowRekeyer } from '../table/column-merge.js';
 import { mergeRefreshedRows } from '../table/refresh-merge.js';
-import { setTableLoading } from '../table/data-table.js';
+import { setTableLoading } from '../table/table-loading.js';
+import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
+import { ImportProgress } from './import-progress.js';
 import {
   applyPrimaryKeyFlags,
   applyTableMetadata,
@@ -266,6 +268,11 @@ export async function importDatasette(api: HostApi, input: string, opts: Dataset
       overwrite: prep.overwrite,
       knownCount: c.count,
     });
+    // Flash this window's bar NOW, not when its turn comes. Twenty windows open
+    // at once and nineteen of them wait; without this they look like empty
+    // tables instead of tables that have not been filled yet. It goes
+    // proportional in fillImportTable as soon as that table has a denominator.
+    setTableLoading(prep.tableId, true);
   }
 
   let imported = 0;
@@ -273,18 +280,50 @@ export async function importDatasette(api: HostApi, input: string, opts: Dataset
   const capped: string[] = [];
   const partial: string[] = [];
   const failed: string[] = [];
-  for (const p of plans) {
-    try {
-      const r = await fillImportTable(api, p.tableId, p.ref, p.overwrite, p.knownCount, opts, settings);
-      imported += 1;
-      totalRows += r.rowCount;
-      // A partial import (paging stopped on a failure, e.g. rate limiting) still
-      // landed its salvaged rows — report it as partial, not merely "capped".
-      if (r.error) partial.push(`${p.ref.db}/${p.ref.table} (${r.error})`);
-      else if (r.hasMore || r.truncated) capped.push(`${p.ref.db}/${p.ref.table}`);
-    } catch (err) {
-      failed.push(`${p.ref.db}/${p.ref.table}: ${(err as Error)?.message ?? String(err)}`);
+  // One app-wide bar for the whole batch, weighted by row count so a database of
+  // one huge table and ten small ones does not sit at 9% and then sprint. It
+  // starts indeterminate — the tables are queued and none has reported a row, so
+  // any number here would be invented — and turns proportional on the first
+  // page. The per-window bars are not enough on their own: a batch minimizes
+  // nothing, but the user cannot watch twenty of them.
+  const tracker = new ImportProgress(plans.map((p) => ({ tableId: p.tableId, total: p.knownCount ?? 0 })));
+  const batchLabel = `Importing ${plans.length} table${plans.length === 1 ? '' : 's'}`;
+  const showBatch = (fraction?: number): void => {
+    if (plans.length === 0) return; // everything was skipped; there is no batch
+    setAppProgress({
+      label: batchLabel,
+      ...(fraction === undefined ? {} : { fraction }),
+      detail: `${tracker.completedTables()} of ${tracker.tableCount} table${tracker.tableCount === 1 ? '' : 's'}`,
+    });
+  };
+  showBatch();
+  try {
+    for (const p of plans) {
+      try {
+        const r = await fillImportTable(api, p.tableId, p.ref, p.overwrite, p.knownCount, opts, settings, (rows) => {
+          tracker.observe(p.tableId, rows);
+          showBatch(tracker.fraction());
+        });
+        imported += 1;
+        totalRows += r.rowCount;
+        // A partial import (paging stopped on a failure, e.g. rate limiting) still
+        // landed its salvaged rows — report it as partial, not merely "capped".
+        if (r.error) partial.push(`${p.ref.db}/${p.ref.table} (${r.error})`);
+        else if (r.hasMore || r.truncated) capped.push(`${p.ref.db}/${p.ref.table}`);
+      } catch (err) {
+        failed.push(`${p.ref.db}/${p.ref.table}: ${(err as Error)?.message ?? String(err)}`);
+      }
+      // Finished either way — a table that failed is not going to report more
+      // rows, and leaving its weight unpaid would hold the bar short of 100%.
+      tracker.complete(p.tableId);
+      showBatch(tracker.fraction());
+      // Belt and braces: `fillImportTable` clears its own bar, but it is marked
+      // loading here in phase 1, so a throw before its try-block began would
+      // otherwise leave that window flashing for good.
+      setTableLoading(p.tableId, false);
     }
+  } finally {
+    clearAppProgress();
   }
 
   // The dialog's "Limit rows" narrows the batch's cap the same way it does per
@@ -385,6 +424,8 @@ async function fillImportTable(
   knownCount: number | null,
   opts: DatasetteImportOpts,
   settings: DatasetteSettings,
+  /** Rows fetched so far for THIS table, for a batch-wide bar. */
+  onRows?: (rows: number) => void,
 ): Promise<OneResult> {
   const name = `${ref.db}/${ref.table}`;
   const fetchFn = (u: string) => api.backend.fetch(u);
@@ -453,6 +494,7 @@ async function fillImportTable(
         ...(startUrl ? { startUrl } : {}),
         onProgress: (n) => {
           if (target > 0) setTableLoading(tableId, true, Math.min(1, (rows.length + n) / target));
+          onRows?.(rows.length + n);
         },
       });
       rows.push(...seg.rows);

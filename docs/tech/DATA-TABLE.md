@@ -222,6 +222,17 @@ interfere:
   (width ∝ fraction); otherwise it runs the same indeterminate sliver
   animation as the local case.
 
+The event and its `setTableLoading` reporter live in
+[`table/table-loading.ts`](../../packages/renderer/src/table/table-loading.ts),
+which also **remembers which tables are loading**. That memory is what makes a
+multi-table import readable: the importer creates every table record up front
+(so all the windows appear together) and marks them all loading, then fills them
+one at a time — so most of the grids mount long after their own event was sent.
+Each one calls `tableLoadingState(tableId)` on mount and when its `tableId`
+lands, and starts flashing straight away instead of looking like an empty table.
+`data-table.ts` re-exports `setTableLoading` for the importers that already
+imported it from there.
+
 ## Row count → panel title
 
 After every render, `emitCount()` compares the just-rendered visible row

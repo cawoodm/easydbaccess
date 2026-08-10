@@ -19,6 +19,7 @@ import { nextSortSpecs } from './sort-cycle.js';
 import { runColumnScript, runValidateScript } from '../util/column-script.js';
 import { arrayMembers } from '@easydb/shared';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
+import { TABLE_LOADING_EVENT, tableLoadingState, type TableLoadingDetail } from './table-loading.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
 
 /** Delay before the header loading bar appears, so fast loads don't flash it. */
@@ -541,7 +542,8 @@ export class DataTable extends LitElement {
     super.connectedCallback();
     document.addEventListener('easydb:global-search', this.onGlobalSearch as EventListener);
     document.addEventListener('easydb:table-search', this.onTableSearch as EventListener);
-    document.addEventListener('easydb:table-loading', this.onTableLoading as EventListener);
+    document.addEventListener(TABLE_LOADING_EVENT, this.onTableLoading as EventListener);
+    this.readLoadingState();
     this.addEventListener('scroll', this.onScroll, { passive: true });
     this.resizeObs = new ResizeObserver(() => {
       this.viewportHeight = this.clientHeight;
@@ -554,7 +556,7 @@ export class DataTable extends LitElement {
     super.disconnectedCallback();
     document.removeEventListener('easydb:global-search', this.onGlobalSearch as EventListener);
     document.removeEventListener('easydb:table-search', this.onTableSearch as EventListener);
-    document.removeEventListener('easydb:table-loading', this.onTableLoading as EventListener);
+    document.removeEventListener(TABLE_LOADING_EVENT, this.onTableLoading as EventListener);
     this.removeEventListener('scroll', this.onScroll);
     this.resizeObs?.disconnect();
     this.resizeObs = null;
@@ -605,17 +607,31 @@ export class DataTable extends LitElement {
   };
 
   private onTableLoading = (e: Event) => {
-    const d = (e as CustomEvent<{ tableId: string; loading: boolean; progress?: number }>).detail;
+    const d = (e as CustomEvent<TableLoadingDetail>).detail;
     if (d.tableId !== this.tableId) return;
     this.externalLoading = d.loading;
     this.externalProgress = d.loading && typeof d.progress === 'number' ? d.progress : null;
   };
+
+  /**
+   * Pick up a load that started before this grid existed. A multi-table import
+   * marks every table loading and then fills them one by one, so most of the
+   * windows mount after their own signal has already been sent.
+   */
+  private readLoadingState(): void {
+    const state = tableLoadingState(this.tableId);
+    this.externalLoading = state !== undefined;
+    this.externalProgress = typeof state === 'number' ? state : null;
+  }
 
   override async updated(changed: Map<string, unknown>) {
     if ((changed.has('tableId') || changed.has('viewInstanceId')) && this.tableId) {
       this.unsubscribe?.();
       this.tableSubUnsub?.();
       this.viewSubUnsub?.();
+      // The id arrives after connectedCallback when the host sets it as an
+      // attribute, so this is where a pending import is really discovered.
+      if (changed.has('tableId')) this.readLoadingState();
       await this.bind();
     }
     // Re-measure row height once we have content. Reading offsetHeight forces
@@ -1759,16 +1775,7 @@ function isNonEmptyButUnparsed(raw: unknown, parsed: string): boolean {
   return parsed === '';
 }
 
-/**
- * Toggle the progress bar on the window for `tableId` from outside the grid.
- * An importer shows the window (an empty table record) immediately, calls this
- * with `true`, fetches rows in the background, then calls it with `false` once
- * the rows have landed — so the user sees the window + a progress bar before
- * any data arrives.
- */
-export function setTableLoading(tableId: string, loading: boolean, progress?: number): void {
-  document.dispatchEvent(new CustomEvent('easydb:table-loading', { detail: { tableId, loading, progress } }));
-}
+export { setTableLoading } from './table-loading.js';
 
 declare global {
   interface HTMLElementTagNameMap {
