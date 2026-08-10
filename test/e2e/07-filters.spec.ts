@@ -202,6 +202,32 @@ test.describe('filters', () => {
     await expect(rows).toHaveCount(0);
   });
 
+  test('Esc closes the picker, and the window behind it stays open', async ({ page }) => {
+    const id = await createTable(page, 'Pets', [{ field: 'species' }]);
+    await waitForPanel(page, id);
+    await addRow(page, id, { species: 'cat' });
+    await addRow(page, id, { species: 'dog' });
+
+    const panel = page.locator(`#${panelDomId(id)}`);
+    await panel.locator('data-table thead th button.funnel').first().click();
+    const popover = page.locator('filter-popover');
+    await expect(popover).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(popover).toBeHidden();
+    // Escape dismissed the layer, not the table — the popover claims the key.
+    await expect(panel).toBeVisible();
+
+    // A value ticked before Escape stays applied: each click was written as it
+    // was made, so Escape means "done with the list", not "undo".
+    await panel.locator('data-table thead th button.funnel').first().click();
+    await popover.locator('li').filter({ hasText: 'cat' }).click();
+    await page.keyboard.press('Escape');
+    await expect(popover).toBeHidden();
+    await expect(panel.locator('data-table tbody tr')).toHaveCount(1);
+    await expect(panel.locator('data-table thead th button.funnel').first()).toHaveClass(/active/);
+  });
+
   test('popover is portal-mounted (fixed positioning, escapes panel clip)', async ({ page }) => {
     const id = await createTable(page, 'Anchor', [{ field: 'a' }]);
     await waitForPanel(page, id);

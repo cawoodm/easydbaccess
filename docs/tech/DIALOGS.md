@@ -135,12 +135,12 @@ dialog to reimplement:
   / Delete / Use / Copy) all needed an explicit `type="button"` added so
   clicking them didn't also submit (and close) the dialog.
 - **Mobile goes full-screen.** A `@media (max-width: 640px)` block forces
-  every *open* dialog to `position: fixed; inset: 0` edge-to-edge,
+  every _open_ dialog to `position: fixed; inset: 0` edge-to-edge,
   overriding each dialog's own width/position (including an in-progress
   drag — see below). The rule is scoped to `dialog[open]` specifically —
   the comment in the source is emphatic about this — because a bare
   `dialog { display: flex !important }` would override the user-agent's
-  `dialog:not([open]) { display: none }` and leave a *closed* dialog
+  `dialog:not([open]) { display: none }` and leave a _closed_ dialog
   visibly on screen, blocking the whole UI permanently.
 
 ## Dragging a native `<dialog>`
@@ -169,13 +169,22 @@ button's job is "pick one of a few actions" rather than "do the one thing
 this button does." `AnchoredMenu.open(rect, items)` self-mounts a singleton
 `<anchored-menu>` (same lazy-singleton pattern as `<toast-host>` and the
 filter popover), positions it just under the given viewport-space `rect`
-(flipping to open *above* the rect if it would overflow the bottom of the
+(flipping to open _above_ the rect if it would overflow the bottom of the
 screen — useful since these are mostly opened from the footer), and
 resolves to the clicked item's `id` or `null` on outside-click/Escape. A
 button's `onClick(api, ctx)` gets `ctx.anchor` — its own DOM element — from
 the host precisely so it can hand `anchor.getBoundingClientRect()` to
 `AnchoredMenu.open()` and have the menu appear right under itself rather
 than at a guessed fixed position.
+
+**Escape closes every transient layer, and exactly one of them.** The convention
+is a capture-phase `keydown` listener on `document` that calls `preventDefault()`
+— the anchored menu, the filter popover (`chrome/filter-popover.ts`) and the cell
+editors all do this — because `panel-shell`'s own Escape handler bails out on
+`e.defaultPrevented`. That is what stops one press closing the popover AND the
+window behind it. Dismissing the filter popover this way keeps whatever was
+already ticked: each value is applied as it is clicked, so Escape means "done with
+the list", not "undo".
 
 This is what replaced several plugins' one-button-per-action footer
 buttons with a single button opening a menu: `gist-sync` (Push / Pull /

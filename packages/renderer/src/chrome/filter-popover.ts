@@ -230,8 +230,11 @@ export class FilterPopover extends LitElement {
     this.removeAttribute('hidden');
     return new Promise((res) => {
       this.resolveFn = res;
-      // Click outside to dismiss
+      // Click outside to dismiss. Deferred a tick so the click that OPENED the
+      // popover is not the click that closes it — a key press has no such race,
+      // so Escape is armed straight away.
       setTimeout(() => document.addEventListener('mousedown', this.onOutside, true), 0);
+      document.addEventListener('keydown', this.onKey, true);
     });
   }
 
@@ -262,6 +265,7 @@ export class FilterPopover extends LitElement {
   private close(v: string | null | { clear: true }) {
     this.onChange = null;
     document.removeEventListener('mousedown', this.onOutside, true);
+    document.removeEventListener('keydown', this.onKey, true);
     this.setAttribute('hidden', '');
     const fn = this.resolveFn;
     this.resolveFn = null;
@@ -271,6 +275,20 @@ export class FilterPopover extends LitElement {
   private onOutside = (e: MouseEvent) => {
     const path = e.composedPath();
     if (!path.includes(this)) this.close(null);
+  };
+
+  /**
+   * Escape dismisses the popover, like every other transient layer (see
+   * `anchored-menu.ts`). Capture phase + `preventDefault` is the app's convention
+   * for "I claimed this key": `panel-shell`'s Escape handler checks
+   * `defaultPrevented`, so closing the popover cannot also close a window behind
+   * it. Values already toggled stay applied — each one was written as it was
+   * clicked, and Escape here means "I am done with this list", not "undo".
+   */
+  private onKey = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    this.close(null);
   };
 
   override connectedCallback() {
