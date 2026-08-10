@@ -5,6 +5,7 @@
 ### Features
 
 - ✨ Importing many tables flashes a bar in every window at once, and one bar under the header counts the batch (v0.0.336)
+- ✨ The Import dialog's sample list is yours: add the URL in the box to it, delete any sample, restore the shipped ones (v0.0.337)
 
 ## 9 Aug 2026
 

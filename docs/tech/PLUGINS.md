@@ -39,7 +39,7 @@ export function init(api: HostApi): void {
   functional category that drives the Plugin Manager's "by type" filter —
   every built-in declares one.
 - **Every built-in defaults to user-toggleable from the Plugin Manager.**
-  Only `meta.fixed = true` opts a plugin *out* of that — it becomes
+  Only `meta.fixed = true` opts a plugin _out_ of that — it becomes
   always-on and never shows a toggle. Today only `settings` is fixed;
   everything else (including things you might assume are load-bearing, like
   `new-table-button`, `csv-import`, or any of the `cell-date`/`cell-datetime`/
@@ -60,25 +60,25 @@ dynamic-`import()`ed — so unlike built-ins they must be fully self-contained
 
 Every plugin gets one `api` object. The pieces plugins actually touch:
 
-| Surface | Purpose | Example call |
-|---|---|---|
-| `api.ui.registerHeaderButton` | Button in the top chrome (global actions) | `new-table-button` adds "+ New Table" |
-| `api.ui.registerFooterButton` | Button in the bottom bar (workspace-level actions) | `gist-sync` adds a single "Gist" menu button |
-| `api.ui.registerTableButton` | Per-table button in a table's window titlebar | `csv-export` adds a "CSV" download button |
-| `api.ui.registerCellRenderer(name, tag)` | Custom element for a column whose `renderer` field matches `name` | `cell-color` registers `<cell-color>` under `'color'` |
-| `api.ui.registerImporter` / `registerExporter` | Named format handlers (used by drop handlers, the Import dialog, per-table export) | `csv-import`, `csv-export` |
-| `api.ui.registerDropHandler` | Intercept a file/text drag-drop onto the canvas | `csv-import`, `json-import`, `datasette-import` |
-| `api.ui.registerUrlSource` | A named "import from URL" flow | `datasette-import` |
-| `api.ui.registerConnector` | A live-backend CONNECT flow, listed by the Connect menu | `datasette-connect` |
-| `api.ui.registerSettings(pluginId, name, fields)` | Declares a settings tab (rendered by the Settings dialog) | `gist-sync`'s `user`/`gist_id`/`gist_token` fields |
-| `api.ui.openSettings()` | Opens the Settings dialog | the `settings` built-in's header gear button |
-| `api.settings` | Layered settings accessor (`get`/`set`/`placement`) — user layer shadows workspace layer, resolves `${secret:name}` refs on read | `gist-sync`, `server-sync` reading their config |
-| `api.ui.dialogs` | Promise-based alert/confirm/prompt/choice/toast | used everywhere instead of `window.*` |
-| `api.store` | The `DataStore` (tables, rows, settings, plugins, view templates/instances) | every plugin that persists data |
-| `api.registerRowSource` | Backs a table carrying a `source` descriptor with a non-local row collection | `datasette-connect` |
-| `api.events` | Typed pub/sub (`AppEvents`) | `import:before`/`import:after`, `plugin:error` |
-| `api.backend.fetch` / `saveFile` | CORS-aware fetch (proxied through the Hono server in browser mode) and a save-file abstraction | `import-data`, `gist-sync`, all exporters |
-| `api.windows` | Open/list/find panel-shell-backed windows | the core window manager; plugins rarely call this directly |
+| Surface                                           | Purpose                                                                                                                          | Example call                                               |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `api.ui.registerHeaderButton`                     | Button in the top chrome (global actions)                                                                                        | `new-table-button` adds "+ New Table"                      |
+| `api.ui.registerFooterButton`                     | Button in the bottom bar (workspace-level actions)                                                                               | `gist-sync` adds a single "Gist" menu button               |
+| `api.ui.registerTableButton`                      | Per-table button in a table's window titlebar                                                                                    | `csv-export` adds a "CSV" download button                  |
+| `api.ui.registerCellRenderer(name, tag)`          | Custom element for a column whose `renderer` field matches `name`                                                                | `cell-color` registers `<cell-color>` under `'color'`      |
+| `api.ui.registerImporter` / `registerExporter`    | Named format handlers (used by drop handlers, the Import dialog, per-table export)                                               | `csv-import`, `csv-export`                                 |
+| `api.ui.registerDropHandler`                      | Intercept a file/text drag-drop onto the canvas                                                                                  | `csv-import`, `json-import`, `datasette-import`            |
+| `api.ui.registerUrlSource`                        | A named "import from URL" flow                                                                                                   | `datasette-import`                                         |
+| `api.ui.registerConnector`                        | A live-backend CONNECT flow, listed by the Connect menu                                                                          | `datasette-connect`                                        |
+| `api.ui.registerSettings(pluginId, name, fields)` | Declares a settings tab (rendered by the Settings dialog)                                                                        | `gist-sync`'s `user`/`gist_id`/`gist_token` fields         |
+| `api.ui.openSettings()`                           | Opens the Settings dialog                                                                                                        | the `settings` built-in's header gear button               |
+| `api.settings`                                    | Layered settings accessor (`get`/`set`/`placement`) — user layer shadows workspace layer, resolves `${secret:name}` refs on read | `gist-sync`, `server-sync` reading their config            |
+| `api.ui.dialogs`                                  | Promise-based alert/confirm/prompt/choice/toast                                                                                  | used everywhere instead of `window.*`                      |
+| `api.store`                                       | The `DataStore` (tables, rows, settings, plugins, view templates/instances)                                                      | every plugin that persists data                            |
+| `api.registerRowSource`                           | Backs a table carrying a `source` descriptor with a non-local row collection                                                     | `datasette-connect`                                        |
+| `api.events`                                      | Typed pub/sub (`AppEvents`)                                                                                                      | `import:before`/`import:after`, `plugin:error`             |
+| `api.backend.fetch` / `saveFile`                  | CORS-aware fetch (proxied through the Hono server in browser mode) and a save-file abstraction                                   | `import-data`, `gist-sync`, all exporters                  |
+| `api.windows`                                     | Open/list/find panel-shell-backed windows                                                                                        | the core window manager; plugins rarely call this directly |
 
 A `ButtonSpec.onClick(api, ctx?)` handler for a header/footer button
 optionally receives `ctx.anchor` — the button's own DOM element, when the
@@ -95,32 +95,32 @@ Load order matches `plugin-host/loader.ts`. "Fixed" means the plugin has no
 toggle in the Plugin Manager and can never be disabled; every other row
 defaults to enabled but **can** be turned off by the user.
 
-| Plugin | Type | Fixed | What it does | Main hooks |
-|---|---|:---:|---|---|
-| `settings` | ui | | Header gear button that opens the tabbed Settings dialog; drag-and-drop a `secrets.txt` to import the device-local secrets store. | `registerHeaderButton`, `registerDropHandler` |
-| `new-table-button` | ui | | Adds the "+ New Table" header button that opens the table-creation dialog. | `registerHeaderButton` |
-| `csv-import` | importer | | Drag-and-drop or paste CSV to create a typed table; infers column types and a `field:label:type:default:max:flags` header mini-language; append/overwrite/new-table prompt on name collision. | `registerImporter`, `registerDropHandler`, `registerHeaderButton` |
-| `json-import` | importer | | Drag-and-drop JSON — native `.db.json` dumps, legacy v1 minniDBMax dumps, or plain arrays/objects — with a table picker for multi-table dumps. | `registerImporter`, `registerDropHandler` |
-| `datasette-import` | importer | | IMPORT snapshot tables from any online [Datasette](https://datasette.io/) instance by URL — single table, whole database, or entire instance with a table checklist. Rows are stored locally and synced. Supports resumable paged imports, a per-table Refresh (re-fetch + merge by primary key) and a red Resume button. | `registerTableButton`, `registerUrlSource`, `registerDropHandler` |
-| `connect-menu` | ui | | Header "Connect" button plus a Ctrl+K command. Lists every registered `ConnectorSpec`; with one installed it opens that backend directly, with several it shows an anchored menu. Knows no backend itself. | `registerHeaderButton`, `registerCommand` |
-| `datasette-connect` | source | | CONNECT a live, read-write Datasette table. Rows are fetched on demand and never stored locally; the table carries `source: { type: 'datasette' }` and the routed store hands it `datasette-collection.ts`. Its Refresh re-reads the remote instead of merging. | `registerHeaderButton`, `registerTableButton`, `registerRowSource` |
-| `csv-export` | exporter | | Per-table "CSV" download button; RFC-4180-ish writer mirroring the CSV importer's dialect. | `registerExporter`, `registerTableButton` |
-| `dump-export` | exporter | | Footer "Export" menu button (JSON dump / SQL script) — the JSON option exports the whole workspace as one `.db.json` file; the SQL option delegates to `sql-export`'s serializer. | `registerFooterButton` |
-| `sql-export` | exporter | | No UI of its own — exports `serializeWorkspaceAsSql()`, called from `dump-export`'s "Export" menu. Still a standalone catalog entry (its own `meta.type`) for the Plugin Manager's type filter. | none (library only) |
-| `gist-sync` | sync | | Footer "Gist" menu button (Push/Pull/Settings/Share/View gist) plus a per-table "Gist" menu (push/pull/view just that table's file) that store the workspace as a private GitHub Gist. Credentials are Settings-dialog fields (`user`/`gist_id` workspace-scope, `gist_token` a user-scope secret). | `registerFooterButton`, `registerTableButton`, `registerSettings` |
-| `server-sync` | sync | | Footer "Sync" menu button (Push/Pull) against a configured easyDBAccess Hono server, with ETag-based conflict detection. | `registerFooterButton`, `registerSettings` |
-| `cell-date` | cell-renderer | | `date` renderer: a native `<input type=date>` picker. | `registerCellRenderer` |
-| `cell-datetime` | cell-renderer | | `datetime` renderer: a native `<input type=datetime-local>` picker. | `registerCellRenderer` |
-| `cell-boolean` | cell-renderer | | `boolean` renderer: a native checkbox. | `registerCellRenderer` |
-| `cell-color` | cell-renderer | | `color` renderer: a native `<input type=color>` swatch picker for hex values. | `registerCellRenderer` |
-| `cell-image` | cell-renderer | | `image` renderer: thumbnail + upload button; stores images as `data:` URIs. | `registerCellRenderer` |
-| `cell-tags` | cell-renderer | | `tags` renderer for `array` columns: one pill per value of the list, with a pencil to edit the raw list. Set automatically on an `array` column at import time. | `registerCellRenderer` |
-| `cell-markdown` | cell-renderer | | `markdown` renderer for a column written in Markdown: one line of flattened plain text in the cell, the formatted value in the popup, clicking the text edits the source. Shares its cell with `preview` (`preview-cell.ts`) but never guesses the language. | `registerCellRenderer` |
-| `cell-link` | cell-renderer | | `link` renderer: detects http(s) URLs, email addresses, and phone numbers per-value and renders the matching `<a>` (target `_blank`/`mailto:`/`tel:`), with a pencil to switch to raw-text edit mode. | `registerCellRenderer` |
-| `import-data` | importer | | Header "Import" button — a URL/file dialog with curated sample sources (Northwind JSON, a public CSV, Datasette examples) that runs `csv-import` and `json-import` through the import kernel and still routes Datasette to `datasette-import`; recognises a native `.db.json` dump and offers to restore the workspace instead of importing its tables; adds a per-table Refresh button for CSV/JSON snapshot origins. | `registerHeaderButton`, `registerTableButton` |
-| `auto-sync` | sync | | Background timer (1 min) that silently pushes local changes to the configured sync server and prompts to pull when the server has diverged. Shares its config with `server-sync` via `api.settings`. | `load()` (timer) |
-| `views` | ui | | The View system: workspace-global HTML templates (header/row/footer with `$TOKEN` substitution) rendered read-only per table in their own windows, with auto-mapped tokens and an optional row limit; seeds a default "RSS Feed" template. Footer "Views" button opens the manager dialog; window lifecycle itself is core, not plugin, code. | `registerTableButton`, `load()` (template seeding) |
-| `electron-db` | ui | | Footer "Database" button → an anchored Open… / Save As… / Import… menu for `.db` files. **Electron-only, and silent about it:** `init()` returns immediately when `window.easydb?.db` is absent, so the browser build gets no button, no menu entry and no error. Open only accepts a file this app wrote and offers Import for a foreign one; Import previews first and asks Overwrite / Rename / Skip per colliding table. See `STORAGE.md` and `ELECTRON.md`. | `registerFooterButton` |
+| Plugin              | Type          | Fixed | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Main hooks                                                         |
+| ------------------- | ------------- | :---: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `settings`          | ui            |       | Header gear button that opens the tabbed Settings dialog; drag-and-drop a `secrets.txt` to import the device-local secrets store.                                                                                                                                                                                                                                                                                                                                | `registerHeaderButton`, `registerDropHandler`                      |
+| `new-table-button`  | ui            |       | Adds the "+ New Table" header button that opens the table-creation dialog.                                                                                                                                                                                                                                                                                                                                                                                       | `registerHeaderButton`                                             |
+| `csv-import`        | importer      |       | Drag-and-drop or paste CSV to create a typed table; infers column types and a `field:label:type:default:max:flags` header mini-language; append/overwrite/new-table prompt on name collision.                                                                                                                                                                                                                                                                    | `registerImporter`, `registerDropHandler`, `registerHeaderButton`  |
+| `json-import`       | importer      |       | Drag-and-drop JSON — native `.db.json` dumps, legacy v1 minniDBMax dumps, or plain arrays/objects — with a table picker for multi-table dumps.                                                                                                                                                                                                                                                                                                                   | `registerImporter`, `registerDropHandler`                          |
+| `datasette-import`  | importer      |       | IMPORT snapshot tables from any online [Datasette](https://datasette.io/) instance by URL — single table, whole database, or entire instance with a table checklist. Rows are stored locally and synced. Supports resumable paged imports, a per-table Refresh (re-fetch + merge by primary key) and a red Resume button.                                                                                                                                        | `registerTableButton`, `registerUrlSource`, `registerDropHandler`  |
+| `connect-menu`      | ui            |       | Header "Connect" button plus a Ctrl+K command. Lists every registered `ConnectorSpec`; with one installed it opens that backend directly, with several it shows an anchored menu. Knows no backend itself.                                                                                                                                                                                                                                                       | `registerHeaderButton`, `registerCommand`                          |
+| `datasette-connect` | source        |       | CONNECT a live, read-write Datasette table. Rows are fetched on demand and never stored locally; the table carries `source: { type: 'datasette' }` and the routed store hands it `datasette-collection.ts`. Its Refresh re-reads the remote instead of merging.                                                                                                                                                                                                  | `registerHeaderButton`, `registerTableButton`, `registerRowSource` |
+| `csv-export`        | exporter      |       | Per-table "CSV" download button; RFC-4180-ish writer mirroring the CSV importer's dialect.                                                                                                                                                                                                                                                                                                                                                                       | `registerExporter`, `registerTableButton`                          |
+| `dump-export`       | exporter      |       | Footer "Export" menu button (JSON dump / SQL script) — the JSON option exports the whole workspace as one `.db.json` file; the SQL option delegates to `sql-export`'s serializer.                                                                                                                                                                                                                                                                                | `registerFooterButton`                                             |
+| `sql-export`        | exporter      |       | No UI of its own — exports `serializeWorkspaceAsSql()`, called from `dump-export`'s "Export" menu. Still a standalone catalog entry (its own `meta.type`) for the Plugin Manager's type filter.                                                                                                                                                                                                                                                                  | none (library only)                                                |
+| `gist-sync`         | sync          |       | Footer "Gist" menu button (Push/Pull/Settings/Share/View gist) plus a per-table "Gist" menu (push/pull/view just that table's file) that store the workspace as a private GitHub Gist. Credentials are Settings-dialog fields (`user`/`gist_id` workspace-scope, `gist_token` a user-scope secret).                                                                                                                                                              | `registerFooterButton`, `registerTableButton`, `registerSettings`  |
+| `server-sync`       | sync          |       | Footer "Sync" menu button (Push/Pull) against a configured easyDBAccess Hono server, with ETag-based conflict detection.                                                                                                                                                                                                                                                                                                                                         | `registerFooterButton`, `registerSettings`                         |
+| `cell-date`         | cell-renderer |       | `date` renderer: a native `<input type=date>` picker.                                                                                                                                                                                                                                                                                                                                                                                                            | `registerCellRenderer`                                             |
+| `cell-datetime`     | cell-renderer |       | `datetime` renderer: a native `<input type=datetime-local>` picker.                                                                                                                                                                                                                                                                                                                                                                                              | `registerCellRenderer`                                             |
+| `cell-boolean`      | cell-renderer |       | `boolean` renderer: a native checkbox.                                                                                                                                                                                                                                                                                                                                                                                                                           | `registerCellRenderer`                                             |
+| `cell-color`        | cell-renderer |       | `color` renderer: a native `<input type=color>` swatch picker for hex values.                                                                                                                                                                                                                                                                                                                                                                                    | `registerCellRenderer`                                             |
+| `cell-image`        | cell-renderer |       | `image` renderer: thumbnail + upload button; stores images as `data:` URIs.                                                                                                                                                                                                                                                                                                                                                                                      | `registerCellRenderer`                                             |
+| `cell-tags`         | cell-renderer |       | `tags` renderer for `array` columns: one pill per value of the list, with a pencil to edit the raw list. Set automatically on an `array` column at import time.                                                                                                                                                                                                                                                                                                  | `registerCellRenderer`                                             |
+| `cell-markdown`     | cell-renderer |       | `markdown` renderer for a column written in Markdown: one line of flattened plain text in the cell, the formatted value in the popup, clicking the text edits the source. Shares its cell with `preview` (`preview-cell.ts`) but never guesses the language.                                                                                                                                                                                                     | `registerCellRenderer`                                             |
+| `cell-link`         | cell-renderer |       | `link` renderer: detects http(s) URLs, email addresses, and phone numbers per-value and renders the matching `<a>` (target `_blank`/`mailto:`/`tel:`), with a pencil to switch to raw-text edit mode.                                                                                                                                                                                                                                                            | `registerCellRenderer`                                             |
+| `import-data`       | importer      |       | Header "Import" button — a URL/file dialog with curated sample sources (Northwind JSON, a public CSV, Datasette examples) that runs `csv-import` and `json-import` through the import kernel and still routes Datasette to `datasette-import`; recognises a native `.db.json` dump and offers to restore the workspace instead of importing its tables; adds a per-table Refresh button for CSV/JSON snapshot origins.                                           | `registerHeaderButton`, `registerTableButton`                      |
+| `auto-sync`         | sync          |       | Background timer (1 min) that silently pushes local changes to the configured sync server and prompts to pull when the server has diverged. Shares its config with `server-sync` via `api.settings`.                                                                                                                                                                                                                                                             | `load()` (timer)                                                   |
+| `views`             | ui            |       | The View system: workspace-global HTML templates (header/row/footer with `$TOKEN` substitution) rendered read-only per table in their own windows, with auto-mapped tokens and an optional row limit; seeds a default "RSS Feed" template. Footer "Views" button opens the manager dialog; window lifecycle itself is core, not plugin, code.                                                                                                                    | `registerTableButton`, `load()` (template seeding)                 |
+| `electron-db`       | ui            |       | Footer "Database" button → an anchored Open… / Save As… / Import… menu for `.db` files. **Electron-only, and silent about it:** `init()` returns immediately when `window.easydb?.db` is absent, so the browser build gets no button, no menu entry and no error. Open only accepts a file this app wrote and offers Import for a foreign one; Import previews first and asks Overwrite / Rename / Skip per colliding table. See `STORAGE.md` and `ELECTRON.md`. | `registerFooterButton`                                             |
 
 ## Cell Renderers
 
@@ -346,12 +346,12 @@ Exports `parsedToTables`/`importJsonText` for reuse by `import-data` and
 words, and a file dropped ON a table window asks the same thing as a file that
 merely carries that table's name — those are the same situation:
 
-| Answer | What happens |
-|---|---|
-| **Re-Create** | The file's columns REPLACE the table's, and its rows replace the data. |
-| **Re-Load** | The table's columns stay (widths, renderers, types, scripts); only the rows are replaced. |
-| **Append** | The rows are added after the ones already there. |
-| **A new table** | That table is left alone; the store uniques the name (`Cities-2`). |
+| Answer          | What happens                                                                              |
+| --------------- | ----------------------------------------------------------------------------------------- |
+| **Re-Create**   | The file's columns REPLACE the table's, and its rows replace the data.                    |
+| **Re-Load**     | The table's columns stay (widths, renderers, types, scripts); only the rows are replaced. |
+| **Append**      | The rows are added after the ones already there.                                          |
+| **A new table** | That table is left alone; the store uniques the name (`Cities-2`).                        |
 
 Re-Create keeps the table's **id**, name and window rather than deleting and
 re-inserting it: every projection and view instance bound to it survives what is
@@ -417,6 +417,21 @@ naming, the collision policy and the write, which is why "Import into" is only
 offered for those. Datasette is still dispatched to `datasette-import`, which
 owns its own paging and collision prompt.
 
+**The sample list is the user's** (`import/import-samples.ts`). `PREDEFINED` in
+the plugin is only what it STARTS as: **Add to samples** names the URL in the box
+and keeps it, and the trash deletes whichever sample is picked. Deleting one of
+ours cannot remove it from the code, so it is recorded as hidden BY URL in
+`import:samplesHidden`, while the user's own live in `import:samples` — two
+workspace settings, so the list travels with a gist push or a dump. Two
+consequences of hiding by url: changing a shipped sample's url un-hides it (a
+different url is a different sample), and nothing is destroyed, which is what
+lets **Restore samples** — shown only while something is hidden — simply clear
+the list. `parseUserSamples` / `parseHiddenSamples` are deliberately tolerant: the
+value may arrive from another device or a hand-edited dump, and one malformed
+entry must cost that entry, not the Import button. A stored `kind` that is not a
+known importer is dropped while the sample is kept, since auto-detect reads the
+URL anyway.
+
 A native `.db.json` body is sniffed before anything is written: it is a whole
 workspace, so the dialog offers `json-import`'s `restoreWorkspaceDump` instead
 of flattening it into tables. The sniffed body is passed to the kernel as `text`
@@ -441,7 +456,7 @@ same bridge is the leftover half of Phase 8; exporters need no change when it
 lands, since they only ever call `api.backend.saveFile`.
 
 Note that exporting is not the same thing as the desktop app's Save As: an
-exporter writes CSV / JSON / SQL *text*, while Save As copies the live SQLite
+exporter writes CSV / JSON / SQL _text_, while Save As copies the live SQLite
 file (the `electron-db` plugin, above).
 
 ### csv-export
@@ -531,7 +546,7 @@ file is likewise more than rows: `tableToFile()` also carries `title`,
 `view`, `windowGeometry`, `sortColumn`/`sortAsc`, `filters`, `labelColumn`,
 `deletedColumns`, `readonly`, and `info`, so a pull restores a table's window
 position/size, sort, and filters exactly as pushed, not just its data
-(row values are projected onto the table's *current* columns, so a
+(row values are projected onto the table's _current_ columns, so a
 long-deleted column's leftover data never inflates the push size or gets
 re-synced). `syncedTableFields()` only overwrites the fields a given gist
 file actually carries, so pulling an older gist can never clear newer local
@@ -580,7 +595,7 @@ that only claims a file literally named `secrets.txt` — dropped anywhere on
 the canvas, it imports that text into the device-local secrets store
 (confirming an overwrite if secrets already exist), so a user can carry
 their secrets between devices without typing them again. The Settings
-*dialog* itself — tabs, per-field promote/demote, the secrets editor — is
+_dialog_ itself — tabs, per-field promote/demote, the secrets editor — is
 core chrome documented in `DIALOGS.md`; this plugin only owns the entry
 point and the drag-and-drop convenience, the same "dogfood the registration
 path" pattern `new-table-button` follows.
@@ -629,6 +644,7 @@ unzoned one is already a wall clock and must not be shifted. A date-only value i
 formatted from its parts, never through `new Date(s)`, which parses it as midnight
 UTC and renders the day before west of Greenwich. `$raw.` keeps the stored text,
 and a value the app cannot parse comes back unchanged rather than blank.
+
 - `$input.TOKEN` — an editable control bound to the cell (checkbox for a
   boolean, number/text otherwise), disabled for a read-only view or a scripted
   column, which has nowhere to write back to.
@@ -683,7 +699,7 @@ value, and cycling a chip to "off" leaves the idle chip behind rather than
 removing the only way back to it. Grid mode (template off) has no template body
 and so offers none — its chips remain whatever is actually filtering.
 
-The plugin itself only owns *intent*: it adds the footer "Views" button (opens
+The plugin itself only owns _intent_: it adds the footer "Views" button (opens
 the manager dialog, which flips `ViewInstance.open`) and seeds/repairs a
 built-in "RSS Feed" template on `load()`, reconciling it against a hash of
 the shipped HTML so an app update can patch an already-seeded workspace's

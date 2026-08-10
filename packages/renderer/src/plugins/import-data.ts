@@ -17,6 +17,7 @@ import type { ColumnSpec, ColumnType, HostApi, ImporterSpec, ImportSourceInput, 
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { getContext } from '../app-context.js';
+import { HostDialogs } from '../dialogs/host-dialogs.js';
 import { editColumnNames } from '../dialogs/column-names-dialog.js';
 import { ctrlEnterSubmits, dialogChromeStyles } from '../dialogs/dialog-chrome.js';
 import { makeDialogDraggable } from '../dialogs/draggable.js';
@@ -32,16 +33,24 @@ import { runImport, type RunImportResult } from '../import/import-kernel.js';
 import { refreshFromOrigin } from '../import/refresh.js';
 import { looksLikeArray } from '@easydb/shared';
 import type { ImportTarget } from '../import/land-tables.js';
+import {
+  addUserSample,
+  hideSample,
+  IMPORT_SAMPLES_HIDDEN_SETTING,
+  IMPORT_SAMPLES_SETTING,
+  parseHiddenSamples,
+  parseUserSamples,
+  removeUserSample,
+  sampleEntries,
+  type ImportSample,
+  type ImportSampleKind,
+  type SampleEntry,
+  type UserImportSample,
+} from '../import/import-samples.js';
 
 /** How a URL should be imported. `auto` is resolved to a concrete kind on submit. */
-type ImportKind = 'auto' | 'json' | 'csv' | 'sql' | 'datasette';
+type ImportKind = 'auto' | ImportSampleKind;
 type ResolvedKind = Exclude<ImportKind, 'auto'>;
-
-interface PredefinedSource {
-  label: string;
-  url: string;
-  kind: ResolvedKind;
-}
 
 const NORTHWIND_URL = 'https://raw.githubusercontent.com/cawoodm/easydbaccess/main/data/northwind.db.json';
 
@@ -62,8 +71,11 @@ const IMPORT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidde
  * Datasette instances served with CORS so they work from the static browser
  * build (no sync server required). Picking one fills the URL box and sets the
  * import kind, but the URL stays editable.
+ *
+ * The user may delete any of these and add their own — see
+ * `import/import-samples.ts`. This array is only what the list STARTS as.
  */
-const PREDEFINED: PredefinedSource[] = [
+const PREDEFINED: ImportSample[] = [
   { label: 'Northwind — sample database (JSON dump)', url: NORTHWIND_URL, kind: 'json' },
   { label: 'Air quality — 2016 readings (CSV)', url: AIR_QUALITY_CSV, kind: 'csv' },
   {
@@ -690,12 +702,62 @@ export class ImportDialog extends LitElement {
         flex: 0 0 auto;
         white-space: nowrap;
       }
+      /* The sample row: the dropdown, then delete-this-one and add-this-URL.
+         Same shape as the script editor's sample row, for the same reason. */
+      .samples {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .samples select {
+        flex: 1;
+        min-width: 0;
+      }
+      button.icon {
+        background: transparent;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+        padding: 0.2rem 0.4rem;
+        font-size: 0.9rem;
+        line-height: 1;
+        cursor: pointer;
+        flex: 0 0 auto;
+      }
+      button.icon.danger:hover:not([disabled]) {
+        border-color: #fecaca;
+        background: #fef2f2;
+      }
+      button.icon[disabled] {
+        opacity: 0.4;
+        cursor: default;
+      }
+      button.link {
+        background: transparent;
+        border: 0;
+        padding: 0;
+        color: #2563eb;
+        font: inherit;
+        font-size: 0.78rem;
+        text-decoration: underline;
+        cursor: pointer;
+        white-space: nowrap;
+        flex: 0 0 auto;
+      }
+      button.link[disabled] {
+        color: #9ca3af;
+        text-decoration: none;
+        cursor: default;
+      }
     `,
   ];
 
   @state() private url = '';
   @state() private kind: ImportKind = 'auto';
-  @state() private presetIdx = -1;
+  /** The picked sample's key (`b:<url>` / `u:<id>`), or '' for none. */
+  @state() private pickedSample = '';
+  @state() private userSamples: UserImportSample[] = [];
+  /** Urls of shipped samples the user deleted. */
+  @state() private hiddenSamples: string[] = [];
   @state() private dbList: string[] | null = null;
   @state() private dbLoading = false;
   @state() private dbError = '';
@@ -897,7 +959,8 @@ export class ImportDialog extends LitElement {
     });
     this.url = '';
     this.kind = opts?.presetKind ?? 'auto';
-    this.presetIdx = -1;
+    this.pickedSample = '';
+    void this.loadSamples();
     this.editColumns = false;
     this.file = null;
     this.maxRowsInput = '';
@@ -929,15 +992,87 @@ export class ImportDialog extends LitElement {
     this.finish(null);
   };
 
+  /** The dropdown's rows: what we ship minus deletions, then the user's own. */
+  private get sampleList(): SampleEntry[] {
+    return sampleEntries(PREDEFINED, this.userSamples, this.hiddenSamples);
+  }
+
+  private get pickedEntry(): SampleEntry | undefined {
+    return this.pickedSample ? this.sampleList.find((s) => s.key === this.pickedSample) : undefined;
+  }
+
   private onPresetChange(e: Event): void {
-    const idx = Number((e.target as HTMLSelectElement).value);
-    this.presetIdx = idx;
+    this.pickedSample = (e.target as HTMLSelectElement).value;
     this.resetDbList();
-    const preset = PREDEFINED[idx];
-    if (preset) {
-      this.url = preset.url;
-      this.kind = preset.kind;
+    const picked = this.pickedEntry;
+    if (picked) {
+      this.url = picked.url;
+      // A sample with no recorded kind leaves the format on auto-detect, which
+      // reads the URL — the same answer the user would get by pasting it.
+      this.kind = picked.kind ?? 'auto';
     }
+  }
+
+  /**
+   * The sample list out of the workspace settings. Never throws: the dialog has
+   * to open even when the store is unhappy, so a failed read leaves the shipped
+   * samples alone.
+   */
+  private async loadSamples(): Promise<void> {
+    try {
+      const ctx = await getContext();
+      const [mine, hidden] = await Promise.all([ctx.store.settings.findOne(IMPORT_SAMPLES_SETTING), ctx.store.settings.findOne(IMPORT_SAMPLES_HIDDEN_SETTING)]);
+      this.userSamples = parseUserSamples(mine?.value);
+      this.hiddenSamples = parseHiddenSamples(hidden?.value);
+    } catch {
+      this.userSamples = [];
+      this.hiddenSamples = [];
+    }
+  }
+
+  private async writeSamples(): Promise<void> {
+    const ctx = await getContext();
+    await ctx.store.settings.upsert({ name: IMPORT_SAMPLES_SETTING, value: [...this.userSamples] });
+    await ctx.store.settings.upsert({ name: IMPORT_SAMPLES_HIDDEN_SETTING, value: [...this.hiddenSamples] });
+  }
+
+  /** Add what is in the URL box to the sample list, under a name the user gives. */
+  private async saveAsSample(): Promise<void> {
+    const url = this.url.trim();
+    const dialogs = HostDialogs.instance;
+    if (!url || !dialogs) return;
+    const suggestion = this.pickedEntry?.label ?? filenameFromUrl(url);
+    const label = await dialogs.prompt('Name this sample — it appears in the Sample source list.', suggestion, 'Add to samples');
+    if (label === null || !label.trim()) return;
+    // The kind is stored only when the user committed to one. On auto-detect we
+    // store nothing rather than freezing today's guess into the sample.
+    const kind: ImportSampleKind | undefined = this.kind === 'auto' ? undefined : this.kind;
+    const sample: UserImportSample = { id: cryptoUUID(), label: label.trim(), url, ...(kind ? { kind } : {}) };
+    this.userSamples = addUserSample(this.userSamples, sample);
+    this.pickedSample = `u:${sample.id}`;
+    await this.writeSamples();
+  }
+
+  /**
+   * Delete the picked sample, after a confirm. One of ours can only be HIDDEN —
+   * it lives in the code — which is why "Restore samples" can bring it back.
+   */
+  private async deletePickedSample(): Promise<void> {
+    const picked = this.pickedEntry;
+    const dialogs = HostDialogs.instance;
+    if (!picked || !dialogs) return;
+    const ok = await dialogs.confirm(`Delete the sample "${picked.label}"? The URL stays in the box.`, 'Delete sample');
+    if (!ok) return;
+    if (picked.own) this.userSamples = removeUserSample(this.userSamples, picked.key.slice(2));
+    else this.hiddenSamples = hideSample(this.hiddenSamples, picked.url);
+    this.pickedSample = '';
+    await this.writeSamples();
+  }
+
+  /** Bring back every shipped sample the user deleted. Their own are untouched. */
+  private async restoreSamples(): Promise<void> {
+    this.hiddenSamples = [];
+    await this.writeSamples();
   }
 
   private submit = (e: Event): void => {
@@ -977,9 +1112,58 @@ export class ImportDialog extends LitElement {
     if (f) {
       // A file supersedes a URL/preset; clear them so submit is unambiguous.
       this.url = '';
-      this.presetIdx = -1;
+      this.pickedSample = '';
       this.resetDbList();
     }
+  }
+
+  /**
+   * The sample-source row. The list is the user's: 🗑 deletes whichever sample is
+   * picked, and "Add to samples" puts the URL now in the box into it, so the
+   * source someone imports from every week is one pick away.
+   *
+   * Deleting one of ours only hides it, so "Restore samples" — offered only once
+   * something is hidden — brings them all back.
+   */
+  private renderSamples() {
+    const list = this.sampleList;
+    const picked = this.pickedEntry;
+    const mine = this.userSamples.length > 0;
+    return html`
+      <label>
+        Sample source
+        <div class="samples">
+          <select data-testid="import-sample" .value=${this.pickedSample} @change=${(e: Event) => this.onPresetChange(e)}>
+            <option value="" ?selected=${this.pickedSample === ''}>${list.length === 0 ? '— no samples —' : '— choose a sample —'}</option>
+            ${mine
+              ? html`
+                  <optgroup label="Shipped">${list.filter((s) => !s.own).map((s) => html`<option value=${s.key} ?selected=${s.key === this.pickedSample}>${s.label}</option>`)}</optgroup>
+                  <optgroup label="Yours">${list.filter((s) => s.own).map((s) => html`<option value=${s.key} ?selected=${s.key === this.pickedSample}>${s.label}</option>`)}</optgroup>
+                `
+              : list.map((s) => html`<option value=${s.key} ?selected=${s.key === this.pickedSample}>${s.label}</option>`)}
+          </select>
+          <button
+            type="button"
+            class="icon danger"
+            data-testid="sample-delete"
+            title=${picked ? `Delete the sample "${picked.label}"` : 'Pick a sample to delete it'}
+            ?disabled=${!picked}
+            @click=${() => void this.deletePickedSample()}
+          >
+            🗑
+          </button>
+          <button type="button" class="link" data-testid="sample-add" title="Add the URL above to the sample list" ?disabled=${!this.url.trim()} @click=${() => void this.saveAsSample()}>
+            Add to samples
+          </button>
+        </div>
+      </label>
+      ${this.hiddenSamples.length > 0
+        ? html`<p class="hint">
+            ${this.hiddenSamples.length} shipped sample${this.hiddenSamples.length === 1 ? '' : 's'} deleted.
+            <button type="button" class="link" data-testid="sample-restore" @click=${() => void this.restoreSamples()}>Restore samples</button>
+          </p>`
+        : nothing}
+    `;
   }
 
   /**
@@ -1124,13 +1308,7 @@ export class ImportDialog extends LitElement {
 
             <fieldset class="block">
               <legend>Source and options</legend>
-              <label>
-                Sample source
-                <select data-testid="import-sample" .value=${String(this.presetIdx)} @change=${(e: Event) => this.onPresetChange(e)}>
-                  <option value="-1" ?selected=${this.presetIdx === -1}>— choose a sample —</option>
-                  ${PREDEFINED.map((p, i) => html`<option value=${String(i)} ?selected=${i === this.presetIdx}>${p.label}</option>`)}
-                </select>
-              </label>
+              ${this.renderSamples()}
 
               <label>
                 URL
@@ -1144,7 +1322,7 @@ export class ImportDialog extends LitElement {
                     this.url = (e.target as HTMLInputElement).value;
                     // A hand-edited URL is no longer "a preset" or an upload; drop
                     // any stale database list (it belonged to the previous instance).
-                    this.presetIdx = -1;
+                    this.pickedSample = '';
                     this.file = null;
                     this.resetDbList();
                   }}

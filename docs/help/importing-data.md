@@ -56,7 +56,21 @@ The first block holds what every format has in common:
 - **Edit columns before import** — review and rename the columns first. A
   source with several tables asks once per table, and names each one.
 - **Limit rows** — so a huge file does not have to load in full.
-- A few curated **sample sources**, to try the app out.
+- A **Sample source** list, which starts with a few datasets to try the app out.
+
+### Your own sample sources
+
+The sample list is yours to edit.
+
+- **Add to samples** keeps whatever URL is in the box, under a name you give it,
+  so a source you import from every week is one pick away. It remembers the
+  format too, unless you left that on Auto-detect.
+- The **🗑** next to the list deletes the sample you picked, after asking.
+- Deleting one of ours only hides it, so **Restore samples** brings back
+  everything you deleted. Your own are not touched by that.
+
+The list is stored with the workspace, so it travels with a Gist push or an
+exported dump.
 
 The second block holds only the options of the format you picked. A CSV, for
 example, offers a **Separator**: auto-detect, comma, semicolon, tab, pipe, or a
