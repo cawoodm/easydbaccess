@@ -9,6 +9,7 @@
 - ✨ Saving a sample is a **+** next to the URL box and next to the script dropdown, which asks for a name (v0.0.338)
 
 - ✨ Esc closes the column filter list, keeping the filter you built and leaving the window behind it open (v0.0.340)
+- ✨ Settings → Table grid turns the pink highlight on empty cells off, and the open tables repaint at once (v0.0.341)
 
 ### Bugs
 

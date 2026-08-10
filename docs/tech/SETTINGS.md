@@ -44,16 +44,16 @@ interface SettingsFieldSpec {
 
 The dialog's `renderControl()` switch maps each `type` to a control:
 
-| Type        | Control                                                          |
-| ----------- | ----------------------------------------------------------------- |
-| `string`    | single-line text input                                            |
-| `text`      | multi-line textarea                                               |
-| `number`    | numeric input; clearing it stores `undefined`, not `0`            |
-| `boolean`   | checkbox                                                          |
-| `date`      | native `<input type="date">`                                      |
+| Type        | Control                                                            |
+| ----------- | ------------------------------------------------------------------ |
+| `string`    | single-line text input                                             |
+| `text`      | multi-line textarea                                                |
+| `number`    | numeric input; clearing it stores `undefined`, not `0`             |
+| `boolean`   | checkbox                                                           |
+| `date`      | native `<input type="date">`                                       |
 | `secret`    | text input + a "insert secret reference" `<select>` of known names |
-| `option`    | radio group over `options`                                        |
-| `selection` | checkbox group over `options`, value is `string[]`                |
+| `option`    | radio group over `options`                                         |
+| `selection` | checkbox group over `options`, value is `string[]`                 |
 
 A `secret`-typed field gets extra validation in the dialog: a non-empty value
 that isn't a `${secret:name}` reference is flagged (red border) and blocks
@@ -149,6 +149,33 @@ plugin's own `meta.id`), with fields `maxImportRows` (0 = unlimited),
 runs first "wins" the registration; it doesn't matter which, since both pass
 identical field specs, and both read the same resolved `datasette:*` keys
 afterward.
+
+## Telling a reader a setting changed
+
+There is no live query over settings. A collection has one (a grid re-runs its
+row query on any write), but `api.settings.get` resolves through the user layer,
+the workspace layer, the field default and the secrets store, so a component
+either re-reads on every use or caches a value that goes stale the moment
+someone flips it in the dialog.
+
+`db/settings-events.ts` is the seam: the Settings dialog raises
+`easydb:settings-changed` with `{ pluginId, key }` after each auto-save, and a
+listener that cares re-reads what it needs. The event carries no VALUE, so the
+store stays the one source of truth.
+
+Which of the two a reader wants depends on when it needs the answer:
+
+- **Per use** — `readSortDescFirst` runs inside the header-click handler. A click
+  is not a hot path, and reading it there means there is nothing to invalidate.
+- **Into state** — `readHighlightNulls` is needed while painting every cell, and
+  a render cannot await a store read. `<data-table>` reads it on mount and again
+  on the event, so the switch repaints the open grids instead of waiting for a
+  reload.
+
+Both live in [`table/grid-settings.ts`](../../packages/renderer/src/table/grid-settings.ts),
+which exists because of the direction the dependencies must run: the `settings`
+plugin REGISTERS the `grid` fields and `<data-table>` READS them, and neither may
+import the other.
 
 ## Secrets: `${secret:name}` references
 

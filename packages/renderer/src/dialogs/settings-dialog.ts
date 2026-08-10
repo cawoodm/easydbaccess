@@ -7,6 +7,7 @@ import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { makeDialogDraggable } from './draggable.js';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { parseSecrets, readSecretsText, readUserSetting, writeSecretsText } from '../db/user-settings.js';
+import { emitSettingsChanged } from '../db/settings-events.js';
 
 const GENERAL = '__general__';
 
@@ -386,6 +387,10 @@ export class SettingsDialog extends LitElement {
     this.clearSecretErrorIfFixed();
     const ctx = await getContext();
     await ctx.api.settings.set(tab.id, f.key, value, this.placements[k]);
+    // Announced after the write, so a listener that re-reads sees the new value.
+    // This dialog auto-saves per field, so this is where "a setting changed"
+    // actually happens — there is no Save button to hang it off.
+    emitSettingsChanged(tab.id, f.key);
   }
 
   private async toggleScope(tab: Tab, f: SettingsFieldSpec, user: boolean) {

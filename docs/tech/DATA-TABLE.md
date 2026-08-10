@@ -18,7 +18,7 @@ Renderers section.
 fallback — see `PLUGINS.md`'s Views section). Whichever is set changes what
 `this.columns`/`sortColumn`/`filters` etc. actually mean:
 
-- **Plain table mode** (`viewInstanceId` empty) — column *definitions*,
+- **Plain table mode** (`viewInstanceId` empty) — column _definitions_,
   sort, filters, and column widths all live on and are persisted straight to
   the `Table` record (`applyTable()`).
 - **View-bound mode** (`viewInstanceId` set) — column **definitions** still
@@ -80,7 +80,7 @@ stale-looking cell.
 Header click cycles **none → asc → desc → none** (`toggleSort`). The sort
 column/direction is persisted immediately to the `Table` (or, in view-bound
 mode, the `ViewInstance`) so it survives a reload and rides along through
-export/sync. `sortedRows()` ranks emptiness as the *smallest* value —
+export/sync. `sortedRows()` ranks emptiness as the _smallest_ value —
 `null` sorts ahead of `''`, which sorts ahead of any real value — so the
 rank, not the raw comparison, flips with direction: ascending floats
 nulls-then-blanks to the top, descending sinks them to the bottom. Real
@@ -115,8 +115,8 @@ evidence is not evidence of emptiness.
   (`onFilterInput` → `saveFilters`), so typing doesn't hammer IndexedDB on
   every keystroke; the pending timer doubles as the "don't let a store
   refresh stomp what I'm mid-typing" guard mentioned above.
-- **Free-text search** — a *local* per-table query (from the window's own
-  search box) and a *global* query (from the app-wide header search) are
+- **Free-text search** — a _local_ per-table query (from the window's own
+  search box) and a _global_ query (from the app-wide header search) are
   each applied through `searchRows()` from
   [`search/text-search.ts`](../../packages/renderer/src/search/text-search.ts),
   a pure, DOM-free helper shared with the view window. Its rules: an
@@ -132,7 +132,7 @@ by `computeFilterSuggestions()`: it samples the first 100 rows to decide
 whether a column is "short enough" to suggest (every sampled value under 50
 chars — long free-text columns get no dropdown at all), then collects up to
 500 unique values. Critically, the value list for column A is computed over
-rows that pass every *other* column's active filter — not column A's own —
+rows that pass every _other_ column's active filter — not column A's own —
 via `rowsFacetedFor()`. That's what gives drill-down behavior: picking
 `Country = Sweden` narrows the `City` dropdown to Swedish cities, while the
 `Country` dropdown itself keeps showing every country (its own filter is
@@ -155,6 +155,21 @@ never rewritten — the type only changes how it is read.
 A list with no members also SHOWS as an empty cell (pink, no tooltip) instead of
 as the text it is stored in: `[]` is how an absent list arrives from most exports,
 and two brackets read as content where there is none.
+
+## The empty-cell highlight is a preference
+
+`cellStateClass` marks a `<td>` from the STORED value — ` is-null` for empty,
+` is-invalid` for a value that does not fit the column type — so the marking holds
+whatever the renderer draws, including a checkbox or an image for an empty value.
+A scripted column is exempt: its display is computed, so an empty stored value is
+normal there and pink would flag every row.
+
+The pink one is behind `grid:highlightNulls` (Settings → Table grid, default on);
+the red one is not, and deliberately so. A gap is normal and someone whose table
+is mostly gaps can fairly call the colour noise, while "this value does not fit
+its type" is a fault they must be able to see. The flag reaches the class through
+a `@state()` field kept fresh by `easydb:settings-changed` — see `SETTINGS.md`'s
+"Telling a reader a setting changed" for why a render cannot just read the store.
 
 The `tags` renderer (`plugins/cell-tags.ts`) draws one pill per value, and an
 `array` column gets it automatically at import time (`csv-import`'s
@@ -182,12 +197,12 @@ it needs continuous `pointermove` deltas rather than drop semantics. The
 tricky part: under `table-layout: auto` (the default), the browser ignores
 `<col>` widths whenever content demands more room — so setting one column's
 width live would silently do nothing on a wide, many-column table. The fix
-is `freezeColumnWidths()`: the instant a resize starts, every *visible*
+is `freezeColumnWidths()`: the instant a resize starts, every _visible_
 column's currently-rendered width is snapshotted into `this.columns` (only
 for columns that don't already carry an explicit width) and the table flips
 to `table-layout: fixed` (triggered in `render()` whenever any column has a
 `width`) — under which `<col>` widths are authoritative, so the drag tracks
-the pointer exactly. On pointer-up, *all* frozen widths are persisted (not
+the pointer exactly. On pointer-up, _all_ frozen widths are persisted (not
 just the dragged column), because the fixed layout needs every column's
 width to reproduce the same rendering after a reload.
 
@@ -249,8 +264,8 @@ the event goes through `document` rather than a callback prop.
 
 - **A column's `type` still matters even with a custom renderer set.** Type
   drives sort comparison, SQL export typing (see `sql-export` in
-  `PLUGINS.md`), and cell *editing* when no renderer is registered —
-  `renderer` only changes how the value is *displayed*.
+  `PLUGINS.md`), and cell _editing_ when no renderer is registered —
+  `renderer` only changes how the value is _displayed_.
 - **Widths are sticky once frozen.** The first resize on a wide table
   freezes every visible column's width, not just the one being dragged —
   don't be surprised that resizing one column locks the whole row's layout

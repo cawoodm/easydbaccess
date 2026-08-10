@@ -15,6 +15,19 @@ There's no Save button. Each field saves as soon as you change it.
   **Server Sync**, or **Datasette**. A feature only gets a tab if it
   registered one; not every feature has settings to show.
 
+### The Table grid tab
+
+Two preferences for how every grid behaves:
+
+- **Sort descending first** — a first click on a column header sorts from the
+  high end down. Turn it off to start ascending.
+- **Highlight empty cells** — an empty cell gets a pink background, so a gap is
+  visible whatever the column draws. Turn it off for a table that is empty on
+  purpose, where the colour is only noise. A value that does not fit its column
+  type stays marked red either way, because that is a fault and not a gap.
+
+Both apply at once to the tables you already have open.
+
 ## Editing a field
 
 Click into a field and change it. The field saves on change — no separate

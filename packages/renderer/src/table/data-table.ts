@@ -13,7 +13,8 @@ import '../chrome/filter-combobox.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { matchesColumnFilter } from '@easydb/shared';
 import { facetable, facetCounts, facetValues } from '../search/facet-values.js';
-import { readSortDescFirst } from './grid-settings.js';
+import { GRID_SETTINGS_ID, readHighlightNulls, readSortDescFirst } from './grid-settings.js';
+import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
 import { readSortSpecs, sortRowsBySpecs } from './row-sort.js';
 import { nextSortSpecs } from './sort-cycle.js';
 import { runColumnScript, runValidateScript } from '../util/column-script.js';
@@ -495,6 +496,13 @@ export class DataTable extends LitElement {
    * runs the indeterminate animation.
    */
   @state() private externalProgress: number | null = null;
+  /**
+   * Does an empty cell get the pink background (`grid:highlightNulls`)? Held in
+   * state, not read per cell: painting a row cannot await a store read. Kept
+   * fresh by the settings-changed event, so flipping the switch repaints the
+   * open grids instead of waiting for a reload.
+   */
+  @state() private highlightNulls = true;
   /** Median row height in px, measured from currently-rendered rows. */
   private rowHeight = 28;
   private resizeObs: ResizeObserver | null = null;
@@ -544,6 +552,8 @@ export class DataTable extends LitElement {
     document.addEventListener('easydb:global-search', this.onGlobalSearch as EventListener);
     document.addEventListener('easydb:table-search', this.onTableSearch as EventListener);
     document.addEventListener(TABLE_LOADING_EVENT, this.onTableLoading as EventListener);
+    document.addEventListener(SETTINGS_CHANGED_EVENT, this.onSettingsChanged as EventListener);
+    void this.readGridSettings();
     this.readLoadingState();
     this.addEventListener('scroll', this.onScroll, { passive: true });
     this.resizeObs = new ResizeObserver(() => {
@@ -558,6 +568,7 @@ export class DataTable extends LitElement {
     document.removeEventListener('easydb:global-search', this.onGlobalSearch as EventListener);
     document.removeEventListener('easydb:table-search', this.onTableSearch as EventListener);
     document.removeEventListener(TABLE_LOADING_EVENT, this.onTableLoading as EventListener);
+    document.removeEventListener(SETTINGS_CHANGED_EVENT, this.onSettingsChanged as EventListener);
     this.removeEventListener('scroll', this.onScroll);
     this.resizeObs?.disconnect();
     this.resizeObs = null;
@@ -613,6 +624,21 @@ export class DataTable extends LitElement {
     this.externalLoading = d.loading;
     this.externalProgress = d.loading && typeof d.progress === 'number' ? d.progress : null;
   };
+
+  private onSettingsChanged = (e: Event) => {
+    const d = (e as CustomEvent<SettingsChangedDetail>).detail;
+    if (d?.pluginId === GRID_SETTINGS_ID) void this.readGridSettings();
+  };
+
+  /** The grid preferences that are needed at paint time. Never throws. */
+  private async readGridSettings(): Promise<void> {
+    try {
+      const ctx = await getContext();
+      this.highlightNulls = await readHighlightNulls(ctx.api.settings);
+    } catch {
+      /* a grid that cannot read a preference still has to draw */
+    }
+  }
 
   /**
    * Pick up a load that started before this grid existed. A multi-table import
@@ -1637,7 +1663,7 @@ export class DataTable extends LitElement {
                 ${cols.map(
                   (c) =>
                     html`<td
-                      class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}${c.renderer && this.cellRenderers?.get(c.renderer) ? ' has-renderer' : ''}${cellStateClass(r, c)}`}
+                      class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}${c.renderer && this.cellRenderers?.get(c.renderer) ? ' has-renderer' : ''}${cellStateClass(r, c, this.highlightNulls)}`}
                       title=${cellTooltip(r, c)}
                     >
                       ${this.renderCell(r, c)}
@@ -1698,10 +1724,14 @@ function cellTooltip(row: Row, col: ColumnSpec): string {
   return text.length > MAX_TOOLTIP_CHARS ? `${text.slice(0, MAX_TOOLTIP_CHARS)}…` : text;
 }
 
-function cellStateClass(row: Row, col: ColumnSpec): string {
+function cellStateClass(row: Row, col: ColumnSpec, highlightNulls = true): string {
   if (col.script) return '';
   const state = cellState(row.data[col.field], col.type);
-  return state === 'empty' ? ' is-null' : state === 'invalid' ? ' is-invalid' : '';
+  // The empty highlight is a setting; the invalid one is not. "Nothing here" is
+  // normal and can be turned off as noise, while "this does not fit the type" is
+  // a fault the user has to be able to see.
+  if (state === 'empty') return highlightNulls ? ' is-null' : '';
+  return state === 'invalid' ? ' is-invalid' : '';
 }
 
 /**

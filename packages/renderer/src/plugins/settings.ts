@@ -27,6 +27,15 @@ export function init(api: HostApi): void {
       description:
         'Clicking a column header sorts descending, then ascending, then off. Turn this off to start ascending. Dates, scores and counts are usually read from the high end down, which took two clicks before.',
     },
+    {
+      key: 'highlightNulls',
+      label: 'Highlight empty cells',
+      type: 'boolean',
+      default: true,
+      scope: 'workspace',
+      description:
+        'An empty cell gets a pink background, so a gap in the data is visible whatever the column draws. Turn it off for a table that is mostly empty on purpose, where the colour is noise. A value that does not fit its column type stays marked red either way.',
+    },
   ]);
 
   api.ui.registerHeaderButton({

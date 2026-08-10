@@ -22,3 +22,15 @@ export const GRID_SETTINGS_ID = 'grid';
 export async function readSortDescFirst(settings: { get<T>(pluginId: string, key: string): Promise<T | undefined> }): Promise<boolean> {
   return (await settings.get<boolean>(GRID_SETTINGS_ID, 'sortDescFirst')) !== false;
 }
+
+/**
+ * Does an empty cell get the pink background? Defaults to true when unset — the
+ * highlight came first and a gap in the data is worth seeing.
+ *
+ * Unlike the sort setting this one is read into component state rather than per
+ * use, because it is needed while painting every cell and a render cannot await
+ * a store read. `settings-events.ts` is what tells the grid to read it again.
+ */
+export async function readHighlightNulls(settings: { get<T>(pluginId: string, key: string): Promise<T | undefined> }): Promise<boolean> {
+  return (await settings.get<boolean>(GRID_SETTINGS_ID, 'highlightNulls')) !== false;
+}
