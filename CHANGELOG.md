@@ -8,6 +8,10 @@
 - ✨ The Import dialog's sample list is yours: add the URL in the box to it, delete any sample, restore the shipped ones (v0.0.337)
 - ✨ Saving a sample is a **+** next to the URL box and next to the script dropdown, which asks for a name (v0.0.338)
 
+### Bugs
+
+- 🪲 The grid and the datetime renderer showed a zoned time as stored, so the picker held the wrong time and saved it (v0.0.339)
+
 ## 9 Aug 2026
 
 ### Features

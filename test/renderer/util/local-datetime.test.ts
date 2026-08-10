@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatByType, formatDateLocal, formatDateTimeLocal, hasTimezone } from '../../../packages/renderer/src/util/local-datetime.js';
+import { formatByType, formatDateLocal, formatDateTimeLocal, hasTimezone, toDateInput, toDatetimeInput } from '../../../packages/renderer/src/util/local-datetime.js';
 
 /**
  * The distinction the module exists for: a value with a ZONE names an instant and
@@ -67,5 +67,50 @@ describe('local-datetime', () => {
     expect(formatByType('string', '2026-06-17', EN)).toBeNull();
     expect(formatByType(undefined, '2026-06-17', EN)).toBeNull();
     expect(formatByType('number', 42, EN)).toBeNull();
+  });
+
+  /**
+   * What goes INTO a native date / datetime-local control. Same zoned-vs-wall-clock
+   * rule as the display side, because the control has no way to show a zone: it
+   * used to be handed the stored UTC text, so the box read 10:59 for an instant
+   * that is 12:59 where the reader sits — and the next edit saved that wrong time.
+   *
+   * Expectations for a zoned value are computed from the same `Date`, so they hold
+   * wherever the suite runs, UTC included.
+   */
+  describe('control values', () => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+
+    it('a zoned datetime goes in as the reader’s wall clock', () => {
+      const iso = '2026-06-17T10:59:56.937Z';
+      const d = new Date(iso);
+      expect(toDatetimeInput(iso)).toBe(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+      expect(toDateInput(iso)).toBe(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+    });
+
+    it('an offset is honoured, not ignored', () => {
+      // 12:00+02:00 is 10:00Z — the same instant as the Z spelling below.
+      expect(toDatetimeInput('2026-06-17T12:00+02:00')).toBe(toDatetimeInput('2026-06-17T10:00:00Z'));
+    });
+
+    it('an unzoned value keeps its own clock and its own day', () => {
+      expect(toDatetimeInput('2026-06-17T09:00')).toBe('2026-06-17T09:00');
+      expect(toDatetimeInput('2026-06-17 09:00:30')).toBe('2026-06-17T09:00'); // the control has no seconds
+      expect(toDateInput('2026-06-17')).toBe('2026-06-17');
+      expect(toDateInput('2026-06-17 23:30')).toBe('2026-06-17'); // never the 18th
+    });
+
+    it('a date-only value opens a datetime control at midnight', () => {
+      expect(toDatetimeInput('2026-06-17')).toBe('2026-06-17T00:00');
+    });
+
+    // '' is what tells the grid a value is broken rather than blank
+    // (`isNonEmptyButUnparsed`), so it has to stay '' for anything unreadable.
+    it('gives up with an empty string, never a guess', () => {
+      for (const v of [null, undefined, '', '   ', {}, [], 'not a date']) {
+        expect(toDateInput(v)).toBe('');
+        expect(toDatetimeInput(v)).toBe('');
+      }
+    });
   });
 });

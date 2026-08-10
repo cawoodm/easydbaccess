@@ -60,6 +60,10 @@ async function seedBigTable(page: import('@playwright/test').Page, ws: string, r
 }
 
 test('a view of a table past the cap warns, and says something different once searching', async ({ page, workspaceId }) => {
+  // Writing 20 001 rows and then reading the slice takes most of the default 30s
+  // on its own, so this one had been failing only inside a full run — where the
+  // machine is busiest. The work is the point of the test; the budget is not.
+  test.slow();
   await seedBigTable(page, workspaceId, CAP + 1);
 
   const vw = page.locator('view-window');

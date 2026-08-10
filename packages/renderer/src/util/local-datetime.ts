@@ -12,8 +12,13 @@
 //     is at 09:00 wherever it is read.
 //
 // Both go through `Intl`, so the order of the parts and the separators are the
-// reader's too. Display only: nothing here is ever written back, and sorting and
-// filtering keep working on the stored string.
+// reader's too. Sorting and filtering keep working on the stored string.
+//
+// The same distinction decides what goes INTO a native `<input type="date">` /
+// `<input type="datetime-local">` (`toDateInput` / `toDatetimeInput`), because
+// those controls are wall-clock controls with no way to show a zone. That is one
+// rule in one file rather than four copies of it, which is how the grid and the
+// `datetime` renderer came to disagree with a view about the same cell.
 
 /** Does the text name an instant (carries a timezone) rather than a wall clock? */
 export function hasTimezone(s: string): boolean {
@@ -70,6 +75,46 @@ export function formatDateTimeLocal(value: unknown, locale?: string): string {
   if (DATE_ONLY.test(s)) return formatDateLocal(s, locale);
   const parsed = new Date(s);
   return Number.isNaN(parsed.getTime()) ? s : localDateTime(parsed, locale);
+}
+
+/**
+ * The value for an `<input type="date">`: `YYYY-MM-DD` on the READER's clock.
+ *
+ * A native date/datetime control is a local-wall-clock control — it has no way to
+ * show a zone — so a value naming an instant has to be converted before it goes
+ * in, exactly as it is for display. Feeding it the stored UTC text put the wrong
+ * time in the box and then wrote that wrong time back on the next edit.
+ *
+ * Empty for anything unreadable, which is what makes `isNonEmptyButUnparsed`
+ * able to tell a bad value from a blank one.
+ */
+export function toDateInput(value: unknown): string {
+  const s = text(value);
+  if (s === null) return '';
+  if (DATE_ONLY.test(s)) return s;
+  const naive = NAIVE.exec(s);
+  // A wall clock keeps its own date — read the parts, never `new Date(s)`, whose
+  // UTC answer can land a day either side.
+  if (naive && !hasTimezone(s)) return `${naive[1]}-${naive[2]}-${naive[3]}`;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** The value for an `<input type="datetime-local">`: `YYYY-MM-DDTHH:mm`, reader's clock. */
+export function toDatetimeInput(value: unknown): string {
+  const s = text(value);
+  if (s === null) return '';
+  const naive = NAIVE.exec(s);
+  if (naive && !hasTimezone(s)) return `${naive[1]}-${naive[2]}-${naive[3]}T${naive[4]}:${naive[5]}`;
+  if (DATE_ONLY.test(s)) return `${s}T00:00`;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function pad(n: number): string {
+  return String(n).padStart(2, '0');
 }
 
 function localDate(d: Date, locale?: string): string {

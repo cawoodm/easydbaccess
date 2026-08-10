@@ -648,6 +648,17 @@ formatted from its parts, never through `new Date(s)`, which parses it as midnig
 UTC and renders the day before west of Greenwich. `$raw.` keeps the stored text,
 and a value the app cannot parse comes back unchanged rather than blank.
 
+Since 0.0.339 that module is also what the GRID and the `cell-date` /
+`cell-datetime` renderers use, so a view and a grid can no longer disagree about
+the same cell. Two functions there answer the second half of the question — what
+goes INTO a native `<input type="date">` / `<input type="datetime-local">`:
+`toDateInput` / `toDatetimeInput`. A native picker is a wall-clock control with no
+way to show a zone, so a zoned value has to be converted before it goes in; all
+four call sites used to strip the zone instead, putting the UTC time in the box
+and writing that wrong time back on the next edit. Both still return `''` for an
+unreadable value, which is what lets `isNonEmptyButUnparsed` tell a broken cell
+from a blank one.
+
 - `$input.TOKEN` — an editable control bound to the cell (checkbox for a
   boolean, number/text otherwise), disabled for a read-only view or a scripted
   column, which has nowhere to write back to.

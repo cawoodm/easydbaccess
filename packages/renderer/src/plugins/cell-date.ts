@@ -1,6 +1,7 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { markInvalid } from '../util/cell-validity.js';
 import { makePencil, makeValueEditor, pencilRow } from './cell-pencil.js';
+import { formatDateLocal, toDateInput } from '../util/local-datetime.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'cell-date',
@@ -88,12 +89,12 @@ class CellDate extends HTMLElement {
     }
 
     if (this._readonly) {
-      this.textContent = toDateIso(this._value);
+      this.textContent = formatDateLocal(this._value);
       return;
     }
     const input = document.createElement('input');
     input.type = 'date';
-    input.value = toDateIso(this._value);
+    input.value = toDateInput(this._value);
     input.style.cssText = 'font:inherit;border:0;background:transparent;padding:0;width:100%;box-sizing:border-box';
     input.addEventListener('change', () => this.commit(input.value || null));
     this.append(input);
@@ -115,24 +116,9 @@ class CellDate extends HTMLElement {
   }
 }
 
-/**
- * Coerce arbitrary stored values into the YYYY-MM-DD string that
- * `<input type=date>` expects. Returns '' if it can't parse — leaves the
- * input empty rather than showing a misleading "Invalid Date".
- */
-function toDateIso(raw: unknown): string {
-  if (typeof raw !== 'string' && typeof raw !== 'number') return '';
-  const s = String(raw).trim();
-  if (!s) return '';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toISOString().slice(0, 10);
-}
-
-/** A value is invalid, not empty, when it has content but `toDateIso` gave up. */
+/** A value is invalid, not empty, when it has content but `toDateInput` gave up. */
 function isInvalidDate(raw: unknown): boolean {
   if (raw == null) return false;
   if (typeof raw === 'string' && raw.trim() === '') return false;
-  return toDateIso(raw) === '';
+  return toDateInput(raw) === '';
 }

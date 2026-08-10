@@ -1,6 +1,7 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { markInvalid } from '../util/cell-validity.js';
 import { makePencil, makeValueEditor, pencilRow } from './cell-pencil.js';
+import { formatDateTimeLocal, toDatetimeInput } from '../util/local-datetime.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'cell-datetime',
@@ -87,12 +88,12 @@ class CellDatetime extends HTMLElement {
     }
 
     if (this._readonly) {
-      this.textContent = toDatetimeLocal(this._value).replace('T', ' ');
+      this.textContent = formatDateTimeLocal(this._value);
       return;
     }
     const input = document.createElement('input');
     input.type = 'datetime-local';
-    input.value = toDatetimeLocal(this._value);
+    input.value = toDatetimeInput(this._value);
     input.style.cssText = 'font:inherit;border:0;background:transparent;padding:0;width:100%;box-sizing:border-box';
     input.addEventListener('change', () => this.commit(input.value || null));
     this.append(input);
@@ -114,26 +115,9 @@ class CellDatetime extends HTMLElement {
   }
 }
 
-/**
- * Same idea for `<input type=datetime-local>`, which wants YYYY-MM-DDTHH:MM
- * (no timezone). We strip seconds/timezone bits because the input ignores them.
- */
-function toDatetimeLocal(raw: unknown): string {
-  if (typeof raw !== 'string' && typeof raw !== 'number') return '';
-  const s = String(raw).trim();
-  if (!s) return '';
-  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(s);
-  if (m) return `${m[1]}T${m[2]}`;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return `${s}T00:00`;
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return '';
-  const iso = d.toISOString();
-  return `${iso.slice(0, 10)}T${iso.slice(11, 16)}`;
-}
-
-/** A value is invalid, not empty, when it has content but `toDatetimeLocal` gave up. */
+/** A value is invalid, not empty, when it has content but `toDatetimeInput` gave up. */
 function isInvalidDatetime(raw: unknown): boolean {
   if (raw == null) return false;
   if (typeof raw === 'string' && raw.trim() === '') return false;
-  return toDatetimeLocal(raw) === '';
+  return toDatetimeInput(raw) === '';
 }

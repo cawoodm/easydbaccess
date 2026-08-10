@@ -20,6 +20,7 @@ import { runColumnScript, runValidateScript } from '../util/column-script.js';
 import { arrayMembers } from '@easydb/shared';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { TABLE_LOADING_EVENT, tableLoadingState, type TableLoadingDetail } from './table-loading.js';
+import { formatByType, toDateInput, toDatetimeInput } from '../util/local-datetime.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
 
 /** Delay before the header loading bar appears, so fast loads don't flash it. */
@@ -943,8 +944,10 @@ export class DataTable extends LitElement {
     // Same rule as the editable cell: an empty list shows nothing, whichever way
     // the emptiness is spelled (`[]`, `[ ]`, an empty array).
     if (col.type === 'array' && arrayMembers(raw).length === 0) return html``;
-    if (col.type === 'date') return html`${toDateIso(raw)}`;
-    if (col.type === 'datetime') return html`${toDatetimeLocal(raw).replace('T', ' ')}`;
+    // Formatted for the reader, the same way a view formats the same cell —
+    // see util/local-datetime.ts for the zoned/wall-clock rule.
+    const typed = formatByType(col.type, raw);
+    if (typed !== null) return html`${typed}`;
     return html`${String(raw)}`;
   }
 
@@ -1057,23 +1060,23 @@ export class DataTable extends LitElement {
       case 'date':
         // A non-empty value the date input can't parse would otherwise render
         // as a misleadingly empty box. Show it raw and fixable instead.
-        if (isNonEmptyButUnparsed(raw, toDateIso(raw))) {
+        if (isNonEmptyButUnparsed(raw, toDateInput(raw))) {
           return this.renderInvalidCell(row, col, raw, `Not a valid date: "${String(raw)}"`);
         }
         return html`<input
           type="date"
-          .value=${toDateIso(raw)}
-          @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, toDateIso(raw))}
+          .value=${toDateInput(raw)}
+          @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, toDateInput(raw))}
           @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
         />`;
       case 'datetime':
-        if (isNonEmptyButUnparsed(raw, toDatetimeLocal(raw))) {
+        if (isNonEmptyButUnparsed(raw, toDatetimeInput(raw))) {
           return this.renderInvalidCell(row, col, raw, `Not a valid datetime: "${String(raw)}"`);
         }
         return html`<input
           type="datetime-local"
-          .value=${toDatetimeLocal(raw)}
-          @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, toDatetimeLocal(raw))}
+          .value=${toDatetimeInput(raw)}
+          @keydown=${(e: KeyboardEvent) => this.cancelCellEdit(e, toDatetimeInput(raw))}
           @change=${(e: Event) => this.setCell(row, col.field, (e.target as HTMLInputElement).value || null)}
         />`;
       case 'number': {
@@ -1739,32 +1742,9 @@ function validate(col: ColumnSpec, value: unknown, allRows: Row[], rowId: string
   return null;
 }
 
-function toDateIso(raw: unknown): string {
-  if (typeof raw !== 'string' && typeof raw !== 'number') return '';
-  const s = String(raw).trim();
-  if (!s) return '';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toISOString().slice(0, 10);
-}
-
-function toDatetimeLocal(raw: unknown): string {
-  if (typeof raw !== 'string' && typeof raw !== 'number') return '';
-  const s = String(raw).trim();
-  if (!s) return '';
-  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(s);
-  if (m) return `${m[1]}T${m[2]}`;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return `${s}T00:00`;
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return '';
-  const iso = d.toISOString();
-  return `${iso.slice(0, 10)}T${iso.slice(11, 16)}`;
-}
-
 /**
  * True when `raw` has content (not null/undefined/empty/whitespace-only) but
- * `parsed` — whatever `toDateIso`/`toDatetimeLocal` made of it — came back
+ * `parsed` — whatever `toDateInput`/`toDatetimeInput` made of it — came back
  * empty. Both parsers also return '' for a genuinely empty `raw`, so the
  * empty-content check above is what tells "no value" apart from "unparseable
  * value" — only the latter counts as invalid.

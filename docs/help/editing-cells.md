@@ -6,6 +6,10 @@ Click any cell to edit it. Checkboxes for booleans, date pickers for dates,
 and a plain text/number box otherwise. Press **Esc** while editing to cancel
 and revert to the stored value.
 
+Dates and times are shown on your own clock: a value that carries a timezone is
+converted to it, and one without a timezone is left as it was written, because it
+is already a wall-clock time. A view of the same column shows it the same way.
+
 A column can enforce rules, and a bad edit is rejected with a message
 explaining why, rather than silently discarded:
 
