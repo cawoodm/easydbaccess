@@ -62,7 +62,7 @@ The first block holds what every format has in common:
 
 The sample list is yours to edit.
 
-- **Add to samples** keeps whatever URL is in the box, under a name you give it,
+- The **+** next to the URL box keeps that URL, under a name you are asked for,
   so a source you import from every week is one pick away. It remembers the
   format too, unless you left that on Auto-detect.
 - The **🗑** next to the list deletes the sample you picked, after asking.

@@ -19,8 +19,13 @@ const sampleLabels = async (dlg: import('@playwright/test').Locator) => (await d
 test('a URL can be added to the samples, and it comes back after a reload', async ({ page }) => {
   let dlg = await openImport(page);
 
+  // The + is disabled until there is a URL to keep, and it sits next to the box
+  // it acts on.
+  await expect(dlg.getByTestId('sample-add')).toBeDisabled();
   await dlg.locator('input[type="text"]').first().fill('https://example.test/weekly.csv');
   await dlg.getByTestId('import-format').selectOption('csv');
+  await expect(dlg.getByTestId('sample-add')).toHaveText('+');
+  await expect(dlg.getByTestId('sample-add')).toBeEnabled();
 
   // Naming it is a prompt — the label is what the dropdown will show.
   await dlg.getByTestId('sample-add').click();

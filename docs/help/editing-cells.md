@@ -41,8 +41,8 @@ date that isn't in the future, and one column compared against another. Pick
 one, adjust the value at the top of it, and save. Picked the wrong one? **Undo**
 puts back what was there.
 
-Written a rule you will want again? **Add to samples** gives it a name and puts
-it in the same dropdown, under _Your samples_. The 🗑 next to the dropdown
+Written a rule you will want again? The **+** next to the dropdown asks for a
+name and puts it in the same list, under _Your samples_. The 🗑 beside it
 deletes the one you have picked, after asking; the shipped samples can't be
 deleted. Your samples belong to the workspace, so they travel with it.
 
@@ -50,13 +50,13 @@ The rule runs on **manual edits only**. Importing, refreshing and syncing are
 not edits, so a rule can't stop a table from loading — it tells you about the
 next value someone types.
 
-Validation is separate from the *other* pencil (the one left of Max), which
+Validation is separate from the _other_ pencil (the one left of Max), which
 computes what a column **displays** — see
 [Computing what a column shows](#computing-what-a-column-shows) below.
 
 ## Renderers — changing how a value is displayed
 
-A column's **renderer** controls how its value is *shown*, separately from
+A column's **renderer** controls how its value is _shown_, separately from
 its underlying type. The same number, date, or text column keeps sorting
 and validating the same way no matter which renderer you pick — only the
 display changes. Renderers are chosen in the column editor.
@@ -72,7 +72,7 @@ Or with a fully custom script that builds its own HTML from the row's data:
 ### Computing what a column shows
 
 The pencil **left of the Max box** opens the other script — the one that
-decides what the column *displays*:
+decides what the column _displays_:
 
 ```js
 function render(row) {
@@ -103,20 +103,20 @@ Same **Undo** as the validation editor if you pick the wrong one. Each sample
 says in its first line which renderer it expects — the dropdown can't set that
 for you, it's the column's own Renderer box.
 
-**Add to samples** works here too, and this list is shared with views: a script
+The **+** works here too, and this list is shared with views: a script
 you save on a column is offered when you script a view's `$TOKEN`, and one you
 save there is offered on your columns. Validation rules stay in their own list.
 
 ### Built-in renderers
 
-| Renderer | What it shows |
-|---|---|
-| **Link** | Detects URLs, email addresses, and phone numbers and turns them into clickable links. A pencil icon lets you switch to editing the raw text. |
-| **Color** | A color swatch and picker for hex color values. |
-| **Image** | A thumbnail with an upload button; images are stored directly in the cell. |
-| **HTML (preview)** | Shows the plain text of an HTML value, trimmed to a short length, with a popup icon to view the full rendered HTML. |
-| **HTML (render)** | Renders the HTML directly in the cell, and lets you edit it inline. |
-| **Script** | Runs a small script you write to build the cell's HTML from the whole row — for fully custom layouts. |
+| Renderer           | What it shows                                                                                                                                |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Link**           | Detects URLs, email addresses, and phone numbers and turns them into clickable links. A pencil icon lets you switch to editing the raw text. |
+| **Color**          | A color swatch and picker for hex color values.                                                                                              |
+| **Image**          | A thumbnail with an upload button; images are stored directly in the cell.                                                                   |
+| **HTML (preview)** | Shows the plain text of an HTML value, trimmed to a short length, with a popup icon to view the full rendered HTML.                          |
+| **HTML (render)**  | Renders the HTML directly in the cell, and lets you edit it inline.                                                                          |
+| **Script**         | Runs a small script you write to build the cell's HTML from the whole row — for fully custom layouts.                                        |
 
 ## Column types still matter
 

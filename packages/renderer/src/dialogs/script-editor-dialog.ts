@@ -156,16 +156,23 @@ export class ScriptEditorDialog extends LitElement {
         text-decoration: none;
         cursor: default;
       }
-      /* Deletes the user sample currently loaded. Disabled — not hidden — for a
-         built-in, so the dropdown's shape does not jump as you browse it. */
+      /* Beside the dropdown: 🗑 deletes the user sample currently loaded (disabled
+         — not hidden — for a built-in, so the row's shape does not jump as you
+         browse it), + keeps what is in the editor. Same pair, same glyphs, as the
+         Import dialog's sample row. */
       button.icon {
         background: transparent;
         border: 1px solid #d1d5db;
         border-radius: 0.25rem;
-        padding: 0.15rem 0.35rem;
-        font-size: 0.9rem;
+        padding: 0.3rem 0.5rem;
+        font-size: 1rem;
         line-height: 1;
         cursor: pointer;
+        flex: 0 0 auto;
+      }
+      button.icon:hover:not([disabled]) {
+        border-color: #bfdbfe;
+        background: #eff6ff;
       }
       button.icon.danger:hover:not([disabled]) {
         border-color: #fecaca;
@@ -437,8 +444,15 @@ export class ScriptEditorDialog extends LitElement {
               >
                 🗑
               </button>
-              <button type="button" class="link" title="Add what is in the editor to the sample list for this kind of script" ?disabled=${!this.text.trim()} @click=${() => void this.saveAsSample()}>
-                Add to samples
+              <button
+                type="button"
+                class="icon"
+                data-testid="sample-add"
+                title="Add what is in the editor to the sample list for this kind of script"
+                ?disabled=${!this.text.trim()}
+                @click=${() => void this.saveAsSample()}
+              >
+                +
               </button>
               ${this.undoText !== null ? html`<button type="button" class="link" @click=${() => this.undoSample()}>Undo</button>` : null}
             </div>

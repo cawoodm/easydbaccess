@@ -6,6 +6,7 @@
 
 - ✨ Importing many tables flashes a bar in every window at once, and one bar under the header counts the batch (v0.0.336)
 - ✨ The Import dialog's sample list is yours: add the URL in the box to it, delete any sample, restore the shipped ones (v0.0.337)
+- ✨ Saving a sample is a **+** next to the URL box and next to the script dropdown, which asks for a name (v0.0.338)
 
 ## 9 Aug 2026
 

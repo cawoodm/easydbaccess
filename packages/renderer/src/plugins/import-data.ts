@@ -702,14 +702,15 @@ export class ImportDialog extends LitElement {
         flex: 0 0 auto;
         white-space: nowrap;
       }
-      /* The sample row: the dropdown, then delete-this-one and add-this-URL.
-         Same shape as the script editor's sample row, for the same reason. */
-      .samples {
+      /* A control with a small button beside it: the sample list + its trash,
+         the URL box + its "add this to the samples" plus. */
+      .with-btn {
         display: flex;
         align-items: center;
         gap: 0.5rem;
       }
-      .samples select {
+      .with-btn select,
+      .with-btn input[type='text'] {
         flex: 1;
         min-width: 0;
       }
@@ -717,11 +718,15 @@ export class ImportDialog extends LitElement {
         background: transparent;
         border: 1px solid #d1d5db;
         border-radius: 0.25rem;
-        padding: 0.2rem 0.4rem;
-        font-size: 0.9rem;
+        padding: 0.3rem 0.5rem;
+        font-size: 1rem;
         line-height: 1;
         cursor: pointer;
         flex: 0 0 auto;
+      }
+      button.icon:hover:not([disabled]) {
+        border-color: #bfdbfe;
+        background: #eff6ff;
       }
       button.icon.danger:hover:not([disabled]) {
         border-color: #fecaca;
@@ -1119,8 +1124,8 @@ export class ImportDialog extends LitElement {
 
   /**
    * The sample-source row. The list is the user's: 🗑 deletes whichever sample is
-   * picked, and "Add to samples" puts the URL now in the box into it, so the
-   * source someone imports from every week is one pick away.
+   * picked, and the + beside the URL box adds what is in it, so the source
+   * someone imports from every week is one pick away.
    *
    * Deleting one of ours only hides it, so "Restore samples" — offered only once
    * something is hidden — brings them all back.
@@ -1132,7 +1137,7 @@ export class ImportDialog extends LitElement {
     return html`
       <label>
         Sample source
-        <div class="samples">
+        <div class="with-btn">
           <select data-testid="import-sample" .value=${this.pickedSample} @change=${(e: Event) => this.onPresetChange(e)}>
             <option value="" ?selected=${this.pickedSample === ''}>${list.length === 0 ? '— no samples —' : '— choose a sample —'}</option>
             ${mine
@@ -1151,9 +1156,6 @@ export class ImportDialog extends LitElement {
             @click=${() => void this.deletePickedSample()}
           >
             🗑
-          </button>
-          <button type="button" class="link" data-testid="sample-add" title="Add the URL above to the sample list" ?disabled=${!this.url.trim()} @click=${() => void this.saveAsSample()}>
-            Add to samples
           </button>
         </div>
       </label>
@@ -1312,21 +1314,26 @@ export class ImportDialog extends LitElement {
 
               <label>
                 URL
-                <input
-                  type="text"
-                  autofocus
-                  placeholder="https://… (JSON dump, .csv/.tsv file, or Datasette table)"
-                  ?disabled=${!!this.file}
-                  .value=${this.url}
-                  @input=${(e: Event) => {
-                    this.url = (e.target as HTMLInputElement).value;
-                    // A hand-edited URL is no longer "a preset" or an upload; drop
-                    // any stale database list (it belonged to the previous instance).
-                    this.pickedSample = '';
-                    this.file = null;
-                    this.resetDbList();
-                  }}
-                />
+                <div class="with-btn">
+                  <input
+                    type="text"
+                    autofocus
+                    placeholder="https://… (JSON dump, .csv/.tsv file, or Datasette table)"
+                    ?disabled=${!!this.file}
+                    .value=${this.url}
+                    @input=${(e: Event) => {
+                      this.url = (e.target as HTMLInputElement).value;
+                      // A hand-edited URL is no longer "a preset" or an upload; drop
+                      // any stale database list (it belonged to the previous instance).
+                      this.pickedSample = '';
+                      this.file = null;
+                      this.resetDbList();
+                    }}
+                  />
+                  <!-- Next to the URL, not next to the list: it acts on what is in
+                       the box, and that is the thing it should sit beside. -->
+                  <button type="button" class="icon" data-testid="sample-add" title="Add this URL to the sample list" ?disabled=${!this.url.trim()} @click=${() => void this.saveAsSample()}>+</button>
+                </div>
               </label>
 
               <label>

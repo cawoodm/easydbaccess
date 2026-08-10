@@ -21,10 +21,10 @@ async function openColumns(page: import('@playwright/test').Page, id: string) {
   return dlg;
 }
 
-/** Saves the editor's current text as a sample called `name`. */
+/** Saves the editor's current text as a sample called `name`, via the + button. */
 async function saveAsSample(page: import('@playwright/test').Page, name: string) {
   const editor = page.locator('script-editor-dialog dialog');
-  await editor.getByRole('button', { name: 'Add to samples' }).click();
+  await editor.getByTestId('sample-add').click();
   const host = page.locator('host-dialogs');
   await host.locator('input').fill(name);
   await host.getByRole('button', { name: 'OK', exact: true }).click();
@@ -37,6 +37,11 @@ test('a script saved as a sample is offered again, and is stored on the workspac
 
   await dlg.locator('button.script-btn').first().click();
   const editor = page.locator('script-editor-dialog dialog');
+  await editor.locator('textarea').fill(MY_SCRIPT);
+  // Same + as the Import dialog's sample row, and dead with an empty editor.
+  await expect(editor.getByTestId('sample-add')).toHaveText('+');
+  await editor.locator('textarea').fill('');
+  await expect(editor.getByTestId('sample-add')).toBeDisabled();
   await editor.locator('textarea').fill(MY_SCRIPT);
   await saveAsSample(page, 'Shout it');
 

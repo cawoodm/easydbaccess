@@ -183,9 +183,10 @@ for an empty row, since a script runs against the blank row the user just
 added and "undefined undefined" or "NaN%" in the grid is the classic way a
 naive script embarrasses itself.
 
-**The user's own samples** sit beside them: **Add to samples** names what is in
-the editor and keeps it, and the trash next to the dropdown deletes the one
-currently loaded (after a confirm; a built-in is code and cannot be deleted).
+**The user's own samples** sit beside them: the **+** next to the dropdown asks
+for a name and keeps what is in the editor, and the trash beside it deletes the
+one currently loaded (after a confirm; a built-in is code and cannot be deleted).
+Same 🗑 / + pair as the Import dialog's sample row — see `import-data` below.
 The whole list is one workspace setting, `scripts:samples` — a sample is
 content, like a view template, so a gist push or a dump carries it rather than
 leaving it on the machine it was written on. There are two lists, not three: a
@@ -418,8 +419,10 @@ offered for those. Datasette is still dispatched to `datasette-import`, which
 owns its own paging and collision prompt.
 
 **The sample list is the user's** (`import/import-samples.ts`). `PREDEFINED` in
-the plugin is only what it STARTS as: **Add to samples** names the URL in the box
-and keeps it, and the trash deletes whichever sample is picked. Deleting one of
+the plugin is only what it STARTS as: the **+** beside the URL box prompts for a
+name and keeps that URL, and the trash beside the list deletes whichever sample
+is picked. The + sits with the URL rather than with the list because that is what
+it acts on. Deleting one of
 ours cannot remove it from the code, so it is recorded as hidden BY URL in
 `import:samplesHidden`, while the user's own live in `import:samples` — two
 workspace settings, so the list travels with a gist push or a dump. Two
