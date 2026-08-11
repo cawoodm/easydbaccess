@@ -11,7 +11,16 @@ import { allColumnsFlagged, buildColumnSpec, toggleColumnFlag, type ColumnFlag, 
 import { renameRowFields, type FieldRename } from '../table/column-merge.js';
 import { readRows } from '../db/row-reader.js';
 import { LEGACY_CELL_RENDERERS } from '../plugin-host/registries.js';
-import { describeReferences, findTableReferences, renameProjectionOutputs, renameProjectionSourceFields, repointProjectionSpec, specOf, type TableReferences } from '../table/table-references.js';
+import {
+  describeReferences,
+  findTableReferences,
+  renameProjectionOutputs,
+  renameProjectionSourceFields,
+  renameViewMappings,
+  repointProjectionSpec,
+  specOf,
+  type TableReferences,
+} from '../table/table-references.js';
 
 const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'datetime', 'array'];
 
@@ -87,6 +96,19 @@ async function repointReferences(tableId: string, oldName: string, name: string,
 async function repointFieldRenames(tableId: string, tableName: string, renames: readonly FieldRename[], tables: Table[]): Promise<void> {
   if (renames.length === 0) return;
   const ctx = await getContext();
+  // Views and visualizations bind to columns by name too — see
+  // `renameViewMappings`. Done first so a failure writing a projection cannot
+  // leave the views behind (both are independent patches either way).
+  const views = (await ctx.store.viewInstances.find({ workspaceId: ctx.workspaceId })).filter((v) => v.tableId === tableId);
+  for (const v of views) {
+    const patch = renameViewMappings(v, renames);
+    if (patch) await ctx.store.viewInstances.patch(v.id, { ...patch, updatedAt: Date.now() });
+  }
+  if (views.length > 0) {
+    // Push the change into any open window or docked pane, so a chart re-reads
+    // its mapping instead of showing "no column mapped" until the next reload.
+    document.dispatchEvent(new CustomEvent('easydb:reload-views'));
+  }
   const write = async (t: Table, next: ProjectionSpec) => {
     await ctx.store.tables.patch(t.id, {
       source: { type: 'projection', config: next as unknown as Record<string, unknown> },

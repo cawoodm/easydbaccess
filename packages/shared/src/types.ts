@@ -371,14 +371,74 @@ export interface Setting {
   workspaceId?: string;
 }
 
+/** How a group of rows collapses into one number. */
+export type VizMeasureFn = 'count' | 'countDistinct' | 'sum' | 'avg' | 'min' | 'max';
+
+/** Bucket width for a `date`/`datetime` group key. */
+export type VizBinUnit = 'day' | 'week' | 'month' | 'quarter' | 'year';
+
 /**
- * A workspace-global display template — three HTML fragments that decide how a
- * table's data is shown in a read-only view window.
+ * How rows collapse into the categories and series a visualization plots.
  *
- * If `rowHtml` is blank the view falls back to a read-only columns table with
- * `headerHtml` above and `footerHtml` below. If `rowHtml` is present, no table
- * is drawn: `rowHtml` is repeated once per row (between header and footer) with
- * `$TOKEN` placeholders substituted from the row's mapped columns.
+ * Keyed by CHANNEL, never by field: the channel → field indirection lives in
+ * `ViewInstance.mapping`, so one template works on any table whose columns can
+ * be mapped onto it. That is the whole reason a viz is a kind of View — the
+ * mapping record already existed for `$TOKEN`s.
+ */
+export interface VizAggregate {
+  /** Group by these channel keys, in order. Empty ⇒ one group (a single number). */
+  groupBy: string[];
+  /** One measure per series drawn. */
+  measures: Array<{ channel: string; fn: VizMeasureFn }>;
+  /**
+   * Bucket a numeric or date group key instead of grouping on exact values.
+   * `width` applies to numbers, `unit` to dates; a spec carrying neither bins
+   * nothing.
+   */
+  bin?: { channel: string; width?: number | undefined; unit?: VizBinUnit | undefined } | undefined;
+  /** Keep the top N groups by the first measure; the rest fold into "Other". */
+  topN?: number | undefined;
+  sort?: 'category' | 'value' | 'valueDesc' | undefined;
+}
+
+/** The drawing half of a viz template: which visualization, and how configured. */
+export interface VizSpec {
+  /** Which registered visualization draws this — a `VisualizationSpec.id`. */
+  kind: string;
+  /** How rows become series. Absent ⇒ the visualization's `defaultAggregate`. */
+  aggregate?: VizAggregate | undefined;
+  /** Values for the visualization's declared `options`, keyed by field key. */
+  options?: Record<string, unknown> | undefined;
+}
+
+/**
+ * Where a view instance is shown. Absent ⇒ its own floating window, which is
+ * what every instance did before visualizations existed.
+ *
+ * `host` is deliberately explicit rather than implied by `ViewInstance.tableId`.
+ * They are usually the same table, but not always, and the difference is the
+ * interesting case: a chart OF a projection docked INTO the raw table's window
+ * is how a KPI strip gets built.
+ */
+export interface ViewDock {
+  host: { kind: 'table'; tableId: string } | { kind: 'view'; viewInstanceId: string };
+  edge: 'above' | 'below';
+  /** Pane height in px, written by the splitter drag. */
+  size: number;
+  /** Order among the panes on the same edge, ascending. */
+  order: number;
+}
+
+/**
+ * A workspace-global display template. Two kinds, discriminated by `kind`:
+ *
+ * - `'html'` (the default, and every template that predates visualizations) —
+ *   three HTML fragments. If `rowHtml` is blank the view falls back to a
+ *   read-only columns table with `headerHtml` above and `footerHtml` below. If
+ *   `rowHtml` is present, no table is drawn: it repeats once per row with
+ *   `$TOKEN` placeholders substituted from the row's mapped columns.
+ * - `'viz'` — draws instead of laying out HTML. `viz` carries the spec and the
+ *   three HTML fields stay `''`.
  */
 export interface ViewTemplate {
   id: string;
@@ -387,6 +447,10 @@ export interface ViewTemplate {
   headerHtml: string;
   rowHtml: string;
   footerHtml: string;
+  /** Absent ⇒ `'html'`. No migration: an existing template is already valid. */
+  kind?: 'html' | 'viz' | undefined;
+  /** Present when `kind === 'viz'`. */
+  viz?: VizSpec | undefined;
   /** True for templates seeded by the app (e.g. the default RSS feed). */
   builtin?: boolean | undefined;
   updatedAt: number;
@@ -470,8 +534,16 @@ export interface ViewInstance {
    * plugin can reopen open windows on boot (the panel shell itself has no
    * cross-reload memory — table windows are likewise re-created from
    * persisted state).
+   *
+   * With a `dock` set this means the same thing for a docked pane: shown or not.
+   * One flag, one reconciler — see `window-mgr/view-window-manager.ts`.
    */
   open?: boolean | undefined;
+  /**
+   * Docked above/below a host panel instead of floating in its own window.
+   * Absent ⇒ own window, which is what every instance did before this existed.
+   */
+  dock?: ViewDock | undefined;
   /** Max rows to show (TOP N). Absent or ≤0 ⇒ show all. */
   limit?: number | undefined;
   /**

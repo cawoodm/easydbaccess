@@ -88,3 +88,11 @@ export const TABLE_KIND_ICONS: Record<TableKind, string> = {
  * table's. Same eye glyph as the `views` plugin's own `meta.icon` (views.ts).
  */
 export const VIEW_ICON = `<svg ${ICON_ATTRS} aria-label="View"><title>View</title><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+
+/**
+ * A visualization window or docked pane. A viz is a KIND of view (its definition
+ * is a `ViewTemplate` whose `kind` is `'viz'`), but it reads as a different thing
+ * on screen, so it gets its own glyph and its own chrome colour rather than
+ * sharing the eye.
+ */
+export const VIZ_ICON = `<svg ${ICON_ATTRS} aria-label="Visualization"><title>Visualization</title><path d="M3 3v18h18"/><rect x="6" y="12" width="3" height="6"/><rect x="11" y="8" width="3" height="10"/><rect x="16" y="5" width="3" height="13"/></svg>`;

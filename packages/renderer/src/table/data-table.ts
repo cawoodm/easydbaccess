@@ -21,6 +21,7 @@ import { runColumnScript, runValidateScript } from '../util/column-script.js';
 import { arrayMembers } from '@easydb/shared';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { TABLE_LOADING_EVENT, tableLoadingState, type TableLoadingDetail } from './table-loading.js';
+import { emitVisibleRows, visibleRowsWanted } from './visible-rows.js';
 import { formatByType, toDateInput, toDatetimeInput } from '../util/local-datetime.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
 
@@ -540,6 +541,8 @@ export class DataTable extends LitElement {
   }
   /** Visible-row count from the last render, emitted for the panel title. */
   private renderedCount = 0;
+  /** The last rendered row set, kept only while a docked pane is listening. */
+  private renderedRows: Row[] | null = null;
   private lastEmittedCount = -1;
   private lastEmittedTotal = -1;
   /** Tables with fewer rows than this skip virtualization (cheap to render). */
@@ -670,6 +673,33 @@ export class DataTable extends LitElement {
     }
     if (!this.viewportHeight) this.viewportHeight = this.clientHeight;
     this.emitCount();
+    this.emitRows();
+  }
+
+  /** The key both `easydb:visible-count` and `easydb:visible-rows` are keyed by. */
+  private get visibleRowsKey(): string {
+    return (this.viewMode ? this.viewInstanceId : this.tableId) || '';
+  }
+
+  /**
+   * Hand the current row set to any docked visualization watching this table.
+   *
+   * Unlike `emitCount` there is no change-detection here: comparing row arrays
+   * costs about what re-aggregating them does, and `emitVisibleRows` is already a
+   * no-op when nobody is listening — which is the case for every window that has
+   * no pane docked, i.e. almost all of them.
+   */
+  private emitRows(): void {
+    const key = this.visibleRowsKey;
+    const rows = this.renderedRows;
+    if (!key || !rows) return;
+    emitVisibleRows({
+      key,
+      rows,
+      total: Math.max(this.matchingTotal, rows.length),
+      truncated: this.truncated,
+      searching: this.searchIsActive,
+    });
   }
 
   /**
@@ -1532,6 +1562,10 @@ export class DataTable extends LitElement {
     // Captured for the panel-title row-count (emitted in updated()); render
     // already computes the visible set, so this reuses that pass.
     this.renderedCount = rows.length;
+    // Same reuse for a docked visualization (see `visible-rows.ts`). Held only
+    // while something is listening — the array is the whole filtered set, and
+    // keeping a reference to it for nobody would pin it after a filter narrowed.
+    this.renderedRows = this.visibleRowsKey && visibleRowsWanted(this.visibleRowsKey) ? rows : null;
     const cols = this.visibleColumns;
     const { slice, topPad, bottomPad } = this.virtualSlice(rows);
     const suggestions = this.computeFilterSuggestions();
