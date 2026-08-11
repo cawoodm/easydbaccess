@@ -269,3 +269,55 @@ describe('search skips a computed-only column', () => {
     expect(applyRowRequest(filled, { columns: cols, search: 'calc:ADA' }).rows).toHaveLength(1);
   });
 });
+
+/**
+ * A WINDOW: the grid asks for one page of the match instead of all of it. What
+ * matters is that the slice only travels when the backend can narrow soundly,
+ * and that an answer which admits it is a superset is never sliced twice.
+ */
+describe('readRows with a slice', () => {
+  it('hands the slice to a backend that can apply the whole request', async () => {
+    const { coll, seen } = fakeColl();
+    const page = await readRows(coll, req({ offset: 1, limit: 2 }), 20_000);
+    expect(seen.queries[0]?.offset).toBe(1);
+    expect(seen.queries[0]?.limit).toBe(2);
+    expect(seen.finds).toBe(0);
+    expect(page.rows.map((r) => r.id)).toEqual(['r2', 'r3']);
+    // `total` is the MATCH, not the page — that is what the scrollbar stands for.
+    expect(page.total).toBe(4);
+    expect(page.truncated).toBeUndefined();
+  });
+
+  it('holds the slice back when the search cannot be pushed', async () => {
+    // A multi-word search has the phrase→AND→OR fallback, which no WHERE clause
+    // means. Counting off rows from a set we are about to narrow further would
+    // report the wrong page, so the slice stays here.
+    const { coll, seen } = fakeColl();
+    await readRows(coll, req({ search: 'ada bo', offset: 100, limit: 10 }), 20_000);
+    expect(seen.queries[0]?.offset).toBeUndefined();
+    expect(seen.queries[0]?.limit).toBe(20_000);
+  });
+
+  it('re-asks unsliced when the backend applied the slice but not every predicate', async () => {
+    // `partial` says the rows are a superset. Slicing that again would count off
+    // a second time — page 2 of page 2 — so the answer is re-read whole and the
+    // whole request re-applied here.
+    const { coll, seen } = fakeColl({ partial: true });
+    const page = await readRows(coll, req({ offset: 2, limit: 2 }), 20_000);
+    expect(seen.queries).toHaveLength(2);
+    expect(seen.queries[0]?.offset).toBe(2);
+    expect(seen.queries[1]?.offset).toBeUndefined();
+    expect(seen.queries[1]?.limit).toBe(20_000);
+    // The right page of the right set, and still flagged as narrowed here.
+    expect(page.rows.map((r) => r.id)).toEqual(['r3', 'r4']);
+    expect(page.partial).toBe(true);
+  });
+
+  it('slices in memory when the collection cannot query at all', async () => {
+    const { coll, seen } = fakeColl({ supportsQuery: false });
+    const page = await readRows(coll, req({ offset: 1, limit: 2 }), 20_000);
+    expect(seen.finds).toBe(1);
+    expect(page.rows.map((r) => r.id)).toEqual(['r2', 'r3']);
+    expect(page.total).toBe(4);
+  });
+});

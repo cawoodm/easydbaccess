@@ -13,7 +13,7 @@ import '../chrome/filter-combobox.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { matchesColumnFilter } from '@easydb/shared';
 import { facetable, facetCounts, facetValues } from '../search/facet-values.js';
-import { GRID_SETTINGS_ID, readHighlightNulls, readSortDescFirst } from './grid-settings.js';
+import { GRID_SETTINGS_ID, readHighlightNulls, readSortDescFirst, readWindowRowsFrom, WINDOW_ROWS_FROM_DEFAULT } from './grid-settings.js';
 import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
 import { readSortSpecs, sortRowsBySpecs } from './row-sort.js';
 import { nextSortSpecs } from './sort-cycle.js';
@@ -503,6 +503,32 @@ export class DataTable extends LitElement {
    * open grids instead of waiting for a reload.
    */
   @state() private highlightNulls = true;
+  /**
+   * Row count from which this grid reads one PAGE at a time instead of holding
+   * the whole table (`grid:windowRowsFrom`, 0 = never). Kept fresh by the same
+   * settings-changed event as the highlight above.
+   */
+  @state() private windowRowsFrom = WINDOW_ROWS_FROM_DEFAULT;
+  /**
+   * Is `rows` a PAGE of the matching set rather than all of it?
+   *
+   * Everything that reads a row by index has to know: with a page in hand,
+   * `rows.length` is the page size and `matchingTotal` is the number of rows the
+   * scrollbar represents.
+   */
+  @state() private windowed = false;
+  /**
+   * Absolute index of `rows[0]` within the matching set. Always 0 unless
+   * {@link windowed} — which is what makes the un-windowed path literally the
+   * same arithmetic it was before.
+   */
+  @state() private windowOffset = 0;
+  /**
+   * Rows per page. Big enough that ordinary scrolling stays inside one page (a
+   * 500-row page is ~14 000 px of grid), small enough that a page is the 13 ms
+   * read rather than the 1483 ms one.
+   */
+  private readonly PAGE_ROWS = 500;
   /** Median row height in px, measured from currently-rendered rows. */
   private rowHeight = 28;
   private resizeObs: ResizeObserver | null = null;
@@ -553,7 +579,11 @@ export class DataTable extends LitElement {
     document.addEventListener('easydb:table-search', this.onTableSearch as EventListener);
     document.addEventListener(TABLE_LOADING_EVENT, this.onTableLoading as EventListener);
     document.addEventListener(SETTINGS_CHANGED_EVENT, this.onSettingsChanged as EventListener);
-    void this.readGridSettings();
+    // AWAITED, not fired and forgotten: the window threshold decides what the
+    // very first fetch asks for. Reading it a moment late means the first read of
+    // a big table is the whole-table read this exists to avoid, and then a second
+    // one to correct it.
+    await this.readGridSettings();
     this.readLoadingState();
     this.addEventListener('scroll', this.onScroll, { passive: true });
     this.resizeObs = new ResizeObserver(() => {
@@ -596,6 +626,8 @@ export class DataTable extends LitElement {
     // scrolling container. Reading scrollTop off it triggers a @state-driven
     // re-render via the assignment.
     this.scrollY = (this as unknown as { scrollTop: number }).scrollTop;
+    // With only a page in memory, scrolling is also a fetch trigger.
+    this.ensureWindow();
   };
 
   private onGlobalSearch = (e: Event) => {
@@ -635,6 +667,12 @@ export class DataTable extends LitElement {
     try {
       const ctx = await getContext();
       this.highlightNulls = await readHighlightNulls(ctx.api.settings);
+      const from = await readWindowRowsFrom(ctx.api.settings);
+      const changed = from !== this.windowRowsFrom;
+      this.windowRowsFrom = from;
+      // Crossing the threshold changes what a fetch asks for, so the rows in
+      // hand are the answer to the old question.
+      if (changed && this.rowColl) void this.loadRows();
     } catch {
       /* a grid that cannot read a preference still has to draw */
     }
@@ -770,25 +808,30 @@ export class DataTable extends LitElement {
     // resolve before the delay so the bar never flashes.
     const barTimer = window.setTimeout(() => (this.loading = true), LOAD_BAR_DELAY_MS);
     try {
-      const page = await readRows(coll, this.rowRequest(), ROW_FETCH_CAP);
+      // The count comes FIRST, because it is what decides whether this table is
+      // read a page at a time — asking afterwards would mean paying for one
+      // whole-table read before ever windowing it, which is the read this exists
+      // to avoid. Counting is cheap (`COUNT(*)`, or a Dexie index count);
+      // fetching to measure is what was not.
+      if (coll.count) {
+        const n = await coll.count();
+        if (gen !== this.loadGeneration) return;
+        this.tableTotal = n;
+      }
+      const windowed = this.shouldWindow(coll);
+      const req = this.rowRequest(windowed);
+      const page = await readRows(coll, req, ROW_FETCH_CAP);
       // A slower earlier load must not land on top of a newer one — the same
       // generation guard `subscribeToCollection` uses for the same reason.
       if (gen !== this.loadGeneration) return;
       this.rows = page.rows;
       this.matchingTotal = page.total;
       this.truncated = page.truncated === true;
-      // The table count travels separately because the page's `total` is the
-      // FILTERED one. Counted, never fetched, and only when the store can do it
-      // without reading rows.
-      if (coll.count) {
-        const n = await coll.count();
-        if (gen !== this.loadGeneration) return;
-        this.tableTotal = n;
-      } else {
-        // No cheap count: an unfiltered read already told us, and a filtered one
-        // can only report what it matched.
-        this.tableTotal = page.total;
-      }
+      this.windowed = windowed;
+      this.windowOffset = windowed ? (req.offset ?? 0) : 0;
+      // No cheap count: an unfiltered read already told us, and a filtered one
+      // can only report what it matched.
+      if (!coll.count) this.tableTotal = page.total;
     } catch (err) {
       if (gen !== this.loadGeneration) return;
       // A remote-backed table (e.g. a live Datasette source) can fail to load
@@ -797,6 +840,8 @@ export class DataTable extends LitElement {
       this.rows = [];
       this.matchingTotal = 0;
       this.tableTotal = 0;
+      this.windowed = false;
+      this.windowOffset = 0;
       const ctx = await getContext();
       ctx.api.ui.dialogs.toast(`Couldn't load rows: ${(err as Error)?.message ?? String(err)}`, {
         kind: 'error',
@@ -808,15 +853,62 @@ export class DataTable extends LitElement {
     }
   }
 
-  /** The current view, as a request the store can answer. */
-  private rowRequest(): RowRequest {
+  /**
+   * The current view, as a request the store can answer. `windowed` adds the
+   * slice — the page the user is looking at rather than every matching row.
+   */
+  private rowRequest(windowed = false): RowRequest {
     const search = [this.localQuery.trim(), this.globalQuery.trim()].filter(Boolean).join(' ');
     return {
       columns: this.columns,
       filters: this.filters,
       ...(search ? { search } : {}),
       ...(this.sortSpecs.length > 0 ? { sort: this.sortSpecs } : {}),
+      ...(windowed ? this.windowRange() : {}),
     };
+  }
+
+  /**
+   * Should this grid read a page at a time?
+   *
+   * Three conditions, and all three are deliberate. The store must be able to
+   * answer a `query` — without that, a window costs the same whole-table read and
+   * buys only a smaller array (that is phase 2, `query` for Dexie). The setting
+   * must be on. And the table must actually be big: under the threshold nothing
+   * changes at all, which is what keeps every table that works well today on the
+   * code path it already has.
+   */
+  private shouldWindow(coll: DataCollection<Row>): boolean {
+    return !!coll.query && this.windowRowsFrom > 0 && this.tableTotal >= this.windowRowsFrom;
+  }
+
+  /**
+   * The page to ask for, in ABSOLUTE row indices, from where the user is looking.
+   *
+   * Snapped down to a whole page so that scrolling a few rows re-uses the page in
+   * hand instead of re-reading a set shifted by three. The span covers the
+   * viewport wherever it sits inside that page, so a viewport straddling a page
+   * boundary gets both — the alternative is a visible gap at every 500th row.
+   */
+  private windowRange(): { offset: number; limit: number } {
+    const rh = this.rowHeight;
+    const first = Math.max(0, Math.floor(this.scrollY / rh) - this.OVERSCAN);
+    const offset = Math.floor(first / this.PAGE_ROWS) * this.PAGE_ROWS;
+    const visible = Math.ceil(this.viewportHeight / rh) + this.OVERSCAN * 2;
+    const need = first - offset + visible;
+    return { offset, limit: Math.ceil(need / this.PAGE_ROWS) * this.PAGE_ROWS || this.PAGE_ROWS };
+  }
+
+  /**
+   * Fetch the next page once the user has scrolled out of the loaded one.
+   *
+   * Only the offset is tested: the span is a function of the viewport, so as long
+   * as the page start is the same the rows in hand still cover what is on screen.
+   */
+  private ensureWindow(): void {
+    if (!this.windowed) return;
+    if (this.windowRange().offset === this.windowOffset) return;
+    this.scheduleReload();
   }
 
   /**
@@ -1255,7 +1347,14 @@ export class DataTable extends LitElement {
     });
     // Toggles apply live while the popover stays open (multi-value tri-state);
     // the promise only reports dismissal or an explicit Clear.
-    const result = await popover.open(btn.getBoundingClientRect(), values, this.filters[field] ?? '', blanks, (next) => this.onFilterInput(field, next));
+    //
+    // The list is built from the rows in memory, which for a windowed grid is one
+    // PAGE — so it says so rather than presenting a page's values as the column's.
+    // Fetching the real distinct list on demand is the next phase; a funnel click
+    // has to stay instant.
+    const result = await popover.open(btn.getBoundingClientRect(), values, this.filters[field] ?? '', blanks, (next) => this.onFilterInput(field, next), {
+      ...(this.windowed ? { note: 'Values from the rows loaded so far — there may be more.' } : {}),
+    });
     if (result === null) return;
     if (typeof result === 'object' && 'clear' in result) {
       this.onFilterInput(field, '');
@@ -1513,25 +1612,41 @@ export class DataTable extends LitElement {
   }
 
   private virtualSlice(rows: Row[]): { slice: Row[]; topPad: number; bottomPad: number } {
-    if (rows.length <= this.VIRT_THRESHOLD || this.viewportHeight === 0) {
+    // How many rows the scrollbar stands for. With a page in hand that is the
+    // MATCHING count, not the page length — otherwise a 609k-row table would
+    // scroll 500 rows and stop.
+    const total = this.windowed ? Math.max(this.matchingTotal, this.windowOffset + rows.length) : rows.length;
+    if (total <= this.VIRT_THRESHOLD || this.viewportHeight === 0) {
       return { slice: rows, topPad: 0, bottomPad: 0 };
     }
     const rh = this.rowHeight;
     const visibleRows = Math.ceil(this.viewportHeight / rh) + this.OVERSCAN * 2;
     const startIdx = Math.max(0, Math.floor(this.scrollY / rh) - this.OVERSCAN);
-    const endIdx = Math.min(rows.length, startIdx + visibleRows);
+    const endIdx = Math.min(total, startIdx + visibleRows);
+    // Absolute indices, less where the loaded page begins. Un-windowed the offset
+    // is 0, so this is the arithmetic it always was.
+    const from = Math.max(0, startIdx - this.windowOffset);
+    const to = Math.max(from, endIdx - this.windowOffset);
+    const slice = rows.slice(from, to);
+    // The rows asked for may not all be in the page yet — the moment between
+    // scrolling and the next page landing. Pad for the ones that are missing, so
+    // the table keeps the height the scrollbar was drawn from; without it the
+    // container shrinks under the scroll position and the view jumps back.
+    const missing = endIdx - startIdx - slice.length;
     return {
-      slice: rows.slice(startIdx, endIdx),
+      slice,
       topPad: startIdx * rh,
-      bottomPad: (rows.length - endIdx) * rh,
+      bottomPad: Math.max(0, (total - endIdx + Math.max(0, missing)) * rh),
     };
   }
 
   override render() {
     const rows = this.sortedRows();
     // Captured for the panel-title row-count (emitted in updated()); render
-    // already computes the visible set, so this reuses that pass.
-    this.renderedCount = rows.length;
+    // already computes the visible set, so this reuses that pass. With a page in
+    // hand the title means the MATCHING count — the user reaches all of them by
+    // scrolling, and "500 of 609,283" would read as a filter nobody applied.
+    this.renderedCount = this.windowed ? this.matchingTotal : rows.length;
     const cols = this.visibleColumns;
     const { slice, topPad, bottomPad } = this.virtualSlice(rows);
     const suggestions = this.computeFilterSuggestions();

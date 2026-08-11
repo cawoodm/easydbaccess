@@ -245,6 +245,59 @@ above and below) and fills the gap with two spacer `<tr>`s sized to
 `topPad`/`bottomPad` pixels, so the scrollbar's total scroll range stays
 correct without every row existing in the DOM.
 
+## Windowed reads: virtualising the FETCH, not just the paint
+
+Virtualisation above only decided what was DRAWN. The fetch stayed eager: one
+measured 609,283-row table cost **1483 ms** and a **15.4 MB** IPC payload to put
+about thirty rows on screen, where the same query for 200 rows takes **13 ms**.
+
+So a big table is now read one PAGE at a time.
+
+- **The threshold is a setting** — `grid:windowRowsFrom` on the Table grid tab,
+  default **50 000**, `0` never windows
+  ([`table/grid-settings.ts`](../../packages/renderer/src/table/grid-settings.ts)).
+  50 000 rather than something smaller so every table that works well today keeps
+  the code path it already has, and only the ones that hurt change.
+- **Three conditions, all deliberate** (`shouldWindow`): the collection must
+  implement `query` — without it a window costs the same whole-table read and buys
+  only a smaller array, which is why Dexie is phase 2 — the setting must be on, and
+  `tableTotal` must reach the threshold.
+- **The count comes first.** `loadRows` asks `count()` BEFORE reading rows, because
+  the count is what decides whether to window; asking afterwards would mean paying
+  for one whole-table read before ever windowing it. Counting is cheap
+  (`SELECT COUNT(*)`), fetching to measure is what was not.
+- **The threshold read is awaited in `connectedCallback`.** Fired and forgotten, it
+  lands after the first fetch — so the first read of a big table is the eager one,
+  followed by a second to correct it. Both of the reads this exists to avoid.
+- **`PAGE_ROWS` is 500** and the offset is snapped down to a whole page, so
+  scrolling a few rows re-uses the page in hand. The span covers the viewport
+  wherever it sits inside that page, or a viewport straddling a boundary would show
+  a gap at every 500th row.
+
+Three things then mean something different, and each is handled where it is read:
+
+| Reader | Un-windowed | Windowed |
+| --- | --- | --- |
+| `virtualSlice` extent | `rows.length` | `matchingTotal` — else a 609k table scrolls 500 rows and stops |
+| Slice indices | absolute | absolute minus `windowOffset` (0 un-windowed, so it is the same arithmetic) |
+| Panel title count | rows in hand | `matchingTotal` — "500 of 609,283" would read as a filter nobody applied |
+
+`virtualSlice` also pads for rows the page does not hold yet — the moment between
+scrolling and the next page landing. Without that the table shrinks under the
+scroll position and the view jumps back.
+
+**Facets say so rather than lying.** The funnel's value list is built from the rows
+in memory, which windowed is one page, so the popover carries a note: "Values from
+the rows loaded so far — there may be more." Fetching the real distinct list on
+demand (a `distinct` capability, plus a refresh icon) is the next phase — a funnel
+click has to stay instant, so it will never be automatic.
+
+**A slice is only ever pushed with every predicate.** `readRows` refuses otherwise
+(`sliceIsSound`), and if a backend applies the slice but reports `partial`, the
+answer is re-read WITHOUT the slice and the whole request re-applied in the
+renderer. Slicing a superset again would count off a second time — page 2 of page
+2 — and nothing in the rows says which ones went missing.
+
 ## Two independent loading bars
 
 The sticky header loading bar (`.load-bar`) can be driven by either of two

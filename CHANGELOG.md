@@ -4,6 +4,7 @@
 
 ### Features
 
+- 🪶 A table of 50,000 rows or more is read one page at a time as you scroll, instead of being held in memory whole (v0.0.347)
 - ✨ The dialogs, the toast and the dropdown menu are now three MIT packages of their own, reusable in any Lit app (v0.0.345)
 
 ### Bugs

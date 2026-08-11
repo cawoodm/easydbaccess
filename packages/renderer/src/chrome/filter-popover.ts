@@ -181,6 +181,12 @@ export class FilterPopover extends LitElement {
   @property({ type: Number }) blanks = 0;
   /** The bare (un-negated) term of the current filter, for selection highlight. */
   @property({ type: String }) current = '';
+  /**
+   * Extra line under the list, for when these values are not the whole story. A
+   * grid reading one page at a time can only offer the values ON that page, and a
+   * list that quietly changes as you scroll is worse than one that says so.
+   */
+  @property({ type: String }) note = '';
   @state() private search = '';
   /**
    * Tri-state per token, keyed by the token's POSITIVE rendering (`Sweden`,
@@ -215,12 +221,13 @@ export class FilterPopover extends LitElement {
     current: string,
     blanks = 0,
     onChange?: (filter: string) => void,
-    opts?: { exact?: boolean | undefined },
+    opts?: { exact?: boolean | undefined; note?: string | undefined },
   ): Promise<string | null | { clear: true }> {
     this.values = values;
     this.blanks = blanks;
     this.onChange = onChange ?? null;
     this.exactValues = opts?.exact === true;
+    this.note = opts?.note ?? '';
     // Seed the tri-states from the active filter so re-opening shows what's on.
     this.states = new Map(parseColumnFilter(current ?? '').map((t) => [keyOf(t), { state: t.negate ? ('not' as const) : ('on' as const), token: t }]));
     this.current = current ?? '';
@@ -348,6 +355,7 @@ export class FilterPopover extends LitElement {
             })}
           </ul>`}
       ${this.values.length > 500 ? html`<div class="cap" style="padding:0 .55rem">Showing first 500 of ${this.values.length}.</div>` : ''}
+      ${this.note ? html`<div class="cap" data-testid="facet-note" style="padding:0 .55rem">${this.note}</div>` : ''}
       <div class="actions">
         <button
           class="text"

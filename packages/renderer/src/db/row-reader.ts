@@ -187,6 +187,28 @@ export async function readRows(coll: DataCollection<Row>, req: RowRequest, capWh
   // Sound and complete: the backend's own answer, `total` included.
   if (sliceIsSound && !page.partial) return page;
 
+  // A slice off a set that was NOT fully narrowed is unrepairable: the backend
+  // counted off rows from a wider set than the caller asked about, and slicing
+  // again here would count off a second time — page 3 of the answer would be
+  // page 3 of page 3. Nothing in the rows says which ones went missing, so the
+  // only correct move is to ask again for the unsliced superset and do the whole
+  // job here. Costs one extra round trip in the case the store admitted it could
+  // not answer (a filter or sort on a computed or `array` column).
+  if (sliceIsSound && page.partial && (q.limit != null || q.offset != null)) {
+    const wide: RowQuery = { ...q };
+    delete wide.offset;
+    if (capWhenReadingAll > 0) wide.limit = capWhenReadingAll;
+    else delete wide.limit;
+    const superset = await coll.query(wide);
+    const redoneWide = applyRowRequest(superset.rows, req);
+    const cappedWide = wide.limit != null && superset.rows.length >= wide.limit;
+    return {
+      ...redoneWide,
+      partial: true,
+      ...(superset.truncated || cappedWide ? { truncated: true } : {}),
+    };
+  }
+
   // A superset. Re-run the whole request over it — cheaper than it looks, since
   // whatever the backend DID apply has already thrown most of the rows away.
   const redone = applyRowRequest(page.rows, req);
