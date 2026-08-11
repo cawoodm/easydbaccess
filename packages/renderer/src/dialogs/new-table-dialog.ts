@@ -9,6 +9,7 @@ import { markDirty, watchDialogDirty } from '../chrome/dirty-guard.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
 import { allColumnsFlagged, buildColumnSpec, toggleColumnFlag, type ColumnFlag, type ColumnRow } from './column-row.js';
 import { renameRowFields, type FieldRename } from '../table/column-merge.js';
+import { remapFilterFields, sameFilterMap } from '../table/filter-map.js';
 import { readRows } from '../db/row-reader.js';
 import { LEGACY_CELL_RENDERERS } from '../plugin-host/registries.js';
 import { describeReferences, findTableReferences, renameProjectionOutputs, renameProjectionSourceFields, repointProjectionSpec, specOf, type TableReferences } from '../table/table-references.js';
@@ -158,10 +159,10 @@ export class NewTableDialog extends LitElement {
       .col-header,
       .col-row {
         display: grid;
-        /* drag | 👁 | field | label | type | renderer | script | max | validate | U ! ⇅ ⚲ | up down del */
+        /* drag | 👁 | field | label | type | renderer | script | max | validate | U ! ⇅ ⚲ | filter | up down del */
         grid-template-columns:
           1.25rem 1.5rem 1fr 1fr 7rem 7rem 1.5rem 4rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem 1.5rem
-          1.5rem 1.5rem;
+          1.5rem 1.5rem 1.5rem;
         gap: 0.4rem;
         align-items: center;
       }
@@ -261,6 +262,22 @@ export class NewTableDialog extends LitElement {
       }
       button.icon-btn.has-validate:hover:not(:disabled) {
         color: #b45309;
+      }
+      /* The funnel that says this column carries a filter. Blue while the filter
+       is on, faded once it is switched off — the glyph changes too, because the
+       state has to survive a screenshot in grey and a colour-blind reader. */
+      button.icon-btn.filter-btn.on {
+        color: #2563eb;
+      }
+      button.icon-btn.filter-btn.on:hover:not(:disabled) {
+        color: #1d4ed8;
+      }
+      button.icon-btn.filter-btn.off {
+        color: #9ca3af;
+      }
+      .col-header .filter-head {
+        color: #9ca3af;
+        line-height: 1;
       }
       button.row-del {
         color: #9ca3af;
@@ -380,6 +397,21 @@ export class NewTableDialog extends LitElement {
   @state() private dragSrcIdx: number | null = null;
   @state() private dropTargetIdx: number | null = null;
   @state() private dropEdge: 'before' | 'after' | null = null;
+  /**
+   * The table's per-column filters (`Table.filters`) as the editor holds them.
+   *
+   * They are shown here because a HIDDEN column's filter is otherwise out of
+   * reach: no header means no funnel, so the grid keeps narrowing and the only
+   * thing that would say why is not on screen. Written back on Save, like every
+   * other change in this dialog.
+   */
+  @state() private filters: Record<string, string> = {};
+  /**
+   * Filters switched off in this session, keyed by field, holding the expression
+   * so a second click puts it back. Switching one off must not cost the user the
+   * expression they built — that is what makes it a toggle rather than a delete.
+   */
+  @state() private filtersOff: Record<string, string> = {};
   /** First {@link PREVIEW_ROWS} rows of the table being edited; edit mode only. */
   @state() private previewRows: Row[] = [];
   /**
@@ -468,6 +500,8 @@ export class NewTableDialog extends LitElement {
       // for a 609k-row one — so the editor either arrived long after the click or,
       // when that read failed, arrived claiming the table had no rows. We still
       // don't subscribe: the dialog is short-lived and a snapshot is fine.
+      this.filters = { ...(t.filters ?? {}) };
+      this.filtersOff = {};
       void this.loadPreview(tableId, t.columns);
     } else {
       this.mode = 'new';
@@ -483,6 +517,8 @@ export class NewTableDialog extends LitElement {
       this.previewRows = [];
       this.previewState = 'none';
       this.previewToken++; // a read still running belongs to the table just left
+      this.filters = {};
+      this.filtersOff = {};
     }
     await this.updateComplete;
     this.dialogEl?.showModal();
@@ -542,6 +578,30 @@ export class NewTableDialog extends LitElement {
 
   private removeColumn(idx: number): void {
     this.columns = this.columns.filter((_, i) => i !== idx);
+    this.touchDirty();
+  }
+
+  /**
+   * Switch a column's filter off, or back on. The expression is kept either way
+   * and nothing is written until Save, so this is as reversible as every other
+   * edit in the dialog — Cancel leaves the filter exactly as it was.
+   */
+  private toggleFilter(field: string): void {
+    const active = this.filters[field];
+    const stashed = this.filtersOff[field];
+    const filters = { ...this.filters };
+    const off = { ...this.filtersOff };
+    if (active !== undefined) {
+      delete filters[field];
+      off[field] = active;
+    } else if (stashed !== undefined) {
+      delete off[field];
+      filters[field] = stashed;
+    } else {
+      return; // no filter on this column: the button is not rendered
+    }
+    this.filters = filters;
+    this.filtersOff = off;
     this.touchDirty();
   }
 
@@ -704,6 +764,25 @@ export class NewTableDialog extends LitElement {
     this.patchColumn(idx, { validate: next.trim() ? next : undefined });
   }
 
+  /**
+   * The parts of an edit patch that are written only when they carry meaning:
+   *
+   * - `deletedColumns` — something is tracked, or a tracked set is being cleared.
+   * - `filters` — a funnel was toggled, or a rename / removal moved the keys.
+   *   Field-keyed, so `remapFilterFields` has to run whether or not the user
+   *   touched a funnel at all.
+   *
+   * Separate from `submit` because that method is already at the complexity
+   * limit the lint config sets.
+   */
+  private conditionalPatch(existing: Table | null | undefined, deletedColumns: string[], prevDeleted: readonly string[], savedFields: ReadonlySet<string>): Partial<Table> {
+    const out: Partial<Table> = {};
+    if (deletedColumns.length > 0 || prevDeleted.length > 0) out.deletedColumns = deletedColumns;
+    const filters = remapFilterFields(this.filters, this.fieldRenames(), savedFields);
+    if (!sameFilterMap(existing?.filters ?? {}, filters)) out.filters = filters;
+    return out;
+  }
+
   private async submit(e: Event): Promise<void> {
     e.preventDefault();
     const name = this.name.trim();
@@ -799,12 +878,8 @@ export class NewTableDialog extends LitElement {
         columns,
         readonly: this.tableReadonly,
         updatedAt: Date.now(),
+        ...this.conditionalPatch(existingTable, deletedColumns, prevDeleted, savedFields),
       };
-      // Only persist the deleted-columns list when it carries meaning (there's
-      // something tracked, or we're clearing a previously-tracked set).
-      if (deletedColumns.length > 0 || prevDeleted.length > 0) {
-        patch.deletedColumns = deletedColumns;
-      }
       const oldName = existingTable?.name;
       await ctx.store.tables.patch(tableId, patch);
 
@@ -863,6 +938,32 @@ export class NewTableDialog extends LitElement {
       });
     }
     this.close();
+  }
+
+  /**
+   * The funnel for one column: shown only where a filter exists, blue while it
+   * is on and faded once it is off. A column with no filter renders an empty
+   * cell — a funnel offering nothing to switch would be worse than no funnel.
+   *
+   * The filter is keyed by the field name as SAVED, so a pending rename must not
+   * move the lookup: `origField` is the key, `field` is only what is on screen.
+   */
+  private renderFilterState(c: ColumnRow) {
+    const key = c.origField ?? c.field;
+    const active = this.filters[key];
+    const stashed = this.filtersOff[key];
+    const expr = active ?? stashed;
+    if (expr === undefined) return html`<span></span>`;
+    const on = active !== undefined;
+    return html`<button
+      type="button"
+      class=${`icon-btn filter-btn ${on ? 'on' : 'off'}`}
+      data-testid=${`filter-state-${key}`}
+      title=${on ? `Filtered: ${expr} — click to switch this filter off (applied on Save)` : `Filter switched off: ${expr} — click to switch it back on`}
+      @click=${() => this.toggleFilter(key)}
+    >
+      <span class="mi sm">${on ? 'filter_alt' : 'filter_alt_off'}</span>
+    </button>`;
   }
 
   private renderPreview() {
@@ -1017,6 +1118,7 @@ export class NewTableDialog extends LitElement {
                 <span></span>
                 ${this.renderFlagHead('unique', 'U', 'Unique')} ${this.renderFlagHead('notnull', '!', 'Not null')} ${this.renderFlagHead('sortable', '⇅', 'Sortable')}
                 ${this.renderFlagHead('filterable', '⚲', 'Filterable (includes search)')}
+                <span class="flag-label filter-head" title="Shows a funnel on every column that has a filter. Click one to switch that filter off."><span class="mi sm">filter_alt</span></span>
                 <span></span>
                 <span></span>
                 <span></span>
@@ -1132,6 +1234,7 @@ export class NewTableDialog extends LitElement {
                           })}
                       />
                     </span>
+                    ${this.renderFilterState(c)}
                     <button type="button" class="icon-btn" title="Move up" ?disabled=${i === 0} @click=${() => this.moveColumn(i, -1)}>
                       <span class="mi sm">arrow_upward</span>
                     </button>

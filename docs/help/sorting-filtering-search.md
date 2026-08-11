@@ -70,6 +70,16 @@ A column with long, free-text values (a description field, say) won't offer
 a dropdown at all — only a plain typed filter — since a value list wouldn't
 be useful there.
 
+### A filter on a hidden column
+
+A hidden column has no header, and so no funnel to open. Its filter keeps
+working, which can look like rows that have gone missing for no reason.
+
+Open the column editor to see it: a blue funnel is shown on every column that
+has a filter, whether the column is hidden or not. Click the funnel to switch
+that filter off, and click it again to bring it back. The change applies when
+you press Save.
+
 ## Columns you cannot search
 
 A column whose value comes from a script holds nothing of its own — the value is

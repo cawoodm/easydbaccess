@@ -8,6 +8,7 @@
 
 ### Bugs
 
+- 🪲 A filter on a hidden column could not be seen or switched off — the column had no header, so it had no funnel (v0.0.346)
 - 🪲 The column editor showed no preview on a large table, and claimed the table was empty when the read failed (v0.0.343)
 
 ## 10 Aug 2026

@@ -167,6 +167,21 @@ A list with no members also SHOWS as an empty cell (pink, no tooltip) instead of
 as the text it is stored in: `[]` is how an absent list arrives from most exports,
 and two brackets read as content where there is none.
 
+**A hidden column's filter needs a second way out.** `Table.filters` is keyed by
+FIELD and survives the column being hidden, but the funnel that would clear it
+lives in the header — which a hidden column does not have. The grid then narrows
+with nothing on screen to say why. So the columns editor shows the same state:
+`renderFilterState` in `new-table-dialog.ts` puts a blue funnel on every filtered
+column and a click switches it off, stashed rather than deleted so a second click
+puts it back, written on Save with everything else.
+
+Being field-keyed makes the editor responsible for the KEYS too — a rename has to
+carry its filter and a removed column has to lose it
+([`table/filter-map.ts`](../../packages/renderer/src/table/filter-map.ts)). A
+stale key is not loud: `row-reader.ts` drops a filter naming a field no column has
+(it would match nothing and empty the grid), so the filter would simply stop
+existing without anyone being told.
+
 ## The empty-cell highlight is a preference
 
 `cellStateClass` marks a `<td>` from the STORED value — ` is-null` for empty,
