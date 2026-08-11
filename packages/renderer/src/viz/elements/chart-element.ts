@@ -55,19 +55,7 @@ async function chartCtor(): Promise<typeof ChartType> {
   if (chartCtorPromise) return chartCtorPromise;
   chartCtorPromise = (async () => {
     const m = await import('chart.js');
-    m.Chart.register(
-      m.BarController,
-      m.BarElement,
-      m.LineController,
-      m.LineElement,
-      m.PointElement,
-      m.PieController,
-      m.ArcElement,
-      m.CategoryScale,
-      m.LinearScale,
-      m.Tooltip,
-      m.Legend,
-    );
+    m.Chart.register(m.BarController, m.BarElement, m.LineController, m.LineElement, m.PointElement, m.PieController, m.ArcElement, m.CategoryScale, m.LinearScale, m.Tooltip, m.Legend);
     return m.Chart;
   })();
   return chartCtorPromise;

@@ -32,7 +32,9 @@ export class VizPane extends LitElement {
         height: 100%;
         overflow: hidden;
         background: var(--eda-pane-bg, transparent);
-        font: 11px/1.3 system-ui, sans-serif;
+        font:
+          11px/1.3 system-ui,
+          sans-serif;
       }
       .strip {
         flex: none;
@@ -138,12 +140,7 @@ export class VizPane extends LitElement {
   override render() {
     return html`
       <div class="strip">
-        <button
-          @click=${this.toggleCollapse}
-          title=${this.collapsed ? 'Expand' : 'Collapse'}
-          aria-label=${this.collapsed ? 'Expand' : 'Collapse'}
-          aria-expanded=${this.collapsed ? 'false' : 'true'}
-        >
+        <button @click=${this.toggleCollapse} title=${this.collapsed ? 'Expand' : 'Collapse'} aria-label=${this.collapsed ? 'Expand' : 'Collapse'} aria-expanded=${this.collapsed ? 'false' : 'true'}>
           <span class="material-icons">${this.collapsed ? 'chevron_right' : 'expand_more'}</span>
         </button>
         <span class="title" title=${this.label}>${this.label}</span>

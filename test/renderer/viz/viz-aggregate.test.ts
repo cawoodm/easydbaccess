@@ -13,11 +13,7 @@ const countBy = (channel = 'CATEGORY'): VizAggregate => ({ groupBy: [channel], m
 describe('aggregateRows — grouping', () => {
   const columns = [col('country'), col('amount', 'number')];
   const mapping = { CATEGORY: 'country', VALUE: 'amount' };
-  const rows = [
-    row({ country: 'CH', amount: 10 }),
-    row({ country: 'DE', amount: 5 }),
-    row({ country: 'CH', amount: 7 }),
-  ];
+  const rows = [row({ country: 'CH', amount: 10 }), row({ country: 'DE', amount: 5 }), row({ country: 'CH', amount: 7 })];
 
   it('groups by one channel and counts', () => {
     const f = aggregateRows(rows, columns, mapping, countBy());
@@ -40,10 +36,15 @@ describe('aggregateRows — grouping', () => {
       row({ country: 'DE', city: 'Bonn', amount: 3 }),
       row({ country: 'CH', city: 'Bern', amount: 4 }),
     ];
-    const f = aggregateRows(rs, cols, { CATEGORY: 'country', SERIES: 'city', VALUE: 'amount' }, {
-      groupBy: ['CATEGORY', 'SERIES'],
-      measures: [{ channel: 'VALUE', fn: 'count' }],
-    });
+    const f = aggregateRows(
+      rs,
+      cols,
+      { CATEGORY: 'country', SERIES: 'city', VALUE: 'amount' },
+      {
+        groupBy: ['CATEGORY', 'SERIES'],
+        measures: [{ channel: 'VALUE', fn: 'count' }],
+      },
+    );
     // 3 combinations, not 2x3 = 6.
     expect(f.categories).toHaveLength(3);
     expect(f.series[0]?.points.reduce((a, b) => (a ?? 0) + (b ?? 0), 0)).toBe(4);
@@ -207,6 +208,22 @@ describe('aggregateRows — sorting', () => {
     expect(f.categories.map((c) => c.label)).toEqual(['a', 'b', 'c']);
   });
 
+  it('breaks a value tie by category, so equal bars do not reshuffle', () => {
+    // Buckets are built in the order rows ARRIVE, and rows arrive in the store's
+    // order (uuid, for Dexie) — not insertion order. Without a tie-break, two
+    // equal categories swap places between reads.
+    const tied = [row({ k: 'b', v: 1 }), row({ k: 'a', v: 1 })];
+    const f = aggregateRows(tied, columns, mapping, { groupBy: ['CATEGORY'], measures: [{ channel: 'VALUE', fn: 'sum' }], sort: 'valueDesc' });
+    expect(f.categories.map((c) => c.label)).toEqual(['a', 'b']);
+    // Same answer whichever order the rows came back in.
+    const reversed = aggregateRows([...tied].reverse(), columns, mapping, {
+      groupBy: ['CATEGORY'],
+      measures: [{ channel: 'VALUE', fn: 'sum' }],
+      sort: 'valueDesc',
+    });
+    expect(reversed.categories.map((c) => c.label)).toEqual(['a', 'b']);
+  });
+
   it('sorts by value ascending and descending', () => {
     const asc = aggregateRows(rows, columns, mapping, { groupBy: ['CATEGORY'], measures: [{ channel: 'VALUE', fn: 'sum' }], sort: 'value' });
     expect(asc.categories.map((c) => c.label)).toEqual(['c', 'b', 'a']);
@@ -226,11 +243,16 @@ describe('aggregateRows — binning', () => {
   it('bins a numeric group key by width', () => {
     const cols = [col('age', 'number'), col('v', 'number')];
     const rs = [row({ age: 3, v: 1 }), row({ age: 7, v: 1 }), row({ age: 12, v: 1 })];
-    const f = aggregateRows(rs, cols, { CATEGORY: 'age', VALUE: 'v' }, {
-      groupBy: ['CATEGORY'],
-      measures: [{ channel: 'VALUE', fn: 'count' }],
-      bin: { channel: 'CATEGORY', width: 10 },
-    });
+    const f = aggregateRows(
+      rs,
+      cols,
+      { CATEGORY: 'age', VALUE: 'v' },
+      {
+        groupBy: ['CATEGORY'],
+        measures: [{ channel: 'VALUE', fn: 'count' }],
+        bin: { channel: 'CATEGORY', width: 10 },
+      },
+    );
     expect(f.categories.map((c) => c.label)).toEqual(['0–10', '10–20']);
     expect(f.series[0]?.points).toEqual([2, 1]);
   });
@@ -250,11 +272,16 @@ describe('aggregateRows — binning', () => {
 
   it('buckets an unparseable date as empty rather than inventing one', () => {
     const cols = [col('d', 'date'), col('v', 'number')];
-    const f = aggregateRows([row({ d: 'not a date', v: 1 })], cols, { CATEGORY: 'd', VALUE: 'v' }, {
-      groupBy: ['CATEGORY'],
-      measures: [{ channel: 'VALUE', fn: 'count' }],
-      bin: { channel: 'CATEGORY', unit: 'month' },
-    });
+    const f = aggregateRows(
+      [row({ d: 'not a date', v: 1 })],
+      cols,
+      { CATEGORY: 'd', VALUE: 'v' },
+      {
+        groupBy: ['CATEGORY'],
+        measures: [{ channel: 'VALUE', fn: 'count' }],
+        bin: { channel: 'CATEGORY', unit: 'month' },
+      },
+    );
     expect(f.categories.map((c) => c.label)).toEqual([EMPTY_LABEL]);
   });
 });

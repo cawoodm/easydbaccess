@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  clampPaneSize,
-  fitPanes,
-  MIN_PANE_H,
-  MIN_PRIMARY_H,
-  orderPanes,
-  resizedPaneSize,
-} from '../../../packages/renderer/src/window-mgr/stack-math.js';
+import { clampPaneSize, fitPanes, MIN_PANE_H, MIN_PRIMARY_H, orderPanes, resizedPaneSize } from '../../../packages/renderer/src/window-mgr/stack-math.js';
 
 describe('clampPaneSize', () => {
   it('passes through a size that fits', () => {

@@ -1,12 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Row } from '../../../packages/shared/src/types.js';
-import {
-  __resetVisibleRowsWatchers,
-  emitVisibleRows,
-  visibleRowsWanted,
-  watchVisibleRows,
-  type VisibleRowsDetail,
-} from '../../../packages/renderer/src/table/visible-rows.js';
+import { __resetVisibleRowsWatchers, emitVisibleRows, visibleRowsWanted, watchVisibleRows, type VisibleRowsDetail } from '../../../packages/renderer/src/table/visible-rows.js';
 
 const rows: Row[] = [{ id: 'r1', tableId: 't1', data: { a: 1 }, updatedAt: 0 }];
 

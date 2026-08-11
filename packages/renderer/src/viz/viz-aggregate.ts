@@ -217,13 +217,7 @@ interface Bucket {
  * chart, because "no data" and "you renamed the column" look identical otherwise
  * and only one of them is the user's fault.
  */
-export function aggregateRows(
-  rows: readonly Row[],
-  columns: readonly ColumnSpec[],
-  mapping: Record<string, string>,
-  spec: VizAggregate,
-  opts: { truncated?: boolean | undefined } = {},
-): VizFrame {
+export function aggregateRows(rows: readonly Row[], columns: readonly ColumnSpec[], mapping: Record<string, string>, spec: VizAggregate, opts: { truncated?: boolean | undefined } = {}): VizFrame {
   const truncated = opts.truncated === true;
   const byField = new Map(columns.map((c) => [c.field, c]));
   const measures = spec.measures ?? [];
@@ -347,10 +341,21 @@ export function aggregateRows(
 
   const primary = (e: { points: Array<number | null> }): number => e.points[0] ?? Number.NEGATIVE_INFINITY;
 
+  /**
+   * Tie-break by category label.
+   *
+   * Load-bearing, not tidiness: buckets are built in the order rows arrive, and
+   * rows arrive in whatever order the store returns them — uuid order for Dexie,
+   * not insertion order. So two categories with equal measures would swap places
+   * between reads, and a chart whose equal bars reshuffle on every reload looks
+   * broken. Comparing labels makes the order a function of the data alone.
+   */
+  const byLabel = (a: Bucket, b: Bucket): number => a.key.localeCompare(b.key);
+
   const firstGroupType = groupBy.length > 0 ? byField.get(mapping[groupBy[0] as string] as string)?.type : undefined;
   const sortMode = spec.sort ?? 'category';
-  if (sortMode === 'value') evaluated.sort((a, b) => primary(a) - primary(b));
-  else if (sortMode === 'valueDesc') evaluated.sort((a, b) => primary(b) - primary(a));
+  if (sortMode === 'value') evaluated.sort((a, b) => primary(a) - primary(b) || byLabel(a.bucket, b.bucket));
+  else if (sortMode === 'valueDesc') evaluated.sort((a, b) => primary(b) - primary(a) || byLabel(a.bucket, b.bucket));
   else {
     evaluated.sort((a, b) => {
       const av = a.bucket.sortValue;
@@ -360,13 +365,15 @@ export function aggregateRows(
       const aBlank = isBlank(av);
       const bBlank = isBlank(bv);
       if (aBlank !== bBlank) return aBlank ? 1 : -1;
-      if (aBlank && bBlank) return 0;
+      if (aBlank && bBlank) return byLabel(a.bucket, b.bucket);
       // A binned key sorts as its own label/number; otherwise by column type.
       if (spec.bin && spec.bin.channel === groupBy[0]) {
-        if (typeof av === 'number' && typeof bv === 'number') return av - bv;
-        return String(av).localeCompare(String(bv));
+        if (typeof av === 'number' && typeof bv === 'number') return av - bv || byLabel(a.bucket, b.bucket);
+        return String(av).localeCompare(String(bv)) || byLabel(a.bucket, b.bucket);
       }
-      return compareValues(av, bv, firstGroupType ?? 'string');
+      // Second group channel included: grouping by two channels leaves many
+      // buckets equal on the first, and only the full key orders them.
+      return compareValues(av, bv, firstGroupType ?? 'string') || byLabel(a.bucket, b.bucket);
     });
   }
 
@@ -382,7 +389,7 @@ export function aggregateRows(
   // when the chart is sorted by category.
   const topN = spec.topN;
   if (topN && topN > 0 && categories.length > topN) {
-    const ranked = [...evaluated].sort((a, b) => primary(b) - primary(a));
+    const ranked = [...evaluated].sort((a, b) => primary(b) - primary(a) || byLabel(a.bucket, b.bucket));
     const keep = new Set(ranked.slice(0, topN).map((e) => e.bucket.key));
     const kept: VizCategory[] = [];
     const keptPoints: Array<Array<number | null>> = [];

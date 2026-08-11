@@ -163,12 +163,7 @@ export class VizWordCloud extends LitElement {
         <g transform="translate(${w / 2},${h / 2})">
           ${this.placed.map(
             (p, i) => html`
-              <text
-                text-anchor="middle"
-                transform="translate(${p.x},${p.y}) rotate(${p.rotate})"
-                font-size=${p.size}
-                fill=${theme.palette[i % theme.palette.length] ?? theme.text}
-              >
+              <text text-anchor="middle" transform="translate(${p.x},${p.y}) rotate(${p.rotate})" font-size=${p.size} fill=${theme.palette[i % theme.palette.length] ?? theme.text}>
                 <title>${p.text}: ${p.count.toLocaleString()}</title>
                 ${p.text}
               </text>

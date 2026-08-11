@@ -178,7 +178,9 @@ export class VizPointMap extends LitElement {
 
   override render() {
     if (this.points.length === 0) {
-      return html`<div style="display:flex;align-items:center;justify-content:center;height:100%;padding:.5rem 1rem;text-align:center;font:12px/1.5 system-ui,sans-serif;color:rgba(127,127,127,.9)">${this.emptyText}</div>`;
+      return html`<div style="display:flex;align-items:center;justify-content:center;height:100%;padding:.5rem 1rem;text-align:center;font:12px/1.5 system-ui,sans-serif;color:rgba(127,127,127,.9)">
+        ${this.emptyText}
+      </div>`;
     }
     return html`
       <div
@@ -188,10 +190,7 @@ export class VizPointMap extends LitElement {
         style="position:absolute;inset:0;background:var(--viz-map-bg, #e5e7eb)"
       ></div>
       ${this.tileError
-        ? html`<div
-            role="status"
-            style="position:absolute;left:0;right:0;bottom:0;z-index:500;padding:3px 8px;font:11px/1.35 system-ui,sans-serif;color:#92400e;background:rgba(255,251,235,.95)"
-          >
+        ? html`<div role="status" style="position:absolute;left:0;right:0;bottom:0;z-index:500;padding:3px 8px;font:11px/1.35 system-ui,sans-serif;color:#92400e;background:rgba(255,251,235,.95)">
             Map tiles could not be loaded — the points are still plotted. Check the tile URL in Settings → Visualizations, or your connection.
           </div>`
         : nothing}

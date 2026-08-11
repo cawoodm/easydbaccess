@@ -38,14 +38,7 @@ export function clampPaneSize(requested: number, available: number, otherPanes: 
  * because the splitter sits between the pane and the primary content in both
  * cases but the pane is on the other side of it.
  */
-export function resizedPaneSize(
-  startSize: number,
-  dy: number,
-  edge: 'above' | 'below',
-  available: number,
-  otherPanes: number,
-  minPrimary = MIN_PRIMARY_H,
-): number {
+export function resizedPaneSize(startSize: number, dy: number, edge: 'above' | 'below', available: number, otherPanes: number, minPrimary = MIN_PRIMARY_H): number {
   const delta = edge === 'above' ? dy : -dy;
   return clampPaneSize(startSize + delta, available, otherPanes, minPrimary);
 }
@@ -88,5 +81,8 @@ export function fitPanes(sizes: readonly number[], available: number, minPrimary
 
 /** Panes on one edge, in display order. Stable for equal `order` values. */
 export function orderPanes<T extends { order: number }>(panes: readonly T[]): T[] {
-  return [...panes].map((p, i) => ({ p, i })).sort((a, b) => a.p.order - b.p.order || a.i - b.i).map(({ p }) => p);
+  return [...panes]
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => a.p.order - b.p.order || a.i - b.i)
+    .map(({ p }) => p);
 }

@@ -60,7 +60,9 @@ export class VizPanel extends LitElement {
       box-sizing: border-box;
       /* The default palette the elements read. Overridable per host. */
       --viz-palette: #2563eb, #0891b2, #7c3aed, #db2777, #ea580c, #16a34a, #ca8a04, #dc2626;
-      font: 12px/1.4 system-ui, sans-serif;
+      font:
+        12px/1.4 system-ui,
+        sans-serif;
     }
     .chart {
       flex: 1;

@@ -862,9 +862,7 @@ export class ViewsDialog extends LitElement {
   private renderVizTemplate(d: TemplateDraft) {
     const kinds = this.visualizations();
     if (kinds.length === 0) {
-      return html`<p class="hint">
-        No visualizations are registered. Enable the Charts, Map or Word cloud plugins in the Plugin Manager.
-      </p>`;
+      return html`<p class="hint">No visualizations are registered. Enable the Charts, Map or Word cloud plugins in the Plugin Manager.</p>`;
     }
     const spec = this.vizSpecOf(d.viz?.kind) ?? kinds[0];
     if (!spec) return nothing;
@@ -1030,30 +1028,34 @@ export class ViewsDialog extends LitElement {
                     <option value="" ?selected=${!d.mapping[tok]}>— none —</option>
                     ${this.columns.map((c) => html`<option value=${c.field} ?selected=${d.mapping[tok] === c.field}>${c.label || c.field}</option>`)}
                   </select>
-                  ${this.isVizDraft(d) ? nothing : html`<button
-                    type="button"
-                    class=${d.tokenRaw[tok] ? 'mini' : 'mini scripted'}
-                    title=${d.tokenRaw[tok] ? `$${tok} shows the plain value — click to render it with the column's renderer` : `$${tok} is shown by the column's renderer — click for the plain value`}
-                    @click=${() => this.toggleTokenRaw(tok)}
-                  >
-                    ${d.tokenRaw[tok] ? '🔤' : '🎨'}
-                  </button>
-                  <button
-                    type="button"
-                    class=${d.tokenScripts[tok]?.trim() ? 'mini scripted' : 'mini'}
-                    title=${d.tokenScripts[tok]?.trim() ? `Edit the script formatting $${tok}` : `Format $${tok} with a script (e.g. a local date, markdown as HTML)`}
-                    @click=${() => void this.editTokenScript(tok)}
-                  >
-                    ƒ(x)
-                  </button>`}
+                  ${this.isVizDraft(d)
+                    ? nothing
+                    : html`<button
+                          type="button"
+                          class=${d.tokenRaw[tok] ? 'mini' : 'mini scripted'}
+                          title=${d.tokenRaw[tok]
+                            ? `$${tok} shows the plain value — click to render it with the column's renderer`
+                            : `$${tok} is shown by the column's renderer — click for the plain value`}
+                          @click=${() => this.toggleTokenRaw(tok)}
+                        >
+                          ${d.tokenRaw[tok] ? '🔤' : '🎨'}
+                        </button>
+                        <button
+                          type="button"
+                          class=${d.tokenScripts[tok]?.trim() ? 'mini scripted' : 'mini'}
+                          title=${d.tokenScripts[tok]?.trim() ? `Edit the script formatting $${tok}` : `Format $${tok} with a script (e.g. a local date, markdown as HTML)`}
+                          @click=${() => void this.editTokenScript(tok)}
+                        >
+                          ƒ(x)
+                        </button>`}
                 </div>`,
             )}
       </div>
       ${this.isVizDraft(d)
         ? nothing
         : html`<p class="hint">
-            🎨 shows the token through the column's own cell renderer, so the view looks like the table; 🔤 shows the plain value instead (the same as writing <code>$raw.TOKEN</code>). A token inside a
-            tag, as in <code>&lt;img src="$IMAGE"&gt;</code>, always stays plain.
+            🎨 shows the token through the column's own cell renderer, so the view looks like the table; 🔤 shows the plain value instead (the same as writing <code>$raw.TOKEN</code>). A token inside
+            a tag, as in <code>&lt;img src="$IMAGE"&gt;</code>, always stays plain.
           </p>`}
       <p class="hint">
         <code>ƒ(x)</code> gives a token a <code>render(row)</code> script, so the view can show a formatted value — a local date, markdown as HTML — without changing the stored cell. It applies to
