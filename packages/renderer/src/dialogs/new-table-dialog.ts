@@ -10,11 +10,19 @@ import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
 import { allColumnsFlagged, buildColumnSpec, toggleColumnFlag, type ColumnFlag, type ColumnRow } from './column-row.js';
 import { renameRowFields, type FieldRename } from '../table/column-merge.js';
+import { readRows } from '../db/row-reader.js';
 import { HostDialogs } from './host-dialogs.js';
 import { LEGACY_CELL_RENDERERS } from '../plugin-host/registries.js';
 import { describeReferences, findTableReferences, renameProjectionOutputs, renameProjectionSourceFields, repointProjectionSpec, specOf, type TableReferences } from '../table/table-references.js';
 
 const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'datetime', 'array'];
+
+/**
+ * Rows the live preview reads. Enough to judge the column specs against real
+ * values, and small enough to ASK for: reading a whole table to show a hundred
+ * rows of it is what left the editor with an empty preview on a big table.
+ */
+const PREVIEW_ROWS = 100;
 
 /** Registered renderer names worth offering, sorted; legacy aliases dropped. */
 function offerableRenderers(registered: ReadonlyMap<string, string>): string[] {
@@ -374,8 +382,19 @@ export class NewTableDialog extends LitElement {
   @state() private dragSrcIdx: number | null = null;
   @state() private dropTargetIdx: number | null = null;
   @state() private dropEdge: 'before' | 'after' | null = null;
-  /** First 100 rows of the table being edited; populated only in edit mode. */
+  /** First {@link PREVIEW_ROWS} rows of the table being edited; edit mode only. */
   @state() private previewRows: Row[] = [];
+  /**
+   * Why the preview has no rows. A read still running, a read that failed and a
+   * table that is genuinely empty all showed the same "No rows to preview" —
+   * which reads as "this table has no data", the one thing it did not mean.
+   */
+  @state() private previewState: 'none' | 'loading' | 'ready' | 'error' = 'none';
+  /**
+   * Answers arriving for a table the dialog has since been reopened on are
+   * dropped. A slow read outliving its dialog is exactly the case here.
+   */
+  private previewToken = 0;
   /**
    * Snapshot of renderer names registered at open time. Populated from
    * `registries.cellRenderers` keys; built-in renderers (date, datetime,
@@ -446,11 +465,12 @@ export class NewTableDialog extends LitElement {
         origField: c.field,
         orig: c,
       }));
-      // Pull the first 100 rows for the live preview. We deliberately don't
-      // subscribe — the dialog is short-lived and external row edits during
-      // the dialog session are rare enough that a snapshot is fine.
-      const allRows = await ctx.store.rows(tableId).find();
-      this.previewRows = allRows.slice(0, 100);
+      // The preview is loaded AFTER the dialog is on screen, not before. It used
+      // to be awaited here, over a read of the WHOLE table — seconds and ~15 MB
+      // for a 609k-row one — so the editor either arrived long after the click or,
+      // when that read failed, arrived claiming the table had no rows. We still
+      // don't subscribe: the dialog is short-lived and a snapshot is fine.
+      void this.loadPreview(tableId, t.columns);
     } else {
       this.mode = 'new';
       this.editTableId = null;
@@ -463,9 +483,41 @@ export class NewTableDialog extends LitElement {
         { field: 'note', label: 'Note', type: 'string' },
       ];
       this.previewRows = [];
+      this.previewState = 'none';
+      this.previewToken++; // a read still running belongs to the table just left
     }
     await this.updateComplete;
     this.dialogEl?.showModal();
+  }
+
+  /**
+   * Fill the live preview, asking for {@link PREVIEW_ROWS} rows rather than all
+   * of them.
+   *
+   * `readRows` is used instead of `find()` so a backend that can narrow does:
+   * the Electron SQLite store turns the limit into `LIMIT` and answers in
+   * milliseconds, and the cap bounds the read for the backends that cannot
+   * (Dexie has no `query`). A failure is REPORTED rather than shown as an empty
+   * table — the column settings still save either way, so the editor stays
+   * usable without its preview.
+   */
+  private async loadPreview(tableId: string, columns: readonly ColumnSpec[]): Promise<void> {
+    const token = ++this.previewToken;
+    this.previewRows = [];
+    this.previewState = 'loading';
+    try {
+      const ctx = await getContext();
+      const page = await readRows(ctx.store.rows(tableId), { columns, limit: PREVIEW_ROWS }, PREVIEW_ROWS);
+      if (token !== this.previewToken) return;
+      this.previewRows = page.rows;
+      this.previewState = 'ready';
+    } catch (err) {
+      if (token !== this.previewToken) return;
+      this.previewRows = [];
+      this.previewState = 'error';
+      // eslint-disable-next-line no-console
+      console.warn('[columns-editor] the preview rows could not be read', err);
+    }
   }
 
   private close(): void {
@@ -817,7 +869,13 @@ export class NewTableDialog extends LitElement {
 
   private renderPreview() {
     if (this.previewRows.length === 0) {
-      return html`<div class="preview"><div class="empty">No rows to preview.</div></div>`;
+      const msg =
+        this.previewState === 'loading'
+          ? 'Reading rows for the preview…'
+          : this.previewState === 'error'
+            ? 'The rows could not be read, so there is no preview. Your column changes still save.'
+            : 'No rows to preview.';
+      return html`<div class="preview"><div class="empty" data-testid="preview-empty">${msg}</div></div>`;
     }
     // The preview rows are keyed by the field names as SAVED, but the columns
     // below read the names the user has typed. Re-key a copy exactly the way

@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 11 Aug 2026
+
+### Bugs
+
+- 🪲 The column editor showed no preview on a large table, and claimed the table was empty when the read failed (v0.0.343)
+
 ## 10 Aug 2026
 
 ### Features

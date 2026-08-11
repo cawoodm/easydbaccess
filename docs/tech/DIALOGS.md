@@ -274,6 +274,26 @@ event is the one channel both sides can reach.
   listening on the event bus sees the raw drop even if a specific handler
   already claimed it.
 
+## A dialog never waits on a data read to open
+
+The columns editor learned this the hard way. Its live preview was awaited
+BEFORE `showModal()`, over `store.rows(id).find()` — the whole table. On a
+609k-row table that is seconds and ~15 MB to show a hundred rows, so the editor
+appeared long after the click, and a read that failed outright left it open
+saying "No rows to preview" — the one thing that was not true.
+
+The shape to copy (`new-table-dialog.ts`'s `loadPreview`):
+
+- show the dialog on what you already have (here: the `Table` doc), then start
+  the read;
+- ASK for what you show — `readRows(coll, { columns, limit: 100 }, 100)`, so the
+  Electron store turns it into `LIMIT` and the cap bounds the backends with no
+  `query`;
+- keep a token that a reopen increments, and drop an answer whose token is
+  stale — a slow read outliving its dialog is exactly the case here;
+- give the empty state three readings — reading, nothing there, could not be
+  read. One message for all three is a bug report waiting to happen.
+
 ## Practical implications
 
 - **Always use `api.ui.dialogs`, never `window.*`, in plugin code.** The

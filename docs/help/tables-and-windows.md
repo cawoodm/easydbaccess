@@ -50,6 +50,16 @@ close.
 
 ![Command Palette](./screenshots/command-palette.png)
 
+## The preview in the column editor
+
+The column editor shows the first 100 rows below the columns. Each cell is
+checked against the settings you have typed, and a cell that breaks one is
+marked red.
+
+Only 100 rows are read, so the editor opens as quickly for a table of a million
+rows as for a small one. The preview fills a moment after the editor appears. If
+the rows cannot be read, the preview tells you — your column changes still save.
+
 ## Getting a deleted column back
 
 Deleting a column in the column editor removes its values, and the app remembers
