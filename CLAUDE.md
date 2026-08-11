@@ -105,6 +105,51 @@ Three logical pieces:
 and — most importantly — `plugin-api.ts`, which defines the `HostApi` every
 plugin receives.
 
+## Three UI pieces now live outside this repo
+
+The dialog layer, the toast and the dropdown menu were generic enough to reuse
+elsewhere, so each is its own MIT-licensed repo with its own tests, example and
+npm publish workflow:
+
+- **[`@cawoodm/lit-dialogs`](https://github.com/cawoodm/lit-dialogs)** —
+  `HostDialogs` (alert/confirm/prompt/choice), `dialogChromeStyles`,
+  `ctrlEnterSubmits`, `makeDialogDraggable`. Every dialog in
+  `src/dialogs/` imports its chrome from here.
+- **[`@cawoodm/lit-toast`](https://github.com/cawoodm/lit-toast)** —
+  `ToastHost`. A toast is a notification, not a dialog; the two share no code.
+- **[`@cawoodm/lit-menu`](https://github.com/cawoodm/lit-menu)** —
+  `AnchoredMenu.open(rect, items)`, the self-mounting dropdown behind the
+  Connect menu, the export-format pickers and the sync menus.
+
+One deliberate omission: `chrome/filter-combobox.ts` and `chrome/panel-search.ts`
+stay here. They are wired into `data-table` and `panel-shell` — data-table UI,
+not primitives — so they belong with the windows layer whenever that is
+extracted. `chrome/app-progress*.ts` and `chrome/top-progress.ts` are generic
+but nothing outside the app needs them yet.
+
+All three are **git dependencies pinned to a commit SHA** in
+`packages/renderer/package.json`, not npm versions — a git dep works on a CI
+runner and needs no publish round-trip. `npm install` clones each one and runs
+its `prepare` script, which builds `dist/`. To take a package change:
+
+1. Commit and push in `C:\projects\marc\packages\<name>`.
+2. Bump the SHA in `packages/renderer/package.json`.
+3. `npm install`.
+
+For a tight edit loop, `npm link` the package instead of re-installing per
+change.
+
+The elements register through `defineHostDialogs()` / `defineToastHost()` in
+`chrome/app-shell.ts` rather than a side-effect import, because a library that
+calls `customElements.define` at module scope throws when the module is
+evaluated twice.
+
+`chrome/material-icon-css.ts`, `@cawoodm/lit-toast` and `@cawoodm/lit-menu` each
+carry their own copy of the same Material Icons class rules. This is deliberate,
+not drift: a published package cannot reach back into the app, and 24 lines of
+CSS with no logic is not worth a fourth package everything then depends on. The
+rules have not changed in this app's life.
+
 ## The plugin model (load-bearing)
 
 `packages/shared/src/plugin-api.ts` **is the single source of truth** for what

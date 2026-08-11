@@ -1,7 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
-import { makeDialogDraggable } from './draggable.js';
+import { ctrlEnterSubmits, dialogChromeStyles, HostDialogs, makeDialogDraggable } from '@cawoodm/lit-dialogs';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import {
   USER_SAMPLES_SETTING,
@@ -15,7 +14,6 @@ import {
   type UserScriptSample,
 } from './script-samples.js';
 import { getContext } from '../app-context.js';
-import { HostDialogs } from './host-dialogs.js';
 
 /**
  * Which script is being edited. They share this one editor because everything

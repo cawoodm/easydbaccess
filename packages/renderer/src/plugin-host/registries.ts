@@ -15,8 +15,8 @@ import type {
   Unregister,
   UrlSourceSpec,
 } from '@easydb/shared';
-import { HostDialogs } from '../dialogs/host-dialogs.js';
-import { ToastHost } from '../dialogs/toast-host.js';
+import { HostDialogs } from '@cawoodm/lit-dialogs';
+import { ToastHost } from '@cawoodm/lit-toast';
 
 /**
  * Mutable lists the app reads to render header/footer slots and to dispatch

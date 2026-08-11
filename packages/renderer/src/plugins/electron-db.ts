@@ -156,7 +156,7 @@ export function init(api: HostApi): void {
     icon: 'storage',
     tooltip: 'Open, Save As, or Import a .db file',
     onClick: async (api, ctx) => {
-      const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
+      const { AnchoredMenu } = await import('@cawoodm/lit-menu');
       const rect = ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
       const choice = await AnchoredMenu.open(rect, [
         { id: 'open', label: 'Open…', icon: 'folder_open' },

@@ -2,6 +2,10 @@
 
 ## 11 Aug 2026
 
+### Features
+
+- ✨ The dialogs, the toast and the dropdown menu are now three MIT packages of their own, reusable in any Lit app (v0.0.345)
+
 ### Bugs
 
 - 🪲 The column editor showed no preview on a large table, and claimed the table was empty when the read failed (v0.0.343)

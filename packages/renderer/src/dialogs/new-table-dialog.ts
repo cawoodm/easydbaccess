@@ -4,14 +4,12 @@ import type { ColumnEditorActionSpec, ColumnSpec, ColumnType, ProjectionSpec, Ro
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
-import { makeDialogDraggable } from './draggable.js';
+import { ctrlEnterSubmits, dialogChromeStyles, HostDialogs, makeDialogDraggable } from '@cawoodm/lit-dialogs';
 import { markDirty, watchDialogDirty } from '../chrome/dirty-guard.js';
-import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
 import { allColumnsFlagged, buildColumnSpec, toggleColumnFlag, type ColumnFlag, type ColumnRow } from './column-row.js';
 import { renameRowFields, type FieldRename } from '../table/column-merge.js';
 import { readRows } from '../db/row-reader.js';
-import { HostDialogs } from './host-dialogs.js';
 import { LEGACY_CELL_RENDERERS } from '../plugin-host/registries.js';
 import { describeReferences, findTableReferences, renameProjectionOutputs, renameProjectionSourceFields, repointProjectionSpec, specOf, type TableReferences } from '../table/table-references.js';
 

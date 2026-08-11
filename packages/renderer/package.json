@@ -10,6 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@cawoodm/lit-dialogs": "github:cawoodm/lit-dialogs#637491ff4a050cd92c4269fb5e00dd1acf146c22",
+    "@cawoodm/lit-menu": "github:cawoodm/lit-menu#3e1f075907b38f89f3e75387dfa42a18be6875ac",
+    "@cawoodm/lit-toast": "github:cawoodm/lit-toast#0c3f654dcd333e527c2f51cbac7100eab1d8ba57",
     "@easydb/shared": "*",
     "dexie": "^4.0.10",
     "lit": "^3.2.0",
