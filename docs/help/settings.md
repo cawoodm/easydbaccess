@@ -29,8 +29,8 @@ Preferences for how every grid behaves:
   rows is read one page at a time as you scroll, instead of being held in memory
   whole. It opens in a moment rather than in a second and a half. Sorting,
   filtering and searching still cover every row, because the store does that work.
-  Set it to 0 to always read the whole table. The desktop app is where this
-  applies; in the browser every table is still read whole.
+  Set it to 0 to always read the whole table. This works in the browser and in the
+  desktop app.
 
 They apply at once to the tables you already have open.
 

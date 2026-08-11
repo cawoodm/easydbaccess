@@ -259,9 +259,9 @@ So a big table is now read one PAGE at a time.
   50 000 rather than something smaller so every table that works well today keeps
   the code path it already has, and only the ones that hurt change.
 - **Three conditions, all deliberate** (`shouldWindow`): the collection must
-  implement `query` — without it a window costs the same whole-table read and buys
-  only a smaller array, which is why Dexie is phase 2 — the setting must be on, and
-  `tableTotal` must reach the threshold.
+  implement `query`, the setting must be on, and `tableTotal` must reach the
+  threshold. Both stores answer a `query` now, so this works in the browser and on
+  the desktop.
 - **The count comes first.** `loadRows` asks `count()` BEFORE reading rows, because
   the count is what decides whether to window; asking afterwards would mean paying
   for one whole-table read before ever windowing it. Counting is cheap
@@ -291,6 +291,38 @@ in memory, which windowed is one page, so the popover carries a note: "Values fr
 the rows loaded so far — there may be more." Fetching the real distinct list on
 demand (a `distinct` capability, plus a refresh icon) is the next phase — a funnel
 click has to stay instant, so it will never be automatic.
+
+**Dexie answers a `RowQuery` in two ways**, because IndexedDB can honor one of them
+and not the other
+([`db/data-store-dexie.ts`](../../packages/renderer/src/db/data-store-dexie.ts)).
+
+- A **plain slice** — no filter, no search, no sort (`isPlainSlice`) — is a real
+  windowed read: `offset().limit()` walks the `tableId` index and reads only the
+  page, and `count()` gives the total without reading a row. This is the case that
+  matters, because a big table is scrolled far more often than it is filtered.
+- **Anything else** has to read the rows to match them: our filter language is not
+  an IndexedDB query, and nothing indexes the fields inside `data`. That read is
+  capped at `ROW_FETCH_CAP` and a capped answer reports `truncated`.
+
+The narrowing path calls `applyRowRequest`, the same function the reader uses on the
+rows it holds. That is deliberate: a filter which means one thing in the store and
+another in the renderer returns a wrong answer that looks right, and one shared
+implementation cannot disagree with itself.
+
+**A sort or filter that arrives from the STORE refetches.** The header click and the
+filter box always did. The other ways in — the columns editor's filter toggle, a
+commandlet, a view patch, a sync from another device — set the state and left the
+rows alone, which was harmless while the grid held every row and re-narrowed in
+memory. Holding a page, re-sorting sorts 500 rows out of 609,283. `adoptQueryState`
+compares before it adopts, so the grid's own write coming back through the
+subscription is not a change and does not start a second read.
+
+**A view window collapses overlapping reads** (`view-window.ts`'s `loadRows`). The
+rows subscription delivers once on connect — the same read `reload` has already
+started — and once per write after that, and on the Dexie path every delivery costs a
+full read of the table. A 20 000-row view read it four times over while it opened,
+about five seconds. A request arriving mid-read is not dropped: it becomes one more
+read after the current one, so the last state still wins.
 
 **A slice is only ever pushed with every predicate.** `readRows` refuses otherwise
 (`sliceIsSound`), and if a backend applies the slice but reports `partial`, the

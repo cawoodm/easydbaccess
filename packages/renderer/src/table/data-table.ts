@@ -16,6 +16,7 @@ import { facetable, facetCounts, facetValues } from '../search/facet-values.js';
 import { GRID_SETTINGS_ID, readHighlightNulls, readSortDescFirst, readWindowRowsFrom, WINDOW_ROWS_FROM_DEFAULT } from './grid-settings.js';
 import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
 import { readSortSpecs, sortRowsBySpecs } from './row-sort.js';
+import { sameFilterMap } from './filter-map.js';
 import { nextSortSpecs } from './sort-cycle.js';
 import { runColumnScript, runValidateScript } from '../util/column-script.js';
 import { arrayMembers } from '@easydb/shared';
@@ -733,6 +734,9 @@ export class DataTable extends LitElement {
 
   private async bind() {
     if (!this.tableId) return;
+    // Dropped up front so `adoptQueryState` can tell "the saved sort is being
+    // applied for the first time" from "the sort changed under a live grid".
+    this.rowColl = null;
     const ctx = await getContext();
     const table = await ctx.store.tables.findOne(this.tableId);
     if (!table) return;
@@ -939,10 +943,36 @@ export class DataTable extends LitElement {
     // table never flips to fixed and the drag barely moves anything.
     if (this.resizing == null) this.columns = table.columns;
     this.tableReadonly = !!table.readonly;
-    this.sortSpecs = readSortSpecs(table);
+    this.adoptQueryState(readSortSpecs(table), { ...(table.filters ?? {}) });
+  }
+
+  /**
+   * Take on a sort or a filter that arrived from the STORE, and refetch when it
+   * really changed.
+   *
+   * The grid's own header click and filter box already refetch. This is the other
+   * way they arrive: the columns editor's filter toggle, a commandlet, a view
+   * patch, another device's sync. While the grid held every row that needed no
+   * refetch — it re-sorted and re-filtered in memory. Holding one PAGE, the rows in
+   * hand are the answer to the old question, and re-sorting a page sorts 500 rows
+   * out of 609,283.
+   *
+   * Compared before it is adopted, so the grid's own write coming back through the
+   * subscription is not a change and does not start a second read.
+   */
+  private adoptQueryState(sort: SortSpec[], filters: Record<string, string>): void {
+    const sortChanged = !sameSort(this.sortSpecs, sort);
+    this.sortSpecs = sort;
+    let filtersChanged = false;
     // Don't stomp on filters the user is mid-editing (a debounced save is
     // pending) with the older store value — that reverts the just-typed filter.
-    if (this.filterSaveTimer == null) this.filters = { ...(table.filters ?? {}) };
+    if (this.filterSaveTimer == null) {
+      filtersChanged = !sameFilterMap(this.filters, filters);
+      this.filters = filters;
+    }
+    // `rowColl` is null until `bind` has one, which is how the first application
+    // of a saved sort avoids scheduling a read that `bind` is about to do anyway.
+    if (this.rowColl && (sortChanged || filtersChanged)) this.scheduleReload();
   }
 
   /**
@@ -963,10 +993,7 @@ export class DataTable extends LitElement {
         const w = widths[c.field];
         return typeof w === 'number' ? { ...c, width: w } : c;
       });
-    this.sortSpecs = readSortSpecs(inst);
-    // See applyTable: never revert a filter the user is mid-editing (pending
-    // debounced save) to the older instance value.
-    if (this.filterSaveTimer == null) this.filters = { ...(inst.filters ?? {}) };
+    this.adoptQueryState(readSortSpecs(inst), { ...(inst.filters ?? {}) });
   }
 
   private async setCell(row: Row, field: string, value: unknown) {
@@ -1837,6 +1864,11 @@ function cellTooltip(row: Row, col: ColumnSpec): string {
   const text = typeof v === 'string' ? v : String(v);
   if (text.trim() === '') return '';
   return text.length > MAX_TOOLTIP_CHARS ? `${text.slice(0, MAX_TOOLTIP_CHARS)}…` : text;
+}
+
+/** Same sort keys, in the same order and the same directions? */
+function sameSort(a: readonly SortSpec[], b: readonly SortSpec[]): boolean {
+  return a.length === b.length && a.every((s, i) => s.field === b[i]?.field && s.asc === b[i]?.asc);
 }
 
 function cellStateClass(row: Row, col: ColumnSpec, highlightNulls = true): string {

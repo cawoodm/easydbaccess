@@ -43,7 +43,7 @@ export function init(api: HostApi): void {
       default: WINDOW_ROWS_FROM_DEFAULT,
       scope: 'workspace',
       description:
-        'A table with at least this many rows is read one page at a time as you scroll, instead of being held in memory whole. Filtering, searching and sorting still cover every row — the store does that work. Set 0 to always read the whole table. Only stores that can answer a query do this; in the browser every table is still read whole.',
+        'A table with at least this many rows is read one page at a time as you scroll, instead of being held in memory whole. Filtering, searching and sorting still cover every row, because the store does that work. Set 0 to always read the whole table.',
     },
   ]);
 

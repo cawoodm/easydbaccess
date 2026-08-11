@@ -138,8 +138,14 @@ export function applyRowRequest(rows: Row[], req: RowRequest): RowPage {
   return { rows: projectFields(out, req.fields), total };
 }
 
-/** Drop every field the caller did not ask for. A no-op when it asked for all. */
-function projectFields(rows: Row[], fields: string[] | undefined): Row[] {
+/**
+ * Drop every field the caller did not ask for. A no-op when it asked for all.
+ *
+ * Exported for the Dexie store, whose windowed read returns rows the reader never
+ * sees — the projection has to happen there or `fields` would mean nothing in the
+ * browser and something in Electron.
+ */
+export function projectFields(rows: Row[], fields: string[] | undefined): Row[] {
   if (!fields || fields.length === 0) return rows;
   const wanted = new Set(fields);
   return rows.map((r) => ({
