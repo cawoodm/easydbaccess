@@ -1,9 +1,4 @@
 {
   "files": [],
-  "references": [
-    { "path": "./packages/shared" },
-    { "path": "./packages/renderer" },
-    { "path": "./packages/server" },
-    { "path": "./packages/electron" }
-  ]
+  "references": [{ "path": "./packages/shared" }, { "path": "./packages/renderer" }, { "path": "./packages/server" }, { "path": "./packages/electron" }]
 }

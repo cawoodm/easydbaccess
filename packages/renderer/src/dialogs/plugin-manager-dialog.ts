@@ -5,8 +5,7 @@ import type { PluginRecord, PluginModule, PluginType } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { SAFE_MODE } from '../plugin-host/safe-mode.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
-import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
-import { makeDialogDraggable } from './draggable.js';
+import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@cawoodm/lit-dialogs';
 import { builtinKey, builtinPlugins } from '../plugin-host/loader.js';
 
 /** Small GitHub mark used for the "view source" link on rows with a `repo`. */

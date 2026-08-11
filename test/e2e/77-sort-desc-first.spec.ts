@@ -64,8 +64,10 @@ test('turning the setting off puts ascending first again', async ({ page }) => {
   await expect(dlg).toBeVisible();
   await dlg.getByRole('button', { name: 'Table grid' }).click();
   // Both the value and its scope toggle are checkboxes in a label.scope; the
-  // value's label reads "enabled".
-  const box = dlg.locator('label.scope', { hasText: 'enabled' }).locator('input');
+  // value's label reads "enabled". Scope to this setting's own `.field` — the
+  // Table grid group gained a second boolean in 0.0.341 (Highlight empty
+  // cells), so a bare "enabled" matches two checkboxes.
+  const box = dlg.locator('.field', { hasText: 'Sort descending first' }).locator('label.scope', { hasText: 'enabled' }).locator('input');
   await expect(box).toBeChecked(); // on by default
   await box.uncheck();
   await dlg.getByRole('button', { name: 'Done', exact: true }).click();

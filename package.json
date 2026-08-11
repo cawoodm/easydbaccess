@@ -1,7 +1,8 @@
 {
   "name": "easydbaccess",
   "author": "Marc Cawood",
-  "version": "0.0.341",
+  "license": "MIT",
+  "version": "0.0.342",
   "private": true,
   "repository": "https://github.com/cawoodm/easydbaccess",
   "description": "Local-first, plugin-extensible, multi-table database app — runs in the browser and as an Electron desktop app.",

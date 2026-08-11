@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 11 Aug 2026
+
+### Features
+
+- ✨ The dialogs, the toast and the dropdown menu are now three MIT packages of their own, reusable in any Lit app (v0.0.342)
+
 ## 10 Aug 2026
 
 ### Features

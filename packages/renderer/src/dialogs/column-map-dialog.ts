@@ -12,8 +12,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { ColumnSpec } from '@easydb/shared';
-import { ctrlEnterSubmits, dialogChromeStyles } from './dialog-chrome.js';
-import { makeDialogDraggable } from './draggable.js';
+import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@cawoodm/lit-dialogs';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { guessMapping, type ColumnMapping } from '../import/map-columns.js';
 

@@ -24,7 +24,7 @@ export function init(api: HostApi): void {
     onClick: async (api, ctx) => {
       const wsId = api.workspaceId();
       if (!wsId) return;
-      const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
+      const { AnchoredMenu } = await import('@cawoodm/lit-menu');
       const rect = ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
       const choice = await AnchoredMenu.open(rect, [
         { id: 'json', label: 'JSON dump (.db.json)', icon: 'data_object' },
@@ -54,7 +54,7 @@ export function init(api: HostApi): void {
     icon: 'file_download',
     tooltip: 'Export this table as CSV, JSON, or SQL',
     onClick: async (api, ctx) => {
-      const { AnchoredMenu } = await import('../chrome/anchored-menu.js');
+      const { AnchoredMenu } = await import('@cawoodm/lit-menu');
       const rect = ctx.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
       const format = await AnchoredMenu.open(rect, [
         { id: 'csv', label: 'CSV (.csv)', icon: 'table_chart' },

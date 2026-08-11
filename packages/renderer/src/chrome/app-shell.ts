@@ -2,10 +2,11 @@ import type { ButtonSpec, HostApi } from '@easydb/shared';
 import { LitElement, css, html } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import { unsafeSVG } from 'lit/directives/unsafe-svg.js';
+import { defineHostDialogs } from '@cawoodm/lit-dialogs';
+import { defineToastHost } from '@cawoodm/lit-toast';
 import { getContext } from '../app-context.js';
 import '../dialogs/csv-paste-dialog.js';
 import type { CsvPasteDialog } from '../dialogs/csv-paste-dialog.js';
-import '../dialogs/host-dialogs.js';
 import '../dialogs/new-table-dialog.js';
 import type { NewTableDialog } from '../dialogs/new-table-dialog.js';
 import '../dialogs/plugin-manager-dialog.js';
@@ -15,11 +16,16 @@ import type { SettingsDialog } from '../dialogs/settings-dialog.js';
 import '../dialogs/command-palette-dialog.js';
 import type { CommandPaletteDialog } from '../dialogs/command-palette-dialog.js';
 import '../dialogs/script-editor-dialog.js';
-import '../dialogs/toast-host.js';
 import { materialIconStyles } from './material-icon-css.js';
 import './app-progress.js';
 import './table-list.js';
 import './workspace-selector.js';
+
+// Both extracted elements register on demand, not on import — they are
+// libraries and a repeated import must not throw. The shell's template below
+// renders both, so they have to be defined before it runs.
+defineHostDialogs();
+defineToastHost();
 
 /**
  * Render a button's `icon`. An icon string that begins with `<svg` is rendered
@@ -481,7 +487,7 @@ export class AppShell extends LitElement {
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
           <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
-            ><span class="version">v0.0.341</span></a
+            ><span class="version">v0.0.342</span></a
           ></strong
         >
         ${this.headerButtons.filter((b) => b.variant !== 'secondary').map((b) => this.renderSlotButton(b, 'header'))}

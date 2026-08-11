@@ -13,7 +13,7 @@
 // local SQLite file or another remote database later needs no edit here.
 
 import type { ConnectorSpec, HostApi, PluginModule } from '@easydb/shared';
-import { AnchoredMenu } from '../chrome/anchored-menu.js';
+import { AnchoredMenu } from '@cawoodm/lit-menu';
 import { getContext } from '../app-context.js';
 
 const CONNECT_ICON_SVG =
