@@ -110,9 +110,19 @@ is a no-op without a `document`. The `data-table` side is e2e territory.
   `db/truncation-note.ts`, the `role="img"` + `aria-label`, and the hidden
   numbers table.
 - `viz-bar.ts` — a built-in registering `{ id: 'bar', tag: 'viz-bar', channels:
-  [CATEGORY, VALUE], data: 'aggregate' }` and the element itself.
-  `await import('chart.js')` on first update; `ResizeObserver` → `chart.resize()`;
-  colours from `viz-theme.ts`.
+  [CATEGORY, VALUE], data: 'aggregate' }`. It owns channels, mapping and
+  aggregation, and hands the element a neutral shape.
+- `viz/elements/bar-chart.ts` — the element. `await import('chart.js')` on first
+  update; `ResizeObserver` → `chart.resize()`; colours read from CSS custom
+  properties via `viz-theme.ts`.
+  **It must not import `@easydb/shared`** — no `Row`, `ColumnSpec`, `VizFrame` or
+  `HostApi`. It declares its own `{ categories: string[]; series: {label, points}[] }`
+  input, because this file is destined for `@cawoodm/lit-charts` (see the spec's
+  packages section). Keep every element under `viz/elements/` for exactly that
+  reason, and export a guarded `defineBarChart()` rather than using
+  `@customElement`, matching `lit-dialogs`' `defineHostDialogs()`.
+  A lint check that nothing under `viz/elements/` imports `@easydb/shared` is
+  worth more than the convention being written down.
 - `views-dialog.ts` — the kind switch, the viz picker, channel mapping (reusing
   the token-mapping UI over the same `mapping` record), and the options editor
   over `SettingsFieldSpec`.
@@ -222,7 +232,36 @@ both in the test.
 
 Independent of every other phase; land it whenever, including first.
 
-## Phase 9 — Docs and ship
+## Phase 9 — Extract the three element packages
+
+**New repos:** `cawoodm/lit-charts`, `cawoodm/lit-map`, `cawoodm/lit-wordcloud`.
+**Files:** everything under `packages/renderer/src/viz/elements/` moves out;
+`packages/renderer/package.json` gains the three SHA pins.
+
+Only worth doing once phases 3–7 have settled the element inputs. Per package,
+copy the manifest shape from `@cawoodm/lit-dialogs` exactly — and note that
+`node_modules/@cawoodm/lit-dialogs` ships its `src/` as well as `dist/`, so it can
+be read as the reference implementation without cloning anything:
+
+- zero `dependencies`; `lit` **and** the drawing library (`chart.js` / `leaflet` /
+  `d3-cloud`) both as `peerDependencies`;
+- `"prepare": "npm run build"` — mandatory for a `github:` install to have a
+  `dist/`;
+- `"sideEffects": false` + guarded `defineX()` exports, never `@customElement`;
+- flat `src/` → `dist/` via plain `tsc`, barrel `index.ts`,
+  `exports: { ".": "./dist/index.js" }`,
+  `files: [dist, src, README.md, LICENSE]`, MIT, `engines.node >= 20`.
+
+Then pin each in `packages/renderer/package.json` as
+`github:cawoodm/lit-charts#<sha>` and delete the local copies. `npm install`,
+full gate, and confirm the lazy chunking still holds — a package boundary is
+where a static import most easily sneaks back in.
+
+**Verify:** `npm run typecheck && npm run lint && npm run test && npm run test:e2e
+&& npm run build`, plus a check that the chart chunk is still separate from the
+entry bundle.
+
+## Phase 10 — Docs and ship
 
 - `docs/tech/VISUALIZATIONS.md` in the house voice (what it is, the channel
   model, where rows come from, the docking stack, what is deliberately not
@@ -250,10 +289,15 @@ Independent of every other phase; land it whenever, including first.
 - **Row caps are a correctness issue, not a performance one.** A chart over the
   first 20,000 of 600,000 rows looks exactly like a chart over all of them.
   The truncation note is not optional polish.
-- **Three new dependencies** in a repo that has four. Decide early whether these
-  live in the renderer or in a `@cawoodm/lit-charts` package following the
-  `lit-dialogs`/`lit-toast`/`lit-menu` precedent — retrofitting the split later
-  means moving every element.
+- **The extraction constraint is the thing to hold, not the file layout.**
+  Elements are built in-repo and extracted in phase 9, so the only rule that has
+  to survive from phase 3 is that nothing under `viz/elements/` imports
+  `@easydb/shared`. Moving files later is cheap; discovering at phase 9 that every
+  element reaches into `Row` is not. Enforce it with a lint rule on day one.
+- **`prepare` and guarded `define` are the two ways a `github:`-pinned package
+  fails quietly.** No `prepare` ⇒ no `dist/` ⇒ unresolvable `main`. An
+  `@customElement` decorator ⇒ a second define of the same tag throws on a
+  double-load, which is why `lit-dialogs` hand-rolls a guarded `defineHostDialogs()`.
 - **Bundle size.** Verify after phase 3 that the chart chunk is genuinely lazy;
   a static import sneaking in would put Chart.js in the entry bundle for users
   who never open a chart.

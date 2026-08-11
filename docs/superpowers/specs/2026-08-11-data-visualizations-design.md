@@ -56,7 +56,8 @@ Two facts make this genuinely cheap rather than merely tidy:
 |---|---|
 | Definition model | **A `ViewTemplate` kind** — no new collection, no third window manager |
 | Channel binding | **Reuse `ViewInstance.mapping`** — channel key → column field |
-| Drawing | **Bundled libraries, lazily `import()`ed** — never a CDN |
+| Drawing | **Libraries, lazily `import()`ed** — never a CDN |
+| Where the elements live | **Their own `@cawoodm/lit-*` packages**, following `lit-dialogs` / `lit-menu` / `lit-toast` |
 | Docking | **A panel-shell content stack**, above / primary / below, with splitters |
 | Aggregation | **In the renderer, over the row set the grid already has** |
 | v1 kinds | bar/column, line, pie, **map**, **word cloud** |
@@ -345,16 +346,6 @@ lands in the initial bundle — Vite code-splits automatically, and under Electr
 the chunks are local files. The `/* @vite-ignore */` gotcha does **not** apply
 here: these are static specifiers and we want Vite to resolve them.
 
-On whether to take the dependencies at all: the precedent people will reach for
-is that jsPanel4 was deleted and `panel-shell/` written in its place. But the
-newer precedent points the other way — the dialogs, toast and anchored menu were
-just extracted *out* of the renderer into three SHA-pinned `@cawoodm/lit-*`
-packages. The live convention is not "no dependencies", it is "own the reusable
-UI and pin it precisely". That suggests a real option to weigh at implementation
-time: ship these renderers as a `@cawoodm/lit-charts` package the same way. The
-`registerVisualization` seam is identical either way, so it is a packaging
-decision, not an architectural one.
-
 - **Theming** — `viz/viz-theme.ts` reads the app's CSS custom properties at draw
   time, so dark mode and the panel accent colours carry through instead of a
   chart library imposing a second palette.
@@ -370,6 +361,82 @@ decision, not an architectural one.
   `role="img"` with an `aria-label` summarising the frame, plus a visually hidden
   `<table>` of the aggregated numbers. That doubles as the copy-the-numbers
   affordance.
+
+## The drawing elements are their own packages
+
+The elements ship as SHA-pinned MIT packages alongside `@cawoodm/lit-dialogs`,
+`@cawoodm/lit-menu` and `@cawoodm/lit-toast`, **split by underlying library** —
+one third-party dependency each, so a consumer who wants bar charts never pulls a
+mapping library:
+
+| Package | Draws | Library |
+|---|---|---|
+| `@cawoodm/lit-charts` | bar / column, line, pie | `chart.js@4` |
+| `@cawoodm/lit-map` | point map | `leaflet@1.9` |
+| `@cawoodm/lit-wordcloud` | word cloud | `d3-cloud` |
+
+### The library is a peer dependency, not a bundled one
+
+All three existing packages have **zero runtime dependencies**: `lit` is a
+`peerDependency` and everything else is a devDependency. A chart package that
+listed `chart.js` under `dependencies` would be the first to break that, and
+would also risk two copies of Chart.js in one build. So the heavy library is a
+**peer dependency too**, exactly as `lit` is, and easyDBAccess installs it in its
+own `packages/renderer/package.json`. That is what reconciles "use a charting
+library" with "these packages carry no dependencies" — both hold.
+
+### Conventions to copy verbatim
+
+Read `node_modules/@cawoodm/lit-dialogs` before writing the first one; four of
+its choices are load-bearing rather than incidental:
+
+- **Explicit guarded `define`, never `@customElement`.** `lit-dialogs` exports
+  `defineHostDialogs()` which does `if (!customElements.get(tag))
+  customElements.define(tag, …)`, and says why in a comment: a second define of
+  the same tag throws, which a decorator makes unavoidable on a double-load or an
+  HMR reload. Export `defineBarChart()` and friends the same way.
+- **`"sideEffects": false`** is only honest *because* of the above — nothing is
+  registered at import time. Keep both properties together; auto-defining while
+  claiming no side effects lets a bundler drop the registration.
+- **`"prepare": "npm run build"`.** These are consumed as `github:` deps, not npm
+  tarballs, so there is no prebuilt `dist/` in the repo — npm runs `prepare` on
+  install to produce it. Omit this and the install silently yields a package with
+  no `dist/` and an unresolvable `main`.
+- Flat `src/*.ts` compiled by plain `tsc` to `dist/`, a barrel `index.ts`,
+  `exports: { ".": "./dist/index.js" }`, `files: [dist, src, README.md, LICENSE]`,
+  `peerDependencies: { lit: ^3.2.0 }`, `engines.node >= 20`,
+  `publishConfig.access: public`.
+
+### What this forbids — the constraint that actually matters
+
+A package that imports `@easydb/shared` is not a reusable MIT component, it is
+easyDBAccess code in a different repository. So the elements must know nothing
+about `Row`, `ColumnSpec`, `HostApi` or `VizFrame`. Each declares its own neutral
+input shape — categories and numeric series for a chart, `{lat, lon}` points for
+a map, `{term, weight}` pairs for a cloud — and easyDBAccess adapts.
+
+**That makes `VizFrame` the adapter boundary**, which is the one design
+consequence worth internalising now: the app-side built-in
+(`plugins/viz-bar.ts`) owns channels, mapping and aggregation and hands the
+package a plain data shape; the package owns drawing, theming and resize and
+nothing else. It is a better factoring than putting the elements in the renderer
+would have produced, because it forces that seam to exist.
+
+### Build in-renderer first, extract once stable
+
+Do **not** start by creating three repositories. The dialogs, toast and menu were
+not born as packages: `dialogs/host-dialogs.ts`, `dialogs/dialog-chrome.ts`,
+`dialogs/draggable.ts`, `dialogs/toast-host.ts` and `chrome/anchored-menu.ts`
+lived in this repo for a long time and were extracted in one commit
+(`7437809`) once their shape had settled. Follow the same path: build the
+elements under `packages/renderer/src/viz/` and extract at the end.
+
+The decision still has to be made **now**, though, because it is not really about
+file locations. It is the no-`@easydb/shared`-imports rule above, which has to
+hold from the first element written. Moving files later is cheap; discovering
+that every element reaches into `Row` is not. Iterating across two repositories
+with SHA pins is also slow enough that doing it before the contract is proven
+would cost more than it saves.
 
 ## UI
 
@@ -434,13 +501,15 @@ and call it from the same `submit`. One fix, both features.
 | `packages/renderer/src/window-mgr/panel-stack.ts` | new — above / primary / below stack + splitters |
 | `packages/renderer/src/window-mgr/table-window-manager.ts` | wrap content in the stack |
 | `packages/renderer/src/window-mgr/view-window-manager.ts` | reconcile docked instances; wrap content in the stack |
-| `packages/renderer/src/plugins/viz-bar.ts`, `viz-line.ts`, `viz-pie.ts`, `viz-map.ts`, `viz-wordcloud.ts` | new built-ins, one per kind |
+| `packages/renderer/src/plugins/viz-bar.ts`, `viz-line.ts`, `viz-pie.ts`, `viz-map.ts`, `viz-wordcloud.ts` | new built-ins, one per kind — channels, mapping, aggregation |
+| `packages/renderer/src/viz/elements/*.ts` | new — the drawing elements. **No `@easydb/shared` imports**; extracted to the `@cawoodm/lit-*` packages last |
 | `packages/renderer/src/plugins/settings.ts` | register the viz settings fields (it owns the tab) |
 | `packages/renderer/src/plugin-host/loader.ts` | register the five |
 | `packages/renderer/src/dialogs/views-dialog.ts` | the kind switch, channel mapping, options editor |
 | `packages/renderer/src/table/table-references.ts` | + `renameViewMappings` |
 | `packages/renderer/src/dialogs/new-table-dialog.ts` | call it from `submit` |
-| `packages/renderer/package.json` | + `chart.js`, `leaflet`, `d3-cloud` |
+| `packages/renderer/package.json` | + `chart.js`, `leaflet`, `d3-cloud` (the packages take them as peers) + the three `@cawoodm/lit-*` chart packages once extracted |
+| `cawoodm/lit-charts`, `lit-map`, `lit-wordcloud` | new repos — the drawing elements, extracted last (see above) |
 | `docs/tech/VISUALIZATIONS.md` + `INDEX.md`, `PLUGINS.md`, `WINDOWS.md`, `docs/help/` | the tech and help write-ups |
 | `test/renderer/viz/viz-aggregate.test.ts` | Vitest units |
 | `test/e2e/104-visualizations.spec.ts`, `test/e2e/105-viz-docking.spec.ts` | Playwright |
