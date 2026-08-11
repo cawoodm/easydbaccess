@@ -139,10 +139,21 @@ via `rowsFacetedFor()`. That's what gives drill-down behavior: picking
 excluded from its own facet).
 
 **`array` columns filter per member.** A cell of an `array` column holds several
-values, written either as a comma list (`foo,bar,baz`) or as a JSON array
-(`["Foo","Bar"]`, or a real JS array from a JSON import). All three are read by
-[`array-cell.ts`](../../packages/shared/src/array-cell.ts), and the
+values, written as a comma list (`foo,bar,baz`), a JSON array (`["Foo","Bar"]`),
+the same thing single-quoted (`['Foo', 'Bar']` — Python's spelling, and what a
+great many exported CSVs hold), or a real JS array from a JSON import. All four
+are read by [`array-cell.ts`](../../packages/shared/src/array-cell.ts), and the
 column's type — not the shape of the cell — is what turns member reading on.
+
+**Which columns get typed `array` on import** is `looksLikeArrayColumn` in that
+same module, used by both `csv-import` and `json-import`. The rule is a RUN:
+`ARRAY_RUN` (5) consecutive non-empty cells that are all lists. It used to be
+"every non-empty cell", which one `n/a` in ten thousand lists was enough to
+defeat — leaving the column a `string`, its cells one long value, and its funnel
+offering whole cells that a picked value can never equal. A column with fewer than
+five values still has to be all lists, so a two-row import is unchanged. Prose is
+safe either way: a bare comma list is deliberately NOT evidence, since ordinary
+sentences are full of commas.
 
 Both filter layers take the members instead of the whole cell: the dropdown
 offers each member as its own option (with the count of rows that carry it, so

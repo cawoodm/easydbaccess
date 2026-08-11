@@ -13,6 +13,7 @@
 
 ### Bugs
 
+- 🪲 A column of `['a', 'b']` lists came in as text, and one odd cell was enough to lose the list type entirely (v0.0.342)
 - 🪲 The grid and the datetime renderer showed a zoned time as stored, so the picker held the wrong time and saved it (v0.0.339)
 
 ## 9 Aug 2026

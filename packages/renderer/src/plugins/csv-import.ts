@@ -4,7 +4,7 @@ import { askImportOntoMode, columnsLineUp, type ImportOntoMode } from '../import
 import { isUnsafeIntegerText } from '../import/big-numbers.js';
 import { mapRowsToTarget, type ColumnMapping } from '../import/map-columns.js';
 import { cryptoUUID, slugField } from '../util/ids.js';
-import { looksLikeArray } from '@easydb/shared';
+import { looksLikeArrayColumn } from '@easydb/shared';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'csv-import',
@@ -722,7 +722,7 @@ function inferType(samples: string[]): ColumnType {
   // commas is NOT — prose is full of commas, so a comma list only becomes an
   // `array` column when the header says so (`tags:Tags:array`) or the user picks
   // the type in the columns editor.
-  if (samples.every(looksLikeArray)) return 'array';
+  if (looksLikeArrayColumn(samples)) return 'array';
   if (samples.every(isBool)) return 'boolean';
   if (samples.every(isNumber)) return 'number';
   if (samples.every(isDateTime)) return 'datetime';

@@ -6,6 +6,12 @@ Drop a CSV, TSV, or JSON file anywhere on the window. The first row becomes
 your column headers, and each column's type (number, date, boolean, or text)
 is guessed automatically from the data.
 
+A column whose cells hold a **list** — `["a","b"]` or `['a', 'b']` — is typed as
+a list and shown as pills, so you can filter by one member instead of the whole
+cell. Five such cells in a row are enough; one `n/a` in the middle does not spoil
+it. A plain comma list is not enough on its own, because ordinary sentences are
+full of commas — set the type yourself in the column editor for those.
+
 ![Import CSV](./screenshots/import-csv.png)
 
 If a dropped CSV matches the name of a table you already have, you are asked

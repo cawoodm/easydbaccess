@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { arrayCellText, arrayMembers, jsonArray, looksLikeArray, looksLikeJsonArray } from '../../packages/shared/src/array-cell.js';
+import { ARRAY_RUN, arrayCellText, arrayMembers, jsonArray, looksLikeArray, looksLikeArrayColumn, looksLikeJsonArray, singleQuotedArray } from '../../packages/shared/src/array-cell.js';
 
 /**
  * An `array` column has to read three spellings of the same thing: a comma list
@@ -112,5 +112,79 @@ describe('looksLikeArray', () => {
     expect(looksLikeArray('Hello, world')).toBe(false);
     expect(looksLikeArray('plain')).toBe(false);
     expect(looksLikeArray(3)).toBe(false);
+  });
+
+  /**
+   * `['a', 'b']` is what Python's repr writes, so it arrives in exported CSVs
+   * constantly. JSON.parse refuses it, and before this it fell through to the
+   * comma split — which cut it into `['a` and `'b']`, brackets and quotes and all.
+   */
+  describe('single-quoted lists', () => {
+    it('reads the members, brackets and quotes gone', () => {
+      expect(singleQuotedArray("['a', 'b']")).toEqual(['a', 'b']);
+      expect(arrayMembers("['a', 'b']")).toEqual(['a', 'b']);
+      expect(looksLikeArray("['a', 'b']")).toBe(true);
+    });
+
+    it('keeps a comma or an apostrophe inside a member', () => {
+      expect(arrayMembers("['Berlin, DE', 'Zurich']")).toEqual(['Berlin, DE', 'Zurich']);
+      // Escaped, as an exporter writes it. An UNescaped apostrophe is genuinely
+      // ambiguous (`['it's']` could be two broken members), so that one falls
+      // back to the comma split rather than guessing.
+      expect(arrayMembers(String.raw`['it\'s', 'b']`)).toEqual(["it's", 'b']);
+      expect(singleQuotedArray("['it's', 'b']")).toBeNull();
+    });
+
+    it('one member and odd spacing are still a list', () => {
+      expect(arrayMembers("['solo']")).toEqual(['solo']);
+      expect(arrayMembers("[  'a' ,  'b'  ]")).toEqual(['a', 'b']);
+    });
+
+    // Anything not exactly this shape must fall through to the comma split, or
+    // ordinary prose in brackets would start being reinterpreted.
+    it('refuses a half-quoted or unquoted list', () => {
+      expect(singleQuotedArray('[unquoted, words]')).toBeNull();
+      expect(singleQuotedArray(`["a", 'b']`)).toBeNull();
+      expect(singleQuotedArray("['unterminated]")).toBeNull();
+      expect(singleQuotedArray('[]')).toBeNull();
+      expect(singleQuotedArray('not a list')).toBeNull();
+    });
+
+    it('leaves the JSON spelling to JSON', () => {
+      expect(arrayMembers('["a", "b"]')).toEqual(['a', 'b']);
+      expect(arrayMembers('[]')).toEqual([]);
+    });
+  });
+
+  /**
+   * A column is a list column on the evidence of a RUN, not of every cell: one
+   * `n/a` in ten thousand lists used to leave the column typed `string`.
+   */
+  describe('looksLikeArrayColumn', () => {
+    const list = (n: number) => Array.from({ length: n }, (_, i) => `["a${i}"]`);
+
+    it('needs a run of five, and one stray cell no longer spoils it', () => {
+      expect(looksLikeArrayColumn([...list(ARRAY_RUN), 'n/a'])).toBe(true);
+      expect(looksLikeArrayColumn(['n/a', ...list(ARRAY_RUN)])).toBe(true);
+      expect(looksLikeArrayColumn([...list(3), 'n/a', ...list(ARRAY_RUN)])).toBe(true);
+    });
+
+    it('a broken run is not a run', () => {
+      expect(looksLikeArrayColumn([...list(3), 'n/a', ...list(3)])).toBe(false);
+    });
+
+    it('a short column still has to be all lists — the old rule', () => {
+      expect(looksLikeArrayColumn(list(2))).toBe(true);
+      expect(looksLikeArrayColumn([...list(2), 'n/a'])).toBe(false);
+      expect(looksLikeArrayColumn([])).toBe(false);
+    });
+
+    it('mixes the spellings, since all three read the same', () => {
+      expect(looksLikeArrayColumn(['["a"]', "['b']", ['c'], '["d"]', "['e']"])).toBe(true);
+    });
+
+    it('a column of prose is not a list column', () => {
+      expect(looksLikeArrayColumn(['Hello, world', 'a,b', 'plain', 'x', 'y', 'z'])).toBe(false);
+    });
   });
 });
