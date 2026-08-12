@@ -26,34 +26,69 @@ data; see `SYNCH.md`.
 
 ```
                               Plugin
-                                │  (never touches Dexie or IPC directly)
+                                │  (never touches Dexie or a bridge directly)
                                 ▼
                             DataStore
                  packages/shared/src/plugin-api.ts — the contract
                                 │
-             ┌──────────────────┴──────────────────┐
-        browser                               Electron
-             │                                     │
-             ▼                                     ▼
-   data-store-dexie.ts                     data-store-bridge.ts
-   wraps each Dexie table                  same DataCollection<T>,
-   in DataCollection<T>                    each call an IPC round trip
-             │                                     │
-             ▼                                     ▼
-   dexie-db.ts                             preload.ts (contextBridge)
-   one Dexie() instance, one               window.easydb.store
-   IndexedDB database "easydb"                     │
-             │                                     ▼
-             ▼                             electron/src/sqlite-store.ts
-   IndexedDB — persists across             main process, node:sqlite
-   reloads, scoped to the origin                   │
-                                                   ▼
-                                           a .db file the user chose
+        ┌───────────────────────┼───────────────────────┐
+   browser, simple        browser, .edb file        Electron
+        │                       │                       │
+        ▼                       └───────────┬───────────┘
+  data-store-dexie.ts                       ▼
+  wraps each Dexie table            data-store-bridge.ts
+  in DataCollection<T>              same DataCollection<T> over an
+        │                           ASYNC BRIDGE — two transports
+        ▼                                   │
+  dexie-db.ts                    ┌──────────┴──────────┐
+  one Dexie() instance, one      ▼                     ▼
+  IndexedDB database "easydb"  db/edb/worker.ts   preload.ts
+        │                      postMessage        window.easydb.store
+        ▼                      sqlite-wasm             │
+  IndexedDB — persists across  in a Web Worker         ▼
+  reloads, scoped to the origin        │        electron/src/sqlite-store.ts
+                                       ▼        main process, node:sqlite
+                              a .edb file the user             │
+                              saves + an OPFS mirror           ▼
+                                                     a .db file the user chose
 ```
 
-The `DataStore` abstraction below is what makes those two interchangeable:
+The `DataStore` abstraction below is what makes those three interchangeable:
 the plugin-facing `DataCollection<T>` contract is identical, so no plugin —
 and almost nothing in the chrome — knows which backend it is talking to.
+
+`data-store-bridge.ts` serves two of the three. It is a `DataStore` over an
+async message bridge, and `EdbBridge` satisfies the same `EasydbStoreBridge`
+interface the Electron preload does — so the browser's file mode needed no
+second adapter. (It was called `data-store-ipc.ts` while Electron was its only
+caller.)
+
+## A workspace in a `.edb` file (browser)
+
+Opt-in, per tab, and per workspace. "New workspace" asks whether the data goes
+in this browser or in a file; the footer **File** menu opens, saves and converts
+one. `docs/tech/EDB.md` has the format and the reasoning.
+
+Four things are worth knowing here:
+
+- **The database lives in a Web Worker.** This app imports 600k-row tables and
+  sqlite-wasm is synchronous, so a bulk insert on the main thread would freeze
+  the tab for the length of the import.
+- **The file is written only on Save** (or by autosave, which is off by
+  default). Between saves the bytes are mirrored to OPFS.
+- **The mirror is load-bearing, not insurance.** A remembered
+  `FileSystemFileHandle` needs a user gesture to re-grant write permission, and
+  a page load has none. The mirror is origin-private and always readable, so a
+  reload restores from it and the handle is only re-permissioned on the first
+  Save.
+- **Permission is granted per FOLDER.** One `showDirectoryPicker` grant covers
+  every workspace file in it, so New types a name and Open picks from a list,
+  with no OS dialog either time. The per-file pickers remain for a browser
+  without a directory picker, and for a file kept somewhere else.
+
+The format is v2 and the desktop still writes v1, so a browser `.edb` does not
+open on the desktop yet. The `_meta.format` row is what makes that later
+migration a read-old / write-new rather than a guess.
 
 ## Why Dexie, not a bigger database engine
 
