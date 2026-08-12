@@ -154,6 +154,8 @@ function handle(req: EdbRequest): unknown {
       return s().countRowsIn(req.tableId);
     case 'queryRows':
       return s().queryRows(req.tableId, req.query);
+    case 'distinctValues':
+      return s().distinctValues(req.tableId, req.query);
     case 'export':
       return require(driver, 'export requested').export();
     case 'dbName':

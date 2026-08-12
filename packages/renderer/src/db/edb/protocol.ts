@@ -1,4 +1,4 @@
-import type { RowQuery } from '@easydb/shared';
+import type { DistinctQuery, RowQuery } from '@easydb/shared';
 
 /**
  * The worker protocol.
@@ -25,6 +25,7 @@ export type EdbRequest =
   | { id: number; op: 'count'; coll: string }
   | { id: number; op: 'countRows'; tableId: string }
   | { id: number; op: 'queryRows'; tableId: string; query: RowQuery }
+  | { id: number; op: 'distinctValues'; tableId: string; query: DistinctQuery }
   | { id: number; op: 'export' }
   /**
    * Write the OPFS mirror NOW, without waiting for the debounce.

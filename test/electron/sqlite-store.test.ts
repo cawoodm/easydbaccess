@@ -9,8 +9,10 @@ import { SqliteStore, copyDatabase } from '../../packages/electron/src/sqlite-st
 /**
  * Unit tests for the main-process SQLite store — the RELATIONAL layout (see
  * `.claude/plans/2026-07-31-electron-sqlite-storage.md`). A user table is a
- * real SQL table plus an `_easydb_meta_<sql>` metadata table, not a
- * `doc TEXT` JSON blob. Uses a real temp file per test (not `:memory:`) so
+ * real SQL table, with its `Table` doc in the one `_easydb` bookkeeping table —
+ * not a `doc TEXT` JSON blob. The store body itself is
+ * `packages/shared/src/edb-store.ts`; this suite pins the DESKTOP binding of it,
+ * on a real file. Uses a real temp file per test (not `:memory:`) so
  * "reopen an existing file" is genuinely exercised, and so the raw
  * `sqlite_master` / `PRAGMA table_info` introspection below can open its own
  * connection onto the same file.
@@ -128,7 +130,9 @@ describe('SqliteStore — tables: real SQL objects', () => {
     const raw = inspect(dbPath);
     const names = tableNames(raw);
     expect(names).toContain('people');
-    expect(names).toContain('_easydb_meta_people');
+    // v2 keeps the Table doc in `_easydb`, so there is no per-table metadata
+    // table beside the rows any more — one bookkeeping table, not one per table.
+    expect(names).toEqual(['_easydb', 'people']);
 
     const cols = columnInfo(raw, 'people');
     expect(cols.map((c) => c.name)).toEqual(['_id', '_updatedAt', '_extra', 'name', 'qty', 'active']);
@@ -146,7 +150,6 @@ describe('SqliteStore — tables: real SQL objects', () => {
 
     const raw = inspect(dbPath);
     expect(tableNames(raw)).toContain('simon_blog_entries');
-    expect(tableNames(raw)).toContain('_easydb_meta_simon_blog_entries');
     raw.close();
   });
 
@@ -244,14 +247,16 @@ describe('SqliteStore — table name collisions and edge cases', () => {
 
   it('a table named like a reserved system table does not collide with it', () => {
     const store = new SqliteStore({ path: dbPath });
-    expect(() => store.insert('tables', baseTable({ id: 't1', name: '_easydb_tables' }))).not.toThrow();
+    expect(() => store.insert('tables', baseTable({ id: 't1', name: '_easydb' }))).not.toThrow();
     store.insert('tables', baseTable({ id: 't2', name: 'unrelated' }));
     store.close();
 
     const raw = inspect(dbPath);
-    // The real system registry must still be exactly one table, untouched.
-    const registryRows = raw.prepare('SELECT id FROM _easydb_tables').all() as Array<{ id: string }>;
-    expect(registryRows.map((r) => r.id).sort()).toEqual(['t1', 't2']);
+    // Both tables are registered, and the bookkeeping table the first one is
+    // NAMED after is still the app's own — a user table cannot squat on it.
+    const registered = (raw.prepare(`SELECT key FROM _easydb WHERE coll = 'tables'`).all() as Array<{ key: string }>).map((r) => r.key);
+    expect(registered.sort()).toEqual(['t1', 't2']);
+    expect(tableNames(raw)).toContain('_easydb');
     raw.close();
   });
 
@@ -267,7 +272,6 @@ describe('SqliteStore — table name collisions and edge cases', () => {
     const names = tableNames(raw);
     // The physical SQL objects are untouched by the rename.
     expect(names).toContain('people');
-    expect(names).toContain('_easydb_meta_people');
     expect(names).not.toContain('humans');
     raw.close();
 
@@ -505,7 +509,6 @@ describe('SqliteStore — tables: remove drops both SQL objects', () => {
     const raw = inspect(dbPath);
     const names = tableNames(raw);
     expect(names).not.toContain('people');
-    expect(names).not.toContain('_easydb_meta_people');
     raw.close();
 
     const store2 = new SqliteStore({ path: dbPath });

@@ -25,6 +25,19 @@ import type { ImportDecision } from './db-import';
 
 const isDev = !!process.env.EASYDB_RENDERER_URL;
 
+/**
+ * Opt-in `?test=1` on the renderer, for the desktop e2e suite.
+ *
+ * `?test=1` is what makes `renderer/src/main.ts` publish the live `AppContext`
+ * on `window.__easydb`, and the specs drive the app through it — the same hook
+ * the browser suite uses. It has to be on the FIRST load: navigating a second
+ * time to add the query would boot the app twice, and the first boot already
+ * creates a workspace in the file under test.
+ *
+ * Off unless asked for, like `EASYDB_DEVTOOLS_PORT` below.
+ */
+const isE2E = process.env.EASYDB_E2E === '1';
+
 // -- Main-process SQLite store IPC surface ---------------------------------
 //
 // The store singleton itself (open/close/switch, persisted-path resolution)
@@ -293,7 +306,7 @@ async function createWindow(): Promise<void> {
       });
     });
 
-    await win.loadFile(indexPath);
+    await win.loadFile(indexPath, isE2E ? { query: { test: '1' } } : {});
   }
 }
 

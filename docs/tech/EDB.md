@@ -5,8 +5,10 @@ A `.edb` is an ordinary SQLite database. Open one in DB Browser, Datasette or
 with real columns. That is the whole point: IndexedDB is opaque, cannot be
 handed to a colleague, and no other tool can read it.
 
-This is the **browser** side. The Electron desktop has kept its data in SQLite
-since v0.0.313, but in an older layout — see [Format versions](#format-versions).
+The browser and the Electron desktop write the **same** file. One store body
+(`shared/src/edb-store.ts`) serves both — see
+[One store, two bindings](#one-store-two-bindings) — so a workspace saved in a
+browser tab opens on the desktop and back again.
 
 ## The format (v2)
 
@@ -25,13 +27,11 @@ CREATE INDEX _easydb_coll_ws ON _easydb (coll, workspaceId);
 ```
 
 A `tables` doc is the `Table` verbatim — `columns` included — plus two storage
-fields, `_sqlTable` (the physical name) and `_ordinal`. That absorbs both things
-the desktop keeps separately: its `_easydb_tables` registry and its per-table
-`_easydb_meta_<name>`.
+fields, `_sqlTable` (the physical name) and `_ordinal`. One row per table, where
+the old desktop layout used a registry plus a per-table metadata table.
 
 `coll='_meta', key='format'` holds `{ version: 2, app: 'easydbaccess' }`. It is
-how a file is recognised as ours, and how the desktop migration will tell v1
-from v2.
+how a file is recognised as ours.
 
 ### Row data: real SQL tables
 
@@ -114,17 +114,27 @@ pickers are still there for a browser with no directory picker (Firefox, Safari,
 where Save falls back to a download) and for a file kept elsewhere — the Open
 list ends with "Another file…".
 
+## One store, two bindings
+
+`EdbStore` takes a `SqlDriver` — `exec`, and `prepare` returning
+`get`/`all`/`run` — and nothing else. Two bindings satisfy it:
+
+| Binding | Runs on | Used by |
+| --- | --- | --- |
+| `electron/src/node-sqlite-driver.ts` | `node:sqlite`, main process | the desktop, through `electron/src/sqlite-store.ts` |
+| `renderer/src/db/edb/wasm-driver.ts` | `@sqlite.org/sqlite-wasm`, Web Worker | a file-backed browser tab |
+
+`sqlite-store.ts` is the driver plus what only a real file on disk needs: the
+page-cache and WAL pragmas, `checkpoint()`, `setDurability()` and the file copy
+Save As makes. It holds no storage logic of its own.
+
 ## Format versions
 
-| | Layout | Written by |
-| --- | --- | --- |
-| v1 | `_easydb_tables` + `_easydb_meta_<name>` + one table per table | Electron, `electron/src/sqlite-store.ts` |
-| v2 | one `_easydb` + one table per table | the browser, `shared/src/edb-store.ts` |
-
-So **a browser `.edb` does not open on the desktop yet**. That is the accepted
-cost of going browser-first. Converging the desktop onto `edb-store.ts`, reading
-v1 and writing v2, is the follow-up that makes the file portable in both
-directions.
+**v2 is the only format.** v1 — an `_easydb_tables` registry, one
+`_easydb_meta_<name>` per table and an `_easydb_docs` for everything else — is
+what the desktop wrote between v0.0.313 and v0.0.355. It was removed in v0.0.357
+with **no migration and no read path**: a v1 file does not open, and the app
+cannot recover one. `coll='_meta', key='format'` is what distinguishes them.
 
 ## Tests
 
@@ -133,6 +143,9 @@ directions.
 - `test/renderer/db/wasm-driver.test.ts` — the same store on sqlite-wasm
 - `test/renderer/db/edb-convert.test.ts` — copying a workspace in
 - `test/renderer/db/edb-dirty.test.ts` — autosave timing
+- `test/e2e/100-edb-browser.spec.ts` — the browser flow in a real tab
+- `test/e2e/desktop/` — the desktop app writing and reopening a real file
+  (`npm run test:e2e:desktop`)
 - `test/e2e/100-edb-browser.spec.ts` — the worker, the mirror, the reload, the
   File menu, the storage question and the folder helpers
 

@@ -1,11 +1,21 @@
-# Database Files (desktop app)
+# Database Files
 
-In the desktop app your workspace is one file on your disk — a SQLite `.db`
-file. This page explains how to open, save and import those files.
+Your workspace can be one file on your disk — a SQLite database you own, save
+and hand to anyone. This page explains how.
 
-**This applies to the desktop app only.** In a browser tab there is no
-**Database** button, because a browser tab has no files to open. Your data
-there stays in the browser's own storage — see
+There are two versions of this, because the desktop app and a browser tab reach
+your disk in different ways:
+
+| | Button | File | Saving |
+|---|---|---|---|
+| **Desktop app** | **Database** | `.db` | Every change goes straight into the file |
+| **Browser** | **File** | `.edb` | Only when you press **Save**, or turn on autosave |
+
+Both write a real SQLite database. The rest of this page covers the desktop
+first, then [the browser](#a-workspace-file-in-the-browser).
+
+In a browser tab, files are **opt-in**. A new workspace asks you where its data
+should live, and the answer can simply be "this browser" — see
 [Getting Started](getting-started.md).
 
 ## The Database button
@@ -117,3 +127,61 @@ Some things stay on the device, not in the `.db` file:
 See [Settings](settings.md) for what is device-local and what travels with
 your data. If you copy a `.db` file to another computer, expect to enter
 those again there.
+
+## A workspace file in the browser
+
+A browser tab can keep a workspace in a `.edb` file — the same idea as the
+desktop's `.db`, and the same real SQLite inside. It is off until you ask for it.
+
+Two ways to start:
+
+- **New workspace** asks where its data should live. Pick **Advanced** and it
+  goes in a file.
+- The **File** button in the footer turns the workspace you already have into a
+  file: **New .edb file…** → **Copy this workspace into it**. Your browser copy
+  is left exactly as it was, so you can go back to it.
+
+### One folder holds them all
+
+The first time you use a file, the browser asks you to choose a **folder**. Pick
+one place for your workspaces — a `easyDBAccess` folder in Documents, say.
+
+That one permission covers everything in that folder, for good. After it:
+
+- **New .edb file…** just asks for a name.
+- **Open .edb file…** lists the workspaces already in the folder.
+
+No file dialog either time. **Workspace folder…** in the same menu changes it
+later; files already saved stay where they are.
+
+### Saving is yours to do
+
+Nothing is written to your file until you press **Save**. This is the main
+difference from the desktop app, where every change lands in the file at once.
+
+**Turn on autosave** in the **File** menu if you would rather not think about
+it. It saves shortly after a change, and once at the end of an import rather
+than once per row.
+
+You will not lose work in the meantime. The browser keeps its own private copy
+as you go, so closing the tab, a crash or a reload all come back to where you
+were. Only your `.edb` file waits for Save.
+
+### Which browsers
+
+Saving in place needs the File System Access API, which today means Chrome,
+Edge and other Chromium browsers.
+
+In Firefox and Safari the **File** menu still works, but Save hands you a
+**download** instead of writing back to the file you opened, and there is no
+folder to choose. Opening a file works everywhere.
+
+### Moving a workspace between the browser and the desktop
+
+A `.edb` written in the browser opens in the desktop app, and one written on the
+desktop opens in the browser. Both write the same file.
+
+One exception: a desktop workspace saved **before v0.0.357** used an older
+internal layout. It does not open, in either place, and the app cannot convert
+it. If you still have the desktop version you saved it with, open it there and
+**Export** the tables you want — see [Sharing & Sync](sharing-and-sync.md).

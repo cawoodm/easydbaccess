@@ -10,7 +10,8 @@ Dexie/IndexedDB.
 | File                         | Role                                                                                                                                                                                                                            |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/main.ts`                | App entry. Creates the BrowserWindow, picks dev vs prod loader, registers the `store:*` and `db:*` IPC handlers, applies the production CSP, handles `window-all-closed` / `activate`.                                          |
-| `src/sqlite-store.ts`        | The store itself. User tables become real SQL tables; everything else lives in `_easydb_docs`. See "Storage layout" below.                                                                                                      |
+| `src/sqlite-store.ts`        | The desktop's binding to `EdbStore` (`packages/shared`) plus the connection tuning and file controls. Holds no storage logic — see "Storage layout" below.                                                                      |
+| `src/node-sqlite-driver.ts`  | The `SqlDriver` `EdbStore` runs on, over `node:sqlite`. The browser's file mode binds the same store to sqlite-wasm.                                                                                                            |
 | `src/db-files.ts`            | The store singleton (open / close / switch, remembered path) and the Open / Save As file operations, including the OS dialogs.                                                                                                  |
 | `src/db-import.ts`           | Reads **any** SQLite file's `sqlite_master` and imports its tables and views — a two-phase preview-then-commit so the renderer can resolve name collisions first. Also `probeDatabaseFile`, the guard Open needs.               |
 | `src/db-browse.ts`           | Read-only listing and reading of a file's tables + views, for Browse. Never writes — not even a `-wal`.                                                                                                                         |
@@ -24,22 +25,22 @@ Design: [`.claude/plans/2026-07-31-electron-sqlite-storage.md`](../../.claude/pl
 
 **Open, Browse and Import are not interchangeable.** Browse and Import take any
 SQLite file; Open takes only a file this app wrote. Opening is not a read-only
-act — the store's constructor runs `CREATE TABLE IF NOT EXISTS _easydb_docs` /
-`_easydb_tables` — so pointing it at a stranger's database adds two tables to it
-and then shows an empty workspace, there being no registry rows to list.
+act — the store's constructor runs `CREATE TABLE IF NOT EXISTS _easydb` — so
+pointing it at a stranger's database adds a table to it and then shows an empty
+workspace, there being no `tables` docs to list.
 `probeDatabaseFile` therefore runs first, read-only, and `pickDatabaseToOpen`
 returns its verdict as `kind`; the renderer (`plugins/electron-db.ts`) offers
 Convert or Browse for a `foreign` file and says so plainly for an `unreadable`
 one. Design: [`2026-08-03-open-db-three-ways.md`](../../.claude/plans/2026-08-03-open-db-three-ways.md).
 
-**The stamp alone does not make a file ours.** `isEasydbFile` requires the
-registry to be _usable_: some rows in it, OR no unregistered user objects in the
-file. A file the pre-guard Open had already stamped carries `_easydb_tables`
-with nothing in it over all of its real tables — a real `northwind.db` did, with
-13 tables and 17 views — and testing only for the stamp made Open show a blank
-workspace and made Import find zero tables, both silently. A brand-new easydb
-file also has an empty registry and must still count as ours; unregistered data
-sitting alongside is what separates the two.
+**The stamp alone does not make a file ours.** `isEasydbFile` requires `_easydb`
+to be _usable_: some `coll='tables'` docs in it, OR no unregistered user objects
+in the file. A file the pre-guard Open had already stamped carries an empty
+`_easydb` over all of its real tables — a real `northwind.db` did, with 13 tables
+and 17 views — and testing only for the stamp made Open show a blank workspace
+and made Import find zero tables, both silently. A brand-new easydb file also has
+no `tables` docs and must still count as ours; unregistered data sitting
+alongside is what separates the two.
 
 ## Storage layout
 
@@ -47,34 +48,29 @@ A saved `.db` is a genuine database — openable in DB Browser or Datasette —
 not an opaque blob. That is the whole point of the design, and it is why
 "import a `.db`" is meaningful.
 
-| SQL object                 | Holds                                                                                                                           |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `<sanitized table name>`   | the rows: `_id TEXT PRIMARY KEY` (= `Row.id`), `_updatedAt INTEGER`, `_extra TEXT` (overflow), then one column per `ColumnSpec` |
-| `_easydb_meta_<sanitized>` | that table's `columns_json` (the `ColumnSpec[]` verbatim) + `table_json` (the `Table` doc minus `columns`)                      |
-| `_easydb_tables`           | registry: `id`, `name`, `sql_table`, `ordinal`                                                                                  |
-| `_easydb_docs`             | `workspaces`, `settings`, `plugins`, `viewTemplates`, `viewInstances` — `(coll, key, workspaceId, doc)`                         |
+| SQL object               | Holds                                                                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `<sanitized table name>` | the rows: `_id TEXT PRIMARY KEY` (= `Row.id`), `_updatedAt INTEGER`, `_extra TEXT` (overflow), then one column per `ColumnSpec`         |
+| `_easydb`                | everything else — `workspaces`, `settings`, `plugins`, `viewTemplates`, `viewInstances`, `tables` — as `(coll, key, workspaceId, doc)`  |
 
-Three rules that a naive change would break:
+**The rules are not in this package.** They live with the store that enforces
+them, `packages/shared/src/edb-store.ts`: the physical table name assigned once,
+additive-only column reconciliation, `_extra` overflow. `docs/tech/EDB.md` states
+each and why. This package supplies the `node:sqlite` driver
+(`src/node-sqlite-driver.ts`) and the file-level controls a real database on disk
+needs — page-cache and WAL pragmas, `checkpoint()`, `setDurability()`,
+`copyDatabase()`.
 
-- **`sql_table` is assigned once.** Renaming `Table.name` updates the registry
-  and `table_json`, never the SQL object — nothing outside the registry
-  addresses a table by its physical name, and renaming risks a fresh collision
-  for no benefit.
-- **Column reconciliation is additive only** — `ALTER TABLE … ADD COLUMN`,
-  never `RENAME`/`DROP`. `ColumnSpec` has no stable id, so a rename is
-  indistinguishable from a drop-plus-add; dropping on that guess destroys data
-  (the v0.0.218 bug). A removed column just lingers, orphaned and harmless:
-  `columns_json`, not the DDL, says what is visible.
-- **`_extra` holds schemaless overflow.** `Row.data` may carry keys with no
-  `ColumnSpec`; they go to a JSON object in `_extra` rather than being dropped.
-  It is SQL `NULL` (not `'{}'`) when empty, and a decoded `null` is omitted
-  from `data` so a round-tripped row matches a fresh one.
+Format **v2 only**. v1 — an `_easydb_tables` registry, one
+`_easydb_meta_<name>` per table and `_easydb_docs` — is what this package wrote
+between v0.0.313 and v0.0.355. It was removed in v0.0.357 with no migration and
+no read path, so a v1 file does not open.
 
 `packages/shared/src/sql-mapping.ts` owns the type↔SQL mapping
 (`sanitizeTableName` / `quoteIdent` / `sqlAffinity` / `encodeValue` /
 `decodeValue` / `columnTypeFromSqlType`) and the server's `sqlite-store.ts`
-imports the same helpers — one convention, so a `.db` written by either side
-has the same shape.
+imports the same helpers — one convention, so a `.db` written by any of the
+three has the same shape.
 
 ## Dev vs prod
 
@@ -165,8 +161,13 @@ npm run build --workspace @easydb/electron
 npm run build:electron --workspace @easydb/renderer   # produces frontend/
 npm run start:electron        # uses already-built dist + frontend
 npm test --workspace @easydb/electron                 # vitest: store, import, sql mapping
+npm run test:e2e:desktop      # playwright: the real app (test/e2e/desktop/)
 npm run package:electron      # electron-builder installer (PowerShell wrapper)
 ```
 
 The store module is pure Node, so vitest covers it directly — no Electron
-runtime needed for the storage tests.
+runtime needed for the storage tests. What vitest CANNOT reach is anything in
+`db-files.ts` (it imports `electron`) and the renderer's choice of store, so
+`test/e2e/desktop/` launches the real app for those: boot, the file it writes,
+restart, Save As and Import. See `docs/tech/ELECTRON.md` § Tests for the three
+launch arguments that make it isolated.

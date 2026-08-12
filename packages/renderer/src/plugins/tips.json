@@ -12,6 +12,10 @@
     {
       "id": "right-click-and-drag-the-workspace-to-pan-deskto",
       "text": "Right-click and drag the workspace to pan (Desktop)"
+    },
+    {
+      "id": "a-workspace-can-live-in-a-real-sqlite-file-you-s",
+      "text": "A workspace can live in a real SQLite file you save — the File button, or pick Advanced when you make one"
     }
   ]
 }

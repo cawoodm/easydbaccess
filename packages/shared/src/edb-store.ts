@@ -18,15 +18,19 @@
  * never need querying beyond their primary key and, for settings and view
  * instances, `workspaceId`.
  *
- * v1 (what the desktop still writes as of 0.0.346) spread the same information
- * over `_easydb_docs`, an `_easydb_tables` registry and a per-table
- * `_easydb_meta_<name>`. Three tables to answer questions one can. The desktop
- * converges onto this file in a later change; until then a v2 file will not open
- * there. `coll='_meta', key='format'` is what tells the two apart.
+ * **This is the only format.** v1 — an `_easydb_tables` registry plus a per-table
+ * `_easydb_meta_<name>`, which the desktop wrote between v0.0.313 and v0.0.355 —
+ * is gone, with no migration and no read path. A v1 file does not open. That was
+ * a deliberate call: carrying a second layout meant two code paths through every
+ * read and write, forever, to serve files from a two-month window of a
+ * pre-1.0 app.
+ *
+ * `coll='_meta', key='format'` is how a file is recognised as ours, and is what a
+ * future format change has to look at.
  */
 
 import { buildWhere } from './filter-sql.js';
-import type { RowPage, RowQuery } from './row-query.js';
+import type { DistinctPage, DistinctQuery, RowPage, RowQuery } from './row-query.js';
 import type { SqlDriver } from './sql-driver.js';
 import { decodeValue, encodeValue, quoteIdent, sanitizeTableName, sqlAffinity } from './sql-mapping.js';
 import type { ColumnSpec, Row } from './types.js';
@@ -201,9 +205,26 @@ export class EdbStore {
     return Number(r?.n ?? 0);
   }
 
-  /** Row count for ONE table, without fetching any of them. */
+  /**
+   * The physical SQL table behind a logical table id, or null when there is no
+   * such table. For code that reads the file directly — the desktop's importer
+   * streams rows straight out of it.
+   */
+  sqlTableOf(tableId: string): string | null {
+    const stored = this.getRaw('tables', tableId);
+    return stored ? String(stored[SQL_TABLE_KEY]) : null;
+  }
+
+  /**
+   * Row count for ONE table, without fetching any of them.
+   *
+   * An unknown id counts 0 rather than throwing. This is a panel-title read, and
+   * it races deletion: the panel asks for its count while the table is going
+   * away. Throwing there turned a stale question into an error dialog.
+   */
   countRowsIn(tableId: string): number {
-    const sqlTable = this.resolveRowsTable(tableId);
+    const sqlTable = this.sqlTableOf(tableId);
+    if (sqlTable === null) return 0;
     const r = this.db.prepare(`SELECT COUNT(*) AS n FROM ${quoteIdent(sqlTable)}`).get();
     return Number(r?.n ?? 0);
   }
@@ -604,6 +625,60 @@ export class EdbStore {
       rows: raws.map((raw) => this.decodeRow(tableId, wanted, raw)) as RowPage['rows'],
       total,
       ...(partial ? { partial: true } : {}),
+    };
+  }
+
+  /**
+   * One column's distinct values and their counts — a funnel's list, answered in
+   * SQL so the caller never reads the rows.
+   *
+   * The blank group gets its OWN query rather than being picked out of the
+   * grouped one. NULL and `''` are the same thing to a picker — a cell with
+   * nothing in it — and left in the `GROUP BY` the blank group takes a slot in the
+   * `LIMIT`: it can push a real value out of the list, and be missed altogether
+   * when it sorts past the limit itself. `TRIM` leaves a number alone
+   * (`TRIM(0)` is `'0'`, not `''`).
+   */
+  distinctValues(tableId: string, q: DistinctQuery): DistinctPage {
+    const stored = this.getRaw('tables', tableId);
+    if (!stored) return { values: [] };
+    const columns = this.columnsOf(stored);
+    const spec = columns.find((c) => c.field === q.field);
+    // No SQL form for the field itself: the caller has to do the whole job.
+    if (!spec || spec.script) return { values: [], partial: true };
+
+    const table = quoteIdent(String(stored[SQL_TABLE_KEY]));
+    const specOf = new Map(columns.map((c) => [c.field, c] as const));
+    const sqlOf = (field: string): string | null => {
+      const s = specOf.get(field);
+      if (!s || s.script || s.type === 'array') return null;
+      return quoteIdent(s.field);
+    };
+    const searchFields = columns.filter((c) => !c.script && c.type !== 'array' && c.filterable !== false).map((c) => c.field);
+    const where = buildWhere(q.where?.filters, q.where?.search, sqlOf, searchFields);
+
+    const col = quoteIdent(spec.field);
+    const limit = q.limit != null && q.limit > 0 ? Math.floor(q.limit) : 500;
+    const blankSql = `(${col} IS NULL OR TRIM(${col}) = '')`;
+    const scope = where.sql ? `(${where.sql}) AND ` : '';
+
+    // One more row than asked for, so "there are more" needs no second query.
+    const rows = this.db
+      .prepare(`SELECT ${col} AS v, COUNT(*) AS n FROM ${table} WHERE ${scope}NOT ${blankSql} GROUP BY ${col} ORDER BY n DESC, v ASC LIMIT ${limit + 1}`)
+      .all(...where.params);
+    const blanks = Number(this.db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${scope}${blankSql}`).get(...where.params)?.n ?? 0);
+
+    const more = rows.length > limit;
+    const values = (more ? rows.slice(0, limit) : rows).map((r) => ({ value: decodeValue(spec.type, r.v), count: Number(r.n) }));
+    return {
+      values,
+      blanks,
+      ...(more ? { truncated: true } : {}),
+      // An `array` column's cells are not its members: SQL cannot see inside one,
+      // so the caller splits them. Said with its own flag so `partial` keeps
+      // meaning "a predicate was left out", which is a different problem.
+      ...(spec.type === 'array' ? { cells: true } : {}),
+      ...(where.expressible ? {} : { partial: true }),
     };
   }
 }

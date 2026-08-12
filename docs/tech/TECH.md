@@ -26,8 +26,8 @@ plugin registry.
 | Language | TypeScript everywhere — renderer, server, Electron main, plugin host |
 | UI | [Lit](https://lit.dev/) web components (no virtual DOM, plugin-friendly) |
 | Renderer build | [Vite](https://vitejs.dev/) (dev server on port `5190`) |
-| Browser storage | IndexedDB via [Dexie](https://dexie.org/) — `liveQuery` reactivity and explicit versioned migrations |
-| Desktop storage | SQLite via the built-in **`node:sqlite`** in the Electron main process — no native binding to rebuild per platform. The renderer reaches it over IPC; the workspace is a real `.db` file the user opens and saves. |
+| Browser storage | IndexedDB via [Dexie](https://dexie.org/) — `liveQuery` reactivity and explicit versioned migrations. **Or** SQLite via [`@sqlite.org/sqlite-wasm`](https://sqlite.org/wasm) in a Web Worker, writing a real `.edb` file through the File System Access API, opt-in per workspace — see [`EDB.md`](./EDB.md) |
+| Desktop storage | The **same** store as above, bound to the built-in **`node:sqlite`** in the Electron main process — no native binding to rebuild per platform. The renderer reaches it over IPC; the workspace is a real `.db` file the user opens and saves, in the same format a browser writes. |
 | Backend | [Hono](https://hono.dev/) on `@hono/node-server`, ESM, Node ≥ 24 |
 | Desktop shell | Electron 43 with contextIsolation, sandbox, no nodeIntegration (43 is also what makes `node:sqlite` available unflagged) |
 | Windows | in-repo panel shell (`window-mgr/panel-shell/`) for draggable in-app panels |
@@ -70,7 +70,7 @@ adapter and sync target change.
 
 | Mode | Renderer | Local storage | Backend | Sync target |
 |---|---|---|---|---|
-| **Browser** | Lit + Vite bundle | Dexie (IndexedDB) | none locally | optional remote Hono |
+| **Browser** | Lit + Vite bundle | Dexie (IndexedDB), or `data-store-bridge.ts` over `postMessage` → a sqlite-wasm worker in a user-chosen `.edb` file **(landed)** | none locally | optional remote Hono |
 | **Electron** | Same Lit bundle in renderer process | `data-store-bridge.ts` over IPC → main-process `node:sqlite` store, in a user-chosen `.db` file **(landed)** | Hono in-process *(not wired yet)* | optional remote Hono |
 | **Hosted Hono** | n/a | filesystem (one JSON per workspace) or SQLite | Hono | central peer for multi-device |
 
@@ -82,21 +82,28 @@ fetchFn, ... })` is the single entry point, parameterized by a
 ## Architecture diagram
 
 ```
-Browser                Electron renderer        Electron main / Node server
-┌────────────────┐    ┌────────────────┐       ┌──────────────────────┐
-│ Lit chrome     │    │ Lit chrome     │       │ node:sqlite store    │
-│ Dexie          │─HTTP→ data-store-   │─IPC──→│  → a user-chosen .db │
-│ (IndexedDB)    │    │ ipc.ts         │       │ Hono server:         │
-│ Plugin runtime │    │ Plugin runtime │       │  /sync (pull/push)   │
-│ Plugins .js    │    │ Plugins .js    │       │  /fetch (URL proxy)  │
-└────────────────┘    └────────────────┘       │  /plugins/registry   │
-                                               └──────────────────────┘
-                          (the Hono half does not run in Electron's main
-                           process yet — only the store does)
-                                                          ↑
+Browser                       Electron renderer        Electron main / Node server
+┌───────────────────────┐    ┌────────────────┐       ┌──────────────────────┐
+│ Lit chrome            │    │ Lit chrome     │       │ node:sqlite store    │
+│ Plugin runtime        │    │ Plugin runtime │       │  → a user-chosen .db │
+│ Plugins .js           │    │ Plugins .js    │       │ Hono server:         │
+│                       │    │                │       │  /sync (pull/push)   │
+│ Dexie (IndexedDB)     │    │ data-store-    │─IPC──→│  /fetch (URL proxy)  │
+│   or                  │    │ bridge.ts      │       │  /plugins/registry   │
+│ data-store-bridge.ts  │    └────────────────┘       └──────────────────────┘
+│   │ postMessage       │                                        ↑
+│   ▼                   │──────────────HTTP──────────────────────┘
+│ sqlite-wasm worker    │
+│  → a user-saved .edb  │      (the Hono half does not run in Electron's main
+│  + an OPFS mirror     │       process yet — only the store does)
+└───────────────────────┘
                               multi-device sync via HTTP to a hosted instance
                               of the same Hono server.
 ```
+
+`data-store-bridge.ts` appears twice on purpose. It is one `DataStore` over an
+async message bridge, and the two transports — `ipcRenderer` and `postMessage` —
+satisfy the same interface, so the browser's file mode needed no second adapter.
 
 ## The plugin model (the load-bearing decision)
 

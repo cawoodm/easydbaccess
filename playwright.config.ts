@@ -24,6 +24,11 @@ const serverPort = resolveServerPort();
 
 export default defineConfig({
   testDir: './test/e2e',
+  // The desktop suite lives in here too, but it launches Electron instead of
+  // using a page — it has its own config (`playwright.electron.config.ts`) and
+  // must not be run by this one. It sits under test/e2e/ so that the lint and
+  // typecheck exclusions for Playwright specs, and `helpers.ts`, cover it.
+  testIgnore: ['desktop/**'],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

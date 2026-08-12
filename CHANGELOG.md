@@ -10,12 +10,18 @@
 - ✨ A funnel on a big table says its value list may be short, and a refresh icon reads the whole column (v0.0.349)
 - ✨ A dragged file shows where it will land: the whole canvas, or the one window whose table it will load (v0.0.356)
 - ✨ A file of several tables dropped on a window loads the table of that name, or asks which one should (v0.0.356)
+- 🪶 The desktop and the browser now write the same workspace file, so one `.edb` opens in both (v0.0.357)
 
 ### Bugs
 
 - 🪲 A dump whose rows held a field its column list omitted imported those rows blank, with no way to reach the value (v0.0.352)
 - 🪲 A table of 600,000 rows took most of a minute to appear, and was read whole again on every write (v0.0.351)
 - 🪲 A filter on a table over 20,000 rows only searched the first 20,000, so a match further in was missing (v0.0.350)
+
+### Chores
+
+- 🔧 Desktop workspaces saved before v0.0.357 no longer open: the old internal layout is gone, with no migration (v0.0.357)
+- 🔧 Playwright now tests the desktop app itself — boot, the file it writes, restart, Save As and Import (v0.0.357)
 
 ## 11 Aug 2026
 

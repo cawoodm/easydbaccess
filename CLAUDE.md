@@ -42,6 +42,7 @@ process — the Electron storage layer depends on it.
 | `npm run test`             | One Vitest run over `test/renderer/` + `test/server/` (the server suites are e2e-style HTTP tests).                                                                                           |
 | `npm run test:e2e`         | Playwright suite under `test/e2e/` (79 specs covering dialogs, table, columns editor, cells, import/export, filters, window manager, auto-sync, sql-export, backend proxy, plugins registry). |
 | `npm run test:e2e:ui`      | Same, with Playwright's interactive UI.                                                                                                                                                       |
+| `npm run test:e2e:desktop` | Playwright against the **real Electron app** (`test/e2e/desktop/`, own config). Builds the renderer and main process first. Covers boot, the file it writes, restart, Save As, Import.        |
 | `npm run format`           | Prettier across `packages/` and `test/`.                                                                                                                                                      |
 | `npm run package:electron` | `package-electron.ps1 -Installer` — builds renderer + electron, runs `electron-builder` for the Windows installer.                                                                            |
 | `npm run publish`          | `publish.ps1` — release script. Only needed for **branch previews** now; `main` publishes itself (see below).                                                                                 |
@@ -177,7 +178,7 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
   `import-data`, `auto-sync`, `views`, `settings`, `url-source`,
   `datasette-import` (+ `datasette-views`), `datasette-connect`, `connect-menu`,
   `projection`, `command-palette-button`, `electron-db`, `sqlitefile-source`,
-  `tips`, `commandlets`.
+  `tips`, `commandlets`, `edb-file`.
   Don't add a feature to
   the core if it can be a plugin. (Exception: the Plugin Manager button is core
   chrome in `app-shell.ts`, not a plugin — it opens the manager that governs
@@ -280,6 +281,19 @@ Don't "fix" these without checking the plan section first:
   through it.
 - **Migration from v1 minniDBMax localStorage** — Phase 9.
 
+## One SQLite store, two bindings
+
+`packages/shared/src/edb-store.ts` is the whole storage layer for a file-backed
+workspace, and it runs on a `SqlDriver` seam (`exec`, `prepare` →
+`get`/`all`/`run`) rather than on any one SQLite build. The desktop binds it to
+`node:sqlite` (`packages/electron/src/node-sqlite-driver.ts`), the browser to
+`@sqlite.org/sqlite-wasm` in a Web Worker. `packages/electron/src/sqlite-store.ts`
+is a thin wrapper: pragmas, `checkpoint()`, `setDurability()`, `copyDatabase()`.
+
+Both write **format v2**, so a `.edb` moves between browser and desktop. Format
+v1 — what the desktop wrote from v0.0.313 to v0.0.355 — was removed in v0.0.357
+with no migration and no read path. See `docs/tech/EDB.md`.
+
 ## Every test lives in root `test/`
 
 No test file sits next to the code it covers. `test/renderer/` and
@@ -287,10 +301,11 @@ No test file sits next to the code it covers. `test/renderer/` and
 `packages/renderer/src/util/ids.ts` goes to `test/renderer/util/ids.test.ts`
 and imports the module by relative source path
 (`../../../packages/renderer/src/util/ids.js`). Playwright specs go in
-`test/e2e/`. Both runners are driven from the repo root — one
-`vitest.config.ts` (`test/**/*.test.ts`) and `playwright.config.ts`
-(`testDir: './test/e2e'`); the packages have no `test` script of their own.
-See `docs/tech/TESTING.md`.
+`test/e2e/`, and the ones that launch the desktop app in `test/e2e/desktop/`.
+Three configs are driven from the repo root — `vitest.config.ts`
+(`test/**/*.test.ts`), `playwright.config.ts` (`testDir: './test/e2e'`, which
+ignores `desktop/**`) and `playwright.electron.config.ts`; the packages have no
+`test` script of their own. See `docs/tech/TESTING.md`.
 
 ## Servers
 

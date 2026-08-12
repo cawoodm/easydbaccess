@@ -273,3 +273,65 @@ describe('queryRows', () => {
     expect(store.queryRows('nope')).toEqual({ rows: [], total: 0 });
   });
 });
+
+describe('distinctValues', () => {
+  beforeEach(() => {
+    store.insert('tables', table());
+    store.bulkInsert('rows', [
+      row('r1', { name: 'bolt', qty: 1 }),
+      row('r2', { name: 'bolt', qty: 2 }),
+      row('r3', { name: 'nut', qty: 3 }),
+      row('r4', { name: '', qty: 4 }),
+      row('r5', { qty: 5 }),
+    ]);
+  });
+
+  it('counts each value, commonest first', () => {
+    const page = store.distinctValues('t1', { field: 'name' });
+    expect(page.values).toEqual([
+      { value: 'bolt', count: 2 },
+      { value: 'nut', count: 1 },
+    ]);
+  });
+
+  it('counts blanks together and keeps them out of the value list', () => {
+    // NULL and '' are the same thing to a picker: a cell with nothing in it.
+    const page = store.distinctValues('t1', { field: 'name' });
+    expect(page.blanks).toBe(2);
+    expect(page.values.map((v) => v.value)).not.toContain('');
+  });
+
+  it('narrows to the rows a filter leaves', () => {
+    const page = store.distinctValues('t1', { field: 'name', where: { filters: { qty: '2' } } });
+    expect(page.values).toEqual([{ value: 'bolt', count: 1 }]);
+  });
+
+  it('says the list was cut short rather than looking complete', () => {
+    const page = store.distinctValues('t1', { field: 'name', limit: 1 });
+    expect(page.values).toHaveLength(1);
+    expect(page.truncated).toBe(true);
+  });
+
+  it('a blank group past the limit is still counted', () => {
+    // The blank group has its own query for exactly this reason: inside the
+    // GROUP BY it would take a slot in the LIMIT, and be missed when it sorts
+    // past it.
+    const page = store.distinctValues('t1', { field: 'name', limit: 1 });
+    expect(page.blanks).toBe(2);
+  });
+
+  it('gives up on a scripted column, and says so', () => {
+    store.patch('tables', 't1', { columns: [...COLUMNS, { field: 'calc', label: 'Calc', type: 'string', script: 'function render(r){return 1}' }] });
+    expect(store.distinctValues('t1', { field: 'calc' })).toEqual({ values: [], partial: true });
+  });
+
+  it('marks an array column, whose cells are not its members', () => {
+    store.patch('tables', 't1', { columns: [...COLUMNS, { field: 'tags', label: 'Tags', type: 'array' }] });
+    store.insert('rows', row('r6', { tags: 'a,b' }));
+    expect(store.distinctValues('t1', { field: 'tags' }).cells).toBe(true);
+  });
+
+  it('is an empty list for a table that does not exist, not a throw', () => {
+    expect(store.distinctValues('nope', { field: 'name' })).toEqual({ values: [] });
+  });
+});

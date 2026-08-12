@@ -3,11 +3,11 @@
  * `.claude/plans/2026-07-31-electron-sqlite-storage.md` and `db-files.ts`).
  * Accepts ANY SQLite file, not just ones this app wrote:
  *
- *  - a file WE wrote carries an `_easydb_tables` registry — its per-table
- *    `_easydb_meta_<sql>` row holds the original `ColumnSpec[]` VERBATIM
- *    (renderer, hidden, width, script, sortable, filterable, label, …), so
- *    this path replays that JSON as-is instead of re-inferring it from the
- *    raw SQL schema, which would lose all of it.
+ *  - a file WE wrote carries an `_easydb` table — its `coll='tables'` rows hold
+ *    each `Table` doc, `ColumnSpec[]` VERBATIM (renderer, hidden, width, script,
+ *    sortable, filterable, label, …), so this path replays that JSON as-is
+ *    instead of re-inferring it from the raw SQL schema, which would lose all of
+ *    it. See `docs/tech/EDB.md`.
  *  - any OTHER SQLite file: `sqlite_master` lists its tables (skipping
  *    `sqlite_*` internals and anything named `_easydb*`), and `PRAGMA
  *    table_info` + `columnTypeFromSqlType` (in `@easydb/shared/sql-mapping`)
@@ -135,7 +135,7 @@ export interface ImportCandidate {
 }
 
 export interface ImportPreview {
-  /** Whether the source carries our own `_easydb_tables` registry, or is a foreign file. */
+  /** Whether the source carries our own `_easydb` bookkeeping, or is a foreign file. */
   kind: 'easydb' | 'foreign';
   candidates: ImportCandidate[];
   /** The source file's size on disk; the renderer decides what a big file means. */
@@ -161,9 +161,9 @@ export function sourceSizeBytes(sourcePath: string): number {
   }
 }
 
-/** True when `_easydb_tables` exists — the app's bookkeeping has touched this file. */
+/** True when `_easydb` exists — the app's bookkeeping has touched this file. */
 function hasEasydbStamp(db: DatabaseSyncType): boolean {
-  const row = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_easydb_tables'`).get();
+  const row = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_easydb'`).get();
   return row !== undefined;
 }
 
@@ -185,19 +185,19 @@ function countForeignObjects(db: DatabaseSyncType): number {
  * can be trusted as the list of tables.
  *
  * The stamp alone is not enough. Before the Open guard existed, pointing the
- * store at any SQLite file created `_easydb_docs` + `_easydb_tables` in it and
- * left the registry EMPTY, so the file ends up stamped while every one of its
- * real tables is unregistered. Such a file must not be treated as a workspace:
- * opening it shows nothing, and importing it would take the metadata path and
- * find zero tables to import — both silent, both wrong.
+ * store at any SQLite file created its bookkeeping table in it and left the table
+ * list EMPTY, so the file ends up stamped while every one of its real tables is
+ * unregistered. Such a file must not be treated as a workspace: opening it shows
+ * nothing, and importing it would take the metadata path and find zero tables to
+ * import — both silent, both wrong.
  *
- * A brand-new easydb file also has an empty registry, and that one MUST still
+ * A brand-new easydb file also has no `tables` rows, and that one MUST still
  * count as ours. What separates them is unregistered data: an empty workspace
  * holds no other objects, a mis-stamped file is full of them.
  */
 function isEasydbFile(db: DatabaseSyncType): boolean {
   if (!hasEasydbStamp(db)) return false;
-  const registered = (db.prepare(`SELECT COUNT(*) AS n FROM _easydb_tables`).get() as { n: number }).n;
+  const registered = (db.prepare(`SELECT COUNT(*) AS n FROM _easydb WHERE coll = 'tables'`).get() as { n: number }).n;
   if (registered > 0) return true;
   return countForeignObjects(db) === 0;
 }
@@ -208,13 +208,12 @@ export type DatabaseFileKind = 'easydb' | 'foreign' | 'unreadable';
 /**
  * Classifies `sourcePath` without writing to it — the guard "Open…" needs.
  *
- * Opening a store on a file is not a read-only act: `SqliteStore`'s
- * constructor runs `CREATE TABLE IF NOT EXISTS _easydb_docs/_easydb_tables`,
- * so pointing it at someone else's database silently adds two tables to it
- * and then shows an empty workspace (no `_easydb_tables` rows to list). This
- * probe runs FIRST, `readOnly` so it leaves no `-wal`/`-journal` sidecar
- * either, and lets the caller offer Import instead of quietly mangling the
- * file.
+ * Opening a store on a file is not a read-only act: `EdbStore`'s constructor runs
+ * `CREATE TABLE IF NOT EXISTS _easydb` and stamps the format, so pointing it at
+ * someone else's database silently adds a table to it and then shows an empty
+ * workspace (no `coll='tables'` rows to list). This probe runs FIRST, `readOnly`
+ * so it leaves no `-wal`/`-journal` sidecar either, and lets the caller offer
+ * Import instead of quietly mangling the file.
  *
  * A non-SQLite file usually survives `new DatabaseSync()` and only fails on
  * the first read, so the classification query is what actually decides
@@ -241,30 +240,41 @@ function rowCountOf(db: DatabaseSyncType, sqlTable: string): number {
   return r.n;
 }
 
-function listEasydbCandidates(db: DatabaseSyncType): Array<{ name: string; sqlTable: string; rowCount: number; columns: string[] }> {
-  const rows = db.prepare(`SELECT name, sql_table FROM _easydb_tables ORDER BY ordinal`).all() as Array<{
-    name: string;
-    sql_table: string;
-  }>;
-  return rows.map((r) => ({
-    name: r.name,
-    sqlTable: r.sql_table,
-    rowCount: rowCountOf(db, r.sql_table),
-    // From the recorded ColumnSpec[], not the SQL schema: those are the fields a
-    // row's `data` is keyed by, which is what an append maps FROM.
-    columns: easydbColumnNames(db, r.sql_table),
-  }));
+/**
+ * The `tables` documents of a file we wrote, in their own order.
+ *
+ * One read where v1 needed three: the doc is the `Table` verbatim plus
+ * `_sqlTable` and `_ordinal`, so the physical name and the `ColumnSpec[]` come
+ * out of the same row. See `docs/tech/EDB.md`.
+ */
+function easydbTableDocs(db: DatabaseSyncType): Array<Record<string, unknown>> {
+  const rows = db.prepare(`SELECT doc FROM _easydb WHERE coll = 'tables'`).all() as Array<{ doc: string }>;
+  return rows
+    .map((r) => JSON.parse(r.doc) as Record<string, unknown>)
+    .sort((a, b) => Number(a['_ordinal'] ?? 0) - Number(b['_ordinal'] ?? 0));
 }
 
-/** The recorded field names of an easydb-origin table. */
-function easydbColumnNames(db: DatabaseSyncType, sqlTable: string): string[] {
-  try {
-    const meta = db.prepare(`SELECT columns_json FROM ${quoteIdent(`_easydb_meta_${sqlTable}`)}`).get() as { columns_json?: string } | undefined;
-    if (!meta?.columns_json) return [];
-    return (JSON.parse(meta.columns_json) as ColumnSpec[]).map((c) => c.field);
-  } catch {
-    return [];
-  }
+function columnsOfDoc(doc: Record<string, unknown>): ColumnSpec[] {
+  return (Array.isArray(doc['columns']) ? doc['columns'] : []) as ColumnSpec[];
+}
+
+function listEasydbCandidates(db: DatabaseSyncType): Array<{ name: string; sqlTable: string; rowCount: number; columns: string[] }> {
+  return easydbTableDocs(db).map((doc) => {
+    const sqlTable = String(doc['_sqlTable']);
+    return {
+      name: String(doc['name'] ?? ''),
+      sqlTable,
+      rowCount: rowCountOf(db, sqlTable),
+      // From the recorded ColumnSpec[], not the SQL schema: those are the fields a
+      // row's `data` is keyed by, which is what an append maps FROM.
+      columns: columnsOfDoc(doc).map((c) => c.field),
+    };
+  });
+}
+
+/** One file-of-ours table doc, by its physical name. */
+function easydbDocFor(db: DatabaseSyncType, sqlTable: string): Record<string, unknown> | null {
+  return easydbTableDocs(db).find((d) => String(d['_sqlTable']) === sqlTable) ?? null;
 }
 
 /**
@@ -535,9 +545,15 @@ function importEasydbTable(
     };
   }
 
-  const metaRow = src.prepare(`SELECT columns_json, table_json FROM ${quoteIdent(`_easydb_meta_${candidate.sqlTable}`)}`).get() as { columns_json: string; table_json: string };
-  const columns = JSON.parse(metaRow.columns_json) as ColumnSpec[];
-  const tableRest = JSON.parse(metaRow.table_json) as Record<string, unknown>;
+  // The whole `Table` in one row. `columns` is the recorded `ColumnSpec[]`; the
+  // rest is what the block below picks over. Storage-only keys go, so they cannot
+  // be carried into the target as if they meant something there.
+  const doc = easydbDocFor(src, candidate.sqlTable) ?? {};
+  const columns = columnsOfDoc(doc);
+  const tableRest: Record<string, unknown> = { ...doc };
+  delete tableRest['columns'];
+  delete tableRest['_sqlTable'];
+  delete tableRest['_ordinal'];
 
   const reusesExisting = resolved.action === 'overwrite' || resolved.action === 'append';
   const existing = reusesExisting
@@ -674,8 +690,7 @@ function applyFieldMap(data: Record<string, unknown>, fieldMap: Record<string, s
 }
 
 function* easydbRowBatches(src: DatabaseSyncType, targetStore: SqliteStore, t: RowStreamTarget): Generator<ImportProgress> {
-  const metaRow = src.prepare(`SELECT columns_json FROM ${quoteIdent(`_easydb_meta_${t.sqlTable}`)}`).get() as { columns_json: string };
-  const columns = JSON.parse(metaRow.columns_json) as ColumnSpec[];
+  const columns = columnsOfDoc(easydbDocFor(src, t.sqlTable) ?? {});
   const rawCols = ['_id', '_updatedAt', '_extra', ...columns.map((c) => c.field)];
   const fallbackAt = Date.now();
   let imported = 0;

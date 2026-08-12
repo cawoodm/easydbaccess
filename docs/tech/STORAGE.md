@@ -86,9 +86,9 @@ Four things are worth knowing here:
   with no OS dialog either time. The per-file pickers remain for a browser
   without a directory picker, and for a file kept somewhere else.
 
-The format is v2 and the desktop still writes v1, so a browser `.edb` does not
-open on the desktop yet. The `_meta.format` row is what makes that later
-migration a read-old / write-new rather than a guess.
+The desktop writes the same v2 file, from the same `EdbStore` — so a workspace
+saved in a browser tab opens on the desktop and back again. `docs/tech/EDB.md`
+has the format and the two drivers.
 
 ## Why Dexie, not a bigger database engine
 
@@ -193,9 +193,13 @@ makes "import a `.db`" a meaningful operation:
 | SQL object | Holds |
 |---|---|
 | `<sanitized table name>` | the rows — `_id TEXT PRIMARY KEY` (= `Row.id`), `_updatedAt INTEGER`, `_extra TEXT` (overflow), then one real column per `ColumnSpec` |
-| `_easydb_meta_<sanitized>` | that table's `columns_json` (the `ColumnSpec[]` verbatim) + `table_json` (the `Table` doc minus `columns`) |
-| `_easydb_tables` | registry: `id`, `name`, `sql_table`, `ordinal` |
-| `_easydb_docs` | the non-row collections — `workspaces`, `settings`, `plugins`, `viewTemplates`, `viewInstances` — as `(coll, key, workspaceId, doc)` |
+| `_easydb` | everything that is not row data — `workspaces`, `settings`, `plugins`, `viewTemplates`, `viewInstances` and `tables` — as `(coll, key, workspaceId, doc)` |
+
+This is format v2, and `packages/shared/src/edb-store.ts` is what writes it —
+the same store the browser's file mode runs, bound here to `node:sqlite` instead
+of sqlite-wasm. `sqlite-store.ts` adds only what a file on disk needs: the
+pragmas, `checkpoint()`, `setDurability()` and the copy behind Save As. See
+`docs/tech/EDB.md`.
 
 So the browser's "one `rows` table, many logical tables" (above) inverts
 here: each logical table really is its own SQL table, and `rows(tableId)`
@@ -204,15 +208,15 @@ semantics plugins see are unchanged.
 
 Three rules a naive change would break:
 
-- **`sql_table` is assigned once.** Renaming `Table.name` updates the
-  registry and `table_json`, never the SQL object. Nothing outside the
-  registry addresses a table by its physical name, and renaming would risk a
-  fresh collision for no benefit.
+- **The physical table name is assigned once.** Renaming `Table.name` rewrites
+  the `tables` doc, never the SQL object. Nothing outside that doc addresses a
+  table by its physical name (`_sqlTable`), and renaming would risk a fresh
+  collision for no benefit.
 - **Column reconciliation is additive only** — `ALTER TABLE … ADD COLUMN`,
   never `RENAME` or `DROP`. `ColumnSpec` has no stable id, so a rename is
   indistinguishable from a drop-plus-add, and dropping on that guess destroys
   data (that was the v0.0.218 bug). A removed column just lingers, orphaned
-  and harmless: `columns_json`, not the DDL, decides what is visible.
+  and harmless: the table doc's `columns`, not the DDL, decides what is visible.
 - **`_extra` holds schemaless overflow.** `Row.data` may carry keys with no
   `ColumnSpec`; they go into a JSON object in `_extra` rather than being
   dropped. It is SQL `NULL` (not `'{}'`) when empty, and a decoded `null` is
@@ -233,10 +237,9 @@ re-runs its query and notifies its subscribers. Same coarse granularity as
 ### Open takes only our own files; Import takes any
 
 Opening a database is **not** a read-only act: the store's constructor runs
-`CREATE TABLE IF NOT EXISTS _easydb_docs` / `_easydb_tables`. Pointing it at
-a stranger's `.db` would therefore add two bookkeeping tables to someone
-else's file and then show an empty workspace, there being no registry rows to
-list.
+`CREATE TABLE IF NOT EXISTS _easydb`. Pointing it at a stranger's `.db` would
+therefore add a bookkeeping table to someone else's file and then show an empty
+workspace, there being no `tables` docs to list.
 
 So `pickDatabaseToOpen` probes the picked file read-only first
 (`probeDatabaseFile` in
@@ -434,8 +437,8 @@ reasoning about what `gist-sync` (see `SYNCH.md`) does and doesn't carry
 across devices, since it only ever reads from a subset of this list.
 
 The table below is the **browser** layout. Under Electron every IndexedDB row
-becomes SQL in the open `.db` file instead (`tables`/`rows` → one real SQL
-table each plus `_easydb_meta_*`, everything else → `_easydb_docs`), while the
+becomes SQL in the open `.db` file instead (`rows` → one real SQL table per
+logical table, everything else — `tables` included — → `_easydb`), while the
 three `localStorage` entries stay exactly as they are — user-layer settings,
 the secrets store, and the last-active workspace id are device-local either
 way and do not travel with the `.db` file.

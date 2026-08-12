@@ -82,14 +82,19 @@ The store lives in the main process, not the renderer:
 
 | File | Role |
 |---|---|
-| [`src/sqlite-store.ts`](../../packages/electron/src/sqlite-store.ts) | The store. User tables are real SQL tables; documents (`workspaces`, `settings`, `plugins`, `viewTemplates`, `viewInstances`) live in `_easydb_docs`. |
+| [`src/sqlite-store.ts`](../../packages/electron/src/sqlite-store.ts) | The desktop's binding to `EdbStore` (`packages/shared`), plus the pragmas, `checkpoint()` and file copy only a real file needs. No storage logic of its own. |
+| [`src/node-sqlite-driver.ts`](../../packages/electron/src/node-sqlite-driver.ts) | The `SqlDriver` over `node:sqlite`. The browser's file mode binds the same store to sqlite-wasm instead. |
 | [`src/db-files.ts`](../../packages/electron/src/db-files.ts) | Store singleton (open / switch / remembered path) and the Open / Save As dialogs. |
 | [`src/db-import.ts`](../../packages/electron/src/db-import.ts) | Imports **any** SQLite file by reading its `sqlite_master` — not only files easyDBAccess wrote. `probeDatabaseFile` classifies a picked file read-only. |
 
+User tables are real SQL tables; everything else — `workspaces`, `settings`,
+`plugins`, `viewTemplates`, `viewInstances` and `tables` — lives in one
+`_easydb` table. That is format v2, the same file a browser tab writes, and it
+is the only format: see [`EDB.md`](EDB.md).
+
 **Open takes only our own files; Import takes any.** Opening a database is not
-a read-only act — the store's constructor creates `_easydb_docs` and
-`_easydb_tables` — so Open on a stranger's `.db` would add two tables to it and
-show an empty workspace. `pickDatabaseToOpen` therefore probes first and
+a read-only act — the store's constructor creates `_easydb` — so Open on a
+stranger's `.db` would add a table to it and show an empty workspace. `pickDatabaseToOpen` therefore probes first and
 reports `kind`: `easydb` opens after the usual confirmation, `foreign` is
 offered as an import of the same file, and `unreadable` (not a SQLite database
 at all) is reported as such. Nothing is written until the user has agreed to
@@ -141,6 +146,38 @@ This is what makes `dev:electron` usable standalone — a developer doesn't
 need `dev:renderer` running in a second terminal first; the script starts
 one for them and cleans up after itself, but leaves an already-running dev
 server alone.
+
+## Tests
+
+Two levels, and the split matters:
+
+| Where | Runner | Covers |
+|---|---|---|
+| `test/electron/` | Vitest | `sqlite-store.ts`, `db-import.ts`, `db-browse.ts`, `import-runner.ts` driven directly. Pure Node — no Electron runtime. |
+| `test/e2e/desktop/` | Playwright, `npm run test:e2e:desktop` | The app itself: `_electron.launch` starts the real main process and `file://` renderer. |
+
+The e2e suite exists because a whole class of behaviour has no other test.
+`db-files.ts` imports `electron`, so Vitest cannot reach Open, Save As or the
+store singleton at all. Nor can a unit test show that the RENDERER picked the IPC
+store — `app-context.ts` decides that from `window.easydb.store`, and a broken
+preload would leave a working app backed by the wrong storage.
+
+Three things make it work:
+
+- **`--user-data-dir` into a temp folder.** Otherwise a test run opens the
+  developer's own `easydbaccess.db` and rewrites their `db-location.json`.
+- **A `.edb` path as the last argument.** `workspaceFromArgv` beats both the
+  remembered path and the auto-load setting, so a test can name the exact file it
+  is about to inspect with plain SQL.
+- **`EASYDB_E2E=1`.** `main.ts` then loads the renderer with `?test=1`, which
+  publishes the live `AppContext` on `window.__easydb` — the same hook the browser
+  suite drives. It must be on the first load: a second navigation would boot the
+  app twice, and the first boot has already written a workspace into the file.
+
+Native dialogs cannot be clicked from Playwright, so the specs replace
+`dialog.showSaveDialog` / `showOpenDialog` in the main process
+(`app.evaluate`). Everything under them — checkpoint, close, copy, switch —
+still runs as it does for a real user.
 
 ## Packaging
 

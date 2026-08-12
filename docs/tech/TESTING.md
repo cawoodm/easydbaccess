@@ -11,6 +11,7 @@ components in jsdom.
 npm run test         # Vitest — test/renderer/ + test/server/ (694 tests)
 npm run test:e2e     # Playwright — the test/e2e/ suite (79 specs)
 npm run test:e2e:ui  # same, with Playwright's interactive UI
+npm run test:e2e:desktop  # Playwright — the real Electron app (test/e2e/desktop/)
 ```
 
 ## Where the tests live
@@ -23,6 +24,7 @@ test/
 ├── renderer/   Vitest units, mirroring packages/renderer/src/
 ├── server/     Vitest HTTP suites for the Hono app
 ├── e2e/        Playwright specs, helpers and fixtures
+│   └── desktop/  Playwright specs that launch Electron itself
 └── tsconfig.json
 ```
 
@@ -59,7 +61,11 @@ without spinning up a browser. Examples scattered through this codebase:
 | `plugins/datasette-client.test.ts`, `plugins/datasette-collection.test.ts` | Datasette URL parsing, paging, column inference |
 | `plugins/read-url.test.ts` | CORS-friendly URL rewriting |
 | `db/routed-data-store.test.ts` | The row-source routing seam (see `STORAGE.md`) — verifies it's a strict no-op for tables with no `source` |
-| `db/data-store-bridge.test.ts` | The Electron-side `DataStore`: that it satisfies the same `DataCollection<T>` contract over a fake IPC bridge, injects `tableId` on `rows(id)` writes, and re-runs subscriptions on a `store:changed` broadcast |
+| `db/data-store-bridge.test.ts` | The bridge-backed `DataStore` (Electron IPC and the `.edb` worker share it): that it satisfies the same `DataCollection<T>` contract over a fake bridge, injects `tableId` on `rows(id)` writes, and re-runs subscriptions on a `store:changed` broadcast |
+| `db/wasm-driver.test.ts` | The SAME `EdbStore` running on `@sqlite.org/sqlite-wasm` instead of `node:sqlite`, and that its export starts `SQLite format 3`. What makes the `SqlDriver` seam real rather than notional |
+| `db/edb-convert.test.ts` | Copying a workspace into a `.edb`: what travels, that setting keys are rebuilt for the target, and that a source-backed table's definition goes but its rows do not |
+| `db/edb-dirty.test.ts` | The autosave policy with an injected clock — one save per batch, the debounce, and no save when clean |
+| `chrome/icon-names.test.ts` | Every `icon: '…'` literal in `plugins/` and `chrome/` exists in the Material Icons font. A name the font lacks renders as the WORD, which shipped twice |
 | `plugins/electron-db.test.ts` | The Open / Import decision tree with a fake `window.easydb.db` bridge — a `foreign` file offers Import instead of opening, an `unreadable` one is reported, and collisions map to Overwrite / Rename / Skip. The OS file dialog can't be scripted, so the flows are exported for exactly this |
 
 None of these import Lit, Dexie, or the panel shell. When you're about to add logic
@@ -91,9 +97,9 @@ reason the server's does: these suites open real SQLite databases through
 Node** — `sqlite-store.ts`, `db-import.ts` and `sql-mapping.ts` never import
 `electron`, so vitest exercises them directly with no BrowserWindow, no
 `app`, and no display. The pieces that genuinely need Electron (the OS file
-dialogs in `db-files.ts`) are the pieces left to manual testing; the decision
-logic in front of them is tested from the renderer side instead
-(`plugins/electron-db.test.ts` above).
+dialogs in `db-files.ts`) are covered by `test/e2e/desktop/` instead, which
+launches the app for real; the decision logic in front of them is also tested
+from the renderer side (`plugins/electron-db.test.ts` above).
 
 Each test gets a **real temp file** via `mkdtempSync`, deliberately not
 `:memory:` — the behaviour under test includes closing a store and reopening
@@ -109,6 +115,20 @@ That last suite covers `packages/shared/src/sql-mapping.ts`, which the
 **server's** `storage/sqlite-store.ts` imports too — so the one convention
 that keeps a `.db` written by either side identical has one set of tests.
 
+## `test/shared/` — the `.edb` store, on real SQLite
+
+| Suite | What it covers |
+|---|---|
+| `edb-store.test.ts` | The v2 store driven through `SqlDriver` by **`node:sqlite`**: the format stamp, the physical table name never moving, additive-only column reconciliation, `_extra` round-tripping, and `queryRows` |
+| `edb-file.test.ts` | A saved `.edb` on disk, read back with **plain SQL and no store involved** — the proof that the file is a genuine database and not a private format |
+| `node-sqlite-driver.ts` | Not a suite: `node:sqlite` as a `SqlDriver`, loaded through `createRequire` because Vite's static analyser does not know the builtin |
+
+The point of these running on `node:sqlite` is that the store under test is the
+same code the browser worker runs on sqlite-wasm — no WASM to boot, no DOM to
+fake. `test/renderer/db/wasm-driver.test.ts` runs the other binding, which is
+what keeps the seam honest. If a method here ever needs more than a cast, the
+abstraction is leaking.
+
 ## End-to-end tests (Playwright) — the real app, driven two ways
 
 `test/e2e/` holds 79 numbered specs (`01-dialogs` through `71-projection-join-writeback`),
@@ -117,6 +137,37 @@ the window manager, import/export, auto-sync, SQL export, the backend
 `/fetch` proxy, the plugin registry, mobile UI, loading bars, Datasette
 import/connect, views, DB schema upgrades, and more — roughly one spec file
 per feature area, growing as features are added.
+
+### The desktop suite
+
+`test/e2e/desktop/` is Playwright too, but it launches **Electron** rather than
+a page: `_electron.launch` starts the real main process, which loads the built
+renderer over `file://`. It has its own config,
+`playwright.electron.config.ts` (`npm run test:e2e:desktop`), because the
+browser config boots two web servers this suite has no use for; and
+`playwright.config.ts` sets `testIgnore: ['desktop/**']` so the browser project
+leaves it alone. The specs sit under `test/e2e/` all the same, so the lint and
+typecheck exclusions for Playwright specs cover them, and `helpers.ts` is one
+import away.
+
+| Spec | Covers |
+|---|---|
+| `01-boot` | The window opens on the file named on the command line, and the renderer picked the IPC store — not Dexie |
+| `02-workspace-file` | What lands on disk: a real SQL table per user table, the v2 stamp, `_extra` overflow. Asserted with a plain `node:sqlite` connection and no app code |
+| `03-restart` | Quit and reopen: tables, columns and rows come back, and a column added later leaves the existing rows alone |
+| `04-save-as` | The copy is complete and the store then writes to it. Cancel changes nothing |
+| `05-import` | A foreign `.db` previewed and copied in, a name collision reported and renamed, the picker route |
+
+`globalSetup` rebuilds `@easydb/shared`, the main process and the renderer
+bundle before anything runs — there is no dev server watching sources here, and
+a pass against a stale `dist/` says nothing about the current code. Set
+`EASYDB_E2E_SKIP_BUILD=1` while iterating on the specs themselves.
+
+Three arguments keep a run isolated and inspectable, and
+`docs/tech/ELECTRON.md` § Tests explains each: `--user-data-dir` into a temp
+folder, an `.edb` path that `workspaceFromArgv` picks up, and `EASYDB_E2E=1`
+for the `?test=1` hook. Native dialogs cannot be clicked, so the specs replace
+`dialog.showSaveDialog` / `showOpenDialog` in the main process.
 
 **Isolation.** `playwright.config.ts` runs a single Chromium project,
 `workers: 1`, `fullyParallel: false` — deliberately serial, not parallelized
@@ -181,10 +232,11 @@ rendering section). A test that wants to type into a cell needs to pass
   `packages/server/test/*.e2e.test.ts` — boot the real app, hit it over
   real HTTP, don't mock `StoreAdapter`.
 - **Changed the desktop store, `.db` import, or the SQL mapping?** Add it to
-  `packages/electron/src/*.test.ts` against a `mkdtempSync` temp file — no
-  Electron runtime needed, because none of those modules import `electron`.
-  Keep it that way: put anything that needs `dialog`/`app`/`BrowserWindow` in
-  `db-files.ts`, and test the decision in front of it from the renderer side.
+  `test/electron/*.test.ts` against a `mkdtempSync` temp file — no Electron
+  runtime needed, because none of those modules import `electron`. Keep it that
+  way: put anything that needs `dialog`/`app`/`BrowserWindow` in `db-files.ts`.
+- **Changed a desktop flow that needs the app running** — Open, Save As,
+  Import, or which store the renderer picks? That is `test/e2e/desktop/`.
 - **Added or changed user-visible behavior** (a new button, a dialog flow,
   a rendering change)? That's `test/e2e/`, in whichever numbered spec already
   covers the feature area, or a new one if it doesn't fit an existing file.

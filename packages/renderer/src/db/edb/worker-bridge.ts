@@ -1,4 +1,4 @@
-import type { RowPage, RowQuery } from '@easydb/shared';
+import type { DistinctPage, DistinctQuery, RowPage, RowQuery } from '@easydb/shared';
 import type { EasydbStoreBridge } from '../data-store-bridge.js';
 import type { EdbCall, EdbRequest, EdbResponse } from './protocol.js';
 
@@ -91,6 +91,9 @@ export function createEdbBridge(): EdbBridge {
     count: (coll) => call<number>({ op: 'count', coll }),
     countRows: (tableId) => call<number>({ op: 'countRows', tableId }),
     queryRows: (tableId, q: RowQuery) => call<RowPage>({ op: 'queryRows', tableId, query: q }),
+    // Feature-detected by the caller, so declaring it here is what turns a
+    // funnel's value list from a client-side scan into a SQL GROUP BY.
+    distinctValues: (tableId, q: DistinctQuery) => call<DistinctPage>({ op: 'distinctValues', tableId, query: q }),
     dbPath: () => call<string>({ op: 'dbName' }),
     onWarning(cb) {
       warners.add(cb);
