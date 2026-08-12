@@ -46,10 +46,13 @@ async function seed(page: import('@playwright/test').Page, threshold: number) {
 test('the browser holds one page of a big table, not the table', async ({ page }) => {
   const id = await seed(page, 250);
 
-  await expect.poll(async () => (await gridState(page, id))?.windowed).toBe(true);
+  // The real total arrives AFTER the rows: a windowed read never waits on a count,
+  // because counting a range in IndexedDB costs seconds on a big table. So this polls
+  // for the settled state rather than reading it the moment rows appear.
+  await expect.poll(async () => (await gridState(page, id))?.matching, { timeout: 10_000 }).toBe(ROWS);
   const state = await gridState(page, id);
+  expect(state?.windowed).toBe(true);
   expect(state?.held).toBe(500); // one page
-  expect(state?.matching).toBe(ROWS); // and it knows the real total
   expect(state?.offset).toBe(0);
 });
 

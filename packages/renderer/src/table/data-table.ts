@@ -38,6 +38,16 @@ const LOAD_BAR_DELAY_MS = 200;
 const RELOAD_DEBOUNCE_MS = 250;
 
 /**
+ * How long a total already on screen is left alone before it is counted again.
+ *
+ * Counting is the expensive part of reading a big table — 14 seconds on 609,283 rows
+ * in IndexedDB, whichever API asks — and every write is a reason to count again. A
+ * titlebar figure a few seconds behind the data costs nothing, so a burst of writes
+ * pays for one count instead of one per write.
+ */
+const COUNT_REFRESH_MS = 5000;
+
+/**
  * Narrowest a column may be dragged. Small enough to park a column you don't
  * want to read as a sliver, while still leaving a grab target for the resize
  * gutter (which is 6px wide) so the column can be dragged back open.
@@ -447,8 +457,8 @@ export class DataTable extends LitElement {
    * what was fetched and `matchingTotal` is what the filter matched, so once the
    * grid stopped fetching everything, both shrink the moment a filter is typed and
    * the title collapsed from "2/4" to "2" — the count vanishing exactly when it
-   * became interesting. Counting is cheap (`COUNT(*)`, or a Dexie index count);
-   * fetching to measure is what was not.
+   * became interesting. Counting is far cheaper than fetching to measure, but it is
+   * not free: see `loadRows` on how seldom it is asked for.
    */
   @state() private tableTotal = 0;
   /**
@@ -612,6 +622,10 @@ export class DataTable extends LitElement {
       window.clearTimeout(this.reloadTimer);
       this.reloadTimer = null;
     }
+    if (this.countTimer != null) {
+      window.clearTimeout(this.countTimer);
+      this.countTimer = null;
+    }
     // A live column resize (see onResizeStart) has its own window-level
     // pointermove/pointerup/pointercancel listeners, but those only fire on
     // an actual pointer event — if the grid unmounts mid-drag (table
@@ -654,8 +668,14 @@ export class DataTable extends LitElement {
   private onTableLoading = (e: Event) => {
     const d = (e as CustomEvent<TableLoadingDetail>).detail;
     if (d.tableId !== this.tableId) return;
+    const was = this.externalLoading;
     this.externalLoading = d.loading;
     this.externalProgress = d.loading && typeof d.progress === 'number' ? d.progress : null;
+    // The importer has finished. `countSoon` stood aside for the whole import rather
+    // than count between its chunks, so nothing has measured the table it left
+    // behind — and the last chunk's change signal arrived while it was still
+    // standing aside. One read now, which is what asks for the count.
+    if (was && !d.loading) void this.loadRows();
   };
 
   private onSettingsChanged = (e: Event) => {
@@ -812,30 +832,61 @@ export class DataTable extends LitElement {
     // resolve before the delay so the bar never flashes.
     const barTimer = window.setTimeout(() => (this.loading = true), LOAD_BAR_DELAY_MS);
     try {
-      // The count comes FIRST, because it is what decides whether this table is
-      // read a page at a time — asking afterwards would mean paying for one
-      // whole-table read before ever windowing it, which is the read this exists
-      // to avoid. Counting is cheap (`COUNT(*)`, or a Dexie index count);
-      // fetching to measure is what was not.
-      if (coll.count) {
-        const n = await coll.count();
-        if (gen !== this.loadGeneration) return;
-        this.tableTotal = n;
-      }
-      const windowed = this.shouldWindow(coll);
-      const req = this.rowRequest(windowed);
+      // NOTHING blocks the rows on a count. Counting a table is not the cheap
+      // operation the SQL version of this contract suggests: in IndexedDB it walks
+      // the whole `tableId` range. Measured on 609,283 rows: 14.0 s to count,
+      // against 0.3 s to read the 500-row page. A raw `IDBIndex.count(range)` is no
+      // faster, so there is no better path to find — and the grid used to pay that
+      // 14 s TWICE before drawing a row.
+      //
+      // So a windowed read never asks for one. `page.total` comes back as `-1`, the
+      // rows go on screen, and the size arrives afterwards from `countSoon`. Two
+      // consequences to keep straight below: the total may be `-1`, and a table
+      // whose size is not known yet is read as a page on the guess that it is big.
+      const sizeKnown = this.tableTotal > 0 || !coll.count;
+      const windowed = sizeKnown ? this.shouldWindow(coll) : this.canWindow(coll);
+      const req = this.rowRequest(windowed, windowed);
       const page = await readRows(coll, req, ROW_FETCH_CAP);
       // A slower earlier load must not land on top of a newer one — the same
       // generation guard `subscribeToCollection` uses for the same reason.
       if (gen !== this.loadGeneration) return;
       this.rows = page.rows;
-      this.matchingTotal = page.total;
       this.truncated = page.truncated === true;
-      this.windowed = windowed;
-      this.windowOffset = windowed ? (req.offset ?? 0) : 0;
-      // No cheap count: an unfiltered read already told us, and a filtered one
-      // can only report what it matched.
-      if (!coll.count) this.tableTotal = page.total;
+      // A page that came back SHORT reached the end of the data, so `reach` is the
+      // exact number of matching rows and no background count is needed even though
+      // none was asked for. A FULL page is only a floor.
+      const from = req.offset ?? 0;
+      const reach = from + page.rows.length;
+      const short = req.limit != null && page.rows.length < req.limit;
+      const counted = page.total >= 0;
+      // A short FIRST page means the whole answer is in hand, so this grid is not
+      // reading a window at all — a small table read speculatively as a page must
+      // not go on claiming its funnel saw only part of the values. A short page
+      // further in is just the last one.
+      this.windowed = windowed && !(short && from === 0);
+      this.windowOffset = this.windowed ? from : 0;
+      // An unfiltered, unsearched read measured the WHOLE table, so its total is the
+      // one `coll.count` would have returned. A filtered read can only report what
+      // it matched, so the last known total stands: it goes stale only while a filter
+      // is on and rows are being written, and the next unfiltered read repairs it.
+      const whole = this.countsWholeTable(req);
+      if (whole) {
+        if (counted) this.tableTotal = page.total;
+        else if (short) this.tableTotal = reach;
+      }
+      // What the scrollbar spans. `reach` on its own would be wrong the moment the
+      // user scrolls — an uncounted page at offset 5,000 reaches 5,500, and a
+      // scrollbar that shrinks under the hand holding it is worse than one that is
+      // briefly short. So a size already measured wins.
+      this.matchingTotal = counted ? page.total : whole ? Math.max(this.tableTotal, reach) : reach;
+      // The window was a GUESS whenever the size was unknown. Settle it from the
+      // total this read brought back, or from a count that runs while these rows are
+      // already on screen. A whole answer in hand needs no settling whatever the
+      // threshold says — and asking for one would loop, since the re-read would come
+      // back short again.
+      const partialView = !(short && from === 0);
+      if (!counted && !short) this.countSoon(coll);
+      else if (!sizeKnown && partialView) this.settleWindow(coll);
     } catch (err) {
       if (gen !== this.loadGeneration) return;
       // A remote-backed table (e.g. a live Datasette source) can fail to load
@@ -858,10 +909,105 @@ export class DataTable extends LitElement {
   }
 
   /**
+   * Ask for the table's size, at some point, without anything waiting for it.
+   *
+   * A windowed read skips the count, which leaves two things provisional: the
+   * scrollbar spans only the page in hand, and the decision to window was a guess.
+   * The count settles both. It costs seconds on a big table, so when to run it
+   * matters as much as running it — see the three cases below.
+   */
+  private countSoon(coll: DataCollection<Row>): void {
+    if (!coll.count || this.countInFlight) return;
+    // While an importer is filling this table, the titlebar shows ITS progress
+    // (`importSuffix`) and the rows keep arriving. Counting between the chunks would
+    // cost more than the import: each chunk commit is a change signal, and each
+    // count is seconds on a table this size.
+    if (this.externalLoading) return;
+    // Nothing is known about the size, so nothing waits: the window shape and the
+    // scrollbar both depend on this answer.
+    if (this.tableTotal === 0) {
+      void this.countNow(coll);
+      return;
+    }
+    if (this.countTimer != null) return;
+    // A total already on screen only has to keep up, not be exact to the write. One
+    // count per burst, trailing — so a hundred writes cost one.
+    const wait = Math.max(0, COUNT_REFRESH_MS - (Date.now() - this.countedAt));
+    this.countTimer = window.setTimeout(() => {
+      this.countTimer = null;
+      void this.countNow(coll);
+    }, wait);
+  }
+
+  /**
+   * Count the table now. Never throws: a grid that cannot count still draws rows.
+   *
+   * When the count shows the window was the wrong shape — a table of 3,000 rows read
+   * as a page because the threshold is 50,000 — it re-reads the table the way it
+   * should have been read in the first place.
+   */
+  private async countNow(coll: DataCollection<Row>): Promise<void> {
+    if (!coll.count || this.countInFlight) return;
+    this.countInFlight = true;
+    try {
+      const n = await coll.count();
+      // The grid may have re-bound to another table while this was in flight.
+      if (coll !== this.rowColl) return;
+      this.tableTotal = n;
+      if (this.settleWindow(coll)) return;
+      // The scrollbar's extent, now that the whole table has been measured. Only
+      // when nothing narrows the view — with a filter on, what matched is a
+      // different number and the read that ran already reported it.
+      if (this.countsWholeTable(this.rowRequest())) this.matchingTotal = n;
+    } catch {
+      /* a grid that cannot count its table still shows the rows it has */
+    } finally {
+      this.countedAt = Date.now();
+      this.countInFlight = false;
+    }
+  }
+
+  private countInFlight = false;
+  /** When the last count finished, so a burst of writes costs one count. */
+  private countedAt = 0;
+  private countTimer: number | null = null;
+
+  /**
+   * Re-read the table if the speculative window turns out to be the wrong shape.
+   *
+   * A grid that has not measured its table reads one page anyway, which is right for
+   * a big table and wrong for a table of 3,000 rows that should simply be held whole.
+   * Once the size IS known the two can be compared, and only a mismatch costs
+   * anything — one re-read, of a table small enough that the read is cheap by
+   * definition.
+   *
+   * Returns true when a re-read was started, so the caller stops touching state the
+   * new load is about to replace.
+   */
+  private settleWindow(coll: DataCollection<Row>): boolean {
+    if (this.windowed === this.shouldWindow(coll)) return false;
+    void this.loadRows();
+    return true;
+  }
+
+  /**
+   * Does `req` narrow nothing, so that its `total` is the table's own row count?
+   *
+   * A sort and a slice leave the total alone — only a filter or a search change
+   * what is counted. Deliberately pessimistic: a filter on a field no column has
+   * is dropped by the reader, and this still calls the request filtered, so the
+   * worst case is one count kept a little longer than needed.
+   */
+  private countsWholeTable(req: RowRequest): boolean {
+    if ((req.search ?? '').trim() !== '') return false;
+    return Object.values(req.filters ?? {}).every((q) => !q || q.trim() === '');
+  }
+
+  /**
    * The current view, as a request the store can answer. `windowed` adds the
    * slice — the page the user is looking at rather than every matching row.
    */
-  private rowRequest(windowed = false): RowRequest {
+  private rowRequest(windowed = false, skipCount = false): RowRequest {
     const search = [this.localQuery.trim(), this.globalQuery.trim()].filter(Boolean).join(' ');
     return {
       columns: this.columns,
@@ -869,21 +1015,32 @@ export class DataTable extends LitElement {
       ...(search ? { search } : {}),
       ...(this.sortSpecs.length > 0 ? { sort: this.sortSpecs } : {}),
       ...(windowed ? this.windowRange() : {}),
+      ...(skipCount ? { countTotal: false } : {}),
     };
   }
 
   /**
-   * Should this grid read a page at a time?
+   * CAN this grid read a page at a time — is the machinery there and switched on?
    *
-   * Three conditions, and all three are deliberate. The store must be able to
-   * answer a `query` — without that, a window costs the same whole-table read and
-   * buys only a smaller array (that is phase 2, `query` for Dexie). The setting
-   * must be on. And the table must actually be big: under the threshold nothing
-   * changes at all, which is what keeps every table that works well today on the
-   * code path it already has.
+   * The store must be able to answer a `query`: without that, a window costs the
+   * same whole-table read and buys only a smaller array. And the setting must be on.
+   * Both are known without touching the data, which is what lets an unmeasured
+   * table be read as a page before anything has counted it.
+   */
+  private canWindow(coll: DataCollection<Row>): boolean {
+    return !!coll.query && this.windowRowsFrom > 0;
+  }
+
+  /**
+   * SHOULD this grid read a page at a time — is the table big enough to be worth it?
+   *
+   * Under the threshold nothing changes at all, which is what keeps every table that
+   * works well today on the code path it already has. Needs a measured
+   * `tableTotal`, so a grid that has not counted yet asks {@link canWindow} instead
+   * and comes back to this once `countInBackground` lands.
    */
   private shouldWindow(coll: DataCollection<Row>): boolean {
-    return !!coll.query && this.windowRowsFrom > 0 && this.tableTotal >= this.windowRowsFrom;
+    return this.canWindow(coll) && this.tableTotal >= this.windowRowsFrom;
   }
 
   /**

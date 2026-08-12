@@ -13,6 +13,7 @@
 // plain text everywhere can switch the guessing off in the Plugin Manager.
 
 import type { ColumnSpec, ColumnType, HostApi, PluginModule } from '@easydb/shared';
+import { readRows } from '../db/row-reader.js';
 import { looksLikeImage } from '../util/image-source.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
@@ -33,7 +34,11 @@ export const meta: NonNullable<PluginModule['meta']> = {
  */
 const LONG_TEXT_CHARS = 120;
 
-/** How many rows to look at. Enough to be sure, cheap on a big import. */
+/**
+ * How many rows to look at. Enough to be sure, and asked for as a page — reading
+ * the table and keeping the first 50 is what made a 609,283-row import pay for a
+ * whole extra read of itself the moment it finished.
+ */
 const SAMPLE_ROWS = 50;
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?|#|$)/i;
@@ -130,7 +135,7 @@ export function init(api: HostApi): void {
         });
         return null;
       }
-      const rows = (await hostApi.store.rows(tableId).find()).slice(0, SAMPLE_ROWS);
+      const { rows } = await readRows(hostApi.store.rows(tableId), { columns, limit: SAMPLE_ROWS }, SAMPLE_ROWS);
       if (rows.length === 0) {
         hostApi.ui.dialogs.toast('This table has no rows to learn from yet.', {
           kind: 'info',
@@ -167,7 +172,7 @@ async function applyToTable(api: HostApi, tableId: string): Promise<void> {
     // Nothing to learn if every column already has a renderer — skip the read.
     if (table.columns.every((c) => c.renderer)) return;
 
-    const rows = (await api.store.rows(tableId).find()).slice(0, SAMPLE_ROWS);
+    const { rows } = await readRows(api.store.rows(tableId), { columns: table.columns, limit: SAMPLE_ROWS }, SAMPLE_ROWS);
     if (rows.length === 0) return;
 
     const columns = withInferredRenderers(

@@ -61,6 +61,22 @@ export interface RowQuery {
   offset?: number | undefined;
   /** Maximum rows to return. Omitted means every matching row — say a number. */
   limit?: number | undefined;
+  /**
+   * Count the matching rows as well as returning them. Default true.
+   *
+   * A HINT, not an instruction: a store where counting is free (`SELECT COUNT(*)`)
+   * should ignore it and count anyway. It exists for the store where counting is
+   * NOT free. IndexedDB has to walk the index to count a range: measured **14.0 s**
+   * on 609,283 rows, against **0.3 s** to read the 500-row page it accompanies. A
+   * raw `IDBIndex.count(range)` is no faster, so there is no better path to find.
+   *
+   * A grid drawing thirty rows needs the rows now and the total shortly. Waiting for
+   * the count cost that 14 s twice over — once to choose the read's shape, once
+   * inside the paged read to fill in `total`.
+   *
+   * A store that honors it sets {@link QueryPage.total} to `-1`.
+   */
+  countTotal?: boolean | undefined;
 }
 
 /**
@@ -73,9 +89,15 @@ export interface QueryPage<T> {
    * Rows matching the filter and search, IGNORING offset and limit.
    *
    * Needed separately because the caller has to show a total it did not fetch —
-   * a titlebar count, a scrollbar's extent. Counting is far cheaper than
-   * returning: `SELECT COUNT(*)` on a 609k-row table is milliseconds against
-   * the ~1.5s it took to hand over 20,000 rows.
+   * a titlebar count, a scrollbar's extent. Counting is cheaper than returning, but
+   * how much cheaper depends entirely on the store: `SELECT COUNT(*)` on a 609k-row
+   * table is milliseconds against the ~1.5s it took to hand over 20,000 rows, while
+   * the same count in IndexedDB is 14 seconds. Which is why
+   * {@link RowQuery.countTotal} exists.
+   *
+   * `-1` means NOT COUNTED — the caller passed {@link RowQuery.countTotal} `false`
+   * and this store honored it. The same negative sentinel `countSuffix` and the
+   * view-window manager already use for "no count yet". Never treat it as a number.
    */
   total: number;
   /**

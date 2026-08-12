@@ -30,7 +30,9 @@ Preferences for how every grid behaves:
   whole. It opens in a moment rather than in a second and a half. Sorting,
   filtering and searching still cover every row, because the store does that work.
   Set it to 0 to always read the whole table. This works in the browser and in the
-  desktop app.
+  desktop app. The row count in the window title can lag the rows by a few seconds
+  on a very big table — counting it takes longer than showing it, so the rows come
+  first.
 
 They apply at once to the tables you already have open.
 

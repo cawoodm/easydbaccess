@@ -1,4 +1,4 @@
-import { liveQuery, type Table as DexieTable } from 'dexie';
+import Dexie, { liveQuery, type ObservabilitySet, type Table as DexieTable } from 'dexie';
 import type { DataCollection, DataStore, DistinctPage, DistinctQuery, PluginRecord, Row, RowPage, RowQuery, Setting, Table, Unsubscribe, ViewInstance, ViewTemplate, Workspace } from '@easydb/shared';
 import { isPlainSlice } from '@easydb/shared';
 import { settingId, type EasyDb } from './dexie-db.js';
@@ -60,6 +60,35 @@ function wrap<T extends { id: string } | { url: string } | { key: string }>(coll
       return () => sub.unsubscribe();
     },
   };
+}
+
+/**
+ * Call `fn` whenever anything is written to `coll`, without reading a row.
+ *
+ * `storagemutated` is the event `liveQuery` itself listens to, so this is the same
+ * signal with the read left out. That read is the whole point: a caller that runs
+ * its own narrow query used `subscribe`, and `subscribe` has to materialize the
+ * collection to have an argument to pass — 609,283 rows to be told that one
+ * changed.
+ *
+ * The set names each mutated part as `idb://<db>/<table>/<index>`, so the prefix
+ * test scopes this to one Dexie table. It is NOT scoped to one `tableId`: the
+ * answer to the signal is to re-run the caller's own query, which is right however
+ * coarse the signal is, and an index range would have to be matched against
+ * Dexie's own range trees to do better.
+ */
+function watchDexieTable<T>(coll: DexieTable<T, string>, fn: () => void): Unsubscribe {
+  const prefix = `idb://${coll.db.name}/${coll.name}/`;
+  const listener = (parts: ObservabilitySet) => {
+    for (const part of Object.keys(parts)) {
+      if (part.startsWith(prefix)) {
+        fn();
+        return;
+      }
+    }
+  };
+  Dexie.on('storagemutated', listener);
+  return () => Dexie.on.storagemutated.unsubscribe(listener);
 }
 
 /**
@@ -152,8 +181,13 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string, tables: DexieT
           // make Dexie walk the index with a cursor, one step per record skipped —
           // the price of no index on position, and cheap next to materialising the
           // whole table.
+          //
+          // The count is the OTHER walk of that index, and this store is the reason
+          // `countTotal` exists: 730 ms per 100,000 rows, which on a 609,283-row
+          // table doubled the time to first paint for a number no pixel needed yet.
+          // Honored here, so a caller can take the rows now and count afterwards.
           const from = Math.max(0, q.offset ?? 0);
-          const total = await base().count();
+          const total = q.countTotal === false ? -1 : await base().count();
           const c = from > 0 ? base().offset(from).limit(q.limit) : base().limit(q.limit);
           return { rows: projectFields(await c.toArray(), q.fields), total };
         }
@@ -221,13 +255,24 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string, tables: DexieT
       });
       return () => sub.unsubscribe();
     },
-    // No `watch` here on purpose. `liveQuery` only pushes when its result
-    // CHANGES, so a cheap key (a count, or the last row's stamp) would stay
-    // silent on the commonest write of all — editing a cell in place — and the
-    // grid would not refresh. Reading the rows is the only reliable Dexie
-    // signal, which is what `subscribe` already does, and in-process IndexedDB
-    // reads are not the cost that made this worth avoiding: the IPC store's
-    // structured-clone of every row is (see `data-store-ipc.ts`'s `watch`).
+    /**
+     * The bare change signal, so a caller running its own query does not pay for
+     * every row to learn that one of them moved.
+     *
+     * This once read "no `watch` here on purpose", on the grounds that a cheap
+     * `liveQuery` key would stay silent when a cell is edited in place. That is
+     * true of a key, and beside the point: `storagemutated` fires on the write
+     * itself, before any query is re-run, so an in-place edit is signalled like
+     * any other mutation. Reading the rows was never the only reliable signal, and
+     * in a table of 609,283 rows it cost seconds per write.
+     *
+     * Fires once immediately, matching `subscribe` and the IPC store's `watch`, so
+     * a caller has one code path for "load now" and "load again".
+     */
+    watch(fn): Unsubscribe {
+      fn();
+      return watchDexieTable(coll, fn);
+    },
   };
 }
 

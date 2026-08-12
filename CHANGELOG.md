@@ -8,6 +8,7 @@
 
 ### Bugs
 
+- 🪲 A table of 600,000 rows took most of a minute to appear, and was read whole again on every write (v0.0.351)
 - 🪲 A filter on a table over 20,000 rows only searched the first 20,000, so a match further in was missing (v0.0.350)
 
 ## 11 Aug 2026
