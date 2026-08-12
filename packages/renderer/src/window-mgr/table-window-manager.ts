@@ -540,9 +540,26 @@ function cssSafe(s: string): string {
  * app".
  */
 export function tableIdAtNode(node: EventTarget | null): string | null {
+  return tablePanelEntryAtNode(node)?.[0] ?? null;
+}
+
+/**
+ * The same lookup, returning the window ELEMENT — what a drag needs in order to
+ * highlight the window a drop would land in.
+ *
+ * Shares one loop with `tableIdAtNode` on purpose: the highlight has to name the
+ * same window the drop will use, and two lookups could disagree about a panel that
+ * is opening or closing. A highlight that lies about where a file will land is worse
+ * than no highlight.
+ */
+export function tablePanelAtNode(node: EventTarget | null): HTMLElement | null {
+  return tablePanelEntryAtNode(node)?.[1] ?? null;
+}
+
+function tablePanelEntryAtNode(node: EventTarget | null): [string, PanelShellEl] | null {
   if (!(node instanceof Node)) return null;
-  for (const [tableId, shell] of panels) {
-    if (shell.contains(node)) return tableId;
+  for (const entry of panels) {
+    if (entry[1].contains(node)) return entry;
   }
   return null;
 }

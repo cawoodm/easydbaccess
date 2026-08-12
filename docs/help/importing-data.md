@@ -19,6 +19,22 @@ whether to **append**, **overwrite**, or create a **new table**. A dropped JSON
 file just creates a new table, adding `-2` to the name if it is taken; use the
 Import dialog's **Import into** if you want it to land in an existing table.
 
+### Dropping on a table, or on the workspace
+
+The two are different, and the drag shows you which one you are about to do. Drag a
+file over the app and watch:
+
+- Over the **workspace** — the whole canvas is outlined in blue and says "Drop CSV or
+  JSON here". The file arrives as a new table.
+- Over a **table window** — that one window is outlined in amber and says "Load this
+  table". The file goes into that table, and you are asked whether to re-create,
+  re-load, append, or make a new table after all.
+
+If the file holds several tables, the one with the same name as the window is used.
+If none matches, you are asked which of the file's tables should be loaded. Then, if
+its column names differ from the table's, the column mapper opens so you can say
+where each one goes.
+
 ## Defining columns up front
 
 Instead of relying on guessed types, you can start a CSV with a header line

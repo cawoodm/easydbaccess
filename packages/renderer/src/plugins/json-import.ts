@@ -86,17 +86,44 @@ async function dropOntoTable(api: HostApi, event: DragEvent, file: File): Promis
   }
   const incoming = parsedToTables(parsed, stripJsonExt(file.name));
   if (incoming.length === 0) return false;
-  if (incoming.length > 1) {
-    // Several tables cannot land in one table. The canvas drop restores them all.
-    api.ui.dialogs.toast(`"${file.name}" holds ${incoming.length} tables — drop it outside a window to import them.`, { kind: 'warning', title: 'Import JSON' });
-    return true;
-  }
+
+  const source = await pickSourceTable(api, incoming, table.name);
+  if (!source) return true; // the picker was dismissed ⇒ cancelled, and it was ours
 
   const mode = await askImportOntoMode(api, { fileName: file.name, tableName: table.name, title: 'Import JSON' });
   if (!mode) return true; // dismissed ⇒ the drop is cancelled, and it was ours
   if (mode === 'new') return false;
-  await importIntoTable(api, table, incoming[0]!, mode);
+  await importIntoTable(api, table, source, mode);
   return true;
+}
+
+/**
+ * Which table in the FILE is being loaded into the window it was dropped on.
+ *
+ * A drop on a window says where the data is going and not what part of the file it
+ * is, so a file holding several tables leaves one question open. Answered in the
+ * order a person would: a table of the same name is obviously the one meant, and only
+ * a file with no such table has to ask.
+ *
+ * This used to refuse — "holds 5 tables, drop it outside a window" — which told the
+ * user their aim was wrong when it was the only unambiguous part of what they did.
+ *
+ * Returns null only when the user dismissed the picker. A single-table file never
+ * asks: there is nothing to choose, whatever it is called.
+ */
+async function pickSourceTable(api: HostApi, incoming: NormalizedTable[], targetName: string): Promise<NormalizedTable | null> {
+  if (incoming.length === 1) return incoming[0]!;
+  const target = targetName.trim().toLowerCase();
+  const byName = incoming.find((t) => t.name.trim().toLowerCase() === target);
+  if (byName) return byName;
+
+  // Labelled with the row count, so two tables of the same name in one file are
+  // still tellable apart — a choice dialog reports back the label it was given.
+  const labels = incoming.map((t) => `${t.name} — ${t.rows.length.toLocaleString()} row${t.rows.length === 1 ? '' : 's'}`);
+  const pick = await api.ui.dialogs.choice(`"${targetName}" is the destination. Which table from the file should be loaded into it?`, labels, 'Import JSON');
+  if (!pick) return null;
+  const at = labels.indexOf(pick);
+  return at >= 0 ? incoming[at]! : null;
 }
 
 /**

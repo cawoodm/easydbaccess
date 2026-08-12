@@ -156,3 +156,35 @@
   width: 24px;
   height: 24px;
 }
+
+/* A file is being dragged over THIS window, so dropping loads this table rather
+ * than making a new one. The workspace overlay (app-shell's `main::after`) hides
+ * itself while this is up, so the two never claim the same drop.
+ *
+ * `outline`, not `border`: a border would change the panel's box and shift its
+ * contents by 3px the moment a drag crossed it. The label sits on the content area
+ * rather than the whole panel so it cannot cover the titlebar the user is aiming at,
+ * and `pointer-events: none` keeps it out of the drag's own hit testing — an overlay
+ * that swallows dragover events makes the highlight flicker. */
+.jsPanel.eda-drop-target {
+  outline: 3px dashed #fbbf24;
+  outline-offset: 2px;
+}
+.jsPanel.eda-drop-target .jsPanel-content {
+  position: relative;
+}
+.jsPanel.eda-drop-target .jsPanel-content::after {
+  content: 'Load this table';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(251, 191, 36, 0.22);
+  color: #78350f;
+  font-family: system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+  z-index: 5;
+}

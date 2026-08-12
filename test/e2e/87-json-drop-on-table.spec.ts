@@ -139,7 +139,11 @@ test('fields that do not line up open the column mapper', async ({ page }) => {
   expect(added.data.pop).toBe(30000);
 });
 
-test('a multi-table dump says it cannot land in one table', async ({ page }) => {
+test('a multi-table dump asks which of its tables should land here', async ({ page }) => {
+  // This used to refuse — "holds 2 tables, drop it outside a window" — which told the
+  // user their aim was wrong when the aim was the one unambiguous part of the drop.
+  // A window says where the data goes; the file decides what it is, and only that
+  // second question is open. See `110-drop-target-highlight.spec.ts` for the rest.
   const id = await makeCities(page);
   const dump = JSON.stringify({
     tables: [
@@ -150,8 +154,12 @@ test('a multi-table dump says it cannot land in one table', async ({ page }) => 
 
   await dropOnPanel(page, id, 'both.db.json', dump);
 
-  await expect(page.locator('toast-host').getByText(/holds 2 tables/)).toBeVisible();
-  // The dropped-on table is untouched, and nothing was imported behind it.
+  await expect(dialogs(page).getByText(/"Cities" is the destination/)).toBeVisible();
+  await expect(dialogs(page).locator('button.choice', { hasText: /^A —/ })).toBeVisible();
+  await expect(dialogs(page).locator('button.choice', { hasText: /^B —/ })).toBeVisible();
+
+  // Dismissing it imports nothing: the drop was ours, and it was cancelled.
+  await dialogs(page).getByRole('button', { name: 'Cancel' }).click();
   expect(await readRows(page, id)).toHaveLength(1);
 });
 

@@ -431,9 +431,16 @@ test.describe('data-table rendering', () => {
     );
 
     const panel = page.locator(`#${panelDomId(id)}`);
-    // Wait for the table to settle on a virtualized count (it polls in case
-    // rendering catches up over a frame or two).
-    await expect.poll(async () => panel.locator('data-table tbody tr:not(.spacer)').count()).toBeLessThan(250);
+    // Wait for SOME rows and fewer than all of them. Polling on "fewer than 250"
+    // alone was satisfied by the zero rows on screen before the write had even
+    // landed, so the poll stopped immediately and the count read back as 0 — a race
+    // that passed or failed on how fast the grid redrew.
+    await expect
+      .poll(async () => {
+        const n = await panel.locator('data-table tbody tr:not(.spacer)').count();
+        return n > 0 && n < 250;
+      })
+      .toBe(true);
     const rendered = await panel.locator('data-table tbody tr:not(.spacer)').count();
     expect(rendered).toBeGreaterThan(0);
     expect(rendered).toBeLessThan(250);

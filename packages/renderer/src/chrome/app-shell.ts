@@ -28,6 +28,14 @@ defineHostDialogs();
 defineToastHost();
 
 /**
+ * Marks the table window a drop would land in. Styled in
+ * `window-mgr/panel-shell/panel-shell.css`, not here: a panel lives in light DOM
+ * under `#easydb-panels`, outside this shell's shadow root, so this shell cannot
+ * style it.
+ */
+const DROP_TARGET_CLASS = 'eda-drop-target';
+
+/**
  * Render a button's `icon`. An icon string that begins with `<svg` is rendered
  * as inline SVG (sized + coloured by CSS); anything else is treated as a
  * Material Icons ligature name, the long-standing default.
@@ -290,6 +298,11 @@ export class AppShell extends LitElement {
     document.addEventListener('easydb:focus-search', this.openSearch);
     document.addEventListener('easydb:set-search', this.onSetSearch as EventListener);
     document.addEventListener('keydown', this.onGlobalKeydown);
+    // Resolved once, not per `dragover`: that event fires continuously while a file
+    // moves, and the window manager is loaded at boot by the table list anyway. A
+    // dynamic import keeps the chrome from depending on the window layer statically,
+    // the same way the drop handlers do.
+    void import('../window-mgr/table-window-manager.js').then((m) => (this.tablePanelAt = m.tablePanelAtNode));
     void this.bindRegistries();
   }
 
@@ -418,10 +431,30 @@ export class AppShell extends LitElement {
     this.headerButtons = [...ctx.registries.headerButtons];
   }
 
+  /**
+   * `tablePanelAtNode`, once the window manager has loaded. Null before that, which
+   * only costs the per-table highlight for the first moments after boot.
+   */
+  private tablePanelAt: ((node: EventTarget | null) => HTMLElement | null) | null = null;
+  /** The table window currently showing the drop highlight, if any. */
+  private dropTargetPanel: HTMLElement | null = null;
+
+  /**
+   * Two drop targets, told apart while the file is still in the air.
+   *
+   * A drop on a table window LOADS that table; a drop anywhere else makes a new one.
+   * Both were true before this, and the user could not tell which was about to
+   * happen: one overlay covered the whole of `main`, table windows included, and
+   * announced "Drop CSV or JSON here" over the very window whose own behaviour was
+   * different. So the window under the pointer takes the highlight, and the
+   * workspace overlay stands down while it has it.
+   */
   private onDragOver = (e: DragEvent) => {
     if (!hasFiles(e)) return;
     e.preventDefault();
-    this.classList.add('drag-over');
+    const panel = this.tablePanelAt?.(e.target) ?? null;
+    this.setDropTargetPanel(panel);
+    this.classList.toggle('drag-over', panel === null);
   };
 
   private onDragLeave = (e: DragEvent) => {
@@ -430,10 +463,20 @@ export class AppShell extends LitElement {
     const to = e.relatedTarget as Node | null;
     if (to && (this.contains(to) || panelsOverlay()?.contains(to))) return;
     this.classList.remove('drag-over');
+    this.setDropTargetPanel(null);
   };
+
+  /** Move the window highlight, keeping at most one window marked at a time. */
+  private setDropTargetPanel(panel: HTMLElement | null): void {
+    if (panel === this.dropTargetPanel) return;
+    this.dropTargetPanel?.classList.remove(DROP_TARGET_CLASS);
+    panel?.classList.add(DROP_TARGET_CLASS);
+    this.dropTargetPanel = panel;
+  }
 
   private onDrop = async (e: DragEvent) => {
     this.classList.remove('drag-over');
+    this.setDropTargetPanel(null);
     if (!hasFiles(e)) return;
     e.preventDefault();
     const ctx = await getContext();
@@ -487,7 +530,7 @@ export class AppShell extends LitElement {
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
           <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
-            ><span class="version">v0.0.355</span></a
+            ><span class="version">v0.0.356</span></a
           ></strong
         >
         ${this.headerButtons.filter((b) => b.variant !== 'secondary').map((b) => this.renderSlotButton(b, 'header'))}

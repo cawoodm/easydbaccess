@@ -305,6 +305,16 @@ event is the one channel both sides can reach.
   until one returns `true`, and emits `drop:files` regardless so any plugin
   listening on the event bus sees the raw drop even if a specific handler
   already claimed it.
+- **Two drop targets, told apart in mid-air.** A drop on a table window LOADS that
+  table; a drop anywhere else makes a new one. Both were already true and nothing
+  said which was about to happen: the one overlay covered all of `main`, table
+  windows included, announcing "Drop CSV or JSON here" over the very window whose
+  behaviour differed. So `dragover` resolves the window under the pointer
+  (`tablePanelAtNode`, the same lookup the drop itself uses — a highlight that named
+  a different window than the drop would use is worse than none) and hands it the
+  highlight, while the workspace overlay stands down. The window's class is
+  `eda-drop-target`, styled in `panel-shell.css` rather than here: a panel lives in
+  light DOM under `#easydb-panels`, outside the shell's shadow root.
 
 ## A dialog never waits on a data read to open
 

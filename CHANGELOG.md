@@ -8,6 +8,8 @@
 - ✨ New workspace asks where its data goes: this browser, or a `.edb` file (v0.0.347)
 - ✨ One folder grant covers every workspace file, so New and Open need no file dialog (v0.0.347)
 - ✨ A funnel on a big table says its value list may be short, and a refresh icon reads the whole column (v0.0.349)
+- ✨ A dragged file shows where it will land: the whole canvas, or the one window whose table it will load (v0.0.356)
+- ✨ A file of several tables dropped on a window loads the table of that name, or asks which one should (v0.0.356)
 
 ### Bugs
 

@@ -352,6 +352,19 @@ type-inferred; declared columns keep their order and their width / renderer /
 hidden flags. A field in `deletedColumns` stays deleted — that list is what tells a
 deliberate deletion apart from an omission.
 
+### A file of several tables, dropped ON one window
+
+A window says where the data goes. It does not say which part of the file it is, so a
+multi-table file leaves exactly one question open, and `pickSourceTable` answers it
+the way a person would: **a table of the same name is the one meant**, and only a
+file with no such table asks. The picker labels each candidate with its row count, so
+two tables of one name in one file are still tellable apart.
+
+This used to refuse outright — "holds 5 tables, drop it outside a window" — which
+told the user their aim was wrong when the aim was the one unambiguous part of what
+they had done. Everything after the picker is the path a single-table file already
+took: the four-way question, then the column mapper if the fields differ.
+
 ### One file, one existing table: the four-way question
 
 `import/import-mode.ts` owns it, so a CSV and a `.table.json` ask it in the same
