@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PluginRecord, Row, Table, Workspace } from '@easydb/shared';
-import { createIpcDataStore, type EasydbStoreBridge } from '../../../packages/renderer/src/db/data-store-ipc.js';
+import { createIpcDataStore, type EasydbStoreBridge } from '../../../packages/renderer/src/db/data-store-bridge.js';
 
 /* `fakeBridge`'s methods are async only to match the real IPC bridge's shape —
    an in-memory Map needs nothing awaited. */

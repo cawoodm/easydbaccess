@@ -41,6 +41,13 @@ export default defineConfig({
     target: 'es2022',
     sourcemap: true,
   },
+  // sqlite-wasm finds its `.wasm` file relative to its own module URL. esbuild's
+  // dep pre-bundling rewrites that URL into `.vite/deps/`, where the `.wasm` is
+  // not, so the worker fails to boot. Excluding it is what the package's own
+  // Vite instructions call for.
+  optimizeDeps: {
+    exclude: ['@sqlite.org/sqlite-wasm'],
+  },
   plugins: [
     // Some deps ship a `sourceMappingURL` annotation but not the .map file
     // (some third-party packages do). Vite then logs a "Failed to load source

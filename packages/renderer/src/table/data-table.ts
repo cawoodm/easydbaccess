@@ -3,7 +3,7 @@ import { html as staticHtml, unsafeStatic } from 'lit/static-html.js';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { ColumnSpec, DataCollection, Row, SortSpec, Table, ViewInstance } from '@easydb/shared';
 import { readRows, type RowRequest } from '../db/row-reader.js';
-import { ROW_FETCH_CAP } from '../db/data-store-ipc.js';
+import { ROW_FETCH_CAP } from '../db/data-store-bridge.js';
 import { truncationNote } from '../db/truncation-note.js';
 import { isComputedOnly, searchableColumns } from '../search/searchable-columns.js';
 import { getContext } from '../app-context.js';

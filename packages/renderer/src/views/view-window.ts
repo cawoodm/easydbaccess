@@ -12,7 +12,7 @@ import { FilterPopover } from '../chrome/filter-popover.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { readRows, type RowRequest } from '../db/row-reader.js';
-import { ROW_FETCH_CAP } from '../db/data-store-ipc.js';
+import { ROW_FETCH_CAP } from '../db/data-store-bridge.js';
 import { truncationNote } from '../db/truncation-note.js';
 // Side-effect import: the template-off mode renders the standard interactive
 // grid, bound to this view instance for its presentation state.

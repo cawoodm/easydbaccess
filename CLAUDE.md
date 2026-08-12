@@ -214,13 +214,13 @@ table in the minimal `DataCollection<T>` shape from `plugin-api.ts`
 (`db/data-store-dexie.ts`). The wrapper is the only surface plugins see — the
 storage layer remains swappable, and Electron proves it: there
 `app-context.ts` builds the same contract over IPC instead
-(`db/data-store-ipc.ts` → `packages/electron/src/sqlite-store.ts`). When
+(`db/data-store-bridge.ts` → `packages/electron/src/sqlite-store.ts`). When
 adding new collections, touch **four** places in lockstep:
 
 1. Type → `packages/shared/src/types.ts`
 2. Dexie schema + typed table → `packages/renderer/src/db/dexie-db.ts`
 3. Plugin-facing wrapper → `packages/renderer/src/db/data-store-dexie.ts`
-4. The IPC store's collection list → `packages/renderer/src/db/data-store-ipc.ts`
+4. The IPC store's collection list → `packages/renderer/src/db/data-store-bridge.ts`
    and `packages/electron/src/sqlite-store.ts` (an unknown collection throws
    there rather than failing silently)
 

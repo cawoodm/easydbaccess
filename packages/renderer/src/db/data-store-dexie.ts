@@ -125,7 +125,7 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string): DataCollectio
     // grid would not refresh. Reading the rows is the only reliable Dexie
     // signal, which is what `subscribe` already does, and in-process IndexedDB
     // reads are not the cost that made this worth avoiding: the IPC store's
-    // structured-clone of every row is (see `data-store-ipc.ts`'s `watch`).
+    // structured-clone of every row is (see `data-store-bridge.ts`'s `watch`).
   };
 }
 

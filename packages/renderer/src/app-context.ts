@@ -1,6 +1,7 @@
 import type { DataStore, EventBus, HostApi, RowSourceCtx, Table } from '@easydb/shared';
 import { createDataStore, createRoutedDataStore, getDb, withUniqueTableNames } from './db/index.js';
-import { createIpcDataStore } from './db/data-store-ipc.js';
+import { createIpcDataStore } from './db/data-store-bridge.js';
+import { startEdbSession } from './db/edb/session.js';
 import { createEventBus } from './events/bus.js';
 import { createRegistries, type Registries } from './plugin-host/registries.js';
 import { createHostApi } from './plugin-host/api-factory.js';
@@ -30,12 +31,21 @@ async function init(): Promise<AppContext> {
   // which is filled before any settings access happens.
   let activeWorkspaceId = '';
   // Electron exposes a `window.easydb.store` bridge to the main-process
-  // SqliteStore (see `db/data-store-ipc.ts`); everywhere else (browser, or
+  // SqliteStore (see `db/data-store-bridge.ts`); everywhere else (browser, or
   // Electron before that bridge lands) keeps using Dexie/IndexedDB. Only
   // `getDb()` — and the Dexie database it opens — is skipped on the IPC path;
   // nothing downstream (routing, workspace resolution, plugin host) branches
   // on which one is active.
-  const baseStore = window.easydb?.store ? createIpcDataStore(window.easydb.store, () => activeWorkspaceId) : createDataStore(await getDb(), () => activeWorkspaceId);
+  // A file-backed browser session is the third option, and it reuses the SAME
+  // adapter as Electron: `EdbBridge` implements `EasydbStoreBridge`, so a worker
+  // running sqlite-wasm and a preload talking to the main process are the same
+  // shape to everything downstream. Null here means this tab stays on Dexie.
+  const edb = window.easydb?.store ? null : await startEdbSession();
+  const baseStore = window.easydb?.store
+    ? createIpcDataStore(window.easydb.store, () => activeWorkspaceId)
+    : edb
+      ? createIpcDataStore(edb.bridge, () => activeWorkspaceId)
+      : createDataStore(await getDb(), () => activeWorkspaceId);
   const events = createEventBus();
   const registries = createRegistries();
 

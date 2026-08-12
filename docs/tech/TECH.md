@@ -71,7 +71,7 @@ adapter and sync target change.
 | Mode | Renderer | Local storage | Backend | Sync target |
 |---|---|---|---|---|
 | **Browser** | Lit + Vite bundle | Dexie (IndexedDB) | none locally | optional remote Hono |
-| **Electron** | Same Lit bundle in renderer process | `data-store-ipc.ts` over IPC → main-process `node:sqlite` store, in a user-chosen `.db` file **(landed)** | Hono in-process *(not wired yet)* | optional remote Hono |
+| **Electron** | Same Lit bundle in renderer process | `data-store-bridge.ts` over IPC → main-process `node:sqlite` store, in a user-chosen `.db` file **(landed)** | Hono in-process *(not wired yet)* | optional remote Hono |
 | **Hosted Hono** | n/a | filesystem (one JSON per workspace) or SQLite | Hono | central peer for multi-device |
 
 The **same** Hono code in [`packages/server`](../../packages/server) runs both
@@ -147,7 +147,7 @@ Plugins never see Dexie. They get the `DataStore` wrapper
 ([`data-store-dexie.ts`](../../packages/renderer/src/db/data-store-dexie.ts)),
 which exposes the minimal `DataCollection<T>` shape from `plugin-api.ts`.
 That indirection is what made the Electron swap possible: there
-[`data-store-ipc.ts`](../../packages/renderer/src/db/data-store-ipc.ts)
+[`data-store-bridge.ts`](../../packages/renderer/src/db/data-store-bridge.ts)
 satisfies the identical contract over IPC against a `node:sqlite` store, and
 nothing above it changed.
 

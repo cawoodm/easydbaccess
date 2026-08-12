@@ -25,7 +25,7 @@ import type {
   EasydbImportDecision,
   EasydbImportPlanEntry,
   EasydbImportedTableResult,
-} from '../db/data-store-ipc.js';
+} from '../db/data-store-bridge.js';
 import { IMPORT_PROGRESS_EVENT, type ImportProgressDetail } from '../window-mgr/panel-title.js';
 import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
 import { ImportProgress } from './import-progress.js';

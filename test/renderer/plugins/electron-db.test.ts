@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HostApi, Table } from '@easydb/shared';
-import type { EasydbDatabaseFileKind, EasydbDbBridge } from '../../../packages/renderer/src/db/data-store-ipc.js';
+import type { EasydbDatabaseFileKind, EasydbDbBridge } from '../../../packages/renderer/src/db/data-store-bridge.js';
 import { handleDroppedFile, importDeps, openFlow, resumePendingImport } from '../../../packages/renderer/src/plugins/electron-db.js';
 
 /**

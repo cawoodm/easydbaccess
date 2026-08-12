@@ -16,7 +16,7 @@
  * which is always true in the browser build.
  */
 import type { DataCollection, HostApi, PluginModule, Row, Table, Unsubscribe } from '@easydb/shared';
-import type { EasydbDbBridge } from '../db/data-store-ipc.js';
+import type { EasydbDbBridge } from '../db/data-store-bridge.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'sqlitefile-source',

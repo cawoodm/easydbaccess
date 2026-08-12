@@ -2,7 +2,15 @@ import type { ColumnSpec, DataCollection, DataStore, PluginRecord, Row, RowPage,
 import { settingId } from './dexie-db.js';
 
 /**
- * Ambient typing for the preload bridge `packages/electron/src/preload.ts`
+ * A `DataStore` over an ASYNC MESSAGE BRIDGE — nothing here is Electron-specific.
+ *
+ * Two transports satisfy the same interface: `ipcRenderer` through the preload
+ * (Electron, backed by the main-process SQLite store) and `postMessage` to a Web
+ * Worker running sqlite-wasm (`db/edb/worker-bridge.ts`). That is why the file is
+ * named for the bridge rather than for IPC, and why the browser's file-backed
+ * mode needed no second adapter.
+ *
+ * The shape itself is ambient typing for what `packages/electron/src/preload.ts`
  * exposes as `window.easydb`. The renderer and electron packages are separate
  * `tsc -b` projects — the renderer cannot import electron's own `declare
  * global` block (see `packages/electron/CLAUDE.md`) — so this mirrors that

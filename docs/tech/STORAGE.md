@@ -35,7 +35,7 @@ data; see `SYNCH.md`.
         browser                               Electron
              │                                     │
              ▼                                     ▼
-   data-store-dexie.ts                     data-store-ipc.ts
+   data-store-dexie.ts                     data-store-bridge.ts
    wraps each Dexie table                  same DataCollection<T>,
    in DataCollection<T>                    each call an IPC round trip
              │                                     │
@@ -143,7 +143,7 @@ re-evaluation cost is harmless and the implementation stays simple.
 ## The Electron path — the workspace IS a SQLite file
 
 Inside Electron the same `DataStore` contract is served by
-[`db/data-store-ipc.ts`](../../packages/renderer/src/db/data-store-ipc.ts)
+[`db/data-store-bridge.ts`](../../packages/renderer/src/db/data-store-bridge.ts)
 instead of the Dexie wrapper. `app-context.ts` selects it when
 `window.easydb?.store` exists; every `find`/`insert`/`patch`/… becomes an IPC
 call to a `node:sqlite` store in the main process
@@ -388,7 +388,7 @@ plugin's original URL later goes offline.
   a **new collection**, or indexing an existing field, touches four places
   in lockstep — the type, the Dexie schema + typed accessor in
   `dexie-db.ts`, the `DataStore` wrapper in `data-store-dexie.ts`, and the
-  same collection in `data-store-ipc.ts` + `packages/electron/src/sqlite-store.ts`
+  same collection in `data-store-bridge.ts` + `packages/electron/src/sqlite-store.ts`
   (an unknown collection **throws** there rather than degrading quietly) —
   see `packages/shared/CLAUDE.md`.
 
