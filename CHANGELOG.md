@@ -8,6 +8,7 @@
 
 ### Bugs
 
+- 🪲 A dump whose rows held a field its column list omitted imported those rows blank, with no way to reach the value (v0.0.352)
 - 🪲 A table of 600,000 rows took most of a minute to appear, and was read whole again on every write (v0.0.351)
 - 🪲 A filter on a table over 20,000 rows only searched the first 20,000, so a match further in was missing (v0.0.350)
 

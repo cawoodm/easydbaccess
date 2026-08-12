@@ -341,6 +341,17 @@ reconstructed with that backing intact rather than as a plain local table.
 Exports `parsedToTables`/`importJsonText` for reuse by `import-data` and
 `server-sync-core`.
 
+**A dump's rows may carry fields its own column list omits**, and the reader adds a
+column for each of them (`withUndeclaredFields`). A real case: `bible.db.json`
+declares `book` and no `title`, yet 368 of its 1,258 rows carry `title` and no
+`book` — one logical field under two names, written by two generations of the
+exporter. Those 368 rows imported blank, and the value was unreachable rather than
+merely unshown: no column means no header, no funnel and nothing to sort by, so
+there was no way to tell the data had arrived. The added columns are appended and
+type-inferred; declared columns keep their order and their width / renderer /
+hidden flags. A field in `deletedColumns` stays deleted — that list is what tells a
+deliberate deletion apart from an omission.
+
 ### One file, one existing table: the four-way question
 
 `import/import-mode.ts` owns it, so a CSV and a `.table.json` ask it in the same
