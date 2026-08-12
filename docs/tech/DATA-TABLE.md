@@ -167,6 +167,21 @@ A list with no members also SHOWS as an empty cell (pink, no tooltip) instead of
 as the text it is stored in: `[]` is how an absent list arrives from most exports,
 and two brackets read as content where there is none.
 
+**A hidden column's filter needs a second way out.** `Table.filters` is keyed by
+FIELD and survives the column being hidden, but the funnel that would clear it
+lives in the header — which a hidden column does not have. The grid then narrows
+with nothing on screen to say why. So the columns editor shows the same state:
+`renderFilterState` in `new-table-dialog.ts` puts a blue funnel on every filtered
+column and a click switches it off, stashed rather than deleted so a second click
+puts it back, written on Save with everything else.
+
+Being field-keyed makes the editor responsible for the KEYS too — a rename has to
+carry its filter and a removed column has to lose it
+([`table/filter-map.ts`](../../packages/renderer/src/table/filter-map.ts)). A
+stale key is not loud: `row-reader.ts` drops a filter naming a field no column has
+(it would match nothing and empty the grid), so the filter would simply stop
+existing without anyone being told.
+
 ## The empty-cell highlight is a preference
 
 `cellStateClass` marks a `<td>` from the STORED value — ` is-null` for empty,
@@ -229,6 +244,131 @@ reused as a constant — rows are assumed uniform height). It renders only
 above and below) and fills the gap with two spacer `<tr>`s sized to
 `topPad`/`bottomPad` pixels, so the scrollbar's total scroll range stays
 correct without every row existing in the DOM.
+
+## Windowed reads: virtualising the FETCH, not just the paint
+
+Virtualisation above only decided what was DRAWN. The fetch stayed eager: one
+measured 609,283-row table cost **1483 ms** and a **15.4 MB** IPC payload to put
+about thirty rows on screen, where the same query for 200 rows takes **13 ms**.
+
+So a big table is now read one PAGE at a time.
+
+- **The threshold is a setting** — `grid:windowRowsFrom` on the Table grid tab,
+  default **50 000**, `0` never windows
+  ([`table/grid-settings.ts`](../../packages/renderer/src/table/grid-settings.ts)).
+  50 000 rather than something smaller so every table that works well today keeps
+  the code path it already has, and only the ones that hurt change.
+- **Three conditions, all deliberate** (`shouldWindow`): the collection must
+  implement `query`, the setting must be on, and `tableTotal` must reach the
+  threshold. Both stores answer a `query` now, so this works in the browser and on
+  the desktop.
+- **The count comes first.** `loadRows` asks `count()` BEFORE reading rows, because
+  the count is what decides whether to window; asking afterwards would mean paying
+  for one whole-table read before ever windowing it. Counting is cheap
+  (`SELECT COUNT(*)`), fetching to measure is what was not.
+- **The threshold read is awaited in `connectedCallback`.** Fired and forgotten, it
+  lands after the first fetch — so the first read of a big table is the eager one,
+  followed by a second to correct it. Both of the reads this exists to avoid.
+- **`PAGE_ROWS` is 500** and the offset is snapped down to a whole page, so
+  scrolling a few rows re-uses the page in hand. The span covers the viewport
+  wherever it sits inside that page, or a viewport straddling a boundary would show
+  a gap at every 500th row.
+
+Three things then mean something different, and each is handled where it is read:
+
+| Reader | Un-windowed | Windowed |
+| --- | --- | --- |
+| `virtualSlice` extent | `rows.length` | `matchingTotal` — else a 609k table scrolls 500 rows and stops |
+| Slice indices | absolute | absolute minus `windowOffset` (0 un-windowed, so it is the same arithmetic) |
+| Panel title count | rows in hand | `matchingTotal` — "500 of 609,283" would read as a filter nobody applied |
+
+`virtualSlice` also pads for rows the page does not hold yet — the moment between
+scrolling and the next page landing. Without that the table shrinks under the
+scroll position and the view jumps back.
+
+**Facets say so, and offer to fix it.** The funnel's value list is built from the
+rows in memory, which windowed is one page, so the popover carries a note — "Values
+from the rows loaded so far — there may be more" — and a REFRESH icon beside it.
+Pressing it asks the store for the real list. Never automatic: a funnel click has to
+stay instant, and the page usually already holds the value being looked for.
+
+The contract is one optional capability, `DataCollection.distinct?({ field, where,
+limit })` → `{ values, blanks, truncated, partial, cells }`, and it deliberately
+says nothing about HOW: `GROUP BY` in SQLite, a scan in Dexie, a facet query at a
+Datasette instance. `where` carries the OTHER columns' filters and the search, so
+the list stays faceted — leaving a column's own filter out is the CALLER's rule
+(`readDistinct` in `data-table.ts`), the same rule `rowsFacetedFor` follows for the
+in-memory list.
+
+Four things had to be got right, or the refreshed list would not agree with the one
+it replaces:
+
+- **Blanks are counted by their own query.** Left in the `GROUP BY`, the blank group
+  takes a slot in the `LIMIT`: it can push a real value out of the list, and be
+  missed entirely when it sorts past the limit itself.
+- **An `array` cell is not its values.** `GROUP BY` over `"a,b"` groups the cell, so
+  the store answers with `cells: true` and the renderer splits the members and adds
+  the cell counts up — the same arithmetic `facetCounts` does.
+- **`cells` is not `partial`.** Folding them together made the note claim a filter
+  had been dropped when nothing had. `partial` keeps one meaning: a predicate had no
+  SQL form.
+- **A `boolean` column offers both sides at a count of 0**, or a column of all-true
+  rows leaves no way to filter for false. `facetCounts` does that in memory; a
+  `GROUP BY` cannot, so `readDistinct` puts the domain back.
+
+Dexie's own `distinct` calls `facetCounts`, so on that path none of the four can
+drift apart at all.
+
+**Dexie answers a `RowQuery` in two ways**, because IndexedDB can honor one of them
+and not the other
+([`db/data-store-dexie.ts`](../../packages/renderer/src/db/data-store-dexie.ts)).
+
+- A **plain slice** — no filter, no search, no sort (`isPlainSlice`) — is a real
+  windowed read: `offset().limit()` walks the `tableId` index and reads only the
+  page, and `count()` gives the total without reading a row. This is the case that
+  matters, because a big table is scrolled far more often than it is filtered.
+- **Anything else** has to read the rows to match them: our filter language is not
+  an IndexedDB query, and nothing indexes the fields inside `data`. That read is
+  capped at `ROW_FETCH_CAP` and a capped answer reports `truncated`.
+
+The narrowing path calls `applyRowRequest`, the same function the reader uses on the
+rows it holds. That is deliberate: a filter which means one thing in the store and
+another in the renderer returns a wrong answer that looks right, and one shared
+implementation cannot disagree with itself.
+
+**A sort or filter that arrives from the STORE refetches.** The header click and the
+filter box always did. The other ways in — the columns editor's filter toggle, a
+commandlet, a view patch, a sync from another device — set the state and left the
+rows alone, which was harmless while the grid held every row and re-narrowed in
+memory. Holding a page, re-sorting sorts 500 rows out of 609,283. `adoptQueryState`
+compares before it adopts, so the grid's own write coming back through the
+subscription is not a change and does not start a second read.
+
+**A view window collapses overlapping reads** (`view-window.ts`'s `loadRows`). The
+rows subscription delivers once on connect — the same read `reload` has already
+started — and once per write after that, and on the Dexie path every delivery costs a
+full read of the table. A 20 000-row view read it four times over while it opened,
+about five seconds. A request arriving mid-read is not dropped: it becomes one more
+read after the current one, so the last state still wins.
+
+**The cap bounds what comes BACK, not what is looked at.** `ROW_FETCH_CAP` is applied
+to the RESULT of a filter, search and sort, never to the rows going in. The other way
+round answers "these of the first 20,000" to a question about the table: a row
+matching at row 30,000 is simply absent, and the grid looks like it filtered
+correctly. That is the one failure `truncated` cannot rescue, because the answer is
+not a superset of the right one — it is a different one. `total` is then every match,
+so the truncation note can say how many were left out.
+
+This holds in both places that cap: `readRows`'s no-`query` fallback and the Dexie
+`query`. The rows were already read whole in both, so narrowing first costs nothing
+and is the only correct order. The SQLite store never had the problem — a `WHERE`
+runs before its `LIMIT`.
+
+**A slice is only ever pushed with every predicate.** `readRows` refuses otherwise
+(`sliceIsSound`), and if a backend applies the slice but reports `partial`, the
+answer is re-read WITHOUT the slice and the whole request re-applied in the
+renderer. Slicing a superset again would count off a second time — page 2 of page
+2 — and nothing in the rows says which ones went missing.
 
 ## Two independent loading bars
 

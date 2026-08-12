@@ -108,6 +108,34 @@ comment documents at length (1483 ms and 15.4 MB to display about 30 rows).
 rows itself via `readRows(coll, RowRequest, cap)` and subscribes with
 `coll.watch ?? coll.subscribe` — precisely what `views/view-window.ts` does.
 
+### Push for updates, PULL for the initial value
+
+Publishing alone is not enough, and the reason is a mount order nobody controls:
+a pane mounts AFTER the host grid has rendered, and the grid publishes only when
+something is already listening. So the first publish the new pane could hear is
+the grid's next render — which, on a table nobody is touching, never comes. The
+pane sat on "No data to chart." beside a full grid, and a window resize (any
+re-render at all) fixed it, which is what the bug looked like from outside.
+
+Three parts close it, and all three are needed:
+
+- `provideVisibleRows(key, fn)` / `requestVisibleRows(key)` — the grid registers
+  a provider, so a late listener can ask instead of wait. `viz-panel`'s docked
+  branch pulls immediately after it starts watching.
+- The grid keeps its rendered row set **unconditionally**. Keeping it only while
+  something was listening was the same bug from the other side: at the render
+  before the pane existed, nothing was kept, so the publish in `updated()` had
+  nothing to send. It is a reference to an array the render already built.
+- A pane that pulls and gets `null` — the grid is not mounted yet, which happens
+  on a reload where both mount at once — stays on "Loading…" rather than claiming
+  to be loaded with no rows. Otherwise a reloaded word cloud reported "No words
+  to show.", which reads as a verdict on the data rather than as "not yet".
+
+A windowed table (`grid:windowRowsFrom`, where `rows` is one 500-row page of the
+matching set) publishes with `truncated: true`. A chart of a page is a chart of a
+slice, and one that moves as the user scrolls; the pane's truncation note is how
+it says so.
+
 ### `visible-rows.ts` is a registry, not a document event
 
 Its two siblings (`easydb:visible-count`, `db/settings-events.ts`) are
@@ -354,3 +382,19 @@ resize or a filter change re-lays out without reshuffling every word.
   pre-existing gap that silently emptied a renamed token in an HTML view; for a
   chart it would silently plot nothing, which reads as "no data" rather than as a
   broken reference.
+
+## The demo workspace is a test, not a document
+
+`docs/help/workspace.db.json` is a dump a user can drop in to see every kind at
+once (48 city trips: coordinates, dates, ratings and a sentence of prose each).
+`test/e2e/111-viz-fixture.spec.ts` imports that exact file through the real drop
+handler and asserts each kind draws, because a fixture that has drifted from the
+code teaches a new user that the feature is broken.
+
+It also covers a path nothing else does, and found a real bug doing so: a
+`ViewDock` names its host by **table id**, and an import mints new ids — so a
+docked pane arrived pointing at a table that no longer existed, was mounted
+nowhere, and (docked instances being excluded from the window reconcile) vanished
+entirely. `remapDock` in `plugins/json-import.ts` carries the host across for the
+ordinary case, where the pane is docked into the window of the table it charts,
+and DROPS the dock otherwise: visible in the wrong place beats invisible.

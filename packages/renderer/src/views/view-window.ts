@@ -536,7 +536,31 @@ export class ViewWindow extends LitElement {
    * ever narrows FURTHER, so what comes back is a superset and `recompute` — which
    * re-applies the whole pipeline regardless — stays correct either way.
    */
-  private async loadRows(): Promise<void> {
+  private loadRows(): Promise<void> {
+    // Collapse overlapping reads. The rows subscription delivers once on connect —
+    // the same read `reload` has already started — and once per write after that,
+    // and on the Dexie path every delivery costs a full read of the table. A
+    // 20 000-row view read it FOUR times over while it opened, which is seconds.
+    // A request that arrives mid-read is not dropped: it becomes one more read
+    // after this one, so the last state still wins.
+    if (this.loadInFlight) {
+      this.loadAgain = true;
+      return this.loadInFlight;
+    }
+    this.loadInFlight = this.readRows().finally(() => {
+      this.loadInFlight = null;
+      if (this.loadAgain) {
+        this.loadAgain = false;
+        void this.loadRows();
+      }
+    });
+    return this.loadInFlight;
+  }
+
+  private loadInFlight: Promise<void> | null = null;
+  private loadAgain = false;
+
+  private async readRows(): Promise<void> {
     const coll = this.rowColl;
     const inst = this.instance;
     if (!coll || !inst) return;

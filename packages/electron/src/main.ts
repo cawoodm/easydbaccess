@@ -86,6 +86,9 @@ function registerStoreIpc(): void {
   // wants and only that crosses IPC. `store:find` above hands over up to
   // ROW_FETCH_CAP rows whatever the caller intends to show.
   handle('store:queryRows', (tableId: string, q: RowQuery) => getStore().queryRows(tableId, q));
+  // One column's distinct values, counted in SQL. A funnel's value list at any
+  // table size, with no row crossing IPC.
+  handle('store:distinctValues', (tableId: string, q: { field: string; where?: RowQuery; limit?: number }) => getStore().distinctValues(tableId, q));
   handle('store:findOne', (coll: string, key: string) => getStore().findOne(coll, key));
   handleMutating('store:insert', (coll: string, doc: Record<string, unknown>) => getStore().insert(coll, doc));
   handleMutating('store:bulkInsert', (coll: string, docs: Record<string, unknown>[]) => getStore().bulkInsert(coll, docs));

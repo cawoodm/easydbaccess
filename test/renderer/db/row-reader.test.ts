@@ -269,3 +269,89 @@ describe('search skips a computed-only column', () => {
     expect(applyRowRequest(filled, { columns: cols, search: 'calc:ADA' }).rows).toHaveLength(1);
   });
 });
+
+/**
+ * A WINDOW: the grid asks for one page of the match instead of all of it. What
+ * matters is that the slice only travels when the backend can narrow soundly,
+ * and that an answer which admits it is a superset is never sliced twice.
+ */
+describe('readRows with a slice', () => {
+  it('hands the slice to a backend that can apply the whole request', async () => {
+    const { coll, seen } = fakeColl();
+    const page = await readRows(coll, req({ offset: 1, limit: 2 }), 20_000);
+    expect(seen.queries[0]?.offset).toBe(1);
+    expect(seen.queries[0]?.limit).toBe(2);
+    expect(seen.finds).toBe(0);
+    expect(page.rows.map((r) => r.id)).toEqual(['r2', 'r3']);
+    // `total` is the MATCH, not the page — that is what the scrollbar stands for.
+    expect(page.total).toBe(4);
+    expect(page.truncated).toBeUndefined();
+  });
+
+  it('holds the slice back when the search cannot be pushed', async () => {
+    // A multi-word search has the phrase→AND→OR fallback, which no WHERE clause
+    // means. Counting off rows from a set we are about to narrow further would
+    // report the wrong page, so the slice stays here.
+    const { coll, seen } = fakeColl();
+    await readRows(coll, req({ search: 'ada bo', offset: 100, limit: 10 }), 20_000);
+    expect(seen.queries[0]?.offset).toBeUndefined();
+    expect(seen.queries[0]?.limit).toBe(20_000);
+  });
+
+  it('re-asks unsliced when the backend applied the slice but not every predicate', async () => {
+    // `partial` says the rows are a superset. Slicing that again would count off
+    // a second time — page 2 of page 2 — so the answer is re-read whole and the
+    // whole request re-applied here.
+    const { coll, seen } = fakeColl({ partial: true });
+    const page = await readRows(coll, req({ offset: 2, limit: 2 }), 20_000);
+    expect(seen.queries).toHaveLength(2);
+    expect(seen.queries[0]?.offset).toBe(2);
+    expect(seen.queries[1]?.offset).toBeUndefined();
+    expect(seen.queries[1]?.limit).toBe(20_000);
+    // The right page of the right set, and still flagged as narrowed here.
+    expect(page.rows.map((r) => r.id)).toEqual(['r3', 'r4']);
+    expect(page.partial).toBe(true);
+  });
+
+  it('slices in memory when the collection cannot query at all', async () => {
+    const { coll, seen } = fakeColl({ supportsQuery: false });
+    const page = await readRows(coll, req({ offset: 1, limit: 2 }), 20_000);
+    expect(seen.finds).toBe(1);
+    expect(page.rows.map((r) => r.id)).toEqual(['r2', 'r3']);
+    expect(page.total).toBe(4);
+  });
+});
+
+/**
+ * The cap bounds what comes BACK, not what is looked at.
+ *
+ * Applied first, it answers "these of the first 20,000" to a question about the
+ * table — so a row matching at 30,000 is simply absent and the grid looks like it
+ * filtered correctly. That is the one failure mode `truncated` cannot rescue,
+ * because the answer is not a superset of anything.
+ */
+describe('readRows caps the answer, not the input', () => {
+  const many = (n: number): Row[] => Array.from({ length: n }, (_, i) => ({ id: `r${i}`, tableId: 't', data: { name: `row ${i}`, kind: i === n - 1 ? 'rare' : 'common' }, updatedAt: 1 }));
+  const cols: ColumnSpec[] = [
+    { field: 'name', label: 'Name', type: 'string' },
+    { field: 'kind', label: 'Kind', type: 'string' },
+  ];
+
+  it('finds a match past the cap', async () => {
+    const { coll } = fakeColl({ rows: many(30_000), supportsQuery: false });
+    const page = await readRows(coll, { columns: cols, filters: { kind: '=rare' } }, 20_000);
+    expect(page.rows).toHaveLength(1);
+    expect(page.total).toBe(1);
+    // Nothing was cut, so nothing claims to have been.
+    expect(page.truncated).toBeUndefined();
+  });
+
+  it('cuts a result bigger than the cap, and says so', async () => {
+    const { coll } = fakeColl({ rows: many(30_000), supportsQuery: false });
+    const page = await readRows(coll, { columns: cols, filters: { kind: '=common' } }, 20_000);
+    expect(page.rows).toHaveLength(20_000);
+    // `total` is every match, which is what lets a note say how many are missing.
+    expect(page.total).toBe(29_999);
+    expect(page.truncated).toBe(true);
+  });
+});

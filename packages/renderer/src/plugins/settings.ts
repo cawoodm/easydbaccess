@@ -1,6 +1,6 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { parseSecrets, readSecretsText, writeSecretsText } from '../db/user-settings.js';
-import { GRID_SETTINGS_ID } from '../table/grid-settings.js';
+import { GRID_SETTINGS_ID, WINDOW_ROWS_FROM_DEFAULT } from '../table/grid-settings.js';
 import { DEFAULT_TILE_ATTRIBUTION, DEFAULT_TILE_URL, VIZ_SETTINGS_ID } from '../viz/viz-settings.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
@@ -36,6 +36,15 @@ export function init(api: HostApi): void {
       scope: 'workspace',
       description:
         'An empty cell gets a pink background, so a gap in the data is visible whatever the column draws. Turn it off for a table that is mostly empty on purpose, where the colour is noise. A value that does not fit its column type stays marked red either way.',
+    },
+    {
+      key: 'windowRowsFrom',
+      label: 'Read big tables one page at a time (rows)',
+      type: 'number',
+      default: WINDOW_ROWS_FROM_DEFAULT,
+      scope: 'workspace',
+      description:
+        'A table with at least this many rows is read one page at a time as you scroll, instead of being held in memory whole. Filtering, searching and sorting still cover every row, because the store does that work. Set 0 to always read the whole table.',
     },
   ]);
 

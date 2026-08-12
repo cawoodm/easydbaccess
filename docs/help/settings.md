@@ -17,7 +17,7 @@ There's no Save button. Each field saves as soon as you change it.
 
 ### The Table grid tab
 
-Two preferences for how every grid behaves:
+Preferences for how every grid behaves:
 
 - **Sort descending first** — a first click on a column header sorts from the
   high end down. Turn it off to start ascending.
@@ -25,8 +25,14 @@ Two preferences for how every grid behaves:
   visible whatever the column draws. Turn it off for a table that is empty on
   purpose, where the colour is only noise. A value that does not fit its column
   type stays marked red either way, because that is a fault and not a gap.
+- **Read big tables one page at a time (rows)** — a table with at least this many
+  rows is read one page at a time as you scroll, instead of being held in memory
+  whole. It opens in a moment rather than in a second and a half. Sorting,
+  filtering and searching still cover every row, because the store does that work.
+  Set it to 0 to always read the whole table. This works in the browser and in the
+  desktop app.
 
-Both apply at once to the tables you already have open.
+They apply at once to the tables you already have open.
 
 ## Editing a field
 
