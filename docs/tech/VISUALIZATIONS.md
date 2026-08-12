@@ -140,6 +140,22 @@ deliberate, because each is a way a naive aggregator lies:
   regardless of display order. A chart that silently drops 200 small categories
   reads as though they do not exist.
 
+### Why a chart is blank, said out loud
+
+Three different blanks, three different messages, because they need three
+different fixes and all look identical on screen (`viz/viz-diagnose.ts`, pure):
+
+| Cause | Message points at |
+|---|---|
+| A channel maps to a field **no column carries** (a renamed column) | the broken reference, naming the channel — from `viz-aggregate.ts` |
+| A channel maps to a column that **exists and is empty** | the mapping: names the column, the row count, and the Edit button |
+| A word cloud's column **holds text but yielded no terms** | the word rules behind Chart — min length, stop words, numbers — never the mapping, because the column is fine |
+
+The middle one is the commonest and was silent until a user hit it: picking the
+wrong column out of a dropdown of a dozen is easy, and a blank pane taught them
+nothing. The third is kept separate on purpose — "pick a different column" is
+actively wrong advice when the column has text in it.
+
 An `array` (tags) column contributes **one group per member**, matching how the
 grid's filter already matches per member. A **scripted column is evaluated
 before aggregating** (`viz-panel.ts`'s `evaluatedRows`), because its value does

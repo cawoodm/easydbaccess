@@ -241,6 +241,32 @@ test.describe('visualizations', () => {
     expect(iconFont).toContain('Material Icons');
   });
 
+  test('a chart mapped to an EMPTY column says so instead of drawing nothing', async ({ page }) => {
+    // The reported case, and the commonest way a chart looks broken: the column
+    // exists and is simply empty. Picking the wrong one from a dropdown of a dozen
+    // is easy, and a blank pane is indistinguishable from a broken feature.
+    const id = await createTable(page, 'Notes', [{ field: 'body' }, { field: 'blank' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ body: 'alpha beta' }, { body: 'gamma delta' }]);
+    await makeChart(page, id, { name: 'Empty col', kind: 'wordcloud' });
+
+    // Remap TEXT onto the column that holds nothing.
+    await page.evaluate(async () => {
+      const w = window as unknown as {
+        __easydb: { store: { viewInstances: { find(): Promise<Array<{ id: string; mapping: Record<string, string> }>>; patch(id: string, p: unknown): Promise<void> } } };
+      };
+      const insts = await w.__easydb.store.viewInstances.find();
+      const inst = insts[0]!;
+      await w.__easydb.store.viewInstances.patch(inst.id, { mapping: { ...inst.mapping, TEXT: 'blank' }, updatedAt: Date.now() });
+    });
+
+    const err = page.locator('viz-panel .error');
+    await expect(err).toContainText(/is empty in all 2 rows/i);
+    // It names the column the user picked, and where to change it.
+    await expect(err).toContainText(/blank/i);
+    await expect(err).toContainText(/Edit/);
+  });
+
   test('a chart says so when its column was renamed away, instead of drawing nothing', async ({ page }) => {
     const id = await seedCities(page);
     await makeChart(page, id, { name: 'By country' });

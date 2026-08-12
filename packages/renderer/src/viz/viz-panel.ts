@@ -35,6 +35,7 @@ import { runColumnScript } from '../util/column-script.js';
 import { watchVisibleRows, type VisibleRowsDetail } from '../table/visible-rows.js';
 import { aggregateRows, type VizFrame } from './viz-aggregate.js';
 import { wordFrequencies } from './word-frequency.js';
+import { emptyChannelNote, emptyChannels, noTermsNote, type MappedChannel } from './viz-diagnose.js';
 import { readTileAttribution, readTileUrl, DEFAULT_TILE_ATTRIBUTION, DEFAULT_TILE_URL } from './viz-settings.js';
 import { defineCharts } from './elements/chart-element.js';
 import { definePointMap } from './elements/point-map.js';
@@ -428,6 +429,45 @@ export class VizPanel extends LitElement {
     ).map((t): CloudTerm => ({ term: t.term, count: t.count }));
   }
 
+  /**
+   * The channels this visualization actually reads, resolved to their columns.
+   *
+   * Only channels with a mapping are included: an UNMAPPED required channel is
+   * already reported separately, and a blank entry here would read as "the column
+   * is empty" when the real problem is that no column was chosen.
+   */
+  private mappedChannels(): MappedChannel[] {
+    const spec = this.spec;
+    if (!spec) return [];
+    const agg = this.aggregate;
+    const out: MappedChannel[] = [];
+    for (const ch of spec.channels) {
+      const field = this.fieldFor(ch.key);
+      if (!field) continue;
+      // For an aggregate viz, only the channels the SPEC reads matter. A VALUE
+      // channel is irrelevant to a plain `count`, so an empty column there is not
+      // why the chart is blank and must not be blamed for it.
+      if (spec.data === 'aggregate' && agg) {
+        const used = new Set<string>([...(agg.groupBy ?? []), ...(agg.measures ?? []).filter((m) => m.fn !== 'count').map((m) => m.channel)]);
+        if (!used.has(ch.key)) continue;
+      }
+      out.push({ channel: ch.key, label: ch.label, field });
+    }
+    return out;
+  }
+
+  /**
+   * "Why is this blank?" — the empty-column case.
+   *
+   * The aggregator already names a channel pointing at a field no column carries.
+   * This is the commoner mistake it cannot see: a column that exists and holds
+   * nothing. Both render identically, so both have to say so.
+   */
+  private emptyNote(): string | null {
+    if (this.rows.length === 0) return null; // an empty TABLE is its own obvious case
+    return emptyChannelNote(emptyChannels(this.rows, this.columns, this.mappedChannels()), this.rows.length);
+  }
+
   /** Options handed to the element, with app-level settings filled in. */
   private elementOptions(): Record<string, unknown> {
     const o = { ...((this.template?.viz?.options ?? {}) as Record<string, unknown>) };
@@ -474,6 +514,26 @@ export class VizPanel extends LitElement {
       if (unmapped.length > 0) {
         return html`<div class="error" role="status">No column mapped for ${unmapped.map((c) => c.label).join(', ')}.</div>`;
       }
+    }
+
+    // An empty mapped column is the commonest reason a chart looks broken, and it
+    // is indistinguishable from one. Reported before drawing, because there is
+    // nothing to draw and a blank pane teaches the user nothing.
+    const empty = this.emptyNote();
+    if (empty) return html`<div class="error" role="status">${empty}</div>`;
+
+    // A cloud whose column DOES hold text but yielded no terms is a different
+    // problem with a different fix — the word rules, not the mapping.
+    if (this.channelOfKind('text') && !this.channelOfKind('lat') && this.rows.length > 0 && this.cloudTerms().length === 0) {
+      const o = (this.template?.viz?.options ?? {}) as Record<string, unknown>;
+      const minLength = Number(o['minLength']);
+      return html`<div class="error" role="status">
+        ${noTermsNote({
+          minLength: Number.isFinite(minLength) && minLength > 0 ? minLength : 3,
+          stopWordsOn: o['stopWords'] !== false,
+          numbersExcluded: o['includeNumbers'] !== true,
+        })}
+      </div>`;
     }
 
     const tag = unsafeStatic(spec.tag);
