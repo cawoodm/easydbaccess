@@ -113,7 +113,8 @@ test('the 🎨 / 🔤 toggle in the mapping dialog switches an open view', async
   await toggle.click();
   await expect(toggle).toHaveText('🔤');
   await dlg.getByRole('button', { name: 'Save' }).click();
-  await dlg.getByRole('button', { name: 'Close' }).click();
+  // Deep-linked from "Edit view", so Save finishes and closes — no second click.
+  await expect(dlg).toBeHidden();
 
   // The open view drops to plain text…
   await expect(vw.locator('.line')).toHaveText('https://example.com/one');
@@ -129,7 +130,8 @@ test('the 🎨 / 🔤 toggle in the mapping dialog switches an open view', async
   await vw.getByRole('button', { name: 'Edit view' }).click();
   await dlg.locator('.map-row', { hasText: '$URL' }).locator('button.mini').first().click();
   await dlg.getByRole('button', { name: 'Save' }).click();
-  await dlg.getByRole('button', { name: 'Close' }).click();
+  // Deep-linked from "Edit view", so Save finishes and closes — no second click.
+  await expect(dlg).toBeHidden();
   await expect(vw.locator('.line a')).toHaveCount(1);
 });
 

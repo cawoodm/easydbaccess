@@ -7,7 +7,7 @@
  * host treats it as a mutable namespace.
  */
 
-import type { ColumnSpec, PluginRecord, Row, Setting, Table, TableSource, ViewInstance, ViewTemplate, Workspace } from './types.js';
+import type { ColumnSpec, ColumnType, PluginRecord, Row, Setting, Table, TableSource, ViewInstance, ViewTemplate, VizAggregate, Workspace } from './types.js';
 import type { DistinctPage, DistinctQuery, QueryPage, RowQuery } from './row-query.js';
 
 // -- Plugin module shape --------------------------------------------------
@@ -580,6 +580,57 @@ export interface ColumnEditorActionSpec {
   run(api: HostApi, ctx: { columns: ColumnSpec[]; tableId?: string | undefined }): Promise<ColumnSpec[] | null> | ColumnSpec[] | null;
 }
 
+// -- Visualizations -------------------------------------------------------
+
+/**
+ * What a channel means to the visualization, so the editor can auto-map it and
+ * validate what the user picks. `category` groups, `value` is measured, `series`
+ * splits into several lines/bars, the rest are kind-specific.
+ */
+export type VizChannelKind = 'category' | 'value' | 'series' | 'time' | 'lat' | 'lon' | 'text' | 'weight';
+
+/** One data slot a visualization needs a column mapped onto. */
+export interface VizChannelSpec {
+  /** Channel key — the key used in `ViewInstance.mapping`. UPPER_SNAKE by convention. */
+  key: string;
+  label: string;
+  kind: VizChannelKind;
+  /** Column types that may be mapped here; absent ⇒ any. */
+  accepts?: ColumnType[] | undefined;
+  required?: boolean | undefined;
+  /** Several columns may be mapped here (e.g. multiple VALUE series). */
+  multiple?: boolean | undefined;
+}
+
+/**
+ * A way of drawing a table. Registered under `id`; a viz template opts into it
+ * by setting `VizSpec.kind`, exactly as a column opts into a cell renderer by
+ * setting `column.renderer`.
+ *
+ * The element receives PROPERTIES, never attributes — `.frame` for
+ * `data: 'aggregate'`, `.rows` + `.columns` for `data: 'rows'`, plus `.config`
+ * and `.note`. It is handed plain data and knows nothing about the store.
+ */
+export interface VisualizationSpec {
+  /** Stable id stored in `VizSpec.kind` — 'bar', 'line', 'pie', 'map', 'wordcloud'. */
+  id: string;
+  label: string;
+  /** Material Icons ligature name, or inline `<svg>` markup. */
+  icon?: string | undefined;
+  /** Custom element tag (must contain a hyphen). */
+  tag: string;
+  channels: VizChannelSpec[];
+  /**
+   * Extra options, rendered generically by the same field renderer the Settings
+   * dialog uses — so a new option costs no UI code.
+   */
+  options?: SettingsFieldSpec[] | undefined;
+  /** What the element is handed: a grouped frame, or the raw rows. */
+  data: 'aggregate' | 'rows';
+  /** Used when the template's `VizSpec` carries no `aggregate` of its own. */
+  defaultAggregate?: VizAggregate | undefined;
+}
+
 export interface UiRegistry {
   registerHeaderButton(spec: ButtonSpec): Unregister;
   registerFooterButton(spec: ButtonSpec): Unregister;
@@ -609,6 +660,15 @@ export interface UiRegistry {
   registerCellRenderer(name: string, tag: string): Unregister;
   registerRowRenderer(viewName: string, tag: string): Unregister;
   registerTableRenderer(viewName: string, tag: string): Unregister;
+  /**
+   * Register a way of DRAWING a table — a chart, a map, a word cloud. A viz
+   * template opts in via `VizSpec.kind`.
+   *
+   * Deliberately not `registerTableRenderer` above: that is a bare name → tag
+   * pair with no channels, options or icon, nothing reads its map, and its key
+   * means a view name rather than a drawing kind.
+   */
+  registerVisualization(spec: VisualizationSpec): Unregister;
   registerImporter(spec: ImporterSpec): Unregister;
   /**
    * Register a live-backend connector. The Connect menu lists these; the

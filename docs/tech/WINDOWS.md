@@ -202,6 +202,39 @@ Two behaviors are unique to view windows:
 View panels use a distinct chrome color (`color: '#0891b2'`, cyan) purely so
 they read visually as different from table windows.
 
+## Docked panes — the content stack
+
+`createPanel()` takes a single `content` element, so both managers now wrap their
+content in a **`panel-stack.ts`**: `[panes above][primary][panes below]`, with a
+drag splitter per pane. A docked visualization (`ViewInstance.dock`) is mounted
+into a host panel's stack instead of getting a window of its own — see
+[`VISUALIZATIONS.md`](./VISUALIZATIONS.md).
+
+**With no panes the stack renders its primary child and nothing else** — one flex
+wrapper, no listeners, no layout of its own — so every window that has nothing
+docked behaves exactly as it did before. That is the property the design rests
+on, and it is pinned by an e2e check on a plain table window rather than left to
+inspection.
+
+Three consequences for this file's concerns:
+
+- **Minimize still drops everything.** `mountContent` / `unmountContent` build and
+  tear down the *stack*, so a minimized window holds neither its grid nor any
+  pane, and neither holds a subscription.
+- **Maximize needs no new code.** The stack is `flex-direction: column` with the
+  primary at `flex: 1`, so a maximized panel just gives the primary more room;
+  the shell's counter-transform for the pan/zoom canvas is untouched.
+- **Splitter releases persist `ViewDock.size`** through the same
+  `queueGeometryWrite()` every other geometry write uses — on release, not per
+  pointermove, which would queue a store write per pixel. The clamping
+  arithmetic is pure and unit-tested in `stack-math.ts`.
+
+`panel-stacks.ts` is the registry that lets `view-window-manager.ts` find a table
+window's stack without importing `table-window-manager.ts` — the same decoupling
+`panel-registry.ts` (restack) and `shell-viewport.ts` (pan/zoom) already exist
+for. It notifies on change, because a host panel appearing is not a store change
+and a pane whose host opened second would otherwise never mount.
+
 ## The pan/zoom canvas (`panzoom.ts`)
 
 Both window managers render into `#easydb-panels-viewport`, an inner element

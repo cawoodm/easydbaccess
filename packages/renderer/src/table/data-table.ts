@@ -22,6 +22,7 @@ import { runColumnScript, runValidateScript } from '../util/column-script.js';
 import { arrayMembers } from '@easydb/shared';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { TABLE_LOADING_EVENT, tableLoadingState, type TableLoadingDetail } from './table-loading.js';
+import { emitVisibleRows, provideVisibleRows, visibleRowsWanted, type VisibleRowsDetail } from './visible-rows.js';
 import { formatByType, toDateInput, toDatetimeInput } from '../util/local-datetime.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
 
@@ -577,6 +578,8 @@ export class DataTable extends LitElement {
   }
   /** Visible-row count from the last render, emitted for the panel title. */
   private renderedCount = 0;
+  /** The last rendered row set, kept only while a docked pane is listening. */
+  private renderedRows: Row[] | null = null;
   private lastEmittedCount = -1;
   private lastEmittedTotal = -1;
   /** Tables with fewer rows than this skip virtualization (cheap to render). */
@@ -601,6 +604,7 @@ export class DataTable extends LitElement {
       this.viewportHeight = this.clientHeight;
     });
     this.resizeObs.observe(this);
+    this.registerRowsProvider();
     await this.bind();
   }
 
@@ -616,6 +620,11 @@ export class DataTable extends LitElement {
     this.unsubscribe?.();
     this.tableSubUnsub?.();
     this.viewSubUnsub?.();
+    // Otherwise a pane that mounts later pulls from a detached grid, which would
+    // answer with whatever rows it happened to be holding when it was unmounted.
+    this.provideUnsub?.();
+    this.provideUnsub = undefined;
+    this.providedKey = '';
     // A pending refetch would otherwise land on a detached element — and bump
     // the generation, so a later re-connect could discard its own fresh load.
     if (this.reloadTimer != null) {
@@ -711,6 +720,9 @@ export class DataTable extends LitElement {
   }
 
   override async updated(changed: Map<string, unknown>) {
+    // The ids usually arrive as attributes AFTER connectedCallback, so the key is
+    // only knowable here — and it changes when the host repoints this grid.
+    if (changed.has('tableId') || changed.has('viewInstanceId')) this.registerRowsProvider();
     if ((changed.has('tableId') || changed.has('viewInstanceId')) && this.tableId) {
       this.unsubscribe?.();
       this.tableSubUnsub?.();
@@ -729,6 +741,77 @@ export class DataTable extends LitElement {
     }
     if (!this.viewportHeight) this.viewportHeight = this.clientHeight;
     this.emitCount();
+    this.emitRows();
+  }
+
+  /**
+   * The payload a docked pane wants, computed on demand.
+   *
+   * Registered as a PROVIDER so a pane that mounts after this grid has already
+   * rendered can pull the current set instead of waiting for a re-render that may
+   * never come — see `visible-rows.ts`.
+   *
+   * `windowed` counts as truncated. In that mode `rows` is one page of the
+   * matching set, so a chart of it is a chart of a slice, and a slice that moves
+   * as the user scrolls. It has to say so; the pane's truncation note is the same
+   * one a capped read produces.
+   */
+  private visibleRowsDetail = (): VisibleRowsDetail | null => {
+    const key = this.visibleRowsKey;
+    if (!key) return null;
+    const rows = this.sortedRows();
+    return {
+      key,
+      rows,
+      total: Math.max(this.matchingTotal, this.windowOffset + rows.length),
+      truncated: this.truncated || this.windowed,
+      searching: this.searchIsActive,
+    };
+  };
+
+  private provideUnsub?: (() => void) | undefined;
+  private providedKey = '';
+
+  /**
+   * (Re)register as the provider for the current key, releasing the old one.
+   *
+   * Idempotent, because it is called from `updated()` — which runs on every
+   * render — as well as from `connectedCallback`.
+   */
+  private registerRowsProvider(): void {
+    const key = this.visibleRowsKey;
+    if (key === this.providedKey) return;
+    this.provideUnsub?.();
+    this.provideUnsub = undefined;
+    this.providedKey = key;
+    if (key) this.provideUnsub = provideVisibleRows(key, this.visibleRowsDetail);
+  }
+
+  /** The key both `easydb:visible-count` and `easydb:visible-rows` are keyed by. */
+  private get visibleRowsKey(): string {
+    return (this.viewMode ? this.viewInstanceId : this.tableId) || '';
+  }
+
+  /**
+   * Hand the current row set to any docked visualization watching this table.
+   *
+   * Unlike `emitCount` there is no change-detection here: comparing row arrays
+   * costs about what re-aggregating them does, and `emitVisibleRows` is already a
+   * no-op when nobody is listening — which is the case for every window that has
+   * no pane docked, i.e. almost all of them.
+   */
+  private emitRows(): void {
+    const key = this.visibleRowsKey;
+    const rows = this.renderedRows;
+    if (!key || !rows || !visibleRowsWanted(key)) return;
+    emitVisibleRows({
+      key,
+      rows,
+      // Same windowed caveat as `visibleRowsDetail` — one page is not the answer.
+      total: Math.max(this.matchingTotal, this.windowOffset + rows.length),
+      truncated: this.truncated || this.windowed,
+      searching: this.searchIsActive,
+    });
   }
 
   /**
@@ -1897,6 +1980,16 @@ export class DataTable extends LitElement {
     // hand the title means the MATCHING count — the user reaches all of them by
     // scrolling, and "500 of 609,283" would read as a filter nobody applied.
     this.renderedCount = this.windowed ? this.matchingTotal : rows.length;
+    // Same reuse for a docked visualization (see `visible-rows.ts`).
+    //
+    // Held UNCONDITIONALLY, not only while something is listening. Gating it on
+    // `visibleRowsWanted` looked like thrift and was the bug behind a pane that
+    // mounted after this render: at that render nobody was listening, so nothing
+    // was kept, so the publish in `updated()` had nothing to send — and the pane
+    // sat empty until something unrelated (a window resize) forced a re-render.
+    // It costs a reference to an array this render already built, replaced on the
+    // next one, so there was never anything to save.
+    this.renderedRows = rows;
     const cols = this.visibleColumns;
     const { slice, topPad, bottomPad } = this.virtualSlice(rows);
     const suggestions = this.computeFilterSuggestions();

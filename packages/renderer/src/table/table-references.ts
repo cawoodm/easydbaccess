@@ -111,6 +111,65 @@ export function renameProjectionOutputs(spec: ProjectionSpec, renames: readonly 
 }
 
 /**
+ * A view instance with its column references renamed, or null when it names none
+ * of them.
+ *
+ * This closes a gap that predates visualizations. A `ViewInstance` binds to
+ * columns BY NAME in four places — the token/channel `mapping`, the snapshotted
+ * `visibleColumns`, and both filter layers — and a field rename updated none of
+ * them. For an HTML view that silently empties a token; for a chart, whose
+ * `mapping` keys are data channels, it silently plots nothing, which reads as "no
+ * data" rather than as a broken reference. Same fix serves both.
+ */
+export function renameViewMappings(inst: ViewInstance, renames: readonly FieldRename[]): Partial<ViewInstance> | null {
+  const map = renameMap(renames);
+  if (map.size === 0) return null;
+  const patch: Partial<ViewInstance> = {};
+
+  const mapping = inst.mapping ?? {};
+  const nextMapping: Record<string, string> = {};
+  let mappingChanged = false;
+  for (const [token, field] of Object.entries(mapping)) {
+    const to = map.get(field);
+    nextMapping[token] = to ?? field;
+    if (to) mappingChanged = true;
+  }
+  if (mappingChanged) patch.mapping = nextMapping;
+
+  if (Array.isArray(inst.visibleColumns)) {
+    const next = inst.visibleColumns.map((f) => map.get(f) ?? f);
+    if (next.some((f, i) => f !== inst.visibleColumns[i])) patch.visibleColumns = next;
+  }
+
+  // Both filter layers are keyed by field, and a filter left on the old name
+  // matches nothing — the view opens empty with no funnel to clear it from.
+  const filters = renamedFilters(inst.filters, map);
+  if (filters) patch.filters = filters;
+  const pill = renamedFilters(inst.pillFilters, map);
+  if (pill) patch.pillFilters = pill;
+
+  // Column widths and sort are name-keyed too: a renamed column would otherwise
+  // lose the width the user set and silently stop being the sort column.
+  if (inst.columnWidths) {
+    const widths: Record<string, number> = {};
+    let changed = false;
+    for (const [field, w] of Object.entries(inst.columnWidths)) {
+      const to = map.get(field);
+      widths[to ?? field] = w;
+      if (to) changed = true;
+    }
+    if (changed) patch.columnWidths = widths;
+  }
+  if (inst.sortColumn && map.has(inst.sortColumn)) patch.sortColumn = map.get(inst.sortColumn) as string;
+  if (Array.isArray(inst.sortBy)) {
+    const next = inst.sortBy.map((sp) => (map.has(sp.field) ? { ...sp, field: map.get(sp.field) as string } : sp));
+    if (next.some((sp, i) => sp !== inst.sortBy?.[i])) patch.sortBy = next;
+  }
+
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+/**
  * A spec with `tableName`'s field renames applied to everything that names one
  * of them: the source columns read from that table, and the join keys on either
  * side of an equijoin. Returns null when the spec names none of them.

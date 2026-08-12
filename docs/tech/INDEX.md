@@ -16,6 +16,7 @@ changing code. For the user guide (how to use the app) see
 - [Server](SERVER.md)
 - [Windows](WINDOWS.md)
 - [Data Table](DATA-TABLE.md)
+- [Visualizations](VISUALIZATIONS.md) — charts, maps and word clouds, in a window or docked to a grid
 - [Row Memory](MEMORY.md)
 - [Testing](TESTING.md)
 - [Electron](ELECTRON.md)

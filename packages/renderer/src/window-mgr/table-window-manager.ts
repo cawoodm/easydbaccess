@@ -21,6 +21,8 @@ import { getContext, type AppContext } from '../app-context.js';
 import { openTableInfoDialog } from '../dialogs/table-info-dialog.js';
 import { initPanZoom } from './panzoom.js';
 import { createPanel, type PanelShellEl } from './panel-shell/panel-shell.js';
+import { createPanelStack, type PanelStack } from './panel-stack.js';
+import { registerPanelStack, unregisterPanelStack } from './panel-stacks.js';
 import { setPanZoom, shellViewport } from './shell-viewport.js';
 import { queueGeometryWrite } from './geometry-writes.js';
 import { countSuffix, importSuffix, IMPORT_PROGRESS_EVENT, VISIBLE_COUNT_EVENT, type ImportProgressDetail, type VisibleCountDetail } from './panel-title.js';
@@ -223,7 +225,19 @@ function openPanel(t: Table, ctx: AppContext): void {
     el.style.height = '100%';
     return el;
   };
-  const content: HTMLElement = startMinimized ? document.createElement('div') : makeGrid();
+  // Every table window's content goes through a stack so a visualization can be
+  // docked above or below the grid. An EMPTY stack renders its primary child and
+  // nothing else — one flex wrapper, no listeners — so a window with no panes
+  // behaves exactly as it did before docking existed. See `panel-stack.ts`.
+  let stack: PanelStack | null = null;
+  const stackKey = `table:${t.id}`;
+  const buildStack = (grid: HTMLElement): HTMLElement => {
+    stack = createPanelStack();
+    stack.setPrimary(grid);
+    registerPanelStack(stackKey, stack);
+    return stack.root;
+  };
+  const content: HTMLElement = startMinimized ? document.createElement('div') : buildStack(makeGrid());
   let contentEl: HTMLElement | null = startMinimized ? null : content;
 
   // Panel title row-count: "<name> (<count>)", or "<name> (<visible>/<total>)"
@@ -260,6 +274,12 @@ function openPanel(t: Table, ctx: AppContext): void {
 
   const unmountContent = (): void => {
     (footer as HTMLElement & { active: boolean }).active = false;
+    // Unregister BEFORE detaching: a docked pane's own element is inside this
+    // stack, so removing the stack drops the pane too — and a host that is gone
+    // must not still look available to the docked-pane reconciler.
+    unregisterPanelStack(stackKey);
+    stack?.destroy();
+    stack = null;
     contentEl?.remove();
     contentEl = null;
   };
@@ -268,7 +288,7 @@ function openPanel(t: Table, ctx: AppContext): void {
     const host = document.getElementById(panelId)?.querySelector('.jsPanel-content') as HTMLElement | null;
     if (!host) return;
     host.replaceChildren(); // drop the minimized placeholder / any stale node
-    const el = makeGrid();
+    const el = buildStack(makeGrid());
     host.appendChild(el);
     contentEl = el;
     (footer as HTMLElement & { active: boolean }).active = true;
@@ -288,6 +308,9 @@ function openPanel(t: Table, ctx: AppContext): void {
   // ("Go to <table>"); the delete-table button is the only path that removes
   // data.
   const onPanelClosed = async (): Promise<void> => {
+    unregisterPanelStack(stackKey);
+    stack?.destroy();
+    stack = null;
     document.removeEventListener(VISIBLE_COUNT_EVENT, onVisibleCount as EventListener);
     document.removeEventListener(IMPORT_PROGRESS_EVENT, onImportProgress as EventListener);
     // The rect has to be read BEFORE the panel leaves the map: the queued write

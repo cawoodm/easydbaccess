@@ -5,6 +5,7 @@ import {
   findTableReferences,
   renameProjectionOutputs,
   renameProjectionSourceFields,
+  renameViewMappings,
   repointProjectionSpec,
   specOf,
 } from '../../../packages/renderer/src/table/table-references.js';
@@ -228,5 +229,77 @@ describe('renameProjectionSourceFields', () => {
 
   it('is null when the spec names none of the renamed fields', () => {
     expect(renameProjectionSourceFields(joined(), 'People', [{ from: 'unused', to: 'x' }])).toBeNull();
+  });
+});
+
+// -- renameViewMappings ------------------------------------------------------
+//
+// A `ViewInstance` binds to columns BY NAME in several places, and a field rename
+// used to update none of them. For an HTML view that silently empties a token;
+// for a visualization, whose `mapping` keys are data channels, it silently plots
+// nothing — which reads as "no data" rather than as a broken reference.
+
+describe('renameViewMappings', () => {
+  const base = (over: Partial<ViewInstance> = {}): ViewInstance => ({
+    id: 'v1',
+    workspaceId: 'ws',
+    tableId: 't1',
+    templateId: 'tpl',
+    name: 'A view',
+    filters: {},
+    visibleColumns: [],
+    mapping: {},
+    updatedAt: 0,
+    ...over,
+  });
+
+  it('is a no-op when nothing was renamed', () => {
+    expect(renameViewMappings(base({ mapping: { TITLE: 'name' } }), [])).toBeNull();
+    expect(renameViewMappings(base({ mapping: { TITLE: 'name' } }), [{ from: 'x', to: 'y' }])).toBeNull();
+  });
+
+  it('rewrites a token mapping', () => {
+    const out = renameViewMappings(base({ mapping: { TITLE: 'name', BODY: 'text' } }), [{ from: 'name', to: 'label' }]);
+    expect(out?.mapping).toEqual({ TITLE: 'label', BODY: 'text' });
+  });
+
+  it('rewrites a visualization channel mapping — the same record', () => {
+    const out = renameViewMappings(base({ mapping: { CATEGORY: 'country', VALUE: 'amount' } }), [{ from: 'amount', to: 'total' }]);
+    expect(out?.mapping).toEqual({ CATEGORY: 'country', VALUE: 'total' });
+  });
+
+  it('rewrites visibleColumns in place, preserving order', () => {
+    const out = renameViewMappings(base({ visibleColumns: ['a', 'b', 'c'] }), [{ from: 'b', to: 'bee' }]);
+    expect(out?.visibleColumns).toEqual(['a', 'bee', 'c']);
+  });
+
+  it('rewrites both filter layers, since a filter on a dead name matches nothing', () => {
+    const out = renameViewMappings(base({ filters: { old: 'x' }, pillFilters: { old: '=y' } }), [{ from: 'old', to: 'new' }]);
+    expect(out?.filters).toEqual({ new: 'x' });
+    expect(out?.pillFilters).toEqual({ new: '=y' });
+  });
+
+  it('carries column widths and sort across, so a rename does not lose them', () => {
+    const out = renameViewMappings(base({ columnWidths: { old: 120 }, sortColumn: 'old', sortBy: [{ field: 'old', asc: true }] }), [{ from: 'old', to: 'new' }]);
+    expect(out?.columnWidths).toEqual({ new: 120 });
+    expect(out?.sortColumn).toBe('new');
+    expect(out?.sortBy).toEqual([{ field: 'new', asc: true }]);
+  });
+
+  it('only returns the parts that actually changed', () => {
+    const out = renameViewMappings(base({ mapping: { T: 'a' }, visibleColumns: ['b'], filters: { c: 'x' } }), [{ from: 'a', to: 'z' }]);
+    expect(Object.keys(out ?? {})).toEqual(['mapping']);
+  });
+
+  it('ignores a rename whose from and to are the same', () => {
+    expect(renameViewMappings(base({ mapping: { T: 'a' } }), [{ from: 'a', to: 'a' }])).toBeNull();
+  });
+
+  it('handles several renames at once', () => {
+    const out = renameViewMappings(base({ mapping: { A: 'one', B: 'two' } }), [
+      { from: 'one', to: 'uno' },
+      { from: 'two', to: 'dos' },
+    ]);
+    expect(out?.mapping).toEqual({ A: 'uno', B: 'dos' });
   });
 });
