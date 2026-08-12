@@ -321,3 +321,37 @@ describe('readRows with a slice', () => {
     expect(page.total).toBe(4);
   });
 });
+
+/**
+ * The cap bounds what comes BACK, not what is looked at.
+ *
+ * Applied first, it answers "these of the first 20,000" to a question about the
+ * table — so a row matching at 30,000 is simply absent and the grid looks like it
+ * filtered correctly. That is the one failure mode `truncated` cannot rescue,
+ * because the answer is not a superset of anything.
+ */
+describe('readRows caps the answer, not the input', () => {
+  const many = (n: number): Row[] => Array.from({ length: n }, (_, i) => ({ id: `r${i}`, tableId: 't', data: { name: `row ${i}`, kind: i === n - 1 ? 'rare' : 'common' }, updatedAt: 1 }));
+  const cols: ColumnSpec[] = [
+    { field: 'name', label: 'Name', type: 'string' },
+    { field: 'kind', label: 'Kind', type: 'string' },
+  ];
+
+  it('finds a match past the cap', async () => {
+    const { coll } = fakeColl({ rows: many(30_000), supportsQuery: false });
+    const page = await readRows(coll, { columns: cols, filters: { kind: '=rare' } }, 20_000);
+    expect(page.rows).toHaveLength(1);
+    expect(page.total).toBe(1);
+    // Nothing was cut, so nothing claims to have been.
+    expect(page.truncated).toBeUndefined();
+  });
+
+  it('cuts a result bigger than the cap, and says so', async () => {
+    const { coll } = fakeColl({ rows: many(30_000), supportsQuery: false });
+    const page = await readRows(coll, { columns: cols, filters: { kind: '=common' } }, 20_000);
+    expect(page.rows).toHaveLength(20_000);
+    // `total` is every match, which is what lets a note say how many are missing.
+    expect(page.total).toBe(29_999);
+    expect(page.truncated).toBe(true);
+  });
+});

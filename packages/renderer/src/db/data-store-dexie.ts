@@ -170,14 +170,17 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string, tables: DexieT
         if (all.length <= ROW_FETCH_CAP) return { rows: projectFields(all, q.fields), total: all.length };
         return { rows: projectFields(all.slice(0, ROW_FETCH_CAP), q.fields), total: await base().count(), truncated: true };
       }
-      // Bulk read, then cap — see the note above on why `limit()` is the slow way
-      // to bound a read that is not a page.
+      // Bulk read — see the note above on why `limit()` is the slow way to bound a
+      // read that is not a page.
       const all = await base().toArray();
-      const capped = all.length > ROW_FETCH_CAP;
-      const rows = capped ? all.slice(0, ROW_FETCH_CAP) : all;
       const columns = (await tables.get(tableId))?.columns ?? [];
-      const page = applyRowRequest(rows, { columns, ...q });
-      return { ...page, ...(capped ? { truncated: true } : {}) };
+      // Narrow FIRST, cap the answer second. The other way round answers "these of
+      // the first 20,000" to a question about the table: a row matching at 30,000 is
+      // simply absent, and the grid looks like it filtered correctly. `total` then
+      // counts every match, so the truncation note can say how many were left out.
+      const page = applyRowRequest(all, { columns, ...q });
+      const capped = page.rows.length > ROW_FETCH_CAP;
+      return { ...page, ...(capped ? { rows: page.rows.slice(0, ROW_FETCH_CAP), truncated: true } : {}) };
     },
     /**
      * The distinct values of one field, for the funnel's picker.
@@ -194,20 +197,21 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string, tables: DexieT
      * list this replaces, and one implementation cannot disagree with itself.
      */
     async distinct(q: DistinctQuery): Promise<DistinctPage> {
+      // Every row, not the first 20,000: this is the whole point of the refresh the
+      // user pressed. A value that only appears at row 30,000 must be offered, or
+      // the "whole column" is another partial list wearing a different label.
       const all = await coll.where('tableId').equals(tableId).toArray();
-      const capped = all.length > ROW_FETCH_CAP;
-      const scanned = capped ? all.slice(0, ROW_FETCH_CAP) : all;
       const columns = (await tables.get(tableId))?.columns ?? [];
       // The other columns' filters, applied here so the list stays faceted. The
       // caller already left this field's own filter out of `where`.
-      const narrowed = q.where ? applyRowRequest(scanned, { columns, ...q.where, offset: 0, limit: 0 }).rows : scanned;
+      const narrowed = q.where ? applyRowRequest(all, { columns, ...q.where, offset: 0, limit: 0 }).rows : all;
       const type = columns.find((c) => c.field === q.field)?.type;
       const { values, blanks } = facetCounts(narrowed, q.field, { type });
       const max = q.limit && q.limit > 0 ? q.limit : FACET_MAX_OPTIONS;
       return {
         values: values.slice(0, max),
         blanks,
-        ...(capped || values.length > max ? { truncated: true } : {}),
+        ...(values.length > max ? { truncated: true } : {}),
       };
     },
     subscribe(fn): Unsubscribe {

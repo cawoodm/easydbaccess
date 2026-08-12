@@ -157,10 +157,11 @@ export function projectFields(rows: Row[], fields: string[] | undefined): Row[] 
 /**
  * Read rows for `req`, letting `coll` narrow as much of it as it soundly can.
  *
- * `capWhenReadingAll` bounds the fallback read — the collection is about to hand
- * over everything, and an unbounded fetch of a 609k-row table is what crashed
- * the app on boot. It is a cap, not a page: the rows that come back are a
- * TRUNCATION, which the result reports as `truncated` so a caller showing a
+ * `capWhenReadingAll` bounds what comes BACK, not what is looked at. The whole
+ * table is filtered and only then cut to the cap — a cap applied first would
+ * answer "these of the first 20,000" to a question about the table, which is a
+ * wrong answer that looks like a right one: a row matching in row 30,000 simply
+ * would not be there. The cut is reported as `truncated`, so a caller showing a
  * count can say "20,000+" rather than "20,000". Pass 0 for no cap.
  */
 export async function readRows(coll: DataCollection<Row>, req: RowRequest, capWhenReadingAll = 0): Promise<RowPage> {
@@ -169,8 +170,11 @@ export async function readRows(coll: DataCollection<Row>, req: RowRequest, capWh
 
   if (!coll.query) {
     const all = await coll.find();
-    const hit = capWhenReadingAll > 0 && all.length >= capWhenReadingAll;
-    return { ...applyRowRequest(hit ? all.slice(0, capWhenReadingAll) : all, req), ...(hit ? { truncated: true } : {}) };
+    // The whole request over the whole table, THEN the cap. `total` counts every
+    // match, so the caller can say how many were left out.
+    const page = applyRowRequest(all, req);
+    const hit = capWhenReadingAll > 0 && page.rows.length > capWhenReadingAll;
+    return { ...page, ...(hit ? { rows: page.rows.slice(0, capWhenReadingAll), truncated: true } : {}) };
   }
 
   const q: RowQuery = {

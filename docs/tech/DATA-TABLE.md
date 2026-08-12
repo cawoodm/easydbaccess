@@ -351,6 +351,19 @@ full read of the table. A 20 000-row view read it four times over while it opene
 about five seconds. A request arriving mid-read is not dropped: it becomes one more
 read after the current one, so the last state still wins.
 
+**The cap bounds what comes BACK, not what is looked at.** `ROW_FETCH_CAP` is applied
+to the RESULT of a filter, search and sort, never to the rows going in. The other way
+round answers "these of the first 20,000" to a question about the table: a row
+matching at row 30,000 is simply absent, and the grid looks like it filtered
+correctly. That is the one failure `truncated` cannot rescue, because the answer is
+not a superset of the right one — it is a different one. `total` is then every match,
+so the truncation note can say how many were left out.
+
+This holds in both places that cap: `readRows`'s no-`query` fallback and the Dexie
+`query`. The rows were already read whole in both, so narrowing first costs nothing
+and is the only correct order. The SQLite store never had the problem — a `WHERE`
+runs before its `LIMIT`.
+
 **A slice is only ever pushed with every predicate.** `readRows` refuses otherwise
 (`sliceIsSound`), and if a backend applies the slice but reports `partial`, the
 answer is re-read WITHOUT the slice and the whole request re-applied in the

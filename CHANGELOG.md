@@ -6,6 +6,10 @@
 
 - ✨ A funnel on a big table says its value list may be short, and a refresh icon reads the whole column (v0.0.349)
 
+### Bugs
+
+- 🪲 A filter on a table over 20,000 rows only searched the first 20,000, so a match further in was missing (v0.0.350)
+
 ## 11 Aug 2026
 
 ### Features
