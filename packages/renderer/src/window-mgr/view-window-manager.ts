@@ -82,6 +82,19 @@ interface ViewEntry {
 const panels = new Map<string, ViewEntry>();
 
 /**
+ * Instances whose window this manager is closing ITSELF, so the shell's
+ * `onclosed` must not read it as the user shutting the view.
+ *
+ * Mirrors `externallyClosed` in `table-window-manager.ts`, and for a sharper
+ * reason: `onclosed` writes `open: false`, which is right when the user clicks X
+ * and WRONG when the window is closing because the instance just became DOCKED.
+ * `open` is the flag a pane is shown by too, so writing it there removed the pane
+ * the reconcile had just mounted — moving a chart to above/below the grid made it
+ * vanish altogether.
+ */
+const selfClosed = new Set<string>();
+
+/**
  * Template ids whose `kind` is `'viz'`, kept live.
  *
  * `openPanel` is synchronous (both reconcile loops call it in a tight pass), but
@@ -538,9 +551,12 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
       stack = null;
       panels.delete(inst.id);
       unregisterPanel(inst.id);
-      // The user closed the window → drop the persisted open flag so it isn't
-      // reopened on the next boot. (Closing because the flag already dropped is
-      // a harmless redundant write; the reconcile subscription is idempotent.)
+      // This manager closed the window itself (the flag dropped, or the instance
+      // became docked) — the store already says what should happen, so writing
+      // `open: false` here would either be redundant or actively wrong.
+      if (selfClosed.delete(inst.id)) return;
+      // The USER closed the window → drop the persisted open flag so it isn't
+      // reopened on the next boot.
       void ctx.store.viewInstances.patch(inst.id, { open: false, updatedAt: Date.now() }).catch(() => {
         /* instance may have been deleted — ignore */
       });
@@ -586,9 +602,17 @@ function closePanel(instanceId: string): void {
   panels.delete(instanceId);
   unregisterPanel(instanceId);
   try {
-    if (entry.panel.status !== 'closed') entry.panel.close();
+    // Marked only when a close is actually ISSUED, and immediately before it.
+    // Marking unconditionally leaks the id when the panel is already closed
+    // (`onclosed` never fires, so nothing clears it) — and a stale mark would
+    // then swallow the `open: false` write on the NEXT genuine user close,
+    // leaving a window the user shut reopening on the following boot.
+    if (entry.panel.status !== 'closed') {
+      selfClosed.add(instanceId);
+      entry.panel.close();
+    }
   } catch {
-    /* already gone */
+    selfClosed.delete(instanceId);
   }
 }
 

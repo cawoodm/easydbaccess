@@ -68,6 +68,44 @@ export function watchVisibleRows(key: string, fn: VisibleRowsListener): () => vo
   };
 }
 
+/**
+ * Providers that can produce the current set on demand, keyed the same way.
+ *
+ * Push alone is not enough. A pane mounts AFTER the grid has rendered, and the
+ * grid only publishes when somebody is already listening — so the first publish a
+ * new pane could possibly hear is the next time the grid re-renders, which for a
+ * table nobody is touching never comes. The pane sat empty saying "No data" beside
+ * a full grid.
+ *
+ * So: push for updates, PULL for the initial value.
+ */
+const providers = new Map<string, () => VisibleRowsDetail | null>();
+
+/** The grid registers itself here so a late listener can pull. */
+export function provideVisibleRows(key: string, fn: () => VisibleRowsDetail | null): () => void {
+  providers.set(key, fn);
+  return () => {
+    if (providers.get(key) === fn) providers.delete(key);
+  };
+}
+
+/**
+ * Ask for this key's rows now, rather than waiting to be told.
+ *
+ * Returns null when no grid is mounted for the key — a windowed visualization, or
+ * a host that is minimized. That is a real answer, not a failure: the caller reads
+ * the store itself in the first case and has nothing to draw in the second.
+ */
+export function requestVisibleRows(key: string): VisibleRowsDetail | null {
+  try {
+    return providers.get(key)?.() ?? null;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[visible-rows] provider failed', err);
+    return null;
+  }
+}
+
 /** Is anything listening for this key? The grid's guard before building a payload. */
 export function visibleRowsWanted(key: string): boolean {
   return (listeners.get(key)?.size ?? 0) > 0;
@@ -96,4 +134,5 @@ export function emitVisibleRows(detail: VisibleRowsDetail): void {
 /** Test seam: forget every registration. */
 export function __resetVisibleRowsWatchers(): void {
   listeners.clear();
+  providers.clear();
 }

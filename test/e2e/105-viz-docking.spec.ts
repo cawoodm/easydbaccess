@@ -172,6 +172,120 @@ test.describe('visualization docking', () => {
     await expect(page.locator('views-dialog dialog')).toContainText('Map data to columns');
   });
 
+  test('moving a windowed chart to docked takes effect immediately', async ({ page }) => {
+    // The bug: the window closing on its way to becoming a pane ran the panel's
+    // `onclosed`, which writes `open: false` — so the pane the reconcile had just
+    // mounted was immediately removed and the chart vanished entirely.
+    const id = await seed(page);
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    const dlg = page.locator('views-dialog dialog');
+    await dlg.getByRole('button', { name: '+ New chart' }).click();
+    await dlg.locator('input[type=text]').first().fill('Mover');
+    await dlg.getByRole('button', { name: 'Save' }).click();
+    await dlg.locator('ul.list li', { hasText: 'Mover' }).getByRole('button', { name: 'Use' }).click();
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+
+    // Starts as its own window.
+    const panel = page.locator(`#${panelDomId(id)}`);
+    await expect(page.locator('viz-panel')).toBeVisible();
+    await expect(panel.locator('viz-pane')).toHaveCount(0);
+
+    // Move it to docked from the chart's own Edit form.
+    const win = page.locator('.jsPanel', { has: page.locator('viz-panel') });
+    await win.locator('viz-footer').getByRole('button', { name: 'Edit visualization' }).click();
+    await expect(dlg).toBeVisible();
+    await dlg.locator('select').first().selectOption('above');
+    await dlg.getByRole('button', { name: 'Save' }).click();
+    await expect(dlg).toBeHidden();
+
+    // Immediately docked, and it STAYS docked — no window left behind.
+    await expect(panel.locator('.panel-stack-above viz-pane')).toHaveCount(1);
+    await expect(panel.locator('viz-pane viz-bar-chart')).toBeVisible();
+    await expect(page.locator('.jsPanel', { has: page.locator('viz-panel') }).locator('.jsPanel-ftr viz-footer')).toHaveCount(0);
+
+    // `open` must still be true — the pane is shown by the same flag.
+    const state = await page.evaluate(async () => {
+      const w = window as unknown as { __easydb: { store: { viewInstances: { find(): Promise<Array<{ open?: boolean; dock?: { edge: string } }>> } } } };
+      return (await w.__easydb.store.viewInstances.find()).map((v) => ({ open: v.open, edge: v.dock?.edge ?? null }));
+    });
+    expect(state[0]).toEqual({ open: true, edge: 'above' });
+  });
+
+  test('a docked pane and a windowed chart both offer a refresh', async ({ page }) => {
+    const id = await seed(page);
+    await dockChart(page, id, 'above');
+    const pane = page.locator(`#${panelDomId(id)} viz-pane`);
+    const refresh = pane.getByRole('button', { name: 'Refresh' });
+    await expect(refresh).toBeVisible();
+
+    // Redraws rather than emptying: the numbers are still there afterwards.
+    await refresh.focus();
+    await refresh.press('Enter');
+    await expect(pane.locator('viz-bar-chart table.a11y tbody tr')).toHaveCount(3);
+  });
+
+  test('a docked pane on an idle table has data without anyone touching it', async ({ page }) => {
+    // The push-only bug: the grid publishes its row set only when something is
+    // already listening, but the pane mounts AFTER the grid has rendered. On a
+    // reload nobody touches the table, so the next publish never came and the pane
+    // sat on "No data to chart." beside a grid showing four rows — permanently, not
+    // slowly. Hence the PULL in `viz-panel`'s docked branch.
+    const id = await seed(page);
+    await dockChart(page, id, 'above');
+    await page.reload();
+    await waitForPanel(page, id);
+
+    const panel = page.locator(`#${panelDomId(id)}`);
+    const chart = panel.locator('viz-pane viz-bar-chart');
+    await expect(chart).toBeVisible();
+    await expect(chart.locator('table.a11y tbody tr')).toHaveCount(3);
+    await expect(chart).not.toContainText('No data to chart.');
+  });
+
+  test('a docked word cloud has its words without a reload or a resize', async ({ page }) => {
+    // Same race as above, seen from the word cloud — where it was reported and where
+    // it looked worst, because the cloud's own empty state ("No words to show.")
+    // reads as a verdict on the data rather than as "not loaded yet". The pane had
+    // claimed to be loaded with no rows; resizing the window forced the grid to
+    // re-render, and only then did the words appear.
+    //
+    // Both orderings are covered: docking onto an already-rendered grid (pane after
+    // grid, which needs the pull) and a reload (either order, which needs the grid
+    // to have kept a publishable set).
+    const id = await createTable(page, 'Notes', [{ field: 'body' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ body: 'alpha beta alpha' }, { body: 'alpha gamma' }]);
+
+    const dlg = page.locator('views-dialog dialog');
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    await expect(dlg).toBeVisible();
+    await dlg.getByRole('button', { name: '+ New chart' }).click();
+    await dlg.locator('input[type=text]').first().fill('Cloud');
+    await dlg.locator('select').first().selectOption('wordcloud');
+    await dlg.getByRole('button', { name: 'Save' }).click();
+    await dlg.locator('ul.list li', { hasText: 'Cloud' }).getByRole('button', { name: 'Use' }).click();
+    await dlg.locator('select').first().selectOption('below');
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+    await expect(dlg).toBeHidden();
+
+    const cloud = page.locator(`#${panelDomId(id)} viz-pane viz-word-cloud`);
+    await expect(cloud.locator('text').filter({ hasText: 'alpha' }).first()).toHaveText(/alpha/);
+
+    await page.reload();
+    await waitForPanel(page, id);
+    const after = page.locator(`#${panelDomId(id)} viz-pane viz-word-cloud`);
+    await expect(after).toBeVisible();
+    // No resize, no click, no filter — the words must simply be there.
+    await expect(after.locator('text').filter({ hasText: 'alpha' }).first()).toHaveText(/alpha/);
+    await expect(after).not.toContainText('No words to show.');
+  });
+
   test('closing a pane leaves the grid alone', async ({ page }) => {
     const id = await seed(page);
     await dockChart(page, id, 'below');

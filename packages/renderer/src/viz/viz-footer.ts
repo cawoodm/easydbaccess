@@ -89,6 +89,12 @@ export class VizFooter extends LitElement {
     this.kindLabel = (kind ? ctx.registries.visualizations.get(kind)?.label : '') ?? '';
   }
 
+  /** Ask the panel to re-read its data. */
+  private async refresh(): Promise<void> {
+    const panel = this.closest('.jsPanel')?.querySelector('viz-panel') as (HTMLElement & { refreshNow?: () => Promise<void> }) | null;
+    await panel?.refreshNow?.();
+  }
+
   /**
    * Save the drawn numbers as CSV.
    *
@@ -135,6 +141,7 @@ export class VizFooter extends LitElement {
     return html`
       <button @click=${this.edit} title="Edit this visualization: which columns feed which channel" aria-label="Edit visualization"><span class="mi sm">edit</span>Edit</button>
       <button @click=${() => void this.editTemplate()} title="Edit the chart definition: kind, aggregate and options" aria-label="Edit chart definition"><span class="mi sm">tune</span>Chart</button>
+      <button @click=${() => void this.refresh()} title="Re-read the data and redraw" aria-label="Refresh"><span class="mi sm">refresh</span></button>
       <button @click=${() => void this.exportCsv()} title="Save the numbers behind this chart as a CSV file" aria-label="Export as CSV"><span class="mi sm">download</span>CSV</button>
       <span class="spacer"></span>
       ${this.kindLabel ? html`<span class="kind">${this.kindLabel}</span>` : nothing}

@@ -32,7 +32,7 @@ import { ROW_FETCH_CAP } from '../db/data-store-ipc.js';
 import { truncationNote } from '../db/truncation-note.js';
 import { readSortSpecs } from '../table/row-sort.js';
 import { runColumnScript } from '../util/column-script.js';
-import { watchVisibleRows, type VisibleRowsDetail } from '../table/visible-rows.js';
+import { requestVisibleRows, watchVisibleRows, type VisibleRowsDetail } from '../table/visible-rows.js';
 import { aggregateRows, type VizFrame } from './viz-aggregate.js';
 import { parseWordList, resolveStopWords, wordFrequencies } from './word-frequency.js';
 import { effectiveVizOptions } from './viz-options.js';
@@ -179,6 +179,50 @@ export class VizPanel extends LitElement {
     return { filename, text: frameToCsv(frame) };
   }
 
+  /**
+   * Re-read the data behind this visualization, bypassing any cache.
+   *
+   * `reload()` re-reads the store; this additionally calls the collection's own
+   * `refresh()` where it has one, which is what makes it meaningful for a
+   * source-backed table (a live Datasette connection caches its reads, so a plain
+   * re-read would hand back the same rows).
+   *
+   * A DOCKED pane is fed by the grid rather than the store, so its refresh asks
+   * the GRID to re-read — otherwise the button would appear to do nothing on
+   * exactly the tables where refreshing matters.
+   */
+  async refreshNow(): Promise<void> {
+    const tableId = this.instance?.tableId;
+    if (tableId) {
+      const ctx = await getContext();
+      // Bypasses a caching provider where there is one (a live Datasette
+      // connection would otherwise hand back the rows it already has). A local
+      // Dexie collection has no `refresh` and is already live, so this is a
+      // deliberate no-op there rather than a missing case.
+      await ctx.store
+        .rows(tableId)
+        .refresh?.()
+        .catch(() => {
+          /* a provider that cannot refresh is not an error */
+        });
+    }
+    const dock = this.instance?.dock;
+    if (dock) {
+      // Docked: the GRID owns the read and republishes on its own subscription,
+      // so re-binding here would fight it. Pull its current set instead — a
+      // re-render it had no reason to do would otherwise leave this pane on stale
+      // rows — then recompute, which also redoes the drawing: a word cloud
+      // re-lays-out, which is the visible half of what pressing refresh asks for.
+      const key = dock.host.kind === 'view' ? dock.host.viewInstanceId : dock.host.tableId;
+      const now = requestVisibleRows(key);
+      if (now) this.acceptPublishedRows(now);
+      else this.recompute();
+      this.requestUpdate();
+      return;
+    }
+    await this.reload();
+  }
+
   /** Re-read everything. Called by the window manager on an instance edit. */
   async reload(): Promise<void> {
     this.teardown();
@@ -271,7 +315,22 @@ export class VizPanel extends LitElement {
       // window's under the table id.
       const key = inst.dock.host.kind === 'view' ? inst.dock.host.viewInstanceId : inst.dock.host.tableId;
       this.dockUnsub = watchVisibleRows(key, (d) => this.acceptPublishedRows(d));
-      this.loaded = true;
+      // Then PULL, because the grid publishes only when somebody is already
+      // listening and we just became that somebody — one render too late. Without
+      // this the pane says "No data" beside a full grid until something happens to
+      // make the grid re-render, which for a table nobody is touching is never.
+      // Then PULL, because the grid publishes only when somebody is already
+      // listening and we just became that somebody — one render too late. Without
+      // this the pane said "No data" beside a full grid until something happened to
+      // make the grid re-render, which for a table nobody is touching is never.
+      //
+      // A null answer means the grid is not mounted YET (on a reload both mount at
+      // once and the order is not ours to choose), so stay on "Loading…" rather
+      // than claim to be loaded with no rows — that is what made a reloaded word
+      // cloud say "No words to show." until it was resized. Its own render is what
+      // finally published, and `acceptPublishedRows` sets `loaded` then.
+      const now = requestVisibleRows(key);
+      if (now) this.acceptPublishedRows(now);
       return;
     }
 

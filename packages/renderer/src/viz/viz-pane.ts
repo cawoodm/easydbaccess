@@ -143,6 +143,12 @@ export class VizPane extends LitElement {
     openViewsDialog(inst.tableId, { editInstanceId: this.viewInstanceId });
   }
 
+  /** Ask the embedded panel to re-read its data. */
+  private async refresh(): Promise<void> {
+    const panel = this.renderRoot.querySelector('viz-panel') as (HTMLElement & { refreshNow?: () => Promise<void> }) | null;
+    await panel?.refreshNow?.();
+  }
+
   /** Undock: clear `dock` and let the reconciler open it as a window instead. */
   private undock(): void {
     void this.patch({ dock: undefined });
@@ -162,6 +168,9 @@ export class VizPane extends LitElement {
         <span class="title" title=${this.label}>${this.label}</span>
         <button @click=${() => void this.edit()} title="Edit this visualization" aria-label="Edit visualization">
           <span class="mi sm">edit</span>
+        </button>
+        <button @click=${() => void this.refresh()} title="Re-read the data and redraw" aria-label="Refresh">
+          <span class="mi sm">refresh</span>
         </button>
         <button @click=${this.undock} title="Open in its own window" aria-label="Open in its own window">
           <span class="mi sm">open_in_new</span>
