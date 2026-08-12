@@ -253,6 +253,19 @@ about thirty rows on screen, where the same query for 200 rows takes **13 ms**.
 
 So a big table is now read one PAGE at a time.
 
+Everything below is measured on the same 609,283-row table in the browser, Dexie over
+IndexedDB (`test/e2e/zz-bigtable-perf` is not committed — it seeds for 22 minutes):
+
+| Operation | Cost |
+| --- | --- |
+| Open the window, first row on screen | **846 ms** (from navigation, including boot) |
+| Read one 500-row page | ~300 ms |
+| `count()` the table | 14.0 s |
+| `subscribe` — the whole table, to be told one row changed | 25.0 s |
+| `watch` — the same signal, no rows | **1 ms** |
+| `find()` the whole table | 21.6 s |
+| A 500-row page at offset 500,000 | 25.7 s (see the cursor note below) |
+
 - **The threshold is a setting** — `grid:windowRowsFrom` on the Table grid tab,
   default **50 000**, `0` never windows
   ([`table/grid-settings.ts`](../../packages/renderer/src/table/grid-settings.ts)).
@@ -261,11 +274,36 @@ So a big table is now read one PAGE at a time.
 - **Three conditions, all deliberate** (`shouldWindow`): the collection must
   implement `query`, the setting must be on, and `tableTotal` must reach the
   threshold. Both stores answer a `query` now, so this works in the browser and on
-  the desktop.
-- **The count comes first.** `loadRows` asks `count()` BEFORE reading rows, because
-  the count is what decides whether to window; asking afterwards would mean paying
-  for one whole-table read before ever windowing it. Counting is cheap
-  (`SELECT COUNT(*)`), fetching to measure is what was not.
+  the desktop. The first two are `canWindow` — they are known without touching data,
+  which is what lets an unmeasured table be read as a page before anything counts it.
+- **Nothing waits for a count.** This was the opposite of the original design, and
+  the original design was wrong about one fact: counting is NOT cheap. `SELECT
+  COUNT(*)` is, but IndexedDB has to walk the whole `tableId` range. Measured on
+  609,283 rows: **14.0 s to count, against 0.3 s to read the 500-row page**, and a
+  raw `IDBIndex.count(range)` is no faster — so there is no better path to find. The
+  grid was paying that 14 s twice before it drew a row: once in `loadRows` to pick
+  the shape, once inside Dexie's paged `query` to fill in `total`.
+
+  So `RowQuery.countTotal: false` exists, a windowed read always passes it, and
+  `QueryPage.total` comes back as `-1` — the same "unknown count" sentinel
+  `countSuffix` already used. The rows paint, and the size follows from `countSoon`.
+  It is a HINT: the SQLite store ignores it and counts anyway, because there it
+  really is free.
+- **The window shape is a guess until something counts.** An unmeasured table is read
+  as a page on the assumption that it is big. Three things then settle it:
+  a page that comes back SHORT at offset 0 is the whole answer (`windowed` goes back
+  to false and the count is exact — no background count at all); a read that returned
+  a real `total` settles it inline; anything else gets `countSoon`. `settleWindow`
+  re-reads the table when the guess was wrong — one extra read, of a table small
+  enough for the read to be cheap by definition.
+- **`countSoon` throttles, and stands aside for an import.** A total on screen only
+  has to keep up, not be exact to the write, so a burst of writes costs one count
+  (`COUNT_REFRESH_MS`, 5 s, trailing). While `externalLoading` is set an importer is
+  filling the table and publishing its own progress in the titlebar — counting
+  between its chunks would cost more than the import.
+- **`matchingTotal` never shrinks below a size already measured.** An uncounted page
+  at offset 5,000 only proves 5,500 rows exist, and a scrollbar that shrank under the
+  hand holding it is worse than one that is briefly short.
 - **The threshold read is awaited in `connectedCallback`.** Fired and forgotten, it
   lands after the first fetch — so the first read of a big table is the eager one,
   followed by a second to correct it. Both of the reads this exists to avoid.
@@ -325,8 +363,16 @@ and not the other
 
 - A **plain slice** — no filter, no search, no sort (`isPlainSlice`) — is a real
   windowed read: `offset().limit()` walks the `tableId` index and reads only the
-  page, and `count()` gives the total without reading a row. This is the case that
-  matters, because a big table is scrolled far more often than it is filtered.
+  page. This is the case that matters, because a big table is scrolled far more often
+  than it is filtered. It honors `countTotal: false` and answers `total: -1`, which is
+  what keeps the count off the path to first paint.
+
+  **`offset` is a cursor walk, one step per row skipped**, because nothing indexes a
+  row's POSITION. The first page costs ~300 ms and a page at offset 500,000 costs
+  **25.7 s** — so scrolling to the far end of a 609k-row table is still slow, even
+  though opening it no longer is. Fixing that needs keyset paging (continue from the
+  last key of the previous page instead of counting off from the start), which needs a
+  compound `[tableId+id]` index and so a Dexie schema bump. Not done.
 - **Anything else** has to read the rows to match them: our filter language is not
   an IndexedDB query, and nothing indexes the fields inside `data`. That read is
   capped at `ROW_FETCH_CAP` and a capped answer reports `truncated`.
@@ -343,6 +389,27 @@ rows alone, which was harmless while the grid held every row and re-narrowed in
 memory. Holding a page, re-sorting sorts 500 rows out of 609,283. `adoptQueryState`
 compares before it adopts, so the grid's own write coming back through the
 subscription is not a change and does not start a second read.
+
+**Nothing else reads the table to learn one number.** Two readers used to, and both
+were a second copy of the read the grid had just been taught to avoid:
+
+- The **panel footer**'s row count called `subscribe`, which materializes the whole
+  collection so it has an array to hand over, and keeps only `.length` — a full read
+  on open and another on every write. The grid already publishes the same figure for
+  the titlebar (`easydb:visible-count`), so the footer listens for that instead and
+  reads nothing at all. `panel-title.ts` remembers the last count per key, because the
+  event only fires on a change and a footer can mount after its grid has settled.
+- **`auto-renderer`** ran `find()` and kept the first 50 rows, so a 609,283-row import
+  paid for a whole extra read of itself the moment it finished. It asks `readRows` for
+  a page of 50 now.
+
+The Dexie rows collection also implements **`watch`** — the bare change signal, with
+no rows attached — over `Dexie.on('storagemutated')`, the event `liveQuery` itself
+listens to. This code once carried a comment explaining why that was impossible: a
+cheap `liveQuery` key would stay silent when a cell is edited in place. True of a key,
+and beside the point — `storagemutated` fires on the write itself, before any query
+re-runs, so an in-place edit signals like any other mutation. The grid had been paying
+a whole-table read per write for the privilege of being told about it.
 
 **A view window collapses overlapping reads** (`view-window.ts`'s `loadRows`). The
 rows subscription delivers once on connect — the same read `reload` has already

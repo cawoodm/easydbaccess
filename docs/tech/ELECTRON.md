@@ -95,7 +95,7 @@ offered as an import of the same file, and `unreadable` (not a SQLite database
 at all) is reported as such. Nothing is written until the user has agreed to
 one of those.
 
-The renderer side is [`db/data-store-ipc.ts`](../../packages/renderer/src/db/data-store-ipc.ts),
+The renderer side is [`db/data-store-bridge.ts`](../../packages/renderer/src/db/data-store-bridge.ts),
 selected in `app-context.ts` when `window.easydb?.store` exists. The
 plugin-facing `DataCollection<T>` contract is identical either way, so no
 plugin knows the difference — and `renderer/src/plugins/electron-db.ts` (the

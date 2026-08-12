@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { createTable, waitForPanel } from './helpers.js';
+import { chooseSimpleStorage, createTable, waitForPanel } from './helpers.js';
 
 /**
  * Creating a workspace asks what it starts with: everything, settings only, or
@@ -33,6 +33,7 @@ test.describe('new workspace clone choice', () => {
     await input.waitFor();
     await input.fill(NEW_WS);
     await dialogs.getByRole('button', { name: 'OK', exact: true }).click();
+    await chooseSimpleStorage(page);
     // The click navigates to ?space=<new>, so wait for the new URL and then for
     // the app hook of the freshly booted page — evaluating any earlier races the
     // navigation and hits either the old context or a page with no __easydb yet.

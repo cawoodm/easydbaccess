@@ -59,7 +59,7 @@ without spinning up a browser. Examples scattered through this codebase:
 | `plugins/datasette-client.test.ts`, `plugins/datasette-collection.test.ts` | Datasette URL parsing, paging, column inference |
 | `plugins/read-url.test.ts` | CORS-friendly URL rewriting |
 | `db/routed-data-store.test.ts` | The row-source routing seam (see `STORAGE.md`) — verifies it's a strict no-op for tables with no `source` |
-| `db/data-store-ipc.test.ts` | The Electron-side `DataStore`: that it satisfies the same `DataCollection<T>` contract over a fake IPC bridge, injects `tableId` on `rows(id)` writes, and re-runs subscriptions on a `store:changed` broadcast |
+| `db/data-store-bridge.test.ts` | The Electron-side `DataStore`: that it satisfies the same `DataCollection<T>` contract over a fake IPC bridge, injects `tableId` on `rows(id)` writes, and re-runs subscriptions on a `store:changed` broadcast |
 | `plugins/electron-db.test.ts` | The Open / Import decision tree with a fake `window.easydb.db` bridge — a `foreign` file offers Import instead of opening, an `unreadable` one is reported, and collisions map to Overwrite / Rename / Skip. The OS file dialog can't be scripted, so the flows are exported for exactly this |
 
 None of these import Lit, Dexie, or the panel shell. When you're about to add logic

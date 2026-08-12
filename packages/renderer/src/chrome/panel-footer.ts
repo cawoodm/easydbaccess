@@ -3,6 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeSVG } from 'lit/directives/unsafe-svg.js';
 import type { ColumnSpec, Table, TableButtonSpec } from '@easydb/shared';
 import { getContext } from '../app-context.js';
+import { VISIBLE_COUNT_EVENT, visibleCountOf, type VisibleCountDetail } from '../window-mgr/panel-title.js';
 import { materialIconStyles } from './material-icon-css.js';
 
 /**
@@ -90,9 +91,8 @@ export class PanelFooter extends LitElement {
 
   @property({ type: String }) tableId = '';
   /**
-   * When false the footer does NOT subscribe to rows (its count would trigger a
-   * fetch for a live/remote table). The window manager sets it false for a
-   * minimized window so a minimized table loads nothing until it's expanded.
+   * When false the footer shows no row count. The window manager sets it false for
+   * a minimized window, which has no grid to take a count from anyway.
    */
   @property({ type: Boolean }) active = true;
   @state() private rowCount = 0;
@@ -105,10 +105,8 @@ export class PanelFooter extends LitElement {
    * stays ignorant of which plugins exist.
    */
   @state() private fixedSchemaSources: Set<string> = new Set();
-  private unsubRows?: (() => void) | undefined;
   private unsubTables?: () => void;
-  // Synchronous guard so an `active` toggle + connectedCallback can't
-  // double-subscribe across their awaits.
+  // Guard so an `active` toggle + connectedCallback can't double-listen.
   private rowsActive = false;
 
   override async connectedCallback() {
@@ -142,18 +140,37 @@ export class PanelFooter extends LitElement {
     }
   }
 
-  private async startRows() {
+  /**
+   * Take the row count from the grid instead of reading the rows.
+   *
+   * The footer wants one NUMBER, and it used to `subscribe`, which materializes
+   * every row so it has an array to pass and then keeps only `.length`. On a
+   * 609,283-row table that was a full read on open and another on every write —
+   * a second copy of the read the grid had just been taught to avoid.
+   *
+   * The grid already publishes the same figure for the panel titlebar
+   * (`easydb:visible-count`), computed from a count it has anyway, so the footer
+   * listens for it. Nothing here reads the store at all now.
+   */
+  private startRows() {
     if (this.rowsActive) return;
     this.rowsActive = true;
-    const ctx = await getContext();
-    if (!this.rowsActive) return; // stopped during the await
-    this.unsubRows = ctx.store.rows(this.tableId).subscribe((r) => (this.rowCount = r.length));
+    // The event only fires on a change, so a footer that mounts after its grid
+    // settled needs the remembered value.
+    const known = visibleCountOf(this.tableId);
+    if (known) this.rowCount = known.total;
+    document.addEventListener(VISIBLE_COUNT_EVENT, this.onVisibleCount as EventListener);
   }
+
+  private onVisibleCount = (e: Event) => {
+    const d = (e as CustomEvent<VisibleCountDetail>).detail;
+    if (d?.key !== this.tableId) return;
+    this.rowCount = d.total;
+  };
 
   private stopRows() {
     this.rowsActive = false;
-    this.unsubRows?.();
-    this.unsubRows = undefined;
+    document.removeEventListener(VISIBLE_COUNT_EVENT, this.onVisibleCount as EventListener);
   }
 
   private async addRow() {

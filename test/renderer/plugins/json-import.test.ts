@@ -536,3 +536,82 @@ describe('parsedToTables: native table columns', () => {
     expect(t?.columns[0]).toEqual({ field: 'a', label: 'A', type: 'string' });
   });
 });
+
+// A dump whose ROWS carry a field its own column list omits. `bible.db.json` is the
+// real case: it declares `book` and no `title`, and 368 of its 1,258 rows carry
+// `title` instead of `book` — one field under two names, written by two generations
+// of the exporter. Those rows imported blank, and the value was unreachable: no
+// column, so no header, no funnel and nothing to sort by.
+describe('parsedToTables: fields the rows carry but the columns omit', () => {
+  it('adds a column for an undeclared field, at the end', () => {
+    const dump = {
+      tables: [
+        {
+          name: 'Bible',
+          columns: [
+            { field: 'book', label: 'Book', type: 'string', width: 270 },
+            { field: 'text', label: 'Text', type: 'string' },
+          ],
+          rows: [
+            { book: 'Genesis 1', text: 'a' },
+            { title: 'Psalms 50', text: 'b' },
+          ],
+        },
+      ],
+    };
+    const [t] = parsedToTables(dump, 'fallback');
+    expect(t?.columns.map((c) => c.field)).toEqual(['book', 'text', 'title']);
+    // The declared columns are untouched — width and label included.
+    expect(t?.columns[0]).toEqual({ field: 'book', label: 'Book', type: 'string', width: 270 });
+    expect(t?.columns[2]).toEqual({ field: 'title', label: 'title', type: 'string' });
+    // And the rows are unchanged: the value was always there.
+    expect(t?.rows[1]).toEqual({ title: 'Psalms 50', text: 'b' });
+  });
+
+  it('types the added column from its values, like any inferred column', () => {
+    const dump = {
+      tables: [
+        {
+          name: 'T',
+          columns: [{ field: 'a', label: 'A', type: 'string' }],
+          rows: [
+            { a: 'x', n: 1, flag: true, tags: ['p', 'q'] },
+            { a: 'y', n: 2, flag: false, tags: ['r'] },
+          ],
+        },
+      ],
+    };
+    const [t] = parsedToTables(dump, 'fallback');
+    const byField = new Map(t?.columns.map((c) => [c.field, c.type]));
+    expect(byField.get('n')).toBe('number');
+    expect(byField.get('flag')).toBe('boolean');
+    expect(byField.get('tags')).toBe('array');
+  });
+
+  it('leaves a deliberately deleted column deleted', () => {
+    // `deletedColumns` is what tells a deletion apart from an omission. Without it
+    // every column the user removed would come back on the next round trip, since
+    // the rows still hold its values.
+    const dump = {
+      tables: [
+        {
+          name: 'T',
+          columns: [{ field: 'a', label: 'A', type: 'string' }],
+          deletedColumns: ['old'],
+          rows: [{ a: 'x', old: 'ghost' }],
+        },
+      ],
+    };
+    const [t] = parsedToTables(dump, 'fallback');
+    expect(t?.columns.map((c) => c.field)).toEqual(['a']);
+    expect(t?.deletedColumns).toEqual(['old']);
+  });
+
+  it('adds nothing when the dump is self-consistent', () => {
+    const dump = {
+      tables: [{ name: 'T', columns: [{ field: 'a', label: 'A', type: 'string' }], rows: [{ a: 'x' }, { a: 'y' }] }],
+    };
+    const [t] = parsedToTables(dump, 'fallback');
+    expect(t?.columns).toHaveLength(1);
+  });
+});

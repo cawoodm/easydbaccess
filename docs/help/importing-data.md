@@ -159,3 +159,9 @@ Drop the file and it restores in one go. Point the Import dialog at one and it
 asks first, because you may have meant to import only its tables as plain data.
 Either way you are then asked whether to merge it into your current workspace or
 replace everything.
+
+If some rows in the file hold a field the file's own column list does not name, a
+column is added for it at the end. This happens with a file written by an older
+version, where the same field went under two names — without the added column those
+rows looked empty, even though the values were there. Rename or delete the extra
+column if you do not want it.

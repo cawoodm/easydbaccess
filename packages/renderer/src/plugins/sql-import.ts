@@ -59,7 +59,7 @@ interface SqlHandle {
 const importerSpec: ImporterSpec = {
   id: 'sql',
   label: 'SQL script (CREATE TABLE / INSERT / SELECT)',
-  icon: 'database',
+  icon: 'storage',
   order: 30,
   accept: ['.sql', 'application/sql', 'text/sql', 'application/x-sql'],
   supports: { url: true, file: true, text: true, multiTable: true, kernel: true },

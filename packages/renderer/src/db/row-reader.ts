@@ -56,6 +56,12 @@ export interface RowRequest {
   fields?: string[] | undefined;
   offset?: number | undefined;
   limit?: number | undefined;
+  /**
+   * Pass the store `countTotal: false` — "the rows now, the count later". Only
+   * reaches a store that can answer a `query`, and only when the whole request went
+   * down; a request finished in memory has counted the rows already, for free.
+   */
+  countTotal?: boolean | undefined;
 }
 
 /**
@@ -189,6 +195,11 @@ export async function readRows(coll: DataCollection<Row>, req: RowRequest, capWh
   if (sliceIsSound) {
     if (req.offset != null) q.offset = req.offset;
     if (req.limit != null) q.limit = req.limit;
+    // "Skip the count" only makes sense on an answer this module returns as it
+    // came. Where the request is finished here, the rows are in hand and counting
+    // them costs nothing — so the flag is dropped rather than passed on to a store
+    // whose `total` would then be discarded anyway.
+    if (req.countTotal === false) q.countTotal = false;
   } else if (capWhenReadingAll > 0) {
     q.limit = capWhenReadingAll;
   }

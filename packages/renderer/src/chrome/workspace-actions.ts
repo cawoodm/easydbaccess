@@ -5,16 +5,35 @@
 // They used to live inside `workspace-selector.ts`, which meant the palette
 // could not reach them and only a mouse could get at them.
 
+import type { Dialogs } from '@easydb/shared';
 import { forgetLastWorkspace, getContext, slugifyWorkspace } from '../app-context.js';
 import { getDb } from '../db/index.js';
 import { cloneWorkspace, type CloneMode } from '../db/clone-workspace.js';
 import { countWorkspaceContents, deleteWorkspace } from '../db/delete-workspace.js';
+import { EDB_EXTENSION } from '../db/edb/file-handle.js';
+import { adoptEdbFile, buildEdbFile, chooseEdbTarget } from '../db/edb/new-file.js';
 
 // The three answers of the "what should it start with?" question. Constants
 // because the choice dialog reports back the label the user picked.
 const CLONE_ALL = 'Clone everything (tables, views, settings)';
 const CLONE_SETTINGS = 'Clone settings only (no data)';
 const CLONE_NOTHING = 'Empty workspace';
+
+// Where the new workspace's data lives. Simple is what every workspace has been
+// until now; Advanced puts it in a real SQLite file the user owns.
+const SIMPLE = 'Simple — in this browser (IndexedDB)';
+const ADVANCED = 'Advanced — in a SQLite file you save (.edb)';
+
+/**
+ * Can this browser keep a workspace in a file?
+ *
+ * Needs a Web Worker for sqlite-wasm. Electron is excluded because it has its own
+ * `.db` file operations, and offering two file systems in one build would be two
+ * answers to one question.
+ */
+function canUseFileStorage(): boolean {
+  return typeof Worker === 'function' && !window.easydb?.store;
+}
 
 /**
  * Open a workspace by RELOADING with `?space=<name>`. A reload is the cleanest
@@ -53,24 +72,59 @@ export async function switchWorkspaceFlow(): Promise<void> {
   openWorkspace(pick);
 }
 
-/** Name a new workspace, choose what it inherits, create it and open it. */
+/** Name a new workspace, choose where it is stored and what it inherits, then open it. */
 export async function newWorkspaceFlow(): Promise<void> {
   const ctx = await getContext();
-  const name = await ctx.api.ui.dialogs.prompt('Name the new workspace. It will become active after creation.', '', 'New workspace');
-  if (!name || !name.trim()) return;
+  const typed = await ctx.api.ui.dialogs.prompt('Name the new workspace. It will become active after creation.', '', 'New workspace');
+  if (!typed || !typed.trim()) return;
+  const name = typed.trim();
+
+  // Asked before anything else, because the answer decides which of two entirely
+  // different creation paths runs. Only asked where a file is possible at all —
+  // a question with one usable answer is not a question.
+  if (canUseFileStorage()) {
+    const where = await ctx.api.ui.dialogs.choice(`Where should "${name}" keep its data?`, [SIMPLE, ADVANCED], 'New workspace');
+    if (!where) return;
+    if (where === ADVANCED) {
+      await newFileWorkspace(ctx.api.ui.dialogs, name);
+      return;
+    }
+  }
 
   // What the new workspace inherits. Settings are per-workspace now, so an
   // empty workspace really starts empty — it used to share this one's server
   // URL, tokens and plugin list whether you wanted that or not.
-  const pick = await ctx.api.ui.dialogs.choice(`What should "${name.trim()}" start with?`, [CLONE_ALL, CLONE_SETTINGS, CLONE_NOTHING], 'New workspace');
+  const pick = await ctx.api.ui.dialogs.choice(`What should "${name}" start with?`, [CLONE_ALL, CLONE_SETTINGS, CLONE_NOTHING], 'New workspace');
   if (!pick) return;
   const mode: CloneMode = pick === CLONE_ALL ? 'all' : pick === CLONE_SETTINGS ? 'settings' : 'empty';
 
   // Create the workspace here rather than letting init() do it on first load:
   // only this side knows what to copy, and the copy must be in place before the
   // new workspace boots.
-  await cloneWorkspace(getDb(), { from: ctx.workspaceId, to: slugifyWorkspace(name.trim()), name: name.trim(), mode });
-  openWorkspace(name.trim());
+  await cloneWorkspace(getDb(), { from: ctx.workspaceId, to: slugifyWorkspace(name), name, mode });
+  openWorkspace(name);
+}
+
+/**
+ * Create a workspace that lives in its own `.edb` file, and switch this tab to it.
+ *
+ * The file starts EMPTY. Cloning an existing workspace into a file is the File
+ * menu's "New .edb file → Copy this workspace into it", and having one job in two
+ * places would mean two behaviours to keep in step.
+ *
+ * The reload at the end is not optional: the store is built once per load, so a
+ * tab only changes where it reads from by starting again.
+ */
+async function newFileWorkspace(dialogs: Dialogs, name: string): Promise<void> {
+  const id = slugifyWorkspace(name);
+  const target = await chooseEdbTarget(dialogs, `${id}${EDB_EXTENSION}`);
+  if (!target) return;
+  await buildEdbFile(target, id, async (store) => {
+    await store.workspaces.insert({ id, name, createdAt: Date.now(), pluginUrls: [] });
+  });
+  await adoptEdbFile(target);
+  await dialogs.alert(`"${name}" now lives in ${target.name}. The page will reload.`, 'New workspace');
+  openWorkspace(name);
 }
 
 /**

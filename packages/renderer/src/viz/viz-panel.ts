@@ -28,7 +28,7 @@ import { html as staticHtml, unsafeStatic } from 'lit/static-html.js';
 import type { ColumnSpec, DataCollection, Row, Table, ViewInstance, ViewTemplate, VisualizationSpec, VizAggregate } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { readRows, type RowRequest } from '../db/row-reader.js';
-import { ROW_FETCH_CAP } from '../db/data-store-ipc.js';
+import { ROW_FETCH_CAP } from '../db/data-store-bridge.js';
 import { truncationNote } from '../db/truncation-note.js';
 import { readSortSpecs } from '../table/row-sort.js';
 import { runColumnScript } from '../util/column-script.js';

@@ -32,8 +32,9 @@ Two consequences worth knowing:
 - **No storage schema work was needed.** `viewTemplates` / `viewInstances` are
   `DOC_COLLECTIONS` in `packages/electron/src/sqlite-store.ts` — whole JSON
   documents, not typed columns — and every added field is optional and
-  non-indexed. The usual four-place lockstep (`types.ts` → `dexie-db.ts` →
-  `data-store-dexie.ts` → `data-store-ipc.ts` + `sqlite-store.ts`) does not apply.
+  non-indexed. The usual lockstep (`types.ts` → `dexie-db.ts` →
+  `data-store-dexie.ts` → `data-store-bridge.ts` + `sqlite-store.ts` +
+  `shared/src/edb-store.ts`) does not apply.
   If a change there ever seems necessary, the field is modelled wrong.
 - **No migration.** Absent `kind` means `'html'`, so every template that predates
   this is already valid.
@@ -387,7 +388,7 @@ resize or a filter change re-lays out without reshuffling every word.
 
 `docs/help/workspace.db.json` is a dump a user can drop in to see every kind at
 once (48 city trips: coordinates, dates, ratings and a sentence of prose each).
-`test/e2e/111-viz-fixture.spec.ts` imports that exact file through the real drop
+`test/e2e/114-viz-fixture.spec.ts` imports that exact file through the real drop
 handler and asserts each kind draws, because a fixture that has drifted from the
 code teaches a new user that the feature is broken.
 

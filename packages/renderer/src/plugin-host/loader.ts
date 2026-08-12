@@ -39,6 +39,7 @@ import * as commandPaletteButton from '../plugins/command-palette-button.js';
 import * as electronDb from '../plugins/electron-db.js';
 import * as sqliteFileSource from '../plugins/sqlitefile-source.js';
 import * as tips from '../plugins/tips.js';
+import * as edbFile from '../plugins/edb-file.js';
 import * as commandlets from '../plugins/commandlets.js';
 
 /** A built-in plugin paired with its id (mirrors `meta.id`, cheaply reachable without importing every module). */
@@ -100,6 +101,7 @@ const modules: PluginModule[] = [
   electronDb,
   sqliteFileSource,
   tips,
+  edbFile,
   commandlets,
 ];
 

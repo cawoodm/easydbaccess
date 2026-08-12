@@ -842,10 +842,11 @@ function nativeTableToNormalized(entry: { name: unknown; columns: unknown[]; row
   const source = isObject(e.source) && typeof (e.source as { type?: unknown }).type === 'string' ? (e.source as unknown as TableSource) : undefined;
   const origin =
     isObject(e.origin) && typeof (e.origin as { type?: unknown }).type === 'string' && typeof (e.origin as { url?: unknown }).url === 'string' ? (e.origin as unknown as TableOrigin) : undefined;
+  const rows = Array.isArray(entry.rows) ? (entry.rows.filter(isObject) as Array<Record<string, unknown>>) : [];
   return {
     name: String(entry.name),
-    columns: entry.columns.map(normalizeColumn),
-    rows: Array.isArray(entry.rows) ? (entry.rows.filter(isObject) as Array<Record<string, unknown>>) : [],
+    columns: withUndeclaredFields(entry.columns.map(normalizeColumn), rows, deletedColumns ?? []),
+    rows,
     ...(title ? { title } : {}),
     ...(geom ? { windowGeometry: geom } : {}),
     ...(sortColumn ? { sortColumn, sortAsc: sortAsc ?? true } : {}),
@@ -857,6 +858,46 @@ function nativeTableToNormalized(entry: { name: unknown; columns: unknown[]; row
     ...(source ? { source } : {}),
     ...(origin ? { origin } : {}),
   };
+}
+
+/**
+ * Add a column for every field the ROWS carry that the dump's own column list left
+ * out.
+ *
+ * A dump is meant to be self-consistent. One from the wild is not: `bible.db.json`
+ * declares `book` and no `title`, yet 368 of its 1,258 rows carry `title` and no
+ * `book` — one logical field under two names, written by two generations of the
+ * exporter. Those 368 rows imported blank. The value was in the row the whole time
+ * with no column to show it, no header to sort by and no funnel to filter on, so it
+ * was not recoverable by hand either.
+ *
+ * Only ADDING, and only at the end. A declared column carries width, renderer,
+ * hidden and the rest, and the declared order is the user's. A field the user
+ * deliberately removed is remembered in `deletedColumns` and stays removed: that
+ * list is exactly what tells a deletion apart from an omission.
+ */
+function withUndeclaredFields(columns: ColumnSpec[], rows: Array<Record<string, unknown>>, deletedColumns: readonly string[]): ColumnSpec[] {
+  const known = new Set(columns.map((c) => c.field));
+  const deleted = new Set(deletedColumns);
+  const extra: string[] = [];
+  for (const r of rows) {
+    for (const k of Object.keys(r)) {
+      if (known.has(k) || deleted.has(k)) continue;
+      known.add(k);
+      extra.push(k);
+    }
+  }
+  if (extra.length === 0) return columns;
+  return [
+    ...columns,
+    ...extra.map(
+      (field): ColumnSpec => ({
+        field,
+        label: field,
+        type: inferTypeFromValues(rows.map((r) => r[field])),
+      }),
+    ),
+  ];
 }
 
 function normalizeColumn(c: unknown): ColumnSpec {

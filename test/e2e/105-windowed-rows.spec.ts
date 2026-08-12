@@ -64,6 +64,13 @@ const lastQuery = (page: import('@playwright/test').Page) =>
     return qs.length ? qs[qs.length - 1] : null;
   });
 
+const firstQuery = (page: import('@playwright/test').Page) =>
+  page.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const qs = (window as any).__windowQueries as any[];
+    return qs.length ? qs[0] : null;
+  });
+
 async function setThreshold(page: import('@playwright/test').Page, n: number) {
   await page.evaluate(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -116,20 +123,40 @@ test('scrolling down asks for the next page', async ({ page }) => {
   expect(Number(top.replace('row ', ''))).toBeGreaterThan(1500);
 });
 
-test('under the threshold nothing changes: no slice is asked for', async ({ page }) => {
+test('under the threshold the grid settles on holding the table whole', async ({ page }) => {
   // The whole point of a threshold — a table that works well today keeps the code
   // path it has.
+  //
+  // It gets there in two steps now, and deliberately. Nothing knows how big a table
+  // is until something counts it, and counting is not free: in IndexedDB it is a
+  // second walk of the index, 730 ms per 100,000 rows, which a 609,283-row table
+  // used to pay TWICE before drawing a row. So the first read is speculatively a
+  // page — enough to paint — and the size that follows decides the shape. Under the
+  // threshold that means one more read, of a table small enough for the read to be
+  // cheap by definition.
   await setThreshold(page, ROWS * 10);
   await installFakeStore(page, ROWS);
   const id = await createTable(page, 'Small', [{ field: 'name' }]);
   await waitForPanel(page, id);
 
-  await expect.poll(async () => (await lastQuery(page)) !== null).toBe(true);
-  const q = await lastQuery(page);
-  expect(q.offset).toBeUndefined();
   // No slice at all — not even the read cap, which only travels when a predicate
   // had to be held back. The store answers the whole query, as it always did.
-  expect(q.limit).toBeUndefined();
+  await expect.poll(async () => (await lastQuery(page))?.limit, { timeout: 5000 }).toBeUndefined();
+  expect((await lastQuery(page)).offset).toBeUndefined();
+});
+
+test('the first read of an unmeasured table is a page, and asks for no count', async ({ page }) => {
+  // The rows come first and the total follows. `countTotal: false` is what says so:
+  // a store that has to walk an index to count must not make the paint wait for it.
+  await setThreshold(page, THRESHOLD);
+  await installFakeStore(page, ROWS);
+  const id = await createTable(page, 'Big', [{ field: 'name' }]);
+  await waitForPanel(page, id);
+
+  await expect.poll(async () => (await firstQuery(page))?.limit ?? null).not.toBeNull();
+  const first = await firstQuery(page);
+  expect(first.limit).toBe(500);
+  expect(first.countTotal).toBe(false);
 });
 
 test('0 means never window', async ({ page }) => {

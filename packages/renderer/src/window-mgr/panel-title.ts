@@ -17,14 +17,26 @@ export interface VisibleCountDetail {
 
 export const VISIBLE_COUNT_EVENT = 'easydb:visible-count';
 
+/**
+ * The last count emitted per key, so a listener that mounts late still has one.
+ *
+ * The event only fires when the numbers change, so a panel footer built after its
+ * grid settled would otherwise wait for the next write to learn anything. Same
+ * reason `tableLoadingState` keeps the loading flags.
+ */
+const lastCount = new Map<string, VisibleCountDetail>();
+
 /** Dispatch a visible-count update for a table/view window title to pick up. */
 export function emitVisibleCount(key: string, count: number, total: number): void {
   if (!key) return;
-  document.dispatchEvent(
-    new CustomEvent<VisibleCountDetail>(VISIBLE_COUNT_EVENT, {
-      detail: { key, count, total },
-    }),
-  );
+  const detail: VisibleCountDetail = { key, count, total };
+  lastCount.set(key, detail);
+  document.dispatchEvent(new CustomEvent<VisibleCountDetail>(VISIBLE_COUNT_EVENT, { detail }));
+}
+
+/** The most recent count for `key`, or undefined if none has been emitted. */
+export function visibleCountOf(key: string): VisibleCountDetail | undefined {
+  return lastCount.get(key);
 }
 
 /**
