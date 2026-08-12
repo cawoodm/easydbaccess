@@ -13,6 +13,9 @@
 
 ### Bugs
 
+- 🪲 A big table with a saved sort or filter took 20 seconds to show a row (v0.0.357)
+- 🪲 A big table never learned its own size, so its title showed the 500 rows on screen as the whole table (v0.0.357)
+- 🪲 A big table with a filter on it re-read every row, over and over, for as long as its window stayed open (v0.0.357)
 - 🪲 A dump whose rows held a field its column list omitted imported those rows blank, with no way to reach the value (v0.0.352)
 - 🪲 A table of 600,000 rows took most of a minute to appear, and was read whole again on every write (v0.0.351)
 - 🪲 A filter on a table over 20,000 rows only searched the first 20,000, so a match further in was missing (v0.0.350)

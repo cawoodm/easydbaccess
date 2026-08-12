@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { html as staticHtml, unsafeStatic } from 'lit/static-html.js';
 import { customElement, property, state } from 'lit/decorators.js';
-import type { ColumnSpec, DataCollection, Row, RowQuery, SortSpec, Table, ViewInstance } from '@easydb/shared';
+import type { ColumnSpec, DataCollection, Row, RowPage, RowQuery, SortSpec, Table, ViewInstance } from '@easydb/shared';
 import { readRows, type RowRequest } from '../db/row-reader.js';
 import { ROW_FETCH_CAP } from '../db/data-store-bridge.js';
 import { truncationNote } from '../db/truncation-note.js';
@@ -21,6 +21,7 @@ import { nextSortSpecs } from './sort-cycle.js';
 import { runColumnScript, runValidateScript } from '../util/column-script.js';
 import { arrayMembers } from '@easydb/shared';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
+import { cachedRowCount, rememberRowCount } from './row-count-cache.js';
 import { TABLE_LOADING_EVENT, tableLoadingState, type TableLoadingDetail } from './table-loading.js';
 import { formatByType, toDateInput, toDatetimeInput } from '../util/local-datetime.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
@@ -711,7 +712,7 @@ export class DataTable extends LitElement {
   }
 
   override async updated(changed: Map<string, unknown>) {
-    if ((changed.has('tableId') || changed.has('viewInstanceId')) && this.tableId) {
+    if ((changed.has('tableId') || changed.has('viewInstanceId')) && this.tableId && this.boundKey !== `${this.tableId}|${this.viewInstanceId}`) {
       this.unsubscribe?.();
       this.tableSubUnsub?.();
       this.viewSubUnsub?.();
@@ -743,7 +744,14 @@ export class DataTable extends LitElement {
     // The TABLE's count, not the fetch's and not the filter's — see `tableTotal`.
     // `matchingTotal`/`rows.length` are the floor for a store that cannot count,
     // which keeps the old behaviour rather than reporting zero.
-    const total = Math.max(this.tableTotal, this.matchingTotal, this.rows.length);
+    //
+    // A WINDOWED grid that has not been counted has no total to give, only the page
+    // in hand. Passing that page as the total made the title say `(500)` on a table of
+    // 609,283 rows, so `-1` goes instead and `countSuffix` renders the floor as
+    // `(500…)`. Nothing else changes: the moment a count lands, or a cached one is
+    // read at bind, this is a real number again.
+    const sizeUnknown = this.windowed && this.tableTotal <= 0;
+    const total = sizeUnknown ? -1 : Math.max(this.tableTotal, this.matchingTotal, this.rows.length);
     if (count === this.lastEmittedCount && total === this.lastEmittedTotal) return;
     this.lastEmittedCount = count;
     this.lastEmittedTotal = total;
@@ -752,8 +760,29 @@ export class DataTable extends LitElement {
 
   private tableSubUnsub?: () => void;
 
+  /**
+   * What {@link bind} is currently bound to, so it is not done twice for the same
+   * thing.
+   *
+   * A panel sets `tableId` before the element connects, so `connectedCallback` binds
+   * — and then Lit's first `updated` reports `tableId` as changed and binds again.
+   * Everything a bind does happened twice: two subscriptions, two initial loads, and
+   * two row collections where the second replaced the first. That last one silently
+   * cost the row COUNT: `countNow` drops its answer when the collection it counted is
+   * no longer the grid's, and on a big table the re-bind always won the race against a
+   * 14-second count. So a big table never learned its own size, and its titlebar kept
+   * showing the page in hand.
+   */
+  private boundKey = '';
+
   private async bind() {
     if (!this.tableId) return;
+    // Set BEFORE the first await, so the second caller turns back here rather than
+    // half-way through the first one's work. `connectedCallback` awaits a settings read
+    // first, which is long enough for Lit's initial `updated` to get in ahead of it.
+    const key = `${this.tableId}|${this.viewInstanceId}`;
+    if (this.boundKey === key) return;
+    this.boundKey = key;
     // Dropped up front so `adoptQueryState` can tell "the saved sort is being
     // applied for the first time" from "the sort changed under a live grid".
     this.rowColl = null;
@@ -785,6 +814,12 @@ export class DataTable extends LitElement {
         }
       });
     } else {
+      // The size this table was last measured at, before a row has been read. It makes
+      // the window decision a fact rather than a guess (so no speculative page is read
+      // and settled on a table already known to be small), and it is what puts the
+      // total in the titlebar from the first paint. Provisional by nature — the count
+      // every load starts is what corrects it.
+      if (this.tableTotal === 0) this.tableTotal = cachedRowCount(this.tableId);
       this.applyTable(table);
       // Re-bind columns/sort/filters whenever this table's record changes
       // (column editor, sort header click, filter input). Without this, the
@@ -806,11 +841,20 @@ export class DataTable extends LitElement {
     // collection to have something to hand its callback, which is the second
     // full fetch this grid used to pay for on every open. Either way the
     // response is the same: re-run OUR query.
-    this.unsubscribe = this.rowColl.watch ? this.rowColl.watch(() => void this.loadRows()) : this.rowColl.subscribe(() => void this.loadRows());
-    // `watch`/`subscribe` both fire once immediately, so the initial load is
-    // already in flight — awaiting it here is what makes `bind()` resolve with
-    // rows on screen, which the tests and the loading bar both rely on.
-    await this.loadRows();
+    // `watch`/`subscribe` both fire once immediately, so the initial load is already
+    // in flight. `bind` has to resolve with rows on screen — the tests and the loading
+    // bar both rely on that — so it waits for THAT load rather than starting a second
+    // one. Starting a second one is what it used to do, and the two were far enough
+    // apart (24 ms measured) that sharing the read in flight never caught them: the
+    // first had finished before the second asked.
+    let first: Promise<void> | undefined;
+    const onChange = () => {
+      const p = this.loadRows();
+      first ??= p;
+      void p;
+    };
+    this.unsubscribe = this.rowColl.watch ? this.rowColl.watch(onChange) : this.rowColl.subscribe(onChange);
+    await (first ?? this.loadRows());
   }
 
   /**
@@ -846,7 +890,8 @@ export class DataTable extends LitElement {
       const sizeKnown = this.tableTotal > 0 || !coll.count;
       const windowed = sizeKnown ? this.shouldWindow(coll) : this.canWindow(coll);
       const req = this.rowRequest(windowed, windowed);
-      const page = await readRows(coll, req, ROW_FETCH_CAP);
+      if (this.shouldPrepaint(req, windowed)) await this.prepaint(coll, req, gen);
+      const page = await this.readPage(coll, req);
       // A slower earlier load must not land on top of a newer one — the same
       // generation guard `subscribeToCollection` uses for the same reason.
       if (gen !== this.loadGeneration) return;
@@ -886,6 +931,13 @@ export class DataTable extends LitElement {
       // back short again.
       const partialView = !(short && from === 0);
       if (!counted && !short) this.countSoon(coll);
+      // A NARROWED read measured its MATCHES, not the table, so it leaves the size as
+      // unknown as it found it. Settling the window on that compares `windowed`
+      // against a `tableTotal` still sitting at 0 — which never reaches the threshold,
+      // so the mismatch never resolves and each re-read starts another. A big filtered
+      // table re-read all 609,283 of its rows every five seconds, without end. The
+      // count is the one number that stops it.
+      else if (!sizeKnown && !whole) this.countSoon(coll);
       else if (!sizeKnown && partialView) this.settleWindow(coll);
     } catch (err) {
       if (gen !== this.loadGeneration) return;
@@ -906,6 +958,70 @@ export class DataTable extends LitElement {
       window.clearTimeout(barTimer);
       if (gen === this.loadGeneration) this.loading = false;
     }
+  }
+
+  /**
+   * The read in flight, and the request it answers.
+   *
+   * Opening a big table calls {@link loadRows} four times before a row is drawn —
+   * `watch` fires its callback immediately, `bind` awaits a load of its own, and the
+   * table subscription then delivers the saved sort, which counts as a change and
+   * schedules another. The generation guard threw three of those ANSWERS away, but
+   * every one of them had already run its query. On a 609,283-row table sorted by a
+   * column, one such query costs about 10 s, so the boot paid four of them at once.
+   *
+   * Sharing the promise makes the repeats free. Keyed by the whole request, so a read
+   * that differs in any way — a page, a filter, a sort — is never mistaken for this
+   * one. Over-keying only costs a missed share, which is the safe direction.
+   */
+  private inflight: { key: string; page: Promise<RowPage> } | null = null;
+
+  private readPage(coll: DataCollection<Row>, req: RowRequest): Promise<RowPage> {
+    const key = JSON.stringify(req);
+    if (this.inflight?.key === key) return this.inflight.page;
+    const page = readRows(coll, req, ROW_FETCH_CAP).finally(() => {
+      if (this.inflight?.key === key) this.inflight = null;
+    });
+    this.inflight = { key, page };
+    return page;
+  }
+
+  /**
+   * Should this read put the unsorted page on screen first?
+   *
+   * A sort is the one part of a request IndexedDB cannot help with. There is no
+   * index on the fields inside `data`, so ordering a big table means reading every
+   * row of it: 5.3 s of the 10 s, with the comparator making up most of the rest.
+   * The plain page beside it takes 193 ms, because `offset`/`limit` walk the
+   * `tableId` index and touch nothing else.
+   *
+   * So a big table with a SAVED sort shows its first rows in about a fifth of a
+   * second and re-draws them in order when the sorted read lands, instead of showing
+   * nothing for twenty. The rows on screen meanwhile are real rows of the table in
+   * storage order, and the loading bar stays up until the order is right.
+   *
+   * Only when the grid is empty: once rows are up, replacing them with unsorted ones
+   * to sort them again would be a visible step backwards. And only when nothing is
+   * FILTERED — an unfiltered page shown under an active filter is not an unfinished
+   * answer, it is a wrong one, and no bar makes that honest.
+   */
+  private shouldPrepaint(req: RowRequest, windowed: boolean): boolean {
+    return windowed && (req.sort?.length ?? 0) > 0 && this.rows.length === 0 && this.countsWholeTable(req);
+  }
+
+  /** Read the same page with the sort dropped, and show it while the sort runs. */
+  private async prepaint(coll: DataCollection<Row>, req: RowRequest, gen: number): Promise<void> {
+    const { sort: _sort, ...plain } = req;
+    const page = await this.readPage(coll, plain);
+    // A newer load, or rows that arrived while this was in flight, both mean these
+    // rows are already stale — and the sorted read is moments behind them anyway.
+    if (gen !== this.loadGeneration || this.rows.length > 0) return;
+    this.rows = page.rows;
+    this.windowed = true;
+    this.windowOffset = req.offset ?? 0;
+    // Enough scrollbar to hold the page, never more: the real total arrives with the
+    // sorted read, and a span that shrinks afterwards is worse than one that grows.
+    this.matchingTotal = page.total >= 0 ? page.total : Math.max(this.tableTotal, (req.offset ?? 0) + page.rows.length);
   }
 
   /**
@@ -949,11 +1065,20 @@ export class DataTable extends LitElement {
   private async countNow(coll: DataCollection<Row>): Promise<void> {
     if (!coll.count || this.countInFlight) return;
     this.countInFlight = true;
+    const counting = this.tableId;
     try {
       const n = await coll.count();
-      // The grid may have re-bound to another table while this was in flight.
-      if (coll !== this.rowColl) return;
+      // The grid may have moved to another TABLE while this was in flight. Compared by
+      // table rather than by collection object: `store.rows(id)` builds a fresh
+      // wrapper on every call, so a re-bind to the same table changes the object and
+      // means nothing about whether the number is still true. Comparing the objects
+      // threw away every count a re-bind overlapped — which on a big table was all of
+      // them, the count being the slowest thing either side of it.
+      if (this.tableId !== counting || !this.rowColl) return;
       this.tableTotal = n;
+      // Now that it has been paid for, keep it: the next open of this table shows its
+      // size in the titlebar at once instead of a floor for the first seconds.
+      if (!this.viewMode && this.tableId) rememberRowCount(this.tableId, n);
       if (this.settleWindow(coll)) return;
       // The scrollbar's extent, now that the whole table has been measured. Only
       // when nothing narrows the view — with a filter on, what matched is a

@@ -94,7 +94,11 @@ test('a table over the threshold is read one page at a time', async ({ page }) =
 
   // The panel title counts the MATCH, not the page — the user reaches every row
   // by scrolling, and "500 of 5000" would read as a filter nobody applied.
-  await expect(page.locator(`#${panelDomId(id)} .panel-title, #${panelDomId(id)} .jsPanel-title`).first()).toContainText(String(ROWS));
+  //
+  // Grouped, and grouped by the PAGE's locale: Node's is Swiss here (`5’000`) while the
+  // browser's is en-US (`5,000`), so the expectation has to be built in the browser.
+  const grouped = await page.evaluate((v) => v.toLocaleString(), ROWS);
+  await expect(page.locator(`#${panelDomId(id)} .panel-title, #${panelDomId(id)} .jsPanel-title`).first()).toContainText(grouped);
 
   // Only the visible slice is in the DOM.
   const drawn = page.locator(`#${panelDomId(id)} data-table tbody tr:not(.spacer)`);

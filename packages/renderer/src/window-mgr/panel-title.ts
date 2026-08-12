@@ -41,12 +41,23 @@ export function visibleCountOf(key: string): VisibleCountDetail | undefined {
 
 /**
  * Row-count suffix for a panel title: `" (12)"` when nothing is filtered, or
- * `" (3/12)"` when a search/filter has narrowed the set. Empty string until a
- * count is known (negative sentinel), so the bare name shows meanwhile.
+ * `" (3/12)"` when a search/filter has narrowed the set.
+ *
+ * A total of `-1` means the size is not known yet, and the count is a FLOOR: the
+ * suffix says `" (500…)"`. It used to say nothing at all, which read as a table with
+ * no name-suffix, and before that the caller passed the rows in hand as the total —
+ * so a 609,283-row table announced itself as `" (500)"`. That is not an unfinished
+ * answer, it is a wrong one. A big table's size costs seconds to measure in
+ * IndexedDB (14.0 s on 609,283 rows), so the first seconds of every open genuinely
+ * have a floor and no total.
+ *
+ * Counts are grouped with `toLocaleString`, as the import suffix already groups
+ * them: six digits run together are hard to read and hard to compare.
  */
 export function countSuffix(count: number, total: number): string {
-  if (count < 0 || total < 0) return '';
-  return count === total ? ` (${total})` : ` (${count}/${total})`;
+  if (count < 0) return '';
+  if (total < 0) return count > 0 ? ` (${count.toLocaleString()}…)` : '';
+  return count === total ? ` (${total.toLocaleString()})` : ` (${count.toLocaleString()}/${total.toLocaleString()})`;
 }
 
 /** Detail of the `easydb:import-progress` document event. */
