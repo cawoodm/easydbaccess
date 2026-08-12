@@ -24,15 +24,18 @@ export class VizFooter extends LitElement {
   static override styles = [
     materialIconStyles,
     css`
+      /* Proportions copied from chrome/panel-footer.ts so a visualization
+         window's footer reads as the same piece of furniture as a table
+         window's. It was 11px type with no padding before, which measured 18px
+         tall and did not read as a footer at all. */
       :host {
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 0.4rem;
         width: 100%;
-        padding: 0 4px;
-        font:
-          11px/1.3 system-ui,
-          sans-serif;
+        padding: 0.35rem 0.55rem;
+        box-sizing: border-box;
+        font-size: 0.85rem;
       }
       .spacer {
         flex: 1;
@@ -46,21 +49,17 @@ export class VizFooter extends LitElement {
       button {
         display: inline-flex;
         align-items: center;
-        gap: 3px;
-        padding: 1px 6px;
-        border: 1px solid rgba(127, 127, 127, 0.35);
-        border-radius: 3px;
-        background: transparent;
-        color: inherit;
+        gap: 0.25rem;
         font: inherit;
+        padding: 0.2rem 0.4rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+        background: white;
+        color: inherit;
         cursor: pointer;
       }
       button:hover {
-        background: rgba(127, 127, 127, 0.2);
-      }
-      button .material-icons {
-        font-size: 13px;
-        line-height: 1;
+        background: #f3f4f6;
       }
     `,
   ];
@@ -113,10 +112,8 @@ export class VizFooter extends LitElement {
 
   override render() {
     return html`
-      <button @click=${this.edit} title="Edit this visualization: which columns feed which channel" aria-label="Edit visualization"><span class="material-icons">edit</span>Edit</button>
-      <button @click=${() => void this.editTemplate()} title="Edit the chart definition: kind, aggregate and options" aria-label="Edit chart definition">
-        <span class="material-icons">tune</span>Chart
-      </button>
+      <button @click=${this.edit} title="Edit this visualization: which columns feed which channel" aria-label="Edit visualization"><span class="mi sm">edit</span>Edit</button>
+      <button @click=${() => void this.editTemplate()} title="Edit the chart definition: kind, aggregate and options" aria-label="Edit chart definition"><span class="mi sm">tune</span>Chart</button>
       <span class="spacer"></span>
       ${this.kindLabel ? html`<span class="kind">${this.kindLabel}</span>` : nothing}
     `;

@@ -76,7 +76,7 @@ export class VizPane extends LitElement {
         background: rgba(127, 127, 127, 0.25);
         opacity: 1;
       }
-      button .material-icons {
+      button .mi {
         font-size: 14px;
         line-height: 1;
       }
@@ -157,17 +157,17 @@ export class VizPane extends LitElement {
     return html`
       <div class="strip">
         <button @click=${this.toggleCollapse} title=${this.collapsed ? 'Expand' : 'Collapse'} aria-label=${this.collapsed ? 'Expand' : 'Collapse'} aria-expanded=${this.collapsed ? 'false' : 'true'}>
-          <span class="material-icons">${this.collapsed ? 'chevron_right' : 'expand_more'}</span>
+          <span class="mi sm">${this.collapsed ? 'chevron_right' : 'expand_more'}</span>
         </button>
         <span class="title" title=${this.label}>${this.label}</span>
         <button @click=${() => void this.edit()} title="Edit this visualization" aria-label="Edit visualization">
-          <span class="material-icons">edit</span>
+          <span class="mi sm">edit</span>
         </button>
         <button @click=${this.undock} title="Open in its own window" aria-label="Open in its own window">
-          <span class="material-icons">open_in_new</span>
+          <span class="mi sm">open_in_new</span>
         </button>
         <button @click=${this.close} title="Close" aria-label="Close">
-          <span class="material-icons">close</span>
+          <span class="mi sm">close</span>
         </button>
       </div>
       <div class="body">

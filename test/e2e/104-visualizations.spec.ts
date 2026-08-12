@@ -184,6 +184,63 @@ test.describe('visualizations', () => {
     await expect(dlg).toContainText('Visualization');
   });
 
+  test('word cloud terms are real SVG text, not HTML elements named text', async ({ page }) => {
+    // The regression this pins: the per-word fragment was built with Lit's `html`
+    // instead of `svg`. Lit parses each nested template independently, so the
+    // `<text>` nodes were created in the HTML namespace — present in the DOM,
+    // carrying every attribute, found by `querySelectorAll('text')`, and drawn by
+    // nothing. Every earlier assertion passed while the cloud was blank, because
+    // all of them checked content and attributes rather than namespace.
+    const id = await createTable(page, 'Notes', [{ field: 'body' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ body: 'alpha beta alpha' }, { body: 'alpha gamma delta' }]);
+    await makeChart(page, id, { name: 'NS cloud', kind: 'wordcloud' });
+    await expect(page.locator('viz-panel viz-word-cloud')).toBeVisible();
+
+    // The layout is async (lazy d3-cloud import, then a placement pass), so poll
+    // until words exist rather than probing the moment the element mounts.
+    const readProbe = () =>
+      page.evaluate(() => {
+        const vp = document.querySelector('viz-panel') as { shadowRoot?: ShadowRoot | null } | null;
+        const cloud = vp?.shadowRoot?.querySelector('viz-word-cloud') as { shadowRoot?: ShadowRoot | null } | null;
+        const texts = [...(cloud?.shadowRoot?.querySelectorAll('text') ?? [])];
+        return {
+          count: texts.length,
+          allSvgNs: texts.every((t) => t.namespaceURI === 'http://www.w3.org/2000/svg'),
+          // A real SVG text has geometry; an HTML element named `text` has no
+          // getBBox at all, which is the cheapest possible proof of the namespace.
+          allHaveGeometry: texts.every((t) => typeof (t as SVGGraphicsElement).getBBox === 'function' && (t as SVGGraphicsElement).getBBox().width > 0),
+        };
+      });
+
+    await expect.poll(async () => (await readProbe()).count, { timeout: 15_000 }).toBeGreaterThan(0);
+    const probe = await readProbe();
+    expect(probe.allSvgNs).toBe(true);
+    expect(probe.allHaveGeometry).toBe(true);
+  });
+
+  test('a visualization window has a footer with a way back to its config', async ({ page }) => {
+    const id = await seedCities(page);
+    await makeChart(page, id, { name: 'By country' });
+    const win = page.locator('.jsPanel', { has: page.locator('viz-panel') });
+    const footer = win.locator('.jsPanel-ftr');
+    await expect(footer).toBeVisible();
+    // Tall enough to read as a footer: it measured 18px when the type was 11px
+    // with no padding, which is why it went unnoticed.
+    expect((await footer.boundingBox())!.height).toBeGreaterThan(28);
+
+    const vf = footer.locator('viz-footer');
+    await expect(vf.getByRole('button', { name: 'Edit visualization' })).toBeVisible();
+    await expect(vf.getByRole('button', { name: 'Edit chart definition' })).toBeVisible();
+    // Icons come from the shared `.mi` class — `.material-icons` has no rules in a
+    // shadow root, so the ligature rendered as the literal word "edit".
+    const iconFont = await vf
+      .locator('span.mi')
+      .first()
+      .evaluate((el) => getComputedStyle(el).fontFamily);
+    expect(iconFont).toContain('Material Icons');
+  });
+
   test('a chart says so when its column was renamed away, instead of drawing nothing', async ({ page }) => {
     const id = await seedCities(page);
     await makeChart(page, id, { name: 'By country' });

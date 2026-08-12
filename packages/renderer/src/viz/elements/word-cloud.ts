@@ -13,7 +13,7 @@
 // count is capped by the caller and the run is generation-guarded: a resize while
 // a layout is in flight abandons the old one rather than drawing it late.
 
-import { LitElement, css, html, nothing } from 'lit';
+import { LitElement, css, html, nothing, svg } from 'lit';
 import type { PropertyValues } from 'lit';
 import { readChartTheme, type CloudTerm } from './chart-data.js';
 import { fitFontCeiling, scaleTermSizes } from './cloud-scale.js';
@@ -193,7 +193,17 @@ export class VizWordCloud extends LitElement {
       <svg viewBox="0 0 ${w} ${h}" role="img" aria-label=${summary} preserveAspectRatio="xMidYMid meet">
         <g transform="translate(${w / 2},${h / 2})">
           ${this.placed.map(
-            (p, i) => html`
+            // `svg` and NOT `html`, and this is the whole reason the cloud drew
+            // nothing while reporting every word placed.
+            //
+            // Lit parses each template independently, so a nested template does
+            // not inherit its parent's namespace. Under `html` these `<text>`
+            // nodes were created in the HTML namespace — real elements that
+            // `querySelectorAll('text')` finds and that carry every attribute
+            // correctly, but which an `<svg>` does not render and which have no
+            // `getBBox`. The bug looked like a layout failure and was a namespace
+            // one; only the tag matters, the markup is unchanged.
+            (p, i) => svg`
               <text text-anchor="middle" transform="translate(${p.x},${p.y}) rotate(${p.rotate})" font-size=${p.size} fill=${theme.palette[i % theme.palette.length] ?? theme.text}>
                 <title>${p.text}: ${p.count.toLocaleString()}</title>
                 ${p.text}
