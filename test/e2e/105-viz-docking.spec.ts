@@ -158,6 +158,20 @@ test.describe('visualization docking', () => {
     await expect(page.locator('viz-panel')).toBeVisible();
   });
 
+  test('a docked pane has an edit button in its strip', async ({ page }) => {
+    // A pane has no footer of its own — the host window's footer belongs to the
+    // table — so the one control that matters lives in the strip.
+    const id = await seed(page);
+    await dockChart(page, id, 'above');
+    const pane = page.locator(`#${panelDomId(id)} viz-pane`);
+    const edit = pane.getByRole('button', { name: 'Edit visualization' });
+    await expect(edit).toBeVisible();
+    await edit.focus();
+    await edit.press('Enter');
+    await expect(page.locator('views-dialog dialog')).toBeVisible();
+    await expect(page.locator('views-dialog dialog')).toContainText('Map data to columns');
+  });
+
   test('closing a pane leaves the grid alone', async ({ page }) => {
     const id = await seed(page);
     await dockChart(page, id, 'below');

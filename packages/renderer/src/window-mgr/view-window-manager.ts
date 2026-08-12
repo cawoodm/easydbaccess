@@ -39,6 +39,7 @@ import { createPanel, type PanelShellEl } from './panel-shell/panel-shell.js';
 import { createPanelStack, type PanelStack } from './panel-stack.js';
 import { getPanelStack, hostKey, onPanelStacksChanged, registerPanelStack, unregisterPanelStack } from './panel-stacks.js';
 import '../viz/viz-pane.js';
+import '../viz/viz-footer.js';
 import { revealPanel } from './reveal.js';
 // Side-effect import registers the <view-window> custom element; the type-only
 // import would otherwise be elided, leaving <view-window> an unupgraded
@@ -487,6 +488,17 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     entry.el = el;
   };
 
+  // A visualization window gets a footer with its own Edit buttons: what it shows
+  // IS a configuration, and the only route back to it was the table's Views
+  // button, which is not discoverable from the chart. An HTML view has nothing to
+  // configure per-window, so it keeps no footer.
+  let vizFooter: HTMLElement | undefined;
+  if (isViz) {
+    const f = document.createElement('viz-footer') as HTMLElement & { viewInstanceId: string };
+    f.viewInstanceId = inst.id;
+    vizFooter = f;
+  }
+
   const panel = createPanel({
     id: panelId,
     container: viewContainer(),
@@ -495,6 +507,7 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     // Distinct chrome so a window reads as what it is at a glance: cyan for an
     // HTML view, violet for a visualization.
     color: isViz ? '#7c3aed' : '#0891b2',
+    ...(vizFooter ? { footerToolbar: vizFooter } : {}),
     content,
     ...(g ? { panelSize: { w: g.w, h: g.h }, position: { x: g.x, y: g.y } } : { contentSize: { w: DEFAULT_W, h: DEFAULT_H }, position: { centerTopOffset: 60 } }),
     minimizeTo: '#easydb-minimized-dock',

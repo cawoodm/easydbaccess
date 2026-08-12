@@ -181,6 +181,11 @@ export interface TermCount {
   count: number;
 }
 
+// The count → font-size helpers used to live here. They moved to
+// `elements/cloud-scale.ts`: the ELEMENT needs them, and everything under
+// `viz/elements/` has to be able to travel to a standalone package, which this
+// module cannot (it is the app-side half). See `elements/chart-data.ts`.
+
 /**
  * Split one string into candidate words.
  *
@@ -254,24 +259,4 @@ export function wordFrequencies(values: readonly unknown[], opts: WordFrequencyO
   // seeded by input order and a cloud that reshuffles on every render is noise.
   ranked.sort((a, b) => b.count - a.count || a.term.localeCompare(b.term));
   return ranked.slice(0, maxTerms);
-}
-
-/**
- * Map counts onto a font-size range.
- *
- * Square-root rather than linear: a term appearing 400 times against one
- * appearing 4 is not 100 times more interesting, and a linear scale makes every
- * term but the top one illegible. Area — not height — is what the eye reads as
- * magnitude, and area grows with the square of the font size.
- */
-export function scaleTermSizes(terms: readonly TermCount[], minSize: number, maxSize: number): Array<TermCount & { size: number }> {
-  if (terms.length === 0) return [];
-  const counts = terms.map((t) => t.count);
-  const lo = Math.min(...counts);
-  const hi = Math.max(...counts);
-  return terms.map((t) => {
-    // Every term the same count ⇒ every term the same size, and no divide by zero.
-    const frac = hi === lo ? 1 : (Math.sqrt(t.count) - Math.sqrt(lo)) / (Math.sqrt(hi) - Math.sqrt(lo));
-    return { ...t, size: Math.round(minSize + frac * (maxSize - minSize)) };
-  });
 }

@@ -15,6 +15,7 @@ import { LitElement, css, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
+import { openViewsDialog } from '../dialogs/views-dialog.js';
 import './viz-panel.js';
 
 /** Height the strip alone occupies when the pane is collapsed. */
@@ -127,6 +128,21 @@ export class VizPane extends LitElement {
     this.dispatchEvent(new CustomEvent('viz-pane-collapse', { detail: { collapsed: this.collapsed }, bubbles: true, composed: true }));
   }
 
+  /**
+   * Open the Views dialog on this instance.
+   *
+   * A docked pane has no footer to hang a toolbar off (that is the host window's),
+   * so the one control that matters most lives in the strip beside the others —
+   * same destination as `viz-footer`'s Edit.
+   */
+  private async edit(): Promise<void> {
+    if (!this.viewInstanceId) return;
+    const ctx = await getContext();
+    const inst = await ctx.store.viewInstances.findOne(this.viewInstanceId);
+    if (!inst) return;
+    openViewsDialog(inst.tableId, { editInstanceId: this.viewInstanceId });
+  }
+
   /** Undock: clear `dock` and let the reconciler open it as a window instead. */
   private undock(): void {
     void this.patch({ dock: undefined });
@@ -144,6 +160,9 @@ export class VizPane extends LitElement {
           <span class="material-icons">${this.collapsed ? 'chevron_right' : 'expand_more'}</span>
         </button>
         <span class="title" title=${this.label}>${this.label}</span>
+        <button @click=${() => void this.edit()} title="Edit this visualization" aria-label="Edit visualization">
+          <span class="material-icons">edit</span>
+        </button>
         <button @click=${this.undock} title="Open in its own window" aria-label="Open in its own window">
           <span class="material-icons">open_in_new</span>
         </button>

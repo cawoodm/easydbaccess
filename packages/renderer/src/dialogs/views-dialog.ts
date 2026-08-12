@@ -182,6 +182,11 @@ export class ViewsDialog extends LitElement {
         font-family: ui-monospace, SFMono-Regular, monospace;
         color: #2563eb;
       }
+      /* A visualization's slot is a named data CHANNEL, not a $TOKEN, so it
+         reads as prose rather than as code. */
+      .map-row .channel {
+        font-weight: 600;
+      }
       /* A token whose script is set says so on the button itself — the script
          lives in a modal, so nothing else in the row would show it. */
       button.mini.scripted {
@@ -287,9 +292,19 @@ export class ViewsDialog extends LitElement {
   private async editInstance(inst: ViewInstance): Promise<void> {
     const ctx = await getContext();
     const tpl = await ctx.store.viewTemplates.findOne(inst.templateId);
-    // Recover the template's live tokens; fall back to whatever the instance
-    // already mapped if the template is gone.
-    const tokens = tpl ? extractTokens(tpl.headerHtml, tpl.rowHtml, tpl.footerHtml) : Object.keys(inst.mapping);
+    // Recover the template's live slots. For a VIZ template those are the
+    // visualization's channel keys, not `$TOKEN`s scraped from HTML — the same
+    // split `useTemplate` makes. Falling back to what the instance already
+    // mapped covers a missing template and a kind whose plugin is switched off,
+    // either of which would otherwise show an edit form with nothing to map.
+    const vizSpec = tpl?.kind === 'viz' ? this.vizSpecOf(tpl.viz?.kind) : null;
+    const tokens = vizSpec
+      ? vizSpec.channels.map((c) => c.key)
+      : tpl?.kind === 'viz'
+        ? Object.keys(inst.mapping)
+        : tpl
+          ? extractTokens(tpl.headerHtml, tpl.rowHtml, tpl.footerHtml)
+          : Object.keys(inst.mapping);
     this.iDraft = {
       id: inst.id,
       templateId: inst.templateId,
@@ -1013,11 +1028,13 @@ export class ViewsDialog extends LitElement {
       <div class="section">
         <h3>${this.isVizDraft(d) ? 'Map data to columns' : 'Map placeholders to columns'}</h3>
         ${d.tokens.length === 0
-          ? html`<p class="hint">This template has no <code>$TOKEN</code> placeholders — it will show the read-only table with your current sort, filter and visible columns.</p>`
+          ? this.isVizDraft(d)
+            ? html`<p class="hint">This visualization needs no columns mapped.</p>`
+            : html`<p class="hint">This template has no <code>$TOKEN</code> placeholders — it will show the read-only table with your current sort, filter and visible columns.</p>`
           : d.tokens.map(
               (tok) =>
                 html`<div class="map-row">
-                  <code>$${tok}</code>
+                  ${this.isVizDraft(d) ? html`<span class="channel">${this.channelLabel(d, tok)}</span>` : html`<code>$${tok}</code>`}
                   <select
                     @change=${(e: Event) =>
                       (this.iDraft = {
@@ -1057,12 +1074,20 @@ export class ViewsDialog extends LitElement {
             🎨 shows the token through the column's own cell renderer, so the view looks like the table; 🔤 shows the plain value instead (the same as writing <code>$raw.TOKEN</code>). A token inside
             a tag, as in <code>&lt;img src="$IMAGE"&gt;</code>, always stays plain.
           </p>`}
+      ${this.isVizDraft(d)
+        ? nothing
+        : html`<p class="hint">
+            <code>ƒ(x)</code> gives a token a <code>render(row)</code> script, so the view can show a formatted value — a local date, markdown as HTML — without changing the stored cell. It applies to
+            <code>$TOKEN</code> only, not to <code>$input.</code> or <code>$filter.</code>.
+          </p>`}
       <p class="hint">
-        <code>ƒ(x)</code> gives a token a <code>render(row)</code> script, so the view can show a formatted value — a local date, markdown as HTML — without changing the stored cell. It applies to
-        <code>$TOKEN</code> only, not to <code>$input.</code> or <code>$filter.</code>.
-      </p>
-      <p class="hint">
-        ${d.id ? html`Editing name and column mapping. The snapshotted sort, filters and visible columns are kept.` : html`The view snapshots this table's current sort, filters and visible columns.`}
+        ${this.isVizDraft(d)
+          ? d.id
+            ? html`Editing this visualization. Use <strong>Chart</strong> in the window footer to change the kind, the aggregate or the options — those are shared by every view of this chart.`
+            : html`The visualization reads this table's rows; a docked one follows the grid's filters live.`
+          : d.id
+            ? html`Editing name and column mapping. The snapshotted sort, filters and visible columns are kept.`
+            : html`The view snapshots this table's current sort, filters and visible columns.`}
       </p>
     `;
   }

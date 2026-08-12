@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_STOP_WORDS, scaleTermSizes, tokenize, wordFrequencies } from '../../../packages/renderer/src/viz/word-frequency.js';
+import { DEFAULT_STOP_WORDS, tokenize, wordFrequencies } from '../../../packages/renderer/src/viz/word-frequency.js';
 
 describe('tokenize', () => {
   it('splits on punctuation and whitespace', () => {
@@ -116,56 +116,5 @@ describe('wordFrequencies', () => {
 
   it('has a stop list that covers the obvious offenders', () => {
     for (const w of ['the', 'and', 'of', 'to', 'a', 'is']) expect(DEFAULT_STOP_WORDS.has(w)).toBe(true);
-  });
-});
-
-describe('scaleTermSizes', () => {
-  it('maps the extremes onto the range ends', () => {
-    const out = scaleTermSizes(
-      [
-        { term: 'a', count: 100 },
-        { term: 'b', count: 1 },
-      ],
-      10,
-      50,
-    );
-    expect(out[0]?.size).toBe(50);
-    expect(out[1]?.size).toBe(10);
-  });
-
-  it('gives every term the max size when all counts are equal', () => {
-    // And crucially does not divide by zero.
-    const out = scaleTermSizes(
-      [
-        { term: 'a', count: 5 },
-        { term: 'b', count: 5 },
-      ],
-      10,
-      50,
-    );
-    expect(out.map((t) => t.size)).toEqual([50, 50]);
-  });
-
-  it('scales by sqrt, which lifts the middle of a skewed range', () => {
-    const out = scaleTermSizes(
-      [
-        { term: 'a', count: 400 },
-        { term: 'b', count: 100 },
-        { term: 'c', count: 4 },
-      ],
-      10,
-      50,
-    );
-    // Roots are 20, 10, 2 ⇒ the middle sits at (10-2)/(20-2) = 0.44 of the range,
-    // i.e. 28. A linear scale would put it at (100-4)/396 = 0.24, i.e. 20 — barely
-    // above the smallest term despite being 25x its count.
-    expect(out[1]?.size).toBe(28);
-    expect(out[0]?.size).toBe(50);
-    expect(out[2]?.size).toBe(10);
-  });
-
-  it('handles a single term and no terms', () => {
-    expect(scaleTermSizes([{ term: 'a', count: 3 }], 10, 50)[0]?.size).toBe(50);
-    expect(scaleTermSizes([], 10, 50)).toEqual([]);
   });
 });

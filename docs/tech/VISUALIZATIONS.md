@@ -209,6 +209,49 @@ Elements are defined by explicit guarded `defineCharts()` / `definePointMap()` /
 `lit-dialogs`' `defineHostDialogs()`: a second `define` of the same tag throws,
 which is reachable on an HMR reload or a module evaluated twice.
 
+## Getting back to the configuration
+
+A visualization's content IS a configuration — which kind, which columns on which
+channels, which aggregate — so there has to be a route back to it from the thing
+itself. There are two, because there are two different objects to edit:
+
+- **`viz-footer.ts`** — the toolbar along the bottom of a visualization window.
+  **Edit** opens this instance's mapping (`openViewsDialog(tableId, { editInstanceId })`);
+  **Chart** opens the TEMPLATE, where the kind, the aggregate and the options live
+  and are shared by every instance of it. An HTML view window still has no footer:
+  it has nothing per-window to configure.
+- The **docked pane's strip** carries the same Edit pencil, because a pane has no
+  footer of its own — the host window's footer belongs to the table.
+
+`panel-footer` is deliberately not reused for this: it is per-TABLE and every one
+of its buttons (add row, edit columns, export CSV) is about rows, which a
+visualization does not own.
+
+The `editInstanceId` / `editTemplateId` deep-links already existed on
+`openViewsDialog`; the only change needed was that `editInstance` must take a viz
+template's slots from its visualization's CHANNELS rather than from
+`extractTokens` over HTML that is empty — the same split `useTemplate` makes.
+
+## Word cloud sizing — why it is not just "count → font size"
+
+`d3-cloud` **silently drops any word it cannot place**, which makes an over-large
+font ceiling look like missing data rather than like a crowded cloud. Two things
+follow, both in `elements/cloud-scale.ts` (in `elements/` because the element
+needs it and everything there must be able to travel to a package):
+
+- **Equal counts size at the MIDDLE of the range, not the top.** Ordinary prose
+  gives almost every word a count of 1, as does any column of distinct names or
+  tags. Sizing all of them at the maximum meant 53 terms rendered as 6 words. With
+  no differences to show, size carries no information and must not shout.
+- **`fitFontCeiling` derives the ceiling from the box AND the term count**,
+  budgeting roughly equal area per term. A fixed `min(w,h)/5` was 93px for every
+  one of those 53 terms.
+
+The element then **retries smaller** while more than a tenth of the terms are
+being dropped, keeps whichever pass placed more, and reports any remainder in the
+corner. Rotation is hashed from the term text rather than `Math.random()`, so a
+resize or a filter change re-lays out without reshuffling every word.
+
 ## Practical implications
 
 - **A canvas has no readable content**, so every chart element renders a

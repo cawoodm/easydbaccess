@@ -114,6 +114,76 @@ test.describe('visualizations', () => {
     await expect(cloud.locator('[role=img]')).toHaveAttribute('aria-label', /largest alpha/);
   });
 
+  test('a word cloud of uniform-frequency prose places nearly every term', async ({ page }) => {
+    // The reported bug: every word in ordinary prose occurs once, so every count
+    // was equal — and equal counts were sized at the MAXIMUM, which for a 468x512
+    // window meant 93px each. d3-cloud silently drops what it cannot place, so 53
+    // terms rendered as 6 words and the cloud looked empty.
+    const prose = [
+      'The quick brown fox jumps over the lazy dog near the river bank',
+      'Switzerland has mountains valleys lakes rivers glaciers and forests everywhere',
+      'Database tables columns rows queries indexes joins projections and views',
+      'Charts maps clouds bars lines pies scatter heatmaps and dashboards',
+      'Zurich Geneva Basel Bern Lausanne Lucerne Lugano Winterthur StGallen Biel',
+      'Analysis reporting visualization aggregation grouping filtering sorting counting',
+    ];
+    const id = await createTable(page, 'Prose', [{ field: 'body' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(
+      page,
+      id,
+      prose.map((body) => ({ body })),
+    );
+    await makeChart(page, id, { name: 'Prose cloud', kind: 'wordcloud' });
+
+    const cloud = page.locator('viz-panel viz-word-cloud');
+    await expect(cloud).toBeVisible();
+    // Asserted as a RATIO of what was counted, not an absolute: the exact term
+    // count depends on the stop list, and the bug was about the share that fit.
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(() => {
+            const panel = document.querySelector('viz-panel') as { shadowRoot?: ShadowRoot | null } | null;
+            const el = panel?.shadowRoot?.querySelector('viz-word-cloud') as { terms?: unknown[]; placed?: unknown[] } | null;
+            const terms = el?.terms?.length ?? 0;
+            const placed = el?.placed?.length ?? 0;
+            return terms === 0 ? 0 : placed / terms;
+          }),
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThan(0.8);
+  });
+
+  test('a visualization window has an Edit button that opens its mapping', async ({ page }) => {
+    // A chart's whole content is a configuration, and before this the only route
+    // back to it was the table's Views button — not discoverable from the chart.
+    const id = await seedCities(page);
+    await makeChart(page, id, { name: 'By country' });
+    const footer = page.locator('viz-footer');
+    await expect(footer).toBeVisible();
+    await expect(footer.getByRole('button', { name: 'Edit visualization' })).toBeVisible();
+    await expect(footer.getByRole('button', { name: 'Edit chart definition' })).toBeVisible();
+
+    await footer.getByRole('button', { name: 'Edit visualization' }).click();
+    const dlg = page.locator('views-dialog dialog');
+    await expect(dlg).toBeVisible();
+    // Straight onto this instance's edit form, with its channels listed by label
+    // rather than as `$TOKEN`s.
+    await expect(dlg).toContainText('Map data to columns');
+    await expect(dlg).toContainText('Category (group by)');
+  });
+
+  test('the Chart button opens the template, where the kind and aggregate live', async ({ page }) => {
+    const id = await seedCities(page);
+    await makeChart(page, id, { name: 'By country' });
+    await page.locator('viz-footer').getByRole('button', { name: 'Edit chart definition' }).click();
+    const dlg = page.locator('views-dialog dialog');
+    await expect(dlg).toBeVisible();
+    await expect(dlg).toContainText('What it measures');
+    await expect(dlg).toContainText('Visualization');
+  });
+
   test('a chart says so when its column was renamed away, instead of drawing nothing', async ({ page }) => {
     const id = await seedCities(page);
     await makeChart(page, id, { name: 'By country' });
