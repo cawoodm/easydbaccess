@@ -286,11 +286,38 @@ Three things then mean something different, and each is handled where it is read
 scrolling and the next page landing. Without that the table shrinks under the
 scroll position and the view jumps back.
 
-**Facets say so rather than lying.** The funnel's value list is built from the rows
-in memory, which windowed is one page, so the popover carries a note: "Values from
-the rows loaded so far — there may be more." Fetching the real distinct list on
-demand (a `distinct` capability, plus a refresh icon) is the next phase — a funnel
-click has to stay instant, so it will never be automatic.
+**Facets say so, and offer to fix it.** The funnel's value list is built from the
+rows in memory, which windowed is one page, so the popover carries a note — "Values
+from the rows loaded so far — there may be more" — and a REFRESH icon beside it.
+Pressing it asks the store for the real list. Never automatic: a funnel click has to
+stay instant, and the page usually already holds the value being looked for.
+
+The contract is one optional capability, `DataCollection.distinct?({ field, where,
+limit })` → `{ values, blanks, truncated, partial, cells }`, and it deliberately
+says nothing about HOW: `GROUP BY` in SQLite, a scan in Dexie, a facet query at a
+Datasette instance. `where` carries the OTHER columns' filters and the search, so
+the list stays faceted — leaving a column's own filter out is the CALLER's rule
+(`readDistinct` in `data-table.ts`), the same rule `rowsFacetedFor` follows for the
+in-memory list.
+
+Four things had to be got right, or the refreshed list would not agree with the one
+it replaces:
+
+- **Blanks are counted by their own query.** Left in the `GROUP BY`, the blank group
+  takes a slot in the `LIMIT`: it can push a real value out of the list, and be
+  missed entirely when it sorts past the limit itself.
+- **An `array` cell is not its values.** `GROUP BY` over `"a,b"` groups the cell, so
+  the store answers with `cells: true` and the renderer splits the members and adds
+  the cell counts up — the same arithmetic `facetCounts` does.
+- **`cells` is not `partial`.** Folding them together made the note claim a filter
+  had been dropped when nothing had. `partial` keeps one meaning: a predicate had no
+  SQL form.
+- **A `boolean` column offers both sides at a count of 0**, or a column of all-true
+  rows leaves no way to filter for false. `facetCounts` does that in memory; a
+  `GROUP BY` cannot, so `readDistinct` puts the domain back.
+
+Dexie's own `distinct` calls `facetCounts`, so on that path none of the four can
+drift apart at all.
 
 **Dexie answers a `RowQuery` in two ways**, because IndexedDB can honor one of them
 and not the other

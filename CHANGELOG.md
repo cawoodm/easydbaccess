@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 12 Aug 2026
+
+### Features
+
+- ✨ A funnel on a big table says its value list may be short, and a refresh icon reads the whole column (v0.0.349)
+
 ## 11 Aug 2026
 
 ### Features

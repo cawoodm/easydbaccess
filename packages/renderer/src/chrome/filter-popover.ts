@@ -173,6 +173,23 @@ export class FilterPopover extends LitElement {
         font-size: 0.78rem;
         font-style: italic;
       }
+      /* The note and its refresh icon read as one line: the icon is what the note
+         is telling the user they can do about it. */
+      .note-row {
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+        padding: 0 0.35rem 0 0.55rem;
+      }
+      .note-row span {
+        flex: 1;
+      }
+      .note-row button.icon {
+        color: #2563eb;
+      }
+      .note-row button.icon:disabled {
+        color: #9ca3af;
+      }
     `,
   ];
 
@@ -187,6 +204,28 @@ export class FilterPopover extends LitElement {
    * list that quietly changes as you scroll is worse than one that says so.
    */
   @property({ type: String }) note = '';
+  @state() private refreshing = false;
+  /**
+   * Fetch the real value list, shown as a refresh icon beside the note.
+   *
+   * Never automatic. A funnel click has to stay instant, and the page in hand
+   * usually already holds the value the user is looking for; reading the column for
+   * every click would make the common case pay for the rare one.
+   */
+  private onRefresh: (() => Promise<{ values: Array<{ value: string; count: number }>; blanks: number; note: string }>) | null = null;
+
+  private async refresh(): Promise<void> {
+    if (!this.onRefresh || this.refreshing) return;
+    this.refreshing = true;
+    try {
+      const next = await this.onRefresh();
+      this.values = next.values;
+      this.blanks = next.blanks;
+      this.note = next.note;
+    } finally {
+      this.refreshing = false;
+    }
+  }
   @state() private search = '';
   /**
    * Tri-state per token, keyed by the token's POSITIVE rendering (`Sweden`,
@@ -221,13 +260,19 @@ export class FilterPopover extends LitElement {
     current: string,
     blanks = 0,
     onChange?: (filter: string) => void,
-    opts?: { exact?: boolean | undefined; note?: string | undefined },
+    opts?: {
+      exact?: boolean | undefined;
+      note?: string | undefined;
+      onRefresh?: (() => Promise<{ values: Array<{ value: string; count: number }>; blanks: number; note: string }>) | undefined;
+    },
   ): Promise<string | null | { clear: true }> {
     this.values = values;
     this.blanks = blanks;
     this.onChange = onChange ?? null;
     this.exactValues = opts?.exact === true;
     this.note = opts?.note ?? '';
+    this.onRefresh = opts?.onRefresh ?? null;
+    this.refreshing = false;
     // Seed the tri-states from the active filter so re-opening shows what's on.
     this.states = new Map(parseColumnFilter(current ?? '').map((t) => [keyOf(t), { state: t.negate ? ('not' as const) : ('on' as const), token: t }]));
     this.current = current ?? '';
@@ -355,7 +400,16 @@ export class FilterPopover extends LitElement {
             })}
           </ul>`}
       ${this.values.length > 500 ? html`<div class="cap" style="padding:0 .55rem">Showing first 500 of ${this.values.length}.</div>` : ''}
-      ${this.note ? html`<div class="cap" data-testid="facet-note" style="padding:0 .55rem">${this.note}</div>` : ''}
+      ${this.note
+        ? html`<div class="cap note-row" data-testid="facet-note">
+            <span>${this.note}</span>
+            ${this.onRefresh
+              ? html`<button class="icon" data-testid="facet-refresh" title="Read the real list of values from the whole table" ?disabled=${this.refreshing} @click=${() => void this.refresh()}>
+                  <span class="mi sm">${this.refreshing ? 'hourglass_empty' : 'refresh'}</span>
+                </button>`
+              : ''}
+          </div>`
+        : ''}
       <div class="actions">
         <button
           class="text"

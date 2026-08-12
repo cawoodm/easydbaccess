@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { html as staticHtml, unsafeStatic } from 'lit/static-html.js';
 import { customElement, property, state } from 'lit/decorators.js';
-import type { ColumnSpec, DataCollection, Row, SortSpec, Table, ViewInstance } from '@easydb/shared';
+import type { ColumnSpec, DataCollection, Row, RowQuery, SortSpec, Table, ViewInstance } from '@easydb/shared';
 import { readRows, type RowRequest } from '../db/row-reader.js';
 import { ROW_FETCH_CAP } from '../db/data-store-ipc.js';
 import { truncationNote } from '../db/truncation-note.js';
@@ -12,7 +12,7 @@ import { FilterPopover } from '../chrome/filter-popover.js';
 import '../chrome/filter-combobox.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { matchesColumnFilter } from '@easydb/shared';
-import { facetable, facetCounts, facetValues } from '../search/facet-values.js';
+import { FACET_MAX_OPTIONS, facetable, facetCounts, facetValues } from '../search/facet-values.js';
 import { GRID_SETTINGS_ID, readHighlightNulls, readSortDescFirst, readWindowRowsFrom, WINDOW_ROWS_FROM_DEFAULT } from './grid-settings.js';
 import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
 import { readSortSpecs, sortRowsBySpecs } from './row-sort.js';
@@ -1376,11 +1376,16 @@ export class DataTable extends LitElement {
     // the promise only reports dismissal or an explicit Clear.
     //
     // The list is built from the rows in memory, which for a windowed grid is one
-    // PAGE — so it says so rather than presenting a page's values as the column's.
-    // Fetching the real distinct list on demand is the next phase; a funnel click
-    // has to stay instant.
+    // PAGE — so it says so, and offers a refresh that reads the real list, rather
+    // than presenting a page's values as the column's. Never automatic: a funnel
+    // click has to stay instant, and the page usually holds what is wanted.
     const result = await popover.open(btn.getBoundingClientRect(), values, this.filters[field] ?? '', blanks, (next) => this.onFilterInput(field, next), {
-      ...(this.windowed ? { note: 'Values from the rows loaded so far — there may be more.' } : {}),
+      ...(this.windowed
+        ? {
+            note: 'Values from the rows loaded so far — there may be more.',
+            ...(this.rowColl?.distinct ? { onRefresh: () => this.readDistinct(field) } : {}),
+          }
+        : {}),
     });
     if (result === null) return;
     if (typeof result === 'object' && 'clear' in result) {
@@ -1388,6 +1393,67 @@ export class DataTable extends LitElement {
     } else if (typeof result === 'string') {
       this.onFilterInput(field, result);
     }
+  }
+
+  /**
+   * Ask the store for one column's real value list — the funnel's refresh icon.
+   *
+   * `where` carries the OTHER columns' filters and the search, so the list stays
+   * faceted exactly as the in-memory one is: this column's own filter is left out,
+   * or picking a value would narrow the list to that value with no way back.
+   *
+   * A store that could not apply all of `where` (`partial`) has counted a wider set
+   * than was asked for, and a capped read (`truncated`) has not seen every row.
+   * Both are said out loud rather than left to look like the whole answer.
+   */
+  private async readDistinct(field: string): Promise<{ values: Array<{ value: string; count: number }>; blanks: number; note: string }> {
+    const coll = this.rowColl;
+    const others = Object.fromEntries(Object.entries(this.filters).filter(([f, q]) => f !== field && q && q.trim() !== ''));
+    const search = [this.localQuery.trim(), this.globalQuery.trim()].filter(Boolean).join(' ');
+    const where: RowQuery = {
+      ...(Object.keys(others).length > 0 ? { filters: others } : {}),
+      ...(search ? { search } : {}),
+    };
+    try {
+      const page = await coll!.distinct!({ field, where, limit: FACET_MAX_OPTIONS });
+      let values = page.values.map((v) => ({ value: typeof v.value === 'string' ? v.value : String(v.value), count: v.count }));
+      // An `array` column's CELL is not its values. A store that grouped cells says
+      // so with `cells`, and the members are taken apart here and their cell counts
+      // added up — the same arithmetic `facetCounts` does in memory, where a cell of
+      // `a,b` is one `a` and one `b`. A store that answered per member says nothing.
+      if (page.cells) {
+        const counts = new Map<string, number>();
+        for (const v of values) for (const m of arrayMembers(v.value)) counts.set(m, (counts.get(m) ?? 0) + v.count);
+        values = [...counts.entries()].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+      }
+      // A boolean column always offers both sides, even at a count of 0 — a column
+      // of all-true rows would otherwise leave no way to filter for false. The
+      // in-memory list does this in `facetCounts`; a store that grouped only the
+      // values present cannot, so the domain is put back here.
+      if (this.columns.find((c) => c.field === field)?.type === 'boolean') {
+        const found = new Map(values.map((v) => [v.value, v.count]));
+        const domain = ['true', 'false'].map((value) => ({ value, count: found.get(value) ?? 0 }));
+        values = [...domain, ...values.filter((v) => v.value !== 'true' && v.value !== 'false')];
+      }
+      const note = page.truncated
+        ? 'Some values may still be missing — the table was too large to read in full.'
+        : page.partial
+          ? 'The whole column, but the counts cover more rows than your other filters.'
+          : 'The whole column.';
+      return { values, blanks: page.blanks ?? 0, note };
+    } catch {
+      // A store that cannot answer must not leave the picker looking refreshed.
+      return {
+        values: this.values(field),
+        blanks: facetCounts(this.rowsFacetedFor(field), field, { type: this.columns.find((c) => c.field === field)?.type }).blanks,
+        note: 'The values could not be read — still showing the rows loaded so far.',
+      };
+    }
+  }
+
+  /** The in-memory faceted values for one field, as the picker first shows them. */
+  private values(field: string): Array<{ value: string; count: number }> {
+    return facetCounts(this.rowsFacetedFor(field), field, { type: this.columns.find((c) => c.field === field)?.type }).values;
   }
 
   private onFilterInput(field: string, value: string) {

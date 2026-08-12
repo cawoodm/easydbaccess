@@ -1,4 +1,20 @@
-import type { ColumnSpec, DataCollection, DataStore, PluginRecord, Row, RowPage, RowQuery, Setting, Table, Unsubscribe, ViewInstance, ViewTemplate, Workspace } from '@easydb/shared';
+import type {
+  ColumnSpec,
+  DataCollection,
+  DataStore,
+  DistinctPage,
+  DistinctQuery,
+  PluginRecord,
+  Row,
+  RowPage,
+  RowQuery,
+  Setting,
+  Table,
+  Unsubscribe,
+  ViewInstance,
+  ViewTemplate,
+  Workspace,
+} from '@easydb/shared';
 import { settingId } from './dexie-db.js';
 
 /**
@@ -19,6 +35,11 @@ export interface EasydbStoreBridge {
    * because an older preload won't have it; `rowsViewIpc` feature-detects.
    */
   queryRows?(tableId: string, q: RowQuery): Promise<RowPage>;
+  /**
+   * One column's distinct values, counted in SQL. Optional for the same reason as
+   * `queryRows`: an older preload does not have it, and the caller feature-detects.
+   */
+  distinctValues?(tableId: string, q: DistinctQuery): Promise<DistinctPage>;
   findOne(coll: string, key: string): Promise<unknown | null>;
   insert(coll: string, doc: Record<string, unknown>): Promise<unknown>;
   bulkInsert(coll: string, docs: Record<string, unknown>[]): Promise<unknown[]>;
@@ -327,12 +348,14 @@ export const ROW_FETCH_CAP = 20_000;
 function rowsViewIpc(bridge: EasydbStoreBridge, tableId: string): DataCollection<Row> {
   const fetchAll = (query?: Partial<Row>): Promise<Row[]> => bridge.find('rows', { ...(query as Record<string, unknown> | undefined), tableId }, ROW_FETCH_CAP) as Promise<Row[]>;
   const queryRows = bridge.queryRows?.bind(bridge);
+  const distinctValues = bridge.distinctValues?.bind(bridge);
   return {
     find: (query) => fetchAll(query),
     // Present only when the preload offers it, because `DataCollection.query`
     // is feature-detected by its callers and an implementation that silently
     // fell back to `find()` would hide the cost it exists to avoid.
     ...(queryRows ? { query: (q: RowQuery): Promise<RowPage> => queryRows(tableId, q) } : {}),
+    ...(distinctValues ? { distinct: (q: DistinctQuery): Promise<DistinctPage> => distinctValues(tableId, q) } : {}),
     async findOne(id) {
       const doc = (await bridge.findOne('rows', id)) as Row | undefined;
       return doc && doc.tableId === tableId ? doc : null;

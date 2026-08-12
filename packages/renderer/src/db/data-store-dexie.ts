@@ -1,9 +1,10 @@
 import { liveQuery, type Table as DexieTable } from 'dexie';
-import type { DataCollection, DataStore, PluginRecord, Row, RowPage, RowQuery, Setting, Table, Unsubscribe, ViewInstance, ViewTemplate, Workspace } from '@easydb/shared';
+import type { DataCollection, DataStore, DistinctPage, DistinctQuery, PluginRecord, Row, RowPage, RowQuery, Setting, Table, Unsubscribe, ViewInstance, ViewTemplate, Workspace } from '@easydb/shared';
 import { isPlainSlice } from '@easydb/shared';
 import { settingId, type EasyDb } from './dexie-db.js';
 import { applyRowRequest, projectFields } from './row-reader.js';
 import { ROW_FETCH_CAP } from './data-store-ipc.js';
+import { FACET_MAX_OPTIONS, facetCounts } from '../search/facet-values.js';
 
 /**
  * Dexie-backed DataStore. Implements `DataCollection<T>` from the plugin API;
@@ -177,6 +178,37 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string, tables: DexieT
       const columns = (await tables.get(tableId))?.columns ?? [];
       const page = applyRowRequest(rows, { columns, ...q });
       return { ...page, ...(capped ? { truncated: true } : {}) };
+    },
+    /**
+     * The distinct values of one field, for the funnel's picker.
+     *
+     * IndexedDB has nothing to group by here — the values live inside `data`, which
+     * no index covers — so this reads the rows and counts them. That is exactly why
+     * it is behind a refresh button: correct on demand beats a scan on every funnel
+     * click. The read is capped like every other, and a capped answer says
+     * `truncated` rather than passing a partial list off as the column's values.
+     *
+     * The counting is `facetCounts`, the same function that builds the list from the
+     * rows in memory. Blanks, the commonest-first order, `array` members counted one
+     * by one, `boolean` always offering both sides — all of it has to agree with the
+     * list this replaces, and one implementation cannot disagree with itself.
+     */
+    async distinct(q: DistinctQuery): Promise<DistinctPage> {
+      const all = await coll.where('tableId').equals(tableId).toArray();
+      const capped = all.length > ROW_FETCH_CAP;
+      const scanned = capped ? all.slice(0, ROW_FETCH_CAP) : all;
+      const columns = (await tables.get(tableId))?.columns ?? [];
+      // The other columns' filters, applied here so the list stays faceted. The
+      // caller already left this field's own filter out of `where`.
+      const narrowed = q.where ? applyRowRequest(scanned, { columns, ...q.where, offset: 0, limit: 0 }).rows : scanned;
+      const type = columns.find((c) => c.field === q.field)?.type;
+      const { values, blanks } = facetCounts(narrowed, q.field, { type });
+      const max = q.limit && q.limit > 0 ? q.limit : FACET_MAX_OPTIONS;
+      return {
+        values: values.slice(0, max),
+        blanks,
+        ...(capped || values.length > max ? { truncated: true } : {}),
+      };
     },
     subscribe(fn): Unsubscribe {
       const obs = liveQuery(() => coll.where('tableId').equals(tableId).toArray());

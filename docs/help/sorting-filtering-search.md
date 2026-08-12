@@ -70,6 +70,16 @@ A column with long, free-text values (a description field, say) won't offer
 a dropdown at all — only a plain typed filter — since a value list wouldn't
 be useful there.
 
+### The value list of a big table
+
+A big table is read one page at a time (see [Settings](settings.md)), so the
+dropdown can only offer the values on the rows loaded so far. It says as much, and
+puts a **refresh** icon next to that line. Press it to read the real list of values
+for the whole column.
+
+It is never done for you, because opening the funnel has to be instant, and the rows
+you already have usually hold the value you are looking for.
+
 ### A filter on a hidden column
 
 A hidden column has no header, and so no funnel to open. Its filter keeps
