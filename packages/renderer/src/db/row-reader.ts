@@ -56,6 +56,12 @@ export interface RowRequest {
   fields?: string[] | undefined;
   offset?: number | undefined;
   limit?: number | undefined;
+  /**
+   * Pass the store `countTotal: false` — "the rows now, the count later". Only
+   * reaches a store that can answer a `query`, and only when the whole request went
+   * down; a request finished in memory has counted the rows already, for free.
+   */
+  countTotal?: boolean | undefined;
 }
 
 /**
@@ -138,8 +144,14 @@ export function applyRowRequest(rows: Row[], req: RowRequest): RowPage {
   return { rows: projectFields(out, req.fields), total };
 }
 
-/** Drop every field the caller did not ask for. A no-op when it asked for all. */
-function projectFields(rows: Row[], fields: string[] | undefined): Row[] {
+/**
+ * Drop every field the caller did not ask for. A no-op when it asked for all.
+ *
+ * Exported for the Dexie store, whose windowed read returns rows the reader never
+ * sees — the projection has to happen there or `fields` would mean nothing in the
+ * browser and something in Electron.
+ */
+export function projectFields(rows: Row[], fields: string[] | undefined): Row[] {
   if (!fields || fields.length === 0) return rows;
   const wanted = new Set(fields);
   return rows.map((r) => ({
@@ -151,10 +163,11 @@ function projectFields(rows: Row[], fields: string[] | undefined): Row[] {
 /**
  * Read rows for `req`, letting `coll` narrow as much of it as it soundly can.
  *
- * `capWhenReadingAll` bounds the fallback read — the collection is about to hand
- * over everything, and an unbounded fetch of a 609k-row table is what crashed
- * the app on boot. It is a cap, not a page: the rows that come back are a
- * TRUNCATION, which the result reports as `truncated` so a caller showing a
+ * `capWhenReadingAll` bounds what comes BACK, not what is looked at. The whole
+ * table is filtered and only then cut to the cap — a cap applied first would
+ * answer "these of the first 20,000" to a question about the table, which is a
+ * wrong answer that looks like a right one: a row matching in row 30,000 simply
+ * would not be there. The cut is reported as `truncated`, so a caller showing a
  * count can say "20,000+" rather than "20,000". Pass 0 for no cap.
  */
 export async function readRows(coll: DataCollection<Row>, req: RowRequest, capWhenReadingAll = 0): Promise<RowPage> {
@@ -163,8 +176,11 @@ export async function readRows(coll: DataCollection<Row>, req: RowRequest, capWh
 
   if (!coll.query) {
     const all = await coll.find();
-    const hit = capWhenReadingAll > 0 && all.length >= capWhenReadingAll;
-    return { ...applyRowRequest(hit ? all.slice(0, capWhenReadingAll) : all, req), ...(hit ? { truncated: true } : {}) };
+    // The whole request over the whole table, THEN the cap. `total` counts every
+    // match, so the caller can say how many were left out.
+    const page = applyRowRequest(all, req);
+    const hit = capWhenReadingAll > 0 && page.rows.length > capWhenReadingAll;
+    return { ...page, ...(hit ? { rows: page.rows.slice(0, capWhenReadingAll), truncated: true } : {}) };
   }
 
   const q: RowQuery = {
@@ -179,6 +195,11 @@ export async function readRows(coll: DataCollection<Row>, req: RowRequest, capWh
   if (sliceIsSound) {
     if (req.offset != null) q.offset = req.offset;
     if (req.limit != null) q.limit = req.limit;
+    // "Skip the count" only makes sense on an answer this module returns as it
+    // came. Where the request is finished here, the rows are in hand and counting
+    // them costs nothing — so the flag is dropped rather than passed on to a store
+    // whose `total` would then be discarded anyway.
+    if (req.countTotal === false) q.countTotal = false;
   } else if (capWhenReadingAll > 0) {
     q.limit = capWhenReadingAll;
   }
@@ -186,6 +207,28 @@ export async function readRows(coll: DataCollection<Row>, req: RowRequest, capWh
   const page = await coll.query(q);
   // Sound and complete: the backend's own answer, `total` included.
   if (sliceIsSound && !page.partial) return page;
+
+  // A slice off a set that was NOT fully narrowed is unrepairable: the backend
+  // counted off rows from a wider set than the caller asked about, and slicing
+  // again here would count off a second time — page 3 of the answer would be
+  // page 3 of page 3. Nothing in the rows says which ones went missing, so the
+  // only correct move is to ask again for the unsliced superset and do the whole
+  // job here. Costs one extra round trip in the case the store admitted it could
+  // not answer (a filter or sort on a computed or `array` column).
+  if (sliceIsSound && page.partial && (q.limit != null || q.offset != null)) {
+    const wide: RowQuery = { ...q };
+    delete wide.offset;
+    if (capWhenReadingAll > 0) wide.limit = capWhenReadingAll;
+    else delete wide.limit;
+    const superset = await coll.query(wide);
+    const redoneWide = applyRowRequest(superset.rows, req);
+    const cappedWide = wide.limit != null && superset.rows.length >= wide.limit;
+    return {
+      ...redoneWide,
+      partial: true,
+      ...(superset.truncated || cappedWide ? { truncated: true } : {}),
+    };
+  }
 
   // A superset. Re-run the whole request over it — cheaper than it looks, since
   // whatever the backend DID apply has already thrown most of the rows away.

@@ -8,7 +8,7 @@
  */
 
 import type { ColumnSpec, PluginRecord, Row, Setting, Table, TableSource, ViewInstance, ViewTemplate, Workspace } from './types.js';
-import type { QueryPage, RowQuery } from './row-query.js';
+import type { DistinctPage, DistinctQuery, QueryPage, RowQuery } from './row-query.js';
 
 // -- Plugin module shape --------------------------------------------------
 
@@ -133,6 +133,19 @@ export interface DataCollection<T> {
    * apply some predicate, so `rows` is a SUPERSET and needs narrowing again.
    */
   query?(q: RowQuery): Promise<QueryPage<T>>;
+  /**
+   * The distinct values of one field, with the other filters in place — what a
+   * funnel offers to pick from.
+   *
+   * Optional, and asked for only when the user presses refresh in the picker. The
+   * default list is built from the rows already in memory, which costs nothing but
+   * on a windowed grid covers one page; this is how the real list is fetched
+   * without making a funnel click wait for a scan.
+   *
+   * Callers must honour `DistinctPage.truncated` and `partial`: the first says the
+   * list is incomplete, the second that the counts cover a wider set than asked.
+   */
+  distinct?(q: DistinctQuery): Promise<DistinctPage>;
 }
 
 export interface DataStore {

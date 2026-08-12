@@ -61,6 +61,22 @@ export interface RowQuery {
   offset?: number | undefined;
   /** Maximum rows to return. Omitted means every matching row — say a number. */
   limit?: number | undefined;
+  /**
+   * Count the matching rows as well as returning them. Default true.
+   *
+   * A HINT, not an instruction: a store where counting is free (`SELECT COUNT(*)`)
+   * should ignore it and count anyway. It exists for the store where counting is
+   * NOT free. IndexedDB has to walk the index to count a range: measured **14.0 s**
+   * on 609,283 rows, against **0.3 s** to read the 500-row page it accompanies. A
+   * raw `IDBIndex.count(range)` is no faster, so there is no better path to find.
+   *
+   * A grid drawing thirty rows needs the rows now and the total shortly. Waiting for
+   * the count cost that 14 s twice over — once to choose the read's shape, once
+   * inside the paged read to fill in `total`.
+   *
+   * A store that honors it sets {@link QueryPage.total} to `-1`.
+   */
+  countTotal?: boolean | undefined;
 }
 
 /**
@@ -73,9 +89,15 @@ export interface QueryPage<T> {
    * Rows matching the filter and search, IGNORING offset and limit.
    *
    * Needed separately because the caller has to show a total it did not fetch —
-   * a titlebar count, a scrollbar's extent. Counting is far cheaper than
-   * returning: `SELECT COUNT(*)` on a 609k-row table is milliseconds against
-   * the ~1.5s it took to hand over 20,000 rows.
+   * a titlebar count, a scrollbar's extent. Counting is cheaper than returning, but
+   * how much cheaper depends entirely on the store: `SELECT COUNT(*)` on a 609k-row
+   * table is milliseconds against the ~1.5s it took to hand over 20,000 rows, while
+   * the same count in IndexedDB is 14 seconds. Which is why
+   * {@link RowQuery.countTotal} exists.
+   *
+   * `-1` means NOT COUNTED — the caller passed {@link RowQuery.countTotal} `false`
+   * and this store honored it. The same negative sentinel `countSuffix` and the
+   * view-window manager already use for "no count yet". Never treat it as a number.
    */
   total: number;
   /**
@@ -104,6 +126,70 @@ export interface QueryPage<T> {
 }
 
 export type RowPage = QueryPage<Row>;
+
+/**
+ * "Give me the distinct values of this field, with the other filters in place."
+ *
+ * The funnel's value list. It is asked for separately from the rows because a grid
+ * holding one PAGE can only offer the values ON that page, and a list that changes
+ * as you scroll is worse than one that says it is incomplete. So the page stays the
+ * default and this is what the refresh icon asks for.
+ *
+ * Deliberately says nothing about HOW: `GROUP BY` in SQLite, a facet query at a
+ * Datasette instance, a scan in Dexie. The caller must not be able to tell which.
+ */
+export interface DistinctQuery {
+  /** The field whose values are wanted. */
+  field: string;
+  /**
+   * The OTHER columns' filters and the search, so the list stays FACETED.
+   *
+   * Which filters those are is the caller's rule, not the store's: a column's own
+   * filter is left out of its own list, or picking one value would narrow the list
+   * to that value and there would be no way back. `offset`/`limit` here are
+   * meaningless and ignored — use {@link DistinctQuery.limit}.
+   */
+  where?: RowQuery | undefined;
+  /** Cap on how many values come back. Absent means the store's own cap. */
+  limit?: number | undefined;
+}
+
+/** One distinct value and how many rows carry it. */
+export interface DistinctValue {
+  value: unknown;
+  count: number;
+}
+
+export interface DistinctPage {
+  /** Commonest first, ties alphabetical — the order a value picker wants. */
+  values: DistinctValue[];
+  /**
+   * Rows whose cell holds nothing, which a picker offers as one "(blanks)" entry.
+   * Separate from `values` because "empty" is a filter option, not a value.
+   */
+  blanks?: number | undefined;
+  /**
+   * More distinct values exist than came back, or the store read only part of the
+   * table to find them. Either way the list is incomplete and must say so.
+   */
+  truncated?: boolean | undefined;
+  /**
+   * The store could not apply all of `where`, so the counts are over a wider set
+   * than the caller asked about. Same meaning as on {@link QueryPage}: the values
+   * are a superset, and a count is an upper bound.
+   */
+  partial?: boolean | undefined;
+  /**
+   * These are whole CELLS of an `array` column, not its members: a SQL `GROUP BY`
+   * over `"a,b"` groups the cell, because SQL cannot see inside it. The caller
+   * takes them apart (`arrayMembers`) and adds the cell counts up per member.
+   *
+   * A separate flag rather than `partial`, so `partial` keeps one meaning. Both can
+   * be true, and telling them apart is what lets the caller fix the members without
+   * also claiming a filter was dropped.
+   */
+  cells?: boolean | undefined;
+}
 
 /** True when the query asks for nothing to be narrowed — a plain slice. */
 export function isPlainSlice(q: RowQuery): boolean {

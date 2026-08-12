@@ -34,3 +34,28 @@ export async function readSortDescFirst(settings: { get<T>(pluginId: string, key
 export async function readHighlightNulls(settings: { get<T>(pluginId: string, key: string): Promise<T | undefined> }): Promise<boolean> {
   return (await settings.get<boolean>(GRID_SETTINGS_ID, 'highlightNulls')) !== false;
 }
+
+/**
+ * Row count from which a grid stops holding the whole table and reads one PAGE at
+ * a time (`grid:windowRowsFrom`). `0` never windows.
+ *
+ * 50 000 rather than something smaller so that every table which works well today
+ * keeps the code path it has, and only the ones that hurt change: one measured
+ * 609,283-row table cost 1483 ms and a 15.4 MB payload to put about thirty rows on
+ * screen, where the same query for 200 rows takes 13 ms.
+ *
+ * Read into component state, like {@link readHighlightNulls} — the answer decides
+ * what a fetch asks for, and a fetch cannot await a settings read per keystroke.
+ */
+export const WINDOW_ROWS_FROM_DEFAULT = 50_000;
+
+export async function readWindowRowsFrom(settings: { get<T>(pluginId: string, key: string): Promise<T | undefined> }): Promise<number> {
+  const raw: unknown = await settings.get<number>(GRID_SETTINGS_ID, 'windowRowsFrom');
+  // `0` is a real answer — never window — so it must be told apart from "nothing
+  // stored". `Number(null)` and `Number('')` are both 0, which would read a dump's
+  // null or a cleared field as a deliberate 0 and quietly switch windowing off for
+  // every table. Only a number, or a string that says one, counts.
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN;
+  if (!Number.isFinite(n) || n < 0) return WINDOW_ROWS_FROM_DEFAULT;
+  return Math.floor(n);
+}

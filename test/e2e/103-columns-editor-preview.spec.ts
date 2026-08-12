@@ -49,15 +49,24 @@ test('a read that fails says so instead of claiming there are no rows', async ({
   await waitForPanel(page, id);
   await addRow(page, id, { n: 'one' });
 
-  // Break the row read. The grid subscribed with the real collection when it
-  // mounted, so this only reaches the editor's own read.
+  // Break the row read. BOTH ways in: `readRows` prefers `query` where the store
+  // has one, and Dexie has had one since 0.0.348 — breaking only `find` left the
+  // preview working and this test asserting nothing. The grid subscribed with the
+  // real collection when it mounted, so this reaches only the editor's own read.
   await page.evaluate((tid) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ctx = (window as any).__easydb;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const real = ctx.store.rows.bind(ctx.store) as (t: string) => any;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ctx.store.rows = (tableId: string): any => (tableId === tid ? { ...real(tableId), find: () => Promise.reject(new Error('no')) } : real(tableId));
+    ctx.store.rows = (tableId: string): any =>
+      tableId === tid
+        ? {
+            ...real(tableId),
+            find: () => Promise.reject(new Error('no')),
+            query: () => Promise.reject(new Error('no')),
+          }
+        : real(tableId);
   }, id);
 
   const dlg = await openColumns(page, id);

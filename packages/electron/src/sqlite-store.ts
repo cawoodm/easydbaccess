@@ -20,7 +20,7 @@
 
 import { copyFileSync } from 'node:fs';
 import type { DatabaseSync as DatabaseSyncType, SQLInputValue, StatementSync as StatementSyncType } from 'node:sqlite';
-import { buildWhere, decodeValue, encodeValue, quoteIdent, sanitizeTableName, sqlAffinity, type ColumnSpec, type RowPage, type RowQuery } from '@easydb/shared';
+import { buildWhere, decodeValue, encodeValue, quoteIdent, sanitizeTableName, sqlAffinity, type ColumnSpec, type DistinctPage, type RowPage, type RowQuery } from '@easydb/shared';
 
 // node:sqlite is a Node 22.5+ builtin (unflagged on Electron 43's bundled
 // Node 24.18.0). Vite (used by vitest to run this package's tests) doesn't
@@ -715,6 +715,70 @@ export class SqliteStore {
       rows: raws.map((raw) => this.decodeRow(tableId, wanted, raw)) as RowPage['rows'],
       total: totalRow.n,
       ...(partial ? { partial: true } : {}),
+    };
+  }
+
+  /**
+   * The distinct values of ONE column, counted, with the other filters in place —
+   * what a funnel offers to pick from. `GROUP BY`, which is what SQL is for: the
+   * whole column at any table size, without a row leaving the main process.
+   *
+   * Two columns cannot be answered this way and both report `partial` rather than a
+   * narrower answer:
+   *
+   *  - a SCRIPTED column stores nothing — its values exist only once the renderer
+   *    has run the script, so this answers with `partial` and no values at all;
+   *  - an ARRAY column holds SEVERAL values per cell, and a `GROUP BY` over
+   *    `"a,b"` yields the cell, not the members. Those come back as the distinct
+   *    CELLS with `cells: true`, and the caller takes them apart.
+   *
+   * `blanks` is counted separately because a picker offers "empty" as its own
+   * option, not as a value.
+   */
+  distinctValues(tableId: string, q: { field: string; where?: RowQuery | undefined; limit?: number | undefined }): DistinctPage {
+    const t = this.allRegisteredTables().find((x) => x.id === tableId);
+    if (!t) return { values: [] };
+    const columns = this.readColumnsJson(t.sql_table);
+    const spec = columns.find((c) => c.field === q.field);
+    // No SQL form for the field itself: the caller has to do the whole job.
+    if (!spec || spec.script) return { values: [], partial: true };
+
+    const table = quoteIdent(t.sql_table);
+    const sqlOf = (field: string): string | null => {
+      const s = columns.find((c) => c.field === field);
+      if (!s || s.script || s.type === 'array') return null;
+      return quoteIdent(s.field);
+    };
+    const searchFields = columns.filter((c) => !c.script && c.type !== 'array' && c.filterable !== false).map((c) => c.field);
+    const where = buildWhere(q.where?.filters, q.where?.search, sqlOf, searchFields);
+    const params = where.params as SQLInputValue[];
+    const col = quoteIdent(spec.field);
+    const limit = q.limit && q.limit > 0 ? Math.floor(q.limit) : 500;
+
+    // Blanks are counted by their own query rather than picked out of the grouped
+    // one. NULL and '' are the same thing to a picker — a cell with nothing in it —
+    // and left in the GROUP BY the blank group takes a slot in the LIMIT: it can
+    // push a real value out of the list, and be missed entirely when it sorts past
+    // the limit itself. `TRIM` leaves a number alone (`TRIM(0)` is '0', not '').
+    const blankSql = `(${col} IS NULL OR TRIM(${col}) = '')`;
+    const scope = where.sql ? `(${where.sql}) AND ` : '';
+    const rows = this.db
+      // One more row than asked for, so "there are more" needs no second query.
+      .prepare(`SELECT ${col} AS v, COUNT(*) AS n FROM ${table} WHERE ${scope}NOT ${blankSql} GROUP BY ${col} ORDER BY n DESC, v ASC LIMIT ${limit + 1}`)
+      .all(...params) as Array<{ v: unknown; n: number }>;
+    const blankRow = this.db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${scope}${blankSql}`).get(...params) as { n: number };
+
+    const more = rows.length > limit;
+    const values = (more ? rows.slice(0, limit) : rows).map((r) => ({ value: decodeValue(spec.type, r.v), count: r.n }));
+    return {
+      values,
+      blanks: blankRow.n,
+      ...(more ? { truncated: true } : {}),
+      // An `array` column's cells are not its members: SQL cannot see inside one,
+      // so the caller splits them. Said with its own flag so `partial` keeps
+      // meaning "a predicate was left out", which is a different problem.
+      ...(spec.type === 'array' ? { cells: true } : {}),
+      ...(where.expressible ? {} : { partial: true }),
     };
   }
 

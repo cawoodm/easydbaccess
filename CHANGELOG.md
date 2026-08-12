@@ -1,13 +1,27 @@
 # CHANGELOG
 
+## 12 Aug 2026
+
+### Features
+
+- ✨ A funnel on a big table says its value list may be short, and a refresh icon reads the whole column (v0.0.349)
+
+### Bugs
+
+- 🪲 A table of 600,000 rows took most of a minute to appear, and was read whole again on every write (v0.0.351)
+- 🪲 A filter on a table over 20,000 rows only searched the first 20,000, so a match further in was missing (v0.0.350)
+
 ## 11 Aug 2026
 
 ### Features
 
+- 🪶 The browser reads a big table one page at a time too, and a filter or a sort still covers every row (v0.0.348)
+- 🪶 A table of 50,000 rows or more is read one page at a time as you scroll, instead of being held in memory whole (v0.0.347)
 - ✨ The dialogs, the toast and the dropdown menu are now three MIT packages of their own, reusable in any Lit app (v0.0.345)
 
 ### Bugs
 
+- 🪲 A view of a big table read the whole table four times before it showed its first card (v0.0.348)
 - 🪲 A filter on a hidden column could not be seen or switched off — the column had no header, so it had no funnel (v0.0.346)
 - 🪲 The column editor showed no preview on a large table, and claimed the table was empty when the read failed (v0.0.343)
 
