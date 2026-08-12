@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { addRow, createTable, waitForPanel } from './helpers.js';
+import { addRow, chooseSimpleStorage, createTable, waitForPanel } from './helpers.js';
 
 /**
  * Switching, adding and deleting a workspace are palette commands, not just a
@@ -54,6 +54,7 @@ async function createWorkspace(page: import('@playwright/test').Page, name: stri
   await input.waitFor();
   await input.fill(name);
   await dialogs.getByRole('button', { name: 'OK', exact: true }).click();
+  await chooseSimpleStorage(page);
   // The pick navigates, so wait for the new URL and the booted page together.
   await Promise.all([bootedAt(page, name), dialogs.getByRole('button', { name: /Empty workspace/ }).click()]);
 }

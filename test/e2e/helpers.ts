@@ -141,6 +141,19 @@ export async function readViewInstance(page: Page, instanceId: string) {
   );
 }
 
+/**
+ * Answer the storage-strategy question "New workspace" asks between the name
+ * prompt and the "what does it start with?" choice.
+ *
+ * Simple keeps the workspace in IndexedDB, which is what every workspace did
+ * before `.edb` files existed and what these specs assume. The click is
+ * unconditional on purpose: the question always appears in Chromium, so a silent
+ * skip would hide the question disappearing.
+ */
+export async function chooseSimpleStorage(page: Page): Promise<void> {
+  await page.locator('host-dialogs').getByRole('button', { name: /^Simple/ }).click();
+}
+
 /** Returns the jsPanel DOM id derived from a table id (mirrors cssSafe()). */
 export function panelDomId(tableId: string): string {
   return `panel-${tableId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;

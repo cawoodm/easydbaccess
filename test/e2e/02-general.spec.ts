@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { addRow, createTable, panelDomId, readTable, waitForPanel } from './helpers.js';
+import { addRow, chooseSimpleStorage, createTable, panelDomId, readTable, waitForPanel } from './helpers.js';
 
 /**
  * TODO § General
@@ -66,7 +66,10 @@ test.describe('general', () => {
     await input.waitFor();
     await input.fill(newName);
     await dialog.getByRole('button', { name: 'OK', exact: true }).click();
-    // Second step: what the new workspace starts with (see 51-workspace-clone
+    // Second step: where the data lives. Simple is the IndexedDB path this test
+    // has always taken.
+    await chooseSimpleStorage(page);
+    // Third step: what the new workspace starts with (see 51-workspace-clone
     // for what each answer copies). This test only cares that it switches.
     await dialog.getByRole('button', { name: /Empty workspace/ }).click();
 
