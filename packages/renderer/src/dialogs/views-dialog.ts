@@ -208,6 +208,12 @@ export class ViewsDialog extends LitElement {
   private columns: ColumnSpec[] = [];
   private dialogEl: HTMLDialogElement | null = null;
   /**
+   * True when the dialog was opened directly onto an editor instead of onto the
+   * list — i.e. the user came from a chart's Edit or Chart button to change one
+   * thing. Decides where Save goes; see `doneEditing`.
+   */
+  private deepLinked = false;
+  /**
    * Snapshotted so the template editor can list the registered drawing kinds.
    * Re-read on every `refresh()` rather than captured once, for the same reason
    * `data-table` re-snapshots its cell renderers on `app:ready`: a plugin
@@ -237,6 +243,9 @@ export class ViewsDialog extends LitElement {
     this.mode = 'list';
     this.tDraft = null;
     this.iDraft = null;
+    // Opened straight onto one editor (a visualization's Edit / Chart button)
+    // rather than onto the list. Save then FINISHES — see `doneEditing`.
+    this.deepLinked = Boolean(opts?.editTemplateId || opts?.editInstanceId);
     await this.refresh();
     // Deep-link straight into a template or instance editor (from a view
     // window's footer icons).
@@ -264,6 +273,20 @@ export class ViewsDialog extends LitElement {
   private close = (): void => {
     this.dialogEl?.close();
   };
+
+  /**
+   * Where Save goes after a successful edit.
+   *
+   * Back to the list when the user navigated there themselves — they were
+   * browsing and may well want to edit something else. But when the dialog was
+   * opened straight onto this editor from a chart's own footer, the list is
+   * somewhere they never asked to be: they came to change one thing, so Save
+   * finishes and the chart they were looking at is visible again.
+   */
+  private doneEditing(): void {
+    if (this.deepLinked) this.close();
+    else this.mode = 'list';
+  }
 
   // The form's one submit path: Enter/Ctrl+Enter or clicking the primary
   // button all route here, dispatching to whichever action is primary for
@@ -473,7 +496,7 @@ export class ViewsDialog extends LitElement {
     // view-window manager to re-render all open views so edits show at once.
     document.dispatchEvent(new CustomEvent('easydb:reload-views'));
     await this.refresh();
-    this.mode = 'list';
+    this.doneEditing();
   }
 
   // -- instance creation ------------------------------------------------------
@@ -719,7 +742,7 @@ export class ViewsDialog extends LitElement {
       // Reflect the change in an already-open window.
       document.dispatchEvent(new CustomEvent('easydb:reload-view', { detail: { instanceId: d.id } }));
       await this.refresh();
-      this.mode = 'list';
+      this.doneEditing();
       return;
     }
     // Snapshot the table's CURRENT sort / filter / visible columns.

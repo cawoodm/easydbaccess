@@ -241,6 +241,39 @@ test.describe('visualizations', () => {
     expect(iconFont).toContain('Material Icons');
   });
 
+  test('Save closes the dialog when it was opened straight onto an editor', async ({ page }) => {
+    // Arriving from a chart's own footer means the user came to change ONE thing.
+    // The list is somewhere they never asked to be, so Save finishes.
+    const id = await seedCities(page);
+    await makeChart(page, id, { name: 'By country' });
+    const win = page.locator('.jsPanel', { has: page.locator('viz-panel') });
+    const dlg = page.locator('views-dialog dialog');
+
+    // The Chart button — the template editor (kind, aggregate, options).
+    await win.locator('viz-footer').getByRole('button', { name: 'Edit chart definition' }).click();
+    await expect(dlg).toBeVisible();
+    await dlg.getByRole('button', { name: 'Save' }).click();
+    await expect(dlg).toBeHidden();
+
+    // The Edit button — the instance editor (which column feeds which channel).
+    await win.locator('viz-footer').getByRole('button', { name: 'Edit visualization' }).click();
+    await expect(dlg).toBeVisible();
+    await dlg.getByRole('button', { name: 'Save' }).click();
+    await expect(dlg).toBeHidden();
+  });
+
+  test('Save returns to the list when the user navigated there themselves', async ({ page }) => {
+    // The other half of the rule: someone browsing the Views list was not asking
+    // to be thrown out of it, and may well want to edit something else.
+    const id = await seedCities(page);
+    const dlg = await openViews(page, id);
+    await dlg.getByRole('button', { name: '+ New chart' }).click();
+    await dlg.locator('input[type=text]').first().fill('Stays open');
+    await dlg.getByRole('button', { name: 'Save' }).click();
+    await expect(dlg).toBeVisible();
+    await expect(dlg.locator('ul.list li', { hasText: 'Stays open' })).toBeVisible();
+  });
+
   test('a chart mapped to an EMPTY column says so instead of drawing nothing', async ({ page }) => {
     // The reported case, and the commonest way a chart looks broken: the column
     // exists and is simply empty. Picking the wrong one from a dropdown of a dozen
