@@ -37,7 +37,7 @@ export function init(api: HostApi): void {
     data: 'rows',
     options: [
       { key: 'minLength', label: 'Ignore words shorter than', type: 'number', default: 3 },
-      { key: 'maxTerms', label: 'Most words to show', type: 'number', default: 120, description: 'Capped — the layout runs on the main thread.' },
+      { key: 'maxTerms', label: 'Most words to show', type: 'number', default: 120 },
       { key: 'stopWords', label: 'Drop common words (the, and, of…)', type: 'boolean', default: true },
       { key: 'includeNumbers', label: 'Include numbers', type: 'boolean' },
       { key: 'rotate', label: 'Allow sideways words', type: 'boolean' },
