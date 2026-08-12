@@ -8,6 +8,8 @@
 // element importing a plugin would invert the plugin model, and a plugin
 // importing an element would pull a charting library in for one string.
 
+import { defaultStopWordsText } from './word-frequency.js';
+
 export const VIZ_SETTINGS_ID = 'viz';
 
 /**
@@ -22,6 +24,34 @@ export const DEFAULT_TILE_ATTRIBUTION = '© OpenStreetMap contributors';
 
 interface SettingsReader {
   get<T>(pluginId: string, key: string): Promise<T | undefined>;
+}
+
+/**
+ * Word-cloud DEFAULTS — what a NEW word cloud starts with, not a live override.
+ *
+ * They are copied into the template's own options the moment the kind is picked
+ * (see `dialogs/views-dialog.ts`), rather than read at draw time like the map's
+ * tile URL. The difference is deliberate: a tile server is infrastructure and
+ * should change everywhere at once, while a word list is editorial. Changing the
+ * workspace default must not silently rewrite clouds somebody already tuned.
+ */
+export interface CloudDefaults {
+  minLength: number;
+  keepWords: string;
+  stopWords: string;
+}
+
+export async function readCloudDefaults(settings: SettingsReader): Promise<CloudDefaults> {
+  const min = Number(await settings.get<number>(VIZ_SETTINGS_ID, 'cloudMinLength'));
+  const keep = await settings.get<string>(VIZ_SETTINGS_ID, 'cloudKeepWords');
+  const stop = await settings.get<string>(VIZ_SETTINGS_ID, 'cloudStopWords');
+  return {
+    minLength: Number.isFinite(min) && min > 0 ? Math.floor(min) : 3,
+    keepWords: typeof keep === 'string' ? keep : '',
+    // An empty string is a real answer here ("drop nothing"), so only an ABSENT
+    // setting falls back to the built-in list.
+    stopWords: typeof stop === 'string' ? stop : defaultStopWordsText(),
+  };
 }
 
 /**

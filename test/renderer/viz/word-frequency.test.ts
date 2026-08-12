@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_STOP_WORDS, tokenize, wordFrequencies } from '../../../packages/renderer/src/viz/word-frequency.js';
+import { DEFAULT_STOP_WORDS, defaultStopWordsText, parseWordList, resolveStopWords, tokenize, wordFrequencies } from '../../../packages/renderer/src/viz/word-frequency.js';
 
 describe('tokenize', () => {
   it('splits on punctuation and whitespace', () => {
@@ -116,5 +116,92 @@ describe('wordFrequencies', () => {
 
   it('has a stop list that covers the obvious offenders', () => {
     for (const w of ['the', 'and', 'of', 'to', 'a', 'is']) expect(DEFAULT_STOP_WORDS.has(w)).toBe(true);
+  });
+});
+
+describe('keepWords — the exception list', () => {
+  it('keeps a word shorter than minLength', () => {
+    // The reason it exists: acronyms are often the most interesting terms in a
+    // column and the first thing a length limit throws away.
+    const out = wordFrequencies(['AI and UI and SQL'], { minLength: 4, keepWords: new Set(['ai', 'ui']) });
+    const terms = out.map((t) => t.term);
+    expect(terms).toContain('AI');
+    expect(terms).toContain('UI');
+    // Still respected for everything NOT on the list.
+    expect(terms).not.toContain('and');
+  });
+
+  it('overrides the stop list too, not just the length', () => {
+    // "always keep this word" that a second rule could still eat would be a
+    // setting that lies.
+    const out = wordFrequencies(['the cat'], { minLength: 1, keepWords: new Set(['the']) });
+    expect(out.map((t) => t.term)).toContain('the');
+  });
+
+  it('overrides the numbers rule', () => {
+    const out = wordFrequencies(['sales 2026'], { minLength: 1, keepWords: new Set(['2026']) });
+    expect(out.map((t) => t.term)).toContain('2026');
+  });
+
+  it('matches case-insensitively, like every other rule here', () => {
+    const out = wordFrequencies(['ai AI Ai'], { minLength: 4, keepWords: new Set(['ai']) });
+    expect(out[0]?.count).toBe(3);
+  });
+
+  it('changes nothing when empty or absent', () => {
+    const withEmpty = wordFrequencies(['the cat sat'], { minLength: 3, keepWords: new Set() }).map((t) => t.term);
+    const without = wordFrequencies(['the cat sat'], { minLength: 3 }).map((t) => t.term);
+    expect(withEmpty).toEqual(without);
+  });
+});
+
+describe('parseWordList', () => {
+  it('accepts commas, spaces, semicolons and new lines interchangeably', () => {
+    // It is a free-text field; a user typing any of these means the same thing.
+    expect([...parseWordList('the, and of;  but\nyet')]).toEqual(['the', 'and', 'of', 'but', 'yet']);
+  });
+
+  it('folds to lower case, because that is how the counter compares', () => {
+    expect([...parseWordList('The AND')]).toEqual(['the', 'and']);
+  });
+
+  it('drops empties and de-duplicates', () => {
+    expect([...parseWordList(' , the ,, the , ')]).toEqual(['the']);
+  });
+
+  it('returns an empty set for empty, null or a non-string', () => {
+    expect(parseWordList('').size).toBe(0);
+    expect(parseWordList(null).size).toBe(0);
+    expect(parseWordList(undefined).size).toBe(0);
+  });
+});
+
+describe('resolveStopWords', () => {
+  it('uses the built-in list when never configured', () => {
+    expect(resolveStopWords(undefined)).toBe(DEFAULT_STOP_WORDS);
+    expect(resolveStopWords(null)).toBe(DEFAULT_STOP_WORDS);
+  });
+
+  it('treats a deliberately emptied field as "drop nothing"', () => {
+    // The distinction that matters: absent means "I never said", empty means
+    // "I said none".
+    expect(resolveStopWords('').size).toBe(0);
+    expect(resolveStopWords('   ').size).toBe(0);
+  });
+
+  it('parses a list', () => {
+    expect([...resolveStopWords('foo, bar')]).toEqual(['foo', 'bar']);
+  });
+
+  it('still understands the boolean this option used to be', () => {
+    // Templates saved before the option became editable text are still valid.
+    expect(resolveStopWords(true)).toBe(DEFAULT_STOP_WORDS);
+    expect(resolveStopWords(false).size).toBe(0);
+  });
+
+  it('round-trips the built-in list through its text form', () => {
+    const text = defaultStopWordsText();
+    expect(resolveStopWords(text).size).toBe(DEFAULT_STOP_WORDS.size);
+    for (const w of ['the', 'and', 'of']) expect(resolveStopWords(text).has(w)).toBe(true);
   });
 });

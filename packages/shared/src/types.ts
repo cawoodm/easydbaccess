@@ -544,6 +544,20 @@ export interface ViewInstance {
    * Absent ⇒ own window, which is what every instance did before this existed.
    */
   dock?: ViewDock | undefined;
+  /**
+   * Per-instance overrides of the viz template's `options`, merged OVER them.
+   *
+   * The template is the shared definition — one "Top words" chart used against
+   * five tables — and the options that matter most in practice are the ones that
+   * differ per table: which words to ignore in THIS column, how short is too
+   * short for THIS data. Without this layer the only way to vary one option was
+   * to copy the whole template.
+   *
+   * Only keys the user actually changed are stored. A key absent here inherits
+   * from the template and keeps inheriting when the template is edited, which is
+   * the whole point of it being a layer rather than a copy.
+   */
+  vizOptions?: Record<string, unknown> | undefined;
   /** Max rows to show (TOP N). Absent or ≤0 ⇒ show all. */
   limit?: number | undefined;
   /**

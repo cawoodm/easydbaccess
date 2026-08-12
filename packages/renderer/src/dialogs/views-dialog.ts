@@ -2,6 +2,8 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { ColumnSpec, SettingsFieldSpec, Table, ViewInstance, ViewTemplate, VisualizationSpec, VizMeasureFn, VizSpec } from '@easydb/shared';
 import { getContext } from '../app-context.js';
+import { readCloudDefaults } from '../viz/viz-settings.js';
+import { effectiveVizOptions, overrideDelta, overriddenKeys } from '../viz/viz-options.js';
 import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@cawoodm/lit-dialogs';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { extractTokens } from '../views/view-render.js';
@@ -56,6 +58,12 @@ interface InstanceDraft {
   readonly: boolean; // grid (template-off) view shows values with no editors
   /** Where it is shown. 'window' ⇒ its own panel; otherwise docked to the table. */
   dock: 'window' | 'above' | 'below';
+  /**
+   * The visualization options AS EDITED — the template's values with the user's
+   * changes applied. Saved as a DELTA against the template (see
+   * `viz/viz-options.ts`), so an option left alone keeps inheriting.
+   */
+  vizOptions: Record<string, unknown>;
 }
 
 @customElement('views-dialog')
@@ -189,6 +197,21 @@ export class ViewsDialog extends LitElement {
       }
       /* A token whose script is set says so on the button itself — the script
          lives in a modal, so nothing else in the row would show it. */
+      /* An overridden option is marked so "this view differs from the chart" is
+         visible without opening the chart definition to compare. */
+      .viz-override {
+        display: flex;
+        align-items: flex-end;
+        gap: 0.4rem;
+      }
+      .viz-override > label {
+        flex: 1;
+        min-width: 0;
+      }
+      .viz-override.changed > label {
+        border-left: 2px solid #2563eb;
+        padding-left: 0.4rem;
+      }
       button.mini.scripted {
         border-color: #2563eb;
         color: #2563eb;
@@ -220,6 +243,8 @@ export class ViewsDialog extends LitElement {
    * hot-installed from the Plugin Manager has to show up here without a reload.
    */
   private registries: { visualizations: Map<string, VisualizationSpec> } | null = null;
+  /** Workspace defaults for a NEW word cloud; see `seedOptions`. */
+  private cloudDefaults: { minLength: number; keepWords: string; stopWords: string } | null = null;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -264,6 +289,7 @@ export class ViewsDialog extends LitElement {
     const ctx = await getContext();
     const wsId = ctx.workspaceId;
     this.registries = ctx.registries;
+    this.cloudDefaults = await readCloudDefaults(ctx.api.settings);
     this.table = await ctx.store.tables.findOne(this.tableId);
     this.columns = this.table?.columns ?? [];
     this.instances = (await ctx.store.viewInstances.find({ workspaceId: wsId })).filter((v) => v.tableId === this.tableId);
@@ -339,6 +365,7 @@ export class ViewsDialog extends LitElement {
       tokenRaw: { ...(inst.tokenRaw ?? {}) },
       limit: inst.limit ?? 0,
       dock: inst.dock ? inst.dock.edge : 'window',
+      vizOptions: effectiveVizOptions(tpl?.viz?.options, inst.vizOptions),
       readonly: inst.readonly ?? false,
     };
     this.mode = 'instance';
@@ -386,9 +413,27 @@ export class ViewsDialog extends LitElement {
       rowHtml: '',
       footerHtml: '',
       kind,
-      viz: first ? { kind: first.id, aggregate: first.defaultAggregate, options: {} } : null,
+      viz: first ? { kind: first.id, aggregate: first.defaultAggregate, options: this.seedOptions(first.id) } : null,
     };
     this.mode = 'template';
+  }
+
+  /**
+   * The options a NEW visualization of this kind starts with.
+   *
+   * Only the word cloud has workspace defaults today, and they are copied in HERE
+   * rather than read at draw time on purpose: a word list is editorial, so
+   * changing the workspace default must not rewrite clouds somebody already
+   * tuned. See `viz/viz-settings.ts`.
+   */
+  private seedOptions(kindId: string): Record<string, unknown> {
+    if (kindId !== 'wordcloud' || !this.cloudDefaults) return {};
+    const d = this.cloudDefaults;
+    return {
+      minLength: d.minLength,
+      ...(d.keepWords.trim() === '' ? {} : { keepWords: d.keepWords }),
+      stopWords: d.stopWords,
+    };
   }
 
   /** Every registered drawing kind, in registration order. */
@@ -524,6 +569,8 @@ export class ViewsDialog extends LitElement {
       limit: 0,
       readonly: false,
       dock: 'window',
+      // A brand-new instance overrides nothing, so it starts on the template's.
+      vizOptions: effectiveVizOptions(t.viz?.options, undefined),
     };
     this.mode = 'instance';
   }
@@ -707,6 +754,23 @@ export class ViewsDialog extends LitElement {
     this.iDraft = { ...d, tokenScripts };
   }
 
+  /**
+   * What this instance actually overrides. `undefined` when it overrides nothing,
+   * so the field is absent rather than an empty object.
+   */
+  private vizDelta(d: InstanceDraft): Record<string, unknown> | undefined {
+    const tpl = this.templates.find((t) => t.id === d.templateId);
+    if (tpl?.kind !== 'viz') return undefined;
+    const delta = overrideDelta(tpl.viz?.options, d.vizOptions);
+    return Object.keys(delta).length > 0 ? delta : undefined;
+  }
+
+  /** The visualization spec behind a draft's template, if it is a viz. */
+  private specOfDraft(d: InstanceDraft): VisualizationSpec | null {
+    const tpl = this.templates.find((t) => t.id === d.templateId);
+    return tpl?.kind === 'viz' ? this.vizSpecOf(tpl.viz?.kind) : null;
+  }
+
   /** Is this draft an instance of a viz template? */
   private isVizDraft(d: InstanceDraft): boolean {
     return this.templates.find((t) => t.id === d.templateId)?.kind === 'viz';
@@ -737,6 +801,7 @@ export class ViewsDialog extends LitElement {
         limit: d.limit > 0 ? d.limit : undefined,
         readonly: d.readonly,
         dock: this.dockFor(d),
+        vizOptions: this.vizDelta(d),
         updatedAt: Date.now(),
       });
       // Reflect the change in an already-open window.
@@ -765,6 +830,7 @@ export class ViewsDialog extends LitElement {
       ...(tokenScripts ? { tokenScripts } : {}),
       ...(tokenRaw ? { tokenRaw } : {}),
       ...(this.dockFor(d) ? { dock: this.dockFor(d) } : {}),
+      ...(Object.keys(this.vizDelta(d) ?? {}).length > 0 ? { vizOptions: this.vizDelta(d) } : {}),
     };
     await ctx.store.viewInstances.insert(inst);
     // A docked pane has no window to reveal — flipping `open` is what mounts it,
@@ -918,7 +984,7 @@ export class ViewsDialog extends LitElement {
             // pie's topN or a line's category sort are part of what the kind IS,
             // and carrying the old one over produced nonsense (a line sorted by
             // size). Options are reset for the same reason: they are per-kind.
-            if (next) this.setViz({ kind: next.id, aggregate: next.defaultAggregate, options: {} });
+            if (next) this.setViz({ kind: next.id, aggregate: next.defaultAggregate, options: this.seedOptions(next.id) });
           }}
         >
           ${kinds.map((k) => html`<option value=${k.id} ?selected=${k.id === spec.id}>${k.label}</option>`)}
@@ -986,31 +1052,52 @@ export class ViewsDialog extends LitElement {
    * option is a line of data in a plugin, not UI code here.
    */
   private renderVizOption(f: SettingsFieldSpec, opts: Record<string, unknown>) {
-    const cur = opts[f.key] ?? f.default;
-    const write = (v: unknown): void => this.setViz({ options: { ...opts, [f.key]: v } });
+    return this.renderVizOptionField(f, opts, (key, v) => this.setViz({ options: { ...opts, [key]: v } }));
+  }
+
+  /**
+   * One option field, rendered from its `SettingsFieldSpec`.
+   *
+   * Shared by the TEMPLATE editor and the per-instance override editor — the only
+   * difference between them is where the value is written, so that is the
+   * parameter. A new chart option stays a line of data in a plugin and appears in
+   * both places at once.
+   */
+  private renderVizOptionField(f: SettingsFieldSpec, values: Record<string, unknown>, write: (key: string, v: unknown) => void) {
+    const cur = values[f.key] ?? f.default;
+    const set = (v: unknown): void => write(f.key, v);
+    const hint = f.description ? html`<span class="hint">${f.description}</span>` : nothing;
     if (f.type === 'boolean') {
       return html`<label class="field-inline">
-        <input type="checkbox" .checked=${cur === true} @change=${(e: Event) => write((e.target as HTMLInputElement).checked)} />
+        <input type="checkbox" .checked=${cur === true} @change=${(e: Event) => set((e.target as HTMLInputElement).checked)} />
         ${f.label}
       </label>`;
     }
     if (f.type === 'number') {
       return html`<label class="field">
-        ${f.label} ${f.description ? html`<span class="hint">${f.description}</span>` : nothing}
-        <input type="number" .value=${cur == null ? '' : String(cur)} @input=${(e: Event) => write(Number((e.target as HTMLInputElement).value) || 0)} />
+        ${f.label} ${hint}
+        <input type="number" .value=${cur == null ? '' : String(cur)} @input=${(e: Event) => set(Number((e.target as HTMLInputElement).value) || 0)} />
       </label>`;
     }
     if (f.type === 'option' && f.options) {
       return html`<label class="field">
         ${f.label}
-        <select @change=${(e: Event) => write((e.target as HTMLSelectElement).value)}>
+        <select @change=${(e: Event) => set((e.target as HTMLSelectElement).value)}>
           ${f.options.map((o) => html`<option value=${o} ?selected=${cur === o}>${o}</option>`)}
         </select>
       </label>`;
     }
+    // `text` is a word list or a long string — a textarea, because a stop list in
+    // a single-line input is unreadable and uneditable.
+    if (f.type === 'text') {
+      return html`<label class="field">
+        ${f.label} ${hint}
+        <textarea rows="3" .value=${cur == null ? '' : String(cur)} @input=${(e: Event) => set((e.target as HTMLTextAreaElement).value)}></textarea>
+      </label>`;
+    }
     return html`<label class="field">
-      ${f.label} ${f.description ? html`<span class="hint">${f.description}</span>` : nothing}
-      <input type="text" .value=${cur == null ? '' : String(cur)} @input=${(e: Event) => write((e.target as HTMLInputElement).value)} />
+      ${f.label} ${hint}
+      <input type="text" .value=${cur == null ? '' : String(cur)} @input=${(e: Event) => set((e.target as HTMLInputElement).value)} />
     </label>`;
   }
 
@@ -1106,12 +1193,51 @@ export class ViewsDialog extends LitElement {
       <p class="hint">
         ${this.isVizDraft(d)
           ? d.id
-            ? html`Editing this visualization. Use <strong>Chart</strong> in the window footer to change the kind, the aggregate or the options — those are shared by every view of this chart.`
+            ? html`Editing this visualization. Use <strong>Chart</strong> in the window footer to change the kind or the aggregate, which every view of this chart shares.`
             : html`The visualization reads this table's rows; a docked one follows the grid's filters live.`
           : d.id
             ? html`Editing name and column mapping. The snapshotted sort, filters and visible columns are kept.`
             : html`The view snapshots this table's current sort, filters and visible columns.`}
       </p>
+      ${this.renderInstanceVizOptions(d)}
+    `;
+  }
+
+  /**
+   * Per-instance option overrides.
+   *
+   * The same generic field renderer the template editor uses, pointed at the
+   * instance's own layer — so every option a visualization declares is
+   * overridable here with no per-kind UI. A changed field is marked, and Reset
+   * puts it back to inheriting rather than to the field's built-in default,
+   * which are different things.
+   */
+  private renderInstanceVizOptions(d: InstanceDraft) {
+    const spec = this.specOfDraft(d);
+    if (!spec?.options || spec.options.length === 0) return nothing;
+    const tpl = this.templates.find((t) => t.id === d.templateId);
+    const overridden = overriddenKeys(tpl?.viz?.options, d.vizOptions);
+    const write = (key: string, v: unknown): void => {
+      this.iDraft = { ...d, vizOptions: { ...d.vizOptions, [key]: v } };
+    };
+    const reset = (key: string): void => {
+      const next = { ...d.vizOptions };
+      next[key] = (tpl?.viz?.options ?? {})[key];
+      this.iDraft = { ...d, vizOptions: next };
+    };
+    return html`
+      <div class="section">
+        <h3>Settings for this view</h3>
+        <p class="hint">Changed here, they apply to this view only; left alone, they follow the “${tpl?.name ?? 'chart'}” definition.</p>
+        ${spec.options.map(
+          (f) => html`
+            <div class="viz-override ${overridden.has(f.key) ? 'changed' : ''}">
+              ${this.renderVizOptionField(f, d.vizOptions, write)}
+              ${overridden.has(f.key) ? html`<button type="button" class="mini" title="Go back to the chart definition's value" @click=${() => reset(f.key)}>Reset</button>` : nothing}
+            </div>
+          `,
+        )}
+      </div>
     `;
   }
 

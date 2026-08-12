@@ -300,6 +300,83 @@ test.describe('visualizations', () => {
     await expect(err).toContainText(/Edit/);
   });
 
+  test('word-cloud settings seed a NEW cloud and are overridable per view', async ({ page }) => {
+    const id = await createTable(page, 'Notes', [{ field: 'body' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ body: 'AI ui alpha alpha beta' }, { body: 'AI gamma delta' }]);
+
+    // Workspace DEFAULTS: keep the acronyms a length limit would throw away.
+    await page.evaluate(async () => {
+      const w = window as unknown as { __easydb: { api: { settings: { set(p: string, k: string, v: unknown): Promise<void> } } } };
+      await w.__easydb.api.settings.set('viz', 'cloudMinLength', 4);
+      await w.__easydb.api.settings.set('viz', 'cloudKeepWords', 'AI, UI');
+    });
+
+    await makeChart(page, id, { name: 'Cloud', kind: 'wordcloud' });
+    const cloud = page.locator('viz-panel viz-word-cloud');
+    await expect(cloud).toBeVisible();
+
+    const terms = async (): Promise<string[]> =>
+      page.evaluate(() => {
+        const vp = document.querySelector('viz-panel') as { shadowRoot?: ShadowRoot | null } | null;
+        const el = vp?.shadowRoot?.querySelector('viz-word-cloud') as { terms?: Array<{ term: string }> } | null;
+        return (el?.terms ?? []).map((t) => t.term);
+      });
+
+    // minLength 4 dropped "beta"(4 is ok) — check the exception list instead:
+    // "AI" is two letters and survived only because it was named.
+    await expect.poll(terms).toContain('AI');
+    expect(await terms()).toContain('ui');
+
+    // Now OVERRIDE on this view only: raise the limit and drop the exceptions.
+    const win = page.locator('.jsPanel', { has: page.locator('viz-panel') });
+    await win.locator('viz-footer').getByRole('button', { name: 'Edit visualization' }).click();
+    const dlg = page.locator('views-dialog dialog');
+    await expect(dlg.locator('.viz-override')).not.toHaveCount(0);
+    const keepField = dlg.locator('.viz-override', { hasText: 'Always keep these words' }).locator('textarea');
+    await keepField.fill('');
+    await dlg.getByRole('button', { name: 'Save' }).click();
+    await expect(dlg).toBeHidden();
+
+    // The acronyms are gone for THIS view; the template still says to keep them.
+    await expect.poll(terms).not.toContain('AI');
+    const stored = await page.evaluate(async () => {
+      const w = window as unknown as { __easydb: { store: { viewInstances: { find(): Promise<Array<{ vizOptions?: Record<string, unknown> }>> } } } };
+      return (await w.__easydb.store.viewInstances.find()).map((v) => v.vizOptions ?? null);
+    });
+    // Only the CHANGED key is stored — everything else keeps inheriting.
+    expect(Object.keys(stored[0] ?? {})).toEqual(['keepWords']);
+  });
+
+  test('a word cloud exports its words and counts as CSV', async ({ page }) => {
+    const id = await createTable(page, 'Notes', [{ field: 'body' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ body: 'alpha beta alpha' }, { body: 'alpha gamma' }]);
+    await makeChart(page, id, { name: 'Top words', kind: 'wordcloud' });
+    await expect(page.locator('viz-panel viz-word-cloud')).toBeVisible();
+
+    const win = page.locator('.jsPanel', { has: page.locator('viz-panel') });
+    const download = page.waitForEvent('download');
+    await win.locator('viz-footer').getByRole('button', { name: 'Export as CSV' }).click();
+    const dl = await download;
+    // Named after the VIEW, not the template — a new instance is auto-named
+    // "<template> — <table>", which is what the user sees in the titlebar.
+    expect(dl.suggestedFilename()).toBe('Top-words-Notes.csv');
+
+    const stream = await dl.createReadStream();
+    const text = await new Promise<string>((resolve, reject) => {
+      let out = '';
+      stream.on('data', (c: Buffer) => (out += c.toString('utf8')));
+      stream.on('end', () => resolve(out));
+      stream.on('error', reject);
+    });
+    const lines = text.trim().split(/\r?\n/);
+    expect(lines[0]).toBe('Word,Count');
+    // Ranked, so the most frequent term is the first row.
+    expect(lines[1]).toBe('alpha,3');
+    expect(lines.length).toBeGreaterThan(2);
+  });
+
   test('a chart says so when its column was renamed away, instead of drawing nothing', async ({ page }) => {
     const id = await seedCities(page);
     await makeChart(page, id, { name: 'By country' });

@@ -173,6 +173,67 @@ of 600,000 rows, which looks identical to a chart of all of them.
 SQLite store and unimplemented everywhere else. It needs the
 both-sides-must-agree treatment `filter-sql.ts` got first.
 
+## Options come in three layers
+
+A value can be set in three places, and each exists for a different reason
+(`viz/viz-options.ts`, pure):
+
+| Layer | Where | What it is for |
+|---|---|---|
+| Workspace | Settings → Visualizations | The **defaults a new visualization starts with** |
+| Template | `VizSpec.options` | The shared definition — one chart used against five tables |
+| Instance | `ViewInstance.vizOptions` | This view of that template |
+
+The workspace layer is **copied in at creation**, not read at draw time — unlike
+the map's tile URL, which is read live. The difference is deliberate: a tile
+server is infrastructure and should change everywhere at once, while a word list
+is editorial, and changing a default must not silently rewrite a cloud somebody
+already tuned.
+
+The instance layer stores **only the keys it actually changes**
+(`overrideDelta`). Storing the full resolved set would freeze a copy, and a later
+template edit would stop reaching the instance — inheritance that quietly stops
+inheriting is worse than none. The editor marks an overridden field and offers
+Reset, which returns it to *inheriting* rather than to the field's built-in
+default; those are different things.
+
+Both editors render from the same `SettingsFieldSpec[]` through one
+`renderVizOptionField`, so a new option declared by a plugin appears in the
+template editor and in every instance's override list at once, with no UI code.
+
+### The word cloud's rules
+
+`viz/word-frequency.ts` is pure and owns what counts as a word. Three of its
+rules are user-settable, and one is subtler than it looks:
+
+- **Ignore words shorter than N.** A blunt instrument — 3 suits prose.
+- **Always keep these words.** The exception, and the reason it exists: acronyms
+  are often the most interesting terms in a column and the first thing a length
+  limit throws away (`AI`, `UI`, `CH`, `SQL`). It overrides the stop list and the
+  numbers rule too, not just the length — "always keep this word" that a second
+  rule could still eat would be a setting that lies.
+- **Ignore these common words.** The stop list, as editable text. `resolveStopWords`
+  distinguishes three states: **absent** ⇒ the built-in English list, **empty**
+  ⇒ drop nothing (a real answer), and a list ⇒ that list. It also still accepts
+  the boolean this option was before it became text, so templates saved then keep
+  working.
+
+## Exporting the numbers
+
+A chart is a summary, and the summary is often the thing worth keeping — the word
+counts, the totals per category. They exist nowhere else in the workspace, since
+aggregation happens at draw time and is never stored. So a visualization window's
+footer has a **CSV** button: `viz-panel.exportCsv()` picks the shape from the same
+question the render asks (`spec.data` and the declared channel kinds), so the file
+always matches what is on screen — terms and counts for a cloud, categories and
+series for a chart, one row per point for a map.
+
+`viz/viz-csv.ts` mirrors `plugins/csv-export.ts`'s dialect rather than importing
+it: that is a plugin and this is core, and a core module importing a plugin would
+invert the plugin model. A `null` point stays empty in the file rather than
+becoming `0` — the frame distinguishes "no usable value" from zero, and
+flattening it would put numbers in the file the chart never drew.
+
 ## Docking
 
 `createPanel()` takes a **single** `content` element, so `window-mgr/panel-stack.ts`

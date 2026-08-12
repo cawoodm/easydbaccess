@@ -34,7 +34,9 @@ import { readSortSpecs } from '../table/row-sort.js';
 import { runColumnScript } from '../util/column-script.js';
 import { watchVisibleRows, type VisibleRowsDetail } from '../table/visible-rows.js';
 import { aggregateRows, type VizFrame } from './viz-aggregate.js';
-import { wordFrequencies } from './word-frequency.js';
+import { parseWordList, resolveStopWords, wordFrequencies } from './word-frequency.js';
+import { effectiveVizOptions } from './viz-options.js';
+import { csvFilename, frameToCsv, pointsToCsv, termsToCsv } from './viz-csv.js';
 import { emptyChannelNote, emptyChannels, noTermsNote, type MappedChannel } from './viz-diagnose.js';
 import { readTileAttribution, readTileUrl, DEFAULT_TILE_ATTRIBUTION, DEFAULT_TILE_URL } from './viz-settings.js';
 import { defineCharts } from './elements/chart-element.js';
@@ -152,6 +154,29 @@ export class VizPanel extends LitElement {
     this.tableUnsub = undefined;
     this.dockUnsub = undefined;
     this.rowColl = null;
+  }
+
+  /**
+   * The data behind the picture, as a CSV file.
+   *
+   * Returns null when there is nothing drawn yet — the caller hides its button
+   * rather than offering an export of an empty chart. Which shape is written
+   * follows the SAME question the render does (`spec.data` and the declared
+   * channel kinds), so the file always matches what is on screen.
+   */
+  exportCsv(): { filename: string; text: string } | null {
+    const name = this.instance?.name ?? 'visualization';
+    const filename = csvFilename(name);
+    if (this.spec?.data === 'rows') {
+      const points = this.mapPoints();
+      if (points.length > 0) return { filename, text: pointsToCsv(points) };
+      const terms = this.cloudTerms();
+      if (terms.length > 0) return { filename, text: termsToCsv(terms) };
+      return null;
+    }
+    const frame = this.frame;
+    if (!frame || frame.categories.length === 0) return null;
+    return { filename, text: frameToCsv(frame) };
   }
 
   /** Re-read everything. Called by the window manager on an instance edit. */
@@ -352,6 +377,16 @@ export class VizPanel extends LitElement {
     };
   }
 
+  /**
+   * The options actually in force: the template's, with this instance's overrides
+   * on top. Every reader below goes through here rather than reaching into
+   * `template.viz.options` — see `viz-options.ts` for why the instance stores
+   * only its differences.
+   */
+  private get options(): Record<string, unknown> {
+    return effectiveVizOptions(this.template?.viz?.options, this.instance?.vizOptions);
+  }
+
   /** The field a channel is mapped to, or '' when unmapped. */
   private fieldFor(channelKey: string): string {
     return this.instance?.mapping?.[channelKey] ?? '';
@@ -411,20 +446,23 @@ export class VizPanel extends LitElement {
     if (!textCh || this.channelOfKind('lat')) return [];
     const field = this.fieldFor(textCh);
     if (!field) return [];
-    const o = (this.template?.viz?.options ?? {}) as Record<string, unknown>;
+    const o = this.options;
     const numOpt = (k: string): number | undefined => {
       const n = Number(o[k]);
       return Number.isFinite(n) && n > 0 ? n : undefined;
     };
+    const keep = parseWordList(typeof o['keepWords'] === 'string' ? (o['keepWords'] as string) : '');
     return wordFrequencies(
       this.rows.map((r) => r.data[field]),
       {
         ...(numOpt('minLength') === undefined ? {} : { minLength: numOpt('minLength') }),
         ...(numOpt('maxTerms') === undefined ? {} : { maxTerms: numOpt('maxTerms') }),
         includeNumbers: o['includeNumbers'] === true,
-        // Opting OUT of stop words has to be possible — a cloud of a column of
-        // single English words is empty once "the" and "and" are dropped.
-        ...(o['stopWords'] === false ? { stopWords: new Set<string>() } : {}),
+        // `resolveStopWords` owns the three shapes this can hold — absent, a
+        // deliberately empty list, or a boolean from before the option became
+        // editable text.
+        stopWords: resolveStopWords(o['stopWords']),
+        ...(keep.size > 0 ? { keepWords: keep } : {}),
       },
     ).map((t): CloudTerm => ({ term: t.term, count: t.count }));
   }
@@ -470,7 +508,7 @@ export class VizPanel extends LitElement {
 
   /** Options handed to the element, with app-level settings filled in. */
   private elementOptions(): Record<string, unknown> {
-    const o = { ...((this.template?.viz?.options ?? {}) as Record<string, unknown>) };
+    const o = { ...this.options };
     // A map with no per-instance tile URL falls back to the workspace setting.
     if (this.channelOfKind('lat') && (typeof o['tileUrl'] !== 'string' || (o['tileUrl'] as string).trim() === '')) {
       o['tileUrl'] = this.tileUrl;
@@ -525,12 +563,13 @@ export class VizPanel extends LitElement {
     // A cloud whose column DOES hold text but yielded no terms is a different
     // problem with a different fix — the word rules, not the mapping.
     if (this.channelOfKind('text') && !this.channelOfKind('lat') && this.rows.length > 0 && this.cloudTerms().length === 0) {
-      const o = (this.template?.viz?.options ?? {}) as Record<string, unknown>;
+      const o = this.options;
       const minLength = Number(o['minLength']);
       return html`<div class="error" role="status">
         ${noTermsNote({
           minLength: Number.isFinite(minLength) && minLength > 0 ? minLength : 3,
-          stopWordsOn: o['stopWords'] !== false,
+          // Empty list ⇒ nothing is being dropped, so don't blame the stop list.
+          stopWordsOn: resolveStopWords(o['stopWords']).size > 0,
           numbersExcluded: o['includeNumbers'] !== true,
         })}
       </div>`;

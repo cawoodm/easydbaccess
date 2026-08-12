@@ -90,6 +90,27 @@ export class VizFooter extends LitElement {
   }
 
   /**
+   * Save the drawn numbers as CSV.
+   *
+   * The panel owns the data, so the footer asks it: they are siblings in the
+   * panel shell (content vs. footer), found by walking up to the window rather
+   * than by threading a reference through the window manager.
+   *
+   * Goes through `api.backend.saveFile` like every other exporter, so it picks up
+   * the native save dialog when that lands in Electron.
+   */
+  private async exportCsv(): Promise<void> {
+    const panel = this.closest('.jsPanel')?.querySelector('viz-panel') as (HTMLElement & { exportCsv?: () => { filename: string; text: string } | null }) | null;
+    const out = panel?.exportCsv?.();
+    const ctx = await getContext();
+    if (!out) {
+      ctx.api.ui.dialogs.toast('There is nothing drawn to export yet.', { kind: 'info' });
+      return;
+    }
+    await ctx.api.backend.saveFile(out.filename, out.text, 'text/csv');
+  }
+
+  /**
    * Open the Views dialog straight on this instance's edit form.
    *
    * `editInstanceId` is the existing entry point the dialog already supports for
@@ -114,6 +135,7 @@ export class VizFooter extends LitElement {
     return html`
       <button @click=${this.edit} title="Edit this visualization: which columns feed which channel" aria-label="Edit visualization"><span class="mi sm">edit</span>Edit</button>
       <button @click=${() => void this.editTemplate()} title="Edit the chart definition: kind, aggregate and options" aria-label="Edit chart definition"><span class="mi sm">tune</span>Chart</button>
+      <button @click=${() => void this.exportCsv()} title="Save the numbers behind this chart as a CSV file" aria-label="Export as CSV"><span class="mi sm">download</span>CSV</button>
       <span class="spacer"></span>
       ${this.kindLabel ? html`<span class="kind">${this.kindLabel}</span>` : nothing}
     `;

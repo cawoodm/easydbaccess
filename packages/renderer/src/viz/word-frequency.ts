@@ -171,6 +171,20 @@ export interface WordFrequencyOptions {
   maxTerms?: number | undefined;
   /** Words to drop. Default `DEFAULT_STOP_WORDS`; pass an empty set to keep everything. */
   stopWords?: ReadonlySet<string> | undefined;
+  /**
+   * Words counted no matter what — the exception to every other rule here.
+   *
+   * It exists because `minLength` is a blunt instrument: 3 is right for prose and
+   * wrong for the acronyms that are often the most interesting terms in a column
+   * ("AI", "UI", "CH", "SQL"). Raising the length limit loses them; lowering it
+   * floods the cloud with "of" and "to". So the length limit stays and the words
+   * worth keeping are named.
+   *
+   * Overrides the stop list and the number rule as well, not just the length —
+   * "always keep this word" that a second rule could still eat would be a
+   * setting that lies.
+   */
+  keepWords?: ReadonlySet<string> | undefined;
   /** Keep purely numeric terms. Default false. */
   includeNumbers?: boolean | undefined;
 }
@@ -185,6 +199,47 @@ export interface TermCount {
 // `elements/cloud-scale.ts`: the ELEMENT needs them, and everything under
 // `viz/elements/` has to be able to travel to a standalone package, which this
 // module cannot (it is the app-side half). See `elements/chart-data.ts`.
+
+/**
+ * Read a user-typed word list into a set.
+ *
+ * Deliberately tolerant about separators: this is a free-text field, and a user
+ * typing `the, and of;  but` or one word per line means the same thing either
+ * way. Folded to lower case because that is how `wordFrequencies` compares.
+ */
+export function parseWordList(text: string | null | undefined): Set<string> {
+  if (typeof text !== 'string') return new Set();
+  const out = new Set<string>();
+  for (const part of text.split(/[,;\s]+/)) {
+    const w = part.trim().toLocaleLowerCase();
+    if (w !== '') out.add(w);
+  }
+  return out;
+}
+
+/** The built-in stop list as editable text — what a settings field starts as. */
+export function defaultStopWordsText(): string {
+  return [...DEFAULT_STOP_WORDS].join(', ');
+}
+
+/**
+ * Resolve the stop list from whatever a stored option holds.
+ *
+ * Three shapes reach this, and the difference between two of them matters:
+ *  - **absent** — never configured, so the built-in list applies;
+ *  - **empty string** — a field the user deliberately cleared, so NO stop words;
+ *  - a string — that list.
+ *
+ * A boolean is also accepted, because that is what the option was before it
+ * became editable and templates saved then are still valid: `false` meant "do not
+ * drop common words", `true` meant the built-in list.
+ */
+export function resolveStopWords(value: unknown): ReadonlySet<string> {
+  if (value === false) return new Set();
+  if (value === true || value == null) return DEFAULT_STOP_WORDS;
+  if (typeof value === 'string') return parseWordList(value);
+  return DEFAULT_STOP_WORDS;
+}
 
 /**
  * Split one string into candidate words.
@@ -212,6 +267,7 @@ export function wordFrequencies(values: readonly unknown[], opts: WordFrequencyO
   const minLength = opts.minLength ?? 3;
   const maxTerms = opts.maxTerms ?? 120;
   const stop = opts.stopWords ?? DEFAULT_STOP_WORDS;
+  const keep = opts.keepWords;
   const includeNumbers = opts.includeNumbers ?? false;
 
   /** folded → { total, spellings } so the dominant casing can be reported. */
@@ -220,9 +276,12 @@ export function wordFrequencies(values: readonly unknown[], opts: WordFrequencyO
   const feed = (text: string): void => {
     for (const raw of tokenize(text)) {
       const folded = raw.toLocaleLowerCase();
-      if (folded.length < minLength) continue;
-      if (stop.has(folded)) continue;
-      if (!includeNumbers && /^\p{N}+$/u.test(folded)) continue;
+      // The keep list is checked FIRST and short-circuits every filter below it.
+      if (!keep?.has(folded)) {
+        if (folded.length < minLength) continue;
+        if (stop.has(folded)) continue;
+        if (!includeNumbers && /^\p{N}+$/u.test(folded)) continue;
+      }
       let e = counts.get(folded);
       if (!e) {
         e = { total: 0, spellings: new Map() };

@@ -63,6 +63,30 @@ export function init(api: HostApi): void {
       description: 'Credit shown in the map corner. Most tile providers require this.',
     },
     {
+      key: 'cloudMinLength',
+      label: 'Word cloud: ignore words shorter than',
+      type: 'number',
+      default: 3,
+      scope: 'workspace',
+      description: 'A new word cloud starts with this. Three suits prose; raise it for noisy text, lower it for a column of codes.',
+    },
+    {
+      key: 'cloudKeepWords',
+      label: 'Word cloud: always keep these words',
+      type: 'text',
+      scope: 'workspace',
+      description:
+        'The exception to the length limit above — and to the ignore list below. Acronyms are often the most interesting terms in a column and the first thing a length limit throws away: AI, UI, CH, SQL. Separate with commas, spaces or new lines.',
+    },
+    {
+      key: 'cloudStopWords',
+      label: 'Word cloud: ignore these common words',
+      type: 'text',
+      scope: 'workspace',
+      description:
+        'Words too common to be interesting. Left as shipped this is an English function-word list, which is what stops "the" being the biggest word in every cloud — replace it wholesale for another language, or clear it to count everything. Separate with commas, spaces or new lines.',
+    },
+    {
       key: 'cloudMaxTerms',
       label: 'Word cloud: most words to lay out',
       type: 'number',
