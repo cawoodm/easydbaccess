@@ -88,10 +88,13 @@ async function askAndDelete(api: HostApi, table: Table): Promise<void> {
   const allLabel = `Delete All Data${rowsSuffix(total)}`;
   const visibleLabel = `Delete Visible Data${rowsSuffix(visible)}`;
   const options: string[] = [];
+  // "Delete Visible Data" comes FIRST when it is offered, because the first option
+  // is the dialog's default — the one Enter submits. It is also the smallest of the
+  // three deletes, so the default costs the least if it is taken by accident.
+  if (narrowsRows(req) && visible !== 0) options.push(visibleLabel);
   // A table known to be empty is offered no data options: both would delete
   // nothing, and an option that does nothing still reads as a threat.
   if (total !== 0) options.push(allLabel);
-  if (narrowsRows(req) && visible !== 0) options.push(visibleLabel);
   options.push(DELETE_TABLE);
 
   const pick = await api.ui.dialogs.choice(

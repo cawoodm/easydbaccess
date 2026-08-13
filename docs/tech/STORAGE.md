@@ -157,6 +157,38 @@ This is why adding a user-facing "table" never touches the Dexie schema —
 only a `Table` record (in the `tables` store) is created; its rows are just
 more documents in the shared `rows` store carrying that table's `id`.
 
+## A row write wakes one table
+
+One shared `rows` table has one cost: a change signal cannot say WHICH
+logical table changed. Dexie's `storagemutated` names the index ranges a
+write touched, which covers `tableId` for an insert or an update — but a
+DELETE by key reports only the primary keys, because knowing which table a
+deleted row belonged to means having read the row first. So a delete used to
+wake every open grid, each of which re-read itself with its own progress bar,
+and a chunked delete did that once per chunk.
+
+The writer announces instead. Every write through the `rows(tableId)` view
+tells that table's watchers and no others, and the coarse `storagemutated`
+signal is ignored while one of our own writes is in flight
+(`announceRowWrite` / `watchDexieRows`). Three rules the listener follows:
+
+1. A mutation naming no `rows` part at all is ignored. Every panel click
+   stamps its front-order onto `tables`, and without this test each one
+   re-read every grid.
+2. A mutation that names `tableId` values is judged exactly, by range
+   overlap.
+3. Anything else — another tab, or a direct `getDb()` write such as a
+   workspace delete — is treated as unknown and re-read.
+
+`subscribe()` needs none of this: a `liveQuery` records the primary keys its
+own query returned, so Dexie can already tell it apart from a delete
+elsewhere. It pays for that precision by materializing every row, which is
+why the grid uses `watch`.
+
+The one thing this gives up: a write from ANOTHER TAB that lands during one
+of our own writes is missed, and that grid updates on its next trigger.
+Nothing goes stale for a write made in this tab.
+
 ## `DataStore` — what plugins actually see
 
 [`data-store-dexie.ts`](../../packages/renderer/src/db/data-store-dexie.ts)

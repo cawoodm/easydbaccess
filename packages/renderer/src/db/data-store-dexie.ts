@@ -1,4 +1,4 @@
-import Dexie, { liveQuery, type ObservabilitySet, type Table as DexieTable } from 'dexie';
+import Dexie, { liveQuery, rangesOverlap, type IntervalTree, type ObservabilitySet, type Table as DexieTable } from 'dexie';
 import type { DataCollection, DataStore, DistinctPage, DistinctQuery, PluginRecord, Row, RowPage, RowQuery, Setting, Table, Unsubscribe, ViewInstance, ViewTemplate, Workspace } from '@easydb/shared';
 import { isPlainSlice } from '@easydb/shared';
 import { settingId, type EasyDb } from './dexie-db.js';
@@ -62,33 +62,83 @@ function wrap<T extends { id: string } | { url: string } | { key: string }>(coll
   };
 }
 
-/**
- * Call `fn` whenever anything is written to `coll`, without reading a row.
- *
- * `storagemutated` is the event `liveQuery` itself listens to, so this is the same
- * signal with the read left out. That read is the whole point: a caller that runs
- * its own narrow query used `subscribe`, and `subscribe` has to materialize the
- * collection to have an argument to pass — 609,283 rows to be told that one
- * changed.
- *
- * The set names each mutated part as `idb://<db>/<table>/<index>`, so the prefix
- * test scopes this to one Dexie table. It is NOT scoped to one `tableId`: the
- * answer to the signal is to re-run the caller's own query, which is right however
- * coarse the signal is, and an index range would have to be matched against
- * Dexie's own range trees to do better.
- */
-function watchDexieTable<T>(coll: DexieTable<T, string>, fn: () => void): Unsubscribe {
+// -- Row writes are announced per table -------------------------------------
+//
+// `watch` is the change signal without the rows: `storagemutated` is the event
+// `liveQuery` itself listens to, and a caller running its own narrow query wants
+// the signal alone. `subscribe` has to materialize the collection to have an
+// argument to pass — 609,283 rows to be told that one changed.
+//
+// The hard part is WHICH table changed. There is ONE `rows` Dexie table for every
+// logical table, so a bare signal made every open window re-read itself, each with
+// its own progress bar, and a chunked delete did that once per chunk.
+//
+// Dexie cannot answer it from the signal alone. The event names each mutated part
+// as `idb://<db>/<table>/<index>`, which covers `tableId` for an insert or an
+// update — but a DELETE by key reports only the primary keys, because knowing which
+// table a deleted row belonged to means having read the row. So the WRITER
+// announces: every write through `rowsView` says which table it changed, and the
+// coarse signal is ignored while one of ours is in flight.
+//
+// The cost is bounded and one-directional: a write from ANOTHER TAB that lands
+// during one of our own writes is missed, and that grid updates on its next
+// trigger instead. Nothing shows stale rows for a write made in this tab.
+
+const rowListeners = new Map<string, Set<() => void>>();
+let liveRowWrites = 0;
+
+/** Run a row write, then tell that table's watchers — and only that table's. */
+async function announceRowWrite<T>(tableId: string, write: () => Promise<T>): Promise<T> {
+  liveRowWrites++;
+  try {
+    return await write();
+  } finally {
+    // The guard outlives the await by a task on purpose. Dexie fires
+    // `storagemutated` from the transaction's own completion handler, right after
+    // resolving this promise — and its promises can run their continuations
+    // synchronously from there, so releasing the guard here would let our own
+    // mutation through as if it came from another tab.
+    setTimeout(() => liveRowWrites--, 0);
+    for (const fn of [...(rowListeners.get(tableId) ?? [])]) fn();
+  }
+}
+
+/** Watch one logical table: our own announcements, plus foreign mutations. */
+function watchDexieRows(coll: DexieTable<Row, string>, tableId: string, fn: () => void): Unsubscribe {
+  const mine = rowListeners.get(tableId) ?? new Set<() => void>();
+  mine.add(fn);
+  rowListeners.set(tableId, mine);
+
   const prefix = `idb://${coll.db.name}/${coll.name}/`;
+  const indexPart = `${prefix}tableId`;
   const listener = (parts: ObservabilitySet) => {
-    for (const part of Object.keys(parts)) {
-      if (part.startsWith(prefix)) {
-        fn();
-        return;
-      }
+    // Another Dexie table entirely — a geometry write, a setting, a view. Every
+    // panel click stamps its front-order onto `tables`, and without this test each
+    // one re-read every grid's rows.
+    if (!Object.keys(parts).some((p) => p.startsWith(prefix))) return;
+    // Ours. The announcement above delivers it to the one table it changed, so
+    // honoring this as well would re-read that table twice and every other once.
+    if (liveRowWrites > 0) return;
+    const touched = parts[indexPart];
+    // A write that named the `tableId` values it touched can be judged exactly.
+    // One id is one point range: Dexie's own `RangeSet` is a runtime-only export,
+    // and an `IntervalTree` is this shape.
+    if (touched) {
+      if (rangesOverlap(touched, { from: tableId, to: tableId, d: 1 } satisfies IntervalTree)) fn();
+      return;
     }
+    // Anything else came from outside this store wrapper — another tab, a direct
+    // `getDb()` write (a workspace delete, a boot-time conversion) — and says
+    // nothing about which table it hit. Re-read rather than miss it.
+    fn();
   };
   Dexie.on('storagemutated', listener);
-  return () => Dexie.on.storagemutated.unsubscribe(listener);
+
+  return () => {
+    mine.delete(fn);
+    if (mine.size === 0) rowListeners.delete(tableId);
+    Dexie.on.storagemutated.unsubscribe(listener);
+  };
 }
 
 /**
@@ -111,35 +161,37 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string, tables: DexieT
       const doc = await coll.get(id);
       return doc && doc.tableId === tableId ? doc : null;
     },
+    // Every write goes through `announceRowWrite` so the watchers of THIS table —
+    // and no others — hear about it. See the note above the function.
     async insert(doc) {
       const stamped = { ...doc, tableId };
-      await coll.add(stamped);
+      await announceRowWrite(tableId, () => coll.add(stamped));
       return stamped;
     },
     async bulkInsert(docs) {
       if (docs.length === 0) return [];
       const stamped = docs.map((d) => ({ ...d, tableId }));
-      await coll.bulkAdd(stamped);
+      await announceRowWrite(tableId, () => coll.bulkAdd(stamped));
       return stamped;
     },
     async upsert(doc) {
       const stamped = { ...doc, tableId };
-      await coll.put(stamped);
+      await announceRowWrite(tableId, () => coll.put(stamped));
       return stamped;
     },
     async patch(id, patch) {
-      const n = await coll.update(id, patch as object);
+      const n = await announceRowWrite(tableId, () => coll.update(id, patch as object));
       if (n === 0) throw new Error(`row patch: no row ${id}`);
       const updated = await coll.get(id);
       if (!updated) throw new Error(`row patch: row ${id} vanished after update`);
       return updated;
     },
     async remove(id) {
-      await coll.delete(id);
+      await announceRowWrite(tableId, () => coll.delete(id));
     },
     async bulkRemove(ids) {
       if (ids.length === 0) return;
-      await coll.bulkDelete(ids);
+      await announceRowWrite(tableId, () => coll.bulkDelete(ids));
     },
     /**
      * Rows in this table, counted on the `tableId` index without reading any of
@@ -268,10 +320,14 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string, tables: DexieT
      *
      * Fires once immediately, matching `subscribe` and the IPC store's `watch`, so
      * a caller has one code path for "load now" and "load again".
+     *
+     * Scoped to THIS table — see the note above `watchDexieRows`. It used to fire
+     * on any write to the shared `rows` table, so one window's delete re-read every
+     * other window.
      */
     watch(fn): Unsubscribe {
       fn();
-      return watchDexieTable(coll, fn);
+      return watchDexieRows(coll, tableId, fn);
     },
   };
 }

@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ Delete Visible Data is the default option in a table's delete prompt (v0.0.366)
 - 🪶 A new `text` column type for prose: its funnel offers no value list, because every cell is different and too long to browse (v0.0.365)
 - 🪶 Run… in the script editor writes what a column script returns into the cells, so a computed column becomes data (v0.0.364)
 - ✨ A table's trash button asks what should go: all the data, the data a filter left visible, or the table (v0.0.363)
@@ -15,6 +16,7 @@
 
 ### Bugs
 
+- 🪲 Deleting rows from one table re-read every other open table, and so did every panel click (v0.0.366)
 - 🪲 A docked visualization's collapse button hid the chart but left its empty box behind (v0.0.362)
 
 ## 12 Aug 2026

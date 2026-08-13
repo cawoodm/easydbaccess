@@ -51,7 +51,10 @@ async function pets(page: Page) {
 
 /** Filter the first column to `value` through its funnel picker. */
 async function filterFirstColumn(page: Page, id: string, value: string) {
-  await page.locator(`#${panelDomId(id)} data-table thead th button.funnel`).first().click();
+  await page
+    .locator(`#${panelDomId(id)} data-table thead th button.funnel`)
+    .first()
+    .click();
   const popover = page.locator('filter-popover');
   await popover.locator('li').filter({ hasText: value }).click();
   await page.mouse.click(5, 5);
@@ -94,9 +97,9 @@ test('Delete Visible Data takes what the filter matched and leaves the rest', as
 
   await openDeleteMenu(page, id);
   const d = dialogs(page);
-  // All three, in the order the footer offers them.
-  await expect(d.getByRole('button', { name: 'Delete All Data (4 rows)' })).toBeVisible();
-  await expect(d.getByRole('button', { name: 'Delete Visible Data (2 rows)' })).toBeVisible();
+  // All three — and "Delete Visible Data" is FIRST, which is the option Enter takes.
+  // The default should be the smallest of the three deletes, not the largest.
+  await expect(d.locator('button.choice')).toHaveText(['Delete Visible Data (2 rows)', 'Delete All Data (4 rows)', 'Delete Table']);
   await d.getByRole('button', { name: 'Delete Visible Data (2 rows)' }).click();
 
   await expect(page.locator('toast-host').getByText(/Deleted 2 rows/)).toBeVisible();
@@ -104,7 +107,10 @@ test('Delete Visible Data takes what the filter matched and leaves the rest', as
   await expect(rows(page, id)).toHaveCount(0);
 
   // The dog and the fish survived: clear the filter and they are what is left.
-  await page.locator(`#${panelDomId(id)} data-table thead th button.funnel`).first().click();
+  await page
+    .locator(`#${panelDomId(id)} data-table thead th button.funnel`)
+    .first()
+    .click();
   await page.locator('filter-popover').getByRole('button', { name: 'Clear filter' }).click();
   await expect(rows(page, id)).toHaveCount(2);
   // A cell is an input, so its value is what to read — not the row's text. Sorted,
@@ -132,6 +138,51 @@ test('a search narrows it too — not just a column filter', async ({ page }) =>
   await search.locator('button.icon').click();
   await search.locator('input').fill('');
   await expect(rows(page, id)).toHaveCount(3);
+});
+
+/**
+ * Deleting from one table must not re-read the others.
+ *
+ * There is ONE `rows` table in IndexedDB for every logical table, so Dexie's
+ * mutation signal could not tell one grid's rows from another's: a delete made
+ * EVERY open window re-read itself, each with its own progress bar, and a chunked
+ * delete did that once per chunk. Row writes are announced per table now — see
+ * `db/data-store-dexie.ts`.
+ *
+ * Observed through `loadGeneration`, the counter the grid already bumps once per
+ * `loadRows` call to discard stale answers. Counting reads is the assertion; a
+ * progress bar is only how the user noticed.
+ */
+test('deleting from one table leaves the other tables alone', async ({ page }) => {
+  const a = await pets(page);
+  const b = await createTable(page, 'Cities', [{ field: 'city' }]);
+  await waitForPanel(page, b);
+  await addRow(page, b, { city: 'Bern' });
+  await expect(title(page, b)).toContainText('(1)');
+
+  const loads = (id: string) =>
+    page.evaluate((tid) => {
+      const grid = [...document.querySelectorAll('data-table')].find((g) => (g as unknown as { tableId: string }).tableId === tid);
+      return (grid as unknown as { loadGeneration: number } | undefined)?.loadGeneration ?? -1;
+    }, id);
+
+  // Panels cascade, so the second one covers the first one's footer. Front the one
+  // under test by its titlebar before reaching for its buttons.
+  await page.locator(`#${panelDomId(a)} .jsPanel-hdr`).click();
+
+  const beforeA = await loads(a);
+  const beforeB = await loads(b);
+
+  await openDeleteMenu(page, a);
+  await dialogs(page).getByRole('button', { name: 'Delete All Data (4 rows)' }).click();
+  await expect(page.locator('toast-host').getByText(/Deleted 4 rows/)).toBeVisible();
+  await expect(rows(page, a)).toHaveCount(0);
+
+  // The deleted table re-read itself, exactly as it should.
+  expect(await loads(a)).toBeGreaterThan(beforeA);
+  // Its neighbour did not, and still shows its own row.
+  expect(await loads(b)).toBe(beforeB);
+  await expect(rows(page, b)).toHaveCount(1);
 });
 
 test('an empty table is only offered Delete Table, and it goes', async ({ page }) => {

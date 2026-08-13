@@ -551,6 +551,16 @@ add a click to every delete. The counts come from what the grid already publishe
 for the titlebar, so opening the dialog costs no read; a big table still counting
 shows no number rather than a wrong one.
 
+**"Delete Visible Data" is listed first when it is offered**, because the first
+option is the dialog's default — the one Enter submits — and it is the smallest of
+the three deletes. With nothing narrowing the table it is not offered at all, so
+"Delete All Data" becomes the default there.
+
+**A row delete wakes only its own grid.** There is one `rows` table in IndexedDB
+for every logical table, so a write to any of them used to re-read every open
+window. Row writes are announced per table now — see `STORAGE.md` § "A row write
+wakes one table".
+
 **"Visible" is every matching row, not the page on screen.** A windowed grid holds
 500 rows of a filtered table, and deleting those would leave the rest — an action
 with no name the user could predict. So the read is uncapped: `ROW_FETCH_CAP` stops

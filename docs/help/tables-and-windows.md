@@ -36,11 +36,11 @@ can bring it back any time from the [Command Palette](#command-palette)
 To delete, use the trash icon in that table's own toolbar. It asks what should
 go, and every option says how many rows that is:
 
-- **Delete All Data** — every row. The table, its columns and its settings stay,
-  so you can import into it again.
 - **Delete Visible Data** — only the rows a filter or a search has left on
   screen. Offered when something narrows the table, and it takes every matching
-  row, not only the page you can see.
+  row, not only the page you can see. It is the default when it is offered.
+- **Delete All Data** — every row. The table, its columns and its settings stay,
+  so you can import into it again.
 - **Delete Table** — the table itself, rows included.
 
 None of the three can be undone, so the list is the confirmation: read the row
