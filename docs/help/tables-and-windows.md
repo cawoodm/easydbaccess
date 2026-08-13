@@ -31,8 +31,23 @@ can be panned and zoomed:
 
 Closing a table's window only **hides** it — your data is untouched, and you
 can bring it back any time from the [Command Palette](#command-palette)
-(search for "Go to `<table name>`"). To permanently delete a table and its
-data, use the trash icon in that table's own toolbar.
+(search for "Go to `<table name>`").
+
+To delete, use the trash icon in that table's own toolbar. It asks what should
+go, and every option says how many rows that is:
+
+- **Delete All Data** — every row. The table, its columns and its settings stay,
+  so you can import into it again.
+- **Delete Visible Data** — only the rows a filter or a search has left on
+  screen. Offered when something narrows the table, and it takes every matching
+  row, not only the page you can see.
+- **Delete Table** — the table itself, rows included.
+
+None of the three can be undone, so the list is the confirmation: read the row
+count on the option before you click it. Cancel is in the dialog header.
+
+A live table (one connected to a server) has no local rows, so the trash icon
+there only removes the connection. Your data stays on the server.
 
 ## The Command Palette
 

@@ -27,6 +27,7 @@ import { setPanZoom, shellViewport } from './shell-viewport.js';
 import { queueGeometryWrite } from './geometry-writes.js';
 import { countSuffix, importSuffix, IMPORT_PROGRESS_EVENT, VISIBLE_COUNT_EVENT, type ImportProgressDetail, type VisibleCountDetail } from './panel-title.js';
 import { forgetRowCount } from '../table/row-count-cache.js';
+import { forgetRowRequest } from '../table/visible-request.js';
 import { sanitizeGeometry, byAscendingZ } from './geometry.js';
 import { tableKind, panelColor, TABLE_KIND_ICONS } from './table-kind.js';
 import { nextFrontZ } from './front-order.js';
@@ -548,9 +549,11 @@ async function deleteTableCascade(tableId: string, ctx: AppContext): Promise<voi
     await rowColl.bulkRemove(rows.map((r) => r.id));
   }
   await ctx.store.tables.remove(tableId);
-  // The remembered size goes with the table. A new table reusing this id is not
-  // possible (ids are UUIDs), so the entry would simply sit there forever.
+  // The remembered size and the published request go with the table. A new table
+  // reusing this id is not possible (ids are UUIDs), so both would simply sit
+  // there forever.
   forgetRowCount(tableId);
+  forgetRowRequest(tableId);
 }
 
 function cssSafe(s: string): string {

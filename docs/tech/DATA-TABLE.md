@@ -534,6 +534,45 @@ count can be stale — another device's writes, an import this tab never saw —
 feeds the title and the window decision, both already provisional, and the count every
 load starts corrects it. `deleteTableCascade` forgets it.
 
+## Three deletes, one button
+
+The footer's trash button asks WHAT should go, because "delete" means three
+different things on a table: **Delete All Data** (the rows, keeping the table and
+its columns), **Delete Visible Data** (the rows a filter or a search left on
+screen) and **Delete Table**. The button used to assume the third one, so there
+was no way to empty a table you wanted to keep. The flow is in
+[`plugins/delete-table.ts`](../../packages/renderer/src/plugins/delete-table.ts);
+the row work is in
+[`table/delete-rows.ts`](../../packages/renderer/src/table/delete-rows.ts).
+
+The CHOICE is the confirmation. Each option names its action and how many rows it
+takes, and Cancel sits in the dialog header, so a second yes/no dialog would only
+add a click to every delete. The counts come from what the grid already published
+for the titlebar, so opening the dialog costs no read; a big table still counting
+shows no number rather than a wrong one.
+
+**"Visible" is every matching row, not the page on screen.** A windowed grid holds
+500 rows of a filtered table, and deleting those would leave the rest — an action
+with no name the user could predict. So the read is uncapped: `ROW_FETCH_CAP` stops
+a GRID drawing too much, but a delete that stopped at 20,000 would report success
+and leave rows behind. The sort and the slice are dropped before it, since neither
+changes which rows match.
+
+**The grid has to publish what "visible" means**
+([`table/visible-request.ts`](../../packages/renderer/src/table/visible-request.ts)).
+A table's filters live on its record, but its SEARCH does not — the header box and
+the panel box are live UI state — so a delete reading only the store would take
+rows the user cannot see. The request is published from `updated()`, beside
+`emitCount`, and NOT from `loadRows`: a filter change does not always reach the
+store (the refetch it schedules is dropped if the grid disconnects before the timer
+fires, and the in-memory pass still narrows what is drawn), so a request published
+per load could say "unfiltered" about a grid showing 2 rows of 4. Every narrowing
+input is a `@state`, so `updated` is the one hook that cannot miss one.
+
+`narrowsRows` is what decides whether "Delete Visible Data" is OFFERED at all: with
+nothing narrowing, it would delete exactly what the option above it deletes, which
+is a trap rather than a choice. An empty table is offered no data options.
+
 ## Practical implications
 
 - **A column's `type` still matters even with a custom renderer set.** Type

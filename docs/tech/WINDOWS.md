@@ -148,8 +148,10 @@ a plain synchronous call — there is no confirm dialog in the close path
 itself. `onclosed` fires right after and just marks the table's
 `windowGeometry` as `closed: true`, keeping its data; the table reopens from
 the command palette ("Go to &lt;table&gt;"). Actually deleting a table's data
-is a separate, explicit action (the delete-table plugin's own button, with
-its own confirm). A table removed _externally_ (a JSON "replace entire
+is a separate, explicit action: the delete-table plugin's own button, which
+asks WHICH delete is meant — all the rows, the rows a filter left visible, or
+the table itself (see `DATA-TABLE.md` § "Three deletes, one button"). A table
+removed _externally_ (a JSON "replace entire
 workspace" import, a server/gist pull) is tracked in a separate
 `externallyClosed` set so the reconciling subscription's forced close skips
 re-marking a record whose data is already gone.

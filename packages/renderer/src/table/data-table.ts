@@ -22,6 +22,7 @@ import { runColumnScript, runValidateScript } from '../util/column-script.js';
 import { arrayMembers } from '@easydb/shared';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cachedRowCount, rememberRowCount } from './row-count-cache.js';
+import { rememberRowRequest } from './visible-request.js';
 import { TABLE_LOADING_EVENT, tableLoadingState, type TableLoadingDetail } from './table-loading.js';
 import { emitVisibleRows, provideVisibleRows, visibleRowsWanted, type VisibleRowsDetail } from './visible-rows.js';
 import { formatByType, toDateInput, toDatetimeInput } from '../util/local-datetime.js';
@@ -743,6 +744,7 @@ export class DataTable extends LitElement {
     if (!this.viewportHeight) this.viewportHeight = this.clientHeight;
     this.emitCount();
     this.emitRows();
+    this.publishRequest();
   }
 
   /**
@@ -813,6 +815,24 @@ export class DataTable extends LitElement {
       truncated: this.truncated || this.windowed,
       searching: this.searchIsActive,
     });
+  }
+
+  /**
+   * Publish what the user is looking at, for the footer's "Delete Visible Data" —
+   * the search half of it exists nowhere else (see `table/visible-request.ts`).
+   *
+   * Here rather than in `loadRows`, beside the count it belongs with: a filter
+   * change does not always reach the store. The refetch it schedules is dropped if
+   * the grid is disconnected before the timer fires, and the in-memory pass still
+   * narrows what is DRAWN — so a request published only on a load can say
+   * "unfiltered" about a grid showing 2 rows of 4. Every state that narrows is a
+   * `@state`, so `updated` is the one hook that cannot miss one.
+   *
+   * Not in view mode: a view is a read-only lens and has no delete button.
+   */
+  private publishRequest(): void {
+    if (this.viewMode || !this.tableId) return;
+    rememberRowRequest(this.tableId, this.rowRequest());
   }
 
   /**
