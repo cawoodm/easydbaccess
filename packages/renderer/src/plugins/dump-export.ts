@@ -1,114 +1,35 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
-import { serializeCsv } from './csv-export.js';
-import { serializeWorkspaceAsSql, serializeTableAsSql } from './sql-export.js';
-import { slugTable } from '../util/ids.js';
-import { scopedRows, scopedTable, tableToFile, type ExportScope } from '../export/table-file.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'dump-export',
   name: 'Dump Export',
   type: 'exporter',
   version: '0.1.0',
-  description: 'Export the current workspace as a single .db.json dump file, and — per table — CSV/JSON/SQL with a Raw vs. Visible vs. Structure Only choice.',
+  description: 'The two buttons that open the export dialog — one for the workspace, one per table — plus the .db.json workspace dump the sync plugins share.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/dump-export.ts',
 };
 
 export function init(api: HostApi): void {
+  // Both buttons now open ONE dialog. They used to open an anchored format menu
+  // each, and the table one then asked Raw / Visible / Structure in a second
+  // prompt — a shape with nowhere to put a third question, and one that had
+  // already forgotten the answer to the first by the time it asked the second.
   api.ui.registerFooterButton({
     id: 'export:menu',
     label: 'Export',
     icon: 'download',
-    tooltip: 'Export the current workspace (JSON or SQL)',
-    onClick: async (api, ctx) => {
-      const wsId = api.workspaceId();
-      if (!wsId) return;
-      const { AnchoredMenu } = await import('@cawoodm/lit-menu');
-      const rect = ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
-      const choice = await AnchoredMenu.open(rect, [
-        { id: 'json', label: 'JSON dump (.db.json)', icon: 'data_object' },
-        { id: 'sql', label: 'SQL script (.sql)', icon: 'storage' },
-      ]);
-      if (!choice) return;
-      try {
-        if (choice === 'json') {
-          const text = await serializeWorkspace(api);
-          await api.backend.saveFile(`workspace-${wsId}.db.json`, text, 'application/json');
-        } else if (choice === 'sql') {
-          const text = await serializeWorkspaceAsSql(api);
-          await api.backend.saveFile(`workspace-${wsId}.sql`, text, 'application/sql');
-        }
-      } catch (err) {
-        api.ui.dialogs.toast(`Export failed: ${(err as Error).message}`, {
-          kind: 'error',
-          title: 'Export',
-        });
-      }
-    },
+    tooltip: 'Export tables of this workspace',
+    onClick: (api) => api.ui.openExportDialog(),
   });
 
   api.ui.registerTableButton({
     id: 'table-export:menu',
     label: 'Export',
     icon: 'file_download',
-    tooltip: 'Export this table as CSV, JSON, or SQL',
-    onClick: async (api, ctx) => {
-      const { AnchoredMenu } = await import('@cawoodm/lit-menu');
-      const rect = ctx.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
-      const format = await AnchoredMenu.open(rect, [
-        { id: 'csv', label: 'CSV (.csv)', icon: 'table_chart' },
-        { id: 'json', label: 'JSON (.table.json)', icon: 'data_object' },
-        { id: 'sql', label: 'SQL (.sql)', icon: 'storage' },
-      ]);
-      if (!format) return;
-
-      const table = await api.store.tables.findOne(ctx.tableId);
-      if (!table) return;
-
-      // 'Visible Data' is listed FIRST and is therefore the dialog's default
-      // (primary/focused/Enter-activated) choice — it's the more common intent.
-      // 'Structure Only' is listed last: the definition-only export, same full
-      // column set as 'Raw Data' but zero rows.
-      const scopeChoice = await api.ui.dialogs.choice(`Export "${table.name}" as ${format.toUpperCase()} — which rows/columns?`, ['Visible Data', 'Raw Data', 'Structure Only'], 'Export table');
-      if (!scopeChoice) return;
-      const scope: ExportScope = scopeChoice === 'Visible Data' ? 'visible' : scopeChoice === 'Raw Data' ? 'raw' : 'structure';
-
-      try {
-        const allRows = await api.store.rows(table.id).find();
-        const t = scopedTable(table, scope);
-        const rows = scopedRows(table, allRows, scope);
-        const base = slugTable(table.code || table.name || 'table');
-        // The "no local rows" warning is about a live table's data not being
-        // available locally — misleading noise when the user asked for the
-        // structure only, since zero rows is then the intended outcome.
-        const isEmptyLiveTable = scope !== 'structure' && table.source != null && allRows.length === 0;
-
-        if (format === 'csv') {
-          if (isEmptyLiveTable) {
-            api.ui.dialogs.toast(`"${table.name}" is a live table with no local rows — exporting column definitions only.`, { kind: 'warning', title: 'Export' });
-          }
-          await api.backend.saveFile(`${base}.csv`, serializeCsv(t, rows), 'text/csv');
-        } else if (format === 'json') {
-          // tableToFile itself forces rows:[] for a remote table (source != null)
-          // — the file is a portable DEFINITION that reconnects/re-fetches live
-          // data on pull, never a stale snapshot of it. The 'structure' scope
-          // gets the same rows:[] result via scopedRows, for any table.
-          const text = JSON.stringify(tableToFile(t, rows), null, 2);
-          await api.backend.saveFile(`${base}.table.json`, text, 'application/json');
-        } else if (format === 'sql') {
-          if (isEmptyLiveTable) {
-            api.ui.dialogs.toast(`"${table.name}" is a live table with no local rows — exporting the CREATE TABLE only.`, { kind: 'warning', title: 'Export' });
-          }
-          await api.backend.saveFile(`${base}.sql`, serializeTableAsSql(t, rows), 'application/sql');
-        }
-      } catch (err) {
-        api.ui.dialogs.toast(`Export failed: ${(err as Error).message}`, {
-          kind: 'error',
-          title: 'Export',
-        });
-      }
-    },
+    tooltip: 'Export this table',
+    onClick: (api, ctx) => api.ui.openExportDialog(ctx.tableId ? [ctx.tableId] : []),
   });
 }
 

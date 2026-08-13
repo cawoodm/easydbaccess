@@ -66,7 +66,7 @@ Every plugin gets one `api` object. The pieces plugins actually touch:
 | `api.ui.registerFooterButton`                     | Button in the bottom bar (workspace-level actions)                                                                               | `gist-sync` adds a single "Gist" menu button               |
 | `api.ui.registerTableButton`                      | Per-table button in a table's window titlebar                                                                                    | `csv-export` adds a "CSV" download button                  |
 | `api.ui.registerCellRenderer(name, tag)`          | Custom element for a column whose `renderer` field matches `name`                                                                | `cell-color` registers `<cell-color>` under `'color'`      |
-| `api.ui.registerImporter` / `registerExporter`    | Named format handlers (used by drop handlers, the Import dialog, per-table export)                                               | `csv-import`, `csv-export`                                 |
+| `api.ui.registerImporter` / `registerExporter`    | Named format handlers (drop handlers, the Import dialog, the Export dialog's format list)                                               | `csv-import`, `csv-export`                                 |
 | `api.ui.registerDropHandler`                      | Intercept a file/text drag-drop onto the canvas                                                                                  | `csv-import`, `json-import`, `datasette-import`            |
 | `api.ui.registerUrlSource`                        | A named "import from URL" flow                                                                                                   | `datasette-import`                                         |
 | `api.ui.registerConnector`                        | A live-backend CONNECT flow, listed by the Connect menu                                                                          | `datasette-connect`                                        |
@@ -104,9 +104,9 @@ defaults to enabled but **can** be turned off by the user.
 | `datasette-import`  | importer      |       | IMPORT snapshot tables from any online [Datasette](https://datasette.io/) instance by URL — single table, whole database, or entire instance with a table checklist. Rows are stored locally and synced. Supports resumable paged imports, a per-table Refresh (re-fetch + merge by primary key) and a red Resume button.                                                                                                                                        | `registerTableButton`, `registerUrlSource`, `registerDropHandler`  |
 | `connect-menu`      | ui            |       | Header "Connect" button plus a Ctrl+K command. Lists every registered `ConnectorSpec`; with one installed it opens that backend directly, with several it shows an anchored menu. Knows no backend itself.                                                                                                                                                                                                                                                       | `registerHeaderButton`, `registerCommand`                          |
 | `datasette-connect` | source        |       | CONNECT a live, read-write Datasette table. Rows are fetched on demand and never stored locally; the table carries `source: { type: 'datasette' }` and the routed store hands it `datasette-collection.ts`. Its Refresh re-reads the remote instead of merging.                                                                                                                                                                                                  | `registerHeaderButton`, `registerTableButton`, `registerRowSource` |
-| `csv-export`        | exporter      |       | Per-table "CSV" download button; RFC-4180-ish writer mirroring the CSV importer's dialect.                                                                                                                                                                                                                                                                                                                                                                       | `registerExporter`, `registerTableButton`                          |
-| `dump-export`       | exporter      |       | Footer "Export" menu button (JSON dump / SQL script) — the JSON option exports the whole workspace as one `.db.json` file; the SQL option delegates to `sql-export`'s serializer.                                                                                                                                                                                                                                                                                | `registerFooterButton`                                             |
-| `sql-export`        | exporter      |       | No UI of its own — exports `serializeWorkspaceAsSql()`, called from `dump-export`'s "Export" menu. Still a standalone catalog entry (its own `meta.type`) for the Plugin Manager's type filter.                                                                                                                                                                                                                                                                  | none (library only)                                                |
+| `csv-export`        | exporter      |       | The `csv` format and its options panel: separator, header row, BOM, line ends, and a typed header in the importer's own mini-language.                                                                                                                                                                                                                                                                                                                                                                       | `registerExporter`, `registerTableButton`                          |
+| `dump-export`       | exporter      |       | The two buttons that open the export dialog, plus `serializeWorkspace` — the `.db.json` wire format the sync plugins share.                                                                                                                                                                                                                                                                                | `registerFooterButton`                                             |
+| `sql-export`        | exporter      |       | The `sql` format: `CREATE TABLE` + `INSERT` per table, a projection as the SELECT behind it.                                                                                                                                                                                                                                                                  | none (library only)                                                |
 | `gist-sync`         | sync          |       | Footer "Gist" menu button (Push/Pull/Settings/Share/View gist) plus a per-table "Gist" menu (push/pull/view just that table's file) that store the workspace as a private GitHub Gist. Credentials are Settings-dialog fields (`user`/`gist_id` workspace-scope, `gist_token` a user-scope secret).                                                                                                                                                              | `registerFooterButton`, `registerTableButton`, `registerSettings`  |
 | `server-sync`       | sync          |       | Footer "Sync" menu button (Push/Pull) against a configured easyDBAccess Hono server, with ETag-based conflict detection.                                                                                                                                                                                                                                                                                                                                         | `registerFooterButton`, `registerSettings`                         |
 | `cell-date`         | cell-renderer |       | `date` renderer: a native `<input type=date>` picker.                                                                                                                                                                                                                                                                                                                                                                                                            | `registerCellRenderer`                                             |
@@ -120,6 +120,9 @@ defaults to enabled but **can** be turned off by the user.
 | `import-data`       | importer      |       | Header "Import" button — a URL/file dialog with curated sample sources (Northwind JSON, a public CSV, Datasette examples) that runs `csv-import` and `json-import` through the import kernel and still routes Datasette to `datasette-import`; recognises a native `.db.json` dump and offers to restore the workspace instead of importing its tables; adds a per-table Refresh button for CSV/JSON snapshot origins.                                           | `registerHeaderButton`, `registerTableButton`                      |
 | `auto-sync`         | sync          |       | Background timer (1 min) that silently pushes local changes to the configured sync server and prompts to pull when the server has diverged. Shares its config with `server-sync` via `api.settings`.                                                                                                                                                                                                                                                             | `load()` (timer)                                                   |
 | `views`             | ui            |       | The View system: workspace-global HTML templates (header/row/footer with `$TOKEN` substitution) rendered read-only per table in their own windows, with auto-mapped tokens and an optional row limit; seeds a default "RSS Feed" template. Footer "Views" button opens the manager dialog; window lifecycle itself is core, not plugin, code.                                                                                                                    | `registerTableButton`, `load()` (template seeding)                 |
+| `viz-charts`        | ui            |       | Bar, column, line and pie visualizations, registered via `registerVisualization`. A chart is a `ViewTemplate` whose `kind` is `'viz'`; see [`VISUALIZATIONS.md`](./VISUALIZATIONS.md). Chart.js is lazily imported, so a user who never opens a chart downloads none of it.                                                                                                                                                                                                | `registerVisualization`                                            |
+| `viz-map`           | ui            |       | The `map` kind: rows with latitude/longitude columns plotted on raster tiles (Leaflet, lazily imported). Its own plugin because it carries its own library AND a network dependency — the tile URL is a workspace setting, and a tile failure still plots the points.                                                                                                                                                                                          | `registerVisualization`                                            |
+| `viz-wordcloud`     | ui            |       | The `wordcloud` kind: term frequency over a text column, laid out with `d3-cloud` (lazily imported) into our own SVG. Tokenisation and counting live in the pure `viz/word-frequency.ts`.                                                                                                                                                                                                                                                                     | `registerVisualization`                                            |
 | `electron-db`       | ui            |       | Footer "Database" button → an anchored Open… / Save As… / Import… menu for `.db` files. **Electron-only, and silent about it:** `init()` returns immediately when `window.easydb?.db` is absent, so the browser build gets no button, no menu entry and no error. Open only accepts a file this app wrote and offers Import for a foreign one; Import previews first and asks Overwrite / Rename / Skip per colliding table. See `STORAGE.md` and `ELECTRON.md`. | `registerFooterButton`                                             |
 
 ## Cell Renderers
@@ -486,33 +489,72 @@ Note that exporting is not the same thing as the desktop app's Save As: an
 exporter writes CSV / JSON / SQL _text_, while Save As copies the live SQLite
 file (the `electron-db` plugin, above).
 
+### The export dialog owns the UI; a format is a plugin again
+
+Every export goes through `dialogs/export-dialog.ts`. It lists the formats from the
+exporter REGISTRY — which nothing read before: `registerExporter` had no consumer at
+all, and `dump-export.ts` hard-coded CSV / JSON / SQL in an anchored menu. Registering
+a format is now what puts it in the dropdown.
+
+The dialog asks the questions every format shares (`ExportOptions`: a row limit,
+visible or all columns, filtered or unfiltered rows, sorted or unsorted, raw or
+rendered values, run scripts) and turns them into rows in one place,
+`export/export-rows.ts`. A serializer receives the finished rows and must not narrow
+them again — a limit taken twice writes a smaller file than the user asked for.
+
+A format's OWN questions live in the element it names in `ExporterSpec.panel`,
+exactly as an importer names one in `ImporterSpec.panel`: the dialog mounts the tag
+and reads its `value` back, so it imports nothing from any plugin. `ExporterSpec` also
+gained `serializeMany` — several tables in ONE file, for a format that has a shape for
+that. Without it the dialog writes a file per table, which is the only thing a CSV can
+mean.
+
+Two options are narrower than they sound, and the docs say so rather than the UI
+implying more:
+
+- **Rendered** formats by column TYPE — a datetime in local time, an array as its
+  members. Not the registered cell renderer: that returns a Lit template, and a
+  template cannot become a CSV cell.
+- **Run scripts** fills a scripted column only where it stores nothing of its own. A
+  script that decorates stored data must not overwrite it.
+
 ### csv-export
 
-Per-table "CSV" button (`registerTableButton`) plus a named `csv` exporter
-spec. The writer is the mirror image of `csv-import`'s parser: comma
-delimiter, CRLF line endings, double-quote escaping for any cell containing
-a comma/quote/newline — so a round trip through export → import is
-lossless for anything the importer itself produced.
+The `csv` exporter and its panel (`csv-export-options.ts`): separator (comma,
+semicolon, tab, pipe or one typed in), header row, byte-order mark, CRLF or LF, and a
+**typed header** that writes each column as `field:label:type:default:max:flags` in
+`csv-import`'s own header mini-language — so a file exported and imported again comes
+back with the types it left with instead of whatever inference makes of the values.
+
+The writer is otherwise the mirror image of `csv-import`'s parser, and quoting follows
+the CHOSEN separator: with `;` picked, a cell holding a comma needs no quotes and one
+holding a semicolon does.
+
+### json-export
+
+New. The `json` exporter, split out of `dump-export` because each format should be its
+own plugin. One table becomes a `.table.json` (the shape `json-import` reads as a
+single table); several become one `.db.json` dump through `serializeMany`, optionally
+carrying the workspace's view templates and the instances of the exported tables. An
+instance whose table is not in the file is left out — it would restore a window bound
+to nothing.
 
 ### dump-export
 
-Footer "Export" menu button (via the shared `AnchoredMenu` — see
-`DIALOGS.md`), offering "JSON dump (.db.json)" and "SQL script (.sql)" —
-the two used to be separate footer buttons, one per exporter plugin.
-The JSON option serializes every table in the current workspace (plus rows,
-window geometry, sort order, and any `source`/`origin` backing info) into
-one `{ tables: [...] }` `.db.json` file — the exact shape `json-import`
-recognizes as a native dump. Exports `serializeWorkspace`, reused by
-`server-sync`/`auto-sync` as the wire format for the Hono `/sync` route and
-by `gist-sync` as the per-table `.table.json` payload shape. The SQL menu
-option just calls into `sql-export`'s serializer below.
+Two buttons, and nothing else: the workspace footer's "Export" and each table
+footer's "Export", both of which now open the dialog. It keeps
+`serializeWorkspace` — the `{ tables: [...] }` `.db.json` shape that
+`server-sync`/`auto-sync` push over the Hono `/sync` route and `gist-sync` writes per
+table. That is a WIRE format with no options, which is why it did not move into
+`json-export` with the dialog's JSON.
 
 ### sql-export
 
-No UI of its own anymore — its footer button was folded into `dump-export`'s
-"Export" menu (the SQL option calls `serializeWorkspaceAsSql()` directly).
-It's still a separate built-in with its own `meta.type: 'exporter'` entry so
-the Plugin Manager's type filter and the catalog can list it independently.
+Registers the `sql` exporter, which is what keeps SQL in the dropdown: the format was
+named by `dump-export`'s menu before, and a dialog reading the registry would have
+dropped it. `serializeTablesAsSql` is the dialog's entry point — the same dump built
+from tables the dialog has already read and narrowed, since `serializeWorkspaceAsSql`
+reads the workspace itself and so can honor no limit, filter or column choice.
 The serializer itself is unchanged: one portable `.sql` script per
 workspace, a `BEGIN`/`COMMIT`-wrapped `DROP TABLE IF EXISTS` → `CREATE
 TABLE` → `INSERT` sequence per table, ANSI double-quoted identifiers (works

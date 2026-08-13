@@ -1,6 +1,7 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { parseSecrets, readSecretsText, writeSecretsText } from '../db/user-settings.js';
 import { GRID_SETTINGS_ID, WINDOW_ROWS_FROM_DEFAULT } from '../table/grid-settings.js';
+import { DEFAULT_TILE_ATTRIBUTION, DEFAULT_TILE_URL, VIZ_SETTINGS_ID } from '../viz/viz-settings.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'settings',
@@ -44,6 +45,63 @@ export function init(api: HostApi): void {
       scope: 'workspace',
       description:
         'A table with at least this many rows is read one page at a time as you scroll, instead of being held in memory whole. Filtering, searching and sorting still cover every row, because the store does that work. Set 0 to always read the whole table.',
+    },
+  ]);
+
+  // Visualization settings live here for the same reason the grid's do: this
+  // plugin owns the Settings tab, and the elements that READ these values must
+  // not import a plugin. See `viz/viz-settings.ts`.
+  api.ui.registerSettings(VIZ_SETTINGS_ID, 'Visualizations', [
+    {
+      key: 'tileUrl',
+      label: 'Map tile URL template',
+      type: 'string',
+      default: DEFAULT_TILE_URL,
+      scope: 'workspace',
+      description:
+        'Where map visualizations fetch their background tiles. The default is OpenStreetMap, whose tile policy asks that heavy or commercial use runs its own server — point this at that server, or at a local one for an offline install. A map still plots its points when tiles cannot be loaded.',
+      helpUrl: 'https://operations.osmfoundation.org/policies/tiles/',
+      helpLinkLabel: 'OpenStreetMap tile usage policy',
+    },
+    {
+      key: 'tileAttribution',
+      label: 'Map attribution',
+      type: 'string',
+      default: DEFAULT_TILE_ATTRIBUTION,
+      scope: 'workspace',
+      description: 'Credit shown in the map corner. Most tile providers require this.',
+    },
+    {
+      key: 'cloudMinLength',
+      label: 'Word cloud: ignore words shorter than',
+      type: 'number',
+      default: 3,
+      scope: 'workspace',
+      description: 'A new word cloud starts with this. Three suits prose; raise it for noisy text, lower it for a column of codes.',
+    },
+    {
+      key: 'cloudKeepWords',
+      label: 'Word cloud: always keep these words',
+      type: 'text',
+      scope: 'workspace',
+      description:
+        'The exception to the length limit above — and to the ignore list below. Acronyms are often the most interesting terms in a column and the first thing a length limit throws away: AI, UI, CH, SQL. Separate with commas, spaces or new lines.',
+    },
+    {
+      key: 'cloudStopWords',
+      label: 'Word cloud: ignore these common words',
+      type: 'text',
+      scope: 'workspace',
+      description:
+        'Words too common to be interesting. Left as shipped this is an English function-word list, which is what stops "the" being the biggest word in every cloud — replace it wholesale for another language, or clear it to count everything. Separate with commas, spaces or new lines.',
+    },
+    {
+      key: 'cloudMaxTerms',
+      label: 'Word cloud: most words to lay out',
+      type: 'number',
+      default: 120,
+      scope: 'workspace',
+      description: 'The cloud layout runs on the main thread, so this is capped — a very high number makes the window unresponsive while it settles.',
     },
   ]);
 

@@ -4,6 +4,10 @@ A **View** is a read-only, styled way to look at a table's data — useful for
 things like an RSS-style feed, a card layout, or any custom HTML rendering
 of your rows, without touching the underlying table.
 
+A chart, map or word cloud is a View too — the same templates-and-instances
+model, drawing a picture instead of HTML. See
+[Visualizations](visualizations.md).
+
 ## Templates and instances
 
 - A **template** is a reusable layout: HTML for the header, one row, and the

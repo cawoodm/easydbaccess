@@ -1,9 +1,20 @@
 # CHANGELOG
 
+## 13 Aug 2026
+
+### Features
+
+- ✨ Delete workspace takes the open workspace and asks yes or no, instead of asking which one first (v0.0.359)
+- 🪶 One Export dialog for every export: pick the format, the rows, the columns, the order and a row limit (v0.0.358)
+- ✨ CSV export offers the separator, a header row, a byte-order mark, and a typed header that a re-import reads back (v0.0.358)
+- ✨ Exporting several tables as JSON writes one dump; as CSV it writes a file each (v0.0.358)
+
 ## 12 Aug 2026
 
 ### Features
 
+- 🪶 Visualizations: bar, column, line and pie charts, a map and a word cloud — in their own window or docked above or below the grid, following the grid's filters (v0.0.356)
+- 🪶 A word cloud's rules are yours: ignore short words, keep named exceptions, edit the common-word list, and export the counts as CSV (v0.0.355)
 - 🪶 A workspace can live in a real SQLite `.edb` file you save, open and hand to anyone (v0.0.347)
 - ✨ New workspace asks where its data goes: this browser, or a `.edb` file (v0.0.347)
 - ✨ One folder grant covers every workspace file, so New and Open need no file dialog (v0.0.347)
@@ -14,6 +25,11 @@
 
 ### Bugs
 
+- 🪲 A chart docked to a grid could sit empty beside a full table until the window was resized, and a reloaded word cloud claimed it had no words (v0.0.356)
+- 🪲 A dump of a workspace with a docked chart came back with the chart missing — its pane had nowhere to mount (v0.0.356)
+- 🪲 A big table with a saved sort or filter took 20 seconds to show a row (v0.0.357)
+- 🪲 A big table never learned its own size, so its title showed the 500 rows on screen as the whole table (v0.0.357)
+- 🪲 A big table with a filter on it re-read every row, over and over, for as long as its window stayed open (v0.0.357)
 - 🪲 A dump whose rows held a field its column list omitted imported those rows blank, with no way to reach the value (v0.0.352)
 - 🪲 A table of 600,000 rows took most of a minute to appear, and was read whole again on every write (v0.0.351)
 - 🪲 A filter on a table over 20,000 rows only searched the first 20,000, so a match further in was missing (v0.0.350)

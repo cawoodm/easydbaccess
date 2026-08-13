@@ -3,6 +3,7 @@ import { SAFE_MODE } from './safe-mode.js';
 import { builtinKey } from './builtin-key.js';
 import * as csvImport from '../plugins/csv-import.js';
 import * as csvExport from '../plugins/csv-export.js';
+import * as jsonExport from '../plugins/json-export.js';
 import * as jsonImport from '../plugins/json-import.js';
 import * as sqlImport from '../plugins/sql-import.js';
 import * as connectMenu from '../plugins/connect-menu.js';
@@ -32,6 +33,9 @@ import * as autoSync from '../plugins/auto-sync.js';
 import * as views from '../plugins/views.js';
 import * as settings from '../plugins/settings.js';
 import * as projection from '../plugins/projection.js';
+import * as vizCharts from '../plugins/viz-charts.js';
+import * as vizMap from '../plugins/viz-map.js';
+import * as vizWordcloud from '../plugins/viz-wordcloud.js';
 import * as commandPaletteButton from '../plugins/command-palette-button.js';
 import * as electronDb from '../plugins/electron-db.js';
 import * as sqliteFileSource from '../plugins/sqlitefile-source.js';
@@ -70,6 +74,7 @@ const modules: PluginModule[] = [
   datasetteConnect,
   urlSource,
   csvExport,
+  jsonExport,
   dumpExport,
   sqlExport,
   gistSync,
@@ -91,6 +96,9 @@ const modules: PluginModule[] = [
   autoSync,
   views,
   projection,
+  vizCharts,
+  vizMap,
+  vizWordcloud,
   commandPaletteButton,
   electronDb,
   sqliteFileSource,

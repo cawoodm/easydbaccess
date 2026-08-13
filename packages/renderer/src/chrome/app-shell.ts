@@ -294,6 +294,7 @@ export class AppShell extends LitElement {
     document.addEventListener('easydb:open-csv-paste', this.onOpenCsvPaste);
     document.addEventListener('easydb:open-plugin-manager', this.onOpenPluginManager);
     document.addEventListener('easydb:open-settings', this.onOpenSettings);
+    document.addEventListener('easydb:open-export', this.onOpenExport as EventListener);
     document.addEventListener('easydb:open-command-palette', this.onOpenCommandPalette);
     document.addEventListener('easydb:focus-search', this.openSearch);
     document.addEventListener('easydb:set-search', this.onSetSearch as EventListener);
@@ -316,6 +317,7 @@ export class AppShell extends LitElement {
     document.removeEventListener('easydb:open-csv-paste', this.onOpenCsvPaste);
     document.removeEventListener('easydb:open-plugin-manager', this.onOpenPluginManager);
     document.removeEventListener('easydb:open-settings', this.onOpenSettings);
+    document.removeEventListener('easydb:open-export', this.onOpenExport as EventListener);
     document.removeEventListener('easydb:open-command-palette', this.onOpenCommandPalette);
     document.removeEventListener('easydb:focus-search', this.openSearch);
     document.removeEventListener('easydb:set-search', this.onSetSearch as EventListener);
@@ -342,6 +344,16 @@ export class AppShell extends LitElement {
 
   private onOpenSettings = () => {
     void this.settingsDialog?.open();
+  };
+
+  /**
+   * The export dialog mounts itself on demand, so the shell only forwards the
+   * request. Loaded lazily: it pulls in the table selector and the export
+   * pipeline, and most sessions never export anything.
+   */
+  private onOpenExport = (e: Event) => {
+    const ids = (e as CustomEvent<{ tableIds?: string[] }>).detail?.tableIds;
+    void import('../dialogs/export-dialog.js').then((m) => m.openExport(ids));
   };
 
   private onOpenCommandPalette = () => {
@@ -530,7 +542,7 @@ export class AppShell extends LitElement {
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
           <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
-            ><span class="version">v0.0.357</span></a
+            ><span class="version">v0.0.361</span></a
           ></strong
         >
         ${this.headerButtons.filter((b) => b.variant !== 'secondary').map((b) => this.renderSlotButton(b, 'header'))}

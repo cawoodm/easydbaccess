@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { countSuffix, importSuffix } from '../../../packages/renderer/src/window-mgr/panel-title.js';
 
 describe('countSuffix', () => {
+  // Counts are grouped with `toLocaleString`, so the separator is the reader's own
+  // (a Swiss locale gives 609’283, not 609,283). Build the expectation the same way.
+  const n = (v: number): string => v.toLocaleString();
+
   it('shows a bare total when nothing is filtered', () => {
     expect(countSuffix(3, 3)).toBe(' (3)');
     expect(countSuffix(0, 0)).toBe(' (0)');
@@ -12,10 +16,28 @@ describe('countSuffix', () => {
     expect(countSuffix(0, 12)).toBe(' (0/12)');
   });
 
-  it('is empty until a count is known (negative sentinel)', () => {
+  it('groups a big count so six digits can be read', () => {
+    expect(countSuffix(500, 609283)).toBe(` (${n(500)}/${n(609283)})`);
+    expect(countSuffix(609283, 609283)).toBe(` (${n(609283)})`);
+  });
+
+  /**
+   * A windowed grid holds one page and has not been told the table's size — counting
+   * 609,283 rows in IndexedDB costs 14 s, so the count arrives later. The page in hand
+   * is a FLOOR, and saying `(500)` on a 609,283-row table is a wrong answer rather
+   * than an unfinished one.
+   */
+  it('shows the rows in hand as a floor while the size is unknown', () => {
+    expect(countSuffix(500, -1)).toBe(` (${n(500)}…)`);
+    expect(countSuffix(609283, -1)).toBe(` (${n(609283)}…)`);
+  });
+
+  it('says nothing when there is no count at all', () => {
     expect(countSuffix(-1, -1)).toBe('');
     expect(countSuffix(-1, 5)).toBe('');
-    expect(countSuffix(5, -1)).toBe('');
+    // No rows AND no total is a grid that has not read anything — a floor of zero
+    // tells the reader nothing, so the bare name shows.
+    expect(countSuffix(0, -1)).toBe('');
   });
 });
 

@@ -258,12 +258,15 @@ IndexedDB (`test/e2e/zz-bigtable-perf` is not committed — it seeds for 22 minu
 
 | Operation | Cost |
 | --- | --- |
-| Open the window, first row on screen | **846 ms** (from navigation, including boot) |
+| Open the window, first row on screen | **191 ms** (from navigation, including boot) |
+| The same, with a SAVED SORT on a column | **128 ms** to first row, sorted rows 5.4 s later |
+| The same, with a SAVED FILTER | **5.2 s** — a filter cannot be windowed, see below |
 | Read one 500-row page | ~300 ms |
 | `count()` the table | 14.0 s |
 | `subscribe` — the whole table, to be told one row changed | 25.0 s |
 | `watch` — the same signal, no rows | **1 ms** |
-| `find()` the whole table | 21.6 s |
+| `find()` the whole table | 21.6 s (5.3 s of it the raw read, the rest narrowing) |
+| Sort 609,283 rows already in memory | 0.3 s |
 | A 500-row page at offset 500,000 | 25.7 s (see the cursor note below) |
 
 - **The threshold is a setting** — `grid:windowRowsFrom` on the Table grid tab,
@@ -311,6 +314,34 @@ IndexedDB (`test/e2e/zz-bigtable-perf` is not committed — it seeds for 22 minu
   scrolling a few rows re-uses the page in hand. The span covers the viewport
   wherever it sits inside that page, or a viewport straddling a boundary would show
   a gap at every 500th row.
+- **`bind` runs ONCE, and that is load-bearing.** A panel sets `tableId` before the
+  element connects, so `connectedCallback` bound and Lit's first `updated` bound again.
+  Everything doubled: two subscriptions, two initial loads, two row collections. The
+  second collection is what hurt — `countNow` used to drop its answer when the
+  collection it counted was no longer `this.rowColl`, and `store.rows(id)` builds a
+  fresh wrapper on every call, so the re-bind won the race against a 14 s count every
+  time. **A big table therefore never learned its own size at all**, and its titlebar
+  showed the page in hand as the whole table: `(500)` on 609,283 rows. Two guards now:
+  `bind` returns early when already bound to that key (set before its first `await`),
+  and `countNow` compares the TABLE, not the collection object.
+- **A saved SORT does not hold up the first paint.** Nothing in IndexedDB can order
+  rows by a field inside `data`, so a sorted page means reading every row — 20 s to
+  first paint, against 193 ms for the unsorted page beside it. So a windowed grid with
+  a saved sort and nothing filtered reads the PLAIN page first, shows it, and re-draws
+  in order when the sorted read lands (`shouldPrepaint` / `prepaint`). The rows on
+  screen meanwhile are real rows of the table in storage order, and the loading bar
+  stays up until the order is right.
+
+  Deliberately NOT done for a filter: an unfiltered page shown under an active filter
+  is not an unfinished answer, it is a wrong one, and no progress bar makes it honest.
+- **A narrowed read teaches nothing about the table's size.** It measures its MATCHES.
+  Settling the window on that compared `windowed` against a `tableTotal` still at 0 —
+  which never reaches the threshold, so the mismatch never resolved and each re-read
+  started another. A big filtered table re-read all 609,283 of its rows **every five
+  seconds, without end**. It now asks for a count instead, which is the one number that
+  ends it.
+- **Identical reads in flight are shared** (`readPage`), keyed by the whole request.
+  Over-keying only costs a missed share, which is the safe direction.
 
 Three things then mean something different, and each is handled where it is read:
 
@@ -477,6 +508,31 @@ the table id, so the enclosing panel's title bar can show
 `"Name (12)"` or `"Name (3/12)"` when a filter/search has narrowed the set.
 The grid has no direct reference to its own panel — this decoupling is why
 the event goes through `document` rather than a callback prop.
+
+Counts over three digits are grouped by the reader's own locale (`609,283`, or
+`609’283` in Swiss German), as the import suffix already grouped them.
+
+**A windowed grid may have no total to give**, and says so rather than substituting
+the page in hand. `emitCount` sends `-1` while `windowed` is set and nothing has
+counted, and `countSuffix` renders that as `" (500…)"` — a floor. It used to send
+`max(tableTotal, matchingTotal, rows.length)`, which on an uncounted big table is the
+500 rows on screen, so the title read `" (500)"` on a table of 609,283 rows. That is
+not an unfinished answer but a wrong one. (Until the `bind` fix above, it also never
+stopped being wrong, because no count ever landed.)
+
+An unfiltered windowed table shows the TABLE's size once known — `" (609,283)"`, not
+`" (500/609,283)"`. The 500 is a page the user scrolls through, not a match, and a
+slash in this app means a filter narrowed the set.
+
+**The size is remembered per table**
+([`table/row-count-cache.ts`](../../packages/renderer/src/table/row-count-cache.ts)),
+in `localStorage` under `easydb:rowcounts`, so the next open shows the total from the
+first paint instead of a floor for however long a 14 s count takes. It is kept off the
+`Table` record on purpose: it is derived data, and a synced field rewritten after every
+count would push a workspace revision for a number no other device needs. A remembered
+count can be stale — another device's writes, an import this tab never saw — so it only
+feeds the title and the window decision, both already provisional, and the count every
+load starts corrects it. `deleteTableCascade` forgets it.
 
 ## Practical implications
 

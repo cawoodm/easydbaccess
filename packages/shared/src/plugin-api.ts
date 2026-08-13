@@ -7,7 +7,7 @@
  * host treats it as a mutable namespace.
  */
 
-import type { ColumnSpec, PluginRecord, Row, Setting, Table, TableSource, ViewInstance, ViewTemplate, Workspace } from './types.js';
+import type { ColumnSpec, ColumnType, PluginRecord, Row, Setting, Table, TableSource, ViewInstance, ViewTemplate, VizAggregate, Workspace } from './types.js';
 import type { DistinctPage, DistinctQuery, QueryPage, RowQuery } from './row-query.js';
 
 // -- Plugin module shape --------------------------------------------------
@@ -435,11 +435,90 @@ export interface ConnectorSpec {
   connect(api: HostApi): Promise<void>;
 }
 
+/**
+ * What the export dialog asks for, whatever the format.
+ *
+ * These are the questions every format has to answer the same way — which rows,
+ * which columns, in what order, and how many. A format's OWN questions (a CSV
+ * separator, whether a JSON dump carries its views) live in the element named by
+ * {@link ExporterSpec.panel}.
+ */
+export interface ExportOptions {
+  /** Rows to write. `0` means every row. */
+  limitRows: number;
+  /** `visible` drops columns marked `hidden`, keeping the rest in their order. */
+  columns: 'visible' | 'all';
+  /** `filtered` applies the filters saved on the table. */
+  rows: 'filtered' | 'unfiltered';
+  /** `sorted` applies the sort saved on the table. */
+  order: 'sorted' | 'unsorted';
+  /**
+   * `rendered` writes each value as the grid FORMATS it — a datetime in local
+   * time rather than the stored ISO string, an array as its members. Not the
+   * registered cell renderer: that returns a Lit template, and there is no
+   * honest way to put a template in a CSV cell.
+   */
+  values: 'raw' | 'rendered';
+  /** Evaluate computed columns, so a scripted column exports its value. */
+  runScripts: boolean;
+}
+
+/** One table and the rows chosen for it, ready to serialize. */
+export interface ExportItem {
+  table: Table;
+  rows: Row[];
+}
+
+/** Everything a serializer is told beyond the rows themselves. */
+export interface ExportContext {
+  /** The dialog's general options, already applied to `rows` — see the note. */
+  options: ExportOptions;
+  /**
+   * This format's own answers, read from its {@link ExporterSpec.panel} element.
+   * Shape is the plugin's business; the host only carries it.
+   */
+  panel?: unknown;
+  api: HostApi;
+}
+
 export interface ExporterSpec {
   id: string;
   label: string;
   extension: string;
-  serialize(table: Table, rows: Row[]): Promise<Blob | string>;
+  /**
+   * MIME type for the written file. Absent ⇒ guessed from `extension`, which is
+   * only right for the extensions the host happens to know — a format writing
+   * something else should say so here rather than rely on the guess.
+   */
+  mimeType?: string | undefined;
+  /** Material Icons ligature or inline `<svg>` for the format list. */
+  icon?: string | undefined;
+  /** List order; lower first. Absent ⇒ registration order. */
+  order?: number | undefined;
+  /**
+   * Custom element tag rendered in the export dialog's panel slot for this
+   * format's own fields, mirroring {@link ImporterSpec.panel}. The element MAY
+   * expose a `value` property the dialog reads into `ExportContext.panel`, and
+   * SHOULD dispatch `change` when it edits. Registering a tag keeps the dialog
+   * free of plugin imports.
+   */
+  panel?: string | undefined;
+  /**
+   * Serialize ONE table. `ctx` is optional so a two-argument implementation
+   * written against the older contract still satisfies this type.
+   *
+   * The rows arrive already narrowed by `ctx.options` — a serializer must not
+   * re-apply them, or a limit would be taken twice.
+   */
+  serialize(table: Table, rows: Row[], ctx?: ExportContext): Promise<Blob | string> | Blob | string;
+  /**
+   * Serialize several tables into ONE file, for a format that has a shape for
+   * that (a JSON dump). Without it the dialog writes one file per table, which
+   * is the only thing CSV can mean.
+   */
+  serializeMany?(items: ExportItem[], ctx: ExportContext): Promise<Blob | string> | Blob | string;
+  /** Filename for the `serializeMany` file, without the extension. */
+  manyBaseName?(items: ExportItem[], ctx: ExportContext): string;
 }
 
 export type DropHandler = (event: DragEvent, api: HostApi) => Promise<boolean> | boolean; // return true if handled
@@ -580,6 +659,57 @@ export interface ColumnEditorActionSpec {
   run(api: HostApi, ctx: { columns: ColumnSpec[]; tableId?: string | undefined }): Promise<ColumnSpec[] | null> | ColumnSpec[] | null;
 }
 
+// -- Visualizations -------------------------------------------------------
+
+/**
+ * What a channel means to the visualization, so the editor can auto-map it and
+ * validate what the user picks. `category` groups, `value` is measured, `series`
+ * splits into several lines/bars, the rest are kind-specific.
+ */
+export type VizChannelKind = 'category' | 'value' | 'series' | 'time' | 'lat' | 'lon' | 'text' | 'weight';
+
+/** One data slot a visualization needs a column mapped onto. */
+export interface VizChannelSpec {
+  /** Channel key — the key used in `ViewInstance.mapping`. UPPER_SNAKE by convention. */
+  key: string;
+  label: string;
+  kind: VizChannelKind;
+  /** Column types that may be mapped here; absent ⇒ any. */
+  accepts?: ColumnType[] | undefined;
+  required?: boolean | undefined;
+  /** Several columns may be mapped here (e.g. multiple VALUE series). */
+  multiple?: boolean | undefined;
+}
+
+/**
+ * A way of drawing a table. Registered under `id`; a viz template opts into it
+ * by setting `VizSpec.kind`, exactly as a column opts into a cell renderer by
+ * setting `column.renderer`.
+ *
+ * The element receives PROPERTIES, never attributes — `.frame` for
+ * `data: 'aggregate'`, `.rows` + `.columns` for `data: 'rows'`, plus `.config`
+ * and `.note`. It is handed plain data and knows nothing about the store.
+ */
+export interface VisualizationSpec {
+  /** Stable id stored in `VizSpec.kind` — 'bar', 'line', 'pie', 'map', 'wordcloud'. */
+  id: string;
+  label: string;
+  /** Material Icons ligature name, or inline `<svg>` markup. */
+  icon?: string | undefined;
+  /** Custom element tag (must contain a hyphen). */
+  tag: string;
+  channels: VizChannelSpec[];
+  /**
+   * Extra options, rendered generically by the same field renderer the Settings
+   * dialog uses — so a new option costs no UI code.
+   */
+  options?: SettingsFieldSpec[] | undefined;
+  /** What the element is handed: a grouped frame, or the raw rows. */
+  data: 'aggregate' | 'rows';
+  /** Used when the template's `VizSpec` carries no `aggregate` of its own. */
+  defaultAggregate?: VizAggregate | undefined;
+}
+
 export interface UiRegistry {
   registerHeaderButton(spec: ButtonSpec): Unregister;
   registerFooterButton(spec: ButtonSpec): Unregister;
@@ -609,6 +739,15 @@ export interface UiRegistry {
   registerCellRenderer(name: string, tag: string): Unregister;
   registerRowRenderer(viewName: string, tag: string): Unregister;
   registerTableRenderer(viewName: string, tag: string): Unregister;
+  /**
+   * Register a way of DRAWING a table — a chart, a map, a word cloud. A viz
+   * template opts in via `VizSpec.kind`.
+   *
+   * Deliberately not `registerTableRenderer` above: that is a bare name → tag
+   * pair with no channels, options or icon, nothing reads its map, and its key
+   * means a view name rather than a drawing kind.
+   */
+  registerVisualization(spec: VisualizationSpec): Unregister;
   registerImporter(spec: ImporterSpec): Unregister;
   /**
    * Register a live-backend connector. The Connect menu lists these; the
@@ -627,6 +766,14 @@ export interface UiRegistry {
   openPluginManager(): void;
   /** Opens the Settings dialog. */
   openSettings(): void;
+  /**
+   * Opens the Export dialog.
+   *
+   * `tableIds` preselects what to export and skips the table selector — pass the
+   * one table a table-footer button belongs to. Called with nothing, the dialog
+   * asks which tables of the workspace to write.
+   */
+  openExportDialog(tableIds?: string[]): void;
   /** Registers a command for the Ctrl+K command palette. Returns an unregister fn. */
   registerCommand(spec: CommandSpec): Unregister;
   /**
