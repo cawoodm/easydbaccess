@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { panelDomId, waitForPanel } from './helpers.js';
+import { liftRowLimit, panelDomId, waitForPanel } from './helpers.js';
 
 /**
  * A filter on a table past the read cap must cover the WHOLE table.
@@ -20,6 +20,9 @@ const ROWS = CAP + 2;
 
 /** A table of `rows` rows where only the LAST one carries `kind = rare`. */
 async function seed(page: import('@playwright/test').Page, ws: string, rows: number) {
+  // Past what a user may create (10,000 rows per browser workspace — see
+  // `db/row-budget.ts`), because the cap under test is the grid's, at 20,000.
+  await liftRowLimit(page);
   return page.evaluate(
     async ({ ws, rows }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

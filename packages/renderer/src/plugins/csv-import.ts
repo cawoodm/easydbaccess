@@ -4,6 +4,7 @@ import { askImportOntoMode, columnsLineUp, type ImportOntoMode } from '../import
 import { isUnsafeIntegerText } from '../import/big-numbers.js';
 import { mapRowsToTarget, type ColumnMapping } from '../import/map-columns.js';
 import { cryptoUUID, slugField } from '../util/ids.js';
+import { assertIncomingFits } from '../db/row-budget.js';
 import { looksLikeArrayColumn, looksLikeTextColumn } from '@easydb/shared';
 
 export const meta: NonNullable<PluginModule['meta']> = {
@@ -374,6 +375,8 @@ export async function importCsvText(api: HostApi, text: string, name: string, op
       columns = edited;
     }
     if (opts.maxRows != null) rows = rows.slice(0, opts.maxRows);
+    // Asked before the wipe below: refused after it, the table would be left empty.
+    assertIncomingFits(rows.length);
     if (mode === 'recreate') {
       // Re-Create: the table is emptied and re-schemad in place. Deleting and
       // re-inserting it would be the literal reading, but it would take the
@@ -429,6 +432,8 @@ export async function importCsvText(api: HostApi, text: string, name: string, op
       updatedAt: Date.now(),
     }));
     if (mode === 'reload') {
+      // Asked before the wipe: refused after it, the table would be left empty.
+      assertIncomingFits(docs.length);
       // Wipe existing rows; keep the table id (panel position) AND its
       // columns (widths, renderers, etc. survive).
       const rows = api.store.rows(targetId);

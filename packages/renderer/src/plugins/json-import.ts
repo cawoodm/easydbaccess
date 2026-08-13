@@ -19,6 +19,7 @@ import { askImportOntoMode, columnsLineUp } from '../import/import-mode.js';
 import { quoteBigIntegers } from '../import/big-numbers.js';
 import { runImport } from '../import/import-kernel.js';
 import { rowRekeyer } from '../table/column-merge.js';
+import { assertIncomingFits } from '../db/row-budget.js';
 import { filenameFromUrl } from '../import/fetch-source.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 import { looksLikeArrayColumn, looksLikeTextColumn } from '@easydb/shared';
@@ -169,6 +170,8 @@ async function importIntoTable(api: HostApi, table: Table, incoming: NormalizedT
   }
 
   if (mode !== 'append') {
+    // Asked before the wipe: refused after it, the table would be left empty.
+    assertIncomingFits(rows.length);
     const old = await rowColl.find();
     await rowColl.bulkRemove(old.map((r) => r.id));
   }
@@ -459,6 +462,10 @@ export async function restoreWorkspaceDump(
   }
 
   try {
+    // Asked BEFORE anything is deleted: an import too big for the browser store
+    // would otherwise be refused part way through, with the workspace it replaced
+    // already gone. `totalRows` is what is about to be written.
+    assertIncomingFits(totalRows);
     if (mode === 'replace-workspace') {
       for (const t of existing) {
         const rowColl = api.store.rows(t.id);

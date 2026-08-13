@@ -6,6 +6,7 @@ import { defineHostDialogs } from '@cawoodm/lit-dialogs';
 import { defineToastHost } from '@cawoodm/lit-toast';
 import { getContext } from '../app-context.js';
 import { hasColumnDrag } from '../table/column-drag.js';
+import { RowLimitError } from '../db/row-budget.js';
 import '../dialogs/csv-paste-dialog.js';
 import type { CsvPasteDialog } from '../dialogs/csv-paste-dialog.js';
 import '../dialogs/new-table-dialog.js';
@@ -507,6 +508,13 @@ export class AppShell extends LitElement {
         const handled = await fn(e, ctx.api);
         if (handled) return;
       } catch (err) {
+        // The browser store's row limit is a rule, not a fault: say it in the
+        // app's own voice rather than as `[runtime] Plugin: (drop-handler)`. It is
+        // the commonest way to meet the limit — dropping a file that is too big.
+        if (err instanceof RowLimitError) {
+          ctx.api.ui.dialogs.toast(err.message, { kind: 'warning', title: 'Too much data for the browser' });
+          return;
+        }
         ctx.events.emit('plugin:error', {
           url: '(drop-handler)',
           phase: 'runtime',
@@ -550,7 +558,7 @@ export class AppShell extends LitElement {
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
           <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
-            ><span class="version">v0.0.371</span></a
+            ><span class="version">v0.0.372</span></a
           ></strong
         >
         ${this.headerButtons.filter((b) => b.variant !== 'secondary').map((b) => this.renderSlotButton(b, 'header'))}

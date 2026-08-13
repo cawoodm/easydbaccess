@@ -18,6 +18,27 @@ In a browser tab, files are **opt-in**. A new workspace asks you where its data
 should live, and the answer can simply be "this browser" — see
 [Getting Started](getting-started.md).
 
+## 10,000 rows in a browser, and no limit in a file
+
+**A workspace kept in this browser holds 10,000 rows.** Import more and the app
+refuses it and tells you so — nothing is half-imported.
+
+That is not a licence check, it is what the browser's own database can do well. The
+same table of 120,000 rows takes over five minutes to import into a browser
+workspace, five seconds to count and six to filter. In a `.edb` file it imports in
+twelve seconds, counts instantly and filters in a fifth of a second. So the limit
+is set where the browser is still quick, and the way past it is a file:
+
+**File → New .edb file…** in the window footer. It copies the workspace you are in
+to the file you name, and from then on there is **no row limit** — the same file
+also opens in the desktop app as it is.
+
+The desktop app has no limit anywhere: its workspaces are always SQLite files.
+
+A workspace that is already over the limit — filled before this rule, or on another
+machine — keeps working. You can read it, edit it, sort it, filter it and delete
+from it. You just cannot add to it until you move it into a file.
+
 ## The Database button
 
 The **Database** button in the footer opens a small menu:

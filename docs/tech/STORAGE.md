@@ -90,6 +90,67 @@ The desktop writes the same v2 file, from the same `EdbStore` — so a workspace
 saved in a browser tab opens on the desktop and back again. `docs/tech/EDB.md`
 has the format and the two drivers.
 
+## The browser store holds 10 000 rows, and refuses the 10 001st
+
+`db/row-budget.ts` enforces one number: **a workspace kept in this browser holds
+10 000 rows.** A write that would cross it throws `RowLimitError` and nothing of it
+lands. There is no setting, and no "do it anyway".
+
+The number is measured, not chosen (full tables in
+`.claude/plans/2026-08-13-sqlite-threshold.md`). In IndexedDB, on this app's row
+layout:
+
+| rows    | import | `count()` | filter | funnel list |
+| ------- | ------ | --------- | ------ | ----------- |
+| 20 000  | 5.8 s  | 575 ms    | 1.6 s  | 496 ms      |
+| 60 000  | 135 s  | 3.5 s     | 3.2 s  | 2.0 s       |
+| 120 000 | 320 s  | 5.3 s     | 5.9 s  | 4.1 s       |
+
+The same 120 000 rows in a `.edb`: **12 s** to import, **17 ms** to count, **180
+ms** to filter, and none of it grows with size. The first thing to cross a second
+in IndexedDB is the per-column filter, at about 12 000 rows, so 10 000 is set
+BELOW the first cliff rather than at it — and it is a number a person can recite,
+which a threshold nobody remembers is not.
+
+Four things make it hold up:
+
+- **Per WORKSPACE, not per table.** Dexie keeps every table's rows in one `rows`
+  store keyed by a random UUID, so an insert degrades against everything already
+  there: the same 20 000-row chunk took 5.8 s into an empty store and 34 s with
+  20 000 rows already in it. A per-table limit would let twenty tables of 10 000
+  build the same hole.
+- **Checked in the store, so there is nothing to go around.** The three row-adding
+  calls of the Dexie rows view (`insert`, `bulkInsert`, `upsert` of a row that is
+  not there yet) ask `assertRoomForRows` first. An importer, a sync pull and a
+  plugin all arrive through it, and because importers write in chunks, a refused
+  import is turned away whole rather than half-written.
+- **Plus a PRE-FLIGHT wherever a write wipes first.** `assertIncomingFits` is
+  called before the delete by every path that replaces rows it is about to
+  overwrite — `server-sync-core.replaceWorkspace`, a gist pull, a JSON dump
+  restore, CSV re-create/reload, a Datasette overwrite and a Datasette refresh
+  merge. Without it the store's own check would refuse the insert AFTER the delete,
+  and the user would be left with their old rows gone and part of a new set. It
+  judges the incoming total only: whatever the wipe frees is free by then. It is
+  also the one check that has to ask whether the limit applies at all, since it can
+  run on any store — hence `markBrowserStore()`, set where the Dexie store is
+  built.
+- **A refusal is always measured.** The per-workspace total is cached (a walk of
+  10 000 keys per typed row would be its own performance bug) and is only ever
+  increased, so it can drift HIGH — a delete in another tab, a sync. A check that
+  is about to refuse recounts first, so a stale total can delay a refusal but never
+  cause one.
+- **Counting stops at the limit.** `limit(max + 1).primaryKeys()` — the answer is
+  only ever compared against the limit, so a 600 000-row workspace costs the same
+  walk as a 10 001-row one. Counting an index range is the 14-second operation this
+  file warns about everywhere else, and this runs on the write path.
+
+Not limited: reading, editing and deleting (a workspace that is already too big
+must not become unusable, only unable to grow), every `.edb` workspace, the whole
+Electron app (its store is SQLite at every size), and rows that live in a provider
+rather than the store. `window.__easydbRowLimit` lifts it for the two e2e specs
+that must seed past it to exercise the grid's own 20 000-row read cap; nothing in
+the app sets it.
+
 ## Why Dexie, not a bigger database engine
 
 The storage layer is hidden behind `DataStore`, so the choice of engine is an

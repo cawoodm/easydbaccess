@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.js';
+import { liftRowLimit } from './helpers.js';
 
 /**
  * A table past the row cap (20 000) is read as a SLICE, and a free-text search
@@ -14,6 +15,9 @@ const CAP = 20_000;
 
 /** A closed table of `rows` rows, plus an open template view of it limited to 3 cards. */
 async function seedBigTable(page: import('@playwright/test').Page, ws: string, rows: number) {
+  // Past what a user may create (10,000 rows per browser workspace — see
+  // `db/row-budget.ts`), because the cap under test is the grid's, at 20,000.
+  await liftRowLimit(page);
   return page.evaluate(
     async ({ ws, rows }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

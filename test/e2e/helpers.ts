@@ -119,6 +119,20 @@ export async function addRow(page: Page, tableId: string, data: Record<string, u
   );
 }
 
+/**
+ * Lift the browser store's 10,000-row limit for this page.
+ *
+ * For fixtures only — a spec that has to seed a table bigger than a user is
+ * allowed to make, to prove something about the grid's own 20,000-row read cap.
+ * Call it BEFORE the seeding write. Nothing in the app sets this: see
+ * `db/row-budget.ts`.
+ */
+export async function liftRowLimit(page: Page, to = 1_000_000): Promise<void> {
+  await page.evaluate((n) => {
+    (window as unknown as { __easydbRowLimit?: number }).__easydbRowLimit = n;
+  }, to);
+}
+
 /** Reads a table record (post-mutation assertions). */
 export async function readTable(page: Page, tableId: string) {
   return page.evaluate(

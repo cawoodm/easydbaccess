@@ -1,5 +1,6 @@
 import type { HostApi, Row, Table } from '@easydb/shared';
 import { cryptoUUID, slugTable } from '../util/ids.js';
+import { assertIncomingFits } from '../db/row-budget.js';
 import { parsedToTables } from './json-import.js';
 
 // Re-exported for the callers that used to get these from here. The
@@ -72,6 +73,11 @@ export function canonicalize(body: string): string {
  */
 export async function replaceWorkspace(api: HostApi, wsId: string, dump: unknown): Promise<number> {
   const tables = parsedToTables(dump, wsId);
+
+  // Asked BEFORE the local workspace is deleted. A pull too big for the browser
+  // store would otherwise be refused half way through the insert, leaving the old
+  // workspace gone and part of a new one in its place.
+  assertIncomingFits(tables.reduce((n, t) => n + t.rows.length, 0));
 
   const existing = (await api.store.tables.find()).filter((t) => t.workspaceId === wsId);
   for (const t of existing) {

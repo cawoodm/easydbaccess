@@ -5,6 +5,7 @@ import { settingId, type EasyDb } from './dexie-db.js';
 import { applyRowRequest, projectFields } from './row-reader.js';
 import { ROW_FETCH_CAP } from './data-store-bridge.js';
 import { FACET_MAX_OPTIONS, facetCounts } from '../search/facet-values.js';
+import { assertRoomForRows, forgetRowBudget, markBrowserStore } from './row-budget.js';
 
 /**
  * Dexie-backed DataStore. Implements `DataCollection<T>` from the plugin API;
@@ -163,19 +164,29 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string, tables: DexieT
     },
     // Every write goes through `announceRowWrite` so the watchers of THIS table —
     // and no others — hear about it. See the note above the function.
+    // The row limit is checked HERE, on the only three calls that add rows, and
+    // before any of them writes. This is the store nobody can go around: an
+    // importer, a sync pull and a plugin all arrive through it. See `row-budget.ts`
+    // for the number and why it is per workspace.
     async insert(doc) {
       const stamped = { ...doc, tableId };
+      await assertRoomForRows(coll, tables, tableId, 1);
       await announceRowWrite(tableId, () => coll.add(stamped));
       return stamped;
     },
     async bulkInsert(docs) {
       if (docs.length === 0) return [];
       const stamped = docs.map((d) => ({ ...d, tableId }));
+      await assertRoomForRows(coll, tables, tableId, stamped.length);
       await announceRowWrite(tableId, () => coll.bulkAdd(stamped));
       return stamped;
     },
     async upsert(doc) {
       const stamped = { ...doc, tableId };
+      // Only a NEW row spends budget; overwriting one that is already there does
+      // not. A sync pull is mostly the second kind.
+      const exists = (await coll.get(doc.id)) !== undefined;
+      if (!exists) await assertRoomForRows(coll, tables, tableId, 1);
       await announceRowWrite(tableId, () => coll.put(stamped));
       return stamped;
     },
@@ -188,10 +199,12 @@ function rowsView(coll: DexieTable<Row, string>, tableId: string, tables: DexieT
     },
     async remove(id) {
       await announceRowWrite(tableId, () => coll.delete(id));
+      forgetRowBudget();
     },
     async bulkRemove(ids) {
       if (ids.length === 0) return;
       await announceRowWrite(tableId, () => coll.bulkDelete(ids));
+      forgetRowBudget();
     },
     /**
      * Rows in this table, counted on the `tableId` index without reading any of
@@ -414,6 +427,9 @@ function matchesAll(doc: Record<string, unknown>, entries: Array<[string, unknow
  * and resolves the active workspace with it, so the id is not known yet here.
  */
 export function createDataStore(db: EasyDb, workspaceId: () => string): DataStore {
+  // This store, and only this store, has a row limit. Said here rather than sniffed
+  // from the environment: the store that was built is the fact that decides it.
+  markBrowserStore();
   return {
     workspaces: wrap<Workspace>(db.workspaces),
     tables: wrap<Table>(db.tables),
