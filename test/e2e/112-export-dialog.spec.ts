@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures.js';
-import { addRow, createTable, panelDomId, waitForPanel } from './helpers.js';
+import { addRow, bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js';
 
 /**
  * The export dialog reached from the WORKSPACE, where more than one table can be
@@ -54,6 +54,30 @@ test('two tables in the workspace ask which ones to export', async ({ page }) =>
   await expect(selector(page)).toBeVisible();
   await expect(selector(page)).toContainText('Alpha');
   await expect(selector(page)).toContainText('Beta');
+});
+
+test('the export selector shows no row counts at all', async ({ page }) => {
+  // It used to show a per-device cached count, which reads 0 for a table this
+  // device has never opened — so tables full of data were offered as "0 rows".
+  // Counting them for real is an index scan per table, too much to pay on the
+  // way to a dialog asking WHICH tables. So the number is gone, not corrected.
+  const a = await createTable(page, 'Alpha', [{ field: 'name' }]);
+  await waitForPanel(page, a);
+  const b = await createTable(page, 'Beta', [{ field: 'name' }]);
+  await waitForPanel(page, b);
+  await bulkAddRows(
+    page,
+    a,
+    Array.from({ length: 3 }, (_, i) => ({ name: `a${i}` })),
+  );
+  await addRow(page, b, { name: 'b1' });
+
+  await stubSaveFile(page);
+  await openFromWorkspace(page);
+  await expect(selector(page)).toBeVisible();
+  await expect(selector(page)).toContainText('Alpha');
+  await expect(selector(page)).not.toContainText('rows');
+  await expect(selector(page)).not.toContainText('1 row');
 });
 
 test('one table in the workspace skips the selector', async ({ page }) => {

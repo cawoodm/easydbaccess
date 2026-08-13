@@ -16,6 +16,7 @@
 
 ### Bugs
 
+- 🪲 The export dialog's table picker offered "0 rows" beside tables full of data (v0.0.367)
 - 🪲 Deleting rows from one table re-read every other open table, and so did every panel click (v0.0.366)
 - 🪲 A docked visualization's collapse button hid the chart but left its empty box behind (v0.0.362)
 

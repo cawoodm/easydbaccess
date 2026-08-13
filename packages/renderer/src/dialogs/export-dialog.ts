@@ -45,7 +45,11 @@ export async function openExport(tableIds?: string[]): Promise<void> {
       ids = [all[0]!.id];
     } else {
       const picked = await chooseTables(
-        all.map((t) => ({ name: t.name, size: cachedRowCount(t.id) })),
+        // No row counts. The only free number is a per-device cache that reads 0
+        // for a table this device has never opened, and counting for real costs
+        // an index scan per table — too much to pay on the way to a dialog whose
+        // question is "which tables", not "how big are they".
+        all.map((t) => ({ name: t.name, size: null })),
         { title: 'Export', message: 'Which tables should be exported?', confirmLabel: 'Choose' },
       );
       if (!picked || picked.length === 0) return;
@@ -217,7 +221,14 @@ export class ExportDialog extends LitElement {
     this.options = { ...this.options, [key]: value };
   }
 
-  /** Tables big enough that reading them whole is worth a word beforehand. */
+  /**
+   * Tables big enough that reading them whole is worth a word beforehand.
+   *
+   * The remembered count is the only one worth having here: it is free, and a
+   * warning is allowed to be best-effort. A table this device has never opened
+   * is remembered as 0 and so goes unwarned — better than counting every table
+   * for real, which is an index scan each and is what this dialog is not for.
+   */
   private bigTables(): Array<{ name: string; rows: number }> {
     if (this.options.limitRows > 0) return [];
     return this.tables
