@@ -182,6 +182,25 @@ stale key is not loud: `row-reader.ts` drops a filter naming a field no column h
 (it would match nothing and empty the grid), so the filter would simply stop
 existing without anyone being told.
 
+## One column the grid owns: `_error`
+
+Everything above reads its columns from `effColumns`, not from `this.columns`.
+They differ by exactly one entry: while a Validate run has something to report for
+this table, `_error` (label **Problem**) is appended, and the grid filters on it.
+
+The split is the point. `this.columns` is the table's own record and is written
+BACK to the store — a resize and a reorder both patch it — so a synthetic column
+living in it would be saved as if the user had made it. `effColumns` is what
+renders, filters, searches and sorts. The persisting paths keep reading
+`this.columns`, which is why a `_error` drag or resize simply does nothing.
+
+The messages themselves come from [`table/row-errors.ts`](../../packages/renderer/src/table/row-errors.ts),
+a per-table registry the ✓ button publishes to, and are merged into rows inside
+`readPage`. The one thing the query contract cannot express is a filter on this
+field, because no store holds it: that case reads the flagged rows by id instead.
+See `docs/tech/PLUGINS.md` § _Checking every row_ for the whole shape and for why
+none of it is persisted.
+
 ## The empty-cell highlight is a preference
 
 `cellStateClass` marks a `<td>` from the STORED value — ` is-null` for empty,

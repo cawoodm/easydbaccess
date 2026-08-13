@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ Validate reports in a temporary `_error` column, with the grid filtered to those rows, instead of a separate issues table (v0.0.370)
 - 🪶 A ✓ button checks every row against its columns' rules and collects what it finds in an issues table (v0.0.369)
 - ✨ Delete Visible Data is the default option in a table's delete prompt (v0.0.366)
 - 🪶 Drag a column from one table onto another to start a projection joining the two, with that column selected (v0.0.368)

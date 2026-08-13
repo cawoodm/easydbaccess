@@ -232,13 +232,44 @@ worth knowing:
   that throws for every row would otherwise return 609,283 issues that all say
   the same thing.
 
-The results go into a TABLE, `<table> issues`, not a list in a dialog. "Let me
-filter and fix these" is a request for filtering, sorting and exporting, and this
-app has all three — for tables. The dialog that appears is the summary, one line
-per column in the grid's own column order, with a **Show me** button that reveals
-the issues window. A second run REPLACES that table's rows rather than adding a
-`Pets issues-2` beside it. The table is `readonly`: every row in it is a copy of
-a problem, and editing the copy fixes nothing.
+The results come back as a COLUMN of the table that was checked, `_error`, with
+the grid filtered to the rows that have one — see `table/row-errors.ts` for the
+registry behind it and `table/data-table.ts` for the three things it changes
+there. The dialog that appears is the summary, one line per column in the grid's
+own column order, with a **Show me** button that fronts the table's own window;
+the rows are already narrowed behind it.
+
+This was a second TABLE at first, `<table> issues`, on the grounds that "let me
+filter and fix these" is a request for filtering, sorting and exporting and this
+app has all three — for tables. It was the wrong place to work. The row that
+needs the edit is in the table the user was already looking at, a copy of a
+problem cannot be repaired, and the copy is stale the moment the original is.
+
+**Nothing about `_error` is persisted**, and that is the load-bearing part:
+
+- No row's stored `data` ever gains the field. `readPage` merges it into the rows
+  on their way to the screen, and `decorateRows` copies each row rather than
+  stamping the one the store handed over — a store's row is shared with whatever
+  else is holding it.
+- The COLUMN is not in `table.columns` either. `data-table` keeps `this.columns`
+  exactly as the store gave it, because that field is written BACK (a resize, a
+  reorder), and renders/filters/sorts from `effColumns` instead.
+- The FILTER is dropped by `saveFilters`, and carried across `adoptQueryState` —
+  a table record arriving from the store cannot speak for a key the store does
+  not have, and any write to that record lands there (being fronted stamps the
+  front order), so leaving it out would take the filter off the grid on the next
+  click in the panel.
+
+A `render` script sees `row._error` like any other field, which is the escape
+hatch for a user who wants it kept: write it into a column of their own.
+
+One consequence: the `_error` filter is the single predicate no store can answer.
+Pushed down it would be dropped as a filter on an unknown field — `row-reader.ts`
+drops those deliberately — and the grid would show every row under a filter
+claiming otherwise. So that case reads the flagged rows BY ID (the ids are what
+the registry holds, and the scan's own cap bounds them) and applies the rest of
+the request in memory with `applyRowRequest`, which is what keeps the other
+filters, the search, the sort and the slice working while it is on.
 
 Both orderings in that summary are fixed rather than encountered: rows come back
 in the store's own order (a Dexie key is a random UUID), so an encounter order

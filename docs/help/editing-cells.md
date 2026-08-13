@@ -67,16 +67,22 @@ rule its columns carry: Required, Maximum, Unique and your own validation
 scripts.
 
 What you get back is a summary — one line per column, in the order the columns
-appear — and a table of the problems themselves, named `<your table> issues`.
-It holds one row per problem: which row, which column, the value, and what is
-wrong with it. Because it is an ordinary table you can filter it, sort it and
-export it, and its window stays open beside the table you are fixing.
+appear — and **the table itself, narrowed to the rows with something wrong**. A
+new column, **Problem**, says what that is, one message per row. Fix the cell
+beside the message.
 
-Fix the rows in the real table, then press ✓ again — the issues table is
-rewritten, so what is left in it is what is still wrong.
+The Problem column has an ordinary funnel, so you can clear the filter to see
+every row again, or type in it to read one kind of problem at a time. Press ✓
+again when you have finished fixing: the rows you repaired drop out of the list,
+and a run that finds nothing takes the column away.
 
-Three things worth knowing:
+Four things worth knowing:
 
+- **Nothing about this is saved.** The Problem column is not part of your table:
+  it is not exported, not synced and not there after a reload. It is what the
+  last run found, and it does not outlive the data it judged. A column script
+  can read it as `row._error` — that is the way to keep it, by writing it into a
+  column of your own.
 - A table whose columns carry no rules is not read at all. There is nothing to
   check, and the button says so instead of pretending to work.
 - A long scan shows a bar under the header and can be stopped with **Esc**. It
