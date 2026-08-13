@@ -603,8 +603,8 @@ export async function restoreWorkspaceDump(
  * replace-workspace mode the old instances are cleared first (their tables were
  * just wiped); otherwise instances are upserted. Each instance's `tableId` is
  * remapped via `nameToId` (falling back to its stored id) so it binds to the
- * table that was actually imported, and its `templateId` via the remap
- * `restoreTemplates` returns.
+ * table that was actually imported, its `templateId` via the remap
+ * `restoreTemplates` returns, and its `dock` host through {@link remapDock}.
  */
 async function restoreViews(api: HostApi, parsed: unknown, workspaceId: string, nameToId: Map<string, string>, replaceWorkspace: boolean): Promise<void> {
   if (!isObject(parsed)) return;
@@ -625,8 +625,37 @@ async function restoreViews(api: HostApi, parsed: unknown, workspaceId: string, 
     const tableId = (inst.tableName ? nameToId.get(inst.tableName) : undefined) ?? inst.tableId;
     if (!tableId) continue;
     const templateId = templateIds.get(inst.templateId) ?? inst.templateId;
-    await api.store.viewInstances.upsert({ ...inst, workspaceId, tableId, templateId });
+    const dock = remapDock(inst.dock, inst.tableId, tableId);
+    await api.store.viewInstances.upsert({ ...inst, workspaceId, tableId, templateId, ...(dock === undefined ? { dock: undefined } : { dock }) });
   }
+}
+
+/**
+ * Carry a docked visualization's HOST across the import's re-identification.
+ *
+ * A `ViewDock` names its host by id, and an imported table gets a NEW id — so a
+ * dock left as written points at a table that does not exist, and a pane whose
+ * host stack never appears is not mounted at all. It does not fall back to a
+ * window either (the window reconcile deliberately skips docked instances), so
+ * the chart simply vanishes. That is what a dump of a workspace with docked
+ * panes did before this.
+ *
+ * The case that resolves is the ordinary one: the pane is docked into the window
+ * of the very table it charts, so the old host id equals the instance's old
+ * `tableId` and the new host is the new one. A host that is some OTHER table (a
+ * chart of a projection docked into the raw table's window) cannot be resolved —
+ * the dump carries no table ids to match it against — so the dock is DROPPED and
+ * the instance opens in its own window. Visible in the wrong place beats
+ * invisible.
+ *
+ * A `view` host keeps its id: instance ids survive the import unchanged.
+ */
+function remapDock(dock: ViewInstance['dock'], oldTableId: string, newTableId: string): ViewInstance['dock'] {
+  if (!dock) return undefined;
+  if (dock.host.kind === 'view') return dock;
+  if (dock.host.tableId === newTableId) return dock;
+  if (dock.host.tableId === oldTableId) return { ...dock, host: { kind: 'table', tableId: newTableId } };
+  return undefined;
 }
 
 // -- Shape detection ----------------------------------------------------------

@@ -13,6 +13,8 @@
 
 ### Features
 
+- 🪶 Visualizations: bar, column, line and pie charts, a map and a word cloud — in their own window or docked above or below the grid, following the grid's filters (v0.0.356)
+- 🪶 A word cloud's rules are yours: ignore short words, keep named exceptions, edit the common-word list, and export the counts as CSV (v0.0.355)
 - 🪶 A workspace can live in a real SQLite `.edb` file you save, open and hand to anyone (v0.0.347)
 - ✨ New workspace asks where its data goes: this browser, or a `.edb` file (v0.0.347)
 - ✨ One folder grant covers every workspace file, so New and Open need no file dialog (v0.0.347)
@@ -22,6 +24,8 @@
 
 ### Bugs
 
+- 🪲 A chart docked to a grid could sit empty beside a full table until the window was resized, and a reloaded word cloud claimed it had no words (v0.0.356)
+- 🪲 A dump of a workspace with a docked chart came back with the chart missing — its pane had nowhere to mount (v0.0.356)
 - 🪲 A big table with a saved sort or filter took 20 seconds to show a row (v0.0.357)
 - 🪲 A big table never learned its own size, so its title showed the 500 rows on screen as the whole table (v0.0.357)
 - 🪲 A big table with a filter on it re-read every row, over and over, for as long as its window stayed open (v0.0.357)

@@ -14,6 +14,7 @@ import type {
   UiRegistry,
   Unregister,
   UrlSourceSpec,
+  VisualizationSpec,
 } from '@easydb/shared';
 import { HostDialogs } from '@cawoodm/lit-dialogs';
 import { ToastHost } from '@cawoodm/lit-toast';
@@ -41,6 +42,12 @@ export interface Registries {
   cellRenderers: Map<string, string>;
   rowRenderers: Map<string, string>;
   tableRenderers: Map<string, string>;
+  /**
+   * Ways of DRAWING a table, keyed by `VisualizationSpec.id` — the value a viz
+   * template puts in `VizSpec.kind`. Distinct from the two maps above, which
+   * nothing reads; see `registerVisualization` in the plugin contract.
+   */
+  visualizations: Map<string, VisualizationSpec>;
   /** Row-collection providers keyed by `RowCollectionProvider.type`. */
   rowSources: Map<string, RowCollectionProvider>;
   /** Plugin settings tabs keyed by pluginId, in registration (insertion) order. */
@@ -75,6 +82,7 @@ export function createRegistries(): Registries {
     cellRenderers: new Map(),
     rowRenderers: new Map(),
     tableRenderers: new Map(),
+    visualizations: new Map(),
     rowSources: new Map(),
     settings: new Map(),
     commands: [],
@@ -111,6 +119,12 @@ export function createUiRegistry(r: Registries): UiRegistry {
     registerCellRenderer: (name, tag) => mapReg(r.cellRenderers, name, tag),
     registerRowRenderer: (viewName, tag) => mapReg(r.rowRenderers, viewName, tag),
     registerTableRenderer: (viewName, tag) => mapReg(r.tableRenderers, viewName, tag),
+    registerVisualization: (spec) => {
+      r.visualizations.set(spec.id, spec);
+      return () => {
+        if (r.visualizations.get(spec.id) === spec) r.visualizations.delete(spec.id);
+      };
+    },
     openNewTableDialog: () => {
       document.dispatchEvent(new CustomEvent('easydb:open-new-table'));
     },

@@ -1,7 +1,9 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import type { ColumnSpec, Table, ViewInstance, ViewTemplate } from '@easydb/shared';
+import type { ColumnSpec, SettingsFieldSpec, Table, ViewInstance, ViewTemplate, VisualizationSpec, VizMeasureFn, VizSpec } from '@easydb/shared';
 import { getContext } from '../app-context.js';
+import { readCloudDefaults } from '../viz/viz-settings.js';
+import { effectiveVizOptions, overrideDelta, overriddenKeys } from '../viz/viz-options.js';
 import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@cawoodm/lit-dialogs';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { extractTokens } from '../views/view-render.js';
@@ -35,6 +37,10 @@ interface TemplateDraft {
   headerHtml: string;
   rowHtml: string;
   footerHtml: string;
+  /** 'viz' ⇒ the template DRAWS; the three HTML fields stay unused. */
+  kind: 'html' | 'viz';
+  /** The drawing spec, when `kind === 'viz'`. */
+  viz: VizSpec | null;
 }
 
 interface InstanceDraft {
@@ -50,6 +56,14 @@ interface InstanceDraft {
   tokenRaw: Record<string, boolean>;
   limit: number; // 0 = all
   readonly: boolean; // grid (template-off) view shows values with no editors
+  /** Where it is shown. 'window' ⇒ its own panel; otherwise docked to the table. */
+  dock: 'window' | 'above' | 'below';
+  /**
+   * The visualization options AS EDITED — the template's values with the user's
+   * changes applied. Saved as a DELTA against the template (see
+   * `viz/viz-options.ts`), so an option left alone keeps inheriting.
+   */
+  vizOptions: Record<string, unknown>;
 }
 
 @customElement('views-dialog')
@@ -176,8 +190,28 @@ export class ViewsDialog extends LitElement {
         font-family: ui-monospace, SFMono-Regular, monospace;
         color: #2563eb;
       }
+      /* A visualization's slot is a named data CHANNEL, not a $TOKEN, so it
+         reads as prose rather than as code. */
+      .map-row .channel {
+        font-weight: 600;
+      }
       /* A token whose script is set says so on the button itself — the script
          lives in a modal, so nothing else in the row would show it. */
+      /* An overridden option is marked so "this view differs from the chart" is
+         visible without opening the chart definition to compare. */
+      .viz-override {
+        display: flex;
+        align-items: flex-end;
+        gap: 0.4rem;
+      }
+      .viz-override > label {
+        flex: 1;
+        min-width: 0;
+      }
+      .viz-override.changed > label {
+        border-left: 2px solid #2563eb;
+        padding-left: 0.4rem;
+      }
       button.mini.scripted {
         border-color: #2563eb;
         color: #2563eb;
@@ -196,6 +230,21 @@ export class ViewsDialog extends LitElement {
   private table: Table | null = null;
   private columns: ColumnSpec[] = [];
   private dialogEl: HTMLDialogElement | null = null;
+  /**
+   * True when the dialog was opened directly onto an editor instead of onto the
+   * list — i.e. the user came from a chart's Edit or Chart button to change one
+   * thing. Decides where Save goes; see `doneEditing`.
+   */
+  private deepLinked = false;
+  /**
+   * Snapshotted so the template editor can list the registered drawing kinds.
+   * Re-read on every `refresh()` rather than captured once, for the same reason
+   * `data-table` re-snapshots its cell renderers on `app:ready`: a plugin
+   * hot-installed from the Plugin Manager has to show up here without a reload.
+   */
+  private registries: { visualizations: Map<string, VisualizationSpec> } | null = null;
+  /** Workspace defaults for a NEW word cloud; see `seedOptions`. */
+  private cloudDefaults: { minLength: number; keepWords: string; stopWords: string } | null = null;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -219,6 +268,9 @@ export class ViewsDialog extends LitElement {
     this.mode = 'list';
     this.tDraft = null;
     this.iDraft = null;
+    // Opened straight onto one editor (a visualization's Edit / Chart button)
+    // rather than onto the list. Save then FINISHES — see `doneEditing`.
+    this.deepLinked = Boolean(opts?.editTemplateId || opts?.editInstanceId);
     await this.refresh();
     // Deep-link straight into a template or instance editor (from a view
     // window's footer icons).
@@ -236,6 +288,8 @@ export class ViewsDialog extends LitElement {
   private async refresh(): Promise<void> {
     const ctx = await getContext();
     const wsId = ctx.workspaceId;
+    this.registries = ctx.registries;
+    this.cloudDefaults = await readCloudDefaults(ctx.api.settings);
     this.table = await ctx.store.tables.findOne(this.tableId);
     this.columns = this.table?.columns ?? [];
     this.instances = (await ctx.store.viewInstances.find({ workspaceId: wsId })).filter((v) => v.tableId === this.tableId);
@@ -245,6 +299,20 @@ export class ViewsDialog extends LitElement {
   private close = (): void => {
     this.dialogEl?.close();
   };
+
+  /**
+   * Where Save goes after a successful edit.
+   *
+   * Back to the list when the user navigated there themselves — they were
+   * browsing and may well want to edit something else. But when the dialog was
+   * opened straight onto this editor from a chart's own footer, the list is
+   * somewhere they never asked to be: they came to change one thing, so Save
+   * finishes and the chart they were looking at is visible again.
+   */
+  private doneEditing(): void {
+    if (this.deepLinked) this.close();
+    else this.mode = 'list';
+  }
 
   // The form's one submit path: Enter/Ctrl+Enter or clicking the primary
   // button all route here, dispatching to whichever action is primary for
@@ -273,9 +341,19 @@ export class ViewsDialog extends LitElement {
   private async editInstance(inst: ViewInstance): Promise<void> {
     const ctx = await getContext();
     const tpl = await ctx.store.viewTemplates.findOne(inst.templateId);
-    // Recover the template's live tokens; fall back to whatever the instance
-    // already mapped if the template is gone.
-    const tokens = tpl ? extractTokens(tpl.headerHtml, tpl.rowHtml, tpl.footerHtml) : Object.keys(inst.mapping);
+    // Recover the template's live slots. For a VIZ template those are the
+    // visualization's channel keys, not `$TOKEN`s scraped from HTML — the same
+    // split `useTemplate` makes. Falling back to what the instance already
+    // mapped covers a missing template and a kind whose plugin is switched off,
+    // either of which would otherwise show an edit form with nothing to map.
+    const vizSpec = tpl?.kind === 'viz' ? this.vizSpecOf(tpl.viz?.kind) : null;
+    const tokens = vizSpec
+      ? vizSpec.channels.map((c) => c.key)
+      : tpl?.kind === 'viz'
+        ? Object.keys(inst.mapping)
+        : tpl
+          ? extractTokens(tpl.headerHtml, tpl.rowHtml, tpl.footerHtml)
+          : Object.keys(inst.mapping);
     this.iDraft = {
       id: inst.id,
       templateId: inst.templateId,
@@ -286,6 +364,8 @@ export class ViewsDialog extends LitElement {
       tokenScripts: { ...(inst.tokenScripts ?? {}) },
       tokenRaw: { ...(inst.tokenRaw ?? {}) },
       limit: inst.limit ?? 0,
+      dock: inst.dock ? inst.dock.edge : 'window',
+      vizOptions: effectiveVizOptions(tpl?.viz?.options, inst.vizOptions),
       readonly: inst.readonly ?? false,
     };
     this.mode = 'instance';
@@ -324,9 +404,45 @@ export class ViewsDialog extends LitElement {
 
   // -- templates --------------------------------------------------------------
 
-  private newTemplate(): void {
-    this.tDraft = { id: null, name: '', headerHtml: '', rowHtml: '', footerHtml: '' };
+  private newTemplate(kind: 'html' | 'viz' = 'html'): void {
+    const first = kind === 'viz' ? this.visualizations()[0] : undefined;
+    this.tDraft = {
+      id: null,
+      name: '',
+      headerHtml: '',
+      rowHtml: '',
+      footerHtml: '',
+      kind,
+      viz: first ? { kind: first.id, aggregate: first.defaultAggregate, options: this.seedOptions(first.id) } : null,
+    };
     this.mode = 'template';
+  }
+
+  /**
+   * The options a NEW visualization of this kind starts with.
+   *
+   * Only the word cloud has workspace defaults today, and they are copied in HERE
+   * rather than read at draw time on purpose: a word list is editorial, so
+   * changing the workspace default must not rewrite clouds somebody already
+   * tuned. See `viz/viz-settings.ts`.
+   */
+  private seedOptions(kindId: string): Record<string, unknown> {
+    if (kindId !== 'wordcloud' || !this.cloudDefaults) return {};
+    const d = this.cloudDefaults;
+    return {
+      minLength: d.minLength,
+      ...(d.keepWords.trim() === '' ? {} : { keepWords: d.keepWords }),
+      stopWords: d.stopWords,
+    };
+  }
+
+  /** Every registered drawing kind, in registration order. */
+  private visualizations(): VisualizationSpec[] {
+    return [...(this.registries?.visualizations.values() ?? [])];
+  }
+
+  private vizSpecOf(id: string | undefined): VisualizationSpec | null {
+    return id ? (this.registries?.visualizations.get(id) ?? null) : null;
   }
 
   private editTemplate(t: ViewTemplate): void {
@@ -336,6 +452,8 @@ export class ViewsDialog extends LitElement {
       headerHtml: t.headerHtml,
       rowHtml: t.rowHtml,
       footerHtml: t.footerHtml,
+      kind: t.kind === 'viz' ? 'viz' : 'html',
+      viz: t.viz ? { ...t.viz } : null,
     };
     this.mode = 'template';
   }
@@ -347,6 +465,8 @@ export class ViewsDialog extends LitElement {
       headerHtml: t.headerHtml,
       rowHtml: t.rowHtml,
       footerHtml: t.footerHtml,
+      kind: t.kind === 'viz' ? 'viz' : 'html',
+      viz: t.viz ? { ...t.viz } : null,
     };
     this.mode = 'template';
   }
@@ -397,6 +517,10 @@ export class ViewsDialog extends LitElement {
         headerHtml: d.headerHtml,
         rowHtml: d.rowHtml,
         footerHtml: d.footerHtml,
+        kind: d.kind,
+        // Written as `undefined` for an html template rather than left alone, so
+        // switching a template back from viz does not leave a stale spec behind.
+        viz: d.kind === 'viz' && d.viz ? d.viz : undefined,
         ...(wasBuiltin ? { builtin: false } : {}),
         updatedAt: Date.now(),
       });
@@ -408,6 +532,8 @@ export class ViewsDialog extends LitElement {
         headerHtml: d.headerHtml,
         rowHtml: d.rowHtml,
         footerHtml: d.footerHtml,
+        kind: d.kind,
+        ...(d.kind === 'viz' && d.viz ? { viz: d.viz } : {}),
         updatedAt: Date.now(),
       });
     }
@@ -415,15 +541,22 @@ export class ViewsDialog extends LitElement {
     // view-window manager to re-render all open views so edits show at once.
     document.dispatchEvent(new CustomEvent('easydb:reload-views'));
     await this.refresh();
-    this.mode = 'list';
+    this.doneEditing();
   }
 
   // -- instance creation ------------------------------------------------------
 
   private useTemplate(t: ViewTemplate): void {
-    const tokens = extractTokens(t.headerHtml, t.rowHtml, t.footerHtml);
+    // A viz template's "tokens" are its visualization's CHANNEL keys. Same
+    // `mapping` record, same UI, different source for the key list — which is the
+    // whole economy of making a visualization a kind of view.
+    const spec = t.kind === 'viz' ? this.vizSpecOf(t.viz?.kind) : null;
+    const tokens = spec ? spec.channels.map((c) => c.key) : extractTokens(t.headerHtml, t.rowHtml, t.footerHtml);
     const mapping: Record<string, string> = {};
-    for (const tok of tokens) mapping[tok] = this.autoMap(tok);
+    for (const tok of tokens) {
+      const ch = spec?.channels.find((c) => c.key === tok);
+      mapping[tok] = ch ? this.autoMapChannel(ch) : this.autoMap(tok);
+    }
     this.iDraft = {
       id: null,
       templateId: t.id,
@@ -435,8 +568,50 @@ export class ViewsDialog extends LitElement {
       tokenRaw: {},
       limit: 0,
       readonly: false,
+      dock: 'window',
+      // A brand-new instance overrides nothing, so it starts on the template's.
+      vizOptions: effectiveVizOptions(t.viz?.options, undefined),
     };
     this.mode = 'instance';
+  }
+
+  /**
+   * Guess a column for a visualization channel.
+   *
+   * Tries the channel's own name first (so a column literally called "Category"
+   * wins), then the declared `kind`, which is the part that makes a chart draw
+   * something sensible the moment it is created: a `value` channel wants a
+   * number, a `time` channel a date, `lat`/`lon` the obvious names. Narrowed by
+   * `accepts` throughout — offering a text column as a latitude only produces an
+   * empty map.
+   */
+  private autoMapChannel(ch: { key: string; kind: string; accepts?: readonly ColumnSpec['type'][] | undefined }): string {
+    const ok = (c: ColumnSpec): boolean => !ch.accepts || ch.accepts.length === 0 || ch.accepts.includes(c.type);
+    const byName = this.autoMap(ch.key);
+    if (byName && this.columns.some((c) => c.field === byName && ok(c))) return byName;
+    const nameHit = (words: string[]): string => {
+      const hit = this.columns.find((c) => ok(c) && words.some((w) => `${c.field} ${c.label ?? ''}`.toLowerCase().includes(w)));
+      return hit?.field ?? '';
+    };
+    switch (ch.kind) {
+      case 'lat':
+        return nameHit(['latitude', 'lat']) || this.firstColumn((c) => ok(c));
+      case 'lon':
+        return nameHit(['longitude', 'lon', 'lng']) || this.firstColumn((c) => ok(c));
+      case 'time':
+        return this.firstColumn((c) => ok(c) && (c.type === 'date' || c.type === 'datetime')) || this.firstColumn(ok);
+      case 'value':
+      case 'weight':
+        return this.firstColumn((c) => ok(c) && c.type === 'number') || '';
+      case 'text':
+        // The longest-looking text column beats the first one: a cloud of a
+        // 3-character status code is not a word cloud.
+        return nameHit(['description', 'text', 'body', 'comment', 'notes', 'title', 'name']) || this.firstColumn((c) => ok(c) && c.type === 'string');
+      case 'category':
+        return this.firstColumn((c) => ok(c) && (c.type === 'string' || c.type === 'array')) || this.firstColumn(ok);
+      default:
+        return '';
+    }
   }
 
   private firstColumn(pred: (c: ColumnSpec) => boolean): string {
@@ -579,6 +754,35 @@ export class ViewsDialog extends LitElement {
     this.iDraft = { ...d, tokenScripts };
   }
 
+  /**
+   * What this instance actually overrides. `undefined` when it overrides nothing,
+   * so the field is absent rather than an empty object.
+   */
+  private vizDelta(d: InstanceDraft): Record<string, unknown> | undefined {
+    const tpl = this.templates.find((t) => t.id === d.templateId);
+    if (tpl?.kind !== 'viz') return undefined;
+    const delta = overrideDelta(tpl.viz?.options, d.vizOptions);
+    return Object.keys(delta).length > 0 ? delta : undefined;
+  }
+
+  /** The visualization spec behind a draft's template, if it is a viz. */
+  private specOfDraft(d: InstanceDraft): VisualizationSpec | null {
+    const tpl = this.templates.find((t) => t.id === d.templateId);
+    return tpl?.kind === 'viz' ? this.vizSpecOf(tpl.viz?.kind) : null;
+  }
+
+  /** Is this draft an instance of a viz template? */
+  private isVizDraft(d: InstanceDraft): boolean {
+    return this.templates.find((t) => t.id === d.templateId)?.kind === 'viz';
+  }
+
+  /** The human label for a channel key, falling back to the key itself. */
+  private channelLabel(d: InstanceDraft, key: string): string {
+    const tpl = this.templates.find((t) => t.id === d.templateId);
+    const spec = this.vizSpecOf(tpl?.viz?.kind);
+    return spec?.channels.find((c) => c.key === key)?.label ?? key;
+  }
+
   private async saveInstance(): Promise<void> {
     if (!this.iDraft || !this.table) return;
     const d = this.iDraft;
@@ -596,12 +800,14 @@ export class ViewsDialog extends LitElement {
         tokenRaw,
         limit: d.limit > 0 ? d.limit : undefined,
         readonly: d.readonly,
+        dock: this.dockFor(d),
+        vizOptions: this.vizDelta(d),
         updatedAt: Date.now(),
       });
       // Reflect the change in an already-open window.
       document.dispatchEvent(new CustomEvent('easydb:reload-view', { detail: { instanceId: d.id } }));
       await this.refresh();
-      this.mode = 'list';
+      this.doneEditing();
       return;
     }
     // Snapshot the table's CURRENT sort / filter / visible columns.
@@ -623,9 +829,38 @@ export class ViewsDialog extends LitElement {
       ...(d.readonly ? { readonly: true } : {}),
       ...(tokenScripts ? { tokenScripts } : {}),
       ...(tokenRaw ? { tokenRaw } : {}),
+      ...(this.dockFor(d) ? { dock: this.dockFor(d) } : {}),
+      ...(Object.keys(this.vizDelta(d) ?? {}).length > 0 ? { vizOptions: this.vizDelta(d) } : {}),
     };
     await ctx.store.viewInstances.insert(inst);
-    await this.openInstance(inst.id);
+    // A docked pane has no window to reveal — flipping `open` is what mounts it,
+    // and the reconciler in `view-window-manager.ts` does the rest.
+    if (d.dock === 'window') await this.openInstance(inst.id);
+    else {
+      await ctx.store.viewInstances.patch(inst.id, { open: true, updatedAt: Date.now() });
+      await this.refresh();
+      this.close();
+    }
+  }
+
+  /**
+   * The `dock` descriptor for a draft, or `undefined` for a windowed view.
+   *
+   * `order` is the count of panes already on that edge, so a second chart lands
+   * beneath the first rather than fighting it for position 0.
+   */
+  private dockFor(d: InstanceDraft): ViewInstance['dock'] {
+    if (d.dock === 'window') return undefined;
+    const onEdge = this.instances.filter((i) => i.id !== d.id && i.dock?.edge === d.dock && i.dock?.host.kind === 'table' && i.dock.host.tableId === this.tableId).length;
+    const existing = d.id ? this.instances.find((i) => i.id === d.id)?.dock : undefined;
+    return {
+      host: { kind: 'table', tableId: this.tableId },
+      edge: d.dock,
+      // Keep a height the user already dragged to; a fresh pane gets a default
+      // that shows a chart without dominating the grid.
+      size: existing?.size ?? 160,
+      order: existing?.order ?? onEdge,
+    };
   }
 
   // -- render -----------------------------------------------------------------
@@ -670,17 +905,20 @@ export class ViewsDialog extends LitElement {
           )}
         </ul>
         <div>
-          <button type="button" class="mini" @click=${() => this.newTemplate()}>+ New template</button>
+          <button type="button" class="mini" @click=${() => this.newTemplate('html')}>+ New template</button>
+          ${this.visualizations().length > 0 ? html`<button type="button" class="mini" @click=${() => this.newTemplate('viz')}>+ New chart</button>` : nothing}
         </div>
         <p class="hint">
           A template's row HTML uses <code>$TOKEN</code> placeholders (e.g. <code>$TITLE</code>). Leave row HTML blank to show a read-only columns table with the header/footer HTML around it.
         </p>
+        <p class="hint">A chart template draws instead — bar, line, pie, a map or a word cloud — in its own window or docked above or below the table.</p>
       </div>
     `;
   }
 
   private renderTemplate() {
     const d = this.tDraft!;
+    void 0;
     const set = (k: keyof TemplateDraft) => (e: Event) => {
       this.tDraft = { ...d, [k]: (e.target as HTMLInputElement | HTMLTextAreaElement).value };
     };
@@ -689,6 +927,12 @@ export class ViewsDialog extends LitElement {
         Name
         <input type="text" .value=${d.name} @input=${set('name')} placeholder="e.g. Cards" />
       </label>
+      ${d.kind === 'viz' ? this.renderVizTemplate(d) : this.renderHtmlTemplate(d, set)}
+    `;
+  }
+
+  private renderHtmlTemplate(d: TemplateDraft, set: (k: 'headerHtml' | 'rowHtml' | 'footerHtml') => (e: Event) => void) {
+    return html`
       <label class="field">
         Header HTML
         <textarea .value=${d.headerHtml} @input=${set('headerHtml')}></textarea>
@@ -702,6 +946,159 @@ export class ViewsDialog extends LitElement {
         <textarea .value=${d.footerHtml} @input=${set('footerHtml')}></textarea>
       </label>
     `;
+  }
+
+  /** Patch the draft's `viz` spec, keeping everything else. */
+  private setViz(patch: Partial<VizSpec>): void {
+    const d = this.tDraft;
+    if (!d?.viz) return;
+    this.tDraft = { ...d, viz: { ...d.viz, ...patch } };
+  }
+
+  private setAggregate(patch: Partial<NonNullable<VizSpec['aggregate']>>): void {
+    const d = this.tDraft;
+    if (!d?.viz) return;
+    const spec = this.vizSpecOf(d.viz.kind);
+    const base = d.viz.aggregate ?? spec?.defaultAggregate ?? { groupBy: ['CATEGORY'], measures: [{ channel: 'VALUE', fn: 'count' as VizMeasureFn }] };
+    this.tDraft = { ...d, viz: { ...d.viz, aggregate: { ...base, ...patch } } };
+  }
+
+  private renderVizTemplate(d: TemplateDraft) {
+    const kinds = this.visualizations();
+    if (kinds.length === 0) {
+      return html`<p class="hint">No visualizations are registered. Enable the Charts, Map or Word cloud plugins in the Plugin Manager.</p>`;
+    }
+    const spec = this.vizSpecOf(d.viz?.kind) ?? kinds[0];
+    if (!spec) return nothing;
+    const agg = d.viz?.aggregate ?? spec.defaultAggregate ?? null;
+    const measure = agg?.measures[0];
+    const opts = (d.viz?.options ?? {}) as Record<string, unknown>;
+
+    return html`
+      <label class="field">
+        Visualization
+        <select
+          @change=${(e: Event) => {
+            const next = this.vizSpecOf((e.target as HTMLSelectElement).value);
+            // Switching kind resets the aggregate to the new kind's default — a
+            // pie's topN or a line's category sort are part of what the kind IS,
+            // and carrying the old one over produced nonsense (a line sorted by
+            // size). Options are reset for the same reason: they are per-kind.
+            if (next) this.setViz({ kind: next.id, aggregate: next.defaultAggregate, options: this.seedOptions(next.id) });
+          }}
+        >
+          ${kinds.map((k) => html`<option value=${k.id} ?selected=${k.id === spec.id}>${k.label}</option>`)}
+        </select>
+      </label>
+      ${spec.data === 'aggregate' && agg
+        ? html`
+            <div class="section">
+              <h3>What it measures</h3>
+              <label class="field">
+                Aggregate
+                <select @change=${(e: Event) => this.setAggregate({ measures: [{ channel: 'VALUE', fn: (e.target as HTMLSelectElement).value as VizMeasureFn }] })}>
+                  ${(
+                    [
+                      ['count', 'Count of rows'],
+                      ['sum', 'Sum of the value column'],
+                      ['avg', 'Average of the value column'],
+                      ['min', 'Minimum of the value column'],
+                      ['max', 'Maximum of the value column'],
+                      ['countDistinct', 'Distinct values of the value column'],
+                    ] as Array<[VizMeasureFn, string]>
+                  ).map(([fn, label]) => html`<option value=${fn} ?selected=${measure?.fn === fn}>${label}</option>`)}
+                </select>
+              </label>
+              <label class="field">
+                Order
+                <select @change=${(e: Event) => this.setAggregate({ sort: (e.target as HTMLSelectElement).value as 'category' | 'value' | 'valueDesc' })}>
+                  <option value="category" ?selected=${agg.sort === 'category'}>By category</option>
+                  <option value="valueDesc" ?selected=${agg.sort === 'valueDesc'}>Largest first</option>
+                  <option value="value" ?selected=${agg.sort === 'value'}>Smallest first</option>
+                </select>
+              </label>
+              <label class="field">
+                Show at most (groups, 0 = all)
+                <span class="hint">The rest are folded into one “Other”, never dropped.</span>
+                <input
+                  type="number"
+                  min="0"
+                  .value=${String(agg.topN ?? 0)}
+                  @input=${(e: Event) => {
+                    const n = Math.max(0, Number((e.target as HTMLInputElement).value) || 0);
+                    this.setAggregate(n > 0 ? { topN: n } : { topN: undefined });
+                  }}
+                />
+              </label>
+            </div>
+          `
+        : nothing}
+      ${spec.options && spec.options.length > 0
+        ? html`
+            <div class="section">
+              <h3>Options</h3>
+              ${spec.options.map((f) => this.renderVizOption(f, opts))}
+            </div>
+          `
+        : nothing}
+      <p class="hint">Columns are mapped when you create a view from this template, so one chart works on any table with matching columns.</p>
+    `;
+  }
+
+  /**
+   * One visualization option, rendered from its `SettingsFieldSpec`.
+   *
+   * The same field shapes the Settings dialog renders, deliberately: a new chart
+   * option is a line of data in a plugin, not UI code here.
+   */
+  private renderVizOption(f: SettingsFieldSpec, opts: Record<string, unknown>) {
+    return this.renderVizOptionField(f, opts, (key, v) => this.setViz({ options: { ...opts, [key]: v } }));
+  }
+
+  /**
+   * One option field, rendered from its `SettingsFieldSpec`.
+   *
+   * Shared by the TEMPLATE editor and the per-instance override editor — the only
+   * difference between them is where the value is written, so that is the
+   * parameter. A new chart option stays a line of data in a plugin and appears in
+   * both places at once.
+   */
+  private renderVizOptionField(f: SettingsFieldSpec, values: Record<string, unknown>, write: (key: string, v: unknown) => void) {
+    const cur = values[f.key] ?? f.default;
+    const set = (v: unknown): void => write(f.key, v);
+    const hint = f.description ? html`<span class="hint">${f.description}</span>` : nothing;
+    if (f.type === 'boolean') {
+      return html`<label class="field-inline">
+        <input type="checkbox" .checked=${cur === true} @change=${(e: Event) => set((e.target as HTMLInputElement).checked)} />
+        ${f.label}
+      </label>`;
+    }
+    if (f.type === 'number') {
+      return html`<label class="field">
+        ${f.label} ${hint}
+        <input type="number" .value=${cur == null ? '' : String(cur)} @input=${(e: Event) => set(Number((e.target as HTMLInputElement).value) || 0)} />
+      </label>`;
+    }
+    if (f.type === 'option' && f.options) {
+      return html`<label class="field">
+        ${f.label}
+        <select @change=${(e: Event) => set((e.target as HTMLSelectElement).value)}>
+          ${f.options.map((o) => html`<option value=${o} ?selected=${cur === o}>${o}</option>`)}
+        </select>
+      </label>`;
+    }
+    // `text` is a word list or a long string — a textarea, because a stop list in
+    // a single-line input is unreadable and uneditable.
+    if (f.type === 'text') {
+      return html`<label class="field">
+        ${f.label} ${hint}
+        <textarea rows="3" .value=${cur == null ? '' : String(cur)} @input=${(e: Event) => set((e.target as HTMLTextAreaElement).value)}></textarea>
+      </label>`;
+    }
+    return html`<label class="field">
+      ${f.label} ${hint}
+      <input type="text" .value=${cur == null ? '' : String(cur)} @input=${(e: Event) => set((e.target as HTMLInputElement).value)} />
+    </label>`;
   }
 
   private renderInstance() {
@@ -724,18 +1121,30 @@ export class ViewsDialog extends LitElement {
             })}
         />
       </label>
-      <label class="field-inline">
-        <input type="checkbox" .checked=${d.readonly} @change=${(e: Event) => (this.iDraft = { ...d, readonly: (e.target as HTMLInputElement).checked })} />
-        Readonly (show values without editors in the table view)
-      </label>
+      ${this.isVizDraft(d)
+        ? html`<label class="field">
+            Where to show it
+            <select @change=${(e: Event) => (this.iDraft = { ...d, dock: (e.target as HTMLSelectElement).value as InstanceDraft['dock'] })}>
+              <option value="window" ?selected=${d.dock === 'window'}>In its own window</option>
+              <option value="above" ?selected=${d.dock === 'above'}>Docked above the table</option>
+              <option value="below" ?selected=${d.dock === 'below'}>Docked below the table</option>
+            </select>
+            <span class="hint">A docked chart follows the table's filters and search as you change them.</span>
+          </label>`
+        : html`<label class="field-inline">
+            <input type="checkbox" .checked=${d.readonly} @change=${(e: Event) => (this.iDraft = { ...d, readonly: (e.target as HTMLInputElement).checked })} />
+            Readonly (show values without editors in the table view)
+          </label>`}
       <div class="section">
-        <h3>Map placeholders to columns</h3>
+        <h3>${this.isVizDraft(d) ? 'Map data to columns' : 'Map placeholders to columns'}</h3>
         ${d.tokens.length === 0
-          ? html`<p class="hint">This template has no <code>$TOKEN</code> placeholders — it will show the read-only table with your current sort, filter and visible columns.</p>`
+          ? this.isVizDraft(d)
+            ? html`<p class="hint">This visualization needs no columns mapped.</p>`
+            : html`<p class="hint">This template has no <code>$TOKEN</code> placeholders — it will show the read-only table with your current sort, filter and visible columns.</p>`
           : d.tokens.map(
               (tok) =>
                 html`<div class="map-row">
-                  <code>$${tok}</code>
+                  ${this.isVizDraft(d) ? html`<span class="channel">${this.channelLabel(d, tok)}</span>` : html`<code>$${tok}</code>`}
                   <select
                     @change=${(e: Event) =>
                       (this.iDraft = {
@@ -746,36 +1155,89 @@ export class ViewsDialog extends LitElement {
                     <option value="" ?selected=${!d.mapping[tok]}>— none —</option>
                     ${this.columns.map((c) => html`<option value=${c.field} ?selected=${d.mapping[tok] === c.field}>${c.label || c.field}</option>`)}
                   </select>
-                  <button
-                    type="button"
-                    class=${d.tokenRaw[tok] ? 'mini' : 'mini scripted'}
-                    title=${d.tokenRaw[tok] ? `$${tok} shows the plain value — click to render it with the column's renderer` : `$${tok} is shown by the column's renderer — click for the plain value`}
-                    @click=${() => this.toggleTokenRaw(tok)}
-                  >
-                    ${d.tokenRaw[tok] ? '🔤' : '🎨'}
-                  </button>
-                  <button
-                    type="button"
-                    class=${d.tokenScripts[tok]?.trim() ? 'mini scripted' : 'mini'}
-                    title=${d.tokenScripts[tok]?.trim() ? `Edit the script formatting $${tok}` : `Format $${tok} with a script (e.g. a local date, markdown as HTML)`}
-                    @click=${() => void this.editTokenScript(tok)}
-                  >
-                    ƒ(x)
-                  </button>
+                  ${this.isVizDraft(d)
+                    ? nothing
+                    : html`<button
+                          type="button"
+                          class=${d.tokenRaw[tok] ? 'mini' : 'mini scripted'}
+                          title=${d.tokenRaw[tok]
+                            ? `$${tok} shows the plain value — click to render it with the column's renderer`
+                            : `$${tok} is shown by the column's renderer — click for the plain value`}
+                          @click=${() => this.toggleTokenRaw(tok)}
+                        >
+                          ${d.tokenRaw[tok] ? '🔤' : '🎨'}
+                        </button>
+                        <button
+                          type="button"
+                          class=${d.tokenScripts[tok]?.trim() ? 'mini scripted' : 'mini'}
+                          title=${d.tokenScripts[tok]?.trim() ? `Edit the script formatting $${tok}` : `Format $${tok} with a script (e.g. a local date, markdown as HTML)`}
+                          @click=${() => void this.editTokenScript(tok)}
+                        >
+                          ƒ(x)
+                        </button>`}
                 </div>`,
             )}
       </div>
+      ${this.isVizDraft(d)
+        ? nothing
+        : html`<p class="hint">
+            🎨 shows the token through the column's own cell renderer, so the view looks like the table; 🔤 shows the plain value instead (the same as writing <code>$raw.TOKEN</code>). A token inside
+            a tag, as in <code>&lt;img src="$IMAGE"&gt;</code>, always stays plain.
+          </p>`}
+      ${this.isVizDraft(d)
+        ? nothing
+        : html`<p class="hint">
+            <code>ƒ(x)</code> gives a token a <code>render(row)</code> script, so the view can show a formatted value — a local date, markdown as HTML — without changing the stored cell. It applies to
+            <code>$TOKEN</code> only, not to <code>$input.</code> or <code>$filter.</code>.
+          </p>`}
       <p class="hint">
-        🎨 shows the token through the column's own cell renderer, so the view looks like the table; 🔤 shows the plain value instead (the same as writing <code>$raw.TOKEN</code>). A token inside a
-        tag, as in <code>&lt;img src="$IMAGE"&gt;</code>, always stays plain.
+        ${this.isVizDraft(d)
+          ? d.id
+            ? html`Editing this visualization. Use <strong>Chart</strong> in the window footer to change the kind or the aggregate, which every view of this chart shares.`
+            : html`The visualization reads this table's rows; a docked one follows the grid's filters live.`
+          : d.id
+            ? html`Editing name and column mapping. The snapshotted sort, filters and visible columns are kept.`
+            : html`The view snapshots this table's current sort, filters and visible columns.`}
       </p>
-      <p class="hint">
-        <code>ƒ(x)</code> gives a token a <code>render(row)</code> script, so the view can show a formatted value — a local date, markdown as HTML — without changing the stored cell. It applies to
-        <code>$TOKEN</code> only, not to <code>$input.</code> or <code>$filter.</code>.
-      </p>
-      <p class="hint">
-        ${d.id ? html`Editing name and column mapping. The snapshotted sort, filters and visible columns are kept.` : html`The view snapshots this table's current sort, filters and visible columns.`}
-      </p>
+      ${this.renderInstanceVizOptions(d)}
+    `;
+  }
+
+  /**
+   * Per-instance option overrides.
+   *
+   * The same generic field renderer the template editor uses, pointed at the
+   * instance's own layer — so every option a visualization declares is
+   * overridable here with no per-kind UI. A changed field is marked, and Reset
+   * puts it back to inheriting rather than to the field's built-in default,
+   * which are different things.
+   */
+  private renderInstanceVizOptions(d: InstanceDraft) {
+    const spec = this.specOfDraft(d);
+    if (!spec?.options || spec.options.length === 0) return nothing;
+    const tpl = this.templates.find((t) => t.id === d.templateId);
+    const overridden = overriddenKeys(tpl?.viz?.options, d.vizOptions);
+    const write = (key: string, v: unknown): void => {
+      this.iDraft = { ...d, vizOptions: { ...d.vizOptions, [key]: v } };
+    };
+    const reset = (key: string): void => {
+      const next = { ...d.vizOptions };
+      next[key] = (tpl?.viz?.options ?? {})[key];
+      this.iDraft = { ...d, vizOptions: next };
+    };
+    return html`
+      <div class="section">
+        <h3>Settings for this view</h3>
+        <p class="hint">Changed here, they apply to this view only; left alone, they follow the “${tpl?.name ?? 'chart'}” definition.</p>
+        ${spec.options.map(
+          (f) => html`
+            <div class="viz-override ${overridden.has(f.key) ? 'changed' : ''}">
+              ${this.renderVizOptionField(f, d.vizOptions, write)}
+              ${overridden.has(f.key) ? html`<button type="button" class="mini" title="Go back to the chart definition's value" @click=${() => reset(f.key)}>Reset</button>` : nothing}
+            </div>
+          `,
+        )}
+      </div>
     `;
   }
 

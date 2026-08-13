@@ -85,9 +85,11 @@ test.describe('view token scripts', () => {
     await editor.locator('textarea').fill('function render(row) { return new Date(row.when).getUTCFullYear(); }');
     await editor.getByRole('button', { name: 'Save' }).click();
     await dlg.getByRole('button', { name: 'Save' }).click();
-    // Saving an edit returns to the list, it does not close the manager — and a
-    // modal dialog swallows the clicks the rest of this test needs.
-    await dlg.getByRole('button', { name: 'Close' }).click();
+    // An edit opened from the view's own "Edit view" icon FINISHES on Save — the
+    // user came to change one thing and never asked for the manager's list. So the
+    // dialog closes itself, and the rest of this test needs it gone (a modal
+    // swallows every click behind it).
+    await expect(dlg).toBeHidden();
 
     // The open window re-renders with the formatted value.
     await expect(vw.locator('.when')).toHaveText('2026');
@@ -105,7 +107,7 @@ test.describe('view token scripts', () => {
     await editor.locator('textarea').fill('');
     await editor.getByRole('button', { name: 'Save' }).click();
     await dlg.getByRole('button', { name: 'Save' }).click();
-    await dlg.getByRole('button', { name: 'Close' }).click();
+    await expect(dlg).toBeHidden();
     await expect(vw.locator('.when')).toHaveText('2026-06-17T10:59:56.937Z');
   });
 

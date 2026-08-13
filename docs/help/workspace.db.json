@@ -1,0 +1,897 @@
+{
+  "workspaceId": "viz-demo",
+  "exportedAt": 1786000000000,
+  "tables": [
+    {
+      "name": "Trips",
+      "title": "City trips",
+      "columns": [
+        {
+          "field": "city",
+          "type": "string",
+          "width": 110
+        },
+        {
+          "field": "country",
+          "type": "string",
+          "width": 80
+        },
+        {
+          "field": "lat",
+          "type": "number",
+          "width": 90
+        },
+        {
+          "field": "lon",
+          "type": "number",
+          "width": 90
+        },
+        {
+          "field": "visited",
+          "type": "date",
+          "width": 110
+        },
+        {
+          "field": "nights",
+          "type": "number",
+          "width": 80
+        },
+        {
+          "field": "rating",
+          "type": "number",
+          "width": 80
+        },
+        {
+          "field": "review",
+          "type": "string",
+          "width": 380
+        }
+      ],
+      "rows": [
+        {
+          "city": "Bern",
+          "country": "CH",
+          "lat": 46.948,
+          "lon": 7.4474,
+          "visited": "2026-01-01",
+          "nights": 1,
+          "rating": 3.0,
+          "review": "Clean quiet city with excellent public transport and a beautiful old town along the river."
+        },
+        {
+          "city": "Zurich",
+          "country": "CH",
+          "lat": 47.3769,
+          "lon": 8.5417,
+          "visited": "2026-02-08",
+          "nights": 2,
+          "rating": 4.5,
+          "review": "Expensive but the lake is beautiful and the public transport is excellent, trams everywhere."
+        },
+        {
+          "city": "Geneva",
+          "country": "CH",
+          "lat": 46.2044,
+          "lon": 6.1432,
+          "visited": "2026-03-15",
+          "nights": 3,
+          "rating": 3.5,
+          "review": "International city with a beautiful lake, expensive restaurants and excellent chocolate."
+        },
+        {
+          "city": "Basel",
+          "country": "CH",
+          "lat": 47.5596,
+          "lon": 7.5886,
+          "visited": "2026-04-22",
+          "nights": 4,
+          "rating": 5.0,
+          "review": "Art museums everywhere, a beautiful river to swim in and excellent trams."
+        },
+        {
+          "city": "Lausanne",
+          "country": "CH",
+          "lat": 46.5197,
+          "lon": 6.6323,
+          "visited": "2026-05-02",
+          "nights": 5,
+          "rating": 4.0,
+          "review": "Steep streets, a beautiful lake view and a quiet student atmosphere."
+        },
+        {
+          "city": "Lucerne",
+          "country": "CH",
+          "lat": 47.0502,
+          "lon": 8.3093,
+          "visited": "2026-06-09",
+          "nights": 6,
+          "rating": 3.0,
+          "review": "Tourists everywhere but the wooden bridge and the lake are genuinely beautiful."
+        },
+        {
+          "city": "Vienna",
+          "country": "AT",
+          "lat": 48.2082,
+          "lon": 16.3738,
+          "visited": "2026-07-16",
+          "nights": 1,
+          "rating": 4.5,
+          "review": "Coffee houses, imperial architecture and excellent public transport for the price."
+        },
+        {
+          "city": "Salzburg",
+          "country": "AT",
+          "lat": 47.8095,
+          "lon": 13.055,
+          "visited": "2026-08-23",
+          "nights": 2,
+          "rating": 3.5,
+          "review": "Small beautiful old town, mountains close by, quiet outside the tourist season."
+        },
+        {
+          "city": "Munich",
+          "country": "DE",
+          "lat": 48.1351,
+          "lon": 11.582,
+          "visited": "2026-09-03",
+          "nights": 3,
+          "rating": 5.0,
+          "review": "Beer gardens, excellent trains and a beautiful park in the middle of the city."
+        },
+        {
+          "city": "Berlin",
+          "country": "DE",
+          "lat": 52.52,
+          "lon": 13.405,
+          "visited": "2026-10-10",
+          "nights": 4,
+          "rating": 4.0,
+          "review": "Cheap, loud, endlessly interesting; the public transport runs all night."
+        },
+        {
+          "city": "Hamburg",
+          "country": "DE",
+          "lat": 53.5511,
+          "lon": 9.9937,
+          "visited": "2026-11-17",
+          "nights": 5,
+          "rating": 3.0,
+          "review": "Rainy harbour city with excellent food and a beautiful lake in the centre."
+        },
+        {
+          "city": "Cologne",
+          "country": "DE",
+          "lat": 50.9375,
+          "lon": 6.9603,
+          "visited": "2026-12-24",
+          "nights": 6,
+          "rating": 4.5,
+          "review": "The cathedral is astonishing, the beer is small and the river walk is beautiful."
+        },
+        {
+          "city": "Milan",
+          "country": "IT",
+          "lat": 45.4642,
+          "lon": 9.19,
+          "visited": "2026-01-04",
+          "nights": 1,
+          "rating": 3.5,
+          "review": "Fashion, excellent coffee and a cathedral roof worth every step of the climb."
+        },
+        {
+          "city": "Rome",
+          "country": "IT",
+          "lat": 41.9028,
+          "lon": 12.4964,
+          "visited": "2026-02-11",
+          "nights": 2,
+          "rating": 5.0,
+          "review": "Ruins everywhere, excellent food, chaotic traffic and beautiful evening light."
+        },
+        {
+          "city": "Florence",
+          "country": "IT",
+          "lat": 43.7696,
+          "lon": 11.2558,
+          "visited": "2026-03-18",
+          "nights": 3,
+          "rating": 4.0,
+          "review": "Renaissance art, beautiful bridges, far too many tourists in August."
+        },
+        {
+          "city": "Venice",
+          "country": "IT",
+          "lat": 45.4408,
+          "lon": 12.3155,
+          "visited": "2026-04-25",
+          "nights": 4,
+          "rating": 3.0,
+          "review": "Beautiful and sinking; expensive, crowded, and still unlike anywhere else."
+        },
+        {
+          "city": "Paris",
+          "country": "FR",
+          "lat": 48.8566,
+          "lon": 2.3522,
+          "visited": "2026-05-05",
+          "nights": 5,
+          "rating": 4.5,
+          "review": "Beautiful boulevards, excellent bakeries, an expensive but superb metro."
+        },
+        {
+          "city": "Lyon",
+          "country": "FR",
+          "lat": 45.764,
+          "lon": 4.8357,
+          "visited": "2026-06-12",
+          "nights": 6,
+          "rating": 3.5,
+          "review": "Food capital: excellent bouchons, two rivers and a quiet beautiful old quarter."
+        },
+        {
+          "city": "Barcelona",
+          "country": "ES",
+          "lat": 41.3874,
+          "lon": 2.1686,
+          "visited": "2026-07-19",
+          "nights": 1,
+          "rating": 5.0,
+          "review": "Beach and architecture together, excellent tapas, crowded in high season."
+        },
+        {
+          "city": "Madrid",
+          "country": "ES",
+          "lat": 40.4168,
+          "lon": -3.7038,
+          "visited": "2026-08-26",
+          "nights": 2,
+          "rating": 4.0,
+          "review": "Late dinners, excellent museums and a beautiful park in the middle of town."
+        },
+        {
+          "city": "Lisbon",
+          "country": "PT",
+          "lat": 38.7223,
+          "lon": -9.1393,
+          "visited": "2026-09-06",
+          "nights": 3,
+          "rating": 3.0,
+          "review": "Hills, trams, excellent seafood and beautiful tiles on every second wall."
+        },
+        {
+          "city": "Porto",
+          "country": "PT",
+          "lat": 41.1579,
+          "lon": -8.6291,
+          "visited": "2026-10-13",
+          "nights": 4,
+          "rating": 4.5,
+          "review": "Cheaper than Lisbon, beautiful river bridges and excellent port wine."
+        },
+        {
+          "city": "Amsterdam",
+          "country": "NL",
+          "lat": 52.3676,
+          "lon": 4.9041,
+          "visited": "2026-11-20",
+          "nights": 5,
+          "rating": 3.5,
+          "review": "Bicycles everywhere, beautiful canals, expensive housing and excellent museums."
+        },
+        {
+          "city": "Rotterdam",
+          "country": "NL",
+          "lat": 51.9244,
+          "lon": 4.4777,
+          "visited": "2026-12-27",
+          "nights": 6,
+          "rating": 5.0,
+          "review": "Modern architecture, a working harbour and excellent cheap food halls."
+        },
+        {
+          "city": "Brussels",
+          "country": "BE",
+          "lat": 50.8503,
+          "lon": 4.3517,
+          "visited": "2026-01-07",
+          "nights": 1,
+          "rating": 4.0,
+          "review": "Excellent beer and chocolate, beautiful squares, unloved concrete elsewhere."
+        },
+        {
+          "city": "Copenhagen",
+          "country": "DK",
+          "lat": 55.6761,
+          "lon": 12.5683,
+          "visited": "2026-02-14",
+          "nights": 2,
+          "rating": 3.0,
+          "review": "Expensive and beautiful; excellent bicycle lanes and very good bread."
+        },
+        {
+          "city": "Stockholm",
+          "country": "SE",
+          "lat": 59.3293,
+          "lon": 18.0686,
+          "visited": "2026-03-21",
+          "nights": 3,
+          "rating": 4.5,
+          "review": "Built on islands, beautiful in summer, dark and quiet in December."
+        },
+        {
+          "city": "Oslo",
+          "country": "NO",
+          "lat": 59.9139,
+          "lon": 10.7522,
+          "visited": "2026-04-01",
+          "nights": 4,
+          "rating": 3.5,
+          "review": "Expensive but the fjord is beautiful and the new opera house is excellent."
+        },
+        {
+          "city": "Helsinki",
+          "country": "FI",
+          "lat": 60.1699,
+          "lon": 24.9384,
+          "visited": "2026-05-08",
+          "nights": 5,
+          "rating": 5.0,
+          "review": "Quiet, clean, excellent design shops and a beautiful ferry ride to the islands."
+        },
+        {
+          "city": "Prague",
+          "country": "CZ",
+          "lat": 50.0755,
+          "lon": 14.4378,
+          "visited": "2026-06-15",
+          "nights": 6,
+          "rating": 4.0,
+          "review": "Beautiful old town, cheap excellent beer, crowded on every bridge."
+        },
+        {
+          "city": "Budapest",
+          "country": "HU",
+          "lat": 47.4979,
+          "lon": 19.0402,
+          "visited": "2026-07-22",
+          "nights": 1,
+          "rating": 3.0,
+          "review": "Thermal baths, a beautiful river, excellent value and crumbling grandeur."
+        },
+        {
+          "city": "Warsaw",
+          "country": "PL",
+          "lat": 52.2297,
+          "lon": 21.0122,
+          "visited": "2026-08-02",
+          "nights": 2,
+          "rating": 4.5,
+          "review": "Rebuilt old town, excellent modern restaurants and very good public transport."
+        },
+        {
+          "city": "Krakow",
+          "country": "PL",
+          "lat": 50.0647,
+          "lon": 19.945,
+          "visited": "2026-09-09",
+          "nights": 3,
+          "rating": 3.5,
+          "review": "Beautiful square, cheap excellent food and a sobering day trip nearby."
+        },
+        {
+          "city": "Dublin",
+          "country": "IE",
+          "lat": 53.3498,
+          "lon": -6.2603,
+          "visited": "2026-10-16",
+          "nights": 4,
+          "rating": 5.0,
+          "review": "Rainy and friendly; expensive pints, excellent bookshops, beautiful coastline."
+        },
+        {
+          "city": "Edinburgh",
+          "country": "GB",
+          "lat": 55.9533,
+          "lon": -3.1883,
+          "visited": "2026-11-23",
+          "nights": 5,
+          "rating": 4.0,
+          "review": "Beautiful stone city on hills, excellent festivals, weather from four seasons."
+        },
+        {
+          "city": "London",
+          "country": "GB",
+          "lat": 51.5074,
+          "lon": -0.1278,
+          "visited": "2026-12-03",
+          "nights": 6,
+          "rating": 3.0,
+          "review": "Expensive, enormous, endlessly interesting; excellent museums, beautiful parks."
+        },
+        {
+          "city": "Manchester",
+          "country": "GB",
+          "lat": 53.4808,
+          "lon": -2.2426,
+          "visited": "2026-01-10",
+          "nights": 1,
+          "rating": 4.5,
+          "review": "Music, football and rain; excellent curry and cheaper than London."
+        },
+        {
+          "city": "Athens",
+          "country": "GR",
+          "lat": 37.9838,
+          "lon": 23.7275,
+          "visited": "2026-02-17",
+          "nights": 2,
+          "rating": 3.5,
+          "review": "Ancient and modern jammed together, excellent food, beautiful evening light."
+        },
+        {
+          "city": "Istanbul",
+          "country": "TR",
+          "lat": 41.0082,
+          "lon": 28.9784,
+          "visited": "2026-03-24",
+          "nights": 3,
+          "rating": 5.0,
+          "review": "Two continents, excellent street food and a beautiful crowded waterfront."
+        },
+        {
+          "city": "Ljubljana",
+          "country": "SI",
+          "lat": 46.0569,
+          "lon": 14.5058,
+          "visited": "2026-04-04",
+          "nights": 4,
+          "rating": 4.0,
+          "review": "Small, green and beautiful; excellent value and a quiet riverside."
+        },
+        {
+          "city": "Zagreb",
+          "country": "HR",
+          "lat": 45.815,
+          "lon": 15.9819,
+          "visited": "2026-05-11",
+          "nights": 5,
+          "rating": 3.0,
+          "review": "Underrated: excellent coffee culture, beautiful upper town, very cheap."
+        },
+        {
+          "city": "Belgrade",
+          "country": "RS",
+          "lat": 44.7866,
+          "lon": 20.4489,
+          "visited": "2026-06-18",
+          "nights": 6,
+          "rating": 4.5,
+          "review": "Loud nightlife, cheap excellent food and a beautiful fortress over two rivers."
+        },
+        {
+          "city": "Bucharest",
+          "country": "RO",
+          "lat": 44.4268,
+          "lon": 26.1025,
+          "visited": "2026-07-25",
+          "nights": 1,
+          "rating": 3.5,
+          "review": "Contrasts everywhere, excellent value, beautiful pockets of old architecture."
+        },
+        {
+          "city": "Sofia",
+          "country": "BG",
+          "lat": 42.6977,
+          "lon": 23.3219,
+          "visited": "2026-08-05",
+          "nights": 2,
+          "rating": 5.0,
+          "review": "Mountains at the tram terminus, cheap excellent food, quiet beautiful churches."
+        },
+        {
+          "city": "Tallinn",
+          "country": "EE",
+          "lat": 59.437,
+          "lon": 24.7536,
+          "visited": "2026-09-12",
+          "nights": 3,
+          "rating": 4.0,
+          "review": "A beautiful walled old town, excellent digital everything, freezing in winter."
+        },
+        {
+          "city": "Riga",
+          "country": "LV",
+          "lat": 56.9496,
+          "lon": 24.1052,
+          "visited": "2026-10-19",
+          "nights": 4,
+          "rating": 3.0,
+          "review": "Art nouveau streets, an excellent central market and beautiful wooden suburbs."
+        },
+        {
+          "city": "Vilnius",
+          "country": "LT",
+          "lat": 54.6872,
+          "lon": 25.2797,
+          "visited": "2026-11-26",
+          "nights": 5,
+          "rating": 4.5,
+          "review": "Baroque, green and quiet; excellent value and a beautiful river bend."
+        },
+        {
+          "city": "Reykjavik",
+          "country": "IS",
+          "lat": 64.1466,
+          "lon": -21.9426,
+          "visited": "2026-12-06",
+          "nights": 6,
+          "rating": 3.5,
+          "review": "Small, expensive and windy; excellent pools and beautiful empty roads out of town."
+        }
+      ],
+      "labelColumn": "city",
+      "windowGeometry": {
+        "left": 60,
+        "top": 60,
+        "width": 560,
+        "height": 600
+      }
+    }
+  ],
+  "viewTemplates": [
+    {
+      "id": "vt-cloud",
+      "workspaceId": "viz-demo",
+      "name": "Words in reviews",
+      "headerHtml": "",
+      "rowHtml": "",
+      "footerHtml": "",
+      "kind": "viz",
+      "viz": {
+        "kind": "wordcloud",
+        "options": {
+          "minLength": 4,
+          "maxTerms": 90,
+          "keepWords": "art, spa",
+          "rotate": false
+        }
+      },
+      "updatedAt": 1786000000000
+    },
+    {
+      "id": "vt-bar",
+      "workspaceId": "viz-demo",
+      "name": "Trips per country",
+      "headerHtml": "",
+      "rowHtml": "",
+      "footerHtml": "",
+      "kind": "viz",
+      "viz": {
+        "kind": "bar",
+        "aggregate": {
+          "groupBy": [
+            "CATEGORY"
+          ],
+          "measures": [
+            {
+              "channel": "VALUE",
+              "fn": "count"
+            }
+          ],
+          "sort": "valueDesc"
+        },
+        "options": {
+          "yTitle": "Trips",
+          "beginAtZero": true
+        }
+      },
+      "updatedAt": 1786000000000
+    },
+    {
+      "id": "vt-nights",
+      "workspaceId": "viz-demo",
+      "name": "Nights per country",
+      "headerHtml": "",
+      "rowHtml": "",
+      "footerHtml": "",
+      "kind": "viz",
+      "viz": {
+        "kind": "column",
+        "aggregate": {
+          "groupBy": [
+            "CATEGORY"
+          ],
+          "measures": [
+            {
+              "channel": "VALUE",
+              "fn": "sum"
+            }
+          ],
+          "sort": "valueDesc",
+          "topN": 8
+        },
+        "options": {
+          "yTitle": "Nights",
+          "beginAtZero": true
+        }
+      },
+      "updatedAt": 1786000000000
+    },
+    {
+      "id": "vt-line",
+      "workspaceId": "viz-demo",
+      "name": "Nights by month",
+      "headerHtml": "",
+      "rowHtml": "",
+      "footerHtml": "",
+      "kind": "viz",
+      "viz": {
+        "kind": "line",
+        "aggregate": {
+          "groupBy": [
+            "CATEGORY"
+          ],
+          "measures": [
+            {
+              "channel": "VALUE",
+              "fn": "sum"
+            }
+          ],
+          "bin": {
+            "channel": "CATEGORY",
+            "unit": "month"
+          },
+          "sort": "category"
+        },
+        "options": {
+          "yTitle": "Nights",
+          "area": true
+        }
+      },
+      "updatedAt": 1786000000000
+    },
+    {
+      "id": "vt-pie",
+      "workspaceId": "viz-demo",
+      "name": "Share of nights",
+      "headerHtml": "",
+      "rowHtml": "",
+      "footerHtml": "",
+      "kind": "viz",
+      "viz": {
+        "kind": "pie",
+        "aggregate": {
+          "groupBy": [
+            "CATEGORY"
+          ],
+          "measures": [
+            {
+              "channel": "VALUE",
+              "fn": "sum"
+            }
+          ],
+          "sort": "valueDesc",
+          "topN": 6
+        }
+      },
+      "updatedAt": 1786000000000
+    },
+    {
+      "id": "vt-map",
+      "workspaceId": "viz-demo",
+      "name": "Where I went",
+      "headerHtml": "",
+      "rowHtml": "",
+      "footerHtml": "",
+      "kind": "viz",
+      "viz": {
+        "kind": "map",
+        "options": {
+          "radius": 7,
+          "scaleByWeight": true
+        }
+      },
+      "updatedAt": 1786000000000
+    }
+  ],
+  "viewInstances": [
+    {
+      "id": "vi-cloud-dock",
+      "workspaceId": "viz-demo",
+      "tableId": "tbl-trips",
+      "tableName": "Trips",
+      "templateId": "vt-cloud",
+      "name": "Words in reviews",
+      "filters": {},
+      "visibleColumns": [
+        "city",
+        "country",
+        "lat",
+        "lon",
+        "visited",
+        "nights",
+        "rating",
+        "review"
+      ],
+      "mapping": {
+        "TEXT": "review"
+      },
+      "open": true,
+      "updatedAt": 1786000000000,
+      "dock": {
+        "host": {
+          "kind": "table",
+          "tableId": "tbl-trips"
+        },
+        "edge": "above",
+        "size": 240,
+        "order": 0
+      }
+    },
+    {
+      "id": "vi-bar-dock",
+      "workspaceId": "viz-demo",
+      "tableId": "tbl-trips",
+      "tableName": "Trips",
+      "templateId": "vt-bar",
+      "name": "Trips per country",
+      "filters": {},
+      "visibleColumns": [
+        "city",
+        "country",
+        "lat",
+        "lon",
+        "visited",
+        "nights",
+        "rating",
+        "review"
+      ],
+      "mapping": {
+        "CATEGORY": "country",
+        "VALUE": "city"
+      },
+      "open": true,
+      "updatedAt": 1786000000000,
+      "dock": {
+        "host": {
+          "kind": "table",
+          "tableId": "tbl-trips"
+        },
+        "edge": "below",
+        "size": 200,
+        "order": 0
+      }
+    },
+    {
+      "id": "vi-map",
+      "workspaceId": "viz-demo",
+      "tableId": "tbl-trips",
+      "tableName": "Trips",
+      "templateId": "vt-map",
+      "name": "Where I went",
+      "filters": {},
+      "visibleColumns": [
+        "city",
+        "country",
+        "lat",
+        "lon",
+        "visited",
+        "nights",
+        "rating",
+        "review"
+      ],
+      "mapping": {
+        "LAT": "lat",
+        "LON": "lon",
+        "LABEL": "city",
+        "WEIGHT": "nights"
+      },
+      "open": true,
+      "updatedAt": 1786000000000
+    },
+    {
+      "id": "vi-nights",
+      "workspaceId": "viz-demo",
+      "tableId": "tbl-trips",
+      "tableName": "Trips",
+      "templateId": "vt-nights",
+      "name": "Nights per country",
+      "filters": {},
+      "visibleColumns": [
+        "city",
+        "country",
+        "lat",
+        "lon",
+        "visited",
+        "nights",
+        "rating",
+        "review"
+      ],
+      "mapping": {
+        "CATEGORY": "country",
+        "VALUE": "nights"
+      },
+      "open": true,
+      "updatedAt": 1786000000000
+    },
+    {
+      "id": "vi-line",
+      "workspaceId": "viz-demo",
+      "tableId": "tbl-trips",
+      "tableName": "Trips",
+      "templateId": "vt-line",
+      "name": "Nights by month",
+      "filters": {},
+      "visibleColumns": [
+        "city",
+        "country",
+        "lat",
+        "lon",
+        "visited",
+        "nights",
+        "rating",
+        "review"
+      ],
+      "mapping": {
+        "CATEGORY": "visited",
+        "VALUE": "nights"
+      },
+      "open": true,
+      "updatedAt": 1786000000000
+    },
+    {
+      "id": "vi-pie",
+      "workspaceId": "viz-demo",
+      "tableId": "tbl-trips",
+      "tableName": "Trips",
+      "templateId": "vt-pie",
+      "name": "Share of nights",
+      "filters": {},
+      "visibleColumns": [
+        "city",
+        "country",
+        "lat",
+        "lon",
+        "visited",
+        "nights",
+        "rating",
+        "review"
+      ],
+      "mapping": {
+        "CATEGORY": "country",
+        "VALUE": "nights"
+      },
+      "open": true,
+      "updatedAt": 1786000000000
+    },
+    {
+      "id": "vi-cloud-win",
+      "workspaceId": "viz-demo",
+      "tableId": "tbl-trips",
+      "tableName": "Trips",
+      "templateId": "vt-cloud",
+      "name": "Words (longer, sideways)",
+      "filters": {},
+      "visibleColumns": [
+        "city",
+        "country",
+        "lat",
+        "lon",
+        "visited",
+        "nights",
+        "rating",
+        "review"
+      ],
+      "mapping": {
+        "TEXT": "review"
+      },
+      "open": true,
+      "updatedAt": 1786000000000,
+      "vizOptions": {
+        "minLength": 6,
+        "rotate": true,
+        "maxTerms": 40
+      }
+    }
+  ]
+}
