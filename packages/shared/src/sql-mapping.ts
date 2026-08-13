@@ -29,7 +29,10 @@ export function sqlAffinity(t: ColumnType): string {
       return 'REAL';
     case 'boolean':
       return 'INTEGER';
+    // `text` is prose but stored the way a short string is — the type only
+    // changes how the filter treats the column, never what reaches the file.
     case 'string':
+    case 'text':
     case 'date':
     case 'datetime':
     default:

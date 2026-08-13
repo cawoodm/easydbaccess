@@ -7,3 +7,4 @@ export * from './sql-mapping.js';
 export * from './sql-driver.js';
 export * from './edb-store.js';
 export * from './array-cell.js';
+export * from './text-column.js';

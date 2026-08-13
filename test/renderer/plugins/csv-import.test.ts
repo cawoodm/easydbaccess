@@ -170,6 +170,17 @@ describe('parseCsv: array columns', () => {
     expect(columns[0]).toMatchObject({ field: 'note', type: 'string' });
   });
 
+  it('infers "text" for a column of long values', () => {
+    const body = 'x'.repeat(200);
+    const { columns } = parseCsv(`body\n${body}\n${body}\n`);
+    expect(columns[0]).toMatchObject({ field: 'body', type: 'text' });
+  });
+
+  it('leaves a column of short values as "string", one long cell notwithstanding', () => {
+    const { columns } = parseCsv(`status\nopen\nclosed\n${'x'.repeat(200)}\nopen\nclosed\n`);
+    expect(columns[0]).toMatchObject({ field: 'status', type: 'string' });
+  });
+
   it('takes "array" from a header annotation, for a comma list', () => {
     const { columns, rows } = parseCsv('tags:Tags:array\n"foo,bar"\n" "\n');
     expect(columns[0]).toMatchObject({ field: 'tags', label: 'Tags', type: 'array' });

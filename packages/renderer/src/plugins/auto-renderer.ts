@@ -75,6 +75,10 @@ export function inferRenderer(type: ColumnType, samples: readonly unknown[]): st
   // An `array` column needs no sampling: its values ARE a list, so the pills fit
   // by definition. The name is `tags`, not the type name.
   if (type === 'array') return 'tags';
+  // A `text` column needs no sampling either — the importer already decided it
+  // is prose, which is the same verdict the `avg > LONG_TEXT_CHARS` rule below
+  // reaches for an untyped one.
+  if (type === 'text') return 'preview';
   if (type !== 'string') return undefined;
 
   const values: string[] = [];

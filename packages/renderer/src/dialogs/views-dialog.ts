@@ -606,7 +606,13 @@ export class ViewsDialog extends LitElement {
       case 'text':
         // The longest-looking text column beats the first one: a cloud of a
         // 3-character status code is not a word cloud.
-        return nameHit(['description', 'text', 'body', 'comment', 'notes', 'title', 'name']) || this.firstColumn((c) => ok(c) && c.type === 'string');
+        // A `text` column is prose by definition, which is exactly what a cloud
+        // wants; a `string` one only might be.
+        return (
+          nameHit(['description', 'text', 'body', 'comment', 'notes', 'title', 'name']) ||
+          this.firstColumn((c) => ok(c) && c.type === 'text') ||
+          this.firstColumn((c) => ok(c) && c.type === 'string')
+        );
       case 'category':
         return this.firstColumn((c) => ok(c) && (c.type === 'string' || c.type === 'array')) || this.firstColumn(ok);
       default:
@@ -688,14 +694,19 @@ export class ViewsDialog extends LitElement {
 
     const descWords = ['description', 'desc', 'notes', 'note', 'body', 'text', 'summary', 'about', 'comment', 'comments', 'details', 'detail', 'remarks'];
     if (descWords.includes(lc)) {
+      // `text` and `string` both qualify: a DESCRIPTION token wants the longest
+      // prose in the table, and `text` is the importer saying which that is.
+      const prose = (c: ColumnSpec): boolean => c.type === 'text' || c.type === 'string';
       const named = this.firstColumn((c) => {
-        if (c.type !== 'string') return false;
+        if (!prose(c)) return false;
         const f = c.field.toLowerCase();
         const l = (c.label ?? '').toLowerCase();
         return descWords.some((w) => f.includes(w) || l.includes(w));
       });
       if (named) return named;
-      const stringCols = this.columns.filter((c) => c.type === 'string');
+      const typedText = this.firstColumn((c) => c.type === 'text');
+      if (typedText) return typedText;
+      const stringCols = this.columns.filter(prose);
       const first = stringCols[0];
       if (!first) return '';
       let best = first;

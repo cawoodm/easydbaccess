@@ -23,7 +23,7 @@ import {
   type TableReferences,
 } from '../table/table-references.js';
 
-const TYPE_OPTIONS: ColumnType[] = ['string', 'number', 'boolean', 'date', 'datetime', 'array'];
+const TYPE_OPTIONS: ColumnType[] = ['string', 'text', 'number', 'boolean', 'date', 'datetime', 'array'];
 
 /**
  * Rows the live preview reads. Enough to judge the column specs against real

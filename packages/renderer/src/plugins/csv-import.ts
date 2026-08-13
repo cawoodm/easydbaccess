@@ -4,7 +4,7 @@ import { askImportOntoMode, columnsLineUp, type ImportOntoMode } from '../import
 import { isUnsafeIntegerText } from '../import/big-numbers.js';
 import { mapRowsToTarget, type ColumnMapping } from '../import/map-columns.js';
 import { cryptoUUID, slugField } from '../util/ids.js';
-import { looksLikeArrayColumn } from '@easydb/shared';
+import { looksLikeArrayColumn, looksLikeTextColumn } from '@easydb/shared';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'csv-import',
@@ -594,7 +594,7 @@ interface HeaderSpec {
   hidden?: boolean;
 }
 
-const KNOWN_TYPES = new Set<ColumnType>(['string', 'number', 'boolean', 'date', 'datetime', 'array']);
+const KNOWN_TYPES = new Set<ColumnType>(['string', 'text', 'number', 'boolean', 'date', 'datetime', 'array']);
 
 /**
  * Legacy CSV header type names that map onto renderer names in the post-
@@ -727,6 +727,8 @@ function inferType(samples: string[]): ColumnType {
   if (samples.every(isNumber)) return 'number';
   if (samples.every(isDateTime)) return 'datetime';
   if (samples.every(isDate)) return 'date';
+  // Last, because a long cell cannot have been a number or a date anyway.
+  if (looksLikeTextColumn(samples)) return 'text';
   return 'string';
 }
 

@@ -24,6 +24,13 @@ describe('inferRenderer', () => {
     expect(inferRenderer('string', [long, 'a', 'b', 'c', 'd', 'e', 'f', 'g'])).toBeUndefined();
   });
 
+  it('picks preview for a `text` column without sampling it', () => {
+    // The importer already decided the column is prose; the samples it happens
+    // to be handed here (a live grid page) need not look like it.
+    expect(inferRenderer('text', ['short', 'also short'])).toBe('preview');
+    expect(inferRenderer('text', [])).toBe('preview');
+  });
+
   it('does not mistake a comparison or an unclosed angle bracket for markup', () => {
     expect(inferRenderer('string', ['3 < 4', 'a > b', 'x <- y'])).toBeUndefined();
   });

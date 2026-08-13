@@ -4,6 +4,7 @@
 
 ### Features
 
+- 🪶 A new `text` column type for prose: its funnel offers no value list, because every cell is different and too long to browse (v0.0.365)
 - 🪶 Run… in the script editor writes what a column script returns into the cells, so a computed column becomes data (v0.0.364)
 - ✨ A table's trash button asks what should go: all the data, the data a filter left visible, or the table (v0.0.363)
 - ✨ A word cloud fills its pane instead of sitting in a wide empty margin (v0.0.362)

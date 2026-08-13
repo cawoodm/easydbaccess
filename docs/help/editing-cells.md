@@ -149,3 +149,19 @@ rows to write to yet.
 Even with a custom renderer, a column's underlying **type** (number, date,
 text, boolean) still decides how it sorts and what counts as a valid edit.
 The renderer only changes what you see.
+
+### String or text?
+
+**String** is a short value — a name, a code, a status. Its funnel offers the
+values the column holds, so you filter by picking one.
+
+**Text** is prose — a description, a body, an abstract. Its funnel offers no
+list at all, because every cell is different and too long to browse: the list
+would be one entry per row. You filter a text column by typing into it instead,
+which matches on any part of the value.
+
+An import picks **text** for you when a column's values are consistently long
+(about 120 characters or more), and gives it the preview renderer. One long
+value among short ones is not enough — a single pasted paragraph in a column of
+statuses leaves the column a string. You can change either way in the columns
+editor; nothing about the stored data changes, only the filter.

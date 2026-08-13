@@ -4,7 +4,14 @@
  * reader (filter matcher, funnel dropdown, renderer) to take the cell apart into
  * its members. See `array-cell.ts` for the three spellings.
  */
-export type ColumnType = 'string' | 'number' | 'date' | 'datetime' | 'boolean' | 'array';
+/**
+ * `text` is prose — a description, a body, an abstract. It is stored exactly as
+ * `string` is (same SQL affinity, same coercion); the type exists so the FILTER
+ * can behave differently. A funnel offers no value list for a text column: every
+ * cell is unique and too long to browse, so the list would be one useless option
+ * per row. Import assigns it — see `text-column.ts` for the rule.
+ */
+export type ColumnType = 'string' | 'text' | 'number' | 'date' | 'datetime' | 'boolean' | 'array';
 
 export interface ColumnSpec {
   field: string;

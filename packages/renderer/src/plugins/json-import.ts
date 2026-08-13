@@ -21,7 +21,7 @@ import { runImport } from '../import/import-kernel.js';
 import { rowRekeyer } from '../table/column-merge.js';
 import { filenameFromUrl } from '../import/fetch-source.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
-import { looksLikeArrayColumn } from '@easydb/shared';
+import { looksLikeArrayColumn, looksLikeTextColumn } from '@easydb/shared';
 import { restoreTemplates } from '../views/template-restore.js';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a
@@ -996,6 +996,8 @@ function inferTypeFromValues(values: unknown[]): ColumnType {
   if (samples.every((v) => typeof v === 'boolean')) return 'boolean';
   if (samples.every((v) => typeof v === 'number' && Number.isFinite(v))) return 'number';
   if (samples.every((v) => typeof v === 'string' && isDateString(v))) return 'date';
+  // Last, because a long cell cannot have been a number or a date anyway.
+  if (looksLikeTextColumn(samples)) return 'text';
   return 'string';
 }
 

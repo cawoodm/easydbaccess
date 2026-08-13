@@ -51,8 +51,16 @@ function cellValues(value: unknown, type: string | undefined): string[] {
  * An `array` column is judged by its longest MEMBER: a list of short tags easily
  * runs past the limit as one string, and would otherwise lose its dropdown
  * exactly when it has enough values to need one.
+ *
+ * A `text` column is never eligible, whatever the sample holds. The length rule
+ * above reaches the same verdict for most prose, but it is decided from the
+ * first {@link ELIGIBILITY_SAMPLE} rows — a body column whose first hundred rows
+ * happen to be short would offer a dropdown that fills with one option per row
+ * further down. The stored type is the column's own answer and does not depend
+ * on which rows are loaded.
  */
 export function facetable(rows: readonly HasData[], field: string, opts?: { maxLen?: number; type?: string | undefined }): boolean {
+  if (opts?.type === 'text') return false;
   const maxLen = opts?.maxLen ?? FACET_MAX_LEN;
   if (rows.length === 0) return false;
   for (const r of rows.slice(0, ELIGIBILITY_SAMPLE)) {
@@ -76,6 +84,8 @@ export function facetable(rows: readonly HasData[], field: string, opts?: { maxL
  * narrows what the others offer, while this column keeps showing its siblings.
  */
 export function facetValues(rows: readonly HasData[], field: string, opts?: { maxLen?: number; maxOptions?: number; type?: string | undefined }): string[] {
+  // Prose has no value list — see `facetable`.
+  if (opts?.type === 'text') return [];
   const maxLen = opts?.maxLen ?? FACET_MAX_LEN;
   const maxOptions = opts?.maxOptions ?? FACET_MAX_OPTIONS;
   const seen = new Set<string>();
@@ -110,6 +120,9 @@ export interface FacetCount {
  * cell with no members at all counts as blank.
  */
 export function facetCounts(rows: readonly HasData[], field: string, opts?: { type?: string | undefined }): { values: FacetCount[]; blanks: number } {
+  // Prose has no value list — see `facetable`. Blanks are not counted either:
+  // the picker they feed is never built for this column.
+  if (opts?.type === 'text') return { values: [], blanks: 0 };
   const counts = new Map<string, number>();
   let blanks = 0;
   for (const r of rows) {

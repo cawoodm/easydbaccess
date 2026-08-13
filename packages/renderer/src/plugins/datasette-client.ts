@@ -11,7 +11,7 @@
 import type { ColumnSpec, ColumnType, FetchOpts, TableInfo } from '@easydb/shared';
 import { parseColumnFilter } from '@easydb/shared';
 import { isInternalField } from '../util/internal-fields.js';
-import { looksLikeArray } from '@easydb/shared';
+import { looksLikeArray, looksLikeTextColumn } from '@easydb/shared';
 
 export interface DatasetteRef {
   base: string;
@@ -370,6 +370,8 @@ function inferColumnType(values: unknown[]): ColumnType {
   if (samples.every((v) => typeof v === 'boolean')) return 'boolean';
   if (samples.every((v) => typeof v === 'number' && Number.isFinite(v))) return 'number';
   if (samples.every((v) => typeof v === 'string' && isIsoDateish(v))) return 'datetime';
+  // Last, because a long cell cannot have been a number or a date anyway.
+  if (looksLikeTextColumn(samples)) return 'text';
   return 'string';
 }
 

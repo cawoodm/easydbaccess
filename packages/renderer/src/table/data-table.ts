@@ -1792,6 +1792,12 @@ export class DataTable extends LitElement {
    * Both are said out loud rather than left to look like the whole answer.
    */
   private async readDistinct(field: string): Promise<{ values: Array<{ value: string; count: number }>; blanks: number; note: string }> {
+    // A `text` column has no value list to read — see `search/facet-values.ts`.
+    // Worth catching before the query rather than after: on a big table this is
+    // a full GROUP BY whose answer would be one option per row.
+    if (this.columns.find((c) => c.field === field)?.type === 'text') {
+      return { values: [], blanks: 0, note: 'This column holds text, so it has no list of values to pick from.' };
+    }
     const coll = this.rowColl;
     const others = Object.fromEntries(Object.entries(this.filters).filter(([f, q]) => f !== field && q && q.trim() !== ''));
     const search = [this.localQuery.trim(), this.globalQuery.trim()].filter(Boolean).join(' ');

@@ -27,6 +27,28 @@ describe('facetable', () => {
   it('measures what a non-string value prints as, not its type', () => {
     expect(facetable(rows(12345), 'tag')).toBe(true);
   });
+
+  it('rejects a `text` column even when the sampled rows are short', () => {
+    // The length rule reads the first 100 rows; the stored type is the column's
+    // own answer, so a body column whose opening rows happen to be one-liners
+    // still offers no list.
+    expect(facetable(rows('a', 'b'), 'tag', { type: 'text' })).toBe(false);
+    expect(facetable(rows('a', 'b'), 'tag', { type: 'string' })).toBe(true);
+  });
+});
+
+describe('a text column has no value list', () => {
+  const text = { type: 'text' } as const;
+
+  it('offers no suggestions', () => {
+    expect(facetValues(rows('a', 'b', 'a'), 'tag', text)).toEqual([]);
+  });
+
+  it('counts nothing, not even the blanks', () => {
+    // The picker these feed is never built for this column, so a blank count
+    // would be an answer to a question nobody asked.
+    expect(facetCounts(rows('a', '', null), 'tag', text)).toEqual({ values: [], blanks: 0 });
+  });
 });
 
 describe('facetValues', () => {
