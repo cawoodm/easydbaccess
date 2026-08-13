@@ -71,7 +71,7 @@ workspace selector so the mouse and the keyboard take the same path:
 |---|---|
 | Switch workspace | Pick another workspace by name and open it. |
 | New workspace | Name it, choose what it inherits (everything / settings / nothing), open it. |
-| Delete workspace | Pick one, see what that removes, delete it and everything in it. |
+| Delete workspace | See what the OPEN workspace holds, answer yes or no, delete it and everything in it. |
 
 Opening a workspace RELOADS the page with `?space=<name>`. Dexie collections,
 panel windows and the plugin host all bind to one `workspaceId` at boot, so
@@ -83,8 +83,19 @@ templates, and its settings (`db/delete-workspace.ts`). That last one is not
 housekeeping: a workspace id is its slugified name, so a leftover settings row
 would be inherited by the next workspace created under the same name. Device-
 local `user` settings and cached plugin bodies stay — they belong to the device,
-not the workspace. Deleting the ACTIVE workspace reloads into a survivor, or
-into a fresh `default` when it was the last one.
+not the workspace. The delete always reloads, into a survivor or into a fresh
+`default` when it was the last one, because every open panel belongs to the
+workspace that went.
+
+Delete always means the OPEN workspace. It used to ask "delete which one?" from a
+list of every workspace, which put a picker in front of the only answer anybody
+wanted, and made the dangerous button the roundabout one as well. To delete a
+different workspace, open it first. The confirm dialog also does NOT count the
+rows: every other total it quotes is a few index entries, but counting the rows of
+a workspace holding a 609,283-row table costs 14 seconds in IndexedDB, and this
+dialog is what the user is waiting for. So it promises "and all their rows", and
+only the delete itself reports a number — taken from the rows it had to read
+anyway.
 
 Cascade/tile position windows within the **currently visible** region of the
 pan/zoom canvas (geometry is computed in viewport-local coordinates from the

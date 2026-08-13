@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ Delete workspace takes the open workspace and asks yes or no, instead of asking which one first (v0.0.359)
 - 🪶 One Export dialog for every export: pick the format, the rows, the columns, the order and a row limit (v0.0.358)
 - ✨ CSV export offers the separator, a header row, a byte-order mark, and a typed header that a re-import reads back (v0.0.358)
 - ✨ Exporting several tables as JSON writes one dump; as CSV it writes a file each (v0.0.358)

@@ -65,7 +65,7 @@ export class WorkspaceSelector extends LitElement {
       <button @click=${newWorkspaceFlow} title="New workspace">
         <span class="mi sm">add</span>
       </button>
-      <button @click=${deleteWorkspaceFlow} title="Delete workspace">
+      <button @click=${deleteWorkspaceFlow} title="Delete this workspace">
         <span class="mi sm">delete</span>
       </button>
     `;

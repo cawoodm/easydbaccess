@@ -7,6 +7,11 @@ import { addRow, chooseSimpleStorage, createTable, waitForPanel } from './helper
  * remove a workspace at all, and it has to take EVERYTHING with it — a leftover
  * settings row would be inherited by the next workspace created under the same
  * name, because a workspace id is its slugified name.
+ *
+ * Delete takes the OPEN workspace and asks nothing else. It used to ask "delete
+ * which one?" from a list of every workspace first, which put a picker in front of
+ * the only answer anybody wanted. To delete another workspace, switch to it — the
+ * dropdown is beside the button.
  */
 
 /** Open the palette, type `query`, and run the entry titled `title`. */
@@ -59,6 +64,13 @@ async function createWorkspace(page: import('@playwright/test').Page, name: stri
   await Promise.all([bootedAt(page, name), dialogs.getByRole('button', { name: /Empty workspace/ }).click()]);
 }
 
+/** Open another workspace by name, through the palette. */
+async function switchTo(page: import('@playwright/test').Page, name: string) {
+  await runCommand(page, 'workspace', 'Switch workspace');
+  const dialogs = page.locator('host-dialogs');
+  await Promise.all([bootedAt(page, name), dialogs.getByRole('button', { name, exact: true }).click()]);
+}
+
 test('the palette carries switch, new and delete', async ({ page }) => {
   await page
     .locator('app-shell header')
@@ -102,6 +114,13 @@ test('Switch workspace says so when there is nowhere to switch to', async ({ pag
 });
 
 test('Delete workspace takes the tables, the rows and the settings with it', async ({ page, workspaceId }) => {
+  // A second workspace to survive the delete and be reloaded into. Made first,
+  // because making one opens it — the seeding below has to happen in the workspace
+  // that is going to be deleted.
+  await runCommand(page, 'workspace', 'New workspace');
+  await createWorkspace(page, 'survivor');
+  await switchTo(page, workspaceId);
+
   // Seed the workspace that is about to be deleted: a table with a row, and a
   // setting — the thing a re-created workspace used to inherit.
   const tableId = await createTable(page, 'Feed', [{ field: 'title' }]);
@@ -112,20 +131,17 @@ test('Delete workspace takes the tables, the rows and the settings with it', asy
     await (window as any).__easydb.store.settings.upsert({ name: 'server-sync:url', value: 'https://example.test' });
   });
 
-  // A second workspace to survive the delete and be reloaded into.
-  await runCommand(page, 'workspace', 'New workspace');
-  await createWorkspace(page, 'survivor');
-
-  // Delete the seeded one from here — it is not the active workspace, so this
-  // path must NOT navigate.
   await runCommand(page, 'workspace', 'Delete workspace');
   const dialogs = page.locator('host-dialogs');
-  await dialogs.getByRole('button', { name: workspaceId }).click();
-  await expect(dialogs.getByText(/1 table, 1 row/)).toBeVisible();
-  // `confirm` is a two-choice dialog — Yes / No, not OK / Cancel.
-  await dialogs.getByRole('button', { name: 'Yes', exact: true }).click();
+  // The dialog names the tables it will take and promises their rows without
+  // counting them — counting a big workspace costs 14 seconds, and the user is
+  // waiting for this dialog. The view and setting totals are whatever the seeded
+  // workspace holds, so they are not asserted here.
+  await expect(dialogs.getByText(/1 table,.* and all their rows/)).toBeVisible();
+  // `confirm` is a two-choice dialog — Yes / No, not OK / Cancel. The active
+  // workspace goes, so this navigates into the survivor.
+  await Promise.all([bootedAt(page, 'survivor'), dialogs.getByRole('button', { name: 'Yes', exact: true }).click()]);
 
-  await expect(page.locator('toast-host').getByText(/Deleted/)).toBeVisible();
   const after = await currentWorkspace(page);
   expect(after.id).toBe('survivor');
   expect(after.orphaned).not.toContain(workspaceId); // its table is gone
@@ -150,12 +166,39 @@ test('Delete workspace takes the tables, the rows and the settings with it', asy
   expect(reborn.settingNames).not.toContain('server-sync:url');
 });
 
+test('Delete workspace asks about the open one, not which one', async ({ page, workspaceId }) => {
+  // Two workspaces, so the old flow would have shown a list here.
+  await runCommand(page, 'workspace', 'New workspace');
+  await createWorkspace(page, 'bystander');
+  await switchTo(page, workspaceId);
+
+  await runCommand(page, 'workspace', 'Delete workspace');
+  const dialogs = page.locator('host-dialogs');
+  await expect(dialogs.getByText(new RegExp(`Delete the workspace "${workspaceId}"`))).toBeVisible();
+  // Yes and No, and nothing offering the other workspace.
+  await expect(dialogs.getByRole('button', { name: 'bystander', exact: true })).toHaveCount(0);
+  await expect(dialogs.getByRole('button', { name: 'Yes', exact: true })).toBeVisible();
+  await expect(dialogs.getByRole('button', { name: 'No', exact: true })).toBeVisible();
+
+  // No is honored: nothing goes.
+  await dialogs.getByRole('button', { name: 'No', exact: true }).click();
+  expect((await currentWorkspace(page)).id).toBe(workspaceId);
+});
+
+test('the header button deletes the open workspace too', async ({ page, workspaceId }) => {
+  // The selector's delete icon and the palette command are one flow. This asserts
+  // the mouse path reaches it and names the workspace on screen.
+  await page.locator('workspace-selector').getByTitle('Delete this workspace').click();
+  const dialogs = page.locator('host-dialogs');
+  await expect(dialogs.getByText(new RegExp(`Delete the workspace "${workspaceId}"`))).toBeVisible();
+  await dialogs.getByRole('button', { name: 'No', exact: true }).click();
+});
+
 test('deleting the only workspace puts an empty one in its place', async ({ page }) => {
   await createTable(page, 'Feed', [{ field: 'title' }]);
 
   await runCommand(page, 'workspace', 'Delete workspace');
   const dialogs = page.locator('host-dialogs');
-  // One workspace ⇒ no "which one?" question, straight to the confirm.
   await expect(dialogs.getByText(/only workspace/)).toBeVisible();
   await Promise.all([bootedAt(page, /\?(?!.*space=)/), dialogs.getByRole('button', { name: 'Yes', exact: true }).click()]);
 
