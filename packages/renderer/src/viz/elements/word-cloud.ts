@@ -119,6 +119,27 @@ export class VizWordCloud extends LitElement {
 
   override updated(changed: PropertyValues): void {
     if (changed.has('terms') || changed.has('options')) void this.layout();
+    this.fitViewBox();
+  }
+
+  /**
+   * Crop the viewBox to the words actually drawn.
+   *
+   * `d3-cloud` packs outwards from the centre of the box it is given and stops
+   * as soon as every word is placed, so a cloud of a few dozen terms sits in a
+   * blob with a wide empty margin around it — dead space the pane could be
+   * spending on legible text. Fitting the viewBox to the drawn extent scales
+   * that blob up to the pane. Measured from the rendered SVG rather than from
+   * the layout output because a rotated word's box is not its font metrics.
+   */
+  private fitViewBox(): void {
+    const svg = this.renderRoot.querySelector('svg');
+    if (!svg || this.placed.length === 0) return;
+    // Includes the centring transform on the <g>, unlike the group's own getBBox.
+    const b = svg.getBBox();
+    if (b.width < 1 || b.height < 1) return;
+    const m = 2;
+    svg.setAttribute('viewBox', `${b.x - m} ${b.y - m} ${b.width + m * 2} ${b.height + m * 2}`);
   }
 
   private async layout(): Promise<void> {

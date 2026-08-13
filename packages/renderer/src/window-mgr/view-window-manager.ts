@@ -39,6 +39,7 @@ import { createPanel, type PanelShellEl } from './panel-shell/panel-shell.js';
 import { createPanelStack, type PanelStack } from './panel-stack.js';
 import { getPanelStack, hostKey, onPanelStacksChanged, registerPanelStack, unregisterPanelStack } from './panel-stacks.js';
 import '../viz/viz-pane.js';
+import { PANE_HEADER_H } from '../viz/viz-pane.js';
 import '../viz/viz-footer.js';
 import { revealPanel } from './reveal.js';
 // Side-effect import registers the <view-window> custom element; the type-only
@@ -378,6 +379,14 @@ function reconcileDockedPanes(all: ViewInstance[], ctx: AppContext): void {
     pane.label = inst.name;
     // Queryable identity, so a reload can find it without a second element map.
     pane.dataset['instance'] = inst.id;
+    // Collapsing hides the pane's body; the stack has to shrink the pane with
+    // it, or the room the body gave up stays an empty box instead of going back
+    // to the grid. Local state, exactly like the pane's own flag — see the note
+    // on `VizPane.toggleCollapse`.
+    pane.addEventListener('viz-pane-collapse', (ev) => {
+      const collapsed = (ev as CustomEvent<{ collapsed: boolean }>).detail.collapsed;
+      stack.setPaneCollapsed(inst.id, collapsed ? PANE_HEADER_H : null);
+    });
 
     stack.addPane({
       id: inst.id,

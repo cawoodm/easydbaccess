@@ -32,6 +32,12 @@ export interface StackPaneSpec {
 interface Pane extends StackPaneSpec {
   wrap: HTMLElement;
   splitter: HTMLElement;
+  /**
+   * Height the pane is pinned to while collapsed (its header strip), or null
+   * when it is open. `size` keeps the user's chosen height throughout, so
+   * expanding restores it.
+   */
+  collapsed: number | null;
 }
 
 const SPLITTER_H = 5;
@@ -43,6 +49,12 @@ export interface PanelStack {
   setPrimary(el: HTMLElement | null): void;
   addPane(spec: StackPaneSpec): void;
   removePane(id: string): void;
+  /**
+   * Pin a pane to `height` px and hide its splitter, or pass null to give it
+   * its own height back. This is what makes a collapse give the room to the
+   * primary content instead of leaving an empty box behind.
+   */
+  setPaneCollapsed(id: string, height: number | null): void;
   hasPane(id: string): boolean;
   paneIds(): string[];
   /** Re-apply sizes to the current container height. */
@@ -76,14 +88,29 @@ export function createPanelStack(): PanelStack {
 
   const innerHeight = (): number => root.clientHeight || 0;
 
+  /** What a pane actually occupies: its own height, or the collapsed pin. */
+  const paneHeight = (p: Pane): number => p.collapsed ?? p.size;
+
+  /** A collapsed pane's splitter is hidden, so it costs nothing either. */
+  const splitterHeight = (p: Pane): number => (p.collapsed === null ? SPLITTER_H : 0);
+
+  const splittersTotal = (): number => {
+    let sum = 0;
+    for (const p of panes.values()) sum += splitterHeight(p);
+    return sum;
+  };
+
   const otherPanesTotal = (exceptId: string): number => {
     let sum = 0;
-    for (const p of panes.values()) if (p.id !== exceptId) sum += p.size + SPLITTER_H;
+    for (const p of panes.values()) if (p.id !== exceptId) sum += paneHeight(p) + splitterHeight(p);
     return sum;
   };
 
   const applySizes = (): void => {
-    for (const p of panes.values()) p.wrap.style.height = `${p.size}px`;
+    for (const p of panes.values()) {
+      p.wrap.style.height = `${paneHeight(p)}px`;
+      p.splitter.style.display = p.collapsed === null ? '' : 'none';
+    }
   };
 
   /** Re-order the DOM so pane `order` decides visual order on each edge. */
@@ -104,14 +131,20 @@ export function createPanelStack(): PanelStack {
     const h = innerHeight();
     if (h <= 0 || panes.size === 0) return;
     const list = [...panes.values()];
-    const splitters = list.length * SPLITTER_H;
-    const fitted = fitPanes(
-      list.map((p) => p.size),
-      h - splitters,
-    );
-    list.forEach((p, i) => {
-      p.size = fitted[i] ?? MIN_PANE_H;
-    });
+    // A collapsed pane is a fixed cost, not something to shrink further — it is
+    // already at its floor, and putting it through `fitPanes` would push it back
+    // up to MIN_PANE_H.
+    const fixed = list.reduce((sum, p) => sum + splitterHeight(p) + (p.collapsed ?? 0), 0);
+    const open = list.filter((p) => p.collapsed === null);
+    if (open.length > 0) {
+      const fitted = fitPanes(
+        open.map((p) => p.size),
+        h - fixed,
+      );
+      open.forEach((p, i) => {
+        p.size = fitted[i] ?? MIN_PANE_H;
+      });
+    }
     applySizes();
   };
 
@@ -148,7 +181,7 @@ export function createPanelStack(): PanelStack {
         // by its own ResizeObserver mid-drag.
         const dy = e.clientY - startY;
         const delta = p.edge === 'above' ? dy : -dy;
-        p.size = clampPaneSize(startSize + delta, innerHeight() - panes.size * SPLITTER_H, otherPanesTotal(p.id));
+        p.size = clampPaneSize(startSize + delta, innerHeight() - splittersTotal(), otherPanesTotal(p.id));
         applySizes();
       };
       const up = (): void => {
@@ -190,9 +223,9 @@ export function createPanelStack(): PanelStack {
       spec.el.style.minHeight = '0';
       wrap.append(spec.el);
 
-      const pane: Pane = { ...spec, wrap, splitter: document.createElement('div') };
+      const pane: Pane = { ...spec, wrap, splitter: document.createElement('div'), collapsed: null };
       pane.splitter = makeSplitter(() => pane);
-      pane.size = clampPaneSize(spec.size, innerHeight() - (panes.size + 1) * SPLITTER_H, otherPanesTotal(spec.id));
+      pane.size = clampPaneSize(spec.size, innerHeight() - splittersTotal() - SPLITTER_H, otherPanesTotal(spec.id));
       panes.set(spec.id, pane);
       reflow();
       applySizes();
@@ -209,6 +242,16 @@ export function createPanelStack(): PanelStack {
       // element's `disconnectedCallback` — i.e. its subscriptions.
       p.wrap.remove();
       stopObserving();
+      refit();
+    },
+
+    setPaneCollapsed(id, height) {
+      const p = panes.get(id);
+      if (!p) return;
+      const next = height === null ? null : Math.max(0, Math.round(height));
+      if (p.collapsed === next) return;
+      p.collapsed = next;
+      applySizes();
       refit();
     },
 

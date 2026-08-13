@@ -704,6 +704,12 @@ export interface VisualizationSpec {
    * dialog uses — so a new option costs no UI code.
    */
   options?: SettingsFieldSpec[] | undefined;
+  /**
+   * Draw to the edge of the pane — the host drops its padding. For an element
+   * that already centres its own content (a word cloud, a map) the inset is
+   * wasted space; a chart needs it so its axis labels are not against the frame.
+   */
+  bleed?: boolean | undefined;
   /** What the element is handed: a grouped frame, or the raw rows. */
   data: 'aggregate' | 'rows';
   /** Used when the template's `VizSpec` carries no `aggregate` of its own. */

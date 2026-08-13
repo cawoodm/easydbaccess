@@ -72,6 +72,9 @@ export class VizPanel extends LitElement {
       min-height: 0;
       padding: 4px 6px;
     }
+    .chart.bleed {
+      padding: 0;
+    }
     .note,
     .error {
       flex: none;
@@ -641,7 +644,7 @@ export class VizPanel extends LitElement {
     // does not declare, and branching the template per kind would mean this host
     // knowing which kinds exist — the thing `channelOfKind` avoids.
     return html`
-      <div class="chart">
+      <div class="chart ${spec.bleed ? 'bleed' : ''}">
         ${staticHtml`<${tag}
           .data=${this.chartData()}
           .points=${this.mapPoints()}

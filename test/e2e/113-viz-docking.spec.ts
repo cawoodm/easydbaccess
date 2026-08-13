@@ -147,6 +147,79 @@ test.describe('visualization docking', () => {
     expect(Math.abs(restored - after)).toBeLessThan(12);
   });
 
+  test('collapsing a pane gives its room back to the grid', async ({ page }) => {
+    // Collapse used to hide the pane's body and leave the pane's box at full
+    // height — an empty rectangle beside the grid rather than a collapse.
+    const id = await seed(page);
+    await dockChart(page, id, 'above');
+    const panel = page.locator(`#${panelDomId(id)}`);
+    const wrap = panel.locator('.panel-stack-pane').first();
+    const grid = panel.locator('data-table');
+
+    const openH = (await wrap.boundingBox())!.height;
+    const gridBefore = (await grid.boundingBox())!.height;
+    expect(openH).toBeGreaterThan(60);
+
+    const collapse = panel.locator('viz-pane').getByRole('button', { name: 'Collapse' });
+    await collapse.focus();
+    await collapse.press('Enter');
+
+    // Down to the header strip, and the splitter goes with it.
+    await expect.poll(async () => (await wrap.boundingBox())!.height).toBeLessThan(30);
+    await expect(panel.locator('.panel-stack-splitter')).toBeHidden();
+    const gridAfter = (await grid.boundingBox())!.height;
+    expect(gridAfter).toBeGreaterThan(gridBefore + 30);
+
+    // Expanding restores the height the user had chosen, not a default.
+    const expand = panel.locator('viz-pane').getByRole('button', { name: 'Expand' });
+    await expand.focus();
+    await expand.press('Enter');
+    await expect.poll(async () => (await wrap.boundingBox())!.height).toBeGreaterThan(60);
+    expect(Math.abs((await wrap.boundingBox())!.height - openH)).toBeLessThan(6);
+  });
+
+  test('a word cloud fills its pane instead of sitting in a margin', async ({ page }) => {
+    // The layout packs outwards from the centre and stops, so the drawn words
+    // covered a fraction of the pane. The viewBox is cropped to them now.
+    const id = await createTable(page, 'Notes', [{ field: 'body' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [{ body: 'alpha beta alpha' }, { body: 'alpha gamma delta' }]);
+
+    const dlg = page.locator('views-dialog dialog');
+    await page
+      .locator(`#${panelDomId(id)} panel-footer`)
+      .getByRole('button', { name: /Views/ })
+      .click();
+    await dlg.getByRole('button', { name: '+ New chart' }).click();
+    await dlg.locator('input[type=text]').first().fill('Cloud');
+    await dlg.locator('select').first().selectOption('wordcloud');
+    await dlg.getByRole('button', { name: 'Save' }).click();
+    await dlg.locator('ul.list li', { hasText: 'Cloud' }).getByRole('button', { name: 'Use' }).click();
+    await dlg.locator('select').first().selectOption('below');
+    await dlg.getByRole('button', { name: 'Create view' }).click();
+    await expect(dlg).toBeHidden();
+
+    const cloud = page.locator(`#${panelDomId(id)} viz-pane viz-word-cloud`);
+    await expect(cloud.locator('text').first()).toBeVisible();
+
+    // The viewBox is the words' own extent, and the words fill most of it.
+    const fill = await cloud.evaluate((el) => {
+      const svg = el.shadowRoot!.querySelector('svg')!;
+      const vb = svg.getAttribute('viewBox')!.split(' ').map(Number);
+      const b = svg.getBBox();
+      return { w: (b.width + 4) / (vb[2] ?? 1), h: (b.height + 4) / (vb[3] ?? 1) };
+    });
+    expect(fill.w).toBeGreaterThan(0.95);
+    expect(fill.h).toBeGreaterThan(0.95);
+
+    // No host padding around a cloud — it draws to the pane's edge.
+    const pad = await page.locator(`#${panelDomId(id)} viz-pane viz-panel`).evaluate((el) => {
+      const chart = el.shadowRoot!.querySelector('.chart')!;
+      return getComputedStyle(chart).padding;
+    });
+    expect(pad).toBe('0px');
+  });
+
   test('undocking moves the chart into its own window', async ({ page }) => {
     const id = await seed(page);
     await dockChart(page, id, 'above');

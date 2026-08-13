@@ -66,7 +66,9 @@ describe('emptyChannelNote', () => {
   it('names the column, the row count and the way to fix it', () => {
     const note = emptyChannelNote([{ label: 'Text column', column: 'Body' }], 1204);
     expect(note).toContain('“Body”');
-    expect(note).toContain('1,204 rows');
+    // The note groups digits for the reader's locale, so the separator is the
+    // runner's, not a comma — this failed on a de-CH machine ("1’204 rows").
+    expect(note).toContain(`${(1204).toLocaleString()} rows`);
     expect(note).toContain('Text column');
     expect(note).toContain('Edit');
   });

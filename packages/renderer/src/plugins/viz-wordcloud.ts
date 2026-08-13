@@ -35,6 +35,7 @@ export function init(api: HostApi): void {
       },
     ],
     data: 'rows',
+    bleed: true,
     options: [
       { key: 'minLength', label: 'Ignore words shorter than', type: 'number', default: 3 },
       {
