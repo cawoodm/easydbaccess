@@ -20,6 +20,7 @@ import { inheritColumns, presentationFromBase, resolveWritability } from './proj
 import { createProjectionCollection } from './projection-collection.js';
 import '../dialogs/projection-dialog.js';
 import { ProjectionDialog, type ProjectionCandidate } from '../dialogs/projection-dialog.js';
+import { readColumnDrag } from '../table/column-drag.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'projection',
@@ -68,6 +69,10 @@ export function init(api: HostApi): void {
     visible: (table) => table.source?.type === 'projection',
     onClick: (a, { tableId }) => void openProjectionEditor(a, { editTableId: tableId }),
   });
+
+  // Drag a column header onto another table's window: the two tables and the
+  // one column are already chosen, so the editor opens on them.
+  api.ui.registerDropHandler((event, a) => handleColumnDrop(a, event));
 }
 
 /**
@@ -142,7 +147,10 @@ async function columnsForSpec(api: HostApi, workspaceId: string, spec: Projectio
  * starts a new projection with that table as the fixed base (first source), so
  * only the join table(s) still need choosing.
  */
-async function openProjectionEditor(api: HostApi, opts: { baseTableId?: string; editTableId?: string }): Promise<void> {
+async function openProjectionEditor(
+  api: HostApi,
+  opts: { baseTableId?: string; editTableId?: string; join?: { tableId: string; field: string } | undefined; filters?: Record<string, string> | undefined },
+): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) return;
   const all = await api.store.tables.find({ workspaceId });
@@ -163,14 +171,75 @@ async function openProjectionEditor(api: HostApi, opts: { baseTableId?: string; 
 
   const baseTable = all.find((t) => t.id === opts.baseTableId);
   if (!baseTable) return;
+  const joinTable = opts.join ? all.find((t) => t.id === opts.join?.tableId) : undefined;
   dlg.open({
     base: toCand(baseTable),
     // Every table is a join candidate — INCLUDING the base, so a table can be
     // joined more than once (a self-join: `a → b → a`, or `a → a`). Each pick
     // becomes its own source with its own alias.
     candidates: all.map(toCand),
+    ...(joinTable && opts.join ? { join: toCand(joinTable), joinFields: [opts.join.field] } : {}),
+    ...(opts.filters ? { filters: opts.filters } : {}),
     onSave: makeOnSave(api, workspaceId, null, baseTable),
   });
+}
+
+/** A filter map with the empty entries dropped. */
+function activeFilters(filters: Record<string, string> | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [f, q] of Object.entries(filters ?? {})) if (q && q.trim() !== '') out[f] = q;
+  return out;
+}
+
+/**
+ * A column dragged out of one table and dropped on another: offer a projection
+ * of the second joined to the first.
+ *
+ * The DROP TARGET is the base and the drag source is joined onto it, which is
+ * the direction the gesture reads in — you carry a column TO the table you want
+ * it beside. `addSourceToModel` guesses the join keys from the field names, so
+ * the dialog usually opens on a working join for the user to confirm.
+ *
+ * Returns false rather than handling anything when the drop was not on a table,
+ * or was back on the column's own grid — that drop reorders the column, and the
+ * grid has already dealt with it by the time this runs.
+ */
+async function handleColumnDrop(api: HostApi, event: DragEvent): Promise<boolean> {
+  const payload = readColumnDrag(event);
+  if (!payload) return false;
+  const { tableIdAtNode } = await import('../window-mgr/table-window-manager.js');
+  const targetId = tableIdAtNode(event.target);
+  if (!targetId || targetId === payload.tableId) return false;
+
+  const workspaceId = api.workspaceId();
+  if (!workspaceId) return true;
+  const all = await api.store.tables.find({ workspaceId });
+  const target = all.find((t) => t.id === targetId);
+  const source = all.find((t) => t.id === payload.tableId);
+  if (!target || !source) return true;
+
+  // The source's filters come off the LIVE grid (they travel with the drag);
+  // the target's are the ones it has saved, which is the best a drop handler
+  // can see of a window it is not inside.
+  const filters = { ...payload.filters, ...activeFilters(target.filters) };
+  let seed: Record<string, string> | undefined;
+  if (Object.keys(filters).length > 0) {
+    const keep = 'Keep the filters';
+    const answer = await api.ui.dialogs.choice(
+      `Add “${payload.label}” from ${source.name} to a new projection over ${target.name}. ` + 'Should the projection carry the filters those tables have on now, or read all their data?',
+      [keep, 'All data'],
+      'New projection',
+    );
+    if (answer === null) return true; // dismissed: no projection, but the drop was ours
+    if (answer === keep) seed = filters;
+  }
+
+  await openProjectionEditor(api, {
+    baseTableId: target.id,
+    join: { tableId: source.id, field: payload.field },
+    ...(seed ? { filters: seed } : {}),
+  });
+  return true;
 }
 
 /**

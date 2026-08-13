@@ -144,6 +144,19 @@ rows to write to yet.
 | **HTML (render)**  | Renders the HTML directly in the cell, and lets you edit it inline.                                                                          |
 | **Script**         | Runs a small script you write to build the cell's HTML from the whole row — for fully custom layouts.                                        |
 
+## Joining two tables by dragging a column
+
+Drag a column's grip out of one table's header and drop it on **another**
+table's window. The projection editor opens with the table you dropped on as
+the base, the column's own table joined onto it, and that one column selected —
+the join keys guessed from the field names for you to confirm.
+
+If either table has a filter on, you are asked first whether the projection
+should carry those filters or read all the data.
+
+Dropped back on its own grid, the same drag reorders the column as it always
+has. Dropped anywhere else, nothing happens.
+
 ## Column types still matter
 
 Even with a custom renderer, a column's underlying **type** (number, date,

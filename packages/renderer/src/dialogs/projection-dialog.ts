@@ -38,6 +38,22 @@ export interface ProjectionDialogOpts {
   candidates: ProjectionCandidate[];
   /** New mode: the fixed base (first source) — the table the editor launched from. */
   base?: ProjectionCandidate | undefined;
+  /**
+   * New mode: a second source, already joined onto the base.
+   *
+   * Set when the editor was opened by dragging a column from one table onto
+   * another, where the two tables are the whole point of the gesture and making
+   * the user re-pick them would be asking a question they already answered.
+   */
+  join?: ProjectionCandidate | undefined;
+  /**
+   * Which of `join`'s columns to include. Absent ⇒ all of them, as picking the
+   * table from the dropdown does. A drag names ONE column, and pulling in the
+   * other twenty would bury it.
+   */
+  joinFields?: string[] | undefined;
+  /** New mode: seed the WHERE, keyed by output field. */
+  filters?: Record<string, string> | undefined;
   /** Edit mode: prefill from an existing projection. */
   initial?: { name: string; spec: ProjectionSpec } | undefined;
   /** Persist the projection; throw to keep the dialog open with an inline error. */
@@ -392,6 +408,18 @@ export class ProjectionDialog extends LitElement {
       // it as source 0. The user only picks join tables from `candidates`.
       this.name = `${opts.base.name} view`;
       this.addCandidateAsSource(opts.base);
+      if (opts.join) {
+        this.addCandidateAsSource(opts.join);
+        this.name = `${opts.base.name} + ${opts.join.name}`;
+        const alias = this.sources.at(-1)?.alias;
+        if (alias && opts.joinFields) this.includeOnlyFrom(alias, opts.joinFields);
+      }
+      // Ride in on `original`, which `editorToSpec` spreads first precisely so
+      // that what the editor does not model survives a save. `filters` is the
+      // one such field, and this is a new spec, so there is nothing to overwrite.
+      if (opts.filters && Object.keys(opts.filters).length > 0) {
+        this.originalSpec = { version: 1, sources: [], columns: [], filters: opts.filters };
+      }
     }
     void this.updateComplete.then(() => this.dialogEl?.showModal());
   }
@@ -427,6 +455,12 @@ export class ProjectionDialog extends LitElement {
 
   private addCandidateAsSource(cand: ProjectionCandidate): void {
     this.applyModel(addSourceToModel(this.modelOf(), cand));
+  }
+
+  /** Keep only `fields` from one source; everything else it brought is unticked. */
+  private includeOnlyFrom(alias: string, fields: readonly string[]): void {
+    const keep = new Set(fields);
+    this.columns = this.columns.map((c) => (c.alias === alias && c.field != null && !keep.has(c.field) ? { ...c, include: false } : c));
   }
 
   private removeSource(alias: string): void {

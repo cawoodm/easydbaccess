@@ -17,6 +17,7 @@ import { GRID_SETTINGS_ID, readHighlightNulls, readSortDescFirst, readWindowRows
 import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
 import { readSortSpecs, sortRowsBySpecs } from './row-sort.js';
 import { sameFilterMap } from './filter-map.js';
+import { writeColumnDrag } from './column-drag.js';
 import { nextSortSpecs } from './sort-cycle.js';
 import { runColumnScript, runValidateScript } from '../util/column-script.js';
 import { arrayMembers } from '@easydb/shared';
@@ -1995,8 +1996,20 @@ export class DataTable extends LitElement {
     // hijack the resize gutter's pointer drag and cover the sort click).
     this.dragSourceField = field;
     if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'move';
+      // `copyMove`, not `move`: within this grid the drag reorders (a move),
+      // but dropped on ANOTHER table it builds a projection, which takes a copy
+      // of nothing and moves nothing. Allowing both keeps either drop legal.
+      e.dataTransfer.effectAllowed = 'copyMove';
       e.dataTransfer.setData('text/x-easydb-col', field);
+      // The cross-table payload rides along on the same drag — see column-drag.ts.
+      const active: Record<string, string> = {};
+      for (const [f, q] of Object.entries(this.filters)) if (q && q.trim() !== '') active[f] = q;
+      writeColumnDrag(e, {
+        tableId: this.tableId,
+        field,
+        label: this.columns.find((c) => c.field === field)?.label || field,
+        filters: active,
+      });
     }
   }
 

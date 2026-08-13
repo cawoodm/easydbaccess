@@ -137,7 +137,22 @@ test.describe('visualization docking', () => {
     const after = (await panel.locator('.panel-stack-pane').first().boundingBox())!.height;
     expect(after).toBeGreaterThan(before + 20);
 
-    // Persisted on release, not per pointermove — so it survives a reload.
+    // Persisted on release, not per pointermove — so it survives a reload. Wait
+    // for the WRITE, not for the pixels: the release only queues it, and a
+    // reload that outran the queue used to fail this as if the size had been
+    // forgotten.
+    await expect
+      .poll(async () => {
+        const all = await page.evaluate(async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const insts = await (window as any).__easydb.store.viewInstances.find();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return insts.map((v: any) => v.dock?.size ?? null);
+        });
+        return all.some((size: number | null) => size != null && Math.abs(size - after) < 12);
+      })
+      .toBe(true);
+
     await page.reload();
     await waitForPanel(page, id);
     const restored = (await page

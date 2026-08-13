@@ -5,6 +5,7 @@
 ### Features
 
 - ✨ Delete Visible Data is the default option in a table's delete prompt (v0.0.366)
+- 🪶 Drag a column from one table onto another to start a projection joining the two, with that column selected (v0.0.368)
 - 🪶 A new `text` column type for prose: its funnel offers no value list, because every cell is different and too long to browse (v0.0.365)
 - 🪶 Run… in the script editor writes what a column script returns into the cells, so a computed column becomes data (v0.0.364)
 - ✨ A table's trash button asks what should go: all the data, the data a filter left visible, or the table (v0.0.363)

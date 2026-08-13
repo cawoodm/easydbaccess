@@ -5,6 +5,7 @@ import { unsafeSVG } from 'lit/directives/unsafe-svg.js';
 import { defineHostDialogs } from '@cawoodm/lit-dialogs';
 import { defineToastHost } from '@cawoodm/lit-toast';
 import { getContext } from '../app-context.js';
+import { hasColumnDrag } from '../table/column-drag.js';
 import '../dialogs/csv-paste-dialog.js';
 import type { CsvPasteDialog } from '../dialogs/csv-paste-dialog.js';
 import '../dialogs/new-table-dialog.js';
@@ -462,11 +463,15 @@ export class AppShell extends LitElement {
    * workspace overlay stands down while it has it.
    */
   private onDragOver = (e: DragEvent) => {
-    if (!hasFiles(e)) return;
+    const column = hasColumnDrag(e);
+    if (!hasFiles(e) && !column) return;
     e.preventDefault();
     const panel = this.tablePanelAt?.(e.target) ?? null;
     this.setDropTargetPanel(panel);
-    this.classList.toggle('drag-over', panel === null);
+    // A dragged COLUMN only has a meaning over another table's window. The
+    // workspace overlay ("drop to make a new table") would be a lie for it, so
+    // it never lights up for one.
+    this.classList.toggle('drag-over', !column && panel === null);
   };
 
   private onDragLeave = (e: DragEvent) => {
@@ -489,11 +494,14 @@ export class AppShell extends LitElement {
   private onDrop = async (e: DragEvent) => {
     this.classList.remove('drag-over');
     this.setDropTargetPanel(null);
-    if (!hasFiles(e)) return;
+    const column = hasColumnDrag(e);
+    if (!hasFiles(e) && !column) return;
     e.preventDefault();
     const ctx = await getContext();
-    const files = Array.from(e.dataTransfer?.files ?? []);
-    ctx.events.emit('drop:files', { files, event: e });
+    if (!column) {
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      ctx.events.emit('drop:files', { files, event: e });
+    }
     for (const fn of [...ctx.registries.dropHandlers]) {
       try {
         const handled = await fn(e, ctx.api);
@@ -542,7 +550,7 @@ export class AppShell extends LitElement {
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
           <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
-            ><span class="version">v0.0.367</span></a
+            ><span class="version">v0.0.368</span></a
           ></strong
         >
         ${this.headerButtons.filter((b) => b.variant !== 'secondary').map((b) => this.renderSlotButton(b, 'header'))}
