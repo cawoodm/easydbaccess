@@ -182,24 +182,29 @@ stale key is not loud: `row-reader.ts` drops a filter naming a field no column h
 (it would match nothing and empty the grid), so the filter would simply stop
 existing without anyone being told.
 
-## One column the grid owns: `_error`
+## What a Validate run adds to a cell
 
-Everything above reads its columns from `effColumns`, not from `this.columns`.
-They differ by exactly one entry: while a Validate run has something to report for
-this table, `_error` (label **Problem**) is appended, and the grid filters on it.
+`cellClass` / `problemOf` put one more state on a `<td>`, ahead of the type-based
+marking below: ` is-problem` for a cell the last ✓ run flagged, with the reason as
+the cell's `title`. The reasons come from
+[`table/row-errors.ts`](../../packages/renderer/src/table/row-errors.ts), a
+per-table registry the Validate plugin publishes to — `row id + field → why`,
+which is the half of a finding no store can hold, because a cell is wrong relative
+to a RULE rather than by its value.
 
-The split is the point. `this.columns` is the table's own record and is written
-BACK to the store — a resize and a reorder both patch it — so a synthetic column
-living in it would be saved as if the user had made it. `effColumns` is what
-renders, filters, searches and sorts. The persisting paths keep reading
-`this.columns`, which is why a `_error` drag or resize simply does nothing.
+A finding beats the type-based marking on the same cell: an empty cell that broke
+a Required rule is already pink from `is-null`, and `is-problem` is what puts a
+reason in its tooltip and keeps the mark when the empty-cell highlight is off. The
+pink is the same pink on purpose — "look here" is one idea, and the app should say
+it one way.
 
-The messages themselves come from [`table/row-errors.ts`](../../packages/renderer/src/table/row-errors.ts),
-a per-table registry the ✓ button publishes to, and are merged into rows inside
-`readPage`. The one thing the query contract cannot express is a filter on this
-field, because no store holds it: that case reads the flagged rows by id instead.
-See `docs/tech/PLUGINS.md` § _Checking every row_ for the whole shape and for why
-none of it is persisted.
+The colour is a preference (`grid:highlightErrors`, default on). The TOOLTIP is
+not: a reason nobody can read is a loss, not a taste.
+
+The other half of a run — each row's whole verdict — is an ordinary hidden column,
+`_error`, with ordinary stored values. Nothing in this element treats it specially
+except that its filter is never persisted, because a hidden column has no funnel to
+clear one from. See `docs/tech/PLUGINS.md` § _Checking every row_.
 
 ## The empty-cell highlight is a preference
 

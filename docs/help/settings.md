@@ -25,6 +25,10 @@ Preferences for how every grid behaves:
   visible whatever the column draws. Turn it off for a table that is empty on
   purpose, where the colour is only noise. A value that does not fit its column
   type stays marked red either way, because that is a fault and not a gap.
+- **Highlight cells Validate flagged** — after the ✓ button checks a table, every
+  cell that broke a rule gets the same pink background, and the reason is in its
+  tooltip. Turn the colour off to read the reasons on hover alone. The marks go
+  away by themselves when a later run finds nothing.
 - **Read big tables one page at a time (rows)** — a table with at least this many
   rows is read one page at a time as you scroll, instead of being held in memory
   whole. It opens in a moment rather than in a second and a half. Sorting,

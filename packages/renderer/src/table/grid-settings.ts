@@ -36,6 +36,19 @@ export async function readHighlightNulls(settings: { get<T>(pluginId: string, ke
 }
 
 /**
+ * Does a cell the last Validate run flagged get the same pink background?
+ * Defaults to true when unset — a run the user asked for should be visible.
+ *
+ * Separate from {@link readHighlightNulls} because the two mark different things:
+ * an empty cell may be empty on purpose (which is why that one can be switched
+ * off), while a flagged cell breaks a rule the user themselves set. The reason in
+ * the cell's tooltip is not behind this switch either way.
+ */
+export async function readHighlightErrors(settings: { get<T>(pluginId: string, key: string): Promise<T | undefined> }): Promise<boolean> {
+  return (await settings.get<boolean>(GRID_SETTINGS_ID, 'highlightErrors')) !== false;
+}
+
+/**
  * Row count from which a grid stops holding the whole table and reads one PAGE at
  * a time (`grid:windowRowsFrom`). `0` never windows.
  *

@@ -1,37 +1,43 @@
 // packages/renderer/src/table/row-errors.ts
 //
-// What the last Validate run found, held per table, and shown as a column the
-// store never sees.
+// What the last Validate run found, held per table: one message per row, and one
+// reason per offending CELL.
 //
-// The first version of the ✓ button wrote its findings into a second table,
-// `<name> issues`. That table filtered, sorted and exported — it was a table —
-// but it was the wrong place to FIX anything: the row needing the edit is in the
-// table the user was already looking at, and a copy of a problem goes stale the
-// moment they repair it. So the findings come back as a column of the table
-// itself, `_error`, and the grid filters on that. Fixing a row is then editing
-// the cell beside the message.
+// Two consumers, and they need different shapes of the same answer:
 //
-// **Nothing here is persisted.** No row's `data._error` is ever written to the
-// store: the grid merges the message into the rows it already holds, on their way
-// to the screen. So a verdict cannot be exported by accident, cannot sync to
-// another device, and cannot outlive the data it judged. A `render` script sees
-// `row._error` like any other field, which is the way out for a user who does
-// want it kept — write it into a column of their own.
+//  - **The grid** marks the cell that is wrong — pink like an empty one, with the
+//    reason in its tooltip. That needs `row + field → reason`, which nothing in
+//    the store holds: a cell is wrong relative to a rule, not by its value.
+//  - **The `_error` column** holds the whole row's verdict as text. That IS in the
+//    store — see below — so the grid reads it like any other column.
 //
-// The registry is a plain map with listeners, for the reason `visible-rows.ts`
-// gives: the producer (the Validate plugin) and the consumer (the grid) know each
-// other, publishing has to be conditional, and a module with no `document` in it
-// can be unit-tested in this repo's DOM-free vitest.
+// The findings were a second TABLE first (`Pets issues`), then a column the grid
+// synthesized and never persisted. Both are gone. `_error` is now an ordinary
+// column of the table, created hidden, and Validate owns its values: a run writes
+// the rows it flagged and clears the ones it no longer flags. Ordinary is what
+// makes the rest work — the columns editor can show it, a filter on it needs no
+// special case in the store, and renaming it hands the messages over as data,
+// because a field rename re-keys every row (`table/column-merge.ts`).
+//
+// So this registry is only the part that CANNOT be stored: the per-cell reasons,
+// and the fact that a run just happened. It is emptied at the start of every run
+// and lost on reload, which is correct — a verdict must not outlive the data it
+// judged. The text in `_error` survives, and the next run rewrites it.
+//
+// A plain registry with listeners, for the reason `visible-rows.ts` gives: the
+// producer (the Validate plugin) and the consumer (the grid) know each other, and
+// a module with no `document` in it can be unit-tested in this repo's DOM-free
+// vitest.
 
-import type { ColumnSpec, Row } from '@easydb/shared';
+import type { ColumnSpec } from '@easydb/shared';
 import type { RowIssue } from './validate-rules.js';
 
 /**
- * The field the messages arrive under.
+ * The field Validate writes its verdict to.
  *
- * Leading underscore because it is not the user's column: it marks the field as
- * the app's own, the way `_id` does elsewhere, and it keeps the name clear of a
- * real column called "error" that a user may already have.
+ * Leading underscore because the app made it, not the user. It stays a normal
+ * field in every other way: renaming it in the columns editor makes it theirs,
+ * and the next run creates a fresh `_error` beside it rather than taking it back.
  */
 export const ERROR_FIELD = '_error';
 
@@ -39,45 +45,71 @@ export const ERROR_FIELD = '_error';
 export const ERROR_FILTER = '!NULL';
 
 /**
- * The column the grid appends while a table has messages.
+ * The column a run creates when the table has no `_error` yet.
  *
- * `text`, so its funnel offers no value list: every message is different and too
- * long to browse, so the list would be one option per row (the rule
- * `search/facet-values.ts` documents). Typing in the funnel still narrows, which
- * is how a user reads "just the duplicates".
+ * `hidden`, because the message is not what the user is reading the table for —
+ * the pink cell and its tooltip say what is wrong, in place. Hidden ONLY at
+ * creation: a later run must not re-hide a column the user unhid, so this spec is
+ * used for the insert and never to patch one that already exists.
  *
- * `readonly`, because a message is derived. There is nowhere to write an edit of
- * it back to.
+ * `text`, so its funnel offers no value list: every message is different, and a
+ * list would be one option per row (the rule `search/facet-values.ts` documents).
+ *
+ * Deliberately NOT `readonly`. The columns editor keeps a column's untouched
+ * fields through a save, so `readonly` would follow the field through a rename
+ * and leave the user with a column of their own they could not edit.
  */
 export function errorColumnSpec(): ColumnSpec {
-  return { field: ERROR_FIELD, label: 'Problem', type: 'text', readonly: true, description: 'What Validate found in this row. Not stored — press ✓ again to refresh it.' };
+  return {
+    field: ERROR_FIELD,
+    label: 'Problem',
+    type: 'text',
+    hidden: true,
+    description: 'What Validate found in this row. Rewritten by every run — rename this column to keep a copy.',
+  };
 }
 
-/** Several problems in one row, as one cell. */
-function joinReasons(issues: readonly RowIssue[]): string {
-  return issues.map((i) => `${i.label} ${i.reason}`).join(' · ');
+/** One row's verdict, in the two shapes its two readers need. */
+export interface RowProblems {
+  /** Every problem in the row as one line. This is what `_error` holds. */
+  message: string;
+  /** Field → why that cell is wrong. One entry per offending column. */
+  fields: ReadonlyMap<string, string>;
 }
 
-/**
- * The issue list as one message per row.
- *
- * Grouped by row, not by column, because the column is already named inside each
- * message and the row is what the grid shows.
- */
-export function rowErrorsFrom(issues: readonly RowIssue[]): Map<string, string> {
+export type RowErrors = ReadonlyMap<string, RowProblems>;
+export type RowErrorsListener = (errors: RowErrors | null) => void;
+
+/** How a single issue reads. The column is named, so a cell tooltip stands alone. */
+function say(issue: RowIssue): string {
+  return `${issue.label} ${issue.reason}`;
+}
+
+/** Group the issue list by row, and within a row by field. */
+export function rowErrorsFrom(issues: readonly RowIssue[]): Map<string, RowProblems> {
   const byRow = new Map<string, RowIssue[]>();
   for (const i of issues) {
     const list = byRow.get(i.rowId);
     if (list) list.push(i);
     else byRow.set(i.rowId, [i]);
   }
-  const out = new Map<string, string>();
-  for (const [rowId, list] of byRow) out.set(rowId, joinReasons(list));
+  const out = new Map<string, RowProblems>();
+  for (const [rowId, list] of byRow) {
+    const fields = new Map<string, string>();
+    for (const i of list) {
+      // A cell can break two rules at once — empty AND rejected by a script.
+      const had = fields.get(i.field);
+      fields.set(i.field, had ? `${had} · ${say(i)}` : say(i));
+    }
+    out.set(rowId, { message: list.map(say).join(' · '), fields });
+  }
   return out;
 }
 
-export type RowErrors = ReadonlyMap<string, string>;
-export type RowErrorsListener = (errors: RowErrors | null) => void;
+/** Why this cell is wrong, or undefined when it is not. */
+export function problemAt(errors: RowErrors | null | undefined, rowId: string, field: string): string | undefined {
+  return errors?.get(rowId)?.fields.get(field);
+}
 
 const errors = new Map<string, RowErrors>();
 const listeners = new Map<string, Set<RowErrorsListener>>();
@@ -98,7 +130,7 @@ function announce(tableId: string): void {
 }
 
 /**
- * Publish what a run found. Replaces the previous run's messages outright, which
+ * Publish what a run found. Replaces the previous run's findings outright, which
  * is what "cleared on every run" means — a row repaired since the last press is
  * simply not in the new map.
  */
@@ -111,7 +143,7 @@ export function setRowErrors(tableId: string, found: RowErrors): void {
   announce(tableId);
 }
 
-/** Drop this table's messages, taking the column and its filter with them. */
+/** Drop this table's findings, taking the cell marks and the filter with them. */
 export function clearRowErrors(tableId: string): void {
   if (!errors.delete(tableId)) return;
   announce(tableId);
@@ -121,7 +153,7 @@ export function rowErrorsOf(tableId: string): RowErrors | null {
   return errors.get(tableId) ?? null;
 }
 
-/** Hear about this table's messages. Returns the release function. */
+/** Hear about this table's findings. Returns the release function. */
 export function watchRowErrors(tableId: string, fn: RowErrorsListener): () => void {
   let set = listeners.get(tableId);
   if (!set) {
@@ -137,24 +169,7 @@ export function watchRowErrors(tableId: string, fn: RowErrorsListener): () => vo
   };
 }
 
-/**
- * Merge the messages into rows on their way to the screen.
- *
- * A new object per row, never a write into the stored one: the rows a store hands
- * over are shared with whatever else is holding them (a live subscription, a
- * docked visualization), and stamping a field into those would be the persistence
- * this module exists to avoid.
- *
- * Rows with nothing to say get an EMPTY `_error`, not a missing one. A missing
- * field and an empty one already mean the same thing to the filter language
- * (`NULL` matches both), and the column reads better as blank than as undefined.
- */
-export function decorateRows(rows: readonly Row[], found: RowErrors | null): Row[] {
-  if (!found || found.size === 0) return rows as Row[];
-  return rows.map((r) => ({ ...r, data: { ...r.data, [ERROR_FIELD]: found.get(r.id) ?? '' } }));
-}
-
-/** Test seam: forget every table's messages and every listener. */
+/** Test seam: forget every table's findings and every listener. */
 export function __resetRowErrors(): void {
   errors.clear();
   listeners.clear();

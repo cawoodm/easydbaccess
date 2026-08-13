@@ -38,6 +38,15 @@ export function init(api: HostApi): void {
         'An empty cell gets a pink background, so a gap in the data is visible whatever the column draws. Turn it off for a table that is mostly empty on purpose, where the colour is noise. A value that does not fit its column type stays marked red either way.',
     },
     {
+      key: 'highlightErrors',
+      label: 'Highlight cells Validate flagged',
+      type: 'boolean',
+      default: true,
+      scope: 'workspace',
+      description:
+        'After the ✓ button checks a table, every cell that broke a rule gets the same pink background, and the reason is in its tooltip. Turn the colour off to read the reasons on hover alone; the marks go away by themselves when the next run finds nothing.',
+    },
+    {
       key: 'windowRowsFrom',
       label: 'Read big tables one page at a time (rows)',
       type: 'number',

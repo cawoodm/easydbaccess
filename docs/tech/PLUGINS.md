@@ -232,44 +232,72 @@ worth knowing:
   that throws for every row would otherwise return 609,283 issues that all say
   the same thing.
 
-The results come back as a COLUMN of the table that was checked, `_error`, with
-the grid filtered to the rows that have one — see `table/row-errors.ts` for the
-registry behind it and `table/data-table.ts` for the three things it changes
-there. The dialog that appears is the summary, one line per column in the grid's
-own column order, with a **Show me** button that fronts the table's own window;
-the rows are already narrowed behind it.
+A run leaves three things behind, and they are deliberately different KINDS of
+thing:
+
+1. **A mark on each offending cell** — pink like an empty one, with the reason in
+   its `title`. This is what the user reads. It cannot be stored, because a cell
+   is wrong relative to a RULE, not by its value, so it lives in the
+   `table/row-errors.ts` registry and dies with the session.
+2. **The grid narrowed** to the rows with a finding, so a big table shows the work
+   and nothing else. An ordinary entry in `this.filters` — see below for the one
+   thing about it that is not ordinary.
+3. **A `_error` column** holding each row's whole verdict as text. An ordinary
+   column of the table, created `hidden`, whose values Validate owns.
 
 This was a second TABLE at first, `<table> issues`, on the grounds that "let me
 filter and fix these" is a request for filtering, sorting and exporting and this
 app has all three — for tables. It was the wrong place to work. The row that
 needs the edit is in the table the user was already looking at, a copy of a
 problem cannot be repaired, and the copy is stale the moment the original is.
+Then it was a column the grid synthesized and never persisted, which broke on the
+next requirement: a column the columns editor can show has to BE a column.
 
-**Nothing about `_error` is persisted**, and that is the load-bearing part:
+**Why `_error` is stored data.** It is one `patch` per flagged row, which is a
+cost, and the alternative looked free — merge the text in on the way to the
+screen and store nothing. But a column with nothing behind it exports as blank,
+syncs as blank, and RENAMING it — the way a user keeps a copy, since a rename
+re-keys every row (`table/column-merge.ts`) — hands over an empty column. So the
+messages are ordinary data:
 
-- No row's stored `data` ever gains the field. `readPage` merges it into the rows
-  on their way to the screen, and `decorateRows` copies each row rather than
-  stamping the one the store handed over — a store's row is shared with whatever
-  else is holding it.
-- The COLUMN is not in `table.columns` either. `data-table` keeps `this.columns`
-  exactly as the store gave it, because that field is written BACK (a resize, a
-  reorder), and renders/filters/sorts from `effColumns` instead.
-- The FILTER is dropped by `saveFilters`, and carried across `adoptQueryState` —
-  a table record arriving from the store cannot speak for a key the store does
-  not have, and any write to that record lands there (being fronted stamps the
-  front order), so leaving it out would take the filter off the grid on the next
-  click in the panel.
+- `writeMessages` (in the plugin) writes the flagged rows and clears the ones a
+  previous run flagged that are clean now. Bounded by the rows involved, never the
+  table: a clean 600,000-row table is not written to at all.
+- **Which rows to clear comes from the SCAN** (`ScanResult.stale`), not from the
+  previous run's map. That map is lost on reload while the text it wrote is not,
+  so a run after a reload would leave last week's verdict on rows that are fine.
+  Only the scan sees every row, so only the scan can answer this.
+- A row is not written when its message has not changed — otherwise every run
+  would bump `updatedAt` on every flagged row and give sync work to do.
+- A run that was CANCELLED or that hit a per-column cap may add messages but never
+  clears any. It did not speak for every row: a row past the cap is still wrong and
+  this run said nothing about it, so taking its message back would erase a true
+  verdict on the strength of not having looked.
+- `table.source` or `table.readonly` ⇒ no column and no writes. A projection's
+  rows are computed and Datasette's are remote. The cell marks and tooltips still
+  work there, because those were never stored.
 
-A `render` script sees `row._error` like any other field, which is the escape
-hatch for a user who wants it kept: write it into a column of their own.
+**Created hidden, exactly once.** `errorColumnSpec()` is used for the INSERT and
+never to patch an existing column, so a later run cannot re-hide one the user
+unhid. And a RENAMED column is not found by field name at all, which is what
+makes it theirs and makes the next run create a fresh `_error` beside it. The spec
+is deliberately not `readonly`: `buildColumnSpec` keeps a column's untouched
+fields through a columns-editor save, so `readonly` would follow the field through
+a rename and leave the user with a column of their own they could not edit.
 
-One consequence: the `_error` filter is the single predicate no store can answer.
-Pushed down it would be dropped as a filter on an unknown field — `row-reader.ts`
-drops those deliberately — and the grid would show every row under a filter
-claiming otherwise. So that case reads the flagged rows BY ID (the ids are what
-the registry holds, and the scan's own cap bounds them) and applies the rest of
-the request in memory with `applyRowRequest`, which is what keeps the other
-filters, the search, the sort and the slice working while it is on.
+**The one thing that is not ordinary: the filter is never saved.** `saveFilters`
+drops the `_error` key and `adoptQueryState` carries it across. The column is
+hidden, so it has no header and no funnel — a saved filter on it would bring a
+grid back from a reload showing three rows of four thousand with nothing on screen
+to explain why. Not saving it makes a reload the way out. `adoptQueryState` has to
+carry it because ANY write to the table record lands there, and being fronted
+stamps the front order — so dropping it would take the filter off the grid on the
+user's next click in the panel.
+
+One optimisation worth knowing: while the findings are up, the `_error` filter is
+answered by reading the flagged rows BY ID rather than by the store. The ordinary
+path is correct — it is real stored data — but on a big table it means reading
+every row to match it, and the run that set the filter already knows the ids.
 
 Both orderings in that summary are fixed rather than encountered: rows come back
 in the store's own order (a Dexie key is a random UUID), so an encounter order

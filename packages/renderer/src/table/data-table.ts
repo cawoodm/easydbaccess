@@ -13,7 +13,7 @@ import '../chrome/filter-combobox.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { matchesColumnFilter } from '@easydb/shared';
 import { FACET_MAX_OPTIONS, facetable, facetCounts, facetValues } from '../search/facet-values.js';
-import { GRID_SETTINGS_ID, readHighlightNulls, readSortDescFirst, readWindowRowsFrom, WINDOW_ROWS_FROM_DEFAULT } from './grid-settings.js';
+import { GRID_SETTINGS_ID, readHighlightErrors, readHighlightNulls, readSortDescFirst, readWindowRowsFrom, WINDOW_ROWS_FROM_DEFAULT } from './grid-settings.js';
 import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
 import { readSortSpecs, sortRowsBySpecs } from './row-sort.js';
 import { sameFilterMap } from './filter-map.js';
@@ -24,7 +24,7 @@ import { arrayMembers } from '@easydb/shared';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cachedRowCount, rememberRowCount } from './row-count-cache.js';
 import { rememberRowRequest } from './visible-request.js';
-import { decorateRows, ERROR_FIELD, ERROR_FILTER, errorColumnSpec, rowErrorsOf, watchRowErrors, type RowErrors } from './row-errors.js';
+import { ERROR_FIELD, ERROR_FILTER, problemAt, rowErrorsOf, watchRowErrors, type RowErrors } from './row-errors.js';
 import { TABLE_LOADING_EVENT, tableLoadingState, type TableLoadingDetail } from './table-loading.js';
 import { emitVisibleRows, provideVisibleRows, visibleRowsWanted, type VisibleRowsDetail } from './visible-rows.js';
 import { formatByType, toDateInput, toDatetimeInput } from '../util/local-datetime.js';
@@ -398,6 +398,17 @@ export class DataTable extends LitElement {
       td.is-null input[type='text'] {
         background: transparent;
       }
+      /* A cell the last Validate run flagged. The SAME pink as an empty cell, on
+         purpose: "look here" is one idea and the app should say it one way. What
+         tells them apart is the tooltip, which an empty cell has nothing to put
+         in. (No backticks in here — this is inside a css template literal.) */
+      td.is-problem {
+        background: #fce7f3;
+      }
+      td.is-problem input[type='text'],
+      td.is-problem input[type='number'] {
+        background: transparent;
+      }
       /* Invalid stored value: the app-wide invalid red (see util/cell-validity),
          as an inset outline so the cell keeps its size and the grid lines stay
          put. Renderers additionally mark their own inputs. */
@@ -520,6 +531,12 @@ export class DataTable extends LitElement {
    */
   @state() private highlightNulls = true;
   /**
+   * Does a cell a Validate run flagged get the same pink (`grid:highlightErrors`)?
+   * Read into state for the same reason as the highlight above. The TOOLTIP is not
+   * behind this switch: a reason nobody can read is not a preference, it is a loss.
+   */
+  @state() private highlightErrors = true;
+  /**
    * Row count from which this grid reads one PAGE at a time instead of holding
    * the whole table (`grid:windowRowsFrom`, 0 = never). Kept fresh by the same
    * settings-changed event as the highlight above.
@@ -563,28 +580,16 @@ export class DataTable extends LitElement {
   private tableColumns: ColumnSpec[] = [];
   private viewSubUnsub?: () => void;
   /**
-   * What the last Validate run found, keyed by row id, or null.
+   * What the last Validate run found: row id → the message, and which of that
+   * row's cells is wrong and why.
    *
-   * Held here rather than fetched, because it is not in the store — see
-   * `row-errors.ts`. While it is set the grid shows one extra column and can
-   * narrow to the rows that have a message.
+   * The per-CELL part is the half no store can hold — a cell is wrong relative to
+   * a rule, not by its value — so it lives in memory and dies with the session.
+   * The row's whole verdict is in the table's own `_error` column, which the grid
+   * reads like any other. See `row-errors.ts`.
    */
   @state() private rowErrors: RowErrors | null = null;
   private errorsUnsub?: () => void;
-
-  /**
-   * The columns of this view, plus `_error` while there are messages to show.
-   *
-   * Separate from `this.columns` on purpose: that one is the table's own record
-   * and is written BACK to the store (a resize, a reorder). A synthetic column in
-   * it would be persisted as if the user had made it. So the store-facing field
-   * stays exactly what came out of the store, and everything that renders,
-   * filters, searches or sorts reads this instead.
-   */
-  private get effColumns(): ColumnSpec[] {
-    if (!this.rowErrors) return this.columns;
-    return [...this.columns, errorColumnSpec()];
-  }
 
   private get viewMode(): boolean {
     return !!this.viewInstanceId;
@@ -725,6 +730,7 @@ export class DataTable extends LitElement {
     try {
       const ctx = await getContext();
       this.highlightNulls = await readHighlightNulls(ctx.api.settings);
+      this.highlightErrors = await readHighlightErrors(ctx.api.settings);
       const from = await readWindowRowsFrom(ctx.api.settings);
       const changed = from !== this.windowRowsFrom;
       this.windowRowsFrom = from;
@@ -1117,12 +1123,7 @@ export class DataTable extends LitElement {
   private readPage(coll: DataCollection<Row>, req: RowRequest): Promise<RowPage> {
     const key = JSON.stringify(req);
     if (this.inflight?.key === key) return this.inflight.page;
-    const errors = this.rowErrors;
-    // Every row this grid holds comes through here, so the messages are merged in
-    // one place — the store never sees the field and never returns it.
-    const read = this.errorRowsOnly(req)
-      ? this.readErrorRows(coll, req, errors!)
-      : readRows(coll, req, ROW_FETCH_CAP).then((p) => ({ ...p, rows: decorateRows(p.rows, errors) }));
+    const read = this.errorRowsOnly(req) ? this.readErrorRows(coll, req, this.rowErrors!) : readRows(coll, req, ROW_FETCH_CAP);
     const page = read.finally(() => {
       if (this.inflight?.key === key) this.inflight = null;
     });
@@ -1133,10 +1134,11 @@ export class DataTable extends LitElement {
   /**
    * Is this read asking only for rows a Validate run flagged?
    *
-   * The `_error` filter is the one predicate no store can answer: the field is not
-   * in the data. Pushed down it would be dropped as a filter on an unknown field —
-   * `row-reader.ts` drops those on purpose — and the grid would show every row
-   * under a filter that says otherwise. So this case is read from the ids instead.
+   * A shortcut, not a correction: `_error` is real stored data, so the ordinary
+   * path answers this filter correctly — by reading the table to match it, which on
+   * a big one is the whole-table read the query contract exists to avoid. The run
+   * that set the filter already knows the ids, so while it is on screen the answer
+   * is a few hundred primary-key lookups instead.
    */
   private errorRowsOnly(req: RowRequest): boolean {
     if (!this.rowErrors || this.rowErrors.size === 0) return false;
@@ -1146,25 +1148,44 @@ export class DataTable extends LitElement {
   /**
    * Read exactly the rows a Validate run flagged, by id.
    *
-   * Bounded by what the scan collected (500 per column), so this is a few hundred
-   * `findOne`s against a primary key rather than a scan — the alternative, reading
-   * the table to filter it in memory, is the 609,283-row read the whole query
-   * contract exists to avoid.
-   *
-   * The rest of the request is then applied here, over rows carrying `_error`, by
-   * the same function the reader uses. That is what makes the OTHER filters, the
-   * search, the sort and the slice keep working while this one is on — including a
-   * filter typed into `_error` itself, which narrows the messages.
+   * The rest of the request is then applied here by the same function the reader
+   * uses, which is what keeps the OTHER filters, the search, the sort and the slice
+   * working while this one is on — including a filter typed into `_error` itself,
+   * which narrows the messages.
    */
+  /**
+   * Why this cell is wrong, according to the last Validate run — the text its
+   * tooltip shows. Empty when there is nothing wrong with it.
+   *
+   * Beats the value tooltip when both apply. A cell over its maximum length is
+   * showing its value already; what it is not showing is the limit it broke.
+   */
+  private problemOf(row: Row, col: ColumnSpec): string {
+    return problemAt(this.rowErrors, row.id, col.field) ?? '';
+  }
+
+  /**
+   * The state suffix for a `<td>`: a Validate finding first, then the type-based
+   * marking every cell gets.
+   *
+   * A finding wins because it is the more specific answer about the same cell. An
+   * empty cell that broke a Required rule is already pink from `is-null`; saying
+   * `is-problem` instead is what puts a reason in the tooltip and keeps the mark
+   * when the empty-cell highlight is switched off.
+   */
+  private cellClass(row: Row, col: ColumnSpec): string {
+    if (this.problemOf(row, col) !== '') return this.highlightErrors ? ' is-problem' : '';
+    return cellStateClass(row, col, this.highlightNulls);
+  }
+
   private async readErrorRows(coll: DataCollection<Row>, req: RowRequest, errors: RowErrors): Promise<RowPage> {
     const found = await Promise.all([...errors.keys()].map((id) => coll.findOne(id)));
     // A row deleted since the scan is simply gone. Nothing to say about it: the
     // problem it had went with it.
-    const rows = decorateRows(
+    return applyRowRequest(
       found.filter((r): r is Row => !!r),
-      errors,
+      req,
     );
-    return applyRowRequest(rows, req);
   }
 
   /**
@@ -1316,7 +1337,7 @@ export class DataTable extends LitElement {
   private rowRequest(windowed = false, skipCount = false): RowRequest {
     const search = [this.localQuery.trim(), this.globalQuery.trim()].filter(Boolean).join(' ');
     return {
-      columns: this.effColumns,
+      columns: this.columns,
       filters: this.filters,
       ...(search ? { search } : {}),
       ...(this.sortSpecs.length > 0 ? { sort: this.sortSpecs } : {}),
@@ -1430,11 +1451,11 @@ export class DataTable extends LitElement {
     // Don't stomp on filters the user is mid-editing (a debounced save is
     // pending) with the older store value — that reverts the just-typed filter.
     if (this.filterSaveTimer == null) {
-      // The `_error` filter is not in the store and never will be, so a record
-      // arriving from it cannot speak for that key. Carried across instead. Any
-      // write to the table record lands here — being fronted stamps the front
-      // order — so dropping it would take the Validate filter off the grid on the
-      // next click anywhere in the panel.
+      // The `_error` filter is deliberately never saved (see `saveFilters`), so a
+      // record arriving from the store cannot speak for that key. Carried across
+      // instead. Any write to the table record lands here — being fronted stamps
+      // the front order — so dropping it would take the Validate filter off the
+      // grid on the next click anywhere in the panel.
       const kept = this.filters[ERROR_FIELD];
       const next = kept === undefined ? filters : { ...filters, [ERROR_FIELD]: kept };
       filtersChanged = !sameFilterMap(this.filters, next);
@@ -1449,12 +1470,11 @@ export class DataTable extends LitElement {
    * Take on what a Validate run found — and put the grid on it.
    *
    * The filter is applied here rather than by the plugin because the plugin has no
-   * handle on the grid, and because the two states belong together: a `_error`
-   * filter with no messages behind it narrows to nothing, and messages nobody
-   * filtered on are a column of mostly blanks. Applied as an ordinary entry in
-   * `this.filters`, so the funnel shows it and the user can clear it or type in it
-   * like any other — it is only the SAVING of it that is special (see
-   * `saveFilters`).
+   * handle on the grid, and because the two go together: a `_error` filter with no
+   * findings behind it narrows to nothing, and findings nobody filtered on leave
+   * the user hunting for pink cells in a table of four thousand rows. Applied as an
+   * ordinary entry in `this.filters` — it is only the SAVING of it that is special
+   * (see `saveFilters`).
    */
   private adoptRowErrors(found: RowErrors | null): void {
     this.rowErrors = found && found.size > 0 ? found : null;
@@ -1810,7 +1830,7 @@ export class DataTable extends LitElement {
     return active.map(([field, query]) => ({
       field,
       query,
-      type: this.effColumns.find((c) => c.field === field)?.type,
+      type: this.columns.find((c) => c.field === field)?.type,
     }));
   }
 
@@ -1818,12 +1838,12 @@ export class DataTable extends LitElement {
     // A column flagged `filterable: false` is excluded from free-text search
     // as well as from the per-column funnel. A stored per-column filter that
     // predates the flag being set must not silently keep narrowing the grid.
-    const unfilterable = new Set(this.effColumns.filter((c) => c.filterable === false).map((c) => c.field));
+    const unfilterable = new Set(this.columns.filter((c) => c.filterable === false).map((c) => c.field));
     // ...and a filter on a field no column has is worse than silent: it has no
     // funnel to clear it from and matches nothing, so the grid empties with
     // nothing on screen to explain why. See `row-reader.ts`, which drops the
     // same ones on the store-query path.
-    const known = new Set(this.effColumns.map((c) => c.field));
+    const known = new Set(this.columns.map((c) => c.field));
     const active = Object.entries(this.filters).filter(([field, q]) => q && q.trim().length > 0 && !unfilterable.has(field) && known.has(field));
     const gq = this.globalQuery.trim();
     const lq = this.localQuery.trim();
@@ -1840,14 +1860,14 @@ export class DataTable extends LitElement {
     // columns (name or label), excluding non-filterable ones.
     // Same rule the reader applies: a scripted column that stores nothing is not
     // searchable, so it must not be offered as one either.
-    const searchable = searchableColumns(this.effColumns, this.rows);
+    const searchable = searchableColumns(this.columns, this.rows);
     if (lq) rows = searchRowsByField(rows, lq, searchable);
     if (gq) rows = searchRowsByField(rows, gq, searchable);
     return rows;
   }
 
   private sortedRows(): Row[] {
-    return sortRowsBySpecs(this.filteredRows(), this.sortSpecs, this.effColumns);
+    return sortRowsBySpecs(this.filteredRows(), this.sortSpecs, this.columns);
   }
 
   private async openFilterPicker(e: Event, field: string) {
@@ -1861,7 +1881,7 @@ export class DataTable extends LitElement {
     // The counting rules (blanks, order, the boolean domain) live in
     // `search/facet-values.ts`, which a view window's filter chip shares.
     const { values, blanks } = facetCounts(this.rowsFacetedFor(field), field, {
-      type: this.effColumns.find((c) => c.field === field)?.type,
+      type: this.columns.find((c) => c.field === field)?.type,
     });
     // Toggles apply live while the popover stays open (multi-value tri-state);
     // the promise only reports dismissal or an explicit Clear.
@@ -1901,7 +1921,7 @@ export class DataTable extends LitElement {
     // A `text` column has no value list to read — see `search/facet-values.ts`.
     // Worth catching before the query rather than after: on a big table this is
     // a full GROUP BY whose answer would be one option per row.
-    if (this.effColumns.find((c) => c.field === field)?.type === 'text') {
+    if (this.columns.find((c) => c.field === field)?.type === 'text') {
       return { values: [], blanks: 0, note: 'This column holds text, so it has no list of values to pick from.' };
     }
     const coll = this.rowColl;
@@ -1927,7 +1947,7 @@ export class DataTable extends LitElement {
       // of all-true rows would otherwise leave no way to filter for false. The
       // in-memory list does this in `facetCounts`; a store that grouped only the
       // values present cannot, so the domain is put back here.
-      if (this.effColumns.find((c) => c.field === field)?.type === 'boolean') {
+      if (this.columns.find((c) => c.field === field)?.type === 'boolean') {
         const found = new Map(values.map((v) => [v.value, v.count]));
         const domain = ['true', 'false'].map((value) => ({ value, count: found.get(value) ?? 0 }));
         values = [...domain, ...values.filter((v) => v.value !== 'true' && v.value !== 'false')];
@@ -1942,7 +1962,7 @@ export class DataTable extends LitElement {
       // A store that cannot answer must not leave the picker looking refreshed.
       return {
         values: this.values(field),
-        blanks: facetCounts(this.rowsFacetedFor(field), field, { type: this.effColumns.find((c) => c.field === field)?.type }).blanks,
+        blanks: facetCounts(this.rowsFacetedFor(field), field, { type: this.columns.find((c) => c.field === field)?.type }).blanks,
         note: 'The values could not be read — still showing the rows loaded so far.',
       };
     }
@@ -1950,7 +1970,7 @@ export class DataTable extends LitElement {
 
   /** The in-memory faceted values for one field, as the picker first shows them. */
   private values(field: string): Array<{ value: string; count: number }> {
-    return facetCounts(this.rowsFacetedFor(field), field, { type: this.effColumns.find((c) => c.field === field)?.type }).values;
+    return facetCounts(this.rowsFacetedFor(field), field, { type: this.columns.find((c) => c.field === field)?.type }).values;
   }
 
   private onFilterInput(field: string, value: string) {
@@ -1972,7 +1992,7 @@ export class DataTable extends LitElement {
   }
 
   private get visibleColumns(): ColumnSpec[] {
-    return this.effColumns.filter((c) => !c.hidden);
+    return this.columns.filter((c) => !c.hidden);
   }
 
   /**
@@ -2109,8 +2129,8 @@ export class DataTable extends LitElement {
       // The cross-table payload rides along on the same drag — see column-drag.ts.
       const active: Record<string, string> = {};
       // `_error` left out for the same reason `saveFilters` leaves it out: a
-      // projection built from this drag would carry a filter on a field its source
-      // does not have.
+      // projection built from this drag would open filtered by a verdict from a run
+      // the user has probably forgotten.
       for (const [f, q] of Object.entries(this.filters)) if (f !== ERROR_FIELD && q && q.trim() !== '') active[f] = q;
       writeColumnDrag(e, {
         tableId: this.tableId,
@@ -2176,9 +2196,11 @@ export class DataTable extends LitElement {
 
   private async saveFilters() {
     const ctx = await getContext();
-    // Strip empty entries so the persisted shape stays tidy — and `_error`, which
-    // is not the table's own column. Saved, it would be a verdict on data that has
-    // since been edited, restored on the next reload with nothing behind it.
+    // Strip empty entries so the persisted shape stays tidy — and `_error`, whose
+    // column is hidden. A saved filter on a column with no header has no funnel to
+    // clear it from: the grid would come back from a reload showing three rows of a
+    // table with four thousand, with nothing on screen to explain why. Reloading is
+    // therefore the way out of it, which is why this one is not saved.
     const cleaned: Record<string, string> = {};
     for (const [k, v] of Object.entries(this.filters)) if (k !== ERROR_FIELD && v && v.trim().length > 0) cleaned[k] = v;
     if (this.viewMode) {
@@ -2395,8 +2417,8 @@ export class DataTable extends LitElement {
                 ${cols.map(
                   (c) =>
                     html`<td
-                      class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}${c.renderer && this.cellRenderers?.get(c.renderer) ? ' has-renderer' : ''}${cellStateClass(r, c, this.highlightNulls)}`}
-                      title=${cellTooltip(r, c)}
+                      class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}${c.renderer && this.cellRenderers?.get(c.renderer) ? ' has-renderer' : ''}${this.cellClass(r, c)}`}
+                      title=${this.problemOf(r, c) || cellTooltip(r, c)}
                     >
                       ${this.renderCell(r, c)}
                     </td>`,

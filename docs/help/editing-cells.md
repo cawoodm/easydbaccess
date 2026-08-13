@@ -67,28 +67,40 @@ rule its columns carry: Required, Maximum, Unique and your own validation
 scripts.
 
 What you get back is a summary — one line per column, in the order the columns
-appear — and **the table itself, narrowed to the rows with something wrong**. A
-new column, **Problem**, says what that is, one message per row. Fix the cell
-beside the message.
+appear — and **the table itself, narrowed to the rows with something wrong**.
+Every cell that broke a rule is **pink**, and hovering it says why: `Age value 40
+is over the maximum of 20`. Fix it in place.
 
-The Problem column has an ordinary funnel, so you can clear the filter to see
-every row again, or type in it to read one kind of problem at a time. Press ✓
-again when you have finished fixing: the rows you repaired drop out of the list,
-and a run that finds nothing takes the column away.
+Press ✓ again when you have finished. The rows you repaired drop out, and a run
+that finds nothing leaves the table as it was.
 
-Four things worth knowing:
+### The `_error` column
 
-- **Nothing about this is saved.** The Problem column is not part of your table:
-  it is not exported, not synced and not there after a reload. It is what the
-  last run found, and it does not outlive the data it judged. A column script
-  can read it as `row._error` — that is the way to keep it, by writing it into a
-  column of your own.
+Each run also writes the whole row's verdict into a column called `_error`,
+created the first time it is needed. It is **hidden**, because the pink cell
+already says it where you are looking — but it is an ordinary column:
+
+- The **columns editor** shows it, so you can unhide it and read the messages in
+  a column of their own. Once you unhide it, it stays unhidden.
+- **Rename it** and it is yours. The messages come with it, the next ✓ leaves it
+  alone, and a fresh `_error` is made for that run. This is how you keep a copy
+  of what a run found.
+- A script can read it as `row._error` like any other field.
+
+Each run rewrites it: messages for the rows that are wrong now, and nothing on
+the rows that are not. So it is never a verdict on data that has since changed.
+
+Three more things worth knowing:
+
 - A table whose columns carry no rules is not read at all. There is nothing to
   check, and the button says so instead of pretending to work.
 - A long scan shows a bar under the header and can be stopped with **Esc**. It
   then reports what it found so far.
 - A column stops listing after 500 problems and counts the rest, so one broken
   rule cannot bury the others.
+
+The pink is a setting — **Highlight cells Validate flagged**, beside the
+empty-cell one in Settings. Turning it off leaves the reason on hover.
 
 ## Renderers — changing how a value is displayed
 
