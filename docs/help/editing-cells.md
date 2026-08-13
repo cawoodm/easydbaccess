@@ -111,6 +111,28 @@ The **+** works here too, and this list is shared with views: a script
 you save on a column is offered when you script a view's `$TOKEN`, and one you
 save there is offered on your columns. Validation rules stay in their own list.
 
+#### Turning a computed column into data
+
+A script normally computes on the way to the screen and leaves the stored cell
+alone. **Run…** in the script editor does the opposite: it writes what the
+script returns into the cells, so the values become ordinary data you can
+export, sync, filter and edit.
+
+It asks twice before writing, because neither answer has a safe default:
+
+- **Which rows** — only when the grid is showing fewer than the table holds.
+  You can write the whole table or just what the filter left.
+- **Keep or clear the script** — keeping it leaves the column computed and
+  read-only, so the written values only show up in an export. Clearing it hands
+  the column over to the data.
+
+The write happens straight away and cannot be undone. Clearing the script is a
+column edit like any other, so it lands when you save the columns editor. Rows
+the script throws on are skipped and counted — the message says how many.
+
+**Run…** is not offered while you are still creating a table: there are no
+rows to write to yet.
+
 ### Built-in renderers
 
 | Renderer           | What it shows                                                                                                                                |

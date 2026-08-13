@@ -1,5 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
+import type { Row } from '@easydb/shared';
 import { ctrlEnterSubmits, dialogChromeStyles, HostDialogs, makeDialogDraggable } from '@cawoodm/lit-dialogs';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import {
@@ -14,6 +15,9 @@ import {
   type UserScriptSample,
 } from './script-samples.js';
 import { getContext } from '../app-context.js';
+import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
+import { requestVisibleRows } from '../table/visible-rows.js';
+import { materializeColumnScript, materializeSummary } from '../table/materialize-script.js';
 
 /**
  * Which script is being edited. They share this one editor because everything
@@ -25,6 +29,16 @@ import { getContext } from '../app-context.js';
  * a view SHOWS and never touches the stored cell.
  */
 export type ScriptKind = 'render' | 'validate' | 'token';
+
+/**
+ * The saved column a `render` script belongs to, which is what Run needs to
+ * write to. Absent while a table is still being created — there are no rows to
+ * write yet — and Run is hidden then.
+ */
+export interface ScriptTarget {
+  tableId: string;
+  field: string;
+}
 
 /**
  * Boilerplate inserted into a fresh script editor. Shows the required
@@ -213,6 +227,10 @@ export class ScriptEditorDialog extends LitElement {
    * built-in sample is code and cannot be deleted.
    */
   @state() private pickedUserId: string | null = null;
+  /** Where Run writes. Null hides the button — see `ScriptTarget`. */
+  @state() private target: ScriptTarget | null = null;
+  /** A run is in flight; Run and Save are held so neither can race the writes. */
+  @state() private running = false;
   private dialogEl: HTMLDialogElement | null = null;
   private resolver: ((v: string | null) => void) | null = null;
 
@@ -242,7 +260,7 @@ export class ScriptEditorDialog extends LitElement {
    * `opts.field` is the column a `token` script's token maps to; it only seeds
    * the boilerplate.
    */
-  async open(initial: string, columnLabel: string, kind: ScriptKind = 'render', opts?: { field?: string }): Promise<string | null> {
+  async open(initial: string, columnLabel: string, kind: ScriptKind = 'render', opts?: { field?: string; target?: ScriptTarget | undefined }): Promise<string | null> {
     if (this.resolver) {
       // Caller opened a new editor before resolving the previous one —
       // treat the old promise as cancelled so it doesn't hang.
@@ -252,6 +270,10 @@ export class ScriptEditorDialog extends LitElement {
     this.kind = kind;
     this.undoText = null;
     this.pickedUserId = null;
+    this.running = false;
+    // Only a column's render script has cells to write; a validation rule
+    // returns nothing and a view token never touches the stored value.
+    this.target = kind === 'render' ? (opts?.target ?? null) : null;
     // Pre-fill with boilerplate so users opening a fresh column-script see
     // the expected shape instead of an intimidating empty textarea. An
     // existing script wins — we never overwrite the user's source.
@@ -368,6 +390,72 @@ export class ScriptEditorDialog extends LitElement {
     await writeUserSamples(this.userSamples);
   }
 
+  /**
+   * Run the script in the editor over the table's rows and write what it
+   * returns into the cells.
+   *
+   * Two questions before anything is written, because both answers change the
+   * result and neither has a safe default:
+   *
+   *  - **Which rows** — asked only when the grid is showing fewer than the
+   *    table holds. With no filter on there is one possible answer, and a
+   *    dialog that only ever has one answer is a click, not a choice.
+   *  - **Keep or clear the script** — a kept script goes on computing, so the
+   *    cells still show the computed value and the write is invisible until
+   *    something exports or syncs them. Clearing it hands the column over to
+   *    the data. Both are legitimate; guessing is not.
+   *
+   * The write itself is immediate and cannot be undone. Clearing the script is
+   * NOT: it comes back as this dialog's result, so it lands with the columns
+   * editor's own Save, like every other column edit.
+   */
+  private async runNow(): Promise<void> {
+    const target = this.target;
+    const dialogs = HostDialogs.instance;
+    if (!target || !dialogs || this.running || !this.text.trim()) return;
+    this.running = true;
+    try {
+      const ctx = await getContext();
+      const coll = ctx.store.rows(target.tableId);
+      const visible = requestVisibleRows(target.tableId);
+      const all = await coll.find();
+      const shown = visible?.rows ?? null;
+
+      let targets: readonly Row[] = all;
+      if (shown && shown.length < all.length) {
+        const allLabel = `All ${all.length.toLocaleString()} rows`;
+        const someLabel = `Only the ${shown.length.toLocaleString()} rows shown`;
+        const scope = await dialogs.choice(`The grid is showing ${shown.length.toLocaleString()} of ${all.length.toLocaleString()} rows. Which should the script write?`, [allLabel, someLabel], 'Run script');
+        if (scope === null) return;
+        targets = scope === someLabel ? shown : all;
+      }
+
+      const keep = 'Write and keep the script';
+      const clear = 'Write and clear the script';
+      const answer = await dialogs.choice(
+        `Write what this script returns into “${target.field}” for ${targets.length.toLocaleString()} ${targets.length === 1 ? 'row' : 'rows'}? The stored values are replaced and this cannot be undone. ` +
+          'Keeping the script leaves the column computed and read-only; clearing it makes the written values the data.',
+        [clear, keep],
+        'Run script',
+      );
+      if (answer === null) return;
+
+      setAppProgress({ label: `Writing “${target.field}”`, fraction: 0 });
+      const result = await materializeColumnScript(coll, this.text, target.field, targets, (done, total) =>
+        setAppProgress({ label: `Writing “${target.field}”`, fraction: total > 0 ? done / total : undefined, detail: `${done.toLocaleString()} of ${total.toLocaleString()}` }),
+      );
+      clearAppProgress();
+      ctx.api.ui.dialogs.toast(materializeSummary(result, target.field), { kind: result.failed > 0 ? 'error' : 'success', title: 'Run script' });
+      // Resolving closes the editor: the run IS the decision about this script.
+      this.resolve(answer === clear ? '' : this.text);
+    } catch (err) {
+      clearAppProgress();
+      await dialogs.alert(`Could not run the script: ${err instanceof Error ? err.message : String(err)}`, 'Run script');
+    } finally {
+      this.running = false;
+    }
+  }
+
   /** The explanation above the textarea — different job, different contract. */
   private renderHints() {
     if (this.kind === 'token') {
@@ -416,8 +504,20 @@ export class ScriptEditorDialog extends LitElement {
           <div class="dialog-header">
             <h2>${validating ? 'Edit validation' : 'Edit script'}${this.columnLabel ? ` — ${this.columnLabel}` : ''}</h2>
             <div class="header-actions">
+              ${this.target
+                ? html`<button
+                    type="button"
+                    class="ghost"
+                    data-testid="script-run"
+                    title="Write what this script returns into the column’s cells"
+                    ?disabled=${this.running || !this.text.trim()}
+                    @click=${() => void this.runNow()}
+                  >
+                    Run…
+                  </button>`
+                : null}
               <button type="button" class="ghost" @click=${this.onCancel}>Cancel</button>
-              <button type="submit" class="primary">Save</button>
+              <button type="submit" class="primary" ?disabled=${this.running}>Save</button>
             </div>
           </div>
           <div class="dialog-body">

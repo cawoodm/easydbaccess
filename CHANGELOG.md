@@ -4,6 +4,7 @@
 
 ### Features
 
+- 🪶 Run… in the script editor writes what a column script returns into the cells, so a computed column becomes data (v0.0.364)
 - ✨ A table's trash button asks what should go: all the data, the data a filter left visible, or the table (v0.0.363)
 - ✨ A word cloud fills its pane instead of sitting in a wide empty margin (v0.0.362)
 - ✨ Delete workspace takes the open workspace and asks yes or no, instead of asking which one first (v0.0.359)

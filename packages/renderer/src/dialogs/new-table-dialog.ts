@@ -767,7 +767,15 @@ export class NewTableDialog extends LitElement {
     if (!dlg) return;
     const c = this.columns[idx];
     if (!c) return;
-    const next = await dlg.open(c.script ?? '', c.label || c.field);
+    // The target is what lets the editor offer Run. Only a SAVED column of a
+    // SAVED table has cells to write: a field being renamed in this editor is
+    // not yet the key the rows are stored under, so Run would write a column
+    // that does not exist until the editor saves.
+    // `origField`, not `field`: Run writes to the key the ROWS use, which a
+    // rename in this editor has not moved yet — the save re-keys them after.
+    // Absent in "new table" mode, where there is nothing to write to.
+    const saved = this.editTableId && c.origField ? { tableId: this.editTableId, field: c.origField } : undefined;
+    const next = await dlg.open(c.script ?? '', c.label || c.field, 'render', { target: saved });
     if (next === null) return;
     this.patchColumn(idx, { script: next.trim() ? next : undefined });
   }
