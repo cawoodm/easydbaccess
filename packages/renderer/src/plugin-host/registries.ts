@@ -123,6 +123,9 @@ export function createUiRegistry(r: Registries): UiRegistry {
     openSettings: () => {
       document.dispatchEvent(new CustomEvent('easydb:open-settings'));
     },
+    openExportDialog: (tableIds?: string[]) => {
+      document.dispatchEvent(new CustomEvent('easydb:open-export', { detail: { tableIds } }));
+    },
     registerCommand: (spec) => pushReg(r.commands, spec),
     registerCommandFallback: (fn) => pushReg(r.commandFallbacks, fn),
     openCommandPalette: () => {

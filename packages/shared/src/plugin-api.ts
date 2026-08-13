@@ -435,11 +435,90 @@ export interface ConnectorSpec {
   connect(api: HostApi): Promise<void>;
 }
 
+/**
+ * What the export dialog asks for, whatever the format.
+ *
+ * These are the questions every format has to answer the same way — which rows,
+ * which columns, in what order, and how many. A format's OWN questions (a CSV
+ * separator, whether a JSON dump carries its views) live in the element named by
+ * {@link ExporterSpec.panel}.
+ */
+export interface ExportOptions {
+  /** Rows to write. `0` means every row. */
+  limitRows: number;
+  /** `visible` drops columns marked `hidden`, keeping the rest in their order. */
+  columns: 'visible' | 'all';
+  /** `filtered` applies the filters saved on the table. */
+  rows: 'filtered' | 'unfiltered';
+  /** `sorted` applies the sort saved on the table. */
+  order: 'sorted' | 'unsorted';
+  /**
+   * `rendered` writes each value as the grid FORMATS it — a datetime in local
+   * time rather than the stored ISO string, an array as its members. Not the
+   * registered cell renderer: that returns a Lit template, and there is no
+   * honest way to put a template in a CSV cell.
+   */
+  values: 'raw' | 'rendered';
+  /** Evaluate computed columns, so a scripted column exports its value. */
+  runScripts: boolean;
+}
+
+/** One table and the rows chosen for it, ready to serialize. */
+export interface ExportItem {
+  table: Table;
+  rows: Row[];
+}
+
+/** Everything a serializer is told beyond the rows themselves. */
+export interface ExportContext {
+  /** The dialog's general options, already applied to `rows` — see the note. */
+  options: ExportOptions;
+  /**
+   * This format's own answers, read from its {@link ExporterSpec.panel} element.
+   * Shape is the plugin's business; the host only carries it.
+   */
+  panel?: unknown;
+  api: HostApi;
+}
+
 export interface ExporterSpec {
   id: string;
   label: string;
   extension: string;
-  serialize(table: Table, rows: Row[]): Promise<Blob | string>;
+  /**
+   * MIME type for the written file. Absent ⇒ guessed from `extension`, which is
+   * only right for the extensions the host happens to know — a format writing
+   * something else should say so here rather than rely on the guess.
+   */
+  mimeType?: string | undefined;
+  /** Material Icons ligature or inline `<svg>` for the format list. */
+  icon?: string | undefined;
+  /** List order; lower first. Absent ⇒ registration order. */
+  order?: number | undefined;
+  /**
+   * Custom element tag rendered in the export dialog's panel slot for this
+   * format's own fields, mirroring {@link ImporterSpec.panel}. The element MAY
+   * expose a `value` property the dialog reads into `ExportContext.panel`, and
+   * SHOULD dispatch `change` when it edits. Registering a tag keeps the dialog
+   * free of plugin imports.
+   */
+  panel?: string | undefined;
+  /**
+   * Serialize ONE table. `ctx` is optional so a two-argument implementation
+   * written against the older contract still satisfies this type.
+   *
+   * The rows arrive already narrowed by `ctx.options` — a serializer must not
+   * re-apply them, or a limit would be taken twice.
+   */
+  serialize(table: Table, rows: Row[], ctx?: ExportContext): Promise<Blob | string> | Blob | string;
+  /**
+   * Serialize several tables into ONE file, for a format that has a shape for
+   * that (a JSON dump). Without it the dialog writes one file per table, which
+   * is the only thing CSV can mean.
+   */
+  serializeMany?(items: ExportItem[], ctx: ExportContext): Promise<Blob | string> | Blob | string;
+  /** Filename for the `serializeMany` file, without the extension. */
+  manyBaseName?(items: ExportItem[], ctx: ExportContext): string;
 }
 
 export type DropHandler = (event: DragEvent, api: HostApi) => Promise<boolean> | boolean; // return true if handled
@@ -627,6 +706,14 @@ export interface UiRegistry {
   openPluginManager(): void;
   /** Opens the Settings dialog. */
   openSettings(): void;
+  /**
+   * Opens the Export dialog.
+   *
+   * `tableIds` preselects what to export and skips the table selector — pass the
+   * one table a table-footer button belongs to. Called with nothing, the dialog
+   * asks which tables of the workspace to write.
+   */
+  openExportDialog(tableIds?: string[]): void;
   /** Registers a command for the Ctrl+K command palette. Returns an unregister fn. */
   registerCommand(spec: CommandSpec): Unregister;
   /**

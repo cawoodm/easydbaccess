@@ -184,24 +184,30 @@ test('the title shows a floor, not a total it does not have', async ({ page }) =
   await expect(title(page, id)).toHaveText(`Big (${await grouped(page, ROWS)})`);
 });
 
-test('the size is remembered, so the next open shows it at once', async ({ page }) => {
+/**
+ * The count is kept once it has been paid for, so the NEXT open of this table has a
+ * total from the first paint instead of a floor for however long a 14-second count
+ * takes.
+ *
+ * Asserted as the WRITE, not as a reloaded title. The reload version of this test was
+ * flaky under a loaded machine, and for a reason worth writing down: the fake store is
+ * armed with `addInitScript`, but `window.__easydb` only appears after `getContext()`
+ * resolves — by which time `chrome/table-list.ts`, awaiting the same promise, may
+ * already have opened the panel and bound its grid to the REAL empty collection. The
+ * title then read `(0)`. There is no hook that makes the patch land first, so the
+ * assertion moved to the thing that is deterministic. The read side — a remembered
+ * count seeding `tableTotal` — is covered by `test/renderer/table/row-count-cache.test.ts`
+ * and by the floor test above.
+ */
+test('the size is remembered once it has been counted', async ({ page }) => {
   await bigTablePage(page);
   const id = await createTable(page, 'Big', [{ field: 'name' }]);
   await waitForPanel(page, id);
   await releaseCount(page);
   await expect(title(page, id)).toHaveText(`Big (${await grouped(page, ROWS)})`);
 
-  // A fresh page, and a fresh gate with it — nothing will answer `count()` this time.
-  await page.reload();
-  await booted(page);
-  await waitForPanel(page, id);
-
-  // The size is there anyway, remembered from the count that was already paid for.
-  // Without it the title would sit on its floor until a 14-second count came back.
-  // A generous wait: this one restores a window after a reload, and under a loaded
-  // machine the whole boot can take longer than the default five seconds.
-  await expect(title(page, id)).toHaveText(`Big (${await grouped(page, ROWS)})`, { timeout: 15_000 });
-  await expect(title(page, id)).not.toContainText('…');
+  const remembered = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, number>, 'easydb:rowcounts');
+  expect(remembered[id]).toBe(ROWS);
 });
 
 test('a saved filter does not re-read the table for ever', async ({ page }) => {

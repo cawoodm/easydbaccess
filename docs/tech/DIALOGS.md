@@ -220,11 +220,18 @@ the list", not "undo".
 
 This is what replaced several plugins' one-button-per-action footer
 buttons with a single button opening a menu: `gist-sync` (Push / Pull /
-Settings / Share / View gist, plus a per-table variant), `server-sync`
-(Push / Pull), and `dump-export` (JSON dump / SQL script) — see
-`PLUGINS.md`'s Sync and Exporters sections. Reach for `AnchoredMenu` instead
+Settings / Share / View gist, plus a per-table variant) and `server-sync`
+(Push / Pull) — see `PLUGINS.md`'s Sync section. Reach for `AnchoredMenu` instead
 of a full dialog whenever a footer/table button's job is picking one of a
 short, static list of actions.
+
+**And it is the wrong shape once the actions take options.** Export used two of
+these menus — a format list on the workspace footer, another per table — and the
+table one then asked Raw / Visible / Structure in a `choice()` prompt. A chain of
+prompts has nowhere to put a third question and has already forgotten the answer to
+the first, so a format list plus its own options became one dialog
+(`dialogs/export-dialog.ts`). The rule of thumb: a menu picks an ACTION, a dialog
+gathers ANSWERS.
 
 ## The Settings dialog (`settings-dialog.ts`)
 

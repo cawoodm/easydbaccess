@@ -3,6 +3,7 @@ import { SAFE_MODE } from './safe-mode.js';
 import { builtinKey } from './builtin-key.js';
 import * as csvImport from '../plugins/csv-import.js';
 import * as csvExport from '../plugins/csv-export.js';
+import * as jsonExport from '../plugins/json-export.js';
 import * as jsonImport from '../plugins/json-import.js';
 import * as sqlImport from '../plugins/sql-import.js';
 import * as connectMenu from '../plugins/connect-menu.js';
@@ -70,6 +71,7 @@ const modules: PluginModule[] = [
   datasetteConnect,
   urlSource,
   csvExport,
+  jsonExport,
   dumpExport,
   sqlExport,
   gistSync,

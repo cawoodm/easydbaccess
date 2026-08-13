@@ -1,4 +1,4 @@
-import type { ColumnSpec, ColumnType, HostApi, PluginModule, ProjectionSpec, Row, Table } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, ExporterSpec, HostApi, PluginModule, ProjectionSpec, Row, Table } from '@easydb/shared';
 import { slugTable } from '../util/ids.js';
 import { buildProjectionSelect } from './projection-sql.js';
 
@@ -7,15 +7,35 @@ export const meta: NonNullable<PluginModule['meta']> = {
   name: 'SQL Export',
   type: 'exporter',
   version: '0.1.0',
-  description: 'Export the current workspace as a portable .sql script (CREATE TABLE + INSERT).',
+  description: 'SQL serializer for the export dialog: CREATE TABLE + INSERT per table, projections as the SELECT behind them.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/sql-export.ts',
 };
 
-export function init(): void {
-  // SQL export is offered through the consolidated Export menu (see
-  // dump-export.ts); this module now only provides serializeWorkspaceAsSql().
+const exporterSpec: ExporterSpec = {
+  id: 'sql',
+  label: 'SQL',
+  extension: '.sql',
+  mimeType: 'application/sql',
+  icon: 'storage',
+  order: 30,
+  serialize(table, rows) {
+    return serializeTableAsSql(table, rows);
+  },
+  serializeMany(items) {
+    return serializeTablesAsSql(items);
+  },
+  manyBaseName(_items, ctx) {
+    return `workspace-${ctx.api.workspaceId()}`;
+  },
+};
+
+export function init(api: HostApi): void {
+  // Registered rather than hard-coded in a menu, which is how the export dialog
+  // finds it. Without this the dialog would have dropped a format the app already
+  // had — `dump-export.ts` used to name SQL itself, and nothing read the registry.
+  api.ui.registerExporter(exporterSpec);
 }
 
 /**
@@ -66,6 +86,38 @@ export async function serializeWorkspaceAsSql(api: HostApi): Promise<string> {
     for (const p of projections) {
       lines.push(`-- projection: ${p.name}`, projectionSelectBody(p, resolve) ?? '', '');
     }
+  }
+  return lines.join('\n');
+}
+
+/**
+ * The same dump, from tables the EXPORT DIALOG has already read and narrowed.
+ *
+ * `serializeWorkspaceAsSql` reads the workspace itself, so it cannot honor a
+ * limit, a filter or a column choice. This one is handed the finished rows.
+ * Projections still come last: a SELECT needs the tables it reads to exist.
+ */
+export function serializeTablesAsSql(items: ReadonlyArray<{ table: Table; rows: Row[] }>): string {
+  const plain = items.filter((i) => i.table.source?.type !== 'projection');
+  const projections = items.filter((i) => i.table.source?.type === 'projection').map((i) => i.table);
+  const resolve = sqlNameResolver(items.map((i) => i.table));
+
+  const lines: string[] = [
+    `-- easyDBAccess SQL dump`,
+    `-- exported: ${new Date().toISOString()}`,
+    `-- tables:   ${plain.length}${projections.length > 0 ? ` (+ ${projections.length} projection${projections.length === 1 ? '' : 's'})` : ''}`,
+    `-- Compatible with PostgreSQL and SQLite. For MySQL run`,
+    `--   SET sql_mode='ANSI_QUOTES';`,
+    `-- before executing, or rewrite "ident" to \`ident\`.`,
+    ``,
+    `BEGIN;`,
+    ``,
+  ];
+  for (const { table, rows } of plain) lines.push(renderTable(table, rows), '');
+  lines.push(`COMMIT;`, '');
+  if (projections.length > 0) {
+    lines.push('', `-- Projections (virtual tables). Each is the query behind one, reading the`, `-- tables above. Run them as-is, or wrap one in CREATE VIEW to keep it.`, '');
+    for (const p of projections) lines.push(`-- projection: ${p.name}`, projectionSelectBody(p, resolve) ?? '', '');
   }
   return lines.join('\n');
 }

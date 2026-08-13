@@ -2,11 +2,38 @@
 
 ## Exporting
 
-- **Per table:** the CSV button in a table's toolbar downloads just that
-  table.
-- **Whole workspace:** the footer **Export** button offers a JSON dump
-  (`.db.json` — every table, its rows, and your window layout, in one file
-  you can drop back in later to restore everything) or a SQL script.
+**Export** in a table's toolbar exports that table. **Export** in the footer
+exports the workspace, and asks which tables to include when there is more than
+one. Both open the same dialog.
+
+Pick a format — **CSV**, **JSON** or **SQL** — then say what to write:
+
+| Option | What it means |
+| --- | --- |
+| Limit rows | `0` writes every row. Any other number writes that many. |
+| Columns | **Visible** leaves out the columns you have hidden. **All** writes them. |
+| Rows | **Filtered** writes only the rows your filters keep. |
+| Order | **Sorted** writes them in the table's sort order. |
+| Values | **Rendered** writes a date in your own time and an array as a list. **Raw** writes what is stored. |
+| Run scripts | Fills a column that computes its value instead of storing one. |
+
+Each format then has its own options. CSV offers the separator, whether to write
+a header row, a byte-order mark (tick it if Excel shows accented characters
+wrongly) and a **typed header** — this writes the column types into the header
+line, so importing the file again restores them instead of guessing. JSON offers
+indenting and whether to carry your views along.
+
+A limit is taken AFTER filtering and sorting, so "the first 100, sorted" really
+is the first 100 of the sorted table.
+
+One table exported as JSON gives a `.table.json`. Several give one `.db.json`
+holding them all — every table, its rows and your window layout, in one file you
+can drop back in later to restore everything. CSV has no shape for several
+tables, so it writes one file each.
+
+A big table warns you before it reads every row: a table over 50,000 rows is not
+held in memory while you work with it, and exporting all of it puts it there. Set
+a limit if you only need the first rows.
 
 ## Backing up and moving between devices
 
