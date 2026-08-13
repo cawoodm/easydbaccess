@@ -10,6 +10,7 @@ import { ScriptEditorDialog } from './script-editor-dialog.js';
 import { allColumnsFlagged, buildColumnSpec, toggleColumnFlag, type ColumnFlag, type ColumnRow } from './column-row.js';
 import { renameRowFields, type FieldRename } from '../table/column-merge.js';
 import { remapFilterFields, sameFilterMap } from '../table/filter-map.js';
+import { createValidator, issueMessages } from '../table/validate-rules.js';
 import { readRows } from '../db/row-reader.js';
 import { LEGACY_CELL_RENDERERS } from '../plugin-host/registries.js';
 import {
@@ -1330,42 +1331,15 @@ function validateAgainstSpec(c: ColumnRow, v: unknown, dupSet: Set<unknown> | un
  * Returns a list of "Row N: <reason>" strings for any row that violates one
  * of the supplied (presumed newly-enabled) constraints. Empty list means
  * the constraints can be applied cleanly.
+ *
+ * The rules themselves live in `table/validate-rules.ts`, shared with the footer's
+ * Validate button — two definitions of what `max` means was one too many. Scripts
+ * are deliberately not run here: a Save must not be the first thing in this app to
+ * run a column script over every row.
  */
 function scanConstraintViolations(specs: ColumnSpec[], rows: Row[]): string[] {
-  const out: string[] = [];
-  for (const c of specs) {
-    if (c.notnull) {
-      rows.forEach((r, i) => {
-        const v = r.data[c.field];
-        if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) {
-          out.push(`Row ${i + 1}: ${c.label} is empty.`);
-        }
-      });
-    }
-    if (c.max != null && c.max > 0) {
-      rows.forEach((r, i) => {
-        const v = r.data[c.field];
-        if (typeof v === 'string' && v.length > c.max!) {
-          out.push(`Row ${i + 1}: ${c.label} length ${v.length} > max ${c.max}.`);
-        } else if (typeof v === 'number' && v > c.max!) {
-          out.push(`Row ${i + 1}: ${c.label} value ${v} > max ${c.max}.`);
-        }
-      });
-    }
-    if (c.unique) {
-      const seen = new Map<unknown, number>();
-      rows.forEach((r, i) => {
-        const v = r.data[c.field];
-        if (v === null || v === undefined || v === '') return;
-        if (seen.has(v)) {
-          out.push(`Row ${i + 1}: ${c.label} duplicates row ${seen.get(v)! + 1} ("${String(v)}").`);
-        } else {
-          seen.set(v, i);
-        }
-      });
-    }
-  }
-  return out;
+  const validator = createValidator(specs);
+  return issueMessages(rows.flatMap((r, i) => validator.check(r, i)));
 }
 
 declare global {

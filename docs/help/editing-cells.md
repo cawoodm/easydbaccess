@@ -52,11 +52,37 @@ deleted. Your samples belong to the workspace, so they travel with it.
 
 The rule runs on **manual edits only**. Importing, refreshing and syncing are
 not edits, so a rule can't stop a table from loading — it tells you about the
-next value someone types.
+next value someone types. To check the rows you already have, use Validate,
+below.
 
 Validation is separate from the _other_ pencil (the one left of Max), which
 computes what a column **displays** — see
 [Computing what a column shows](#computing-what-a-column-shows) below.
+
+## Checking every row: the ✓ button
+
+Rules only meet a value as it is typed, so an imported table has never been
+checked. The **✓** button in a table's footer checks all of it, against every
+rule its columns carry: Required, Maximum, Unique and your own validation
+scripts.
+
+What you get back is a summary — one line per column, in the order the columns
+appear — and a table of the problems themselves, named `<your table> issues`.
+It holds one row per problem: which row, which column, the value, and what is
+wrong with it. Because it is an ordinary table you can filter it, sort it and
+export it, and its window stays open beside the table you are fixing.
+
+Fix the rows in the real table, then press ✓ again — the issues table is
+rewritten, so what is left in it is what is still wrong.
+
+Three things worth knowing:
+
+- A table whose columns carry no rules is not read at all. There is nothing to
+  check, and the button says so instead of pretending to work.
+- A long scan shows a bar under the header and can be stopped with **Esc**. It
+  then reports what it found so far.
+- A column stops listing after 500 problems and counts the rest, so one broken
+  rule cannot bury the others.
 
 ## Renderers — changing how a value is displayed
 

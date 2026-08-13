@@ -178,7 +178,7 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
   `import-data`, `auto-sync`, `views`, `settings`, `url-source`,
   `datasette-import` (+ `datasette-views`), `datasette-connect`, `connect-menu`,
   `projection`, `command-palette-button`, `electron-db`, `sqlitefile-source`,
-  `tips`, `commandlets`, `edb-file`.
+  `tips`, `commandlets`, `edb-file`, `validate`.
   Don't add a feature to
   the core if it can be a plugin. (Exception: the Plugin Manager button is core
   chrome in `app-shell.ts`, not a plugin — it opens the manager that governs

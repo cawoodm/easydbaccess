@@ -30,6 +30,10 @@ export interface TestColumn {
    * directly (like `bulkAddRows`) are unaffected by it.
    */
   validate?: string;
+  /** Column rules the footer's Validate button and the Save pre-flight check. */
+  notnull?: boolean;
+  unique?: boolean;
+  max?: number;
 }
 
 /** Creates a table via the data-store. Returns the new table id. */
@@ -52,6 +56,9 @@ export async function createTable(page: Page, name: string, columns: TestColumn[
             renderer?: string;
             script?: string;
             validate?: string;
+            notnull?: boolean;
+            unique?: boolean;
+            max?: number;
           } = {
             field: c.field,
             label: c.label ?? c.field,
@@ -60,6 +67,9 @@ export async function createTable(page: Page, name: string, columns: TestColumn[
           if (c.renderer) col.renderer = c.renderer;
           if (c.script) col.script = c.script;
           if (c.validate) col.validate = c.validate;
+          if (c.notnull) col.notnull = true;
+          if (c.unique) col.unique = true;
+          if (c.max != null) col.max = c.max;
           return col;
         }),
         view: 'table',

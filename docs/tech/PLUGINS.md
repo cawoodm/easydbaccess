@@ -120,6 +120,7 @@ defaults to enabled but **can** be turned off by the user.
 | `import-data`       | importer      |       | Header "Import" button — a URL/file dialog with curated sample sources (Northwind JSON, a public CSV, Datasette examples) that runs `csv-import` and `json-import` through the import kernel and still routes Datasette to `datasette-import`; recognises a native `.db.json` dump and offers to restore the workspace instead of importing its tables; adds a per-table Refresh button for CSV/JSON snapshot origins.                                           | `registerHeaderButton`, `registerTableButton`                      |
 | `auto-sync`         | sync          |       | Background timer (1 min) that silently pushes local changes to the configured sync server and prompts to pull when the server has diverged. Shares its config with `server-sync` via `api.settings`.                                                                                                                                                                                                                                                             | `load()` (timer)                                                   |
 | `views`             | ui            |       | The View system: workspace-global HTML templates (header/row/footer with `$TOKEN` substitution) rendered read-only per table in their own windows, with auto-mapped tokens and an optional row limit; seeds a default "RSS Feed" template. Footer "Views" button opens the manager dialog; window lifecycle itself is core, not plugin, code.                                                                                                                    | `registerTableButton`, `load()` (template seeding)                 |
+| `validate`          | ui            |       | Footer ✓ button that checks every row against its columns' rules — `notnull`, `max`, `unique` and a `validate` script — and writes what it finds into a `<table> issues` table. Pages through the rows, reports progress, stops on Esc. Shares its rules with the columns editor's Save pre-flight (`table/validate-rules.ts`). | `registerTableButton` |
 | `viz-charts`        | ui            |       | Bar, column, line and pie visualizations, registered via `registerVisualization`. A chart is a `ViewTemplate` whose `kind` is `'viz'`; see [`VISUALIZATIONS.md`](./VISUALIZATIONS.md). Chart.js is lazily imported, so a user who never opens a chart downloads none of it.                                                                                                                                                                                                | `registerVisualization`                                            |
 | `viz-map`           | ui            |       | The `map` kind: rows with latitude/longitude columns plotted on raster tiles (Leaflet, lazily imported). Its own plugin because it carries its own library AND a network dependency — the tile URL is a workspace setting, and a tile failure still plots the points.                                                                                                                                                                                          | `registerVisualization`                                            |
 | `viz-wordcloud`     | ui            |       | The `wordcloud` kind: term frequency over a text column, laid out with `d3-cloud` (lazily imported) into our own SVG. Tokenisation and counting live in the pure `viz/word-frequency.ts`.                                                                                                                                                                                                                                                                     | `registerVisualization`                                            |
@@ -199,6 +200,57 @@ of the render list (offering it there could only ever produce a broken script).
 `parseUserSamples` is deliberately tolerant — the list may arrive from another
 device or a hand-edited dump, and one malformed entry must cost that entry, not
 the whole editor.
+
+### Checking every row: the Validate button
+
+The `validate` script above runs on a manual edit, one cell at a time. That
+leaves a real gap: a table imported from a file has never been checked at all,
+and neither has a row written by a sync. The footer's ✓ button
+(`plugins/validate.ts`) is the answer — the one place in the app that runs a
+column script over more than one row.
+
+The rules themselves moved to `table/validate-rules.ts`, shared with the columns
+editor's Save pre-flight. Two copies of "what does `max` mean" is one too many:
+`max` is a LENGTH for text and a MAGNITUDE for a number, a blank is not a
+duplicate (that is what `notnull` is for), and a zero is a value. The pre-flight
+still does NOT run scripts — a Save must not be the first thing that runs JS over
+every row — which is one option flag, not a second implementation.
+
+`table/validate-scan.ts` does the reading, a page at a time, and this is the part
+worth knowing:
+
+- **A table with no rules is not read at all.** The validator reports which
+  columns carry a rule, and an empty list ends the scan before the first query.
+  So the button costs nothing on a big imported table that declares nothing.
+- **The scan is one continuous pass**, because `unique` needs it: a duplicate is
+  only visible in the light of every row already seen, so a per-page validator
+  would call two copies unique.
+- **It yields between pages**, reports progress through the app-wide bar, and
+  **Esc stops it** — the label says so. A cancelled scan reports what it found
+  and says it was cut short.
+- **Each column stops listing after 500 issues** and counts the rest. A script
+  that throws for every row would otherwise return 609,283 issues that all say
+  the same thing.
+
+The results go into a TABLE, `<table> issues`, not a list in a dialog. "Let me
+filter and fix these" is a request for filtering, sorting and exporting, and this
+app has all three — for tables. The dialog that appears is the summary, one line
+per column in the grid's own column order, with a **Show me** button that reveals
+the issues window. A second run REPLACES that table's rows rather than adding a
+`Pets issues-2` beside it. The table is `readonly`: every row in it is a copy of
+a problem, and editing the copy fixes nothing.
+
+Both orderings in that summary are fixed rather than encountered: rows come back
+in the store's own order (a Dexie key is a random UUID), so an encounter order
+would word the same table's summary differently on every run and a user comparing
+two runs would read that as a change in the data.
+
+One deviation from the design sketch, which had `notnull` / `max` / `unique`
+pushed down to the store as SQL while only scripts streamed. That works on the
+SQLite stores and cannot work in the browser: IndexedDB has no index on a field
+inside `data`, so `WHERE col IS NULL` has nothing to use and costs the same full
+read. A second code path that only ever helped the desktop is not worth two
+definitions of `max`.
 
 ### HTML or Markdown — who decides
 

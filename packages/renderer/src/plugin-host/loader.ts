@@ -27,6 +27,7 @@ import * as cellLink from '../plugins/cell-link.js';
 import * as cellTags from '../plugins/cell-tags.js';
 import * as autoRenderer from '../plugins/auto-renderer.js';
 import * as deleteTable from '../plugins/delete-table.js';
+import * as validate from '../plugins/validate.js';
 import * as tableCopy from '../plugins/table-copy.js';
 import * as importData from '../plugins/import-data.js';
 import * as autoSync from '../plugins/auto-sync.js';
@@ -91,6 +92,7 @@ const modules: PluginModule[] = [
   cellTags,
   autoRenderer,
   deleteTable,
+  validate,
   tableCopy,
   importData,
   autoSync,
