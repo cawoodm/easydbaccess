@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveVizOptions, overrideDelta, overriddenKeys } from '../../../packages/renderer/src/viz/viz-options.js';
+import type { VizAggregate } from '@easydb/shared';
+import {
+  aggregateFields,
+  aggregateOverrideDelta,
+  effectiveAggregate,
+  effectiveVizOptions,
+  overrideDelta,
+  overriddenAggregateKeys,
+  overriddenKeys,
+} from '../../../packages/renderer/src/viz/viz-options.js';
 
 describe('effectiveVizOptions', () => {
   it('returns the template options when nothing is overridden', () => {
@@ -89,5 +98,72 @@ describe('overriddenKeys', () => {
     const delta = overrideDelta(tpl, { minLength: 5, stopWords: 'the' });
     expect(effectiveVizOptions(tpl, delta)).toEqual({ minLength: 5, stopWords: 'the' });
     expect(overriddenKeys(tpl, delta)).toEqual(new Set(['minLength']));
+  });
+});
+
+describe('the aggregate layer', () => {
+  const base: VizAggregate = {
+    groupBy: ['CATEGORY'],
+    measures: [{ channel: 'VALUE', fn: 'count' }],
+    sort: 'valueDesc',
+  };
+
+  it('a view with no override draws exactly what the definition says', () => {
+    expect(effectiveAggregate(base, undefined)).toBe(base);
+    expect(effectiveAggregate(base, {})).toBe(base);
+  });
+
+  it('a measure override applies to every series, not just the first', () => {
+    // A chart drawing three value series and asked for "sum" means all three;
+    // leaving two of them counting rows would be a legend nobody could read.
+    const multi: VizAggregate = { ...base, measures: [{ channel: 'A', fn: 'count' }, { channel: 'B', fn: 'count' }] };
+    const out = effectiveAggregate(multi, { fn: 'sum' });
+    expect(out?.measures.map((m) => m.fn)).toEqual(['sum', 'sum']);
+    // The channels are structure and are left alone.
+    expect(out?.measures.map((m) => m.channel)).toEqual(['A', 'B']);
+  });
+
+  it('overrides sort and topN independently, leaving the rest inherited', () => {
+    const out = effectiveAggregate(base, { topN: 5 });
+    expect(out?.topN).toBe(5);
+    expect(out?.sort).toBe('valueDesc');
+    expect(out?.measures[0]?.fn).toBe('count');
+  });
+
+  it('never mutates the definition it layers over', () => {
+    effectiveAggregate(base, { fn: 'sum', topN: 3 });
+    expect(base.measures[0]?.fn).toBe('count');
+    expect(base.topN).toBeUndefined();
+  });
+
+  it('stores only what actually changed', () => {
+    const edited = { ...aggregateFields(base), fn: 'sum' };
+    expect(aggregateOverrideDelta(base, edited)).toEqual({ fn: 'sum' });
+  });
+
+  it('stores nothing when the form was opened and left alone', () => {
+    // Otherwise every view that was merely LOOKED at would stop following the
+    // definition — the trap the delta exists to avoid.
+    expect(aggregateOverrideDelta(base, aggregateFields(base))).toBeUndefined();
+  });
+
+  it('keeps Top-N 0 as a real answer, not as "unset"', () => {
+    const withTop: VizAggregate = { ...base, topN: 8 };
+    expect(aggregateOverrideDelta(withTop, { ...aggregateFields(withTop), topN: 0 })).toEqual({ topN: 0 });
+    expect(effectiveAggregate(withTop, { topN: 0 })?.topN).toBe(0);
+  });
+
+  it('reads a number typed into the form as the number it equals', () => {
+    const withTop: VizAggregate = { ...base, topN: 8 };
+    expect(aggregateOverrideDelta(withTop, { ...aggregateFields(withTop), topN: '8' })).toBeUndefined();
+  });
+
+  it('names the overridden fields, which is what the editor marks', () => {
+    expect([...overriddenAggregateKeys(base, { fn: 'sum' })]).toEqual(['fn']);
+    expect(overriddenAggregateKeys(base, undefined).size).toBe(0);
+  });
+
+  it('has nothing to layer over when the kind declares no aggregate', () => {
+    expect(effectiveAggregate(null, { fn: 'sum' })).toBeNull();
   });
 });

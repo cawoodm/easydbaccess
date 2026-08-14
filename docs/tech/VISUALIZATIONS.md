@@ -76,8 +76,9 @@ calls them). Don't mistake them for this seam.
 | `viz-charts` | `bar`, `column`, `line`, `pie` | `chart.js` |
 | `viz-map` | `map` | `leaflet` |
 | `viz-wordcloud` | `wordcloud` | `d3-cloud` |
+| `viz-custom` | `custom` | none |
 
-Three plugins rather than one, **split by library**, so a user who wants bar
+The first three are split **by library**, so a user who wants bar
 charts and no mapping can switch exactly that off — and so an offline deployment
 has a reason to. The four chart kinds share one plugin because they share an
 element, a dependency and a mental model; nobody wants "pie but not bar".
@@ -87,6 +88,14 @@ so a user who never opens a chart downloads none of them. Verified against the
 built bundle, not assumed: `getDatasetMeta` and `_tooltipItems` (Chart.js
 internals) and `createTile` (Leaflet's) appear only in their own chunks and never
 in the entry. A static import sneaking back in is the regression to watch for.
+
+`viz-custom` carries no library at all and is the odd one out in two more ways.
+It declares `channels: []` — its markup names the columns it reads, so there is
+nothing for the mapping dialog to ask about — and it is the first visualization
+to WRITE to its host: a `$filter.FIELD` pill calls `table/pane-actions.ts`, the
+mirror of `visible-rows.ts`. That seam is deliberately not custom-visualization
+machinery; making a bar click filter the grid is now a few lines in
+`chart-element.ts`.
 
 ## Where the rows come from
 
@@ -230,6 +239,28 @@ Both editors render from the same `SettingsFieldSpec[]` through one
 `renderVizOptionField`, so a new option declared by a plugin appears in the
 template editor and in every instance's override list at once, with no UI code.
 
+### The aggregate is layered too
+
+`VizAggregate` — which function over the value column, in what order, how many
+groups — was template-only until v0.0.370, so "sum this table but count that
+one" meant forking the template. `ViewInstance.vizAggregate` is the same delta
+layer applied to it (`effectiveAggregate` / `aggregateOverrideDelta`).
+
+It is a **named three-field override**, not `Partial<VizAggregate>`:
+
+```ts
+interface VizAggregateOverride { fn?; sort?; topN? }
+```
+
+`groupBy`, `measures[].channel` and `bin` are STRUCTURE — they say which channel
+means what — and a view that restructured them would not be a view of the same
+chart, it would be a different chart wearing its name. A `fn` override applies
+to **every** measure, not just the first: a chart drawing three value series and
+asked for "sum" means all three.
+
+`topN: 0` is a real answer ("show every group"), not "unset", which is why the
+delta compares against the resolved base rather than testing for falsiness.
+
 ### The word cloud's rules
 
 `viz/word-frequency.ts` is pure and owns what counts as a word. Three of its
@@ -322,12 +353,19 @@ channels, which aggregate — so there has to be a route back to it from the thi
 itself. There are two, because there are two different objects to edit:
 
 - **`viz-footer.ts`** — the toolbar along the bottom of a visualization window.
-  **Edit** opens this instance's mapping (`openViewsDialog(tableId, { editInstanceId })`);
-  **Chart** opens the TEMPLATE, where the kind, the aggregate and the options live
-  and are shared by every instance of it. An HTML view window still has no footer:
-  it has nothing per-window to configure.
-- The **docked pane's strip** carries the same Edit pencil, because a pane has no
-  footer of its own — the host window's footer belongs to the table.
+  **Edit** opens the TEMPLATE (`openViewsDialog(tableId, { editTemplateId })`),
+  where the kind, the aggregate and the options live and are shared by every
+  instance of it; **Settings** opens THIS instance's mapping and overrides
+  (`{ editInstanceId }`). An HTML view window still has no footer: it has
+  nothing per-window to configure.
+
+  The pair read the other way round until v0.0.370 — "Edit" the instance,
+  "Chart" the definition — which put the shared object behind the more specific
+  word. Someone looking for "the chart's settings" pressed Chart and edited what
+  every other view of it also uses.
+- The **docked pane's strip** carries the **Settings** pencil (the instance),
+  because a pane has no footer of its own — the host window's footer belongs to
+  the table — and a pane's likely edit is its own, not the shared definition.
 
 `panel-footer` is deliberately not reused for this: it is per-TABLE and every one
 of its buttons (add row, edit columns, export CSV) is about rows, which a

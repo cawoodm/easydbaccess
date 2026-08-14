@@ -1,9 +1,11 @@
 // packages/renderer/src/dialogs/script-samples.ts
 //
 // The ready-made scripts the script editor offers from its "Start from a
-// sample" dropdown — one list per kind of column script:
-//   - RENDER_SAMPLES   → `function render(row)`, what the column DISPLAYS
-//   - VALIDATE_SAMPLES → `function validate(value, row)`, what it ACCEPTS
+// sample" dropdown — one list per kind of thing it edits:
+//   - RENDER_SAMPLES     → `function render(row)`, what a column DISPLAYS
+//   - VALIDATE_SAMPLES   → `function validate(value, row)`, what it ACCEPTS
+//   - VIZ_HTML_SAMPLES   → the markup of a custom visualization
+//   - VIZ_SCRIPT_SAMPLES → `function render(rows, api)`, its optional code half
 //
 // Each one is complete and runnable: picking it and hitting Save gives a
 // working script, and the common case is then editing a field name or a number
@@ -40,14 +42,21 @@ export interface ScriptSample {
 export type ValidateSample = ScriptSample;
 
 /**
- * Which function shape a sample defines — the two lists below, and the two
- * lists a user's own samples fall into.
+ * Which shape a sample has — the four lists below, and the four lists a user's
+ * own samples fall into.
  *
  * A VIEW TOKEN's script is `render(row)` like a column's, so it shares the
  * `render` list: a sample saved from a column shows up in a view's token editor
- * and the other way round. There is deliberately no third list.
+ * and the other way round.
+ *
+ * A custom visualization's two blocks do NOT share a list with each other, even
+ * though one dialog edits both. A sample is pasted whole, and an HTML body
+ * pasted into the script box is not something the user can edit their way out
+ * of — so the markup and the code are kept apart.
  */
-export type SampleKind = 'render' | 'validate';
+export type SampleKind = 'render' | 'validate' | 'viz-html' | 'viz-script';
+
+const SAMPLE_KINDS: ReadonlyArray<SampleKind> = ['render', 'validate', 'viz-html', 'viz-script'];
 
 /** A sample the USER saved, kept in the workspace settings under {@link USER_SAMPLES_SETTING}. */
 export interface UserScriptSample extends ScriptSample {
@@ -67,7 +76,10 @@ export const USER_SAMPLES_SETTING = 'scripts:samples';
 
 /** The built-in samples for one kind. */
 export function builtinSamples(kind: SampleKind): ReadonlyArray<ScriptSample> {
-  return kind === 'validate' ? VALIDATE_SAMPLES : RENDER_SAMPLES;
+  if (kind === 'validate') return VALIDATE_SAMPLES;
+  if (kind === 'viz-html') return VIZ_HTML_SAMPLES;
+  if (kind === 'viz-script') return VIZ_SCRIPT_SAMPLES;
+  return RENDER_SAMPLES;
 }
 
 /**
@@ -86,7 +98,11 @@ export function parseUserSamples(value: unknown): UserScriptSample[] {
     if (typeof id !== 'string' || !id) continue;
     if (typeof label !== 'string' || !label.trim()) continue;
     if (typeof source !== 'string' || !source.trim()) continue;
-    out.push({ id, kind: kind === 'validate' ? 'validate' : 'render', label: label.trim(), source });
+    // An unknown kind falls back to `render`, which is where every sample lived
+    // before the list split — a workspace written by an older build has no
+    // `kind` worth trusting and its samples are all column scripts.
+    const k = SAMPLE_KINDS.includes(kind as SampleKind) ? (kind as SampleKind) : 'render';
+    out.push({ id, kind: k, label: label.trim(), source });
   }
   return out;
 }
@@ -350,6 +366,165 @@ export const VALIDATE_SAMPLES: ReadonlyArray<ScriptSample> = [
   if (other == null || other === '') return; // nothing to compare against yet
   if (new Date(String(value)) < new Date(String(other))) {
     throw new Error(\`Must not be earlier than \${OTHER} (\${other}).\`);
+  }
+}
+`,
+  },
+];
+
+/**
+ * `viz-html` samples — the markup half of a custom visualization.
+ *
+ * These are the feature's documentation, not a nicety. A blank textarea headed
+ * "HTML" teaches nobody what a custom visualization can be, and the dropdown is
+ * how the shape is discovered — so every one of them draws something the first
+ * time it is picked, and the field names inside it are the only thing that
+ * normally needs editing.
+ *
+ * The tokens describe the WHOLE set the pane was given, not one row (see
+ * `viz/viz-tokens.ts`): `$COUNT` is how many rows are on screen, `$SUM.amount`
+ * their total, `$filter.country` a clickable pill per distinct value.
+ *
+ * Several of them carry a `#goto?…` COMMANDLET link. A commandlet with no table
+ * name acts on the table the click came from (`plugins/commandlet-run.ts`), so a
+ * sample can filter, sort or search without naming a table — which is what makes
+ * one block of markup work on every table it is dropped onto. Written with
+ * `&amp;` rather than a bare `&`, because these land in the document as HTML.
+ */
+export const VIZ_HTML_SAMPLES: ReadonlyArray<ScriptSample> = [
+  {
+    label: 'KPI tile — one big number',
+    source: `<!-- The whole vocabulary in one line: $COUNT is how many rows the grid
+     is showing right now, so this tile follows every filter you type. -->
+<div style="text-align:center;padding:1rem 0">
+  <div style="font-size:2.6rem;font-weight:700;line-height:1">$COUNT</div>
+  <div style="opacity:.7;text-transform:uppercase;letter-spacing:.06em;font-size:.7rem">Rows</div>
+</div>
+`,
+  },
+  {
+    label: 'KPI strip — three tiles in a row',
+    source: `<!-- Needs a numeric column. Rename \`amount\` to yours. -->
+<div style="display:flex;gap:.5rem;text-align:center">
+  <div style="flex:1;padding:.6rem;border-radius:.5rem;background:rgba(127,127,127,.1)">
+    <div style="font-size:1.6rem;font-weight:700">$COUNT</div>
+    <div style="opacity:.7;font-size:.7rem">ROWS</div>
+  </div>
+  <div style="flex:1;padding:.6rem;border-radius:.5rem;background:rgba(127,127,127,.1)">
+    <div style="font-size:1.6rem;font-weight:700">$SUM.amount</div>
+    <div style="opacity:.7;font-size:.7rem">TOTAL</div>
+  </div>
+  <div style="flex:1;padding:.6rem;border-radius:.5rem;background:rgba(127,127,127,.1)">
+    <div style="font-size:1.6rem;font-weight:700">$AVG.amount</div>
+    <div style="opacity:.7;font-size:.7rem">AVERAGE</div>
+  </div>
+</div>
+`,
+  },
+  {
+    label: 'Filter pills — a header that narrows the grid',
+    source: `<!-- Needs a column with a few repeated values. Rename \`country\` to yours.
+     One pill per distinct value; clicking one narrows the grid this pane is
+     docked to. The Clear link is a commandlet — see the Toolbar sample. -->
+<div style="display:flex;flex-wrap:wrap;align-items:center;gap:.15rem">
+  <span style="opacity:.7;margin-right:.35rem">Country:</span>
+  $filter.country
+  <a href="#goto?@clear" style="margin-left:.4rem;opacity:.7">clear</a>
+</div>
+`,
+  },
+  {
+    label: 'Toolbar — commandlet links that filter, sort and search',
+    source: `<!-- A #link starting with \`goto\` and NO table name acts on the table this
+     pane is in, so the same block works wherever you drop it. Rename
+     \`country\` and \`amount\` to your columns. -->
+<div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center">
+  <a href="#goto?country==CH">Only CH</a>
+  <a href="#goto?country=^C">Starts with C</a>
+  <a href="#goto?amount=!NULL">Has an amount</a>
+  <a href="#goto?@sort=-amount">Biggest first</a>
+  <a href="#goto?@sort=country,-amount">By country, then size</a>
+  <a href="#goto?@search=berlin">Search “berlin”</a>
+  <a href="#goto?@clear&amp;@search=">Reset</a>
+</div>
+`,
+  },
+  {
+    label: 'Summary line — a sentence with the numbers in it',
+    source: `<!-- The smallest useful template. Rename \`amount\` and \`country\`. -->
+<p style="margin:0">
+  Showing <strong>$COUNT</strong> rows across <strong>$DISTINCT.country</strong>
+  countries, totalling <strong>$SUM.amount</strong>
+  (from $MIN.amount to $MAX.amount).
+</p>
+`,
+  },
+  {
+    label: 'Table of counts — when a chart is more than you want',
+    source: `<!-- Needs two columns: one to name the thing, one to measure it.
+     Rename \`country\` and \`amount\`. -->
+<table style="width:100%;border-collapse:collapse">
+  <tbody>
+    <tr><td style="padding:.2rem 0">Rows</td><td style="text-align:right;font-weight:600">$COUNT</td></tr>
+    <tr><td style="padding:.2rem 0"><a href="#goto?@sort=country">Countries</a></td><td style="text-align:right;font-weight:600">$DISTINCT.country</td></tr>
+    <tr><td style="padding:.2rem 0"><a href="#goto?@sort=-amount">Total</a></td><td style="text-align:right;font-weight:600">$SUM.amount</td></tr>
+    <tr><td style="padding:.2rem 0">Average</td><td style="text-align:right;font-weight:600">$AVG.amount</td></tr>
+  </tbody>
+</table>
+`,
+  },
+];
+
+/**
+ * `viz-script` samples — the optional code half.
+ *
+ * Two of them, and deliberately two: the contract has exactly two halves, so one
+ * sample returns a string and the other writes into `api.el`, and between them
+ * every part of the `api` is used once.
+ */
+export const VIZ_SCRIPT_SAMPLES: ReadonlyArray<ScriptSample> = [
+  {
+    label: 'Return a string — a grouped count table',
+    source: `function render(rows, api) {
+  // Rename \`country\` to the column you want to group by. Returning a string
+  // replaces the container's markup, so the HTML box can be left empty.
+  const FIELD = 'country';
+  const counts = new Map();
+  for (const row of rows) {
+    const key = String(row.data[FIELD] ?? '(blank)');
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const top = [...counts].sort((a, b) => b[1] - a[1]).slice(0, 10);
+  if (top.length === 0) return '<p style="opacity:.7">Nothing to count.</p>';
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  return \`<table style="width:100%;border-collapse:collapse">\` +
+    top.map(([k, n]) =>
+      \`<tr><td style="padding:.15rem 0">\${esc(k)}</td>\` +
+      \`<td style="text-align:right;font-weight:600">\${n}</td></tr>\`).join('') +
+    \`</table>\`;
+}
+`,
+  },
+  {
+    label: 'Write into api.el — clickable buttons that filter the grid',
+    source: `function render(rows, api) {
+  // The other half of the contract: build real elements instead of a string,
+  // so each one can carry its own click handler. api.filter() asks the grid
+  // this pane is docked to to narrow — the same thing a $filter. pill does.
+  const FIELD = 'country';
+  const values = [...new Set(rows.map((r) => r.data[FIELD]).filter((v) => v != null && v !== ''))].sort();
+  api.el.replaceChildren();
+  if (values.length === 0) {
+    api.el.textContent = 'No values in ' + FIELD + '.';
+    return;
+  }
+  for (const v of values.slice(0, 20)) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = String(v);
+    b.style.cssText = 'margin:.1rem;padding:.1rem .5rem;border:none;border-radius:1rem;background:#e0f2fe;color:#0369a1;cursor:pointer';
+    b.addEventListener('click', () => api.filter(FIELD, String(v)));
+    api.el.append(b);
   }
 }
 `,

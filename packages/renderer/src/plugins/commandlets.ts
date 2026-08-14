@@ -163,6 +163,14 @@ function contextOf(path: EventTarget[]): CommandletContext {
       const id = tableIdAtNode(node);
       if (id) ctx.tableId = id;
     }
+    // An element may name the table it is about, whatever window it is in.
+    // `viz-panel` does (`data-eda-table`): a visualization always draws exactly
+    // one table, but a WINDOWED one sits in no table window, so `tableIdAtNode`
+    // found nothing and a target-less `#goto?…` clicked inside it refused to run.
+    if (!ctx.tableId && node instanceof HTMLElement) {
+      const id = node.dataset.edaTable;
+      if (id) ctx.tableId = id;
+    }
     // A `<view-window>` in the path IS the current view, which is what a
     // target-less `view?…` acts on. Read off the element rather than looked up:
     // the view window carries its own instance id as a property.

@@ -94,7 +94,9 @@ describe('noTermsNote', () => {
   it('points at the word rules, not at the mapping', () => {
     // The column HAS text here, so "pick another column" would be wrong advice.
     const note = noTermsNote({ minLength: 3, stopWordsOn: true, numbersExcluded: true });
-    expect(note).toContain('Chart');
+    // Names the button that actually holds them. It said "Chart" until v0.0.370,
+    // when that button became "Edit" (the definition) and "Settings" (this view).
+    expect(note).toContain('Settings');
     expect(note).toContain('3 characters');
     expect(note).toContain('common word');
     expect(note).toContain('a number');

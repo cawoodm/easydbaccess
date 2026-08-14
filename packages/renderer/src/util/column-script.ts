@@ -106,6 +106,57 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+// -- Visualization scripts ----------------------------------------------------
+//
+// A custom visualization's optional script: `function render(rows, api) { … }`,
+// run once per draw over the WHOLE row set rather than once per row. Same
+// helpers and the same trust model; its own cache, because one source string
+// compiled for the wrong signature would be handed the wrong arguments.
+//
+// The one contract difference from a column script: a BLANK script is not an
+// error. The common custom visualization is a block of HTML with `$filter.`
+// pills and no script at all, so "there is no script" has to be an ordinary
+// answer here, where for a column it means a `script` renderer with nothing to
+// render.
+
+type CompiledViz = (rows: unknown, api: unknown, ...helpers: unknown[]) => unknown;
+
+const compiledViz = new Map<string, CompiledViz>();
+
+/**
+ * Compile a visualization script body to `(rows, api, …helpers) => unknown`,
+ * memoized per unique source. Throws on a syntax error.
+ */
+export function compileVizScript(src: string): CompiledViz {
+  const cached = compiledViz.get(src);
+  if (cached) return cached;
+  const fn = new Function('rows', 'api', ...HELPER_NAMES, 'easydb', `${src}\nreturn render(rows, api);`) as CompiledViz;
+  compiledViz.set(src, fn);
+  return fn;
+}
+
+/**
+ * Run a visualization script over the rows a pane was given.
+ *
+ * A blank script returns `{ ok: true, value: undefined }` — nothing to run is
+ * not a failure. A returned string replaces the container's markup; anything
+ * else means the script wrote into `api.el` itself.
+ */
+export function runVizScript(src: string | undefined, rows: unknown, api: unknown): ScriptRun {
+  if (!src || !src.trim()) return { ok: true, value: undefined };
+  let fn: CompiledViz;
+  try {
+    fn = compileVizScript(src);
+  } catch (err) {
+    return { ok: false, label: 'compile error', message: errorMessage(err) };
+  }
+  try {
+    return { ok: true, value: fn(rows, api, ...helperArgs()) };
+  } catch (err) {
+    return { ok: false, label: 'runtime error', message: errorMessage(err) };
+  }
+}
+
 // -- Validation scripts -------------------------------------------------------
 //
 // A column's OTHER script: `function validate(value, row) { … }`, run when the

@@ -49,7 +49,7 @@ async function openViews(page: import('@playwright/test').Page, tableId: string)
  */
 async function makeChart(page: import('@playwright/test').Page, tableId: string, opts: { kind?: string; name?: string; where?: 'window' | 'above' | 'below' } = {}) {
   const dlg = await openViews(page, tableId);
-  await dlg.getByRole('button', { name: '+ New chart' }).click();
+  await dlg.getByRole('button', { name: '+ New visualization' }).click();
   await dlg
     .locator('input[type=text]')
     .first()
@@ -162,10 +162,10 @@ test.describe('visualizations', () => {
     await makeChart(page, id, { name: 'By country' });
     const footer = page.locator('viz-footer');
     await expect(footer).toBeVisible();
-    await expect(footer.getByRole('button', { name: 'Edit visualization' })).toBeVisible();
-    await expect(footer.getByRole('button', { name: 'Edit chart definition' })).toBeVisible();
+    await expect(footer.getByRole('button', { name: 'Settings for this view' })).toBeVisible();
+    await expect(footer.getByRole('button', { name: 'Edit definition' })).toBeVisible();
 
-    await footer.getByRole('button', { name: 'Edit visualization' }).click();
+    await footer.getByRole('button', { name: 'Settings for this view' }).click();
     const dlg = page.locator('views-dialog dialog');
     await expect(dlg).toBeVisible();
     // Straight onto this instance's edit form, with its channels listed by label
@@ -177,7 +177,7 @@ test.describe('visualizations', () => {
   test('the Chart button opens the template, where the kind and aggregate live', async ({ page }) => {
     const id = await seedCities(page);
     await makeChart(page, id, { name: 'By country' });
-    await page.locator('viz-footer').getByRole('button', { name: 'Edit chart definition' }).click();
+    await page.locator('viz-footer').getByRole('button', { name: 'Edit definition' }).click();
     const dlg = page.locator('views-dialog dialog');
     await expect(dlg).toBeVisible();
     await expect(dlg).toContainText('What it measures');
@@ -230,8 +230,8 @@ test.describe('visualizations', () => {
     expect((await footer.boundingBox())!.height).toBeGreaterThan(28);
 
     const vf = footer.locator('viz-footer');
-    await expect(vf.getByRole('button', { name: 'Edit visualization' })).toBeVisible();
-    await expect(vf.getByRole('button', { name: 'Edit chart definition' })).toBeVisible();
+    await expect(vf.getByRole('button', { name: 'Settings for this view' })).toBeVisible();
+    await expect(vf.getByRole('button', { name: 'Edit definition' })).toBeVisible();
     // Icons come from the shared `.mi` class — `.material-icons` has no rules in a
     // shadow root, so the ligature rendered as the literal word "edit".
     const iconFont = await vf
@@ -250,13 +250,13 @@ test.describe('visualizations', () => {
     const dlg = page.locator('views-dialog dialog');
 
     // The Chart button — the template editor (kind, aggregate, options).
-    await win.locator('viz-footer').getByRole('button', { name: 'Edit chart definition' }).click();
+    await win.locator('viz-footer').getByRole('button', { name: 'Edit definition' }).click();
     await expect(dlg).toBeVisible();
     await dlg.getByRole('button', { name: 'Save' }).click();
     await expect(dlg).toBeHidden();
 
     // The Edit button — the instance editor (which column feeds which channel).
-    await win.locator('viz-footer').getByRole('button', { name: 'Edit visualization' }).click();
+    await win.locator('viz-footer').getByRole('button', { name: 'Settings for this view' }).click();
     await expect(dlg).toBeVisible();
     await dlg.getByRole('button', { name: 'Save' }).click();
     await expect(dlg).toBeHidden();
@@ -267,7 +267,7 @@ test.describe('visualizations', () => {
     // to be thrown out of it, and may well want to edit something else.
     const id = await seedCities(page);
     const dlg = await openViews(page, id);
-    await dlg.getByRole('button', { name: '+ New chart' }).click();
+    await dlg.getByRole('button', { name: '+ New visualization' }).click();
     await dlg.locator('input[type=text]').first().fill('Stays open');
     await dlg.getByRole('button', { name: 'Save' }).click();
     await expect(dlg).toBeVisible();
@@ -330,7 +330,7 @@ test.describe('visualizations', () => {
 
     // Now OVERRIDE on this view only: raise the limit and drop the exceptions.
     const win = page.locator('.jsPanel', { has: page.locator('viz-panel') });
-    await win.locator('viz-footer').getByRole('button', { name: 'Edit visualization' }).click();
+    await win.locator('viz-footer').getByRole('button', { name: 'Settings for this view' }).click();
     const dlg = page.locator('views-dialog dialog');
     await expect(dlg.locator('.viz-override')).not.toHaveCount(0);
     const keepField = dlg.locator('.viz-override', { hasText: 'Always keep these words' }).locator('textarea');
@@ -424,5 +424,62 @@ test.describe('visualizations', () => {
 
     const mappings = await page.evaluate(() => (window as unknown as { __renamed: Array<Record<string, string>> }).__renamed);
     expect(mappings[0]?.['CATEGORY']).toBe('land');
+  });
+});
+
+test.describe('the measure is a setting a single view can override', () => {
+  /** The numbers the bar chart actually plotted, per category. */
+  const plotted = (page: import('@playwright/test').Page) =>
+    page.locator('viz-panel viz-bar-chart table.a11y tbody tr').evaluateAll((rows) =>
+      rows.map((r) => [r.querySelector('th')?.textContent ?? '', r.querySelector('td')?.textContent ?? '']),
+    );
+
+  test('Settings changes SUM for this view; the definition keeps counting', async ({ page }) => {
+    // The definition says "count rows per country". One view of it should be
+    // able to say "sum the amount instead" without forking the template — the
+    // same layering `vizOptions` already had, applied to the measure.
+    const id = await seedCities(page);
+    await makeChart(page, id, { name: 'By country' });
+    await expect.poll(() => plotted(page)).toEqual([
+      ['CH', '3'],
+      ['DE', '2'],
+      ['AT', '1'],
+    ]);
+
+    await page.locator('viz-footer').getByRole('button', { name: 'Settings for this view' }).click();
+    const dlg = page.locator('views-dialog dialog');
+    await expect(dlg).toBeVisible();
+    await dlg.locator('label.field', { hasText: 'Aggregate' }).locator('select').selectOption('sum');
+    await dlg.getByRole('button', { name: 'Save', exact: true }).click();
+
+    // CH 10+7+4, DE 5+3, AT 1 — and still largest-first, which was not overridden.
+    await expect.poll(() => plotted(page)).toEqual([
+      ['CH', '21'],
+      ['DE', '8'],
+      ['AT', '1'],
+    ]);
+
+    // The DEFINITION is untouched — the override is a delta, not a fork, so
+    // editing the template later still reaches every view that never changed it.
+    await page.locator('viz-footer').getByRole('button', { name: 'Edit definition' }).click();
+    await expect(dlg).toBeVisible();
+    await expect(dlg).toContainText('What it measures');
+    await expect(dlg.locator('label.field', { hasText: 'Aggregate' }).locator('select')).toHaveValue('count');
+  });
+
+  test('Reset puts the measure back to following the definition', async ({ page }) => {
+    const id = await seedCities(page);
+    await makeChart(page, id, { name: 'By country' });
+    await page.locator('viz-footer').getByRole('button', { name: 'Settings for this view' }).click();
+    const dlg = page.locator('views-dialog dialog');
+    const field = dlg.locator('.viz-override', { hasText: 'Aggregate' });
+
+    await field.locator('select').selectOption('sum');
+    // Marked as overridden, with a way back — an override you cannot see is one
+    // you cannot undo.
+    await expect(field).toHaveClass(/changed/);
+    await field.getByRole('button', { name: 'Reset' }).click();
+    await expect(field).not.toHaveClass(/changed/);
+    await expect(field.locator('select')).toHaveValue('count');
   });
 });

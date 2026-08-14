@@ -14,8 +14,13 @@ import { createTable, panelDomId, waitForPanel } from './helpers.js';
  * exercises the runtime kind-change path (icon + colour update without
  * reopening the window) with no network mocking required.
  */
+// Mirrors PANEL_COLORS in window-mgr/table-kind.ts. Every table kind is a shade
+// of BLUE; teal and violet are reserved for a view and a visualization, which
+// are not tables. Duplicated rather than imported: an e2e spec asserts what the
+// user sees, and importing the constant would make the test pass by definition.
 const LOCAL = '#01579b';
-const REFRESHABLE = '#6d28d9';
+const CONNECTED = '#0d47a1';
+const VIEW = '#00695c';
 
 /** The chrome colour the shell is painting this panel (or dock bar) with. */
 const panelColorOf = (page: import('@playwright/test').Page, domId: string) =>
@@ -53,12 +58,12 @@ test.describe('panel titlebar kind icons', () => {
     }, id);
 
     await expect(icon).toHaveAttribute('aria-label', 'Connected table (live)');
-    await expect.poll(() => panelColorOf(page, panelDomId(id))).toBe(REFRESHABLE);
+    await expect.poll(() => panelColorOf(page, panelDomId(id))).toBe(CONNECTED);
     await expect(panel).toBeVisible();
   });
 
   test('a minimized window keeps its colour in the dock', async ({ page }) => {
-    // The colour used to be a CSS class on the window only, so a refreshable
+    // The colour used to be a CSS class on the window only, so a connected
     // table docked as a plain local one.
     const id = await createTable(page, 'Widgets', [{ field: 'name' }]);
     await waitForPanel(page, id);
@@ -70,12 +75,12 @@ test.describe('panel titlebar kind icons', () => {
         updatedAt: Date.now(),
       });
     }, id);
-    await expect.poll(() => panelColorOf(page, panelDomId(id))).toBe(REFRESHABLE);
+    await expect.poll(() => panelColorOf(page, panelDomId(id))).toBe(CONNECTED);
 
     await page.locator(`#${panelDomId(id)} .jsPanel-btn-minimize`).click();
     const bar = page.locator('#easydb-minimized-dock .jsPanel-replacement');
     await expect(bar).toHaveCount(1);
-    expect(await panelColorOf(page, `${panelDomId(id)}-min`)).toBe(REFRESHABLE);
+    expect(await panelColorOf(page, `${panelDomId(id)}-min`)).toBe(CONNECTED);
   });
 
   test('a view window keeps its own colour in the dock', async ({ page, workspaceId }) => {
@@ -105,11 +110,12 @@ test.describe('panel titlebar kind icons', () => {
     const viewPanel = page.locator('[id^="view-panel-"]');
     await expect(viewPanel).toBeVisible();
     const domId = (await viewPanel.getAttribute('id'))!;
-    const cyan = await panelColorOf(page, domId);
-    expect(cyan).toBe('#0891b2');
+    const viewColor = await panelColorOf(page, domId);
+    // Deliberately NOT a blue: blue is the table family, and a view is not one.
+    expect(viewColor).toBe(VIEW);
 
     await viewPanel.locator('.jsPanel-btn-minimize').click();
     await expect(page.locator('#easydb-minimized-dock .jsPanel-replacement')).toHaveCount(1);
-    expect(await panelColorOf(page, `${domId}-min`)).toBe(cyan);
+    expect(await panelColorOf(page, `${domId}-min`)).toBe(viewColor);
   });
 });

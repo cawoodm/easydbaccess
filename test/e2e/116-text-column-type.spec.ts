@@ -41,13 +41,24 @@ test('a CSV column of long values imports as `text`, a column of short ones as `
   const table = await page.evaluate(async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const store = (window as any).__easydb.store;
+    let last = null;
     for (let i = 0; i < 60; i++) {
       const all = await store.tables.find();
       const t = all.find((x: { name: string }) => x.name === 'notes');
-      if (t) return t;
+      // Wait for the RENDERER, not just for the table. `auto-renderer` assigns it
+      // in a patch of its own after the import writes the table, so a poll that
+      // stopped at "the table exists" read it one write too early — which passed
+      // on an idle machine and failed under load.
+      if (t) {
+        last = t;
+        const body = (t.columns as Array<{ field: string; renderer?: string }>).find((c) => c.field === 'body');
+        if (body?.renderer) return t;
+      }
       await new Promise((r) => setTimeout(r, 100));
     }
-    return null;
+    // Return what we saw rather than null, so a real regression fails on the
+    // renderer assertion below instead of on a bare "table is null".
+    return last;
   });
   expect(table).not.toBeNull();
   const byField = Object.fromEntries((table.columns as Array<{ field: string; type: string; renderer?: string }>).map((c) => [c.field, c]));

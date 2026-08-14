@@ -42,7 +42,7 @@ async function dockChart(page: import('@playwright/test').Page, tableId: string,
     .click();
   const dlg = page.locator('views-dialog dialog');
   await expect(dlg).toBeVisible();
-  await dlg.getByRole('button', { name: '+ New chart' }).click();
+  await dlg.getByRole('button', { name: '+ New visualization' }).click();
   await dlg.locator('input[type=text]').first().fill('Docked');
   await dlg.getByRole('button', { name: 'Save' }).click();
   await dlg.locator('ul.list li', { hasText: 'Docked' }).getByRole('button', { name: 'Use' }).click();
@@ -205,7 +205,7 @@ test.describe('visualization docking', () => {
       .locator(`#${panelDomId(id)} panel-footer`)
       .getByRole('button', { name: /Views/ })
       .click();
-    await dlg.getByRole('button', { name: '+ New chart' }).click();
+    await dlg.getByRole('button', { name: '+ New visualization' }).click();
     await dlg.locator('input[type=text]').first().fill('Cloud');
     await dlg.locator('select').first().selectOption('wordcloud');
     await dlg.getByRole('button', { name: 'Save' }).click();
@@ -246,18 +246,28 @@ test.describe('visualization docking', () => {
     await expect(page.locator('viz-panel')).toBeVisible();
   });
 
-  test('a docked pane has an edit button in its strip', async ({ page }) => {
+  test('a docked pane reaches BOTH editors from its strip', async ({ page }) => {
     // A pane has no footer of its own — the host window's footer belongs to the
-    // table — so the one control that matters lives in the strip.
+    // table — so both routes back to the configuration live in the strip. With
+    // only one, the definition (kind, aggregate, shared options) was unreachable
+    // from a docked pane without undocking it first.
     const id = await seed(page);
     await dockChart(page, id, 'above');
     const pane = page.locator(`#${panelDomId(id)} viz-pane`);
-    const edit = pane.getByRole('button', { name: 'Edit visualization' });
-    await expect(edit).toBeVisible();
-    await edit.focus();
-    await edit.press('Enter');
-    await expect(page.locator('views-dialog dialog')).toBeVisible();
-    await expect(page.locator('views-dialog dialog')).toContainText('Map data to columns');
+    const dlg = page.locator('views-dialog dialog');
+
+    const settings = pane.getByRole('button', { name: 'Settings for this view' });
+    await expect(settings).toBeVisible();
+    await settings.focus();
+    await settings.press('Enter');
+    await expect(dlg).toBeVisible();
+    await expect(dlg).toContainText('Map data to columns');
+    await page.keyboard.press('Escape');
+    await expect(dlg).toBeHidden();
+
+    await pane.getByRole('button', { name: 'Edit definition' }).click();
+    await expect(dlg).toBeVisible();
+    await expect(dlg).toContainText('What it measures');
   });
 
   test('moving a windowed chart to docked takes effect immediately', async ({ page }) => {
@@ -270,7 +280,7 @@ test.describe('visualization docking', () => {
       .getByRole('button', { name: /Views/ })
       .click();
     const dlg = page.locator('views-dialog dialog');
-    await dlg.getByRole('button', { name: '+ New chart' }).click();
+    await dlg.getByRole('button', { name: '+ New visualization' }).click();
     await dlg.locator('input[type=text]').first().fill('Mover');
     await dlg.getByRole('button', { name: 'Save' }).click();
     await dlg.locator('ul.list li', { hasText: 'Mover' }).getByRole('button', { name: 'Use' }).click();
@@ -283,7 +293,7 @@ test.describe('visualization docking', () => {
 
     // Move it to docked from the chart's own Edit form.
     const win = page.locator('.jsPanel', { has: page.locator('viz-panel') });
-    await win.locator('viz-footer').getByRole('button', { name: 'Edit visualization' }).click();
+    await win.locator('viz-footer').getByRole('button', { name: 'Settings for this view' }).click();
     await expect(dlg).toBeVisible();
     await dlg.locator('select').first().selectOption('above');
     await dlg.getByRole('button', { name: 'Save' }).click();
@@ -353,7 +363,7 @@ test.describe('visualization docking', () => {
       .getByRole('button', { name: /Views/ })
       .click();
     await expect(dlg).toBeVisible();
-    await dlg.getByRole('button', { name: '+ New chart' }).click();
+    await dlg.getByRole('button', { name: '+ New visualization' }).click();
     await dlg.locator('input[type=text]').first().fill('Cloud');
     await dlg.locator('select').first().selectOption('wordcloud');
     await dlg.getByRole('button', { name: 'Save' }).click();

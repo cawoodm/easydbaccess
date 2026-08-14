@@ -45,6 +45,24 @@ message, so a typo can't leave you staring at an empty table.
 Anything beginning with `@` is an instruction rather than a column, which is why
 a column of your own called `sort` still filters normally.
 
+## Leaving the table name out
+
+Drop the name and `goto` means **the table you are in**:
+
+| Type this            | And you get                                     |
+| -------------------- | ----------------------------------------------- |
+| `goto?Book=Matthew`  | this table filtered, whichever table it is      |
+| `goto?@sort=-Rating` | this table sorted                               |
+| `goto?@clear`        | this table's filters cleared                    |
+
+That is what makes a link worth writing once. A custom HTML visualization, or a
+cell script that builds a link, can carry `#goto?Country==CH` and work on every
+table it is used with — naming the table would tie it to one. It is the same
+shortcut `view?…` already offers for the view you are in.
+
+Typed into the command palette there is no table you are in, so it says so
+rather than guessing one and quietly filtering something you are not looking at.
+
 ## The other things it can do
 
 | Type this                               | And you get                            |

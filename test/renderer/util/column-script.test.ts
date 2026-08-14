@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COLUMN_SCRIPT_HELPERS, compileColumnScript, runColumnScript, runValidateScript } from '../../../packages/renderer/src/util/column-script.js';
+import { COLUMN_SCRIPT_HELPERS, compileColumnScript, runColumnScript, runValidateScript, runVizScript } from '../../../packages/renderer/src/util/column-script.js';
 
 describe('runColumnScript', () => {
   it('returns whatever render(row) returns, not just strings', () => {
@@ -151,5 +151,50 @@ describe('runValidateScript', () => {
     expect(runColumnScript(both, { a: 7 })).toEqual({ ok: true, value: 7 });
     expect(runValidateScript(both, 7, { a: 7 })).toEqual({ ok: false, message: 'same' });
     expect(runColumnScript(both, { a: 7 })).toEqual({ ok: true, value: 7 });
+  });
+});
+
+describe('runVizScript', () => {
+  const api = { el: null, columns: [], filter: () => {}, sort: () => {} };
+
+  it('treats a blank script as nothing to do, not as an error', () => {
+    // The common custom visualization is HTML with pills and no script at all,
+    // so "there is no script" has to be an ordinary answer here — unlike a
+    // column, where a `script` renderer with nothing to render IS a mistake.
+    for (const src of [undefined, '', '   \n']) {
+      const out = runVizScript(src, [], api);
+      expect(out.ok && out.value === undefined).toBe(true);
+    }
+  });
+
+  it('hands the script the whole row set, not one row', () => {
+    const rows = [{ data: { n: 1 } }, { data: { n: 2 } }];
+    const out = runVizScript('function render(rows) { return rows.length; }', rows, api);
+    expect(out.ok && out.value).toBe(2);
+  });
+
+  it('passes the api through, so a script can ask the host to filter', () => {
+    const asked: string[] = [];
+    const spy = { ...api, filter: (f: string) => void asked.push(f) };
+    runVizScript('function render(rows, api) { api.filter("country", "CH"); }', [], spy);
+    expect(asked).toEqual(['country']);
+  });
+
+  it('reports a broken script rather than throwing into the draw', () => {
+    const bad = runVizScript('function render( {', [], api);
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.label).toBe('compile error');
+    const boom = runVizScript('function render() { throw new Error("boom"); }', [], api);
+    expect(boom.ok).toBe(false);
+    if (!boom.ok) expect([boom.label, boom.message]).toEqual(['runtime error', 'boom']);
+  });
+
+  it('keeps its own cache, so one source is never compiled for the wrong signature', () => {
+    const src = 'function render(a, b) { return typeof b; }';
+    // A column script is called `render(row)` — one argument, so `b` is absent.
+    expect(runColumnScript(src, {})).toEqual({ ok: true, value: 'undefined' });
+    // The same source compiled as a viz script is called `render(rows, api)`.
+    const asViz = runVizScript(src, [], api);
+    expect(asViz.ok && asViz.value).toBe('object');
   });
 });

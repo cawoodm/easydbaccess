@@ -129,18 +129,24 @@ export class VizPane extends LitElement {
   }
 
   /**
-   * Open the Views dialog on this instance.
+   * The two ways back into the configuration, exactly as `viz-footer` offers
+   * them for a windowed visualization.
    *
-   * A docked pane has no footer to hang a toolbar off (that is the host window's),
-   * so the one control that matters most lives in the strip beside the others —
-   * same destination as `viz-footer`'s Edit.
+   * A docked pane has no footer to hang a toolbar off (that is the host
+   * window's), so both live in the strip. It carried only ONE pencil before,
+   * which meant the definition — the kind, the aggregate, the shared options —
+   * was unreachable from a docked pane without undocking it first.
+   *
+   * Icons are the shared convention: `code` is the DEFINITION everywhere it
+   * appears, `tune` is THIS view's settings. Two buttons that both looked like a
+   * pencil would be two buttons nobody could tell apart in a 22px strip.
    */
-  private async edit(): Promise<void> {
+  private async openEditor(what: 'template' | 'instance'): Promise<void> {
     if (!this.viewInstanceId) return;
     const ctx = await getContext();
     const inst = await ctx.store.viewInstances.findOne(this.viewInstanceId);
     if (!inst) return;
-    openViewsDialog(inst.tableId, { editInstanceId: this.viewInstanceId });
+    openViewsDialog(inst.tableId, what === 'template' ? { editTemplateId: inst.templateId } : { editInstanceId: this.viewInstanceId });
   }
 
   /** Ask the embedded panel to re-read its data. */
@@ -166,8 +172,11 @@ export class VizPane extends LitElement {
           <span class="mi sm">${this.collapsed ? 'chevron_right' : 'expand_more'}</span>
         </button>
         <span class="title" title=${this.label}>${this.label}</span>
-        <button @click=${() => void this.edit()} title="Edit this visualization" aria-label="Edit visualization">
-          <span class="mi sm">edit</span>
+        <button @click=${() => void this.openEditor('template')} title="Edit the definition: kind, aggregate and the options every view of it shares" aria-label="Edit definition">
+          <span class="mi sm">code</span>
+        </button>
+        <button @click=${() => void this.openEditor('instance')} title="Settings for THIS view: its columns, its limit, and any option it overrides" aria-label="Settings for this view">
+          <span class="mi sm">tune</span>
         </button>
         <button @click=${() => void this.refresh()} title="Re-read the data and redraw" aria-label="Refresh">
           <span class="mi sm">refresh</span>

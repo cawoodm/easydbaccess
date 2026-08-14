@@ -4,9 +4,22 @@
 // exists to catch. A typo in a sample is otherwise only found by the person who
 // picked it and got a "compile error" instead of a working script.
 
-import { describe, expect, it } from 'vitest';
-import { RENDER_SAMPLES, VALIDATE_SAMPLES, addUserSample, builtinSamples, parseUserSamples, removeUserSample, userSamplesFor } from '../../../packages/renderer/src/dialogs/script-samples.js';
-import { runColumnScript, runValidateScript } from '../../../packages/renderer/src/util/column-script.js';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { Row } from '@easydb/shared';
+import {
+  RENDER_SAMPLES,
+  VALIDATE_SAMPLES,
+  VIZ_HTML_SAMPLES,
+  VIZ_SCRIPT_SAMPLES,
+  addUserSample,
+  builtinSamples,
+  parseUserSamples,
+  removeUserSample,
+  userSamplesFor,
+} from '../../../packages/renderer/src/dialogs/script-samples.js';
+import { runColumnScript, runValidateScript, runVizScript } from '../../../packages/renderer/src/util/column-script.js';
+import { substituteVizTokens } from '../../../packages/renderer/src/viz/viz-tokens.js';
+import { looksLikeCommandlet, parseCommandlets } from '../../../packages/renderer/src/plugins/commandlet-lang.js';
 
 /** Run a validate sample by label — fails loudly if the label ever drifts. */
 function run(label: string, value: unknown, row: Record<string, unknown> = {}) {
@@ -281,5 +294,198 @@ describe('user samples', () => {
   it('builtinSamples answers per kind, and a token script shares the render list', () => {
     expect(builtinSamples('render')).toBe(RENDER_SAMPLES);
     expect(builtinSamples('validate')).toBe(VALIDATE_SAMPLES);
+    // A visualization's markup and its code keep separate lists: a sample is
+    // pasted whole, and HTML landing in the script box is not recoverable.
+    expect(builtinSamples('viz-html')).toBe(VIZ_HTML_SAMPLES);
+    expect(builtinSamples('viz-script')).toBe(VIZ_SCRIPT_SAMPLES);
+  });
+
+  it('keeps a saved viz sample in its own list, and an unknown kind reads as render', () => {
+    const stored = [
+      { id: 'a', kind: 'viz-html', label: 'My header', source: '<b>$COUNT</b>' },
+      { id: 'b', kind: 'wat', label: 'Older build', source: 'function render(row) { return 1; }' },
+    ];
+    const parsed = parseUserSamples(stored);
+    expect(userSamplesFor(parsed, 'viz-html').map((s) => s.id)).toEqual(['a']);
+    expect(userSamplesFor(parsed, 'render').map((s) => s.id)).toEqual(['b']);
   });
 });
+
+// The custom-visualization samples ARE the documentation for that feature — the
+// dropdown is how it is discovered — so they are held to the same bar: every one
+// draws something the first time it is picked, over rows that look like a real
+// table rather than a fixture built to flatter them.
+
+const VIZ_ROWS: Row[] = [
+  { id: 'r1', tableId: 't', data: { country: 'CH', amount: 10 }, updatedAt: 0 },
+  { id: 'r2', tableId: 't', data: { country: 'DE', amount: 5 }, updatedAt: 0 },
+  { id: 'r3', tableId: 't', data: { country: 'CH', amount: 20 }, updatedAt: 0 },
+];
+
+describe('VIZ_HTML_SAMPLES', () => {
+  it('offers six samples, each with a distinct label', () => {
+    expect(VIZ_HTML_SAMPLES).toHaveLength(6);
+    expect(new Set(VIZ_HTML_SAMPLES.map((s) => s.label)).size).toBe(6);
+  });
+
+  it('every sample draws something over the sample columns it names', () => {
+    for (const s of VIZ_HTML_SAMPLES) {
+      const out = substituteVizTokens(s.source, VIZ_ROWS);
+      expect(out.length, s.label).toBeGreaterThan(0);
+      // A token naming a column that is not there renders an error chip, so this
+      // catches a sample whose field names drifted from the ones it documents.
+      expect(out, s.label).not.toContain('eda-token-error');
+      expect(out, s.label).not.toMatch(/\$(COUNT|SUM|AVG|MIN|MAX|DISTINCT|filter)\b/);
+    }
+  });
+
+  it('the pill sample really emits pills, and the KPI samples real numbers', () => {
+    const pills = VIZ_HTML_SAMPLES.find((s) => s.label.startsWith('Filter pills'));
+    expect(substituteVizTokens(pills!.source, VIZ_ROWS)).toContain('data-eda-filter-value="CH"');
+    const tile = VIZ_HTML_SAMPLES.find((s) => s.label.startsWith('KPI tile'));
+    expect(substituteVizTokens(tile!.source, VIZ_ROWS)).toContain('>3<');
+  });
+});
+
+describe('the #links in the HTML samples are real commandlets', () => {
+  /** Every `href="#…"` across the samples, as the DOM would hand it back. */
+  function links(): string[] {
+    const out: string[] = [];
+    for (const s of VIZ_HTML_SAMPLES) {
+      for (const m of s.source.matchAll(/href="#([^"]+)"/g)) out.push((m[1] ?? '').replace(/&amp;/g, '&'));
+    }
+    return out;
+  }
+
+  it('there are some, and every one parses', () => {
+    // A sample link that does not parse is a dead end the user only finds by
+    // clicking it and getting an error toast.
+    const all = links();
+    expect(all.length).toBeGreaterThan(0);
+    for (const href of all) {
+      expect(looksLikeCommandlet(href), href).toBe(true);
+      expect(() => parseCommandlets(href), href).not.toThrow();
+    }
+  });
+
+  it('none of them names a table, so the block works wherever it is dropped', () => {
+    for (const href of links()) {
+      const [cmd] = parseCommandlets(href);
+      expect(cmd?.verb, href).toBe('goto');
+      expect(cmd?.targets, href).toEqual([]);
+    }
+  });
+
+  it('the toolbar sample covers filtering, sorting and searching', () => {
+    const toolbar = VIZ_HTML_SAMPLES.find((s) => s.label.startsWith('Toolbar'));
+    const parsed = [...(toolbar?.source ?? '').matchAll(/href="#([^"]+)"/g)].map((m) => parseCommandlets((m[1] ?? '').replace(/&amp;/g, '&'))[0]);
+    expect(parsed.some((c) => Object.keys(c?.filters ?? {}).length > 0)).toBe(true);
+    expect(parsed.some((c) => c?.options.sort !== undefined)).toBe(true);
+    expect(parsed.some((c) => c?.options.search !== undefined)).toBe(true);
+    expect(parsed.some((c) => c?.options.clear !== undefined)).toBe(true);
+  });
+});
+
+describe('VIZ_SCRIPT_SAMPLES', () => {
+  it('offers two samples — one per half of the contract', () => {
+    expect(VIZ_SCRIPT_SAMPLES).toHaveLength(2);
+    expect(new Set(VIZ_SCRIPT_SAMPLES.map((s) => s.label)).size).toBe(2);
+  });
+
+  it('every sample compiles and defines render(rows, api)', () => {
+    for (const s of VIZ_SCRIPT_SAMPLES) {
+      const out = runVizScript(s.source, VIZ_ROWS, fakeVizApi());
+      expect(out.ok, `${s.label}: ${out.ok ? '' : `${out.label} — ${out.message}`}`).toBe(true);
+    }
+  });
+
+  it('survives an empty set rather than throwing on the first row', () => {
+    for (const s of VIZ_SCRIPT_SAMPLES) {
+      const out = runVizScript(s.source, [], fakeVizApi());
+      expect(out.ok, s.label).toBe(true);
+    }
+  });
+
+  it('one returns a string and the other writes into api.el', () => {
+    const returning = VIZ_SCRIPT_SAMPLES.find((s) => s.label.startsWith('Return a string'));
+    const out = runVizScript(returning!.source, VIZ_ROWS, fakeVizApi());
+    expect(out.ok && typeof out.value === 'string').toBe(true);
+
+    const writing = VIZ_SCRIPT_SAMPLES.find((s) => s.label.startsWith('Write into api.el'));
+    const api = fakeVizApi();
+    const wrote = runVizScript(writing!.source, VIZ_ROWS, api);
+    expect(wrote.ok && wrote.value === undefined).toBe(true);
+    expect(api.appended).toBe(2); // one button per distinct country
+  });
+
+  it('the api.el sample asks the host to filter when a button is clicked', () => {
+    const writing = VIZ_SCRIPT_SAMPLES.find((s) => s.label.startsWith('Write into api.el'));
+    const api = fakeVizApi();
+    runVizScript(writing!.source, VIZ_ROWS, api);
+    api.clickFirst();
+    expect(api.filtered).toEqual([['country', 'CH']]);
+  });
+});
+
+/**
+ * Just enough `document` for the api.el sample to run.
+ *
+ * This suite has no DOM (see docs/tech/TESTING.md), and a sample that builds
+ * real elements is the whole point of the second script sample — checking only
+ * that it COMPILES would leave the interesting half, the click that asks the
+ * host to filter, untested. Twenty lines of stub buy that assertion.
+ */
+interface FakeEl {
+  tagName: string;
+  type: string;
+  textContent: string;
+  style: { cssText: string };
+  children: FakeEl[];
+  listeners: Array<() => void>;
+  addEventListener(ev: string, fn: () => void): void;
+  append(...kids: FakeEl[]): void;
+  replaceChildren(...kids: FakeEl[]): void;
+}
+
+function fakeEl(tagName = 'div'): FakeEl {
+  const el: FakeEl = {
+    tagName,
+    type: '',
+    textContent: '',
+    style: { cssText: '' },
+    children: [],
+    listeners: [],
+    addEventListener(_ev, fn) {
+      el.listeners.push(fn);
+    },
+    append(...kids) {
+      el.children.push(...kids);
+    },
+    replaceChildren(...kids) {
+      el.children = [...kids];
+    },
+  };
+  return el;
+}
+
+beforeAll(() => vi.stubGlobal('document', { createElement: (tag: string) => fakeEl(tag) }));
+afterAll(() => vi.unstubAllGlobals());
+
+/** The `api` a visualization script is handed, recording what it was asked for. */
+function fakeVizApi() {
+  const el = fakeEl();
+  const filtered: Array<[string, string]> = [];
+  return {
+    el,
+    columns: [],
+    filter: (field: string, value: string) => void filtered.push([field, value]),
+    sort: () => {},
+    filtered,
+    get appended() {
+      return el.children.length;
+    },
+    clickFirst() {
+      el.children[0]?.listeners[0]?.();
+    },
+  };
+}
