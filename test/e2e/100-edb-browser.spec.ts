@@ -103,8 +103,7 @@ test.describe('browser .edb storage', () => {
     expect(tables.map((t) => t.name)).toContain('parts');
 
     const rows = await page.evaluate(
-      async (id) =>
-        (window as unknown as { __easydb: { store: { rows(id: string): { find(): Promise<{ data: Record<string, unknown> }[]> } } } }).__easydb.store.rows(id).find(),
+      async (id) => (window as unknown as { __easydb: { store: { rows(id: string): { find(): Promise<{ data: Record<string, unknown> }[]> } } } }).__easydb.store.rows(id).find(),
       tableId,
     );
     expect(byPart(rows)).toEqual([
@@ -200,8 +199,7 @@ test.describe('converting a browser workspace to a file', () => {
     expect(await fileForWorkspace(page, workspaceId)).toBe(`${workspaceId}.edb`);
 
     const rows = await page.evaluate(
-      async (id) =>
-        (window as unknown as { __easydb: { store: { rows(id: string): { find(): Promise<{ data: Record<string, unknown> }[]> } } } }).__easydb.store.rows(id).find(),
+      async (id) => (window as unknown as { __easydb: { store: { rows(id: string): { find(): Promise<{ data: Record<string, unknown> }[]> } } } }).__easydb.store.rows(id).find(),
       tableId,
     );
     expect(byPart(rows)).toEqual([

@@ -732,11 +732,7 @@ export class VizPanel extends LitElement {
     // does not declare, and branching the template per kind would mean this host
     // knowing which kinds exist — the thing `channelOfKind` avoids.
     return html`
-      <div
-        class="chart ${spec.bleed ? 'bleed' : ''}"
-        @viz-filter-request=${this.onFilterRequest}
-        @viz-sort-request=${this.onSortRequest}
-      >
+      <div class="chart ${spec.bleed ? 'bleed' : ''}" @viz-filter-request=${this.onFilterRequest} @viz-sort-request=${this.onSortRequest}>
         ${staticHtml`<${tag}
           .data=${this.chartData()}
           .points=${this.mapPoints()}

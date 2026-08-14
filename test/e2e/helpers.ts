@@ -203,9 +203,7 @@ async function edbMirrorBase64(page: Page, edbName: string): Promise<string | nu
  */
 export async function waitForEdbMirror(page: Page, edbName: string): Promise<Buffer> {
   let b64: string | null = null;
-  await expect
-    .poll(async () => (b64 = await edbMirrorBase64(page, edbName)) !== null, { timeout: 20_000, message: 'the OPFS mirror was never written' })
-    .toBe(true);
+  await expect.poll(async () => (b64 = await edbMirrorBase64(page, edbName)) !== null, { timeout: 20_000, message: 'the OPFS mirror was never written' }).toBe(true);
   return Buffer.from(b64!, 'base64');
 }
 
@@ -251,7 +249,10 @@ export async function readViewInstance(page: Page, instanceId: string) {
  * skip would hide the question disappearing.
  */
 export async function chooseSimpleStorage(page: Page): Promise<void> {
-  await page.locator('host-dialogs').getByRole('button', { name: /^Simple/ }).click();
+  await page
+    .locator('host-dialogs')
+    .getByRole('button', { name: /^Simple/ })
+    .click();
 }
 
 /** Returns the jsPanel DOM id derived from a table id (mirrors cssSafe()). */

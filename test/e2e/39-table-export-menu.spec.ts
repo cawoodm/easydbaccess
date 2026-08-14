@@ -37,7 +37,10 @@ const dialog = (page: Page) => page.locator('export-dialog dialog');
 
 /** Open the dialog from a table's footer button. */
 async function openFromTable(page: Page, id: string) {
-  await page.locator(`#${panelDomId(id)} panel-footer`).getByRole('button', { name: 'Export' }).click();
+  await page
+    .locator(`#${panelDomId(id)} panel-footer`)
+    .getByRole('button', { name: 'Export' })
+    .click();
   await expect(dialog(page)).toBeVisible();
 }
 

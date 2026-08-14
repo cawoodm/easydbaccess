@@ -133,7 +133,11 @@ describe('bad stored data', () => {
     // Both are still LISTED. That is the whole point of holding local workspaces
     // here too: a load backed by a `.edb` never opens IndexedDB, so this is the
     // only place it can learn that "Sales" exists.
-    expect(knownWorkspaces().map((w) => w.id).sort()).toEqual(['bible', 'sales']);
+    expect(
+      knownWorkspaces()
+        .map((w) => w.id)
+        .sort(),
+    ).toEqual(['bible', 'sales']);
   });
 
   it('refuses a file that is not a usable name', () => {
@@ -168,7 +172,11 @@ describe('reconcileRoster — the two stores must list the same set', () => {
       ],
       null,
     );
-    expect(knownWorkspaces().map((w) => w.id).sort()).toEqual(['bible', 'sales', 'stock']);
+    expect(
+      knownWorkspaces()
+        .map((w) => w.id)
+        .sort(),
+    ).toEqual(['bible', 'sales', 'stock']);
     expect(fileOf('stock')).toBeNull();
   });
 
@@ -180,7 +188,11 @@ describe('reconcileRoster — the two stores must list the same set', () => {
   it('is the union of both stores after each has been opened once', () => {
     reconcileRoster([{ id: 'scratch', name: 'Scratch' }], null);
     reconcileRoster([{ id: 'sales', name: 'Sales' }], 'sales.edb');
-    expect(knownWorkspaces().map((w) => `${w.id}:${w.file ?? 'local'}`).sort()).toEqual(['sales:sales.edb', 'scratch:local']);
+    expect(
+      knownWorkspaces()
+        .map((w) => `${w.id}:${w.file ?? 'local'}`)
+        .sort(),
+    ).toEqual(['sales:sales.edb', 'scratch:local']);
   });
 
   it('never relabels a converted workspace, whose IndexedDB copy is still there', () => {
@@ -223,7 +235,11 @@ describe('reconcileRoster — the two stores must list the same set', () => {
     rememberWorkspace({ id: 'b', name: 'B', file: 'one.edb' });
     rememberWorkspace({ id: 'c', name: 'C', file: 'two.edb' });
     reconcileRoster([{ id: 'a', name: 'A' }], 'one.edb');
-    expect(knownWorkspaces().map((w) => w.id).sort()).toEqual(['a', 'c']);
+    expect(
+      knownWorkspaces()
+        .map((w) => w.id)
+        .sort(),
+    ).toEqual(['a', 'c']);
   });
 
   it('writes nothing when the roster already agrees', () => {

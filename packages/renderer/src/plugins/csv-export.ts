@@ -52,7 +52,7 @@ export function serializeCsv(table: Table, rows: Row[], opts?: Partial<CsvExport
   const fields = table.columns.map((c) => c.field);
   const lines: string[] = [];
   if (o.header) {
-    const cells = table.columns.map((c) => (o.typedHeader ? typedHeaderCell(c) : c.label ?? c.field));
+    const cells = table.columns.map((c) => (o.typedHeader ? typedHeaderCell(c) : (c.label ?? c.field)));
     lines.push(cells.map((c) => quoteIfNeeded(c, sep)).join(sep));
   }
   for (const r of rows) {

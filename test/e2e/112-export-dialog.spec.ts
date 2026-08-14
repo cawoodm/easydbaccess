@@ -102,7 +102,9 @@ test('several tables as JSON become ONE dump file', async ({ page }) => {
 
   await stubSaveFile(page);
   await openFromWorkspace(page);
-  await selector(page).getByRole('button', { name: /^Choose/ }).click();
+  await selector(page)
+    .getByRole('button', { name: /^Choose/ })
+    .click();
   await expect(dialog(page)).toBeVisible();
   await pickFormat(page, 'JSON');
   await dialog(page).getByTestId('export-run').click();
@@ -124,7 +126,9 @@ test('several tables as CSV become one file EACH — a CSV has no shape for two 
 
   await stubSaveFile(page);
   await openFromWorkspace(page);
-  await selector(page).getByRole('button', { name: /^Choose/ }).click();
+  await selector(page)
+    .getByRole('button', { name: /^Choose/ })
+    .click();
   await pickFormat(page, 'CSV');
   await dialog(page).getByTestId('export-run').click();
 
@@ -138,7 +142,10 @@ test('the CSV panel changes the file it writes', async ({ page }) => {
   await addRow(page, id, { name: 'Alice', qty: 1 });
 
   await stubSaveFile(page);
-  await page.locator(`#${panelDomId(id)} panel-footer`).getByRole('button', { name: 'Export' }).click();
+  await page
+    .locator(`#${panelDomId(id)} panel-footer`)
+    .getByRole('button', { name: 'Export' })
+    .click();
   await expect(dialog(page)).toBeVisible();
 
   // The panel is the format's own element, mounted by tag — the dialog imports
@@ -159,7 +166,10 @@ test('a typed CSV header carries the column types', async ({ page }) => {
   await addRow(page, id, { code: '007', qty: 3 });
 
   await stubSaveFile(page);
-  await page.locator(`#${panelDomId(id)} panel-footer`).getByRole('button', { name: 'Export' }).click();
+  await page
+    .locator(`#${panelDomId(id)} panel-footer`)
+    .getByRole('button', { name: 'Export' })
+    .click();
   await dialog(page).locator('csv-export-options').getByTestId('csv-typed-header').check();
   await dialog(page).getByTestId('export-run').click();
 
@@ -172,7 +182,10 @@ test('a typed CSV header carries the column types', async ({ page }) => {
 test('switching format switches the panel', async ({ page }) => {
   const id = await createTable(page, 'Panels', [{ field: 'name' }]);
   await waitForPanel(page, id);
-  await page.locator(`#${panelDomId(id)} panel-footer`).getByRole('button', { name: 'Export' }).click();
+  await page
+    .locator(`#${panelDomId(id)} panel-footer`)
+    .getByRole('button', { name: 'Export' })
+    .click();
   await expect(dialog(page).locator('csv-export-options')).toBeVisible();
 
   await pickFormat(page, 'JSON');
@@ -192,7 +205,10 @@ test('SQL is still offered, and still writes a script', async ({ page }) => {
   await addRow(page, id, { name: 'Alice' });
 
   await stubSaveFile(page);
-  await page.locator(`#${panelDomId(id)} panel-footer`).getByRole('button', { name: 'Export' }).click();
+  await page
+    .locator(`#${panelDomId(id)} panel-footer`)
+    .getByRole('button', { name: 'Export' })
+    .click();
   await pickFormat(page, 'SQL');
   await dialog(page).getByTestId('export-run').click();
 
@@ -200,5 +216,5 @@ test('SQL is still offered, and still writes a script', async ({ page }) => {
   const [file] = await savedFiles(page);
   expect(file?.filename).toBe('scripted.sql');
   expect(file!.body).toContain('CREATE TABLE');
-  expect(file!.body).toContain("INSERT INTO");
+  expect(file!.body).toContain('INSERT INTO');
 });

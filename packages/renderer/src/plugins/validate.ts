@@ -117,7 +117,11 @@ async function validateTable(api: HostApi, table: Table): Promise<void> {
     const head = `${result.issues.length.toLocaleString()} issue${result.issues.length === 1 ? '' : 's'} in ${errors.size.toLocaleString()} of ${result.scanned.toLocaleString()} rows of "${table.name}"${
       result.cancelled ? ', before you stopped it' : ''
     }.`;
-    const pick = await api.ui.dialogs.choice(`${head}\n\n${lines.join('\n')}\n\n"${table.name}" now shows those rows only. Each cell that is wrong is marked, with the reason in its tooltip. Fix them, then press ✓ again.`, ['Show me', 'Close'], 'Validate');
+    const pick = await api.ui.dialogs.choice(
+      `${head}\n\n${lines.join('\n')}\n\n"${table.name}" now shows those rows only. Each cell that is wrong is marked, with the reason in its tooltip. Fix them, then press ✓ again.`,
+      ['Show me', 'Close'],
+      'Validate',
+    );
     if (pick === 'Show me') focusTableWindow(table.id);
   } finally {
     document.removeEventListener('keydown', onKey);

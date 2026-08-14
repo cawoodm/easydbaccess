@@ -277,13 +277,7 @@ describe('queryRows', () => {
 describe('distinctValues', () => {
   beforeEach(() => {
     store.insert('tables', table());
-    store.bulkInsert('rows', [
-      row('r1', { name: 'bolt', qty: 1 }),
-      row('r2', { name: 'bolt', qty: 2 }),
-      row('r3', { name: 'nut', qty: 3 }),
-      row('r4', { name: '', qty: 4 }),
-      row('r5', { qty: 5 }),
-    ]);
+    store.bulkInsert('rows', [row('r1', { name: 'bolt', qty: 1 }), row('r2', { name: 'bolt', qty: 2 }), row('r3', { name: 'nut', qty: 3 }), row('r4', { name: '', qty: 4 }), row('r5', { qty: 5 })]);
   });
 
   it('counts each value, commonest first', () => {

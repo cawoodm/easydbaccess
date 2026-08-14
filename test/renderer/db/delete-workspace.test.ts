@@ -77,7 +77,10 @@ function makeDb(seed: Seed) {
 /** One workspace with two tables, three rows, a view, a template and two settings. */
 function populated() {
   return makeDb({
-    workspaces: [{ id: 'mine', name: 'Mine' }, { id: 'other', name: 'Other' }],
+    workspaces: [
+      { id: 'mine', name: 'Mine' },
+      { id: 'other', name: 'Other' },
+    ],
     tables: [
       { id: 't1', workspaceId: 'mine' },
       { id: 't2', workspaceId: 'mine' },

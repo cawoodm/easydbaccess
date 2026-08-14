@@ -1,6 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { RowIssue } from '../../../packages/renderer/src/table/validate-rules.js';
-import { clearRowErrors, ERROR_FIELD, ERROR_FILTER, errorColumnSpec, problemAt, rowErrorsFrom, rowErrorsOf, setRowErrors, watchRowErrors, __resetRowErrors, type RowErrors } from '../../../packages/renderer/src/table/row-errors.js';
+import {
+  clearRowErrors,
+  ERROR_FIELD,
+  ERROR_FILTER,
+  errorColumnSpec,
+  problemAt,
+  rowErrorsFrom,
+  rowErrorsOf,
+  setRowErrors,
+  watchRowErrors,
+  __resetRowErrors,
+  type RowErrors,
+} from '../../../packages/renderer/src/table/row-errors.js';
 import { matchesColumnFilter } from '../../../packages/shared/src/column-filter.js';
 
 /**

@@ -53,7 +53,10 @@ async function dockCustom(page: import('@playwright/test').Page, tableId: string
   if (opts.script) await boxes.nth(1).fill(opts.script);
   await dlg.getByRole('button', { name: 'Save' }).click();
   await dlg.locator('ul.list li', { hasText: 'Header' }).getByRole('button', { name: 'Use' }).click();
-  await dlg.locator('select').first().selectOption(opts.where ?? 'below');
+  await dlg
+    .locator('select')
+    .first()
+    .selectOption(opts.where ?? 'below');
   await dlg.getByRole('button', { name: 'Create view' }).click();
   await expect(dlg).toBeHidden();
   await expect(page.locator('views-dialog dialog[open]')).toHaveCount(0);

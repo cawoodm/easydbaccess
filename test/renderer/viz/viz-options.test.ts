@@ -116,7 +116,13 @@ describe('the aggregate layer', () => {
   it('a measure override applies to every series, not just the first', () => {
     // A chart drawing three value series and asked for "sum" means all three;
     // leaving two of them counting rows would be a legend nobody could read.
-    const multi: VizAggregate = { ...base, measures: [{ channel: 'A', fn: 'count' }, { channel: 'B', fn: 'count' }] };
+    const multi: VizAggregate = {
+      ...base,
+      measures: [
+        { channel: 'A', fn: 'count' },
+        { channel: 'B', fn: 'count' },
+      ],
+    };
     const out = effectiveAggregate(multi, { fn: 'sum' });
     expect(out?.measures.map((m) => m.fn)).toEqual(['sum', 'sum']);
     // The channels are structure and are left alone.

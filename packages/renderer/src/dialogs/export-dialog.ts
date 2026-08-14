@@ -287,13 +287,7 @@ export class ExportDialog extends LitElement {
           ${choices.map(
             ([value, text]) => html`
               <label>
-                <input
-                  type="radio"
-                  name=${String(key)}
-                  data-testid=${`export-${String(key)}-${String(value)}`}
-                  .checked=${this.options[key] === value}
-                  @change=${() => this.set(key, value)}
-                />
+                <input type="radio" name=${String(key)} data-testid=${`export-${String(key)}-${String(value)}`} .checked=${this.options[key] === value} @change=${() => this.set(key, value)} />
                 ${text}
               </label>
             `,
@@ -315,9 +309,7 @@ export class ExportDialog extends LitElement {
             <h2>Export</h2>
             <div class="header-actions">
               <button type="button" class="ghost" @click=${() => this.finish()}>Cancel</button>
-              <button type="submit" class="primary" ?disabled=${this.busy || !spec || this.tables.length === 0} data-testid="export-run">
-                ${this.busy ? 'Exporting…' : 'Export'}
-              </button>
+              <button type="submit" class="primary" ?disabled=${this.busy || !spec || this.tables.length === 0} data-testid="export-run">${this.busy ? 'Exporting…' : 'Export'}</button>
             </div>
           </div>
           <div class="dialog-body">
