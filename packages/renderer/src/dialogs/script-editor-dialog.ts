@@ -27,8 +27,14 @@ import { materializeColumnScript, materializeSummary } from '../table/materializ
  * `render` / `validate` are a column's two scripts. `token` is a VIEW TOKEN's
  * script: the same `render(row)` shape and the same samples, but it formats what
  * a view SHOWS and never touches the stored cell.
+ *
+ * `viz-html` and `viz-script` are the two halves of a custom visualization. They
+ * are here rather than in a textarea of their own because everything around the
+ * box — the samples dropdown, the **+** that saves what you wrote, Ctrl-Enter,
+ * the Undo after picking a sample — is exactly what writing one of these needs,
+ * and a plain `text` settings field has none of it.
  */
-export type ScriptKind = 'render' | 'validate' | 'token';
+export type ScriptKind = 'render' | 'validate' | 'token' | 'viz-html' | 'viz-script';
 
 /**
  * The saved column a `render` script belongs to, which is what Run needs to
@@ -293,6 +299,11 @@ export class ScriptEditorDialog extends LitElement {
   private blankFor(kind: ScriptKind, field: string): string {
     if (kind === 'validate') return VALIDATE_BOILERPLATE;
     if (kind === 'token') return tokenBoilerplate(field);
+    // A custom visualization starts EMPTY, unlike every other kind. Its HTML
+    // box has no required shape to demonstrate, and its script is optional —
+    // pre-filling either would make an empty visualization impossible to save
+    // and would hide the samples dropdown behind text nobody asked for.
+    if (kind === 'viz-html' || kind === 'viz-script') return '';
     return BOILERPLATE;
   }
 
@@ -316,7 +327,17 @@ export class ScriptEditorDialog extends LitElement {
    * is offered in a view's token editor and the other way round.
    */
   private get sampleKind(): SampleKind {
-    return this.kind === 'validate' ? 'validate' : 'render';
+    if (this.kind === 'validate') return 'validate';
+    if (this.kind === 'viz-html') return 'viz-html';
+    if (this.kind === 'viz-script') return 'viz-script';
+    return 'render';
+  }
+
+  /** What the dialog calls itself. A visualization's markup is not a "script". */
+  private get heading(): string {
+    if (this.kind === 'validate') return 'Edit validation';
+    if (this.kind === 'viz-html') return 'Edit HTML';
+    return 'Edit script';
   }
 
   /** The shipped samples for whichever script is being edited. */
@@ -458,6 +479,31 @@ export class ScriptEditorDialog extends LitElement {
 
   /** The explanation above the textarea — different job, different contract. */
   private renderHints() {
+    if (this.kind === 'viz-html') {
+      return html`
+        <p class="hint">
+          Plain HTML, drawn over the rows the grid is currently showing. The tokens describe the <strong>whole set</strong>, not one row: <code>$COUNT</code> is how many rows are on screen,
+          <code>$SUM.amount</code> their total, and <code>$AVG.</code> <code>$MIN.</code> <code>$MAX.</code> <code>$DISTINCT.</code> work the same way. Anything that is not a token is left exactly as
+          you wrote it.
+        </p>
+        <p class="hint">
+          <code>$filter.country</code> renders one clickable pill per distinct value. Clicking one narrows the grid this pane is docked to — a visualization is a two-way street — and the grid's own
+          funnel is where it shows and where you clear it.
+        </p>
+      `;
+    }
+    if (this.kind === 'viz-script') {
+      return html`
+        <p class="hint">
+          Optional. Define <code>function render(rows, api) { … }</code>. It runs once per draw, <em>after</em> the HTML is in place. <code>rows</code> is what the grid is showing (each with a
+          <code>.data</code> object); return a string to replace the container's markup, or return nothing and build elements in <code>api.el</code> yourself.
+        </p>
+        <p class="hint">
+          <code>api.columns</code> is the column specs, and <code>api.filter(field, value)</code> / <code>api.sort(field)</code> ask the host grid to change — the same thing a
+          <code>$filter.</code> pill does.
+        </p>
+      `;
+    }
     if (this.kind === 'token') {
       return html`
         <p class="hint">
@@ -502,7 +548,7 @@ export class ScriptEditorDialog extends LitElement {
         <button type="button" class="close-x" title="Close" @click=${this.onCancel}>×</button>
         <form @submit=${this.onSubmit}>
           <div class="dialog-header">
-            <h2>${validating ? 'Edit validation' : 'Edit script'}${this.columnLabel ? ` — ${this.columnLabel}` : ''}</h2>
+            <h2>${this.heading}${this.columnLabel ? ` — ${this.columnLabel}` : ''}</h2>
             <div class="header-actions">
               ${this.target
                 ? html`<button
@@ -526,7 +572,7 @@ export class ScriptEditorDialog extends LitElement {
               <label for="sample">Start from a sample</label>
               <select
                 id="sample"
-                title=${validating ? 'Replace the editor contents with a ready-made rule' : 'Replace the editor contents with a ready-made script'}
+                title=${validating ? 'Replace the editor contents with a ready-made rule' : this.kind === 'viz-html' ? 'Replace the editor contents with a ready-made block of HTML' : 'Replace the editor contents with a ready-made script'}
                 @change=${(e: Event) => this.applySample(e)}
               >
                 <option value="">— choose —</option>

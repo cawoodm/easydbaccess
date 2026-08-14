@@ -6,6 +6,7 @@
 //   goto/bible?Book=Matthew
 //   goto/bible?Book=^M&Chapter==5&@sort=-Chapter
 //   goto/notes?@search=berlin&@sort=-Date
+//   goto?Country==CH            (no name ⇒ the table the click came from)
 //   view/Reading plan
 //   cmd/windows:close-all
 //   goto/bible?Book=Matthew;preview/bible/Text?Chapter==5
@@ -38,12 +39,14 @@ const VERB_ALIASES: Record<string, CommandletVerb> = {
 /**
  * How many targets each verb takes. `rest` ⇒ the remaining segments, joined.
  *
- * `view` takes NO target at all: `view?Title==Psalms 139` means the view the
- * click came from, so one template can carry a link that narrows the view it is
- * already in without naming it.
+ * `view` and `goto` both take NO target at all: `view?Title==Psalms 139` means
+ * the view the click came from and `goto?Country==CH` means the TABLE it came
+ * from, so one template can carry a link that narrows what it is already in
+ * without naming it. That is what makes a header written once work on every
+ * table it is dropped onto — naming the table would tie it to one.
  */
 const ARITY: Record<CommandletVerb, { min: number; rest: boolean }> = {
-  goto: { min: 1, rest: false },
+  goto: { min: 0, rest: false },
   search: { min: 1, rest: true },
   preview: { min: 2, rest: false },
   view: { min: 0, rest: true },

@@ -117,19 +117,29 @@ export class VizFooter extends LitElement {
   }
 
   /**
-   * Open the Views dialog straight on this instance's edit form.
+   * Open the Views dialog straight on this INSTANCE's form — the "Settings"
+   * button.
    *
    * `editInstanceId` is the existing entry point the dialog already supports for
    * exactly this — no new dialog surface, and the mapping/options editor it lands
    * on is the same one that created the visualization.
    */
-  private edit(): void {
+  private settings(): void {
     if (!this.tableId) return;
     openViewsDialog(this.tableId, { editInstanceId: this.viewInstanceId });
   }
 
-  /** Edit the TEMPLATE — the kind, the aggregate, the options shared by every instance. */
-  private async editTemplate(): Promise<void> {
+  /**
+   * Edit the TEMPLATE — the kind, the aggregate, the options every view of this
+   * visualization shares.
+   *
+   * This is what "Edit" means, and "Settings" is the instance. The pair used to
+   * read the other way round ("Edit" the instance, "Chart" the definition),
+   * which put the shared thing behind the more specific-sounding word: a user
+   * looking for "the chart's settings" reached for Chart and got the definition
+   * every other view of it also uses.
+   */
+  private async edit(): Promise<void> {
     if (!this.tableId) return;
     const ctx = await getContext();
     const inst = await ctx.store.viewInstances.findOne(this.viewInstanceId);
@@ -139,8 +149,12 @@ export class VizFooter extends LitElement {
 
   override render() {
     return html`
-      <button @click=${this.edit} title="Edit this visualization: which columns feed which channel" aria-label="Edit visualization"><span class="mi sm">edit</span>Edit</button>
-      <button @click=${() => void this.editTemplate()} title="Edit the chart definition: kind, aggregate and options" aria-label="Edit chart definition"><span class="mi sm">tune</span>Chart</button>
+      <button @click=${() => void this.edit()} title="Edit the definition: kind, aggregate and the options every view of it shares" aria-label="Edit definition">
+        <span class="mi sm">code</span>Edit
+      </button>
+      <button @click=${this.settings} title="Settings for THIS view: its columns, its limit, and any option it overrides" aria-label="Settings for this view">
+        <span class="mi sm">tune</span>Settings
+      </button>
       <button @click=${() => void this.refresh()} title="Re-read the data and redraw" aria-label="Refresh"><span class="mi sm">refresh</span></button>
       <button @click=${() => void this.exportCsv()} title="Save the numbers behind this chart as a CSV file" aria-label="Export as CSV"><span class="mi sm">download</span>CSV</button>
       <span class="spacer"></span>

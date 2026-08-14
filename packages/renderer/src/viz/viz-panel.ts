@@ -33,15 +33,18 @@ import { truncationNote } from '../db/truncation-note.js';
 import { readSortSpecs } from '../table/row-sort.js';
 import { runColumnScript } from '../util/column-script.js';
 import { requestVisibleRows, watchVisibleRows, type VisibleRowsDetail } from '../table/visible-rows.js';
+import { paneFilter, paneSort } from '../table/pane-actions.js';
+import { persistPillFilters, withPillValue } from '../views/pill-filters.js';
 import { aggregateRows, type VizFrame } from './viz-aggregate.js';
 import { parseWordList, resolveStopWords, wordFrequencies } from './word-frequency.js';
-import { effectiveVizOptions } from './viz-options.js';
+import { effectiveAggregate, effectiveVizOptions } from './viz-options.js';
 import { csvFilename, frameToCsv, pointsToCsv, termsToCsv } from './viz-csv.js';
 import { emptyChannelNote, emptyChannels, noTermsNote, type MappedChannel } from './viz-diagnose.js';
 import { readTileAttribution, readTileUrl, DEFAULT_TILE_ATTRIBUTION, DEFAULT_TILE_URL } from './viz-settings.js';
 import { defineCharts } from './elements/chart-element.js';
 import { definePointMap } from './elements/point-map.js';
 import { defineWordCloud } from './elements/word-cloud.js';
+import { defineCustomHtml, type VizFilterRequest, type VizSortRequest } from './viz-custom-html.js';
 import type { ChartData, CloudTerm, MapPoint } from './elements/chart-data.js';
 
 // Registers the built-in drawing tags once, at module load. The elements
@@ -50,6 +53,7 @@ import type { ChartData, CloudTerm, MapPoint } from './elements/chart-data.js';
 defineCharts();
 definePointMap();
 defineWordCloud();
+defineCustomHtml();
 
 @customElement('viz-panel')
 export class VizPanel extends LitElement {
@@ -250,8 +254,15 @@ export class VizPanel extends LitElement {
       const inst = all.find((i) => i.id === this.viewInstanceId);
       if (!inst) return;
       const rebind = inst.tableId !== this.instance?.tableId || inst.templateId !== this.instance?.templateId;
+      // A WINDOWED visualization reads rows itself and folds `pillFilters` into
+      // that read, so a pill clicked in a custom template has to re-read — a
+      // recompute alone would redraw the same rows. Docked, the grid owns the
+      // read and republishes on its own.
+      const pillsChanged = !inst.dock && pillKey(inst.pillFilters) !== pillKey(this.instance?.pillFilters);
       this.instance = inst;
+      this.publishTableAttr();
       if (rebind) void this.bind();
+      else if (pillsChanged) void this.loadRows();
       else void this.refreshTemplateThenRecompute();
     });
 
@@ -262,6 +273,7 @@ export class VizPanel extends LitElement {
       return;
     }
     this.instance = inst;
+    this.publishTableAttr();
     await this.bind();
   }
 
@@ -347,6 +359,26 @@ export class VizPanel extends LitElement {
     this.columns = table.columns ?? [];
   }
 
+  /**
+   * Advertise the table this visualization is about, as a plain data attribute.
+   *
+   * A commandlet clicked inside a pane needs to know which table it is in — that
+   * is what a target-less `#goto?Country==CH` acts on — and `tableIdAtNode` only
+   * finds a TABLE window. A windowed visualization is not inside one, and a
+   * `#goto` from it failed with "name the table" even though a visualization
+   * always has exactly one.
+   *
+   * An attribute rather than a property or an import: `plugins/commandlets.ts`
+   * walks the composed path of the click and reads `data-eda-table` off whatever
+   * it passes, so any element can answer the question without that module
+   * learning what a viz-panel is.
+   */
+  private publishTableAttr(): void {
+    const id = this.instance?.tableId;
+    if (id) this.dataset.edaTable = id;
+    else delete this.dataset.edaTable;
+  }
+
   private acceptPublishedRows(d: VisibleRowsDetail): void {
     this.rows = [...d.rows];
     this.matchingTotal = d.total;
@@ -382,11 +414,16 @@ export class VizPanel extends LitElement {
   }
 
   /**
-   * The aggregation spec actually used: the template's, else the visualization's
-   * declared default. A viz with neither cannot draw, and says so.
+   * The aggregation spec actually used: the template's (else the
+   * visualization's declared default), with THIS view's overrides on top.
+   *
+   * The same two-layer shape `options` already had — a template says "count rows
+   * per category" and one view of it may say "sum the amount" without forking the
+   * template. See `viz-options.ts` for why the override is a delta.
    */
   private get aggregate(): VizAggregate | null {
-    return this.template?.viz?.aggregate ?? this.spec?.defaultAggregate ?? null;
+    const base = this.template?.viz?.aggregate ?? this.spec?.defaultAggregate ?? null;
+    return effectiveAggregate(base, this.instance?.vizAggregate);
   }
 
   /**
@@ -579,6 +616,57 @@ export class VizPanel extends LitElement {
     return o;
   }
 
+  /**
+   * The key the host grid publishes and listens under, or null when this
+   * visualization is in its own window. The same key `visible-rows.ts` uses, so
+   * rows in and requests out travel over one identity.
+   */
+  private hostKey(): string | null {
+    const dock = this.instance?.dock;
+    if (!dock) return null;
+    return dock.host.kind === 'view' ? dock.host.viewInstanceId : dock.host.tableId;
+  }
+
+  /**
+   * "Narrow what I am showing" — the pane's half of the two-way street.
+   *
+   * Docked, the request goes to the HOST GRID (`table/pane-actions.ts`): one
+   * filter layer, shown and cleared in the grid's own funnel. A docked pane has
+   * a 22px strip and nowhere to display a filter of its own, so a pane-local
+   * pill could have been switched on with no way to see or clear it.
+   *
+   * Two cases have no grid to ask. A pane docked to a view window that renders
+   * an HTML template has no `data-table` registered under its key, and a
+   * WINDOWED visualization has no host at all; both write the instance's own
+   * `pillFilters`, which is the layer a view already filters by and which
+   * `loadRows` already applies.
+   */
+  private onFilterRequest = async (e: Event): Promise<void> => {
+    const { field, value } = (e as CustomEvent<VizFilterRequest>).detail;
+    const inst = this.instance;
+    if (!inst || !field) return;
+    const key = this.hostKey();
+    if (key && paneFilter(key, field, value)) return;
+    // Docked to a table whose grid is gone (minimized) — there is nothing to
+    // narrow, and writing our own pill layer would filter rows the grid is still
+    // pushing us, so the two would disagree the moment it comes back.
+    if (key && inst.dock?.host.kind === 'table') return;
+    const target = inst.dock?.host.kind === 'view' ? inst.dock.host.viewInstanceId : inst.id;
+    // Read the target's CURRENT pills rather than assuming they are ours: docked
+    // to a view, the layer being added to belongs to the view window, and
+    // overwriting it would drop every pill already clicked over there.
+    const ctx = await getContext();
+    const current = target === inst.id ? inst.pillFilters : (await ctx.store.viewInstances.findOne(target))?.pillFilters;
+    await persistPillFilters(target, withPillValue(current, field, value));
+  };
+
+  /** "Sort what I am showing." Only a host grid can honour this. */
+  private onSortRequest = (e: Event): void => {
+    const { field, additive } = (e as CustomEvent<VizSortRequest>).detail;
+    const key = this.hostKey();
+    if (key && field) paneSort(key, field, additive === true);
+  };
+
   private note(): string | null {
     const f = this.frame;
     if (!f) return null;
@@ -644,15 +732,35 @@ export class VizPanel extends LitElement {
     // does not declare, and branching the template per kind would mean this host
     // knowing which kinds exist — the thing `channelOfKind` avoids.
     return html`
-      <div class="chart ${spec.bleed ? 'bleed' : ''}">
+      <div
+        class="chart ${spec.bleed ? 'bleed' : ''}"
+        @viz-filter-request=${this.onFilterRequest}
+        @viz-sort-request=${this.onSortRequest}
+      >
         ${staticHtml`<${tag}
           .data=${this.chartData()}
           .points=${this.mapPoints()}
           .terms=${this.cloudTerms()}
+          .rows=${this.evaluatedRows()}
+          .columns=${this.columns}
           .options=${opts}
         ></${tag}>`}
       </div>
       ${note ? html`<div class="note" role="status">${note}</div>` : nothing}
     `;
   }
+}
+
+/**
+ * A comparable form of a pill-filter map, so an instance write that changed
+ * something else does not read as a filter change.
+ *
+ * Sorted by field: the map is rebuilt by spread on every click, so its key order
+ * follows the order values were clicked in and two identical filter sets could
+ * otherwise serialise differently.
+ */
+function pillKey(pills: Record<string, string> | undefined): string {
+  const entries = Object.entries(pills ?? {}).filter(([, v]) => v !== '');
+  entries.sort((a, b) => a[0].localeCompare(b[0]));
+  return JSON.stringify(entries);
 }

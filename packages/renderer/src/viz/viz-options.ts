@@ -23,6 +23,8 @@
 // later template edit would stop reaching the instance — inheritance that quietly
 // stops inheriting is worse than no inheritance at all.
 
+import type { VizAggregate, VizAggregateOverride, VizMeasureFn } from '@easydb/shared';
+
 export type VizOptionValues = Record<string, unknown>;
 
 /**
@@ -76,4 +78,60 @@ export function overrideDelta(templateOptions: VizOptionValues | undefined, edit
 /** Which keys this instance overrides — what an editor marks as "not inherited". */
 export function overriddenKeys(templateOptions: VizOptionValues | undefined, instanceOverrides: VizOptionValues | undefined): Set<string> {
   return new Set(Object.keys(overrideDelta(templateOptions, instanceOverrides)));
+}
+
+// -- The aggregate layer ------------------------------------------------------
+//
+// The same two-layer rule, applied to the part of a chart's definition that is
+// not an "option": which function the value column goes through, in what order,
+// and how many groups are worth drawing.
+//
+// It is here rather than beside `VizAggregate` because the RULE is what is
+// shared — store only what changed, treat `undefined` as "inherit" — and having
+// two modules each with their own idea of that is how the two layers drift.
+
+/** The three aggregate settings a view may differ on, as a flat record. */
+export function aggregateFields(agg: VizAggregate | null | undefined): VizOptionValues {
+  return { fn: agg?.measures?.[0]?.fn, sort: agg?.sort, topN: agg?.topN };
+}
+
+/**
+ * What the visualization actually aggregates by: the instance's overrides on top
+ * of the template's spec (or the kind's default, whichever the caller resolved).
+ *
+ * A `fn` override replaces the function on EVERY measure, not just the first. A
+ * chart drawing three value series and asked for "sum" means all three — leaving
+ * two of them counting rows would be a legend nobody could read.
+ */
+export function effectiveAggregate(base: VizAggregate | null | undefined, override: VizAggregateOverride | undefined): VizAggregate | null {
+  if (!base) return null;
+  if (!override || (override.fn === undefined && override.sort === undefined && override.topN === undefined)) return base;
+  const out: VizAggregate = { ...base };
+  if (override.fn !== undefined) out.measures = base.measures.map((m) => ({ ...m, fn: override.fn as VizMeasureFn }));
+  if (override.sort !== undefined) out.sort = override.sort;
+  if (override.topN !== undefined) out.topN = override.topN;
+  return out;
+}
+
+/**
+ * The aggregate overrides worth STORING: the edited values that differ from the
+ * template's, and nothing else. Built on the same diff `overrideDelta` uses, so
+ * a number typed into a text box and a number in the template still compare
+ * equal.
+ */
+export function aggregateOverrideDelta(base: VizAggregate | null | undefined, edited: VizOptionValues | undefined): VizAggregateOverride | undefined {
+  const delta = overrideDelta(aggregateFields(base), edited);
+  const out: VizAggregateOverride = {};
+  if (typeof delta.fn === 'string') out.fn = delta.fn as VizMeasureFn;
+  if (typeof delta.sort === 'string') out.sort = delta.sort as VizAggregate['sort'];
+  if (delta.topN !== undefined) {
+    const n = Number(delta.topN);
+    if (Number.isFinite(n)) out.topN = Math.max(0, Math.trunc(n));
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Which of the three a view overrides — what the editor marks as "not inherited". */
+export function overriddenAggregateKeys(base: VizAggregate | null | undefined, override: VizAggregateOverride | undefined): Set<string> {
+  return new Set(Object.keys(aggregateOverrideDelta(base, { ...aggregateFields(base), ...(override ?? {}) }) ?? {}));
 }

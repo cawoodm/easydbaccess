@@ -408,6 +408,28 @@ export interface VizAggregate {
   sort?: 'category' | 'value' | 'valueDesc' | undefined;
 }
 
+/**
+ * What ONE VIEW may differ on, over and above the template's `VizAggregate`.
+ *
+ * Deliberately three named fields rather than `Partial<VizAggregate>`. `groupBy`,
+ * `measures[].channel` and `bin` are STRUCTURE — they say which channel means
+ * what — and a view that restructured them would no longer be a view of the same
+ * chart; it would be a different chart wearing its name. What genuinely varies
+ * per table is the question asked of the value column (count these, sum those),
+ * the order, and how many groups are worth showing.
+ *
+ * Absent keys inherit, and an absent object inherits everything — the same
+ * delta rule `vizOptions` follows, and for the same reason: a stored full copy
+ * would silently stop tracking later edits to the definition.
+ */
+export interface VizAggregateOverride {
+  /** Replaces the function on every measure. */
+  fn?: VizMeasureFn | undefined;
+  sort?: 'category' | 'value' | 'valueDesc' | undefined;
+  /** 0 ⇒ show every group; that is a real choice, not "unset". */
+  topN?: number | undefined;
+}
+
 /** The drawing half of a viz template: which visualization, and how configured. */
 export interface VizSpec {
   /** Which registered visualization draws this — a `VisualizationSpec.id`. */
@@ -565,6 +587,15 @@ export interface ViewInstance {
    * the whole point of it being a layer rather than a copy.
    */
   vizOptions?: Record<string, unknown> | undefined;
+  /**
+   * This view's aggregate overrides — the measure, the order and the group cap.
+   *
+   * The same layer `vizOptions` is, for the part of the definition that is not an
+   * "option": a template says "count rows per category" and one view of it can
+   * say "sum the amount instead" without forking the template. Only the keys the
+   * user actually changed are stored; see {@link VizAggregateOverride}.
+   */
+  vizAggregate?: VizAggregateOverride | undefined;
   /** Max rows to show (TOP N). Absent or ≤0 ⇒ show all. */
   limit?: number | undefined;
   /**

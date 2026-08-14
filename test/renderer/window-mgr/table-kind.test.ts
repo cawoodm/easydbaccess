@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isRefreshable, PANEL_COLOR_LOCAL, PANEL_COLOR_REFRESHABLE, panelColor, tableKind } from '../../../packages/renderer/src/window-mgr/table-kind.js';
+import { isRefreshable, PANEL_COLORS, PANEL_COLOR_LOCAL, panelColor, tableKind } from '../../../packages/renderer/src/window-mgr/table-kind.js';
 
 describe('tableKind', () => {
   it('is "normal" for a plain table with neither source nor origin', () => {
@@ -55,19 +55,33 @@ describe('isRefreshable', () => {
 });
 
 describe('panelColor', () => {
-  it('gives a plain local table the local colour', () => {
-    expect(panelColor({})).toBe(PANEL_COLOR_LOCAL);
+  it('gives each kind its own shade', () => {
+    expect(panelColor({})).toBe(PANEL_COLORS.normal);
+    expect(panelColor({ origin: { type: 'csv', url: 'https://x/y' } })).toBe(PANEL_COLORS.imported);
+    expect(panelColor({ source: { type: 'url', config: {} } })).toBe(PANEL_COLORS.referenced);
+    expect(panelColor({ source: { type: 'datasette', config: {} } })).toBe(PANEL_COLORS.connected);
+    expect(panelColor({ source: { type: 'projection', config: {} } })).toBe(PANEL_COLORS.projection);
   });
 
-  it('gives every refreshable kind the same violet', () => {
-    expect(panelColor({ origin: { type: 'csv', url: 'https://x/y' } })).toBe(PANEL_COLOR_REFRESHABLE);
-    expect(panelColor({ source: { type: 'url', config: {} } })).toBe(PANEL_COLOR_REFRESHABLE);
-    expect(panelColor({ source: { type: 'datasette', config: {} } })).toBe(PANEL_COLOR_REFRESHABLE);
+  it('every kind is a shade of BLUE — a table always looks like a table', () => {
+    // Non-blue is reserved for what is not a table: teal for a view, violet for
+    // a visualization. Violet used to mean "refreshable table" AND "chart",
+    // which is why this is asserted rather than left to the eye.
+    for (const [kind, hex] of Object.entries(PANEL_COLORS)) {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
+      expect(b, `${kind} ${hex} should be blue-dominant`).toBeGreaterThan(r);
+      expect(b, `${kind} ${hex} should be blue-dominant`).toBeGreaterThan(g);
+    }
+  });
+
+  it('no two kinds share a shade — the whole point is telling them apart', () => {
+    const shades = Object.values(PANEL_COLORS);
+    expect(new Set(shades).size).toBe(shades.length);
   });
 
   it('is the one thing a window and its dock bar both paint from', () => {
     // Not a CSS class over the window: that is what made a minimized window
-    // change colour. Two different values would be the bug returning.
-    expect(PANEL_COLOR_LOCAL).not.toBe(PANEL_COLOR_REFRESHABLE);
+    // change colour.
+    expect(PANEL_COLOR_LOCAL).toBe(PANEL_COLORS.normal);
   });
 });

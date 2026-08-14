@@ -583,6 +583,15 @@ export interface SettingsFieldSpec {
   default?: unknown;
   /** For 'option' (radio) and 'selection' (checkbox group). */
   options?: string[];
+  /**
+   * This `text` field holds CODE, so an editor that has one should offer its
+   * code editor for it — samples dropdown, Ctrl-Enter, the lot.
+   *
+   * A hint rather than a `type` of its own, deliberately: a renderer that has no
+   * code editor ignores it and shows the plain textarea a `text` field always
+   * showed, which is a working control rather than an unhandled field type.
+   */
+  code?: 'html' | 'javascript';
   /** Shown as field help below the control. */
   description?: string;
   /**

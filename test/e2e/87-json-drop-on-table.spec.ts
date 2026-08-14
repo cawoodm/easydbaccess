@@ -106,8 +106,12 @@ test('Re-Create takes the columns from the file', async ({ page }) => {
   await dialogs(page).locator('button.choice', { hasText: 'Re-Create' }).click();
 
   await expect.poll(async () => (await readTable(page, id)).columns.map((c: { field: string }) => c.field)).toEqual(['town', 'mayor']);
+  // The rows need their OWN poll, as in the Append test above. Re-Create writes
+  // the columns FIRST and the rows several store calls later, so the columns
+  // landing says nothing about the rows — a plain read here saw the table
+  // mid-import and got an empty array.
+  await expect.poll(async () => (await readRows(page, id)).length).toBe(1);
   const rows = await readRows(page, id);
-  expect(rows).toHaveLength(1);
   expect(rows[0]?.data).toMatchObject({ town: 'Zug', mayor: 'Ada' });
   // Still the same table — the id, and so the window and anything bound to it.
   expect((await readTable(page, id)).name).toBe('Cities');

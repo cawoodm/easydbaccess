@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 14 Aug 2026
+
+### Features
+
+- 🪶 Custom HTML visualizations: your own markup over the rows on screen, with $COUNT/$SUM tokens and pills that filter the grid (v0.0.371)
+- ✨ A #goto link with no table name acts on the table you are in, so one block of markup works anywhere (v0.0.371)
+- ✨ A chart's measure, order and group cap can be set for one view without changing the definition every view shares (v0.0.371)
+
+### Polish
+
+- ✨ Edit now opens a visualization's definition and Settings opens the view; a docked pane reaches both (v0.0.371)
+- ✨ Every kind of table window is a shade of blue; views and visualizations get their own colours (v0.0.371)
+
 ## 13 Aug 2026
 
 ### Features
@@ -8,7 +21,6 @@
 - ✨ Validate marks each cell that broke a rule pink, with the reason on hover, and keeps the row's verdict in a hidden `_error` column (v0.0.371)
 - ✨ Validate reports in a temporary `_error` column, with the grid filtered to those rows, instead of a separate issues table (v0.0.370)
 - 🪶 A ✓ button checks every row against its columns' rules and collects what it finds in an issues table (v0.0.369)
-- ✨ Delete Visible Data is the default option in a table's delete prompt (v0.0.366)
 - 🪶 Drag a column from one table onto another to start a projection joining the two, with that column selected (v0.0.368)
 - 🪶 A new `text` column type for prose: its funnel offers no value list, because every cell is different and too long to browse (v0.0.365)
 - 🪶 Run… in the script editor writes what a column script returns into the cells, so a computed column becomes data (v0.0.364)

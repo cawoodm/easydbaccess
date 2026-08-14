@@ -27,6 +27,8 @@ import { rememberRowRequest } from './visible-request.js';
 import { ERROR_FIELD, ERROR_FILTER, problemAt, rowErrorsOf, watchRowErrors, type RowErrors } from './row-errors.js';
 import { TABLE_LOADING_EVENT, tableLoadingState, type TableLoadingDetail } from './table-loading.js';
 import { emitVisibleRows, provideVisibleRows, visibleRowsWanted, type VisibleRowsDetail } from './visible-rows.js';
+import { providePaneActions } from './pane-actions.js';
+import { addPillValue } from '../views/view-render.js';
 import { formatByType, toDateInput, toDatetimeInput } from '../util/local-datetime.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
 
@@ -657,6 +659,10 @@ export class DataTable extends LitElement {
     // answer with whatever rows it happened to be holding when it was unmounted.
     this.provideUnsub?.();
     this.provideUnsub = undefined;
+    // The other direction goes with it: a detached grid must not still be
+    // taking filter requests from a pane that outlived it.
+    this.actionsUnsub?.();
+    this.actionsUnsub = undefined;
     this.providedKey = '';
     // A pending refetch would otherwise land on a detached element — and bump
     // the generation, so a later re-connect could discard its own fresh load.
@@ -805,6 +811,7 @@ export class DataTable extends LitElement {
   };
 
   private provideUnsub?: (() => void) | undefined;
+  private actionsUnsub?: (() => void) | undefined;
   private providedKey = '';
 
   /**
@@ -819,7 +826,31 @@ export class DataTable extends LitElement {
     this.provideUnsub?.();
     this.provideUnsub = undefined;
     this.providedKey = key;
-    if (key) this.provideUnsub = provideVisibleRows(key, this.visibleRowsDetail);
+    this.actionsUnsub?.();
+    this.actionsUnsub = undefined;
+    if (key) {
+      this.provideUnsub = provideVisibleRows(key, this.visibleRowsDetail);
+      // The way back: a pane docked into this window can narrow or sort it.
+      // Registered together with the rows provider so the two halves of the
+      // contract can never be out of step — see `table/pane-actions.ts`.
+      this.actionsUnsub = providePaneActions(key, {
+        filter: (field, value) => this.filterFromPane(field, value),
+        sort: (field, additive) => void this.toggleSort(field, additive),
+      });
+    }
+  }
+
+  /**
+   * A pane asking for a value to be filtered on.
+   *
+   * OR-appended as an exact match rather than replacing what is there, which is
+   * what makes clicking a second bar (or a second pill) widen the selection
+   * instead of swapping it — the same `addPillValue` semantics a view's
+   * `$filter.TOKEN` pills have always used.
+   */
+  private filterFromPane(field: string, value: string): void {
+    if (!field) return;
+    this.onFilterInput(field, addPillValue(this.filters[field], value));
   }
 
   /** The key both `easydb:visible-count` and `easydb:visible-rows` are keyed by. */
