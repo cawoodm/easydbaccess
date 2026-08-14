@@ -15,6 +15,10 @@
 
 ### Bugs
 
+- 🪲 Maps drew nothing usable: the tiles and markers were built but landed outside the map, unstyled (v0.0.373)
+- 🪲 A map's "Size by" column made no visible difference to the markers (v0.0.373)
+- 🪲 A JSON file this app exported could fail to import: a long decimal was rewritten into invalid JSON (v0.0.374)
+- 🪲 Resizing a grid column redrew every visualization, re-laying-out a word cloud and losing a map's pan (v0.0.376)
 - 🪲 Moving one workspace into a `.edb` file hid every other workspace from the list (v0.0.375)
 - 🪲 The workspace list differed between a file-backed workspace and a browser one (v0.0.375)
 - 🪲 Deleting a workspace kept in a `.edb` file removed nothing, and it came back on the next load (v0.0.375)

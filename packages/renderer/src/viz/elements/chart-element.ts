@@ -21,6 +21,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import type { PropertyValues } from 'lit';
 import type { Chart as ChartType, ChartConfiguration } from 'chart.js';
 import { readChartTheme, withAlpha, type ChartData } from './chart-data.js';
+import { sameChartData, sameVizOptions } from './same-input.js';
 
 export type ChartKind = 'bar' | 'column' | 'line' | 'pie';
 
@@ -121,6 +122,9 @@ export class VizChartElement extends LitElement {
   private ro: ResizeObserver | null = null;
   /** Guards against an async draw landing after the element was detached. */
   private generation = 0;
+  /** The input the chart on screen was drawn from — see `same-input.ts`. */
+  private drawnData: ChartData = { categories: [], series: [] };
+  private drawnOptions: ChartOptions = {};
 
   static override get properties() {
     return {
@@ -149,7 +153,17 @@ export class VizChartElement extends LitElement {
   }
 
   override updated(changed: PropertyValues): void {
-    if (changed.has('data') || changed.has('options') || changed.has('kind')) void this.draw();
+    // `data` is rebuilt by `viz-panel` on every render, so Lit's reference check
+    // reports it changed whenever the panel re-renders for a reason that has
+    // nothing to do with the numbers — a column resized in the grid beside a
+    // docked chart being the case this was found through. Redrawing then replays
+    // Chart.js's entry animation over an unchanged chart. See `same-input.ts`.
+    if (changed.has('kind') || ((changed.has('data') || changed.has('options')) && !this.matchesDrawn())) void this.draw();
+  }
+
+  /** Is the chart on screen already the answer for the current input? */
+  private matchesDrawn(): boolean {
+    return sameChartData(this.drawnData, this.data) && sameVizOptions(this.drawnOptions, this.options);
   }
 
   private get hasData(): boolean {
@@ -241,6 +255,7 @@ export class VizChartElement extends LitElement {
     if (!this.hasData) {
       this.chart?.destroy();
       this.chart = null;
+      this.rememberDrawnInput();
       return;
     }
     const Ctor = await chartCtor();
@@ -254,6 +269,19 @@ export class VizChartElement extends LitElement {
     // and animation is off so there is nothing to preserve.
     this.chart?.destroy();
     this.chart = new Ctor(canvas, this.buildConfig(Ctor));
+    this.rememberDrawnInput();
+  }
+
+  /**
+   * Record what the chart on screen was built from.
+   *
+   * Only where a chart has really been built (or deliberately cleared), never on
+   * entry: a run abandoned by the generation guard drew nothing, and remembering
+   * its input would suppress the run meant to replace it.
+   */
+  private rememberDrawnInput(): void {
+    this.drawnData = this.data;
+    this.drawnOptions = this.options;
   }
 
   /** One-line summary for `aria-label` — what the picture says, in words. */

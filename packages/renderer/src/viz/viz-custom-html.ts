@@ -31,6 +31,7 @@ import { LitElement, css, html } from 'lit';
 import type { PropertyValues } from 'lit';
 import type { ColumnSpec, Row } from '@easydb/shared';
 import { runVizScript } from '../util/column-script.js';
+import { sameRowRefs, sameVizOptions } from './elements/same-input.js';
 import { substituteVizTokens } from './viz-tokens.js';
 
 /** What the pane asks its host to do. Handled by `viz-panel`. */
@@ -157,7 +158,24 @@ export class VizCustomHtml extends LitElement {
     // A `scriptError` change is the render that REPLACED the canvas, so there is
     // nothing to draw into and re-running would loop.
     if (changed.size === 1 && changed.has('scriptError')) return;
+    // Redrawing rewrites `innerHTML` and re-runs the author's script — which may
+    // have side effects and certainly discards anything the user was doing inside
+    // the markup. `viz-panel` hands over a fresh `rows` array on every render, so
+    // without this a column resized in the grid beside a docked custom
+    // visualization redrew it per pointermove. See `elements/same-input.ts`.
+    if (!this.drawnFor(changed)) return;
     this.draw();
+  }
+
+  /** The input the markup on screen was drawn from — see `elements/same-input.ts`. */
+  private drawnRows: readonly Row[] = [];
+  private drawnColumns: readonly ColumnSpec[] = [];
+  private drawnOptions: CustomHtmlOptions = {};
+
+  /** Has anything the drawing depends on actually changed? */
+  private drawnFor(changed: PropertyValues): boolean {
+    if (changed.has('scriptError')) return true; // recovering from an error: redraw
+    return !(sameRowRefs(this.drawnRows, this.rows) && sameRowRefs(this.drawnColumns, this.columns) && sameVizOptions(this.drawnOptions, this.options));
   }
 
   /**
@@ -170,6 +188,12 @@ export class VizCustomHtml extends LitElement {
   private draw(): void {
     const el = this.renderRoot.querySelector<HTMLElement>('.canvas');
     if (!el) return;
+    // Recorded here rather than at the end: this method is synchronous and always
+    // finishes, and a script that FAILED must not be retried on every unrelated
+    // render either — the message it produced is already on screen.
+    this.drawnRows = this.rows;
+    this.drawnColumns = this.columns;
+    this.drawnOptions = this.options;
     el.innerHTML = substituteVizTokens(this.options.html ?? '', this.rows, this.columns);
     const run = runVizScript(this.options.script, this.rows, this.scriptApi(el));
     if (!run.ok) {
