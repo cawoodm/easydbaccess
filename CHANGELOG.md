@@ -5,7 +5,6 @@
 ### Features
 
 - 🪶 A ✓ button checks every row against its columns' rules and collects what it finds in an issues table (v0.0.369)
-- ✨ Delete Visible Data is the default option in a table's delete prompt (v0.0.366)
 - 🪶 Drag a column from one table onto another to start a projection joining the two, with that column selected (v0.0.368)
 - 🪶 A new `text` column type for prose: its funnel offers no value list, because every cell is different and too long to browse (v0.0.365)
 - 🪶 Run… in the script editor writes what a column script returns into the cells, so a computed column becomes data (v0.0.364)
