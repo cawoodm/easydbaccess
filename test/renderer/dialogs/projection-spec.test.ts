@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectionSpec } from '@easydb/shared';
-import { addComputedToModel, addSourceToModel, editorToSpec, removeSourceFromModel, specToEditor, type ProjectionCandidate } from '../../../packages/renderer/src/dialogs/projection-spec.js';
+import { addComputedToModel, addSourceToModel, editorToSpec, removeSourceFromModel, seedJoinKeyFromBase, specToEditor, type ProjectionCandidate } from '../../../packages/renderer/src/dialogs/projection-spec.js';
 
 const cand = (id: string, name: string, fields: string[]): ProjectionCandidate => ({
   id,
@@ -267,5 +267,57 @@ describe('editorToSpec: validation', () => {
     expect(editorToSpec({ name: 'X', sources: [], columns: [] }).ok).toBe(false);
     const m = addSourceToModel({ name: 'X', sources: [], columns: [] }, people);
     expect(editorToSpec({ ...m, columns: m.columns.map((c) => ({ ...c, include: false })) }).ok).toBe(false);
+  });
+});
+
+describe('seedJoinKeyFromBase', () => {
+  /** A two-source model: base `People`, joined `Dept`, keys guessed. */
+  function twoSources() {
+    const people: ProjectionCandidate = {
+      id: 'p',
+      name: 'People',
+      columns: cand('p', 'People', ['name', 'deptId', 'regionId']).columns,
+    };
+    const dept: ProjectionCandidate = cand('d', 'Dept', ['DeptID', 'label', 'regionId']);
+    return addSourceToModel(addSourceToModel({ name: '', sources: [], columns: [] }, people), dept);
+  }
+
+  it('keys the join on the field the drag named, on both sides', () => {
+    // The user pointed at the answer; a heuristic that "usually" agrees is not
+    // good enough when two columns are plausible keys (here `regionId` is too).
+    const m = seedJoinKeyFromBase(twoSources(), 'deptId');
+    const join = m.sources[1]?.join;
+    expect(join?.otherAlias).toBe(m.sources[0]?.alias);
+    expect(join?.otherField).toBe('deptId');
+    // Matched case-insensitively — the joined table spells it `DeptID`.
+    expect(join?.thisField).toBe('DeptID');
+  });
+
+  it('prefers an exact name match over a case-insensitive one', () => {
+    const base = cand('a', 'A', ['id']);
+    const other = cand('b', 'B', ['ID', 'id']);
+    const m = seedJoinKeyFromBase(addSourceToModel(addSourceToModel({ name: '', sources: [], columns: [] }, base), other), 'id');
+    expect(m.sources[1]?.join?.thisField).toBe('id');
+  });
+
+  it('leaves the guess alone when the joined table has no such column', () => {
+    // Overwriting one side only would leave a join that matches nothing — worse
+    // than the heuristic's answer, which at least names two real fields.
+    const before = twoSources();
+    const after = seedJoinKeyFromBase(before, 'nosuchfield');
+    expect(after).toBe(before);
+  });
+
+  it('does nothing to a model with only a base, or with no field named', () => {
+    const only = addSourceToModel({ name: '', sources: [], columns: [] }, cand('p', 'People', ['deptId']));
+    expect(seedJoinKeyFromBase(only, 'deptId')).toBe(only);
+    const two = twoSources();
+    expect(seedJoinKeyFromBase(two, '')).toBe(two);
+  });
+
+  it('does not disturb the columns the sources brought', () => {
+    const before = twoSources();
+    const after = seedJoinKeyFromBase(before, 'deptId');
+    expect(after.columns).toEqual(before.columns);
   });
 });

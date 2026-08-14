@@ -191,9 +191,13 @@ rows to write to yet.
 ## Joining two tables by dragging a column
 
 Drag a column's grip out of one table's header and drop it on **another**
-table's window. The projection editor opens with the table you dropped on as
-the base, the column's own table joined onto it, and that one column selected —
-the join keys guessed from the field names for you to confirm.
+table's window. The projection editor opens with **the table you dragged from**
+as the base, the table you dropped on joined onto it, and the column you dragged
+as the join key.
+
+So the table you were working in stays the subject, and the drop says what to
+bring alongside it: drag `deptId` off People onto Dept and you get your People
+with the matching Dept rows attached.
 
 If either table has a filter on, you are asked first whether the projection
 should carry those filters or read all the data.

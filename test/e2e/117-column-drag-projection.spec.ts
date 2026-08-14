@@ -4,8 +4,11 @@ import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js
 
 /**
  * Dragging a column header from one table's grid onto another table's window
- * opens the projection editor with both tables already joined and that one
- * column selected.
+ * opens the projection editor with both tables already joined on that column.
+ *
+ * The direction is the part worth pinning: **the table you dragged FROM is the
+ * base**, and the drop target is joined onto it. The table you are working in
+ * stays the subject of the projection; the drop names what to enrich it with.
  *
  * The same drag REORDERS a column when it lands back on its own grid, so the
  * gesture means two things and the drop target is what tells them apart. Both
@@ -56,41 +59,56 @@ async function seed(page: Page) {
 
 const projDialog = (page: Page) => page.locator('projection-dialog dialog');
 
-test('a column dropped on another table opens the projection editor, joined', async ({ page }) => {
+/** The saved projection's spec, or null when none exists. */
+async function savedSpec(page: Page) {
+  return page.evaluate(async () => {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const ctx = (window as any).__easydb;
+    const all = await ctx.store.tables.find({ workspaceId: ctx.workspaceId });
+    return all.find((t: any) => t.source?.type === 'projection')?.source?.config ?? null;
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+  });
+}
+
+test('the table dragged FROM is the base, and the drop target is joined onto it', async ({ page }) => {
   const { people, dept } = await seed(page);
 
-  // Drag Dept's `label` (column 1) onto the People window.
-  await dragColumnOnto(page, { tableId: dept, colIndex: 1 }, people);
+  // Drag People's `deptId` (column 1) onto the Dept window.
+  await dragColumnOnto(page, { tableId: people, colIndex: 1 }, dept);
 
   // No filters anywhere, so nothing is asked — straight to the editor.
   await expect(projDialog(page)).toBeVisible();
-  // The drop target is the BASE and the column's own table is joined onto it.
   await expect(projDialog(page)).toContainText('People');
   await expect(projDialog(page)).toContainText('Dept');
 
   await projDialog(page).getByRole('button', { name: 'Save', exact: true }).click();
   await expect(projDialog(page)).toBeHidden();
 
-  // Two sources, and only the dragged column came across from the second.
-  const spec = await page.evaluate(async () => {
-    /* eslint-disable @typescript-eslint/no-explicit-any */
-    const ctx = (window as any).__easydb;
-    const all = await ctx.store.tables.find({ workspaceId: ctx.workspaceId });
-    const proj = all.find((t: any) => t.source?.type === 'projection');
-    return proj?.source?.config ?? null;
-    /* eslint-enable @typescript-eslint/no-explicit-any */
-  });
+  const spec = await savedSpec(page);
   expect(spec).not.toBeNull();
+  // People FIRST: the table the user was working in is the subject.
   expect(spec.sources.map((s: { tableName: string }) => s.tableName)).toEqual(['People', 'Dept']);
-  const fromSecond = spec.columns.filter((c: { from: { alias?: string } }) => c.from.alias === spec.sources[1].alias);
-  expect(fromSecond).toHaveLength(1);
-  expect(fromSecond[0].from.field).toBe('label');
+  // …and the dragged column is the join key, not a guess.
+  expect(spec.sources[1].join.on).toMatchObject([{ field: 'deptId', eqField: 'deptId' }]);
+});
+
+test('the base brings its own columns, so the projection is still about that table', async ({ page }) => {
+  const { people, dept } = await seed(page);
+  await dragColumnOnto(page, { tableId: people, colIndex: 1 }, dept);
+  await projDialog(page).getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(projDialog(page)).toBeHidden();
+
+  const spec = await savedSpec(page);
+  const baseAlias = spec.sources[0].alias;
+  const fromBase = spec.columns.filter((c: { from: { alias?: string } }) => c.from.alias === baseAlias).map((c: { from: { field: string } }) => c.from.field);
+  expect(fromBase).toEqual(['name', 'deptId']);
 });
 
 test('the drop asks whether to carry the filters across', async ({ page }) => {
   const { people, dept } = await seed(page);
 
-  // Filter the grid the column is dragged FROM; the filter travels with the drag.
+  // Filter the grid the column is dragged FROM (now the BASE); the filter
+  // travels with the drag.
   const funnel = page.locator(`#${panelDomId(dept)} data-table filter-combobox`).first();
   await funnel.locator('input').fill('d1');
   await expect(page.locator(`#${panelDomId(dept)} data-table tbody tr`)).toHaveCount(1);
