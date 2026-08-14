@@ -71,7 +71,7 @@ export async function checkCommandletString(input: string, ctx: CommandletContex
 async function describe(cmd: Commandlet, ctx: CommandletContext = {}): Promise<string> {
   switch (cmd.verb) {
     case 'goto': {
-      const table = await findTableByName(cmd.targets[0] ?? '');
+      const table = await resolveTable(cmd, ctx);
       const fields = Object.keys(cmd.filters).map((k) => resolveField(table, k));
       const sort = parseSort(cmd.options.sort, table);
       const parts = [`open ${table.name}`];
@@ -119,7 +119,7 @@ async function placeholders(ctx: CommandletContext): Promise<Record<string, stri
 async function runOne(cmd: Commandlet, ctx: CommandletContext = {}): Promise<void> {
   switch (cmd.verb) {
     case 'goto':
-      return runGoto(cmd);
+      return runGoto(cmd, ctx);
     case 'search':
       return runSearch(cmd);
     case 'view':
@@ -134,9 +134,8 @@ async function runOne(cmd: Commandlet, ctx: CommandletContext = {}): Promise<voi
 
 // -- goto ---------------------------------------------------------------------
 
-async function runGoto(cmd: Commandlet): Promise<void> {
-  const name = cmd.targets[0] ?? '';
-  const table = await findTableByName(name);
+async function runGoto(cmd: Commandlet, ctx: CommandletContext): Promise<void> {
+  const table = await resolveTable(cmd, ctx);
 
   const patch: Partial<Table> = {};
   const merged = cmd.options.clear === undefined ? { ...(table.filters ?? {}) } : {};
@@ -171,6 +170,29 @@ async function runGoto(cmd: Commandlet): Promise<void> {
   if (search !== undefined) {
     document.dispatchEvent(new CustomEvent('easydb:table-search', { detail: { tableId: table.id, query: search } }));
   }
+}
+
+/**
+ * Which table a `goto/…` acts on: the one it names, or — with no name — the one
+ * the click came from.
+ *
+ * The target-less form is what lets a header, a KPI tile or a custom
+ * visualization carry `#goto?Country==CH` and have it mean "this table". Naming
+ * the table would tie the markup to one table; not naming it makes the same
+ * block work wherever it is dropped. The exact mirror of {@link resolveView},
+ * including the refusal: typed into the palette there is no table to be in, and
+ * guessing one would silently rewrite a table the user is not looking at.
+ */
+async function resolveTable(cmd: Commandlet, ctx: CommandletContext): Promise<Table> {
+  const name = (cmd.targets[0] ?? '').trim();
+  if (name) return findTableByName(name);
+  if (!ctx.tableId) {
+    throw new CommandletError('"goto" with no name means the table you are in — this was not run from one, so name the table.');
+  }
+  const app = await getContext();
+  const table = await app.store.tables.findOne(ctx.tableId);
+  if (!table) throw new CommandletError('That table no longer exists.');
+  return table;
 }
 
 /** `-Field` is descending; several keys are comma-separated, priority order. */

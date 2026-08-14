@@ -128,3 +128,31 @@ describe('formatCommandlet', () => {
     expect(cmd.options).toEqual({ sort: '-Date' });
   });
 });
+
+describe('a target-less goto means the table you are in', () => {
+  it('parses with no targets, so the query still lands', () => {
+    // The mirror of a target-less `view?…`. What makes it worth having: a header
+    // written once works on every table it is dropped onto, because it never
+    // names one.
+    const [cmd] = parseCommandlets('goto?Country==CH&@sort=-Amount&@search=berlin');
+    expect(cmd?.verb).toBe('goto');
+    expect(cmd?.targets).toEqual([]);
+    expect(cmd?.filters).toEqual({ Country: '=CH' });
+    expect(cmd?.options).toEqual({ sort: '-Amount', search: 'berlin' });
+  });
+
+  it('is still a commandlet as far as a link is concerned', () => {
+    expect(looksLikeCommandlet('goto?Country==CH')).toBe(true);
+    expect(looksLikeCommandlet('/goto?@clear')).toBe(true);
+  });
+
+  it('takes @clear with no value, which is how a link resets a table', () => {
+    const [cmd] = parseCommandlets('goto?@clear&@search=');
+    expect(cmd?.options).toEqual({ clear: '', search: '' });
+  });
+
+  it('a named table still wins, and is not read as a filter', () => {
+    const [cmd] = parseCommandlets('goto/Sales?Country==CH');
+    expect(cmd?.targets).toEqual(['Sales']);
+  });
+});

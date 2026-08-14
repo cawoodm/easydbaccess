@@ -53,6 +53,17 @@ import type { VizPanel } from '../viz/viz-panel.js';
 // Core header search box — the same component the table windows use.
 import '../chrome/panel-search.js';
 
+/**
+ * A view window's chrome — teal, ~6.6:1 against the white titlebar text.
+ *
+ * A view is not a table and must not look like one: every table is a shade of
+ * blue (see `window-mgr/table-kind.ts`). These two are the only non-blue window
+ * colours in the app, and that is the whole signal.
+ */
+const VIEW_PANEL_COLOR = '#00695c';
+/** A visualization window's chrome — violet, ~7.1:1. */
+const VIZ_PANEL_COLOR = '#6d28d9';
+
 /** Opening size of a view window, and the fallback when nothing is stored. */
 const DEFAULT_W = 480;
 const DEFAULT_H = 520;
@@ -528,7 +539,10 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
     logo: isViz ? VIZ_ICON : VIEW_ICON,
     // Distinct chrome so a window reads as what it is at a glance: cyan for an
     // HTML view, violet for a visualization.
-    color: isViz ? '#7c3aed' : '#0891b2',
+    // NOT a shade of blue: blue is the TABLE family (`table-kind.ts`'s
+    // PANEL_COLORS). Violet used to mean both "visualization" and "refreshable
+    // table", so a chart window and a remote table window were the same colour.
+    color: isViz ? VIZ_PANEL_COLOR : VIEW_PANEL_COLOR,
     ...(vizFooter ? { footerToolbar: vizFooter } : {}),
     content,
     ...(g ? { panelSize: { w: g.w, h: g.h }, position: { x: g.x, y: g.y } } : { contentSize: { w: DEFAULT_W, h: DEFAULT_H }, position: { centerTopOffset: 60 } }),

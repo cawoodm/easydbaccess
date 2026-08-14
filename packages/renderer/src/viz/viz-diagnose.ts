@@ -88,7 +88,7 @@ export function emptyChannelNote(empties: ReadonlyArray<{ label: string; column:
  * Why a word cloud came out with no terms, given that its column DOES hold text.
  *
  * Separate from `emptyChannelNote` because the fix is different: these are the
- * cloud's own options, all editable behind the Chart button, so saying "pick a
+ * cloud's own options, all editable behind the Settings button, so saying "pick a
  * different column" would send the user the wrong way.
  */
 export function noTermsNote(opts: { minLength: number; stopWordsOn: boolean; numbersExcluded: boolean }): string {
@@ -97,5 +97,5 @@ export function noTermsNote(opts: { minLength: number; stopWordsOn: boolean; num
   if (opts.stopWordsOn) reasons.push('a common word (the, and, of…)');
   if (opts.numbersExcluded) reasons.push('a number');
   const tail = reasons.length > 0 ? ` Every word was ${reasons.join(', or ')}.` : '';
-  return `No words left to show.${tail} Adjust the word rules with Chart, or map a different column with Edit.`;
+  return `No words left to show.${tail} Adjust the word rules with Settings, or map a different column there too.`;
 }

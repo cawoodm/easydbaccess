@@ -5,7 +5,8 @@ import type { ColumnSpec, DataCollection, Row, ViewInstance, ViewTemplate } from
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViewsDialog } from '../dialogs/views-dialog.js';
-import { CELL_SLOT_CLASS, addPillValue, cyclePillValue, evaluateRows, extractFilterTokens, hasRowHtml, removePillValue, substituteRow, tokenValue, viewRows } from './view-render.js';
+import { CELL_SLOT_CLASS, cyclePillValue, evaluateRows, extractFilterTokens, hasRowHtml, removePillValue, substituteRow, tokenValue, viewRows } from './view-render.js';
+import { persistPillFilters, withPillValue } from './pill-filters.js';
 import { parseColumnFilter } from '@easydb/shared';
 import { facetable, facetCounts } from '../search/facet-values.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
@@ -672,10 +673,8 @@ export class ViewWindow extends LitElement {
   /** Add one exact value to a field's pill filter, OR-ed with what is there. */
   private async addPill(field: string, value: string) {
     if (!this.instance) return;
-    const next = addPillValue(this.instance.pillFilters?.[field], value);
-    const pillFilters = { ...(this.instance.pillFilters ?? {}), [field]: next };
-    const ctx = await getContext();
-    await ctx.store.viewInstances.patch(this.instance.id, { pillFilters, updatedAt: Date.now() });
+    const pillFilters = withPillValue(this.instance.pillFilters, field, value);
+    await persistPillFilters(this.instance.id, pillFilters);
     this.instance = { ...this.instance, pillFilters };
     this.recompute();
   }

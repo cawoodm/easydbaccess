@@ -1,9 +1,9 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import type { ColumnSpec, SettingsFieldSpec, Table, ViewInstance, ViewTemplate, VisualizationSpec, VizMeasureFn, VizSpec } from '@easydb/shared';
+import type { ColumnSpec, SettingsFieldSpec, Table, ViewInstance, ViewTemplate, VisualizationSpec, VizAggregate, VizAggregateOverride, VizMeasureFn, VizSpec } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { readCloudDefaults } from '../viz/viz-settings.js';
-import { effectiveVizOptions, overrideDelta, overriddenKeys } from '../viz/viz-options.js';
+import { aggregateFields, aggregateOverrideDelta, effectiveVizOptions, overrideDelta, overriddenAggregateKeys, overriddenKeys } from '../viz/viz-options.js';
 import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@cawoodm/lit-dialogs';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { extractTokens } from '../views/view-render.js';
@@ -26,6 +26,33 @@ function mount(): ViewsDialog {
   document.body.appendChild(el);
   return el;
 }
+
+/**
+ * The aggregate a view inherits: the template's own, else the kind's declared
+ * default. The same fallback `viz-panel` applies when it draws — an instance
+ * override has to diff against what would actually have been used, not against
+ * an absent `template.viz.aggregate`.
+ */
+function baseAggregateOf(tpl: ViewTemplate | null | undefined, spec: VisualizationSpec | null): VizAggregate | null {
+  if (tpl?.kind !== 'viz') return null;
+  return tpl.viz?.aggregate ?? spec?.defaultAggregate ?? null;
+}
+
+/**
+ * The measures a chart can take over its value column, in one place.
+ *
+ * Lifted out of the template editor when the instance editor grew the same
+ * dropdown: two hand-kept copies of this list is how one of them ends up
+ * offering an option the other does not.
+ */
+const MEASURE_FNS: ReadonlyArray<[VizMeasureFn, string]> = [
+  ['count', 'Count of rows'],
+  ['sum', 'Sum of the value column'],
+  ['avg', 'Average of the value column'],
+  ['min', 'Minimum of the value column'],
+  ['max', 'Maximum of the value column'],
+  ['countDistinct', 'Distinct values of the value column'],
+];
 
 function uuid(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -64,6 +91,11 @@ interface InstanceDraft {
    * `viz/viz-options.ts`), so an option left alone keeps inheriting.
    */
   vizOptions: Record<string, unknown>;
+  /**
+   * The aggregate AS EDITED — the definition's measure / order / Top-N with this
+   * view's changes applied. Saved as a delta, like `vizOptions`.
+   */
+  vizAggregate: Record<string, unknown>;
 }
 
 @customElement('views-dialog')
@@ -180,6 +212,24 @@ export class ViewsDialog extends LitElement {
         font-size: 0.78rem;
         margin: 0;
       }
+      /* A code option: the textarea keeps the width it had, with the pencil
+         that opens the real editor (and its samples) tucked beside it. */
+      .code-field {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.3rem;
+      }
+      .code-field .icon {
+        flex: none;
+        padding: 0.25rem 0.4rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.25rem;
+        background: #fff;
+        cursor: pointer;
+      }
+      .code-field .icon:hover {
+        background: #f3f4f6;
+      }
       .map-row {
         display: grid;
         grid-template-columns: 8rem 1fr auto auto;
@@ -232,7 +282,7 @@ export class ViewsDialog extends LitElement {
   private dialogEl: HTMLDialogElement | null = null;
   /**
    * True when the dialog was opened directly onto an editor instead of onto the
-   * list — i.e. the user came from a chart's Edit or Chart button to change one
+   * list — i.e. the user came from a visualization's Edit or Settings button to change one
    * thing. Decides where Save goes; see `doneEditing`.
    */
   private deepLinked = false;
@@ -268,7 +318,7 @@ export class ViewsDialog extends LitElement {
     this.mode = 'list';
     this.tDraft = null;
     this.iDraft = null;
-    // Opened straight onto one editor (a visualization's Edit / Chart button)
+    // Opened straight onto one editor (a visualization's Edit / Settings button)
     // rather than onto the list. Save then FINISHES — see `doneEditing`.
     this.deepLinked = Boolean(opts?.editTemplateId || opts?.editInstanceId);
     await this.refresh();
@@ -366,6 +416,7 @@ export class ViewsDialog extends LitElement {
       limit: inst.limit ?? 0,
       dock: inst.dock ? inst.dock.edge : 'window',
       vizOptions: effectiveVizOptions(tpl?.viz?.options, inst.vizOptions),
+      vizAggregate: { ...aggregateFields(baseAggregateOf(tpl, vizSpec)), ...(inst.vizAggregate ?? {}) },
       readonly: inst.readonly ?? false,
     };
     this.mode = 'instance';
@@ -571,6 +622,7 @@ export class ViewsDialog extends LitElement {
       dock: 'window',
       // A brand-new instance overrides nothing, so it starts on the template's.
       vizOptions: effectiveVizOptions(t.viz?.options, undefined),
+      vizAggregate: aggregateFields(baseAggregateOf(t, spec)),
     };
     this.mode = 'instance';
   }
@@ -776,6 +828,16 @@ export class ViewsDialog extends LitElement {
     return Object.keys(delta).length > 0 ? delta : undefined;
   }
 
+  /**
+   * This view's aggregate overrides, or `undefined` when it follows the
+   * definition exactly — so the field is absent rather than an empty object.
+   */
+  private vizAggregateDelta(d: InstanceDraft): VizAggregateOverride | undefined {
+    const tpl = this.templates.find((t) => t.id === d.templateId);
+    if (tpl?.kind !== 'viz') return undefined;
+    return aggregateOverrideDelta(baseAggregateOf(tpl, this.vizSpecOf(tpl.viz?.kind)), d.vizAggregate);
+  }
+
   /** The visualization spec behind a draft's template, if it is a viz. */
   private specOfDraft(d: InstanceDraft): VisualizationSpec | null {
     const tpl = this.templates.find((t) => t.id === d.templateId);
@@ -813,6 +875,7 @@ export class ViewsDialog extends LitElement {
         readonly: d.readonly,
         dock: this.dockFor(d),
         vizOptions: this.vizDelta(d),
+        vizAggregate: this.vizAggregateDelta(d),
         updatedAt: Date.now(),
       });
       // Reflect the change in an already-open window.
@@ -842,6 +905,7 @@ export class ViewsDialog extends LitElement {
       ...(tokenRaw ? { tokenRaw } : {}),
       ...(this.dockFor(d) ? { dock: this.dockFor(d) } : {}),
       ...(Object.keys(this.vizDelta(d) ?? {}).length > 0 ? { vizOptions: this.vizDelta(d) } : {}),
+      ...(this.vizAggregateDelta(d) ? { vizAggregate: this.vizAggregateDelta(d) } : {}),
     };
     await ctx.store.viewInstances.insert(inst);
     // A docked pane has no window to reveal — flipping `open` is what mounts it,
@@ -917,7 +981,7 @@ export class ViewsDialog extends LitElement {
         </ul>
         <div>
           <button type="button" class="mini" @click=${() => this.newTemplate('html')}>+ New template</button>
-          ${this.visualizations().length > 0 ? html`<button type="button" class="mini" @click=${() => this.newTemplate('viz')}>+ New chart</button>` : nothing}
+          ${this.visualizations().length > 0 ? html`<button type="button" class="mini" @click=${() => this.newTemplate('viz')}>+ New visualization</button>` : nothing}
         </div>
         <p class="hint">
           A template's row HTML uses <code>$TOKEN</code> placeholders (e.g. <code>$TITLE</code>). Leave row HTML blank to show a read-only columns table with the header/footer HTML around it.
@@ -1008,16 +1072,7 @@ export class ViewsDialog extends LitElement {
               <label class="field">
                 Aggregate
                 <select @change=${(e: Event) => this.setAggregate({ measures: [{ channel: 'VALUE', fn: (e.target as HTMLSelectElement).value as VizMeasureFn }] })}>
-                  ${(
-                    [
-                      ['count', 'Count of rows'],
-                      ['sum', 'Sum of the value column'],
-                      ['avg', 'Average of the value column'],
-                      ['min', 'Minimum of the value column'],
-                      ['max', 'Maximum of the value column'],
-                      ['countDistinct', 'Distinct values of the value column'],
-                    ] as Array<[VizMeasureFn, string]>
-                  ).map(([fn, label]) => html`<option value=${fn} ?selected=${measure?.fn === fn}>${label}</option>`)}
+                  ${MEASURE_FNS.map(([fn, label]) => html`<option value=${fn} ?selected=${measure?.fn === fn}>${label}</option>`)}
                 </select>
               </label>
               <label class="field">
@@ -1103,13 +1158,42 @@ export class ViewsDialog extends LitElement {
     if (f.type === 'text') {
       return html`<label class="field">
         ${f.label} ${hint}
-        <textarea rows="3" .value=${cur == null ? '' : String(cur)} @input=${(e: Event) => set((e.target as HTMLTextAreaElement).value)}></textarea>
+        <div class="code-field">
+          <textarea rows="3" .value=${cur == null ? '' : String(cur)} @input=${(e: Event) => set((e.target as HTMLTextAreaElement).value)}></textarea>
+          ${f.code
+            ? html`<button
+                type="button"
+                class="icon"
+                data-testid=${`viz-option-edit-${f.key}`}
+                title=${`Edit ${f.label.toLowerCase()} in the editor — with samples to start from`}
+                @click=${() => void this.editCodeOption(f, cur, set)}
+              >
+                ✏
+              </button>`
+            : nothing}
+        </div>
       </label>`;
     }
     return html`<label class="field">
       ${f.label} ${hint}
       <input type="text" .value=${cur == null ? '' : String(cur)} @input=${(e: Event) => set((e.target as HTMLInputElement).value)} />
     </label>`;
+  }
+
+  /**
+   * Open the script editor for an option field declaring `code`.
+   *
+   * The textarea beside the pencil stays editable — for a one-word change it is
+   * quicker — but the editor is where the samples live, and for this feature the
+   * samples ARE the documentation: a blank box headed "HTML" teaches nobody what
+   * a custom visualization can be.
+   */
+  private async editCodeOption(f: SettingsFieldSpec, cur: unknown, set: (v: unknown) => void): Promise<void> {
+    const dlg = ScriptEditorDialog.instance;
+    if (!dlg) return;
+    const next = await dlg.open(cur == null ? '' : String(cur), f.label, f.code === 'html' ? 'viz-html' : 'viz-script');
+    if (next === null) return;
+    set(next);
   }
 
   private renderInstance() {
@@ -1204,7 +1288,7 @@ export class ViewsDialog extends LitElement {
       <p class="hint">
         ${this.isVizDraft(d)
           ? d.id
-            ? html`Editing this visualization. Use <strong>Chart</strong> in the window footer to change the kind or the aggregate, which every view of this chart shares.`
+            ? html`Editing this view. Use <strong>Edit</strong> in the window footer to change the definition — the kind and the aggregate — which every view of it shares.`
             : html`The visualization reads this table's rows; a docked one follows the grid's filters live.`
           : d.id
             ? html`Editing name and column mapping. The snapshotted sort, filters and visible columns are kept.`
@@ -1225,7 +1309,12 @@ export class ViewsDialog extends LitElement {
    */
   private renderInstanceVizOptions(d: InstanceDraft) {
     const spec = this.specOfDraft(d);
-    if (!spec?.options || spec.options.length === 0) return nothing;
+    const agg = this.renderInstanceAggregate(d);
+    if (!spec?.options || spec.options.length === 0) {
+      // A kind with no declared options may still aggregate — a plain bar chart
+      // does — so the section is not gated on the options alone.
+      return agg === nothing ? nothing : html`<div class="section"><h3>Settings for this view</h3>${agg}</div>`;
+    }
     const tpl = this.templates.find((t) => t.id === d.templateId);
     const overridden = overriddenKeys(tpl?.viz?.options, d.vizOptions);
     const write = (key: string, v: unknown): void => {
@@ -1240,6 +1329,7 @@ export class ViewsDialog extends LitElement {
       <div class="section">
         <h3>Settings for this view</h3>
         <p class="hint">Changed here, they apply to this view only; left alone, they follow the “${tpl?.name ?? 'chart'}” definition.</p>
+        ${agg}
         ${spec.options.map(
           (f) => html`
             <div class="viz-override ${overridden.has(f.key) ? 'changed' : ''}">
@@ -1249,6 +1339,70 @@ export class ViewsDialog extends LitElement {
           `,
         )}
       </div>
+    `;
+  }
+
+  /**
+   * The measure, the order and the group cap — for THIS view.
+   *
+   * The same three controls the definition carries, in the same words, because
+   * they are the same settings: "which function over the value column" is the
+   * question a chart most often has to answer differently per table, and until
+   * now changing it meant editing the definition every other view of it shares.
+   *
+   * Only for a `data: 'aggregate'` kind with something to aggregate — a map, a
+   * word cloud or a custom HTML block plots rows and has no measure.
+   */
+  private renderInstanceAggregate(d: InstanceDraft) {
+    const spec = this.specOfDraft(d);
+    if (spec?.data !== 'aggregate') return nothing;
+    const tpl = this.templates.find((t) => t.id === d.templateId);
+    const base = baseAggregateOf(tpl, spec);
+    if (!base) return nothing;
+
+    const overridden = overriddenAggregateKeys(base, d.vizAggregate as VizAggregateOverride);
+    const cur = d.vizAggregate;
+    const write = (key: string, v: unknown): void => {
+      this.iDraft = { ...d, vizAggregate: { ...d.vizAggregate, [key]: v } };
+    };
+    const reset = (key: string): void => {
+      this.iDraft = { ...d, vizAggregate: { ...d.vizAggregate, [key]: aggregateFields(base)[key] } };
+    };
+    const row = (key: string, control: unknown) => html`
+      <div class="viz-override ${overridden.has(key) ? 'changed' : ''}">
+        ${control}
+        ${overridden.has(key) ? html`<button type="button" class="mini" title="Go back to the chart definition's value" @click=${() => reset(key)}>Reset</button>` : nothing}
+      </div>
+    `;
+
+    return html`
+      ${row(
+        'fn',
+        html`<label class="field">
+          Aggregate
+          <select @change=${(e: Event) => write('fn', (e.target as HTMLSelectElement).value)}>
+            ${MEASURE_FNS.map(([fn, label]) => html`<option value=${fn} ?selected=${cur.fn === fn}>${label}</option>`)}
+          </select>
+        </label>`,
+      )}
+      ${row(
+        'sort',
+        html`<label class="field">
+          Order
+          <select @change=${(e: Event) => write('sort', (e.target as HTMLSelectElement).value)}>
+            <option value="category" ?selected=${cur.sort === 'category'}>By category</option>
+            <option value="valueDesc" ?selected=${cur.sort === 'valueDesc'}>Largest first</option>
+            <option value="value" ?selected=${cur.sort === 'value'}>Smallest first</option>
+          </select>
+        </label>`,
+      )}
+      ${row(
+        'topN',
+        html`<label class="field">
+          Show at most (groups, 0 = all)
+          <input type="number" min="0" .value=${cur.topN == null ? '0' : String(cur.topN)} @input=${(e: Event) => write('topN', Math.max(0, Number((e.target as HTMLInputElement).value) || 0))} />
+        </label>`,
+      )}
     `;
   }
 

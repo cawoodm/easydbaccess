@@ -30,7 +30,10 @@ export function openTableInfoDialog(name: string, info: TableInfo, provenance?: 
  * titlebar can never disagree on what kind a table is. `'connected'` and
  * `'referenced'` share the same "Connected (live X)" prose below (unchanged
  * from before this de-duplication): the dialog never distinguished a `'url'`
- * source from any other, only whether a `source` was present at all.
+ * source from any other, only whether a `source` was present at all. A
+ * `'projection'` is the exception that had to be split out — it carries a
+ * `source` but nothing about it is remote, and calling it "connected to a live
+ * projection backend" was simply false.
  */
 function describeProvenance(p: TableProvenance | null): {
   label: string;
@@ -50,6 +53,16 @@ function describeProvenance(p: TableProvenance | null): {
         `This table is connected to a live ${type} backend: its rows are fetched from the ` +
         `source on demand and are not stored locally. ${writable} Closing its window just ` +
         `disconnects the view — the source data is untouched.`,
+    };
+  }
+  if (kind === 'projection') {
+    return {
+      label: 'Projection (computed)',
+      note:
+        `This table is computed from other tables in this workspace — it stores no rows of its ` +
+        `own and cannot be edited directly. Change the tables it reads, or its definition, and it ` +
+        `follows. It binds to its sources BY NAME, so a source can be deleted and re-imported ` +
+        `under the same name without breaking it.`,
     };
   }
   if (kind === 'imported') {

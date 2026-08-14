@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 14 Aug 2026
+
+### Features
+
+- 🪶 Custom HTML visualizations: your own markup over the rows on screen, with $COUNT/$SUM tokens and pills that filter the grid (v0.0.371)
+- ✨ A #goto link with no table name acts on the table you are in, so one block of markup works anywhere (v0.0.371)
+- ✨ A chart's measure, order and group cap can be set for one view without changing the definition every view shares (v0.0.371)
+
+### Polish
+
+- ✨ Edit now opens a visualization's definition and Settings opens the view; a docked pane reaches both (v0.0.371)
+- ✨ Every kind of table window is a shade of blue; views and visualizations get their own colours (v0.0.371)
+
 ## 13 Aug 2026
 
 ### Features
