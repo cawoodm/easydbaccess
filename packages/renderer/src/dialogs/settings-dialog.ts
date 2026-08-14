@@ -3,7 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import type { RegisteredSettings, SettingScope, SettingsFieldSpec } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
-import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@cawoodm/lit-dialogs';
+import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@marccawood/lit-dialogs';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { parseSecrets, readSecretsText, readUserSetting, writeSecretsText } from '../db/user-settings.js';
 import { emitSettingsChanged } from '../db/settings-events.js';

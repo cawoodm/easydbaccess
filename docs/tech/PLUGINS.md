@@ -680,7 +680,7 @@ for predictable joins.
 
 Sync plugins move a whole workspace between devices. They now share two
 things: `api.settings` for connection state (see `STORAGE.md`'s settings
-section) and the shared `AnchoredMenu` primitive (from `@cawoodm/lit-menu`,
+section) and the shared `AnchoredMenu` primitive (from `@marccawood/lit-menu`,
 see `DIALOGS.md`) for their footer buttons — a single button opens a small
 menu instead of one footer button per action.
 

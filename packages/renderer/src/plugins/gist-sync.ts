@@ -80,7 +80,7 @@ export function init(api: HostApi): void {
     icon: GITHUB_ICON_SVG,
     tooltip: 'Gist sync — push, pull, share…',
     onClick: async (api, ctx) => {
-      const { AnchoredMenu } = await import('@cawoodm/lit-menu');
+      const { AnchoredMenu } = await import('@marccawood/lit-menu');
       const rect = ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
       const choice = await AnchoredMenu.open(rect, [
         { id: 'push', label: 'Push', icon: 'cloud_upload' },
@@ -120,7 +120,7 @@ export function init(api: HostApi): void {
     icon: GITHUB_ICON_SVG,
     tooltip: 'Gist sync for this table — push, pull, view file',
     onClick: async (api, ctx) => {
-      const { AnchoredMenu } = await import('@cawoodm/lit-menu');
+      const { AnchoredMenu } = await import('@marccawood/lit-menu');
       const rect = ctx.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
       const choice = await AnchoredMenu.open(rect, [
         { id: 'push', label: 'Push this table', icon: 'cloud_upload' },

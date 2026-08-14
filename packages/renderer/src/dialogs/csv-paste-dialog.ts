@@ -3,7 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { getContext } from '../app-context.js';
 import { parseCsv } from '../plugins/csv-import.js';
 import { slugTable } from '../util/ids.js';
-import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@cawoodm/lit-dialogs';
+import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@marccawood/lit-dialogs';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 
 /**

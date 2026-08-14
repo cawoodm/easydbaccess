@@ -331,7 +331,7 @@ whose host opened second would never appear.
 ## The elements are extraction-ready
 
 Everything under `viz/elements/` is destined for standalone MIT packages
-alongside `@cawoodm/lit-dialogs` / `lit-menu` / `lit-toast`, so **nothing there
+alongside `@marccawood/lit-dialogs` / `lit-menu` / `lit-toast`, so **nothing there
 may import `@easydb/shared`**. The elements take neutral shapes (`ChartData`,
 `MapPoint[]`, `CloudTerm[]`) and read their theme from CSS custom properties
 (`--viz-palette`, `--viz-grid`, `--viz-text`, …), never from configuration.

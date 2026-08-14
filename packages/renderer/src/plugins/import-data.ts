@@ -17,7 +17,7 @@ import type { ColumnSpec, ColumnType, HostApi, ImporterSpec, ImportSourceInput, 
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { getContext } from '../app-context.js';
-import { ctrlEnterSubmits, dialogChromeStyles, HostDialogs, makeDialogDraggable } from '@cawoodm/lit-dialogs';
+import { ctrlEnterSubmits, dialogChromeStyles, HostDialogs, makeDialogDraggable } from '@marccawood/lit-dialogs';
 import { editColumnNames } from '../dialogs/column-names-dialog.js';
 import { parseCsv } from './csv-import.js';
 import { fetchDatabaseNames, parseDatasetteUrl } from './datasette-client.js';

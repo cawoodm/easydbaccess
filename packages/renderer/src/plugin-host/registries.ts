@@ -16,8 +16,8 @@ import type {
   UrlSourceSpec,
   VisualizationSpec,
 } from '@easydb/shared';
-import { HostDialogs } from '@cawoodm/lit-dialogs';
-import { ToastHost } from '@cawoodm/lit-toast';
+import { HostDialogs } from '@marccawood/lit-dialogs';
+import { ToastHost } from '@marccawood/lit-toast';
 
 /**
  * Mutable lists the app reads to render header/footer slots and to dispatch

@@ -2,8 +2,8 @@ import type { ButtonSpec, HostApi } from '@easydb/shared';
 import { LitElement, css, html } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import { unsafeSVG } from 'lit/directives/unsafe-svg.js';
-import { defineHostDialogs } from '@cawoodm/lit-dialogs';
-import { defineToastHost } from '@cawoodm/lit-toast';
+import { defineHostDialogs } from '@marccawood/lit-dialogs';
+import { defineToastHost } from '@marccawood/lit-toast';
 import { getContext } from '../app-context.js';
 import { hasColumnDrag } from '../table/column-drag.js';
 import { RowLimitError } from '../db/row-budget.js';
@@ -558,7 +558,7 @@ export class AppShell extends LitElement {
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
           <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
-            ><span class="version">v0.0.374</span></a
+            ><span class="version">v0.0.375</span></a
           ></strong
         >
         ${this.headerButtons.filter((b) => b.variant !== 'secondary').map((b) => this.renderSlotButton(b, 'header'))}

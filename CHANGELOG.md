@@ -4,12 +4,22 @@
 
 ### Features
 
+- ✨ The dialog, toast and menu packages are on npm; the app takes them by version instead of a git commit (v0.0.373)
 - 🪶 Custom HTML visualizations: your own markup over the rows on screen, with $COUNT/$SUM tokens and pills that filter the grid (v0.0.371)
 - ✨ A #goto link with no table name acts on the table you are in, so one block of markup works anywhere (v0.0.371)
 - ✨ A chart's measure, order and group cap can be set for one view without changing the definition every view shares (v0.0.371)
 - ✨ Dragging a column to build a projection now makes the table you dragged from the base, joined on that column (v0.0.372)
 - ✨ Edit now opens a visualization's definition and Settings opens the view; a docked pane reaches both (v0.0.371)
 - ✨ Every kind of table window is a shade of blue; views and visualizations get their own colours (v0.0.371)
+- ✨ A workspace kept in a `.edb` file is marked with a database icon in the workspace list (v0.0.375)
+
+### Bugs
+
+- 🪲 Moving one workspace into a `.edb` file hid every other workspace from the list (v0.0.375)
+- 🪲 The workspace list differed between a file-backed workspace and a browser one (v0.0.375)
+- 🪲 Deleting a workspace kept in a `.edb` file removed nothing, and it came back on the next load (v0.0.375)
+- 🪲 A new browser workspace created while a file was open opened empty, inside the file (v0.0.375)
+- 🪲 The File menu could open partly outside the screen (v0.0.375)
 
 ## 13 Aug 2026
 

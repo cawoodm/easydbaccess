@@ -8,7 +8,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import type { TableInfo, TableOrigin, TableSource } from '@easydb/shared';
-import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@cawoodm/lit-dialogs';
+import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@marccawood/lit-dialogs';
 import { tableKind } from '../window-mgr/table-kind.js';
 
 /** Where a table's rows come from — drives the "Kind" explanation. */

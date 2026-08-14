@@ -18,7 +18,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { ExportContext, ExportItem, ExporterSpec, ExportOptions, Table } from '@easydb/shared';
-import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@cawoodm/lit-dialogs';
+import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@marccawood/lit-dialogs';
 import { getContext } from '../app-context.js';
 import { cachedRowCount } from '../table/row-count-cache.js';
 import { DEFAULT_EXPORT_OPTIONS, prepareExport } from '../export/export-rows.js';

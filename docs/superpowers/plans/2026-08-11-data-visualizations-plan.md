@@ -117,7 +117,7 @@ is a no-op without a `document`. The `data-table` side is e2e territory.
   properties via `viz-theme.ts`.
   **It must not import `@easydb/shared`** — no `Row`, `ColumnSpec`, `VizFrame` or
   `HostApi`. It declares its own `{ categories: string[]; series: {label, points}[] }`
-  input, because this file is destined for `@cawoodm/lit-charts` (see the spec's
+  input, because this file is destined for `@marccawood/lit-charts` (see the spec's
   packages section). Keep every element under `viz/elements/` for exactly that
   reason, and export a guarded `defineBarChart()` rather than using
   `@customElement`, matching `lit-dialogs`' `defineHostDialogs()`.
@@ -239,8 +239,8 @@ Independent of every other phase; land it whenever, including first.
 `packages/renderer/package.json` gains the three SHA pins.
 
 Only worth doing once phases 3–7 have settled the element inputs. Per package,
-copy the manifest shape from `@cawoodm/lit-dialogs` exactly — and note that
-`node_modules/@cawoodm/lit-dialogs` ships its `src/` as well as `dist/`, so it can
+copy the manifest shape from `@marccawood/lit-dialogs` exactly — and note that
+`node_modules/@marccawood/lit-dialogs` ships its `src/` as well as `dist/`, so it can
 be read as the reference implementation without cloning anything:
 
 - zero `dependencies`; `lit` **and** the drawing library (`chart.js` / `leaflet` /

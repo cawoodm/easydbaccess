@@ -25,13 +25,12 @@ each lives in an MIT-licensed repo of its own:
 
 | Package                                                          | Provides                                                                       |
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| [`@cawoodm/lit-dialogs`](https://github.com/cawoodm/lit-dialogs) | `HostDialogs`, `dialogChromeStyles`, `ctrlEnterSubmits`, `makeDialogDraggable` |
-| [`@cawoodm/lit-toast`](https://github.com/cawoodm/lit-toast)     | `ToastHost`, `linkify`, `materialIconStyles`                                   |
-| [`@cawoodm/lit-menu`](https://github.com/cawoodm/lit-menu)       | `AnchoredMenu`, `flipIfBelowViewport`, `materialIconStyles`                    |
+| [`@marccawood/lit-dialogs`](https://github.com/cawoodm/lit-dialogs) | `HostDialogs`, `dialogChromeStyles`, `ctrlEnterSubmits`, `makeDialogDraggable` |
+| [`@marccawood/lit-toast`](https://github.com/cawoodm/lit-toast)     | `ToastHost`, `linkify`, `materialIconStyles`                                   |
+| [`@marccawood/lit-menu`](https://github.com/cawoodm/lit-menu)       | `AnchoredMenu`, `flipIfBelowViewport`, `materialIconStyles`                    |
 
-All three are git dependencies pinned to a commit SHA in
-`packages/renderer/package.json`; the root [`CLAUDE.md`](../../CLAUDE.md)
-explains how to take a change from one of them.
+All three are published npm packages under the `@marccawood` scope; the root
+[`CLAUDE.md`](../../CLAUDE.md) explains how to take a change from one of them.
 
 Nothing about the behaviour below changed in the move. Two things about the
 _wiring_ did:
@@ -125,7 +124,7 @@ toast, see `PLUGINS.md`).
 
 Every dialog in `packages/renderer/src/dialogs/` — plus `<host-dialogs>`
 itself — imports one shared `dialogChromeStyles` from
-`@cawoodm/lit-dialogs` and follows the same DOM shape. That covers every
+`@marccawood/lit-dialogs` and follows the same DOM shape. That covers every
 feature dialog: New Table, CSV Paste, Plugin Manager, Import, Views, Column
 Names, Table Info, Datasette Connect and the rest.
 
@@ -177,7 +176,7 @@ dialog to reimplement:
 
 `<dialog>` centers itself on `showModal()` and has no built-in way to be
 repositioned. `makeDialogDraggable(dialog, handle)` (from
-[`@cawoodm/lit-dialogs`](https://github.com/cawoodm/lit-dialogs/blob/main/src/draggable.ts))
+[`@marccawood/lit-dialogs`](https://github.com/cawoodm/lit-dialogs/blob/main/src/draggable.ts))
 wires pointer-capture dragging on a handle (in practice, the `.dialog-header`
 bar) — `pointerdown` records the dialog's current rect, `pointermove`
 translates it via inline `left`/`top` (which overrides the browser's
@@ -192,12 +191,12 @@ label`) inside the handle is excluded from starting a drag, so e.g. a
 Cancel button living inside the header bar still receives its click instead
 of the drag capturing the pointer first.
 
-## Anchored menus (`@cawoodm/lit-menu`)
+## Anchored menus (`@marccawood/lit-menu`)
 
 Not a modal `<dialog>` at all — a small dropdown menu, used when a footer
 button's job is "pick one of a few actions" rather than "do the one thing
 this button does." It lives in its own package,
-[`@cawoodm/lit-menu`](https://github.com/cawoodm/lit-menu), alongside the
+[`@marccawood/lit-menu`](https://github.com/cawoodm/lit-menu), alongside the
 dialogs and the toast. `AnchoredMenu.open(rect, items)` self-mounts a singleton
 `<anchored-menu>` (same lazy-singleton pattern as `<toast-host>` and the
 filter popover), positions it just under the given viewport-space `rect`
