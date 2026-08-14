@@ -65,11 +65,32 @@ caller.)
 
 ## A workspace in a `.edb` file (browser)
 
-Opt-in, per tab, and per workspace. "New workspace" asks whether the data goes
-in this browser or in a file; the footer **File** menu opens, saves and converts
+Opt-in, and **per workspace**. "New workspace" asks whether the data goes in
+this browser or in a file; the footer **File** menu opens, saves and converts
 one. `docs/tech/EDB.md` has the format and the reasoning.
 
-Four things are worth knowing here:
+Five things are worth knowing here:
+
+- **Storage belongs to the workspace, not to the browser or the tab.**
+  `db/edb/registry.ts` keeps one `localStorage` entry per workspace naming the
+  `.edb` it lives in, or nothing for one kept in IndexedDB, and boot binds the
+  store the resolved workspace asks for — see `wantedWorkspaceId()` in
+  `app-context.ts`, which reads `?space=` and the last-opened id before any store
+  exists. Two tabs can therefore hold two workspaces in two different stores.
+
+  This replaced a single `easydb:edb:active` key naming "the open file". That key
+  was wrong about its own scope: `localStorage` is per ORIGIN, exactly like
+  IndexedDB, so one file name governed every workspace and every tab, and moving
+  one workspace into a file hid all the others — they were still in IndexedDB,
+  but nothing in the app named them. There is no app-wide "file mode" any more,
+  and so no "Back to browser storage": the way out of a file is to open another
+  workspace.
+- **The registry lists the local workspaces too**, which is why it is a roster
+  and not just a file map. A load backed by a `.edb` never opens IndexedDB, so
+  from inside a file that is the only place a browser workspace can be named.
+  `app-context.ts` records the workspace it resolved on every boot, so an entry
+  lost with `localStorage` comes back the next time its workspace is opened. It
+  is an index, never the truth — both stores carry their own workspace records.
 
 - **The database lives in a Web Worker.** This app imports 600k-row tables and
   sqlite-wasm is synchronous, so a bulk insert on the main thread would freeze

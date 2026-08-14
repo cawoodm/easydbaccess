@@ -2,6 +2,7 @@ import type { DataStore, EventBus, HostApi, RowSourceCtx, Table } from '@easydb/
 import { createDataStore, createRoutedDataStore, getDb, withUniqueTableNames } from './db/index.js';
 import { createIpcDataStore } from './db/data-store-bridge.js';
 import { startEdbSession } from './db/edb/session.js';
+import { adoptLegacyMarker, fileOf, reconcileRoster, rememberWorkspace } from './db/edb/registry.js';
 import { createEventBus } from './events/bus.js';
 import { createRegistries, type Registries } from './plugin-host/registries.js';
 import { createHostApi } from './plugin-host/api-factory.js';
@@ -39,8 +40,14 @@ async function init(): Promise<AppContext> {
   // A file-backed browser session is the third option, and it reuses the SAME
   // adapter as Electron: `EdbBridge` implements `EasydbStoreBridge`, so a worker
   // running sqlite-wasm and a preload talking to the main process are the same
-  // shape to everything downstream. Null here means this tab stays on Dexie.
-  const edb = window.easydb?.store ? null : await startEdbSession();
+  // shape to everything downstream. Null here means this load stays on Dexie.
+  //
+  // WHICH store is a property of the WORKSPACE, so the workspace has to be named
+  // before the store can be built — see `wantedWorkspaceId` for why that is
+  // possible without one. A workspace the registry does not list lives in Dexie,
+  // which is every workspace until the user makes a file.
+  const wanted = wantedWorkspaceId();
+  const edb = window.easydb?.store ? null : await startEdbSession(wanted ? edbFileFor(wanted) : null);
   const baseStore = window.easydb?.store
     ? createIpcDataStore(window.easydb.store, () => activeWorkspaceId)
     : edb
@@ -160,6 +167,25 @@ async function init(): Promise<AppContext> {
   // back to it (see resolution step 2 above).
   persistLastWorkspace(workspaceId);
 
+  // Record which store this workspace turned out to use. The registry is what
+  // lets the selector name a workspace the active store cannot see, in BOTH
+  // directions — a load on a `.edb` never opens IndexedDB, so without this the
+  // browser workspaces would be just as invisible as the file ones used to be.
+  // Written on every boot, so an entry lost with `localStorage` comes back the
+  // next time its workspace is opened, and a rename is picked up.
+  if (!window.easydb?.store) {
+    // Read back rather than taken from `existing`, which was listed before a
+    // `?space=` miss created one — and its name is the typed one, not the slug.
+    const record = await store.workspaces.findOne(workspaceId);
+    const file = edb?.name ?? null;
+    rememberWorkspace({ id: workspaceId, name: record?.name ?? workspaceId, file });
+    // And declare everything else this store holds, so the roster is the union of
+    // both stores after each has been opened once. Without this a user with five
+    // IndexedDB workspaces sees only the ones opened since, and the two stores
+    // list different sets — see `reconcileRoster`.
+    reconcileRoster(record && !existing.some((w) => w.id === record.id) ? [...existing, record] : existing, file);
+  }
+
   const api = createHostApi({
     store,
     events,
@@ -242,6 +268,30 @@ function readWorkspaceFromUrl(): string | null {
   const sp = new URLSearchParams(location.search);
   const v = sp.get('space');
   return v && v.trim().length > 0 ? v.trim() : null;
+}
+
+/**
+ * Which workspace this load is heading for, decided WITHOUT a store.
+ *
+ * Needed because the store depends on the answer: a file-backed workspace is
+ * served by a sqlite-wasm worker and every other one by Dexie. Both inputs are
+ * readable before any store exists — `?space=` is in the URL and the last-opened
+ * id is in `localStorage` — which is what makes per-workspace storage possible at
+ * all.
+ *
+ * Null means "no preference", and that resolves to Dexie: a first visit has no
+ * file, and the full resolution below (first workspace, or a created `default`)
+ * needs a store to run at all.
+ */
+function wantedWorkspaceId(): string | null {
+  const requested = readWorkspaceFromUrl();
+  if (requested) return slugifyWorkspace(requested);
+  return readLastWorkspace();
+}
+
+/** The file `workspaceId` lives in, taking over the pre-registry marker once. */
+function edbFileFor(workspaceId: string): string | null {
+  return fileOf(workspaceId) ?? adoptLegacyMarker(workspaceId, readWorkspaceFromUrl() ?? workspaceId);
 }
 
 /** Device-local key holding the id of the workspace last opened on this origin. */

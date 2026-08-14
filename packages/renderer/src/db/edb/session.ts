@@ -2,18 +2,29 @@ import { setEdbBridge } from './active-bridge.js';
 import { createEdbBridge, type EdbBridge } from './worker-bridge.js';
 
 /**
- * Whether this tab is file-backed, and the bridge if it is.
+ * Whether this load is file-backed, and the bridge if it is.
  *
- * The choice is made ONCE at boot, because `app-context.ts` builds the
- * `DataStore` once. Switching between Dexie and a file therefore reloads the
- * page — the same thing the desktop does when it opens another `.db`, and far
- * simpler than making every holder of a store handle re-bind mid-session.
+ * The choice is made ONCE per load, because `app-context.ts` builds the
+ * `DataStore` once. Switching stores therefore reloads the page — which costs
+ * nothing extra, since switching workspace already reloads (see
+ * `chrome/workspace-actions.ts`), and it is what the desktop does when it opens
+ * another `.db`.
  *
- * The marker is device-local (`localStorage`), not a workspace setting: which
- * file this tab has open is a property of the tab, not of the data.
+ * WHICH file is not decided here and is not global. It comes from the workspace
+ * this load resolved, through `edb/registry.ts`. It used to be one `localStorage`
+ * key naming "the open file" — but `localStorage` is per ORIGIN, like IndexedDB,
+ * so that one name applied to every tab and every workspace, and every workspace
+ * kept in IndexedDB vanished from the selector while a file was open.
  */
 
-const ACTIVE_KEY = 'easydb:edb:active';
+/**
+ * The file this load opened, in memory only.
+ *
+ * Deliberately NOT persisted: a persisted answer is what made a second tab adopt
+ * the first tab's file. Two tabs on two workspaces now hold two different files,
+ * and each one knows only its own.
+ */
+let activeFile: string | null = null;
 
 /**
  * Why the file-backed session did not start.
@@ -35,27 +46,24 @@ export interface EdbSession {
   name: string;
 }
 
-/** The file name this tab should open, or null for the Dexie path. */
+/** The file this load is backed by, or null when it is on IndexedDB. */
 export function activeEdbName(): string | null {
-  try {
-    return globalThis.localStorage?.getItem(ACTIVE_KEY) ?? null;
-  } catch {
-    return null; // private mode
-  }
-}
-
-/** Make this tab file-backed on its next load. The caller reloads. */
-export function setActiveEdbName(name: string | null): void {
-  try {
-    if (name === null) globalThis.localStorage?.removeItem(ACTIVE_KEY);
-    else globalThis.localStorage?.setItem(ACTIVE_KEY, name);
-  } catch {
-    /* private mode — the tab stays on Dexie, which is the safe direction */
-  }
+  return activeFile;
 }
 
 /**
- * Start the file-backed session, or return null to leave this tab on Dexie.
+ * Point the current load at another file, without reloading.
+ *
+ * Only Save As needs this: the workspace has just been written somewhere else, so
+ * a later Save must go to the new file rather than the one this load opened. The
+ * lasting record of the move is `rememberWorkspace`.
+ */
+export function setActiveEdbName(name: string | null): void {
+  activeFile = name;
+}
+
+/**
+ * Start the file-backed session for `file`, or return null to stay on IndexedDB.
  *
  * The bytes come from the OPFS mirror, never from the user's file: reading their
  * file needs a permission grant, and a grant needs a gesture a boot sequence does
@@ -65,22 +73,24 @@ export function setActiveEdbName(name: string | null): void {
  *
  * A missing mirror is not a failure — it is the first run with a new file.
  */
-export async function startEdbSession(): Promise<EdbSession | null> {
-  const name = activeEdbName();
-  if (!name) return null;
+export async function startEdbSession(file: string | null): Promise<EdbSession | null> {
+  if (!file) return null;
   const bridge = createEdbBridge();
   try {
-    const bytes = await bridge.restore(name);
-    await bridge.open(bytes, name);
+    const bytes = await bridge.restore(file);
+    await bridge.open(bytes, file);
     setEdbBridge(bridge);
-    return { bridge, name };
+    activeFile = file;
+    return { bridge, name: file };
   } catch (err) {
     // A worker that will not start must not take the app down with it. Falling
-    // back to Dexie loses the file view, not the user's ability to work, and the
-    // marker is cleared so the next load does not retry the same failure.
+    // back to IndexedDB loses the file view, not the user's ability to work. The
+    // registry entry is LEFT ALONE: it is the only record that this workspace
+    // belongs in a file, and dropping it here would strand the workspace in a
+    // store that does not hold its data.
     lastError = err;
     bridge.terminate();
-    setActiveEdbName(null);
+    activeFile = null;
     return null;
   }
 }

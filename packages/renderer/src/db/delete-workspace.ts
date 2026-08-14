@@ -11,7 +11,7 @@
 // re-uses the id `demo` and the new workspace would inherit the old one's server
 // URL, tokens and view-seed flags.
 
-import type { Row, Setting, Table, ViewInstance, ViewTemplate } from '@easydb/shared';
+import type { DataStore, Row, Setting, Table, ViewInstance, ViewTemplate } from '@easydb/shared';
 import type { EasyDb } from './dexie-db.js';
 
 /** How much a workspace holds. The confirm dialog quotes these numbers. */
@@ -115,4 +115,61 @@ export async function deleteWorkspace(db: EasyDb, workspaceId: string): Promise<
 
   await db.workspaces.delete(workspaceId);
   return counts;
+}
+
+/**
+ * The same delete, through a `DataStore` instead of Dexie.
+ *
+ * Needed for a workspace kept in a `.edb`: the Dexie version above walks index
+ * ranges no other store has, so pointed at a file-backed workspace it deleted
+ * nothing at all and reported zero of everything, while the workspace itself
+ * survived in the file and came back on the next load.
+ *
+ * The Dexie version stays, and stays the one used for a browser workspace: it
+ * deletes a 600,000-row workspace in a handful of index operations, where this
+ * one reads every row to delete it. This path is for a store where that is the
+ * only option.
+ *
+ * `store.settings` is a view over the ACTIVE workspace, which is the reason the
+ * Dexie version exists at all. That is not a limit here, because a delete always
+ * targets the workspace on screen — `deleteWorkspaceFlow` has no picker.
+ */
+export async function deleteWorkspaceFromStore(store: DataStore, workspaceId: string): Promise<WorkspaceContents> {
+  const tables = await store.tables.find({ workspaceId });
+  const instances = await store.viewInstances.find({ workspaceId });
+  const templates = await store.viewTemplates.find({ workspaceId });
+  const settings = await store.settings.find();
+
+  let rows = 0;
+  for (const table of tables) {
+    const coll = store.rows(table.id);
+    const inTable = await coll.find();
+    rows += inTable.length;
+    if (inTable.length > 0) await coll.bulkRemove(inTable.map((r) => r.id));
+  }
+  if (tables.length > 0) await store.tables.bulkRemove(tables.map((t) => t.id));
+  if (instances.length > 0) await store.viewInstances.bulkRemove(instances.map((v) => v.id));
+  if (templates.length > 0) await store.viewTemplates.bulkRemove(templates.map((t) => t.id));
+  // Settings are addressed by `name` through the view, which builds the key from
+  // the active workspace — the same reason the list above needed no filter.
+  for (const setting of settings) await store.settings.remove(setting.name);
+
+  // The workspace RECORD goes last, for the same reason as above: an interrupted
+  // delete leaves a workspace that still lists rather than data nothing points at.
+  await store.workspaces.remove(workspaceId);
+  return { tables: tables.length, rows, views: instances.length, templates: templates.length, settings: settings.length };
+}
+
+/** What a `DataStore` delete would take, for the confirm dialog. */
+export async function countWorkspaceContentsInStore(store: DataStore, workspaceId: string): Promise<WorkspaceContents> {
+  const tables = await store.tables.find({ workspaceId });
+  return {
+    tables: tables.length,
+    // Left uncounted, exactly as the Dexie version does by default: the dialog
+    // says "and all their rows" rather than making the user wait for a number.
+    rows: -1,
+    views: (await store.viewInstances.find({ workspaceId })).length,
+    templates: (await store.viewTemplates.find({ workspaceId })).length,
+    settings: (await store.settings.find()).length,
+  };
 }

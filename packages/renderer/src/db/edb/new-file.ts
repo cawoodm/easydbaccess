@@ -16,7 +16,7 @@ import {
   writeBytes,
   EDB_EXTENSION,
 } from './file-handle.js';
-import { setActiveEdbName } from './session.js';
+import { rememberWorkspace } from './registry.js';
 import { createEdbBridge } from './worker-bridge.js';
 
 /**
@@ -103,13 +103,17 @@ export async function buildEdbFile(target: EdbTarget, workspaceId: string, fill?
 }
 
 /**
- * Make this tab use `target` from its next load on.
+ * Record that `workspace` now lives in `target`, so the next load opens it there.
  *
- * The caller reloads. The store is built once per load, so adopting another file
- * is a reload — the same thing the desktop does when it opens another database.
+ * The caller reloads. The store is built once per load, so binding a workspace to
+ * a file is a reload — the same thing the desktop does when it opens another
+ * database.
+ *
+ * The binding is per WORKSPACE. Every other workspace keeps the store it had, so
+ * the selector still lists them and another tab is left alone.
  */
-export async function adoptEdbFile(target: EdbTarget): Promise<void> {
+export async function adoptEdbFile(target: EdbTarget, workspace: { id: string; name: string }): Promise<void> {
   if (target.handle) await rememberHandle(target.handle);
   else await forgetHandle();
-  setActiveEdbName(target.name);
+  rememberWorkspace({ id: workspace.id, name: workspace.name, file: target.name });
 }

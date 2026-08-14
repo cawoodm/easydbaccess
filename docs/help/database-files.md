@@ -162,6 +162,16 @@ Two ways to start:
   file: **New .edb file…** → **Copy this workspace into it**. Your browser copy
   is left exactly as it was, so you can go back to it.
 
+### One workspace at a time, not the whole browser
+
+A file holds **one workspace**, and only that workspace moves into it. Your other
+workspaces stay where they are and stay in the list at the top of the window, so
+you can move between them as before. A workspace kept in a file is marked 🖫.
+
+So there is nothing to switch off. To leave a file, pick another workspace from
+the list. To go back to it, pick it again — the app remembers which file each
+workspace belongs to.
+
 ### One folder holds them all
 
 The first time you use a file, the browser asks you to choose a **folder**. Pick

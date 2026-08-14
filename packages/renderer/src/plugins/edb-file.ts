@@ -19,9 +19,11 @@ import {
   EDB_EXTENSION,
 } from '../db/edb/file-handle.js';
 import { activeEdbName, lastEdbError, setActiveEdbName } from '../db/edb/session.js';
+import { rememberWorkspace } from '../db/edb/registry.js';
 import { createAutosavePolicy } from '../db/edb/dirty.js';
 import { edbBridge, edbHandle, setEdbHandle } from '../db/edb/active-bridge.js';
 import { createEdbBridge } from '../db/edb/worker-bridge.js';
+import { createIpcDataStore } from '../db/data-store-bridge.js';
 import { copyWorkspace } from '../db/edb/convert.js';
 import { adoptEdbFile, buildEdbFile, chooseEdbTarget, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
 
@@ -118,40 +120,74 @@ export function init(api: HostApi): void {
     api.ui.dialogs.toast(`New workspace files go in "${picked.name}".`, { kind: 'success' });
   }
 
+  /**
+   * The open workspace's id and name, for the registry entry a file needs.
+   *
+   * Null only before boot resolves a workspace, which no menu click can be.
+   */
+  async function currentWorkspace(): Promise<{ id: string; name: string } | null> {
+    const id = api.workspaceId();
+    if (!id) return null;
+    const record = await api.store.workspaces.findOne(id);
+    return { id, name: record?.name ?? id };
+  }
+
   async function saveAs(): Promise<void> {
     const target = await chooseEdbTarget(api.ui.dialogs, activeEdbName() ?? `workspace${EDB_EXTENSION}`);
     if (!target) return;
     setEdbHandle(target.handle);
     if (target.handle) await rememberHandle(target.handle);
     else await forgetHandle();
+    // Two records to move, because the workspace has changed file. The in-memory
+    // one keeps THIS load saving to the new file; the registry entry is what the
+    // next load reads.
     setActiveEdbName(target.name);
+    const workspace = await currentWorkspace();
+    if (workspace) rememberWorkspace({ ...workspace, file: target.name });
     await save();
   }
 
   /**
-   * Make this tab use `name` from the next load on, and reload.
+   * Bind a workspace to `target` from the next load on, and reload.
    *
-   * The store is built once per load, so adopting another file is a reload — the
-   * same thing the desktop does when it opens another database.
+   * The store is built once per load, so moving a workspace into a file is a
+   * reload — the same thing the desktop does when it opens another database.
    */
-  async function adopt(target: EdbTarget, message: string): Promise<void> {
-    await adoptEdbFile(target);
+  async function adopt(target: EdbTarget, workspace: { id: string; name: string }, message: string): Promise<void> {
+    await adoptEdbFile(target, workspace);
     await api.ui.dialogs.alert(message, 'Workspace file');
-    location.reload();
+    // With `?space=` naming the workspace, the reload resolves it, reads the
+    // registry and comes back on the file. Without it, the workspace has to be
+    // named or boot would resolve the last-opened one instead.
+    openSpace(workspace.name);
+  }
+
+  /** Reload onto `name`, the way the header selector does. */
+  function openSpace(name: string): void {
+    const sp = new URLSearchParams(location.search);
+    sp.set('space', name);
+    location.assign(`${location.pathname}?${sp.toString()}${location.hash}`);
   }
 
   /**
-   * Put an opened file's bytes where the next boot will find them.
+   * Put an opened file's bytes where the next boot will find them, and report
+   * which workspaces are in it.
    *
    * The boot reads the OPFS mirror and never the user's file, because reading the
    * file needs a permission gesture no boot sequence has. So Open fills a
    * throwaway worker and forces its mirror out before it reloads.
+   *
+   * The workspace list is read from the same throwaway worker, and it is not
+   * optional: the registry has to name every workspace the file holds, or the
+   * selector cannot offer one and boot would create an empty workspace beside it.
    */
-  async function seedFromBytes(name: string, bytes: Uint8Array): Promise<void> {
+  async function seedFromBytes(name: string, bytes: Uint8Array): Promise<Array<{ id: string; name: string }>> {
     const bridge = createEdbBridge();
     try {
       await bridge.open(bytes, name);
       await bridge.flush();
+      const store = createIpcDataStore(bridge, () => '');
+      return (await store.workspaces.find()).map((w) => ({ id: w.id, name: w.name }));
     } finally {
       bridge.terminate();
     }
@@ -191,8 +227,19 @@ export function init(api: HostApi): void {
     }
     picked ??= await pickFileToOpen();
     if (!picked) return;
-    await seedFromBytes(picked.name, picked.bytes);
-    await adopt({ name: picked.name, handle: picked.handle }, `Opening "${picked.name}". The page will reload.`);
+    const inFile = await seedFromBytes(picked.name, picked.bytes);
+    if (inFile.length === 0) {
+      await api.ui.dialogs.alert(`"${picked.name}" holds no workspace, so there is nothing to open.`, 'Open workspace');
+      return;
+    }
+    // EVERY workspace in the file is registered, not just the one being opened.
+    // A file may hold several, and one the selector cannot name is one the user
+    // cannot reach.
+    const target = { name: picked.name, handle: picked.handle };
+    for (const ws of inFile.slice(1)) rememberWorkspace({ id: ws.id, name: ws.name, file: picked.name });
+    const first = inFile[0]!;
+    const extra = inFile.length > 1 ? ` It holds ${inFile.length} workspaces — the others are in the workspace list.` : '';
+    await adopt(target, first, `Opening "${first.name}" from "${picked.name}".${extra} The page will reload.`);
   }
 
   /**
@@ -217,14 +264,8 @@ export function init(api: HostApi): void {
     if (!target) return;
 
     await buildEdbFile(target, workspaceId, copy ? (store) => copyInto(store, workspaceId) : undefined);
-    await adopt(target, `"${target.name}" is now this tab's workspace file. The page will reload.`);
-  }
-
-  async function leaveFileMode(): Promise<void> {
-    if (!(await api.ui.dialogs.confirm('Go back to browser storage? The file stays where it is.', 'Local storage'))) return;
-    await forgetHandle();
-    setActiveEdbName(null);
-    location.reload();
+    const workspace = (await currentWorkspace()) ?? { id: workspaceId, name: workspaceId };
+    await adopt(target, workspace, `"${workspace.name}" is now kept in "${target.name}". Your other workspaces are not affected. The page will reload.`);
   }
 
   api.ui.registerFooterButton({
@@ -236,18 +277,22 @@ export function init(api: HostApi): void {
     icon: 'storage',
     tooltip: 'Workspace file — open, save, autosave',
     onClick: async (_api, ctx) => {
-      const inFileMode = activeEdbName() !== null;
+      // Whether THIS workspace is kept in a file. There is no app-wide file mode
+      // any more: the workspace beside it in the list may well be on IndexedDB,
+      // and Save means nothing there. "Back to browser storage" went with the
+      // mode — the way out of a file is to open another workspace, which the
+      // header selector lists.
+      const inFile = activeEdbName() !== null;
       const rect = ctx?.anchor?.getBoundingClientRect();
       if (!rect) return;
       const picked = await AnchoredMenu.open(rect, [
         { id: 'new', label: 'New .edb file…', icon: 'note_add' },
         { id: 'open', label: 'Open .edb file…', icon: 'folder_open' },
-        ...(inFileMode
+        ...(inFile
           ? [
               { id: 'save', label: canSaveInPlace() && edbHandle() ? 'Save' : 'Download a copy', icon: 'save' },
               { id: 'saveAs', label: 'Save As…', icon: 'save_as' },
               { id: 'autosave', label: `${autosave.enabled() ? 'Turn off' : 'Turn on'} autosave`, icon: 'autorenew' },
-              { id: 'leave', label: 'Back to browser storage', icon: 'logout', danger: true },
             ]
           : []),
         ...(canPickFolder() ? [{ id: 'folder', label: 'Workspace folder…', icon: 'folder_special' }] : []),
@@ -257,7 +302,6 @@ export function init(api: HostApi): void {
       else if (picked === 'save') await save();
       else if (picked === 'saveAs') await saveAs();
       else if (picked === 'folder') await chooseFolder();
-      else if (picked === 'leave') await leaveFileMode();
       else if (picked === 'autosave') {
         const next = !autosave.enabled();
         autosave.setEnabled(next);

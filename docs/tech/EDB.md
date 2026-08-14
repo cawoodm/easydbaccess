@@ -68,6 +68,8 @@ it already serves the desktop and the server — one convention across all three
 | Worker, protocol, bridge | `renderer/src/db/edb/{worker,protocol,worker-bridge}.ts` |
 | OPFS mirror | `renderer/src/db/edb/mirror.ts` |
 | Files, folder, permissions | `renderer/src/db/edb/file-handle.ts` |
+| Which store each workspace uses | `renderer/src/db/edb/registry.ts` |
+| Starting one load's session | `renderer/src/db/edb/session.ts` |
 | Making a new file | `renderer/src/db/edb/new-file.ts` |
 | Copying a workspace in | `renderer/src/db/edb/convert.ts` |
 | Autosave timing | `renderer/src/db/edb/dirty.ts` |

@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { DatabaseSync } from 'node:sqlite';
 import { writeFileSync } from 'node:fs';
-import { addRow, createTable } from './helpers.js';
+import { addRow, bindWorkspaceToFile, createTable, waitForEdbMirror, EDB_REGISTRY_KEY } from './helpers.js';
 
 /**
  * The browser's file-backed mode: a workspace kept in a real SQLite `.edb`.
@@ -9,8 +9,9 @@ import { addRow, createTable } from './helpers.js';
  * The OS file picker cannot be driven from Playwright, so this spec never opens
  * one. Two ways round it:
  *
- * 1. Most tests set the marker `localStorage` key the picker would have written,
- *    then exercise everything downstream — worker, store, OPFS mirror, reload.
+ * 1. Most tests write the registry entry the picker would have written, binding
+ *    one workspace to one file, then exercise everything downstream — worker,
+ *    store, OPFS mirror, reload.
  * 2. The conversion test hides `showSaveFilePicker`, which is what a browser
  *    without the FileSystem API looks like. The plugin then takes its download
  *    path, and the whole menu flow runs for real.
@@ -18,9 +19,6 @@ import { addRow, createTable } from './helpers.js';
  * Two tests open the produced bytes in **Node's** SQLite. That is the point of
  * the feature, and the assertion goes nowhere near the app's own code.
  */
-
-/** The key `db/edb/session.ts` reads at boot to decide this tab is file-backed. */
-const ACTIVE_KEY = 'easydb:edb:active';
 
 /**
  * Row data in a fixed order, for comparing.
@@ -35,58 +33,37 @@ function byPart(rows: Array<{ data: Record<string, unknown> }>): Record<string, 
   return rows.map((r) => r.data).sort((a, b) => String(a['part']).localeCompare(String(b['part'])));
 }
 
-/** Mirrors `db/edb/mirror.ts` — one file per workspace, under its own directory. */
-function mirrorPath(edbName: string): string {
-  return `edb-mirror/${encodeURIComponent(edbName)}.edb`;
+/** The `.edb` the registry says `workspaceId` lives in, or null for IndexedDB. */
+async function fileForWorkspace(page: Page, workspaceId: string): Promise<string | null> {
+  return page.evaluate(
+    ({ key, id }) => {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      return (JSON.parse(raw) as Record<string, { file?: string }>)[id]?.file ?? null;
+    },
+    { key: EDB_REGISTRY_KEY, id: workspaceId },
+  );
 }
 
 /**
- * Boot a tab that is backed by `edbName`.
+ * Boot a tab whose `workspaceId` is bound to `edbName`.
  *
- * The marker is written by an init script, so it is in place before the app's
- * first line runs. Loading the app even once without it would open the Dexie
- * database this mode replaces, and the "not in Dexie" assertion below could then
- * never be trusted. Storage is not wiped: Playwright gives each test its own
+ * The registry entry is written by an init script, so it is in place before the
+ * app's first line runs. Loading the app even once without it would open the
+ * Dexie database this mode replaces, and the "not in Dexie" assertion below could
+ * then never be trusted. Storage is not wiped: Playwright gives each test its own
  * browser context, so IndexedDB and OPFS start empty anyway.
  */
 async function bootFileBacked(page: Page, edbName: string, workspaceId: string): Promise<void> {
-  await page.addInitScript(({ key, value }) => localStorage.setItem(key, value), { key: ACTIVE_KEY, value: edbName });
+  await bindWorkspaceToFile(page, workspaceId, edbName);
   await page.goto(`/?test=1&space=${encodeURIComponent(workspaceId)}`);
   await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
 }
 
-/** Reload the same tab. The marker survives, so the session comes back file-backed. */
+/** Reload the same tab. The entry survives, so the session comes back file-backed. */
 async function reload(page: Page): Promise<void> {
   await page.reload();
   await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
-}
-
-/** The mirrored bytes, base64 — the only shape that survives `page.evaluate`. */
-async function mirrorBase64(page: Page, edbName: string): Promise<string | null> {
-  return page.evaluate(async (path) => {
-    const [dir, file] = path.split('/');
-    try {
-      const root = await navigator.storage.getDirectory();
-      const handle = await (await root.getDirectoryHandle(dir!)).getFileHandle(file!);
-      const bytes = new Uint8Array(await (await handle.getFile()).arrayBuffer());
-      if (bytes.byteLength === 0) return null;
-      let binary = '';
-      // Chunked: spreading 100k+ bytes into `fromCharCode` blows the argument limit.
-      for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-      return btoa(binary);
-    } catch {
-      return null; // not written yet — the caller polls
-    }
-  }, mirrorPath(edbName));
-}
-
-/** Wait out the mirror's 2s debounce and hand back its bytes. */
-async function waitForMirror(page: Page, edbName: string): Promise<Buffer> {
-  let b64: string | null = null;
-  await expect
-    .poll(async () => (b64 = await mirrorBase64(page, edbName)) !== null, { timeout: 20_000, message: 'the OPFS mirror was never written' })
-    .toBe(true);
-  return Buffer.from(b64!, 'base64');
 }
 
 test.describe('browser .edb storage', () => {
@@ -115,7 +92,7 @@ test.describe('browser .edb storage', () => {
     ]);
     await addRow(page, tableId, { part: 'bolt', qty: 4 });
     await addRow(page, tableId, { part: 'nut', qty: 9 });
-    await waitForMirror(page, edbName);
+    await waitForEdbMirror(page, edbName);
 
     await reload(page);
 
@@ -146,7 +123,7 @@ test.describe('browser .edb storage', () => {
     ]);
     await addRow(page, tableId, { part: 'bolt', qty: 4 });
 
-    const bytes = await waitForMirror(page, edbName);
+    const bytes = await waitForEdbMirror(page, edbName);
     expect(bytes.subarray(0, 15).toString('latin1')).toBe('SQLite format 3');
 
     const file = testInfo.outputPath('workspace.edb');
@@ -218,9 +195,9 @@ test.describe('converting a browser workspace to a file', () => {
     await dialog.getByRole('button', { name: 'OK', exact: true }).click();
     await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
 
-    // The tab is now file-backed. A session that failed to start clears this key,
-    // so its survival is the proof.
-    expect(await page.evaluate((k) => localStorage.getItem(k), ACTIVE_KEY)).toBe(`${workspaceId}.edb`);
+    // This workspace is now file-backed, and only this one. The registry entry is
+    // the whole record of that.
+    expect(await fileForWorkspace(page, workspaceId)).toBe(`${workspaceId}.edb`);
 
     const rows = await page.evaluate(
       async (id) =>
@@ -287,8 +264,8 @@ test.describe('the storage strategy question', () => {
     await page.waitForURL(/space=sales/, { timeout: 20_000 });
     await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
 
-    // The tab is file-backed and sitting in the new workspace.
-    expect(await page.evaluate((k) => localStorage.getItem(k), ACTIVE_KEY)).toBe('sales.edb');
+    // The new workspace is file-backed and open.
+    expect(await fileForWorkspace(page, 'sales')).toBe('sales.edb');
     expect(await page.evaluate(() => (window as unknown as { __easydb: { workspaceId: string } }).__easydb.workspaceId)).toBe('sales');
 
     // And the file itself holds that workspace and nothing else.
@@ -321,7 +298,7 @@ test.describe('the storage strategy question', () => {
     await page.waitForURL(/space=plain/, { timeout: 20_000 });
     await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
 
-    expect(await page.evaluate((k) => localStorage.getItem(k), ACTIVE_KEY)).toBeNull();
+    expect(await fileForWorkspace(page, 'plain')).toBeNull();
     expect(await page.evaluate(() => (window as unknown as { __easydb: { workspaceId: string } }).__easydb.workspaceId)).toBe('plain');
   });
 });

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from './fixtures.js';
-import { bulkAddRows, createTable, liftRowLimit, readRows, waitForPanel } from './helpers.js';
+import { bindWorkspaceToFile, bulkAddRows, createTable, liftRowLimit, readRows, waitForPanel } from './helpers.js';
 
 /**
  * **A workspace in this browser holds 10,000 rows.** Past that, writes are refused.
@@ -18,7 +18,6 @@ import { bulkAddRows, createTable, liftRowLimit, readRows, waitForPanel } from '
  * here proves it is open.
  */
 
-const ACTIVE_KEY = 'easydb:edb:active';
 const LIMIT = 10_000;
 const toast = (page: Page) => page.locator('toast-host');
 
@@ -201,7 +200,7 @@ test('a workspace dump too big to fit is refused BEFORE the old one is deleted',
 test('a workspace in a .edb file has no row limit', async ({ page, workspaceId }) => {
   // The whole point of the refusal: there is somewhere to go. Booted the way
   // `100-edb-browser` does it, because no file picker can be driven from here.
-  await page.addInitScript(({ key, value }) => localStorage.setItem(key, value), { key: ACTIVE_KEY, value: `limit-${workspaceId}` });
+  await bindWorkspaceToFile(page, workspaceId, `limit-${workspaceId}.edb`);
   await page.goto(`/?test=1&space=${encodeURIComponent(workspaceId)}`);
   await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 30_000 });
 
