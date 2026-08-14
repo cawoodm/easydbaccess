@@ -2,6 +2,12 @@
 
 ## 14 Aug 2026
 
+### Bugs
+
+- 🪲 Maps drew nothing usable: the tiles and markers were built but landed outside the map, unstyled (v0.0.374)
+- 🪲 A map's "Size by" column made no visible difference to the markers (v0.0.374)
+- 🪲 A JSON file this app exported could fail to import: a long decimal was rewritten into invalid JSON (v0.0.375)
+
 ### Features
 
 - ✨ The dialog, toast and menu packages are on npm; the app takes them by version instead of a git commit (v0.0.373)

@@ -4,11 +4,21 @@
 //
 // Three decisions worth knowing before editing this:
 //
-// **It renders into the LIGHT DOM.** `createRenderRoot` returns `this`, so there
-// is no shadow root. Leaflet styles its panes with a global stylesheet and
-// measures its container against the document; inside a shadow root the CSS does
-// not reach it and it draws a grey box. Every other element in this folder keeps
-// its shadow root — this one cannot.
+// **It renders into the LIGHT DOM.** `createRenderRoot` returns `this`, so this
+// element has no shadow root of its own. Leaflet styles its panes with a global
+// stylesheet; behind a shadow boundary that CSS does not reach it. Every other
+// element in this folder keeps its shadow root — this one cannot.
+//
+// **But having no shadow root of its own is not enough**, and that is what made
+// maps unusable up to v0.0.372. The element is mounted inside `viz-panel`'s
+// shadow root, and a `<style>` in `document.head` does not cross a shadow
+// boundary either way round: `.leaflet-pane { position: absolute }` never
+// applied, so every pane, tile and marker stacked in normal flow. The layers
+// were all built correctly — the tiles and the circle markers were there in the
+// DOM — they were simply piled down the page instead of being positioned. So the
+// stylesheet goes into WHICHEVER ROOT the element actually lives in (see
+// {@link adoptLeafletCss}), which is the document when it is in the light DOM
+// and the host's shadow root when it is not.
 //
 // **Markers are `circleMarker`, not `marker`.** Leaflet's default marker is an
 // image (`marker-icon.png`) resolved relative to the stylesheet, which is exactly
@@ -25,6 +35,7 @@ import { LitElement, html, nothing } from 'lit';
 import type { PropertyValues } from 'lit';
 import type { CircleMarker, Map as LeafletMap, TileLayer } from 'leaflet';
 import { readChartTheme, type MapPoint } from './chart-data.js';
+import { markerRadiusRange, scaleMarkerRadii } from './marker-scale.js';
 
 export interface MapOptions {
   tileUrl?: string | undefined;
@@ -36,36 +47,74 @@ export interface MapOptions {
 }
 
 type Leaflet = typeof import('leaflet');
+type StyleRoot = Document | ShadowRoot;
 
 let leafletPromise: Promise<Leaflet> | null = null;
-let cssInjected = false;
+let cssTextPromise: Promise<string> | null = null;
+/** Roots that already carry the stylesheet. Weak, so a closed window's root goes. */
+const styledRoots = new WeakSet<StyleRoot>();
 
 /**
- * Load Leaflet and its stylesheet once.
+ * Load Leaflet once.
  *
- * The CSS is injected into `document.head` rather than imported at module scope
- * so that a user who never opens a map downloads neither the library nor its
- * styles — the whole point of the lazy import.
+ * Lazily, so a user who never opens a map downloads neither the library nor its
+ * stylesheet — the whole point of the dynamic import.
  */
-async function leaflet(): Promise<Leaflet> {
-  if (leafletPromise) return leafletPromise;
-  leafletPromise = (async () => {
-    const [mod] = await Promise.all([import('leaflet'), injectLeafletCss()]);
-    return (mod.default ?? mod) as Leaflet;
-  })();
+function leaflet(): Promise<Leaflet> {
+  leafletPromise ??= import('leaflet').then((mod) => (mod.default ?? mod) as Leaflet);
   return leafletPromise;
 }
 
-async function injectLeafletCss(): Promise<void> {
-  if (cssInjected || typeof document === 'undefined') return;
-  cssInjected = true;
-  // `?inline` hands back the text rather than letting Vite inject it, so it lands
-  // in one place we control and can be found when debugging.
-  const css = (await import('leaflet/dist/leaflet.css?inline')).default;
+/**
+ * Leaflet's stylesheet, as text, fetched once and shared by every root.
+ *
+ * `?inline` hands back the text rather than letting Vite inject it into the
+ * document, which is the whole point: injecting it into the document is exactly
+ * what does NOT work here.
+ */
+function leafletCssText(): Promise<string> {
+  cssTextPromise ??= import('leaflet/dist/leaflet.css?inline').then((m) => m.default as string);
+  return cssTextPromise;
+}
+
+/**
+ * Put Leaflet's stylesheet into the root this element actually lives in.
+ *
+ * A shadow root is styled independently of the document, so a map mounted inside
+ * `viz-panel`'s shadow root gets nothing from `document.head` — its panes stay
+ * `position: static` and the map falls apart. Once per root, not once per map:
+ * several maps in one window share a root and would otherwise each add a copy.
+ *
+ * `adoptedStyleSheets` where it exists (one parsed sheet shared by every root),
+ * a `<style>` element otherwise.
+ */
+async function adoptLeafletCss(root: StyleRoot): Promise<void> {
+  if (styledRoots.has(root)) return;
+  styledRoots.add(root);
+  const css = await leafletCssText();
+  if ('adoptedStyleSheets' in root && typeof CSSStyleSheet === 'function') {
+    try {
+      leafletSheet ??= new CSSStyleSheet();
+      if (leafletSheet.cssRules.length === 0) leafletSheet.replaceSync(css);
+      root.adoptedStyleSheets = [...root.adoptedStyleSheets, leafletSheet];
+      return;
+    } catch {
+      // Constructable stylesheets can be refused (a very old engine, or a CSP
+      // that blocks them). The <style> below always works.
+    }
+  }
   const style = document.createElement('style');
   style.dataset['vizLeaflet'] = '';
   style.textContent = css;
-  document.head.append(style);
+  (root instanceof Document ? root.head : root).append(style);
+}
+
+let leafletSheet: CSSStyleSheet | null = null;
+
+/** The document or shadow root an element is inside. */
+function styleRootOf(el: Element): StyleRoot {
+  const root = el.getRootNode();
+  return root instanceof ShadowRoot || root instanceof Document ? root : document;
 }
 
 export class VizPointMap extends LitElement {
@@ -125,7 +174,10 @@ export class VizPointMap extends LitElement {
     const gen = ++this.generation;
     const host = this.querySelector('.map') as HTMLElement | null;
     if (!host || this.points.length === 0) return;
-    const L = await leaflet();
+    // The CSS has to be in place BEFORE the map is built: Leaflet measures the
+    // container and positions its panes on creation, and an unstyled container
+    // measures wrong.
+    const [L] = await Promise.all([leaflet(), adoptLeafletCss(styleRootOf(this))]);
     if (gen !== this.generation || !this.isConnected) return;
 
     const theme = readChartTheme(this);
@@ -150,15 +202,17 @@ export class VizPointMap extends LitElement {
     for (const m of this.markers) m.remove();
     this.markers = [];
 
-    const weights = this.points.map((p) => p.weight ?? 0).filter((w) => Number.isFinite(w) && w > 0);
-    const maxWeight = weights.length > 0 ? Math.max(...weights) : 0;
     const baseRadius = this.options.radius ?? 6;
     const color = theme.palette[0] ?? '#2563eb';
+    // One pass over the whole set, because a radius depends on the OTHER points:
+    // the range is normalised over the weights actually present. See
+    // `marker-scale.ts` for why it is a range rather than a multiplier.
+    const range = markerRadiusRange(baseRadius);
+    const radii = this.options.scaleByWeight ? scaleMarkerRadii(this.points, range.min, range.max) : null;
 
-    for (const p of this.points) {
-      const scale = this.options.scaleByWeight && maxWeight > 0 ? Math.sqrt((p.weight ?? 0) / maxWeight) : 1;
+    for (const [index, p] of this.points.entries()) {
       const marker = L.circleMarker([p.lat, p.lon], {
-        radius: Math.max(2, baseRadius * (scale || 1)),
+        radius: radii ? (radii[index] ?? range.min) : baseRadius,
         color,
         weight: 1,
         fillColor: color,

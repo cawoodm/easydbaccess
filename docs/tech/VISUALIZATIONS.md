@@ -403,9 +403,20 @@ resize or a filter change re-lays out without reshuffling every word.
   `role="img"` summary. That is also what the e2e specs assert against — reading
   pixels would test Chart.js, not this app.
 - **The map renders into the light DOM** (`createRenderRoot` returns `this`).
-  Leaflet styles its panes with a global stylesheet and measures against the
-  document; inside a shadow root it draws a grey box. Every other element keeps
-  its shadow root.
+  Leaflet styles its panes with a global stylesheet; behind a shadow boundary that
+  CSS does not reach it. Every other element keeps its shadow root.
+- **…and having no shadow root of its own was not enough.** Up to v0.0.372 the
+  stylesheet went into `document.head`, and the map is mounted inside
+  `viz-panel`'s shadow root — where document styles do not apply. Every layer was
+  built correctly (tiles and markers were in the DOM, the points were right) and
+  then stacked in normal flow, because `.leaflet-pane { position: absolute }`
+  never landed. Markers ended up outside the map container entirely.
+
+  `adoptLeafletCss(root)` now puts the sheet in whichever root the element is
+  actually in — the document in the light DOM, the host's shadow root otherwise —
+  once per root via `adoptedStyleSheets`, with a `<style>` fallback. The lesson
+  generalises: any third-party library that ships a global stylesheet needs the
+  sheet in the element's own root, not in the document.
 - **Map markers are `circleMarker`, not `marker`.** The default Leaflet marker is
   an image resolved relative to the stylesheet, which is the thing that breaks
   under a bundler. A circle marker is SVG — no assets, and it can carry a
