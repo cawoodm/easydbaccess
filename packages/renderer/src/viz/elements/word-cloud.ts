@@ -17,6 +17,7 @@ import { LitElement, css, html, nothing, svg } from 'lit';
 import type { PropertyValues } from 'lit';
 import { readChartTheme, type CloudTerm } from './chart-data.js';
 import { fitFontCeiling, scaleTermSizes } from './cloud-scale.js';
+import { sameCloudTerms, sameVizOptions } from './same-input.js';
 
 export interface CloudOptions {
   minFontSize?: number | undefined;
@@ -83,6 +84,9 @@ export class VizWordCloud extends LitElement {
   private placed: PlacedWord[] = [];
   /** Terms `d3-cloud` could not fit. Reported, never silently swallowed. */
   private dropped = 0;
+  /** The input the layout on screen was computed from — see `same-input.ts`. */
+  private laidOutTerms: readonly CloudTerm[] = [];
+  private laidOutOptions: CloudOptions = {};
   private w = 0;
   private h = 0;
   private generation = 0;
@@ -118,8 +122,29 @@ export class VizWordCloud extends LitElement {
   }
 
   override updated(changed: PropertyValues): void {
-    if (changed.has('terms') || changed.has('options')) void this.layout();
+    // A new ARRAY of the same terms is not new data, and Lit cannot tell the
+    // difference: `viz-panel` rebuilds `terms` on every render, so resizing a
+    // column in the grid beside this cloud used to re-run the whole layout — and
+    // a re-layout re-places every word. See `same-input.ts`.
+    if ((changed.has('terms') || changed.has('options')) && !this.matchesLayout()) void this.layout();
     this.fitViewBox();
+  }
+
+  /** Is what is drawn already the answer for the current input? */
+  private matchesLayout(): boolean {
+    return sameCloudTerms(this.laidOutTerms, this.terms) && sameVizOptions(this.laidOutOptions, this.options);
+  }
+
+  /**
+   * Record what the layout on screen was computed from.
+   *
+   * Called only where a layout has actually landed, never on entry: a run
+   * abandoned by the generation guard has drawn nothing, and remembering its
+   * input would suppress the re-run that is supposed to replace it.
+   */
+  private rememberLayoutInput(): void {
+    this.laidOutTerms = this.terms;
+    this.laidOutOptions = this.options;
   }
 
   /**
@@ -146,6 +171,7 @@ export class VizWordCloud extends LitElement {
     const gen = ++this.generation;
     if (this.terms.length === 0) {
       this.placed = [];
+      this.rememberLayoutInput();
       return;
     }
     const rect = this.getBoundingClientRect();
@@ -199,6 +225,7 @@ export class VizWordCloud extends LitElement {
     this.dropped = Math.max(0, this.terms.length - words.length);
     this.w = w;
     this.h = h;
+    this.rememberLayoutInput();
   }
 
   override render() {

@@ -38,6 +38,7 @@ import { persistPillFilters, withPillValue } from '../views/pill-filters.js';
 import { aggregateRows, type VizFrame } from './viz-aggregate.js';
 import { parseWordList, resolveStopWords, wordFrequencies } from './word-frequency.js';
 import { effectiveAggregate, effectiveVizOptions } from './viz-options.js';
+import { vizColumnsKey } from './viz-inputs.js';
 import { csvFilename, frameToCsv, pointsToCsv, termsToCsv } from './viz-csv.js';
 import { emptyChannelNote, emptyChannels, noTermsNote, type MappedChannel } from './viz-diagnose.js';
 import { readTileAttribution, readTileUrl, DEFAULT_TILE_ATTRIBUTION, DEFAULT_TILE_URL } from './viz-settings.js';
@@ -316,10 +317,14 @@ export class VizPanel extends LitElement {
     }
     this.applyTable(table);
     // A column rename / type change / added script has to reach the chart, the
-    // same way it reaches the grid.
+    // same way it reaches the grid — but ONLY those. Resizing a column persists a
+    // `width` on every ColumnSpec, and taking that write re-rendered the panel:
+    // the word cloud re-laid-out and the map re-fit its bounds, throwing away the
+    // user's pan, once per drag. `vizColumnsKey` is the data/optics line.
     this.tableUnsub = ctx.store.tables.subscribe((all) => {
       const t = all.find((x) => x.id === this.instance?.tableId);
       if (!t) return;
+      if (vizColumnsKey(t.columns) === this.columnsKey) return;
       this.applyTable(t);
       this.recompute();
     });
@@ -357,7 +362,17 @@ export class VizPanel extends LitElement {
 
   private applyTable(table: Table): void {
     this.columns = table.columns ?? [];
+    this.columnsKey = vizColumnsKey(this.columns);
   }
+
+  /**
+   * The last column shape drawn from, ignoring grid-only fields.
+   *
+   * Kept beside `columns` rather than derived at compare time so the widths
+   * currently in `this.columns` stay whatever arrived with them — nothing under
+   * `viz/` reads a width, so a stale one cannot be seen.
+   */
+  private columnsKey = '';
 
   /**
    * Advertise the table this visualization is about, as a plain data attribute.

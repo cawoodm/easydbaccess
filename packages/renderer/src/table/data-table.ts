@@ -25,7 +25,7 @@ import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cachedRowCount, rememberRowCount } from './row-count-cache.js';
 import { rememberRowRequest } from './visible-request.js';
 import { TABLE_LOADING_EVENT, tableLoadingState, type TableLoadingDetail } from './table-loading.js';
-import { emitVisibleRows, provideVisibleRows, visibleRowsWanted, type VisibleRowsDetail } from './visible-rows.js';
+import { emitVisibleRows, provideVisibleRows, sameVisibleRows, visibleRowsWanted, type VisibleRowsDetail } from './visible-rows.js';
 import { providePaneActions } from './pane-actions.js';
 import { addPillValue } from '../views/view-render.js';
 import { formatByType, toDateInput, toDatetimeInput } from '../util/local-datetime.js';
@@ -830,24 +830,44 @@ export class DataTable extends LitElement {
   /**
    * Hand the current row set to any docked visualization watching this table.
    *
-   * Unlike `emitCount` there is no change-detection here: comparing row arrays
-   * costs about what re-aggregating them does, and `emitVisibleRows` is already a
-   * no-op when nobody is listening — which is the case for every window that has
-   * no pane docked, i.e. almost all of them.
+   * **Only when the set actually changed.** This runs from `updated()`, so it
+   * fires on every render — and most renders are about how the grid LOOKS, not
+   * about which rows are in it. Resizing a column writes the width to `@state`
+   * per pointermove, and each render republished an identical row set: a docked
+   * word cloud re-ran its layout and a docked map re-fit its bounds (losing the
+   * user's pan) dozens of times during one drag. `sameVisibleRows` is what
+   * separates a data change from an optics one, and costs a pointer comparison
+   * per row against the aggregation and redraw it saves.
+   *
+   * `emitVisibleRows` is additionally a no-op when nobody is listening, which is
+   * the case for every window with no pane docked — i.e. almost all of them.
    */
   private emitRows(): void {
     const key = this.visibleRowsKey;
     const rows = this.renderedRows;
     if (!key || !rows || !visibleRowsWanted(key)) return;
-    emitVisibleRows({
+    const detail: VisibleRowsDetail = {
       key,
       rows,
       // Same windowed caveat as `visibleRowsDetail` — one page is not the answer.
       total: Math.max(this.matchingTotal, this.windowOffset + rows.length),
       truncated: this.truncated || this.windowed,
       searching: this.searchIsActive,
-    });
+    };
+    if (sameVisibleRows(this.lastEmittedRows, detail)) return;
+    this.lastEmittedRows = detail;
+    emitVisibleRows(detail);
   }
+
+  /**
+   * The last payload published, for the comparison above.
+   *
+   * Not cleared when the key changes — the key is part of what is compared, so a
+   * repointed grid's first publish differs and goes out anyway. A pane that
+   * mounts later does not need one either: it PULLS its first value from the
+   * provider (see `visible-rows.ts`).
+   */
+  private lastEmittedRows: VisibleRowsDetail | null = null;
 
   /**
    * Publish what the user is looking at, for the footer's "Delete Visible Data" —

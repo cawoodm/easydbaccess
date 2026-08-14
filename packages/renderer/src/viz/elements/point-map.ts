@@ -36,6 +36,7 @@ import type { PropertyValues } from 'lit';
 import type { CircleMarker, Map as LeafletMap, TileLayer } from 'leaflet';
 import { readChartTheme, type MapPoint } from './chart-data.js';
 import { markerRadiusRange, scaleMarkerRadii } from './marker-scale.js';
+import { sameMapPoints, sameVizOptions } from './same-input.js';
 
 export interface MapOptions {
   tileUrl?: string | undefined;
@@ -133,6 +134,9 @@ export class VizPointMap extends LitElement {
   private ro: ResizeObserver | null = null;
   private generation = 0;
   private tileError = false;
+  /** The input the markers on screen were drawn from — see `same-input.ts`. */
+  private drawnPoints: readonly MapPoint[] = [];
+  private drawnOptions: MapOptions = {};
 
   static override get properties() {
     return {
@@ -167,7 +171,17 @@ export class VizPointMap extends LitElement {
   }
 
   override updated(changed: PropertyValues): void {
-    if (changed.has('points') || changed.has('options')) void this.draw();
+    // A redraw ends in `fitBounds`, so redrawing the SAME points throws away
+    // wherever the user had panned and zoomed to. `viz-panel` rebuilds `points`
+    // on every render, and resizing a column in the grid beside a docked map is a
+    // render — the map kept snapping back mid-drag. Comparing the values is what
+    // separates a data change from an optics one; see `same-input.ts`.
+    if ((changed.has('points') || changed.has('options')) && !this.matchesDrawn()) void this.draw();
+  }
+
+  /** Are the markers on screen already the answer for the current input? */
+  private matchesDrawn(): boolean {
+    return sameMapPoints(this.drawnPoints, this.points) && sameVizOptions(this.drawnOptions, this.options);
   }
 
   private async draw(): Promise<void> {
@@ -228,6 +242,11 @@ export class VizPointMap extends LitElement {
     const bounds = L.latLngBounds(this.points.map((p) => [p.lat, p.lon] as [number, number]));
     if (bounds.isValid()) this.map.fitBounds(bounds, { padding: [24, 24], maxZoom: 12 });
     this.map.invalidateSize();
+    // Only once the markers are really on screen: a run abandoned above by the
+    // generation guard has drawn nothing, and remembering its input would
+    // suppress the run meant to replace it.
+    this.drawnPoints = this.points;
+    this.drawnOptions = this.options;
   }
 
   override render() {

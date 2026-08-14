@@ -4,9 +4,16 @@
 
 ### Bugs
 
+<<<<<<< HEAD
 - 🪲 Maps drew nothing usable: the tiles and markers were built but landed outside the map, unstyled (v0.0.374)
 - 🪲 A map's "Size by" column made no visible difference to the markers (v0.0.374)
 - 🪲 A JSON file this app exported could fail to import: a long decimal was rewritten into invalid JSON (v0.0.375)
+=======
+- 🪲 Maps drew nothing usable: the tiles and markers were built but landed outside the map, unstyled (v0.0.373)
+- 🪲 A map's "Size by" column made no visible difference to the markers (v0.0.373)
+- 🪲 A JSON file this app exported could fail to import: a long decimal was rewritten into invalid JSON (v0.0.374)
+- 🪲 Resizing a grid column redrew every visualization, re-laying-out a word cloud and losing a map's pan (v0.0.376)
+>>>>>>> 6d6d154 (🪲 bug: wordcloud an visualisations should not be triggered for update just because I resize columns, differentiate data changes from optics)
 
 ### Features
 
