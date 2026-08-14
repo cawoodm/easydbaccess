@@ -446,7 +446,11 @@ export class ScriptEditorDialog extends LitElement {
       if (shown && shown.length < all.length) {
         const allLabel = `All ${all.length.toLocaleString()} rows`;
         const someLabel = `Only the ${shown.length.toLocaleString()} rows shown`;
-        const scope = await dialogs.choice(`The grid is showing ${shown.length.toLocaleString()} of ${all.length.toLocaleString()} rows. Which should the script write?`, [allLabel, someLabel], 'Run script');
+        const scope = await dialogs.choice(
+          `The grid is showing ${shown.length.toLocaleString()} of ${all.length.toLocaleString()} rows. Which should the script write?`,
+          [allLabel, someLabel],
+          'Run script',
+        );
         if (scope === null) return;
         targets = scope === someLabel ? shown : all;
       }
@@ -572,7 +576,11 @@ export class ScriptEditorDialog extends LitElement {
               <label for="sample">Start from a sample</label>
               <select
                 id="sample"
-                title=${validating ? 'Replace the editor contents with a ready-made rule' : this.kind === 'viz-html' ? 'Replace the editor contents with a ready-made block of HTML' : 'Replace the editor contents with a ready-made script'}
+                title=${validating
+                  ? 'Replace the editor contents with a ready-made rule'
+                  : this.kind === 'viz-html'
+                    ? 'Replace the editor contents with a ready-made block of HTML'
+                    : 'Replace the editor contents with a ready-made script'}
                 @change=${(e: Event) => this.applySample(e)}
               >
                 <option value="">— choose —</option>

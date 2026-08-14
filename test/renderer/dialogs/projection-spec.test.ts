@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectionSpec } from '@easydb/shared';
-import { addComputedToModel, addSourceToModel, editorToSpec, removeSourceFromModel, seedJoinKeyFromBase, specToEditor, type ProjectionCandidate } from '../../../packages/renderer/src/dialogs/projection-spec.js';
+import {
+  addComputedToModel,
+  addSourceToModel,
+  editorToSpec,
+  removeSourceFromModel,
+  seedJoinKeyFromBase,
+  specToEditor,
+  type ProjectionCandidate,
+} from '../../../packages/renderer/src/dialogs/projection-spec.js';
 
 const cand = (id: string, name: string, fields: string[]): ProjectionCandidate => ({
   id,

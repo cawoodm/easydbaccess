@@ -144,14 +144,34 @@ export class CsvExportOptions extends LitElement {
           : nothing}
       </div>
       <div class="checks">
-        ${this.check('Header row', () => this.header, (v) => (this.header = v), 'csv-header')}
-        ${this.check('Byte-order mark', () => this.bom, (v) => (this.bom = v), 'csv-bom')}
-        ${this.check('Typed header', () => this.typedHeader, (v) => (this.typedHeader = v), 'csv-typed-header')}
-        ${this.check('CRLF line ends', () => this.crlf, (v) => (this.crlf = v), 'csv-crlf')}
+        ${this.check(
+          'Header row',
+          () => this.header,
+          (v) => (this.header = v),
+          'csv-header',
+        )}
+        ${this.check(
+          'Byte-order mark',
+          () => this.bom,
+          (v) => (this.bom = v),
+          'csv-bom',
+        )}
+        ${this.check(
+          'Typed header',
+          () => this.typedHeader,
+          (v) => (this.typedHeader = v),
+          'csv-typed-header',
+        )}
+        ${this.check(
+          'CRLF line ends',
+          () => this.crlf,
+          (v) => (this.crlf = v),
+          'csv-crlf',
+        )}
       </div>
       <p class="hint">
-        A typed header writes each column as <code>field:label:type</code>, so importing the file back restores the types instead of guessing them. A byte-order mark is what makes Excel read
-        accented characters correctly.
+        A typed header writes each column as <code>field:label:type</code>, so importing the file back restores the types instead of guessing them. A byte-order mark is what makes Excel read accented
+        characters correctly.
       </p>
     `;
   }

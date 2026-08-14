@@ -161,7 +161,10 @@ export async function readViewInstance(page: Page, instanceId: string) {
  * skip would hide the question disappearing.
  */
 export async function chooseSimpleStorage(page: Page): Promise<void> {
-  await page.locator('host-dialogs').getByRole('button', { name: /^Simple/ }).click();
+  await page
+    .locator('host-dialogs')
+    .getByRole('button', { name: /^Simple/ })
+    .click();
 }
 
 /** Returns the jsPanel DOM id derived from a table id (mirrors cssSafe()). */

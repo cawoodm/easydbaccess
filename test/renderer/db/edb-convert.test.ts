@@ -132,12 +132,18 @@ describe('copyWorkspace', () => {
   it('makes a real SQL table with a real column per field', () => {
     // The point of the format: a converted file opens in any SQLite tool.
     return copyWorkspace(fakeSource(), target, WS).then(() => {
-      const names = driver.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all().map((r) => String(r['name']));
+      const names = driver
+        .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+        .all()
+        .map((r) => String(r['name']));
       expect(names).toContain('_easydb');
       // The physical name keeps the table's own spelling — `sanitizeTableName`
       // strips what SQL cannot take, it does not lower-case.
       expect(names).toContain('Parts');
-      const columns = driver.prepare(`PRAGMA table_info("Parts")`).all().map((c) => String(c['name']));
+      const columns = driver
+        .prepare(`PRAGMA table_info("Parts")`)
+        .all()
+        .map((c) => String(c['name']));
       expect(columns).toEqual(['_id', '_updatedAt', '_extra', 'name', 'qty']);
       const stored = driver.prepare(`SELECT name, qty FROM "Parts" ORDER BY name`).all();
       expect(stored).toEqual([

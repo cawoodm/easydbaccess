@@ -50,8 +50,8 @@ not an opaque blob. That is the whole point of the design, and it is why
 
 | SQL object               | Holds                                                                                                                                  |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `<sanitized table name>` | the rows: `_id TEXT PRIMARY KEY` (= `Row.id`), `_updatedAt INTEGER`, `_extra TEXT` (overflow), then one column per `ColumnSpec`         |
-| `_easydb`                | everything else — `workspaces`, `settings`, `plugins`, `viewTemplates`, `viewInstances`, `tables` — as `(coll, key, workspaceId, doc)`  |
+| `<sanitized table name>` | the rows: `_id TEXT PRIMARY KEY` (= `Row.id`), `_updatedAt INTEGER`, `_extra TEXT` (overflow), then one column per `ColumnSpec`        |
+| `_easydb`                | everything else — `workspaces`, `settings`, `plugins`, `viewTemplates`, `viewInstances`, `tables` — as `(coll, key, workspaceId, doc)` |
 
 **The rules are not in this package.** They live with the store that enforces
 them, `packages/shared/src/edb-store.ts`: the physical table name assigned once,

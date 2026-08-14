@@ -44,9 +44,7 @@ test('Run writes the script’s value into the cells and can clear the script', 
   await host.getByRole('button', { name: 'Write and clear the script', exact: true }).click();
 
   // The write is immediate — it does not wait for the columns editor's Save.
-  await expect
-    .poll(async () => (await readRows(page, id)).map((r: { data: Record<string, unknown> }) => r.data['shout']).sort())
-    .toEqual(['ADA', 'BOB']);
+  await expect.poll(async () => (await readRows(page, id)).map((r: { data: Record<string, unknown> }) => r.data['shout']).sort()).toEqual(['ADA', 'BOB']);
 
   // The editor closed, and the column came back with no script — so once the
   // columns editor saves, the cells show stored data rather than a computation.
@@ -57,7 +55,9 @@ test('Run writes the script’s value into the cells and can clear the script', 
   // input again, so its value is not a text node. Sorted, because nothing here
   // pins the grid's row order.
   await expect
-    .poll(async () => (await page.locator(`#${panelDomId(id)} data-table tbody td.t-string`).evaluateAll((tds) => tds.map((td) => td.getAttribute('title')))).filter((t) => t === 'ADA' || t === 'BOB').sort())
+    .poll(async () =>
+      (await page.locator(`#${panelDomId(id)} data-table tbody td.t-string`).evaluateAll((tds) => tds.map((td) => td.getAttribute('title')))).filter((t) => t === 'ADA' || t === 'BOB').sort(),
+    )
     .toEqual(['ADA', 'BOB']);
 
   const table = await page.evaluate(
@@ -109,14 +109,15 @@ test('Run asks which rows when the grid is filtered, and honours the answer', as
   await host.getByRole('button', { name: 'Write and keep the script', exact: true }).click();
 
   // Only the filtered row is written; the other two keep an empty cell.
-  await expect
-    .poll(async () => (await readRows(page, id)).filter((r: { data: Record<string, unknown> }) => r.data['shout'] !== undefined).length)
-    .toBe(1);
+  await expect.poll(async () => (await readRows(page, id)).filter((r: { data: Record<string, unknown> }) => r.data['shout'] !== undefined).length).toBe(1);
 });
 
 test('Run is not offered while the table is still being created', async ({ page }) => {
   // There are no rows to write to yet, and the field is not a key any row uses.
-  await page.locator('app-shell').getByRole('button', { name: /New table/i }).click();
+  await page
+    .locator('app-shell')
+    .getByRole('button', { name: /New table/i })
+    .click();
   const dlg = page.locator('new-table-dialog dialog');
   await expect(dlg).toBeVisible();
   await dlg.locator('button.script-btn').first().click();
@@ -135,8 +136,6 @@ test('a row the script throws on is skipped, and the run says how many', async (
   await editor.getByTestId('script-run').click();
   await page.locator('host-dialogs').getByRole('button', { name: 'Write and keep the script', exact: true }).click();
 
-  await expect
-    .poll(async () => (await readRows(page, id)).map((r: { data: Record<string, unknown> }) => r.data['shout'] ?? '').sort())
-    .toEqual(['', 'ADA', 'CY']);
+  await expect.poll(async () => (await readRows(page, id)).map((r: { data: Record<string, unknown> }) => r.data['shout'] ?? '').sort()).toEqual(['', 'ADA', 'CY']);
   await expect(page.locator('toast-host')).toContainText('1 failed');
 });

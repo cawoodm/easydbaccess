@@ -104,17 +104,21 @@ test('a JSON decimal with a long fraction imports, and keeps its value', async (
 
   // BY NAME, not `rows[0]`: the store does not promise insertion order (the
   // primary key is a random UUID), so a two-row fixture cannot be indexed into.
-  await expect.poll(() => importedRowWhere(page, workspaceId, 'plants', 'plant', 'ALUMINE')).toEqual({
-    plant: 'ALUMINE',
-    capacity_mw: 1.9040000000000001,
-    latitude: -39.2145,
-    // The integers beside it are still protected — the fix must not cost that.
-    id: BIG,
-  });
-  await expect.poll(() => importedRowWhere(page, workspaceId, 'plants', 'plant', 'Bern')).toEqual({
-    plant: 'Bern',
-    capacity_mw: 0.30000000000000004,
-    latitude: 46.948,
-    id: BIG2,
-  });
+  await expect
+    .poll(() => importedRowWhere(page, workspaceId, 'plants', 'plant', 'ALUMINE'))
+    .toEqual({
+      plant: 'ALUMINE',
+      capacity_mw: 1.9040000000000001,
+      latitude: -39.2145,
+      // The integers beside it are still protected — the fix must not cost that.
+      id: BIG,
+    });
+  await expect
+    .poll(() => importedRowWhere(page, workspaceId, 'plants', 'plant', 'Bern'))
+    .toEqual({
+      plant: 'Bern',
+      capacity_mw: 0.30000000000000004,
+      latitude: 46.948,
+      id: BIG2,
+    });
 });

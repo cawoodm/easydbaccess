@@ -141,7 +141,11 @@ test('a map of one point still centres on it', async ({ page }) => {
 
 /** Where the first marker sits horizontally, once it has stopped moving. */
 async function settledMarkerLeft(page: Page): Promise<number> {
-  const read = () => page.locator('viz-point-map path.leaflet-interactive').first().evaluate((el) => Math.round(el.getBoundingClientRect().left));
+  const read = () =>
+    page
+      .locator('viz-point-map path.leaflet-interactive')
+      .first()
+      .evaluate((el) => Math.round(el.getBoundingClientRect().left));
   let last = await read();
   // Leaflet animates zoom and eases a drag, so a reading taken mid-flight is not
   // a baseline. Wait for two identical samples rather than for a fixed delay.
@@ -163,10 +167,13 @@ test('the zoom control zooms the map', async ({ page }) => {
 
   // The zoom is legible from the tile URLs Leaflet asked for: `/{z}/{x}/{y}.png`.
   const zoomOf = () =>
-    page.locator('viz-point-map img.leaflet-tile').first().evaluate((el) => {
-      const m = (el as HTMLImageElement).src.match(/\/(\d+)\/\d+\/\d+\.png/);
-      return m ? Number(m[1]) : null;
-    });
+    page
+      .locator('viz-point-map img.leaflet-tile')
+      .first()
+      .evaluate((el) => {
+        const m = (el as HTMLImageElement).src.match(/\/(\d+)\/\d+\/\d+\.png/);
+        return m ? Number(m[1]) : null;
+      });
 
   const before = await zoomOf();
   expect(before).not.toBeNull();
@@ -202,12 +209,7 @@ test('“Size by” gives the markers visibly different radii', async ({ page })
   // `markerSize * sqrt(w / maxWeight)`, so on real data (a 1.9 MW plant against a
   // 6000 MW one) everything but the largest collapsed onto the 2px floor and the
   // largest kept the unscaled size. Identical dots, whatever the column said.
-  const id = await createTable(page, 'Plants', [
-    { field: 'name' },
-    { field: 'lat', type: 'number' },
-    { field: 'lon', type: 'number' },
-    { field: 'capacity_mw', type: 'number' },
-  ]);
+  const id = await createTable(page, 'Plants', [{ field: 'name' }, { field: 'lat', type: 'number' }, { field: 'lon', type: 'number' }, { field: 'capacity_mw', type: 'number' }]);
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [
     { name: 'tiny', lat: 46.9, lon: 7.4, capacity_mw: 1.9 },
@@ -240,7 +242,11 @@ test('“Size by” gives the markers visibly different radii', async ({ page })
       const deep = (root: Document | ShadowRoot): Element | null => {
         const hit = root.querySelector('viz-point-map');
         if (hit) return hit;
-        for (const el of root.querySelectorAll('*')) if (el.shadowRoot) { const i = deep(el.shadowRoot); if (i) return i; }
+        for (const el of root.querySelectorAll('*'))
+          if (el.shadowRoot) {
+            const i = deep(el.shadowRoot);
+            if (i) return i;
+          }
         return null;
       };
       const el = deep(document);

@@ -74,7 +74,12 @@ describe('paneFilter / paneSort', () => {
 
   it('survives a host that throws, reporting it as unhandled', () => {
     // A broken visualization host must not take the pane's click handler down.
-    const host = { filter: vi.fn(() => { throw new Error('boom'); }), sort: vi.fn() };
+    const host = {
+      filter: vi.fn(() => {
+        throw new Error('boom');
+      }),
+      sort: vi.fn(),
+    };
     providePaneActions('t1', host);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(paneFilter('t1', 'country', 'CH')).toBe(false);

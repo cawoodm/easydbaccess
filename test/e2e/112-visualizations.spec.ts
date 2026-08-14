@@ -430,9 +430,7 @@ test.describe('visualizations', () => {
 test.describe('the measure is a setting a single view can override', () => {
   /** The numbers the bar chart actually plotted, per category. */
   const plotted = (page: import('@playwright/test').Page) =>
-    page.locator('viz-panel viz-bar-chart table.a11y tbody tr').evaluateAll((rows) =>
-      rows.map((r) => [r.querySelector('th')?.textContent ?? '', r.querySelector('td')?.textContent ?? '']),
-    );
+    page.locator('viz-panel viz-bar-chart table.a11y tbody tr').evaluateAll((rows) => rows.map((r) => [r.querySelector('th')?.textContent ?? '', r.querySelector('td')?.textContent ?? '']));
 
   test('Settings changes SUM for this view; the definition keeps counting', async ({ page }) => {
     // The definition says "count rows per country". One view of it should be
@@ -440,11 +438,13 @@ test.describe('the measure is a setting a single view can override', () => {
     // same layering `vizOptions` already had, applied to the measure.
     const id = await seedCities(page);
     await makeChart(page, id, { name: 'By country' });
-    await expect.poll(() => plotted(page)).toEqual([
-      ['CH', '3'],
-      ['DE', '2'],
-      ['AT', '1'],
-    ]);
+    await expect
+      .poll(() => plotted(page))
+      .toEqual([
+        ['CH', '3'],
+        ['DE', '2'],
+        ['AT', '1'],
+      ]);
 
     await page.locator('viz-footer').getByRole('button', { name: 'Settings for this view' }).click();
     const dlg = page.locator('views-dialog dialog');
@@ -453,11 +453,13 @@ test.describe('the measure is a setting a single view can override', () => {
     await dlg.getByRole('button', { name: 'Save', exact: true }).click();
 
     // CH 10+7+4, DE 5+3, AT 1 — and still largest-first, which was not overridden.
-    await expect.poll(() => plotted(page)).toEqual([
-      ['CH', '21'],
-      ['DE', '8'],
-      ['AT', '1'],
-    ]);
+    await expect
+      .poll(() => plotted(page))
+      .toEqual([
+        ['CH', '21'],
+        ['DE', '8'],
+        ['AT', '1'],
+      ]);
 
     // The DEFINITION is untouched — the override is a delta, not a fork, so
     // editing the template later still reaches every view that never changed it.
