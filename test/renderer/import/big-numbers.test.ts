@@ -88,3 +88,56 @@ describe('quoteBigIntegers', () => {
     expect(() => quoteBigIntegers('{"a":"unterminated')).not.toThrow();
   });
 });
+
+describe('a decimal is never rewritten, and never broken', () => {
+  /** Rewrite, then insist the result is still JSON, and still the same value. */
+  function roundTrip(json: string): unknown {
+    const out = quoteBigIntegers(json);
+    return JSON.parse(out) as unknown;
+  }
+
+  it('leaves a long decimal alone instead of quoting its fraction', () => {
+    // The reported failure: a `capacity_mw` of 1.9040000000000001 came out as
+    // `1."9040000000000001"` — the fraction digits were re-scanned as a number
+    // literal of their own, found to exceed 2^53, and quoted. The file then would
+    // not parse, so a workspace exported from this app could not be imported back.
+    const json = '{"capacity_mw": 1.9040000000000001}';
+    expect(quoteBigIntegers(json)).toBe(json);
+    expect(roundTrip(json)).toEqual({ capacity_mw: 1.9040000000000001 });
+  });
+
+  it('survives every shape of JSON number', () => {
+    const numbers = ['0', '-0', '1', '-1', '1.5', '-39.2145', '1.9040000000000001', '0.30000000000000004', '1e400', '1E5', '2.5e-3', '-2.5E+3', '1.0', '123456789.123456789'];
+    for (const n of numbers) {
+      const json = `{"v": ${n}}`;
+      expect(quoteBigIntegers(json), n).toBe(json);
+      expect(roundTrip(json), n).toEqual({ v: JSON.parse(n) as number });
+    }
+  });
+
+  it('still quotes the unsafe INTEGERS beside them, in the same document', () => {
+    const json = '{"id": 1298624375692894210, "lat": -39.2145, "n": 1.9040000000000001}';
+    expect(roundTrip(json)).toEqual({ id: '1298624375692894210', lat: -39.2145, n: 1.9040000000000001 });
+  });
+
+  it('handles a decimal whose fraction alone would be an unsafe integer', () => {
+    // The exact trap: 9040000000000001 > 2^53-1, so the old scan quoted it.
+    for (const n of ['1.9040000000000001', '0.9007199254740993', '-8.999999999999999e2']) {
+      expect(() => roundTrip(`[${n}]`), n).not.toThrow();
+    }
+  });
+
+  it('leaves numbers inside strings alone, fraction and all', () => {
+    const json = '{"note": "reads 1.9040000000000001 on the dial", "id": 9007199254740993}';
+    expect(roundTrip(json)).toEqual({ note: 'reads 1.9040000000000001 on the dial', id: '9007199254740993' });
+  });
+
+  it('does not choke on a truncated number at the end of the text', () => {
+    // Malformed input must come back as a parse error from JSON.parse, not as a
+    // crash or an infinite loop inside the scanner.
+    for (const bad of ['[1.', '[1e', '[1e+', '[-', '[1.2e']) {
+      expect(() => quoteBigIntegers(bad), bad).not.toThrow();
+      expect(() => JSON.parse(quoteBigIntegers(bad)), bad).toThrow();
+    }
+  });
+});

@@ -15,6 +15,8 @@
 /** A decimal integer literal, optionally signed. No exponent, no fraction. */
 const INTEGER_TEXT = /^[+-]?\d+$/;
 
+const isDigit = (c: string | undefined): boolean => c !== undefined && c >= '0' && c <= '9';
+
 /**
  * True when `s` is an integer literal that a JS number cannot hold exactly.
  *
@@ -41,6 +43,11 @@ export function isUnsafeIntegerText(s: string): boolean {
  * The scan skips string contents, so a value like `"id: 1298624375692894210"`
  * and a key of that name are untouched — only bare literals in value position
  * are quoted. Escapes inside strings are honoured, so a `\\"` does not end one.
+ *
+ * Every number literal is consumed WHOLE — fraction and exponent included — even
+ * though only a plain integer can ever be rewritten. Leaving the fraction for the
+ * next turn of the loop is what made `1.9040000000000001` come back as invalid
+ * JSON; see the comment at the number branch.
  */
 export function quoteBigIntegers(json: string): string {
   let out = '';
@@ -66,23 +73,33 @@ export function quoteBigIntegers(json: string): string {
       i++;
       continue;
     }
-    // A number literal starts here only if the previous non-space character was
-    // structural — otherwise these digits belong to something else entirely.
+    // Outside a string, a `-` or a digit can only begin a number literal.
     if (ch === '-' || (ch >= '0' && ch <= '9')) {
       let j = i;
       if (json[j] === '-') j++;
-      while (j < json.length && json[j]! >= '0' && json[j]! <= '9') j++;
+      while (j < json.length && isDigit(json[j])) j++;
       const digitsEnd = j;
-      // A fraction or an exponent means it is not an integer literal; leave it.
-      const next = json[j];
-      const isInteger = next !== '.' && next !== 'e' && next !== 'E';
-      const literal = json.slice(i, digitsEnd);
-      if (isInteger && isUnsafeIntegerText(literal)) {
-        out += `"${literal}"`;
-      } else {
-        out += literal;
+      // Consume the FRACTION and the EXPONENT too, even though neither can be an
+      // unsafe integer. Stopping at the integer part and letting the loop pick the
+      // rest up is what corrupted a long decimal: `1.9040000000000001` came out as
+      // `1."9040000000000001"` — the `.` copied as an ordinary character, then the
+      // 16 fraction digits re-scanned as a number literal of their own, found to
+      // exceed 2^53, and quoted. The result would not parse at all, which is how
+      // an exported file could fail to import ("Unterminated fractional number").
+      if (json[j] === '.') {
+        j++;
+        while (j < json.length && isDigit(json[j])) j++;
       }
-      i = digitsEnd;
+      if (json[j] === 'e' || json[j] === 'E') {
+        j++;
+        if (json[j] === '+' || json[j] === '-') j++;
+        while (j < json.length && isDigit(json[j])) j++;
+      }
+      const literal = json.slice(i, j);
+      // Only a whole number is a candidate: `j === digitsEnd` means nothing
+      // followed the digits, so this is an integer literal and not a decimal.
+      out += j === digitsEnd && isUnsafeIntegerText(literal) ? `"${literal}"` : literal;
+      i = j;
       continue;
     }
     out += ch;

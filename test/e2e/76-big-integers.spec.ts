@@ -31,6 +31,24 @@ async function importedRow(page: import('@playwright/test').Page, ws: string, na
   );
 }
 
+/** The imported row whose `field` equals `value`, read back out of the store. */
+async function importedRowWhere(page: import('@playwright/test').Page, ws: string, name: string, field: string, value: string): Promise<Record<string, unknown>> {
+  return page.evaluate(
+    async ([w, n, f, v]) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__easydb.store;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tables = (await store.tables.find({ workspaceId: w })) as any[];
+      const t = tables.find((x) => x.name === n);
+      if (!t) return {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rows = (await store.rows(t.id).find()) as any[];
+      return rows.find((r) => String(r.data?.[f as string]) === v)?.data ?? {};
+    },
+    [ws, name, field, value],
+  );
+}
+
 async function importUrl(page: import('@playwright/test').Page, url: string, body: string, contentType: string, format: string) {
   await page.route(url, (route) =>
     route.fulfill({
@@ -70,4 +88,33 @@ test('ordinary numbers still import as numbers', async ({ page, workspaceId }) =
   await importUrl(page, 'https://ex.example/small.csv', 'n,m\n42,9007199254740991\n', 'text/plain; charset=utf-8', 'csv');
 
   await expect.poll(() => importedRow(page, workspaceId, 'small')).toEqual({ n: 42, m: 9007199254740991 });
+});
+
+test('a JSON decimal with a long fraction imports, and keeps its value', async ({ page, workspaceId }) => {
+  // The rewrite that protects big integers used to break long decimals: it emitted
+  // the integer part, copied the `.` as an ordinary character, then re-scanned the
+  // fraction digits as a number literal of their own — 9040000000000001 is past
+  // 2^53, so it was quoted, and the document no longer parsed. A file this app had
+  // exported failed to import with "Unterminated fractional number".
+  const body = JSON.stringify([
+    { plant: 'ALUMINE', capacity_mw: 1.9040000000000001, latitude: -39.2145, id: BIG },
+    { plant: 'Bern', capacity_mw: 0.30000000000000004, latitude: 46.948, id: BIG2 },
+  ]);
+  await importUrl(page, 'https://ex.example/plants.json', body, 'application/json', 'json');
+
+  // BY NAME, not `rows[0]`: the store does not promise insertion order (the
+  // primary key is a random UUID), so a two-row fixture cannot be indexed into.
+  await expect.poll(() => importedRowWhere(page, workspaceId, 'plants', 'plant', 'ALUMINE')).toEqual({
+    plant: 'ALUMINE',
+    capacity_mw: 1.9040000000000001,
+    latitude: -39.2145,
+    // The integers beside it are still protected — the fix must not cost that.
+    id: BIG,
+  });
+  await expect.poll(() => importedRowWhere(page, workspaceId, 'plants', 'plant', 'Bern')).toEqual({
+    plant: 'Bern',
+    capacity_mw: 0.30000000000000004,
+    latitude: 46.948,
+    id: BIG2,
+  });
 });
