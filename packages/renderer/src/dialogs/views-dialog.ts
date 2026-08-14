@@ -4,7 +4,7 @@ import type { ColumnSpec, SettingsFieldSpec, Table, ViewInstance, ViewTemplate, 
 import { getContext } from '../app-context.js';
 import { readCloudDefaults } from '../viz/viz-settings.js';
 import { aggregateFields, aggregateOverrideDelta, effectiveVizOptions, overrideDelta, overriddenAggregateKeys, overriddenKeys } from '../viz/viz-options.js';
-import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@cawoodm/lit-dialogs';
+import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@marccawood/lit-dialogs';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { extractTokens } from '../views/view-render.js';
 import { revealViewWindow } from '../window-mgr/view-window-manager.js';

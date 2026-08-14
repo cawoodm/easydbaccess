@@ -1,5 +1,5 @@
 import type { DataStore, HostApi, PluginModule } from '@easydb/shared';
-import { AnchoredMenu } from '@cawoodm/lit-menu';
+import { AnchoredMenu } from '@marccawood/lit-menu';
 import {
   canPickFolder,
   canSaveInPlace,

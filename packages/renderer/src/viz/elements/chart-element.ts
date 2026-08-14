@@ -15,7 +15,7 @@
 // Custom elements are defined by an explicit guarded `defineCharts()`, never by
 // Lit's `@customElement` decorator — a second `define` of the same tag throws,
 // which is reachable on an HMR reload or a module evaluated twice. Same reason
-// `@cawoodm/lit-dialogs` hand-rolls `defineHostDialogs()`.
+// `@marccawood/lit-dialogs` hand-rolls `defineHostDialogs()`.
 
 import { LitElement, css, html, nothing } from 'lit';
 import type { PropertyValues } from 'lit';

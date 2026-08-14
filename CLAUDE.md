@@ -112,13 +112,13 @@ The dialog layer, the toast and the dropdown menu were generic enough to reuse
 elsewhere, so each is its own MIT-licensed repo with its own tests, example and
 npm publish workflow:
 
-- **[`@cawoodm/lit-dialogs`](https://github.com/cawoodm/lit-dialogs)** —
+- **[`@marccawood/lit-dialogs`](https://github.com/cawoodm/lit-dialogs)** —
   `HostDialogs` (alert/confirm/prompt/choice), `dialogChromeStyles`,
   `ctrlEnterSubmits`, `makeDialogDraggable`. Every dialog in
   `src/dialogs/` imports its chrome from here.
-- **[`@cawoodm/lit-toast`](https://github.com/cawoodm/lit-toast)** —
+- **[`@marccawood/lit-toast`](https://github.com/cawoodm/lit-toast)** —
   `ToastHost`. A toast is a notification, not a dialog; the two share no code.
-- **[`@cawoodm/lit-menu`](https://github.com/cawoodm/lit-menu)** —
+- **[`@marccawood/lit-menu`](https://github.com/cawoodm/lit-menu)** —
   `AnchoredMenu.open(rect, items)`, the self-mounting dropdown behind the
   Connect menu, the export-format pickers and the sync menus.
 
@@ -128,24 +128,29 @@ not primitives — so they belong with the windows layer whenever that is
 extracted. `chrome/app-progress*.ts` and `chrome/top-progress.ts` are generic
 but nothing outside the app needs them yet.
 
-All three are **git dependencies pinned to a commit SHA** in
-`packages/renderer/package.json`, not npm versions — a git dep works on a CI
-runner and needs no publish round-trip. `npm install` clones each one and runs
-its `prepare` script, which builds `dist/`. To take a package change:
+All three are **published npm packages** under the `@marccawood` scope and are
+ordinary semver dependencies in `packages/renderer/package.json`. They were
+SHA-pinned git dependencies until v0.0.373, when 0.1.0 of each went to the
+registry. To take a package change:
 
 1. Commit and push in `C:\projects\marc\packages\<name>`.
-2. Bump the SHA in `packages/renderer/package.json`.
-3. `npm install`.
+2. Bump its `version` and push a matching `v<version>` tag — the repo's
+   `publish.yml` tests, builds and publishes it with provenance. The tag must
+   equal `package.json`'s version or the job fails.
+3. Bump the range in `packages/renderer/package.json`, `npm install`.
 
-For a tight edit loop, `npm link` the package instead of re-installing per
-change.
+Publishing needs the `NPM_TOKEN` secret in each repo — a granular npm token for
+the `@marccawood` scope, which is what lets CI past the account's
+`auth-and-writes` 2FA.
+
+For a tight edit loop, `npm link` the package instead of publishing per change.
 
 The elements register through `defineHostDialogs()` / `defineToastHost()` in
 `chrome/app-shell.ts` rather than a side-effect import, because a library that
 calls `customElements.define` at module scope throws when the module is
 evaluated twice.
 
-`chrome/material-icon-css.ts`, `@cawoodm/lit-toast` and `@cawoodm/lit-menu` each
+`chrome/material-icon-css.ts`, `@marccawood/lit-toast` and `@marccawood/lit-menu` each
 carry their own copy of the same Material Icons class rules. This is deliberate,
 not drift: a published package cannot reach back into the app, and 24 lines of
 CSS with no logic is not worth a fourth package everything then depends on. The

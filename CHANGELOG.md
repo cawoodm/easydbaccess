@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ The dialog, toast and menu packages are on npm; the app takes them by version instead of a git commit (v0.0.373)
 - 🪶 Custom HTML visualizations: your own markup over the rows on screen, with $COUNT/$SUM tokens and pills that filter the grid (v0.0.371)
 - ✨ A #goto link with no table name acts on the table you are in, so one block of markup works anywhere (v0.0.371)
 - ✨ A chart's measure, order and group cap can be set for one view without changing the definition every view shares (v0.0.371)

@@ -11,7 +11,7 @@ import { css } from 'lit';
  * Use `mi` (short) instead of `material-icons` to avoid name clashes with
  * potential plugin styles in the same scope.
  *
- * `@cawoodm/lit-toast` carries its own copy of these rules — a published
+ * `@marccawood/lit-toast` carries its own copy of these rules — a published
  * package cannot reach back into the app. Both copies move to a shared
  * UI-primitives package when that is extracted.
  */

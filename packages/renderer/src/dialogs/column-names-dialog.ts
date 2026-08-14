@@ -9,7 +9,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { ColumnSpec } from '@easydb/shared';
-import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@cawoodm/lit-dialogs';
+import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@marccawood/lit-dialogs';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 
 interface EditRow {

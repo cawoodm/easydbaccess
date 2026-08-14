@@ -1,7 +1,7 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { Row } from '@easydb/shared';
-import { ctrlEnterSubmits, dialogChromeStyles, HostDialogs, makeDialogDraggable } from '@cawoodm/lit-dialogs';
+import { ctrlEnterSubmits, dialogChromeStyles, HostDialogs, makeDialogDraggable } from '@marccawood/lit-dialogs';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import {
   USER_SAMPLES_SETTING,

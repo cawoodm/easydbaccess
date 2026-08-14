@@ -331,7 +331,7 @@ export class FilterPopover extends LitElement {
 
   /**
    * Escape dismisses the popover, like every other transient layer (the
-   * `@cawoodm/lit-menu` dropdown does the same). Capture phase +
+   * `@marccawood/lit-menu` dropdown does the same). Capture phase +
    * `preventDefault` is the app's convention
    * for "I claimed this key": `panel-shell`'s Escape handler checks
    * `defaultPrevented`, so closing the popover cannot also close a window behind

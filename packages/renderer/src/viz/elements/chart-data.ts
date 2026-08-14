@@ -4,8 +4,8 @@
 // theme it reads.
 //
 // **Nothing under `viz/elements/` may import `@easydb/shared`.** These files are
-// destined for the `@cawoodm/lit-charts` / `lit-map` / `lit-wordcloud` packages
-// alongside `@cawoodm/lit-dialogs`, and an element that knows about `Row`,
+// destined for the `@marccawood/lit-charts` / `lit-map` / `lit-wordcloud` packages
+// alongside `@marccawood/lit-dialogs`, and an element that knows about `Row`,
 // `ColumnSpec` or `VizFrame` is not a reusable component — it is easyDBAccess
 // code in a different repository. So the app adapts its `VizFrame` onto these
 // types (see `viz/viz-panel.ts`) rather than the element reaching into the store.

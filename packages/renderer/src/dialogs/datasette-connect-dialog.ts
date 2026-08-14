@@ -8,7 +8,7 @@
 
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@cawoodm/lit-dialogs';
+import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@marccawood/lit-dialogs';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 
 export interface ConnectChoice {

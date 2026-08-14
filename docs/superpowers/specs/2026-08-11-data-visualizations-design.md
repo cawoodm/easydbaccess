@@ -57,7 +57,7 @@ Two facts make this genuinely cheap rather than merely tidy:
 | Definition model | **A `ViewTemplate` kind** — no new collection, no third window manager |
 | Channel binding | **Reuse `ViewInstance.mapping`** — channel key → column field |
 | Drawing | **Libraries, lazily `import()`ed** — never a CDN |
-| Where the elements live | **Their own `@cawoodm/lit-*` packages**, following `lit-dialogs` / `lit-menu` / `lit-toast` |
+| Where the elements live | **Their own `@marccawood/lit-*` packages**, following `lit-dialogs` / `lit-menu` / `lit-toast` |
 | Docking | **A panel-shell content stack**, above / primary / below, with splitters |
 | Aggregation | **In the renderer, over the row set the grid already has** |
 | v1 kinds | bar/column, line, pie, **map**, **word cloud** |
@@ -364,16 +364,16 @@ here: these are static specifiers and we want Vite to resolve them.
 
 ## The drawing elements are their own packages
 
-The elements ship as SHA-pinned MIT packages alongside `@cawoodm/lit-dialogs`,
-`@cawoodm/lit-menu` and `@cawoodm/lit-toast`, **split by underlying library** —
+The elements ship as MIT npm packages alongside `@marccawood/lit-dialogs`,
+`@marccawood/lit-menu` and `@marccawood/lit-toast`, **split by underlying library** —
 one third-party dependency each, so a consumer who wants bar charts never pulls a
 mapping library:
 
 | Package | Draws | Library |
 |---|---|---|
-| `@cawoodm/lit-charts` | bar / column, line, pie | `chart.js@4` |
-| `@cawoodm/lit-map` | point map | `leaflet@1.9` |
-| `@cawoodm/lit-wordcloud` | word cloud | `d3-cloud` |
+| `@marccawood/lit-charts` | bar / column, line, pie | `chart.js@4` |
+| `@marccawood/lit-map` | point map | `leaflet@1.9` |
+| `@marccawood/lit-wordcloud` | word cloud | `d3-cloud` |
 
 ### The library is a peer dependency, not a bundled one
 
@@ -387,7 +387,7 @@ library" with "these packages carry no dependencies" — both hold.
 
 ### Conventions to copy verbatim
 
-Read `node_modules/@cawoodm/lit-dialogs` before writing the first one; four of
+Read `node_modules/@marccawood/lit-dialogs` before writing the first one; four of
 its choices are load-bearing rather than incidental:
 
 - **Explicit guarded `define`, never `@customElement`.** `lit-dialogs` exports
@@ -502,13 +502,13 @@ and call it from the same `submit`. One fix, both features.
 | `packages/renderer/src/window-mgr/table-window-manager.ts` | wrap content in the stack |
 | `packages/renderer/src/window-mgr/view-window-manager.ts` | reconcile docked instances; wrap content in the stack |
 | `packages/renderer/src/plugins/viz-bar.ts`, `viz-line.ts`, `viz-pie.ts`, `viz-map.ts`, `viz-wordcloud.ts` | new built-ins, one per kind — channels, mapping, aggregation |
-| `packages/renderer/src/viz/elements/*.ts` | new — the drawing elements. **No `@easydb/shared` imports**; extracted to the `@cawoodm/lit-*` packages last |
+| `packages/renderer/src/viz/elements/*.ts` | new — the drawing elements. **No `@easydb/shared` imports**; extracted to the `@marccawood/lit-*` packages last |
 | `packages/renderer/src/plugins/settings.ts` | register the viz settings fields (it owns the tab) |
 | `packages/renderer/src/plugin-host/loader.ts` | register the five |
 | `packages/renderer/src/dialogs/views-dialog.ts` | the kind switch, channel mapping, options editor |
 | `packages/renderer/src/table/table-references.ts` | + `renameViewMappings` |
 | `packages/renderer/src/dialogs/new-table-dialog.ts` | call it from `submit` |
-| `packages/renderer/package.json` | + `chart.js`, `leaflet`, `d3-cloud` (the packages take them as peers) + the three `@cawoodm/lit-*` chart packages once extracted |
+| `packages/renderer/package.json` | + `chart.js`, `leaflet`, `d3-cloud` (the packages take them as peers) + the three `@marccawood/lit-*` chart packages once extracted |
 | `cawoodm/lit-charts`, `lit-map`, `lit-wordcloud` | new repos — the drawing elements, extracted last (see above) |
 | `docs/tech/VISUALIZATIONS.md` + `INDEX.md`, `PLUGINS.md`, `WINDOWS.md`, `docs/help/` | the tech and help write-ups |
 | `test/renderer/viz/viz-aggregate.test.ts` | Vitest units |

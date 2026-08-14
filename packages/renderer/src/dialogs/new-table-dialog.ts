@@ -4,7 +4,7 @@ import type { ColumnEditorActionSpec, ColumnSpec, ColumnType, ProjectionSpec, Ro
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
-import { ctrlEnterSubmits, dialogChromeStyles, HostDialogs, makeDialogDraggable } from '@cawoodm/lit-dialogs';
+import { ctrlEnterSubmits, dialogChromeStyles, HostDialogs, makeDialogDraggable } from '@marccawood/lit-dialogs';
 import { markDirty, watchDialogDirty } from '../chrome/dirty-guard.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
 import { allColumnsFlagged, buildColumnSpec, toggleColumnFlag, type ColumnFlag, type ColumnRow } from './column-row.js';
