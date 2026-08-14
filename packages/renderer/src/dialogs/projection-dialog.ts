@@ -21,6 +21,7 @@ import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import {
   addComputedToModel,
   addSourceToModel,
+  seedJoinKeyFromBase,
   editorToSpec,
   removeSourceFromModel,
   specToEditor,
@@ -47,11 +48,11 @@ export interface ProjectionDialogOpts {
    */
   join?: ProjectionCandidate | undefined;
   /**
-   * Which of `join`'s columns to include. Absent ⇒ all of them, as picking the
-   * table from the dropdown does. A drag names ONE column, and pulling in the
-   * other twenty would bury it.
+   * The BASE field the join should key on, when the caller already knows it —
+   * a drag names a column, and that column is the key. Absent ⇒ the name
+   * heuristics decide, as picking a table from the dropdown does.
    */
-  joinFields?: string[] | undefined;
+  joinOn?: string | undefined;
   /** New mode: seed the WHERE, keyed by output field. */
   filters?: Record<string, string> | undefined;
   /** Edit mode: prefill from an existing projection. */
@@ -411,8 +412,7 @@ export class ProjectionDialog extends LitElement {
       if (opts.join) {
         this.addCandidateAsSource(opts.join);
         this.name = `${opts.base.name} + ${opts.join.name}`;
-        const alias = this.sources.at(-1)?.alias;
-        if (alias && opts.joinFields) this.includeOnlyFrom(alias, opts.joinFields);
+        if (opts.joinOn) this.applyModel(seedJoinKeyFromBase(this.modelOf(), opts.joinOn));
       }
       // Ride in on `original`, which `editorToSpec` spreads first precisely so
       // that what the editor does not model survives a save. `filters` is the
@@ -455,12 +455,6 @@ export class ProjectionDialog extends LitElement {
 
   private addCandidateAsSource(cand: ProjectionCandidate): void {
     this.applyModel(addSourceToModel(this.modelOf(), cand));
-  }
-
-  /** Keep only `fields` from one source; everything else it brought is unticked. */
-  private includeOnlyFrom(alias: string, fields: readonly string[]): void {
-    const keep = new Set(fields);
-    this.columns = this.columns.map((c) => (c.alias === alias && c.field != null && !keep.has(c.field) ? { ...c, include: false } : c));
   }
 
   private removeSource(alias: string): void {

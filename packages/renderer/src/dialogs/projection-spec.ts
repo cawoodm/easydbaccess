@@ -165,6 +165,32 @@ export function specToEditor(name: string, spec: ProjectionSpec, candidates: Pro
   return { name, sources, columns, ...(spec.limit ? { limit: spec.limit } : {}), original: spec };
 }
 
+/**
+ * Point the LAST source's join at a named field of the base, overriding the
+ * name-heuristic guess.
+ *
+ * The drag gesture names a column, and that column IS the join key: dragging
+ * `deptId` off People onto Dept means "join Dept to People on deptId". The
+ * heuristic in {@link addSourceToModel} usually guesses the same pair, but
+ * "usually" is not good enough when the user just pointed at the answer — and on
+ * a table with two plausible keys it picks the wrong one.
+ *
+ * The joined table's side of the key is its own field of the SAME NAME (exact
+ * first, then case-insensitively). When it has none, the guess is left alone:
+ * a base field with no counterpart cannot be half a join, and overwriting only
+ * one side would leave a join that matches nothing.
+ */
+export function seedJoinKeyFromBase(model: EditorModel, baseField: string): EditorModel {
+  const base = model.sources[0];
+  const last = model.sources.at(-1);
+  if (!base || !last?.join || last === base || !baseField) return model;
+  const exact = last.columns.find((c) => c.field === baseField);
+  const loose = exact ?? last.columns.find((c) => c.field.toLowerCase() === baseField.toLowerCase());
+  if (!loose) return model;
+  const join: EdJoin = { ...last.join, thisField: loose.field, otherAlias: base.alias, otherField: baseField };
+  return { ...model, sources: [...model.sources.slice(0, -1), { ...last, join }] };
+}
+
 /** Append a source (base if the model is empty, else a JOIN with guessed keys). */
 export function addSourceToModel(model: EditorModel, cand: ProjectionCandidate): EditorModel {
   const alias = nextAlias(model.sources);

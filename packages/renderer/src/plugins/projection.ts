@@ -149,7 +149,13 @@ async function columnsForSpec(api: HostApi, workspaceId: string, spec: Projectio
  */
 async function openProjectionEditor(
   api: HostApi,
-  opts: { baseTableId?: string; editTableId?: string; join?: { tableId: string; field: string } | undefined; filters?: Record<string, string> | undefined },
+  opts: {
+    baseTableId?: string;
+    editTableId?: string;
+    /** Join this table onto the base, keyed on the base's `onField`. */
+    join?: { tableId: string; onField: string } | undefined;
+    filters?: Record<string, string> | undefined;
+  },
 ): Promise<void> {
   const workspaceId = api.workspaceId();
   if (!workspaceId) return;
@@ -178,7 +184,7 @@ async function openProjectionEditor(
     // joined more than once (a self-join: `a → b → a`, or `a → a`). Each pick
     // becomes its own source with its own alias.
     candidates: all.map(toCand),
-    ...(joinTable && opts.join ? { join: toCand(joinTable), joinFields: [opts.join.field] } : {}),
+    ...(joinTable && opts.join ? { join: toCand(joinTable), joinOn: opts.join.onField } : {}),
     ...(opts.filters ? { filters: opts.filters } : {}),
     onSave: makeOnSave(api, workspaceId, null, baseTable),
   });
@@ -193,12 +199,18 @@ function activeFilters(filters: Record<string, string> | undefined): Record<stri
 
 /**
  * A column dragged out of one table and dropped on another: offer a projection
- * of the second joined to the first.
+ * of the FIRST with the second joined onto it.
  *
- * The DROP TARGET is the base and the drag source is joined onto it, which is
- * the direction the gesture reads in — you carry a column TO the table you want
- * it beside. `addSourceToModel` guesses the join keys from the field names, so
- * the dialog usually opens on a working join for the user to confirm.
+ * **The table you dragged FROM is the base**, and the dragged column is the join
+ * key. Dragging `deptId` off People onto Dept means "take my People and bring
+ * the matching Dept rows alongside" — the table you are working in stays the
+ * subject, and the drop names what to enrich it with.
+ *
+ * It read the other way round until v0.0.372 (drop target as base, and only the
+ * dragged column carried across from its own table), on the reasoning that you
+ * carry a column TO the table you want it beside. In use that inverted the
+ * result: the table the user was actually looking at became a single borrowed
+ * column of someone else's projection.
  *
  * Returns false rather than handling anything when the drop was not on a table,
  * or was back on the column's own grid — that drop reorders the column, and the
@@ -226,7 +238,7 @@ async function handleColumnDrop(api: HostApi, event: DragEvent): Promise<boolean
   if (Object.keys(filters).length > 0) {
     const keep = 'Keep the filters';
     const answer = await api.ui.dialogs.choice(
-      `Add “${payload.label}” from ${source.name} to a new projection over ${target.name}. ` + 'Should the projection carry the filters those tables have on now, or read all their data?',
+      `New projection over ${source.name}, joined to ${target.name} on “${payload.label}”. ` + 'Should it carry the filters those tables have on now, or read all their data?',
       [keep, 'All data'],
       'New projection',
     );
@@ -235,8 +247,8 @@ async function handleColumnDrop(api: HostApi, event: DragEvent): Promise<boolean
   }
 
   await openProjectionEditor(api, {
-    baseTableId: target.id,
-    join: { tableId: source.id, field: payload.field },
+    baseTableId: source.id,
+    join: { tableId: target.id, onField: payload.field },
     ...(seed ? { filters: seed } : {}),
   });
   return true;
