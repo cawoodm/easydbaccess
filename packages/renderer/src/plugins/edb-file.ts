@@ -18,10 +18,13 @@ import {
   writeBytes,
   EDB_EXTENSION,
 } from '../db/edb/file-handle.js';
-import { activeEdbName, adoptedFileName, setActiveEdbName } from '../db/edb/session.js';
+import { activeEdbName, adoptedFileName, reloadWithoutSpace, setActiveEdbName } from '../db/edb/session.js';
 import { createAutosavePolicy } from '../db/edb/dirty.js';
 import { edbBridge, edbHandle, setEdbHandle } from '../db/edb/active-bridge.js';
 import { copyWorkspace } from '../db/edb/convert.js';
+import { syncFolder } from '../db/edb/folder-sync.js';
+import { createEdbBridge } from '../db/edb/worker-bridge.js';
+import { createIpcDataStore } from '../db/data-store-bridge.js';
 import { putSnapshot, readSnapshot, snapshotInfo, SnapshotQuotaError, type SnapshotInfo } from '../db/edb/idb-snapshot.js';
 import { adoptEdbFile, buildEdbFile, chooseEdbTarget, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
 import { adoptFolderFile, clearPendingSpaceRequest, pendingSpaceRequest } from '../db/edb/space-adopt.js';
@@ -52,6 +55,13 @@ export const meta: NonNullable<PluginModule['meta']> = {
 };
 
 const AUTOSAVE_KEY = 'autosave';
+
+/**
+ * The name the throwaway worker opens a file under while Overwrite rewrites it.
+ * Not a real workspace file, and deliberately not any name a user could pick, so
+ * its OPFS mirror cannot land on top of a database that matters.
+ */
+const SYNC_SCRATCH = '__edb-sync-scratch.edb';
 
 /** The two answers "New .edb file" offers. Compared by value, so they live here. */
 const COPY_WORKSPACE = 'Copy this workspace into it';
@@ -163,18 +173,73 @@ export function init(api: HostApi): void {
       }
       await placeForNextBoot(info.slot, bytes);
       setActiveEdbName(info.slot);
-      location.reload();
+      reloadWithoutSpace();
     } catch (err) {
       await api.ui.dialogs.alert(err instanceof Error ? err.message : String(err), 'Restore a copy');
     }
   }
 
-  /** Change the folder. Existing files stay where they are. */
+  /**
+   * Write the open workspace out over the file's copy of it.
+   *
+   * The file's OTHER workspaces survive. Its bytes go into a throwaway worker,
+   * that worker's copy of the workspace is dropped, the open one is copied in over
+   * the top, and the result is written back. Replacing the whole file would be one
+   * line and would destroy workspaces the user never mentioned.
+   *
+   * The throwaway runs on the MEMORY substrate, not the pool: the pool's files are
+   * exclusive origin-wide and the live session already holds it, so a second
+   * worker in this tab cannot install one. `buildEdbFile` relies on the same
+   * thing. The scratch name keeps its mirror away from any real database's.
+   */
+  async function overwriteInFile(dir: FileSystemDirectoryHandle, workspaceId: string, file: string): Promise<void> {
+    const handle = await fileInFolder(dir, file, false);
+    if (!handle || !(await ensureWritable(handle, true))) {
+      await api.ui.dialogs.alert(`easyDBAccess may not write ${file}.`, 'Sync workspace folder');
+      return;
+    }
+    const scratch = createEdbBridge();
+    try {
+      await scratch.open(await readBytes(handle), SYNC_SCRATCH);
+      await scratch.deleteWorkspace?.(workspaceId);
+      await copyWorkspace(
+        api.store,
+        createIpcDataStore(scratch, () => workspaceId),
+        workspaceId,
+      );
+      await writeBytes(handle, await scratch.export());
+      api.ui.dialogs.toast(`Wrote this workspace over the copy in ${file}.`, { kind: 'success' });
+    } finally {
+      scratch.terminate();
+    }
+  }
+
+  /**
+   * Connect a folder and rebuild the workspace list from every `.edb` in it.
+   *
+   * Connecting IS the sync — a folder the app knows about but has not read is a
+   * list that silently omits workspaces the user can see on disk.
+   */
   async function chooseFolder(): Promise<void> {
     const picked = await pickFolder();
     if (!picked) return;
     await rememberFolder(picked);
-    api.ui.dialogs.toast(`New workspace files go in "${picked.name}".`, { kind: 'success' });
+    await syncFolderNow(picked);
+  }
+
+  /** Re-read the connected folder. Offered separately, because files change on disk. */
+  async function syncConnectedFolder(): Promise<void> {
+    const dir = await workspaceFolder();
+    if (!dir) return;
+    await syncFolderNow(dir);
+  }
+
+  async function syncFolderNow(dir: FileSystemDirectoryHandle): Promise<void> {
+    const report = await syncFolder(dir, api.store, api.ui.dialogs, (id, file) => overwriteInFile(dir, id, file));
+    const skipped = report.unreadable.length > 0 ? ` ${report.unreadable.length} file(s) held no workspace.` : '';
+    api.ui.dialogs.toast(`"${dir.name}": ${report.found} workspace(s) in ${report.files} file(s).${skipped}`, { kind: 'success' });
+    // The selector reads the index once, on connect, so it has to be told.
+    window.dispatchEvent(new CustomEvent('easydb:folder-index-changed'));
   }
 
   async function saveAs(): Promise<void> {
@@ -196,7 +261,7 @@ export function init(api: HostApi): void {
   async function adopt(target: EdbTarget, message: string): Promise<void> {
     await adoptEdbFile(target);
     await api.ui.dialogs.alert(message, 'Workspace file');
-    location.reload();
+    reloadWithoutSpace();
   }
 
   /** Copy this workspace into a new file's store, and say what travelled. */
@@ -269,7 +334,7 @@ export function init(api: HostApi): void {
     if (!(await api.ui.dialogs.confirm('Go back to this browser\u2019s own database? The file stays where it is.', 'Local database'))) return;
     await forgetHandle();
     setActiveEdbName(null);
-    location.reload();
+    reloadWithoutSpace();
   }
 
   api.ui.registerFooterButton({
@@ -301,6 +366,7 @@ export function init(api: HostApi): void {
           : []),
         ...(copy ? [{ id: 'restore', label: `Restore this browser's copy (${new Date(copy.at).toLocaleString()})`, icon: 'restore' }] : []),
         ...(canPickFolder() ? [{ id: 'folder', label: 'Workspace folder…', icon: 'folder_special' }] : []),
+        ...(canPickFolder() ? [{ id: 'syncFolder', label: 'Sync workspace folder', icon: 'sync' }] : []),
       ]);
       if (picked === 'new') await newFile();
       else if (picked === 'open') await open();
@@ -308,6 +374,7 @@ export function init(api: HostApi): void {
       else if (picked === 'save') await save();
       else if (picked === 'saveAs') await saveAs();
       else if (picked === 'folder') await chooseFolder();
+      else if (picked === 'syncFolder') await syncConnectedFolder();
       else if (picked === 'leave') await leaveFileMode();
       else if (picked === 'autosave') {
         const next = !autosave.enabled();

@@ -125,3 +125,26 @@ export async function startEdbSession(): Promise<EdbSession> {
     throw err;
   }
 }
+
+/**
+ * Reload onto the database this tab has just adopted, WITHOUT the `?space=` the
+ * old one left in the URL.
+ *
+ * `openWorkspace` writes `?space=NAME` and nothing ever takes it out again, so it
+ * survives every later reload. `location.reload()` re-requests the same URL,
+ * query string included — so opening `simon.edb` while the URL still said
+ * `?space=powerplants` resolved a workspace that file has never held, created an
+ * empty one inside it, and showed a workspace with no tables. The file the user
+ * just chose decides which workspace is active; a parameter from the last one
+ * must not outrank it.
+ *
+ * `?space=` driven adopts are the exception and must keep it — the reload has to
+ * re-resolve the same name against the file it just took on. See
+ * `space-adopt.ts`.
+ */
+export function reloadWithoutSpace(): void {
+  const url = new URL(location.href);
+  url.searchParams.delete('space');
+  url.searchParams.delete('workspace');
+  location.replace(url.toString());
+}

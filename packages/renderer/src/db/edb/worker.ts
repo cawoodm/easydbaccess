@@ -238,6 +238,37 @@ function handle(req: EdbRequest): unknown {
 }
 
 /**
+ * The workspace records inside a `.edb`'s bytes, without adopting it.
+ *
+ * A folder scan reads every file in the folder to rebuild the workspace list, and
+ * `importDb` would be the wrong way to do it twice over: the pool starts at six
+ * file slots, and each import is a full copy of a database the user may never
+ * open. So the bytes go into a THROWAWAY in-memory database that never touches
+ * the module's `db` / `store` / `driver` — the live session keeps running
+ * underneath, and the scan leaves nothing behind.
+ *
+ * Anything that is not one of our databases answers `[]` rather than throwing:
+ * a folder may hold a `.edb` written by something else, or a truncated one, and
+ * one bad file must not abandon the scan.
+ */
+async function peekWorkspaces(bytes: Uint8Array): Promise<Record<string, unknown>[]> {
+  if (bytes.byteLength === 0) return [];
+  const s3 = (sqlite3 ??= await sqlite3InitModule());
+  let probe: Database | null = null;
+  try {
+    const p = s3.wasm.allocFromTypedArray(bytes);
+    probe = new s3.oo1.DB();
+    probe.checkRc(s3.capi.sqlite3_deserialize(probe.pointer!, 'main', p, bytes.byteLength, bytes.byteLength, s3.capi.SQLITE_DESERIALIZE_FREEONCLOSE));
+    const rows = probe.selectObjects(`SELECT doc FROM _easydb WHERE coll = 'workspaces'`);
+    return rows.map((r) => JSON.parse(String(r.doc)) as Record<string, unknown>);
+  } catch {
+    return []; // not our database, or not a database at all
+  } finally {
+    probe?.close();
+  }
+}
+
+/**
  * Does this browser already hold a database called `name`?
  *
  * Two substrates, two places to look: a pooled database is a file in the pool's
@@ -272,6 +303,8 @@ async function handleAsync(req: EdbRequest): Promise<unknown> {
       return exportBytes();
     case 'hasDatabase':
       return hasDatabase(req.name);
+    case 'peekWorkspaces':
+      return peekWorkspaces(req.bytes);
     default:
       return handle(req);
   }

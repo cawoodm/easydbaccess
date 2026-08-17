@@ -49,6 +49,13 @@ export interface EdbBridge extends EasydbStoreBridge {
    * workspace this browser has but the OPEN database has never heard of.
    */
   hasDatabase(name: string): Promise<boolean>;
+  /**
+   * The workspace records inside a `.edb`'s bytes, without adopting the file.
+   *
+   * A folder scan calls this once per file. Nothing is imported and the live
+   * session is untouched — see the worker's own note.
+   */
+  peekWorkspaces(bytes: Uint8Array): Promise<Record<string, unknown>[]>;
   terminate(): void;
 }
 
@@ -98,6 +105,7 @@ export function createEdbBridge(): EdbBridge {
     importBytes: (name, bytes) => call<void>({ op: 'importBytes', name, bytes }),
     flush: () => call<void>({ op: 'flush' }),
     hasDatabase: (name) => call<boolean>({ op: 'hasDatabase', name }),
+    peekWorkspaces: (bytes) => call<Record<string, unknown>[]>({ op: 'peekWorkspaces', bytes }),
     export: () => call<Uint8Array>({ op: 'export' }),
     find: (coll, query, limit) => call<unknown[]>({ op: 'find', coll, query, limit }),
     findOne: (coll, key) => call<unknown | null>({ op: 'findOne', coll, key }),

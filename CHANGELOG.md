@@ -4,6 +4,7 @@
 
 ### Features
 
+- 🪶 Connecting a workspace folder rebuilds the workspace list from every .edb in it, and asks which copy wins where a name is in both (v0.0.393)
 - 🪶 `?space=NAME` now finds a workspace this browser or the workspace folder already holds, instead of creating an empty one (v0.0.388)
 - 🪶 Saving with no file to save to keeps a copy in this browser, and the File menu can restore it — a browser without file access is no longer save-or-lose (v0.0.386)
 - 🪶 Run SQL against a workspace: a SQL button in the footer and `api.store.sql` for plugins. Reads by default, writes behind a checkbox (v0.0.376)
@@ -12,6 +13,7 @@
 
 ### Bugs
 
+- 🐛 A workspace file opened while the URL still named another workspace showed a workspace with no tables (v0.0.393)
 - 🐛 Renaming a column keeps its values. In a workspace file the rename added an empty column beside the old one, so the renamed column read as blank and anything reading it — a projection, a join key — stopped resolving (v0.0.385)
 - 🐛 A column with a script gets the stored value its script reads. In a workspace file that value was left out of the read, so every scripted cell rendered from `undefined` (v0.0.385)
 - 🐛 Open and Convert land on the workspace they just built instead of an empty one (v0.0.385)

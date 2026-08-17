@@ -69,6 +69,12 @@ export type EdbRequest =
    * creates the pool file, which would make every answer yes.
    */
   | { id: number; op: 'hasDatabase'; name: string }
+  /**
+   * The workspace records inside a `.edb`'s bytes, read in a throwaway in-memory
+   * database. What a folder scan uses to rebuild the workspace list without
+   * importing every file into the pool.
+   */
+  | { id: number; op: 'peekWorkspaces'; bytes: Uint8Array }
   | { id: number; op: 'dbName' };
 
 /** What comes back. A `changed` message is unsolicited and carries no id. */
