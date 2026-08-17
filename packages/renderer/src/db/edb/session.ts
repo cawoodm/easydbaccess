@@ -1,5 +1,14 @@
 import { setEdbBridge } from './active-bridge.js';
+import { claimStoreOwnership } from './tab-lock.js';
 import { createEdbBridge, type EdbBridge } from './worker-bridge.js';
+
+/** Thrown when another tab already owns the database. Recognised by the caller. */
+export class StoreBusyError extends Error {
+  constructor() {
+    super('easyDBAccess is already open in another tab. Only one tab can use the database at a time.');
+    this.name = 'StoreBusyError';
+  }
+}
 
 /**
  * Whether this tab is file-backed, and the bridge if it is.
@@ -95,11 +104,16 @@ export function setActiveEdbName(name: string | null): void {
  * the same failure forever.
  */
 export async function startEdbSession(): Promise<EdbSession> {
+  // Before the substrate, and independent of it: the pool's files are exclusive
+  // origin-wide, and the memory fallback would let two tabs overwrite each
+  // other's snapshots without any error at all. See `tab-lock.ts`.
+  if (!(await claimStoreOwnership())) throw new StoreBusyError();
   const name = activeEdbName();
   const bridge = createEdbBridge();
   try {
-    const bytes = await bridge.restore(name);
-    await bridge.open(bytes, name);
+    // No bytes: a pooled database opens its own file, and the memory fallback
+    // reads its own mirror. Bytes are only passed when ADOPTING a user's file.
+    await bridge.open(null, name);
     setEdbBridge(bridge);
     return { bridge, name };
   } catch (err) {

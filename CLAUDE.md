@@ -85,10 +85,10 @@ scripts read the version from `package.json`.
 Three logical pieces:
 
 1. **`packages/renderer`** — Lit web components for the chrome. Identical code
-   runs in the browser (Vite-served) and inside the Electron renderer. In the
-   browser it talks to Dexie/IndexedDB; in Electron the same `DataStore`
-   contract is served over IPC by the main-process SQLite store. Sync goes
-   over HTTP to the server.
+   runs in the browser (Vite-served) and inside the Electron renderer. Both talk
+   to SQLite through one `DataStore` implementation: in the browser, sqlite-wasm
+   in a worker with the database in the `opfs-sahpool` VFS; in Electron, the
+   main-process `node:sqlite` store over IPC. Sync goes over HTTP to the server.
 2. **`packages/server`** — A Hono app exposed by `createServer({ store, fetchFn, ... })`.
    The _same_ exported app is designed to run inside Electron's main process
    **and** as a remote peer (`packages/server/src/standalone.ts`). Routes:

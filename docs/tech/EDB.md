@@ -65,8 +65,11 @@ it already serves the desktop and the server — one convention across all three
 | The store | `packages/shared/src/edb-store.ts` |
 | The driver seam | `packages/shared/src/sql-driver.ts` |
 | sqlite-wasm adapter | `renderer/src/db/edb/wasm-driver.ts` |
+| Raw SQL | see [`SQL.md`](./SQL.md) |
 | Worker, protocol, bridge | `renderer/src/db/edb/{worker,protocol,worker-bridge}.ts` |
-| OPFS mirror | `renderer/src/db/edb/mirror.ts` |
+| The OPFS pool (the durable substrate) | `renderer/src/db/edb/substrate.ts` |
+| Single-writer election | `renderer/src/db/edb/tab-lock.ts` |
+| Memory fallback's mirror | `renderer/src/db/edb/mirror.ts` |
 | Files, folder, permissions | `renderer/src/db/edb/file-handle.ts` |
 | Making a new file | `renderer/src/db/edb/new-file.ts` |
 | Copying a workspace in | `renderer/src/db/edb/convert.ts` |
@@ -82,23 +85,36 @@ No new `DataStore` adapter exists. `EdbBridge` implements the same
 `EasydbStoreBridge` the Electron preload does, so `createIpcDataStore` in
 `data-store-bridge.ts` is reused whole, windowed row reads included.
 
-## Why a worker, and why an OPFS mirror
+## Why a worker, and why the pool
 
 **The worker** is not about tidiness. This app imports 600k-row tables and
 sqlite-wasm is synchronous, so a bulk insert on the main thread would freeze the
 tab for the length of the import. OPFS needs a worker anyway:
-`createSyncAccessHandle` exists nowhere else, and it is what lets the mirror work
+`createSyncAccessHandle` exists nowhere else, and it is what lets this work
 without the COOP/COEP headers GitHub Pages cannot set.
 
-**The mirror** looks like crash insurance, and it is, but its real job is the
-reload. A remembered `FileSystemFileHandle` needs a user GESTURE to re-grant
-write permission, and a boot sequence does not have one. The mirror is
-origin-private and always readable, so the workspace comes back straight away and
-the file handle is only re-permissioned when the user presses Save.
+**The database lives in the `opfs-sahpool` VFS**, so it is a real
+origin-private file and SQLite writes its pages incrementally. Every `COMMIT` is
+durable. Nothing is serialised, debounced or flushed, and a reload simply
+reopens the file.
 
-That is also why Open and New both force a mirror write (`flush`) before they
-reload. Without it the boot after the reload finds no mirror and starts empty —
-which is exactly what Open did before v0.0.347.
+That is a correctness requirement, not a performance one. The previous design
+held the database in memory and mirrored whole-database bytes to OPFS on a
+two-second debounce, which meant **writes made just before a reload were lost** —
+the two reload specs in `test/e2e/02-general.spec.ts` catch it precisely. It was
+survivable while file mode was opt-in; it is not survivable as the only store.
+
+**One tab owns the pool.** SAHPool takes exclusive sync access handles on its
+files, origin-wide, so a second tab's install fails. Ownership is elected with a
+Web Lock (`db/edb/tab-lock.ts`) BEFORE the substrate is chosen — the memory
+fallback needs it just as much, where two tabs would silently overwrite each
+other's snapshots instead of erroring. A tab that does not win shows a blocking
+notice rather than opening a second, diverging copy.
+
+**The memory fallback** (`db/edb/mirror.ts`) remains for a browser that cannot
+install the pool. It is the old behaviour, debounce window and all, and it
+exists to keep such a browser working — not as a second supported way of
+running.
 
 ## A folder, not a file
 

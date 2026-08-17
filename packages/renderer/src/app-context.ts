@@ -59,9 +59,7 @@ async function init(): Promise<AppContext> {
   // adopted). Persistence is a separate concern from being in SQL mode — the
   // database is live and queryable whether or not anything has been written to
   // disk yet.
-  const baseStore = window.easydb?.store
-    ? createIpcDataStore(window.easydb.store, () => activeWorkspaceId)
-    : createIpcDataStore((await startSessionOrExplain()).bridge, () => activeWorkspaceId);
+  const baseStore = window.easydb?.store ? createIpcDataStore(window.easydb.store, () => activeWorkspaceId) : createIpcDataStore((await startSessionOrExplain()).bridge, () => activeWorkspaceId);
   const events = createEventBus();
   const registries = createRegistries();
 

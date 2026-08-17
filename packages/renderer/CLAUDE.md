@@ -1,6 +1,6 @@
 # @easydb/renderer
 
-Lit web components + Dexie + Vite. The identical bundle runs in the browser
+Lit web components + sqlite-wasm + Vite. The identical bundle runs in the browser
 (`npm run dev:renderer`, port 5190) and inside the Electron renderer process.
 
 ## Directory layout
@@ -8,7 +8,7 @@ Lit web components + Dexie + Vite. The identical bundle runs in the browser
 | Dir                  | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/chrome/`        | App-shell, panel chrome (`panel-footer`, `panel-search`), workspace selector, table list, filter popover/combobox, progress bars, material-icon-css helper. No business logic — just lays out registered slot contents. The dropdown menu moved out to **`@marccawood/lit-menu`** (`AnchoredMenu.open`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `src/db/`            | Dexie setup (`dexie-db.ts`) and the `DataStore` wrapper (`data-store-dexie.ts`) that hides Dexie from plugins. `data-store-bridge.ts` is the second implementation of that same wrapper — a store over an async message bridge, used by Electron (IPC to the main-process SQLite store) **and** by the browser's file-backed mode (`db/edb/`, postMessage to a sqlite-wasm worker).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `src/db/`            | `data-store-bridge.ts` — the app's ONLY `DataStore` implementation, a store over an async message bridge. Two transports satisfy it: Electron's IPC to the main-process SQLite store, and `db/edb/` (postMessage to a sqlite-wasm worker) in the browser. `db/edb/substrate.ts` puts the browser's database in the `opfs-sahpool` VFS so every COMMIT is durable; `db/edb/tab-lock.ts` elects the one tab that owns it. `dexie-db.ts` / `data-store-dexie.ts` still exist but are unreachable and are being removed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `src/dialogs/`       | App dialogs: `new-table-dialog`, `csv-paste-dialog`, `plugin-manager-dialog`, `settings-dialog`, `views-dialog` and the rest. Each one takes its chrome (`dialogChromeStyles`, `ctrlEnterSubmits`, `makeDialogDraggable`) from **`@marccawood/lit-dialogs`**, which also supplies the `host-dialogs` element for alert/prompt/confirm/choice. The toast comes from **`@marccawood/lit-toast`**. Both are published npm packages — see the root CLAUDE.md.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `src/events/`        | The typed event bus (`AppEvents` from shared).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `src/plugin-host/`   | `loader.ts` (built-in plugin list + lifecycle), `url-loader.ts` (URL-fetched plugins with localStorage cache), `registries.ts` (slot lists), `api-factory.ts` (`HostApi` constructor).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -24,10 +24,11 @@ Lit web components + Dexie + Vite. The identical bundle runs in the browser
 
 `app-context.ts:init()` runs once on first `getContext()`:
 
-1. Build the `DataStore`, three ways: `window.easydb?.store` present (Electron)
-   → the bridge store over IPC; else a `.edb` session started for this tab
-   (`db/edb/session.ts`) → the same bridge store over a worker; else open Dexie
-   and wrap that. Nothing downstream branches on which one won.
+1. Build the `DataStore`, two ways: `window.easydb?.store` present (Electron)
+   → the bridge store over IPC; else start this tab's SQLite session
+   (`db/edb/session.ts`) → the same bridge store over a worker. Nothing
+   downstream branches on which one won. A session that will not start is fatal
+   and shows a blocking notice — there is no second store to fall back to.
 2. Resolve workspace (URL `?space=` → existing → create `default`).
 3. Build `HostApi` from store + events + registries.
 4. `loadBuiltinPlugins(api)` — runs every `init()` synchronously, returns a
@@ -55,28 +56,27 @@ This works because slot registries (`headerButtons`, etc.) are append-only
 arrays — adding never invalidates existing entries. Removing a plugin still
 requires a reload because the registry contract has no `unregister` story.
 
-## Dexie is hidden from plugins
+## Storage is hidden from plugins
 
-Plugins must never import from `dexie`. They receive `DataStore` from
-`@easydb/shared`, which is satisfied by `data-store-dexie.ts` in the browser
-and by `data-store-bridge.ts` on both bridge transports (Electron IPC, and the
-sqlite-wasm worker). When adding a new collection:
+Plugins receive `DataStore` from `@easydb/shared` and never a transport. When
+adding a new collection, three places in lockstep:
 
 1. TS type in `packages/shared/src/types.ts`
-2. Dexie schema + typed accessor in `src/db/dexie-db.ts`
-3. Plugin-facing wrapper in `src/db/data-store-dexie.ts`
-4. The same collection in `src/db/data-store-bridge.ts`, in
-   `packages/electron/src/sqlite-store.ts` and in
-   `packages/shared/src/edb-store.ts` — a collection a SQLite store
-   doesn't know about throws there, it doesn't degrade quietly
+2. The plugin-facing wrapper in `src/db/data-store-bridge.ts`
+3. `packages/shared/src/edb-store.ts` — a collection the store doesn't know
+   about **throws** there, it doesn't degrade quietly
 
-`store.rows(tableId)` returns a _view_ over the single `rows` Dexie table —
-`tableId` is auto-injected on insert and used as the `where('tableId').equals(...)`
-filter on queries. There is **not** one Dexie table per logical row table.
+`store.rows(tableId)` returns a _view_, but each logical table really is its own
+SQL table, so `tableId` selects WHICH table rather than filtering a column.
 
-Subscriptions use Dexie's `liveQuery` — the closure re-runs whenever any
-write hits the underlying table. Chrome callers always consume the full
-result set, so the broader re-run granularity is harmless.
+Subscriptions re-run on a `changed` broadcast for the collection. Row changes
+carry a `scope` — the table id — so a write to one table does not wake the grids
+of the others; `changeScopeOf` in `@easydb/shared` is the single rule, and it
+reads the scope off what the write RETURNED, because a remove or a patch request
+cannot say which table it hit.
+
+`store.sql` is an optional capability, not a collection: present only where the
+transport can run raw SQL. See `docs/tech/SQL.md`.
 
 ## Row-source routing (`routed-data-store.ts`)
 

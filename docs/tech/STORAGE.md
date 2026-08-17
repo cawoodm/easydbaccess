@@ -6,62 +6,54 @@ sits on top of this layer, see [`PLUGINS.md`](./PLUGINS.md).
 
 ## At a glance
 
-There are **two** storage backends behind one contract, and the environment
-picks which one runs — decided once, in `app-context.ts`, by whether the
-Electron preload bridge is present:
+**One storage engine, two bindings.** Every workspace is a SQLite database; what
+differs is only where that database lives and which SQLite the code is bound to.
 
-- **Browser** — one IndexedDB database, accessed through
-  [Dexie](https://dexie.org/), a thin wrapper that adds `liveQuery`
-  reactivity and explicit versioned schema migrations on top of the raw
-  IndexedDB API.
-- **Electron** — no IndexedDB at all. The renderer talks over IPC to a
-  `node:sqlite` store in the **main process**, and the workspace is a real
-  `.db` file on disk that the user can open, save elsewhere, and read in DB
-  Browser or Datasette.
+- **Browser** — `@sqlite.org/sqlite-wasm` in a Web Worker, with the database in
+  the `opfs-sahpool` VFS: a real origin-private file that SQLite writes
+  incrementally, so every `COMMIT` is durable. A browser that cannot install the
+  pool falls back to an in-memory database mirrored to OPFS on a debounce.
+- **Electron** — the renderer talks over IPC to a `node:sqlite` store in the
+  **main process**, and the workspace is a `.db` file on disk.
 
-Neither case involves a server-side database — a device with no network
-access still has a fully working, persistent app. `packages/server`'s `/sync`
-route stores workspace *snapshots* (JSON blobs), not a live copy of this
-data; see `SYNCH.md`.
+Neither case involves a server-side database — a device with no network still
+has a fully working, persistent app. `packages/server`'s `/sync` route stores
+workspace *snapshots* (JSON blobs), not a live copy; see `SYNCH.md`.
 
 ```
                               Plugin
-                                │  (never touches Dexie or a bridge directly)
+                                │  (never touches a bridge directly)
                                 ▼
                             DataStore
                  packages/shared/src/plugin-api.ts — the contract
                                 │
-        ┌───────────────────────┼───────────────────────┐
-   browser, simple        browser, .edb file        Electron
-        │                       │                       │
-        ▼                       └───────────┬───────────┘
-  data-store-dexie.ts                       ▼
-  wraps each Dexie table            data-store-bridge.ts
-  in DataCollection<T>              same DataCollection<T> over an
-        │                           ASYNC BRIDGE — two transports
-        ▼                                   │
-  dexie-db.ts                    ┌──────────┴──────────┐
-  one Dexie() instance, one      ▼                     ▼
-  IndexedDB database "easydb"  db/edb/worker.ts   preload.ts
-        │                      postMessage        window.easydb.store
-        ▼                      sqlite-wasm             │
-  IndexedDB — persists across  in a Web Worker         ▼
-  reloads, scoped to the origin        │        electron/src/sqlite-store.ts
-                                       ▼        main process, node:sqlite
-                              a .edb file the user             │
-                              saves + an OPFS mirror           ▼
-                                                     a .db file the user chose
+                                ▼
+                      data-store-bridge.ts
+                 ONE DataStore over an async bridge,
+                 two transports
+                                │
+                 ┌──────────────┴──────────────┐
+                 ▼                             ▼
+        db/edb/worker.ts               electron preload.ts
+        postMessage, sqlite-wasm       window.easydb.store (IPC)
+                 │                             │
+           EdbStore (shared)            EdbStore (shared)
+                 │                             │
+        opfs-sahpool VFS               node:sqlite, main process
+        (or memory + mirror                    │
+         where unavailable)                    ▼
+                 │                    a .db file the user chose
+                 ▼
+        the workspace's own file, exportable
+        to a .edb the user saves
 ```
 
-The `DataStore` abstraction below is what makes those three interchangeable:
-the plugin-facing `DataCollection<T>` contract is identical, so no plugin —
-and almost nothing in the chrome — knows which backend it is talking to.
+`data-store-bridge.ts` is the **only** `DataStore` implementation. `EdbBridge`
+satisfies the same `EasydbStoreBridge` interface the Electron preload does, so
+the browser needed no second adapter.
 
-`data-store-bridge.ts` serves two of the three. It is a `DataStore` over an
-async message bridge, and `EdbBridge` satisfies the same `EasydbStoreBridge`
-interface the Electron preload does — so the browser's file mode needed no
-second adapter. (It was called `data-store-ipc.ts` while Electron was its only
-caller.)
+Until v0.0.380 the browser's default was Dexie/IndexedDB and SQLite was opt-in
+per tab. That split is gone: one engine, one row model, one set of semantics.
 
 ## A workspace in a `.edb` file (browser)
 
@@ -90,128 +82,76 @@ The desktop writes the same v2 file, from the same `EdbStore` — so a workspace
 saved in a browser tab opens on the desktop and back again. `docs/tech/EDB.md`
 has the format and the two drivers.
 
-## Why Dexie, not a bigger database engine
+## Why one SQLite store
 
-The storage layer is hidden behind `DataStore`, so the choice of engine is an
-implementation detail plugins never see. Dexie was picked over something
-like RxDB because the app doesn't need schema validation or a built-in
-replication protocol — sync is a separate, app-owned HTTP concern (see
-`SYNCH.md`) — and a thin, predictable IndexedDB wrapper with explicit
-migrations is easier to reason about than a heavier reactive-database layer
-bringing along conventions of its own.
+The engine is hidden behind `DataStore`, so plugins never see it. SQLite is the
+choice because of what it makes true above the abstraction, not below it:
 
-## The Dexie schema
+- **A workspace is a file anyone can read.** DB Browser, Datasette and
+  `node --experimental-sqlite` all open it. IndexedDB is opaque, cannot be handed
+  to a colleague, and cannot be backed up by copying something.
+- **Filtering, sorting, counting and faceting happen in SQL**, so a 609k-row
+  table is answered by an index rather than by materialising every row in JS.
+- **One body of storage logic** (`packages/shared/src/edb-store.ts`) serves the
+  desktop and the browser, so a bug fixed once is fixed on both. The previous
+  split had two implementations, two row models and two reactivity mechanisms.
+- **Raw SQL becomes available to the user** — see [`SQL.md`](./SQL.md).
 
-Declared once in
-[`packages/renderer/src/db/dexie-db.ts`](../../packages/renderer/src/db/dexie-db.ts),
-one IndexedDB database named `easydb`:
+The cost is honest and worth naming: sqlite-wasm is roughly 1 MB of WebAssembly
+to instantiate on a cold load, against Dexie's ~30 KB.
 
-| Dexie table | Schema string | Primary key | Indexed fields |
-|---|---|---|---|
-| `workspaces` | `id` | `id` | — |
-| `tables` | `id, workspaceId, updatedAt` | `id` | `workspaceId`, `updatedAt` |
-| `rows` | `id, tableId, updatedAt` | `id` | `tableId`, `updatedAt` |
-| `settings` | `key` | `key` | — |
-| `plugins` | `url` | `url` | — |
-| `viewTemplates` | `id, workspaceId` | `id` | `workspaceId` |
-| `viewInstances` | `id, workspaceId, tableId` | `id` | `workspaceId`, `tableId` |
+## Every logical table is a real SQL table
 
-Dexie's schema string syntax: the first column is the primary key, the rest
-are secondary indexes. Non-indexed fields on a record (e.g. `Table.columns`,
-`Row.data`) live in the record's serialized value and don't need a schema
-entry — only fields you plan to `.where(...)` on do.
+`DataStore.rows(tableId)` returns a *view*, and that contract is unchanged — but
+underneath, each table the user creates is its own SQL table with one column per
+`ColumnSpec`. `tableId` therefore selects *which* table rather than filtering a
+column.
 
-**Schema versioning:** `raw.version(1).stores({...})` / `raw.version(2)
-.stores({...})` — Dexie carries earlier versions' stores forward
-automatically, so a later `version()` block only needs to declare *new or
-changed* stores (the `viewTemplates`/`viewInstances` v2 bump adds two stores
-without touching v1's). Adding or removing an **indexed** field bumps the
-version; adding a plain JSON field on an existing record does not. A schema
-change that needs existing rows rewritten (not just re-indexed) uses an
-`.upgrade(tx => ...)` callback inside the relevant `version()` block — none
-exists yet because nothing has needed one so far.
+The browser used to work the other way: one shared `rows` store keyed by a
+`tableId` index. That inversion removed a whole section of this document, because
+the machinery it needed went with it — the shared table could not say which
+logical table a delete had touched (a delete by key knows only primary keys), so
+writes had to announce themselves separately or every open grid re-read itself
+once per chunk of a chunked delete.
 
-**Multi-tab upgrade safety:** an IndexedDB version bump can only run inside a
-`versionchange` transaction, which blocks while any other tab still holds the
-database open at the old version. `dexie-db.ts` handles both sides of that:
-a tab notified of `versionchange` closes its own connection (and reloads if
-another tab is genuinely upgrading the schema, so it comes back running the
-new code rather than a dead handle); a tab whose own upgrade is `blocked` by
-a stale tab shows a full-screen "close your other tabs" message instead of
-hanging silently.
+**What replaces it.** The store reports which table a write touched and the
+worker broadcasts `changed(collection, scope)`, where `scope` is that table's id.
+A subscriber for another table ignores it. `changeScopeOf`
+(`packages/shared/src/change-scope.ts`) is the single rule both transports use,
+and it derives the scope from what the write RETURNED — a `remove` request names
+only a row id, and a `patch` only the changed fields, so neither can say which
+table it hit until the store has looked.
 
-## The one `rows` table, many logical tables
-
-There is **no per-user-table Dexie table**. Every row of every table the user
-creates lives in the single `rows` Dexie table, disambiguated by the
-`tableId` index. `DataStore.rows(tableId)` — the only way plugins ever touch
-rows — returns a *view* over that one table, not a separate collection:
-
-- Reads are `rows.where('tableId').equals(tableId)`.
-- Writes (`insert`/`bulkInsert`/`upsert`) auto-stamp `tableId` onto the
-  document before writing, so a plugin can never accidentally write a row
-  into the wrong logical table.
-- `subscribe()` runs a `liveQuery` scoped to that same `where` clause.
-
-This is why adding a user-facing "table" never touches the Dexie schema —
-only a `Table` record (in the `tables` store) is created; its rows are just
-more documents in the shared `rows` store carrying that table's `id`.
-
-## A row write wakes one table
-
-One shared `rows` table has one cost: a change signal cannot say WHICH
-logical table changed. Dexie's `storagemutated` names the index ranges a
-write touched, which covers `tableId` for an insert or an update — but a
-DELETE by key reports only the primary keys, because knowing which table a
-deleted row belonged to means having read the row first. So a delete used to
-wake every open grid, each of which re-read itself with its own progress bar,
-and a chunked delete did that once per chunk.
-
-The writer announces instead. Every write through the `rows(tableId)` view
-tells that table's watchers and no others, and the coarse `storagemutated`
-signal is ignored while one of our own writes is in flight
-(`announceRowWrite` / `watchDexieRows`). Three rules the listener follows:
-
-1. A mutation naming no `rows` part at all is ignored. Every panel click
-   stamps its front-order onto `tables`, and without this test each one
-   re-read every grid.
-2. A mutation that names `tableId` values is judged exactly, by range
-   overlap.
-3. Anything else — another tab, or a direct `getDb()` write such as a
-   workspace delete — is treated as unknown and re-read.
-
-`subscribe()` needs none of this: a `liveQuery` records the primary keys its
-own query returned, so Dexie can already tell it apart from a delete
-elsewhere. It pays for that precision by materializing every row, which is
-why the grid uses `watch`.
-
-The one thing this gives up: a write from ANOTHER TAB that lands during one
-of our own writes is missed, and that grid updates on its next trigger.
-Nothing goes stale for a write made in this tab.
+Writes that cannot say what they touched — raw SQL, a workspace clone, a
+workspace delete — announce every collection instead. Anything narrower would
+leave a stale panel on screen.
 
 ## `DataStore` — what plugins actually see
 
-[`data-store-dexie.ts`](../../packages/renderer/src/db/data-store-dexie.ts)
-wraps every Dexie table in the minimal `DataCollection<T>` shape from
+[`data-store-bridge.ts`](../../packages/renderer/src/db/data-store-bridge.ts)
+wraps each collection in the minimal `DataCollection<T>` shape from
 [`plugin-api.ts`](../../packages/shared/src/plugin-api.ts):
 `find`/`findOne`/`insert`/`bulkInsert`/`upsert`/`patch`/`remove`/
-`bulkRemove`/`subscribe` (+ optional `refresh`). Plugins receive this
-wrapper, never raw Dexie — the storage engine can change without a plugin
-noticing, and a third-party URL-loaded plugin can't reach into IndexedDB
-directly even if it wanted to.
+`bulkRemove`/`subscribe` (+ optional `refresh`). Plugins receive this wrapper
+and never the transport, so a third-party URL-loaded plugin cannot reach the
+database directly even if it wanted to.
 
-`subscribe()` is backed by Dexie's `liveQuery`, which **re-runs the whole
-query closure on any write to the underlying table** — there's no
-fine-grained diffing. This is intentionally coarse: every chrome component
-that subscribes (the table list, a data-table's row set, footer state)
-consumes the full result set on every change anyway, so the extra
-re-evaluation cost is harmless and the implementation stays simple.
+One optional member is a capability rather than a collection: `store.sql` is
+present only where the transport can run raw SQL, which is what lets the SQL
+console feature-detect instead of guessing at the platform. See
+[`SQL.md`](./SQL.md).
+
+`subscribe()` re-runs its whole query on any `changed` broadcast for that
+collection — there is no fine-grained diffing. Deliberately coarse: every
+chrome component that subscribes (the table list, a grid's row set, footer
+state) consumes the full result set anyway. The one place it is NOT coarse is
+rows, which are scoped to a single table — see above.
 
 ## The Electron path — the workspace IS a SQLite file
 
 Inside Electron the same `DataStore` contract is served by
 [`db/data-store-bridge.ts`](../../packages/renderer/src/db/data-store-bridge.ts)
-instead of the Dexie wrapper. `app-context.ts` selects it when
+over the IPC transport. `app-context.ts` selects it when
 `window.easydb?.store` exists; every `find`/`insert`/`patch`/… becomes an IPC
 call to a `node:sqlite` store in the main process
 ([`packages/electron/src/sqlite-store.ts`](../../packages/electron/src/sqlite-store.ts)).
@@ -260,8 +200,8 @@ owns the type↔SQL mapping (`sanitizeTableName`, `quoteIdent`, `sqlAffinity`,
 `storage/sqlite-store.ts` imports the same helpers — one convention, so a
 `.db` written by either side has the same shape.
 
-**Reactivity without `liveQuery`.** There is no Dexie here, so nothing
-re-runs a query closure automatically. The main process instead broadcasts
+**Reactivity.** Nothing re-runs a query closure automatically. The main
+process broadcasts
 `store:changed` naming the mutated collection; the renderer's collection
 re-runs its query and notifies its subscribers. Same coarse granularity as
 `liveQuery`, same contract.
@@ -328,10 +268,10 @@ decorates the `tables` collection — the one place that sees every write — an
 A `Table` may carry an optional `source: TableSource` descriptor
 (`{ type, config, writable?, serverQuery? }`). When present,
 `createRoutedDataStore` (a decorator `app-context.ts` wraps around the plain
-Dexie-backed store) hands `rows(tableId)` to whatever
+bridge-backed store) hands `rows(tableId)` to whatever
 `RowCollectionProvider` a plugin registered for that `type` via
 `api.registerRowSource(...)` — e.g. the `datasette-connect` plugin's live,
-read-write Datasette connector — instead of the local `rows` Dexie table.
+read-write Datasette connector — instead of the table's own local SQL table.
 
 This routing is a **strict no-op for every ordinary table**: no `source`, an
 unregistered `source.type`, or a table not yet primed into the routing
@@ -388,7 +328,7 @@ Settings dialog — see `DIALOGS.md`); each field carries a default `scope`
 layers from the dialog. Every key lives in **exactly one layer at a time** —
 writing to one layer removes it from the other:
 
-- **Workspace layer** — the Dexie `settings` collection above, keyed
+- **Workspace layer** — the `settings` collection above, keyed
   `${pluginId}:${key}`. Syncs with the workspace.
 - **User layer** — a single JSON blob in `localStorage`
   (`/easydbaccess/settings.json`, via `db/user-settings.ts`), device-local
@@ -420,7 +360,7 @@ leave the device.
 `app-context.ts`'s `init()` runs once per page load (memoized behind
 `getContext()`):
 
-1. Open the Dexie database, wrap it in `DataStore`, wrap *that* in the
+1. Start the SQLite session, wrap it in `DataStore`, wrap *that* in the
    row-source-routing decorator.
 2. Resolve which workspace to open, in priority order: a `?space=NAME` URL
    param (creating that workspace if it doesn't exist yet) → the
@@ -440,27 +380,24 @@ plugin's original URL later goes offline.
 
 ## Practical implications
 
-- **In the browser: per-origin, per-browser.** IndexedDB data is scoped to
-  the browser profile + origin. Opening the app in a different browser, a
-  private window, or after clearing site data starts from an empty database —
-  this is exactly what `SYNCH.md`'s server sync and the `gist-sync` plugin
-  exist to bridge. **In Electron this doesn't apply**: the workspace is a
-  file, so backing it up is copying it, and moving it to another machine is
-  Save As plus Open.
-- **No built-in encryption.** Everything above — table data, plugin settings,
-  cached plugin source, sync tokens — is plain IndexedDB, inspectable and
-  editable via DevTools → Application → IndexedDB (or, in Electron, plain SQL
-  in a file anything can read). In the browser, losing the browser's storage
-  (profile deletion, private-mode exit, "clear browsing data") loses
-  everything not separately synced or exported.
-- **Adding a new persisted field to an existing type** touches at most one
-  place (`packages/shared/src/types.ts`) if the field isn't indexed. Adding
-  a **new collection**, or indexing an existing field, touches four places
-  in lockstep — the type, the Dexie schema + typed accessor in
-  `dexie-db.ts`, the `DataStore` wrapper in `data-store-dexie.ts`, and the
-  same collection in `data-store-bridge.ts` + `packages/electron/src/sqlite-store.ts`
-  (an unknown collection **throws** there rather than degrading quietly) —
-  see `packages/shared/CLAUDE.md`.
+- **In the browser: per-origin, per-browser.** Origin-private storage is scoped
+  to the browser profile + origin, so a different browser, a private window, or
+  clearing site data starts from an empty database. What is different now is the
+  way out: the workspace is a SQLite file, so **Save** hands you a real `.edb`
+  you can copy, back up or send. Server sync and `gist-sync` (`SYNCH.md`) remain
+  the automatic answer.
+- **One tab at a time.** The OPFS pool's files are exclusive origin-wide, so a
+  second tab is told to wait rather than opening a second, diverging copy. This
+  is stricter than the IndexedDB store it replaced.
+- **No built-in encryption.** Table data, plugin settings, cached plugin source
+  and sync tokens are all plain SQL in a file anything can read. Losing the
+  browser's storage still loses anything not synced or saved to a file.
+- **Adding a new persisted field** touches one place
+  (`packages/shared/src/types.ts`). Adding a **new collection** touches three,
+  in lockstep: the type, `data-store-bridge.ts`, and
+  `packages/shared/src/edb-store.ts` — where an unknown collection **throws**
+  rather than degrading quietly. It used to be four; the Dexie schema and its
+  wrapper are gone.
 
 ## Where each piece of data lives today
 
