@@ -38,7 +38,13 @@ export interface SpaceEvidence {
   inGrantedFolder: boolean;
   /** An IndexedDB dump of that name exists — what a Save with no file writes. */
   hasSnapshot: boolean;
-  /** A folder grant is obtainable — remembered but unpermissioned, or pickable. */
+  /**
+   * A folder this user has already chosen, which could be re-permissioned.
+   *
+   * NOT "this browser has a directory picker" — that is true of every Chromium,
+   * and `?space=<new name>` is also how a workspace is CREATED by URL, so it
+   * would ask about a folder that does not exist on every new workspace.
+   */
   canAskForFolder: boolean;
 }
 

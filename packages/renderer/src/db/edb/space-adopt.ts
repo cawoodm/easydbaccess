@@ -83,7 +83,8 @@ export async function planForMissingSpace(workspaceId: string): Promise<SpaceAct
   if (alreadyTried(file)) return 'create';
 
   const bridge = edbBridge();
-  const dir = await grantedFolder();
+  const remembered = await rememberedFolder();
+  const dir = remembered && (await ensureWritable(remembered, false)) ? remembered : null;
   const action = decideSpace({
     inOpenDb: false, // the caller only asks after it has looked
     isActive: activeEdbName() === file,
@@ -91,7 +92,13 @@ export async function planForMissingSpace(workspaceId: string): Promise<SpaceAct
     hasLocalDb: bridge ? await bridge.hasDatabase(file) : false,
     inGrantedFolder: dir ? (await listWorkspaceFiles(dir)).includes(file) : false,
     hasSnapshot: (await snapshotInfo(file)) !== null,
-    canAskForFolder: canPickFolder(),
+    // A folder this user has ALREADY chosen, not merely a browser that could
+    // show a picker. `canPickFolder()` alone is true of every Chromium, so a
+    // user who has never used a workspace folder was asked to go looking in one
+    // — and since `?space=<new name>` is how a workspace gets CREATED by URL,
+    // that was every new workspace, every time. Nothing to look in means
+    // nothing to ask about.
+    canAskForFolder: remembered !== null && canPickFolder(),
   });
 
   if (action === 'ask-for-folder') pendingFolderRequest = workspaceId;

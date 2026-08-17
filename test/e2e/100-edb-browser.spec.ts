@@ -88,6 +88,39 @@ async function reload(page: Page): Promise<void> {
 }
 
 /**
+ * The `.edb` names IndexedDB currently holds a dump for.
+ *
+ * Read through the raw IndexedDB API on purpose: the record shape is what the
+ * app promises, and the app must be the only thing that ever needs to know it.
+ * Resolves `[]` for a database that exists but holds nothing, which is what a
+ * boot-time probe leaves behind.
+ */
+async function snapshotKeys(page: Page): Promise<string[]> {
+  return page.evaluate(
+    () =>
+      new Promise<string[]>((resolve, reject) => {
+        const req = indexedDB.open('easydb-snapshots');
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains('snapshots')) {
+            db.close();
+            resolve([]);
+            return;
+          }
+          const tx = db.transaction('snapshots', 'readonly');
+          const keys = tx.objectStore('snapshots').getAllKeys();
+          tx.oncomplete = () => {
+            db.close();
+            resolve(keys.result.map(String));
+          };
+          tx.onerror = () => reject(tx.error);
+        };
+      }),
+  );
+}
+
+/**
  * The bytes the File menu hands over, via Save.
  *
  * The way out of the pool is `export`, and the menu item that calls it is Save
@@ -118,12 +151,15 @@ test.describe('browser .edb storage', () => {
     // holding the database in RAM.
     expect(await opfsEntries(page)).toContain('.easydb-sahpool');
 
-    // And IndexedDB holds no database at all. The workspace lived in one called
-    // `easydb` until the SQLite flip; `easydb-edb-handles` only appears once a
-    // real file handle has been remembered, which no picker here can do, and
-    // `easydb-snapshots` only once the user has saved with no file to save to.
+    // And no WORKSPACE is in IndexedDB. `easydb` is the database the browser
+    // kept them in until the SQLite flip, so its absence is the assertion.
+    //
+    // Deliberately not "IndexedDB is empty": `?space=` resolution probes for a
+    // saved copy on every boot (`space-adopt.ts`), which opens
+    // `easydb-snapshots` before anything has been written to it. That the
+    // snapshot store holds nothing until a Save is the next test's job.
     const dbNames = await page.evaluate(async () => ((await indexedDB.databases?.()) ?? []).map((d) => d.name));
-    expect(dbNames).toEqual([]);
+    expect(dbNames).not.toContain('easydb');
   });
 
   test('a reload restores the workspace, with nothing saved to a file', async ({ page }, testInfo) => {
@@ -221,7 +257,12 @@ test.describe('browser .edb storage', () => {
     await waitForPanel(page, tableId);
 
     // Nothing yet: the dump is written on Save, not as the workspace goes.
-    expect(await page.evaluate(async () => ((await indexedDB.databases?.()) ?? []).map((d) => d.name))).not.toContain('easydb-snapshots');
+    //
+    // Asserted as an empty STORE rather than an absent database. `?space=`
+    // resolution probes for a saved copy on every boot (`space-adopt.ts`), and
+    // `indexedDB.open` creates what it opens — so the database exists from the
+    // first load and only its emptiness can say the dump has not happened.
+    expect(await snapshotKeys(page)).toEqual([]);
 
     await downloadViaSave(page, testInfo.outputPath('saved.edb'));
 
