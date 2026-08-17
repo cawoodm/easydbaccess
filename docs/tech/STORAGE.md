@@ -431,6 +431,44 @@ with the file.
 | The remembered workspace folder / file handle | IndexedDB `easydb-edb-handles` — handles only, never data |
 | A Save with no file to save to | IndexedDB `easydb-snapshots` → one raw blob per `.edb` name (see below) |
 
+### SQLite's JSON functions, and where they are used
+
+In exactly one place: narrowing a filter on an **undeclared** field — one that
+lives in `_extra` as JSON rather than in a column of its own, which is what a
+dump import leaves behind. `EdbStore.narrowByExtra` renders the filter against
+`json_extract("_extra", '$."field"')` and ANDs it into the WHERE.
+
+It is an **optimisation and nothing else.** `sqlOf` still has no expression for
+those fields, so `expressible` stays false, `RowPage.partial` is still set, and
+the caller re-filters every row that comes back. What changed is only how many
+rows cross the bridge: before, a filter on a dump-imported field shipped the
+whole table (to the 20,000-row cap) to be narrowed in memory, and a *sliced*
+request paid a second round trip for the superset.
+
+**The fragment is a guaranteed superset of the matcher's answer**, and that is
+the whole of its correctness. The matcher reads a cell as `String(value ?? '')`,
+which `json_extract` reproduces exactly for JSON text, integers and null — and
+NOT for booleans (`1` vs `true`), reals (`3.0` vs `3`), objects
+(`{"a":1}` vs `[object Object]`) or arrays (`["x"]` vs `x`). Rows of those types
+are therefore KEPT rather than judged, as are rows missing the field where the
+filter is one an absent value could satisfy (`!x`, `NULL`). Judging them would
+make SQL narrower than the matcher, which is the failure `expressible: false`
+exists to prevent. `test/shared/edb-store.test.ts` cross-checks every case
+against `matchesColumnFilter` itself.
+
+Three deliberate non-uses:
+
+- **Not in the ORDER BY.** `json_extract` answers in the JSON's own type, so
+  `'10'` would sort before `'2'`. The sort stays partial and the caller re-sorts.
+- **Not `json_each` for `array` columns.** An array cell has four spellings
+  (`array-cell.ts`: comma list, JSON array text, Python's single-quoted repr, a
+  real array) and `json_each` understands one. It would make some array filters
+  expressible and leave the rest silently wrong — the same trap, with no superset
+  to fall back on.
+- **Not for the document collections.** `findDocs` and `storedTableDocs` parse
+  `_easydb.doc` in JS. `ORDER BY json_extract(doc,'$._ordinal')` would work, but
+  these are tens of rows, not millions.
+
 ### The IndexedDB dump
 
 IndexedDB is **not a store** here and nothing queries it. It holds one thing:

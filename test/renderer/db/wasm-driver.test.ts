@@ -163,4 +163,20 @@ describe('raw SQL through the WASM driver', () => {
     // binding too, not just on node:sqlite.
     expect(store.countWorkspaceContents('w2', { countRows: true })).toMatchObject({ tables: 1, rows: 20 });
   });
+
+  it('narrows an `_extra` filter with json_extract, which this build has to carry', () => {
+    // SQLite's JSON functions are compile-time optional, and this is a different
+    // build from the desktop's — so the narrowing pass is asserted against the
+    // binding the browser actually runs rather than inferred from node:sqlite.
+    const { driver, store } = freshStore();
+    store.insert('tables', { id: 't1', workspaceId: 'w1', name: 'Parts', columns: COLUMNS, updatedAt: 1 });
+    store.insert('rows', { id: 'r1', tableId: 't1', data: { name: 'a', ghost: 'keep me' }, updatedAt: 1 });
+    store.insert('rows', { id: 'r2', tableId: 't1', data: { name: 'b', ghost: 'other' }, updatedAt: 1 });
+    store.insert('rows', { id: 'r3', tableId: 't1', data: { name: 'c', ghost: true }, updatedAt: 1 });
+
+    const page = store.queryRows('t1', { filters: { ghost: 'keep' } });
+    expect(page.rows.map((r) => r.id).sort()).toEqual(['r1', 'r3']); // r3 rides along: SQL may not judge a boolean
+    expect(page.partial).toBe(true); // and the caller still decides
+    driver.close();
+  });
 });

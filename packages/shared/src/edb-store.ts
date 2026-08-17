@@ -29,7 +29,8 @@
  * future format change has to look at.
  */
 
-import { buildWhere } from './filter-sql.js';
+import { groupColumnFilter, parseColumnFilter } from './column-filter.js';
+import { buildWhere, columnFilterToSql } from './filter-sql.js';
 import type { DistinctPage, DistinctQuery, RowPage, RowQuery } from './row-query.js';
 import type { SqlDriver } from './sql-driver.js';
 import type { SqlRunOptions, SqlRunResult } from './sql-run.js';
@@ -112,6 +113,59 @@ function docPk(coll: string): string {
 function matchesAll(doc: Record<string, unknown>, entries: Array<[string, unknown]>): boolean {
   for (const [k, v] of entries) if (doc[k] !== v) return false;
   return true;
+}
+
+/** A SQL string literal. Only ever wraps text this module builds, never a bind value. */
+function sqlText(s: string): string {
+  return `'${s.replace(/'/g, "''")}'`;
+}
+
+/**
+ * A JSON path to one member of `_extra`, quoted so any field name works.
+ *
+ * `$."a.b"` and `$."a b"` both resolve — a dump-imported header is arbitrary
+ * text, and the unquoted `$.name` form would read a dot as a step into a nested
+ * object.
+ */
+function extraPath(field: string): string {
+  return sqlText(`$."${field.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
+}
+
+/**
+ * The JSON types whose SQL rendering is EXACTLY what the in-memory matcher sees.
+ *
+ * The matcher reads a cell as `String(value ?? '')` (`column-filter.ts`'s
+ * `matchesText`), so a predicate may only be trusted in SQL where the two agree
+ * character for character:
+ *
+ * | JSON      | matcher            | `json_extract` |
+ * | --------- | ------------------ | -------------- |
+ * | `"x"`     | `x`                | `x` ✓          |
+ * | `3`       | `3`                | `3` ✓          |
+ * | `null`    | empty              | SQL NULL ✓     |
+ * | `true`    | `true`             | `1` ✗          |
+ * | `3.0`     | `3`                | `3.0` ✗        |
+ * | `[1,2]`   | `1,2`              | `[1,2]` ✗      |
+ * | `{"a":1}` | `[object Object]`  | `{"a":1}` ✗    |
+ *
+ * The four mismatches are why the narrowing below KEEPS those rows rather than
+ * judging them. Judging them would make SQL narrower than the matcher, which is
+ * the one failure this whole seam exists to prevent.
+ */
+const EXACT_JSON_TYPES = ['text', 'integer', 'null'];
+
+/**
+ * Could this filter keep a row whose field is ABSENT?
+ *
+ * The matcher reads a missing field as `''`: a positive text term cannot match
+ * it, but a negated one passes and so does `NULL`. That is the difference
+ * between dropping those rows in SQL (sound, and most of the narrowing on a
+ * sparse `_extra`) and having to keep them.
+ */
+function mayMatchAbsent(raw: string): boolean {
+  const groups = groupColumnFilter(parseColumnFilter(raw));
+  if (groups.length === 0) return true;
+  return groups.some((g) => g.some((t) => t.negate || (!t.prefix && !t.exact && (t.term.trim() === '' || t.term.toUpperCase() === 'NULL'))));
 }
 
 /**
@@ -948,9 +1002,15 @@ export class EdbStore {
     const searchFields = columns.filter((c) => !c.script && c.type !== 'array' && c.filterable !== false).map((c) => c.field);
 
     const where = buildWhere(q.filters, q.search, sqlOf, searchFields);
-    const whereSql = where.sql ? ` WHERE ${where.sql}` : '';
+    // Plus a narrowing pass over `_extra`, which `sqlOf` cannot express.
+    // Optimisation only: `expressible` is already false for those fields, so the
+    // caller re-filters this result whatever it contains.
+    const narrowed = this.narrowByExtra(q.filters, specOf);
+    const whereParts = [where.sql, narrowed.sql].filter((s) => s !== '');
+    const whereSql = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : '';
+    const whereParams = [...where.params, ...narrowed.params];
 
-    const total = Number(this.db.prepare(`SELECT COUNT(*) AS n FROM ${table}${whereSql}`).get(...where.params)?.n ?? 0);
+    const total = Number(this.db.prepare(`SELECT COUNT(*) AS n FROM ${table}${whereSql}`).get(...whereParams)?.n ?? 0);
 
     // Same for the sort: a computed column has nothing to order by, and an array
     // column orders by its MEMBERS as they read, which is not the raw stored text
@@ -986,7 +1046,7 @@ export class EdbStore {
     const wanted = q.fields && q.fields.length > 0 ? columns.filter((c) => q.fields?.includes(c.field)) : columns;
     const selected = ['_id', '_updatedAt', '_extra', ...wanted.map((c) => quoteIdent(c.field))];
 
-    const raws = this.db.prepare(`SELECT ${selected.join(', ')} FROM ${table}${whereSql}${stableSql}${limitSql}${offsetSql}`).all(...where.params);
+    const raws = this.db.prepare(`SELECT ${selected.join(', ')} FROM ${table}${whereSql}${stableSql}${limitSql}${offsetSql}`).all(...whereParams);
 
     const partial = !where.expressible || sortPartial;
     return {
@@ -994,6 +1054,50 @@ export class EdbStore {
       total,
       ...(partial ? { partial: true } : {}),
     };
+  }
+
+  /**
+   * A WHERE fragment narrowing the rows a filter on an UNDECLARED field can
+   * match — one that lives in `_extra` as JSON rather than in a column.
+   *
+   * Purely an optimisation, and safe because of what it is NOT: `sqlOf` returns
+   * null for these fields, so `expressible` is already false and the caller
+   * re-filters every row this returns. Nothing here decides an answer; it only
+   * decides what crosses the bridge. Before this, a filter on a dump-imported
+   * field shipped the whole table (to the 20 000-row cap) to be narrowed in
+   * memory, and a SLICED request paid a second round trip for the superset.
+   *
+   * **The fragment is a guaranteed SUPERSET of the matcher's answer.** A row is
+   * judged in SQL only where `json_extract` renders exactly what the matcher
+   * reads (see {@link EXACT_JSON_TYPES}); every other row — a boolean, a real,
+   * an object, an array, and a row missing the field entirely — is KEPT for the
+   * caller to judge. Getting that backwards would drop rows the user never
+   * excluded, which is the failure `expressible: false` exists to prevent.
+   *
+   * Deliberately not extended to the ORDER BY: `json_extract` answers in the
+   * JSON's own type, so `'10'` would sort before `'2'`. The sort stays partial
+   * and the caller re-sorts.
+   */
+  private narrowByExtra(filters: Record<string, string> | undefined, specOf: Map<string, ColumnSpec>): { sql: string; params: unknown[] } {
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+    for (const [field, raw] of Object.entries(filters ?? {})) {
+      if (specOf.has(field) || !raw || raw.trim() === '') continue;
+      const path = extraPath(field);
+      const frag = columnFilterToSql(`json_extract("_extra", ${path})`, raw);
+      if (!frag.expressible || frag.sql === '') continue;
+
+      const typeOf = `json_type("_extra", ${path})`;
+      // A row missing the field is only kept where the filter could still WANT
+      // it: `!x` and `NULL` both pass on an absent value, and excluding it would
+      // make this narrower than the matcher. A purely positive filter cannot
+      // match an absent value, so those rows go — which is most of the win on a
+      // sparse `_extra`.
+      const keepAbsent = mayMatchAbsent(raw) ? ` OR ${typeOf} IS NULL` : '';
+      clauses.push(`((${frag.sql}) OR ${typeOf} NOT IN (${EXACT_JSON_TYPES.map(sqlText).join(', ')})${keepAbsent})`);
+      params.push(...frag.params);
+    }
+    return { sql: clauses.join(' AND '), params };
   }
 
   /**

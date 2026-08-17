@@ -8,6 +8,8 @@
 - 🪶 Saving with no file to save to keeps a copy in this browser, and the File menu can restore it — a browser without file access is no longer save-or-lose (v0.0.386)
 - 🪶 Run SQL against a workspace: a SQL button in the footer and `api.store.sql` for plugins. Reads by default, writes behind a checkbox (v0.0.376)
 
+- 🪶 Filtering on a field that came in with a dump — one with no column of its own — is narrowed in SQL instead of pulling the whole table across to be narrowed in memory (v0.0.391)
+
 ### Bugs
 
 - 🐛 Renaming a column keeps its values. In a workspace file the rename added an empty column beside the old one, so the renamed column read as blank and anything reading it — a projection, a join key — stopped resolving (v0.0.385)

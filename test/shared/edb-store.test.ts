@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ColumnSpec, Table } from '../../packages/shared/src/types.js';
 import { EDB_FORMAT_VERSION, EdbStore } from '../../packages/shared/src/edb-store.js';
 import { nodeSqliteDriver } from './node-sqlite-driver.js';
+import { matchesColumnFilter } from '../../packages/shared/src/column-filter.js';
 
 /**
  * The `.edb` v2 store, exercised against a real SQLite through the driver
@@ -406,5 +407,90 @@ describe('distinctValues', () => {
 
   it('is an empty list for a table that does not exist, not a throw', () => {
     expect(store.distinctValues('nope', { field: 'name' })).toEqual({ values: [] });
+  });
+});
+
+describe('narrowing a filter on an undeclared (_extra) field', () => {
+  /**
+   * `_extra` holds every field with no `ColumnSpec` — what a dump import leaves
+   * behind. `sqlOf` has no expression for those, so `expressible` is false and
+   * the caller re-filters whatever comes back. The `json_extract` pass is
+   * therefore an OPTIMISATION, and the only thing that can go wrong with it is
+   * returning too FEW rows.
+   *
+   * Every case below asserts the same two things: the answer still contains
+   * exactly what the in-memory matcher would keep (a superset, never narrower),
+   * and `partial` still says the caller must do the deciding.
+   */
+  const VALUES: Array<[string, unknown]> = [
+    ['r1', 'Hello'],
+    ['r2', 'hello world'],
+    ['r3', 'other'],
+    ['r4', 42],
+    ['r5', true], // JSON true → `json_extract` says 1, the matcher says 'true'
+    ['r6', 3.0], // JSON real → '3.0' in SQL, '3' in JS
+    ['r7', { a: 1 }], // object → '{"a":1}' in SQL, '[object Object]' in JS
+    ['r8', ['x', 'y']], // array → '["x","y"]' in SQL, 'x,y' in JS
+    ['r9', null],
+  ];
+
+  beforeEach(() => {
+    store.insert('tables', table());
+    for (const [id, ghost] of VALUES) store.insert('rows', row(id, { name: id, ghost }));
+    store.insert('rows', row('r10', { name: 'r10' })); // no `ghost` key at all
+  });
+
+  /** Ids the matcher keeps — the specification this must not fall short of. */
+  const expected = (filter: string): string[] => {
+    const all = store.find('rows') as Array<{ id: string; data: Record<string, unknown> }>;
+    return all
+      .filter((r) => matchesColumnFilter(r.data.ghost, filter))
+      .map((r) => r.id)
+      .sort();
+  };
+  const got = (filter: string): { ids: string[]; partial: boolean } => {
+    const page = store.queryRows('t1', { filters: { ghost: filter } });
+    return { ids: page.rows.map((r) => r.id).sort(), partial: page.partial === true };
+  };
+
+  for (const filter of ['hello', 'HELLO', '=hello', '^hell', 'tru', '3', '[object', 'x,y', 'NULL', '!hello', '!NULL', 'hello,other', 'o AND h', 'zzz']) {
+    it(`is a superset of the matcher for \`${filter}\``, () => {
+      const want = expected(filter);
+      const { ids, partial } = got(filter);
+      // Never narrower: everything the matcher keeps survived the SQL pass.
+      expect(want.filter((id) => !ids.includes(id))).toEqual([]);
+      // And still flagged, so the caller finishes the job.
+      expect(partial).toBe(true);
+    });
+  }
+
+  it('actually narrows — a positive filter does not ship the whole table', () => {
+    // The point of the exercise. `r1`/`r2` match; the odd-typed rows ride along
+    // because SQL may not judge them, but the plainly-non-matching text rows go.
+    const { ids } = got('hello');
+    expect(ids).toContain('r1');
+    expect(ids).toContain('r2');
+    expect(ids).not.toContain('r3');
+    expect(ids).not.toContain('r10'); // absent key, and no negation to keep it
+    expect(ids.length).toBeLessThan(10);
+  });
+
+  it('keeps rows with no such field when the filter could want them', () => {
+    // `!hello` passes on an absent value, so dropping those rows would be
+    // narrower than the matcher.
+    expect(got('!hello').ids).toContain('r10');
+    expect(got('NULL').ids).toContain('r10');
+  });
+
+  it('reaches a field whose name would otherwise read as a JSON path', () => {
+    store.insert('rows', row('r11', { name: 'r11', 'a.b': 'deep' }));
+    const page = store.queryRows('t1', { filters: { 'a.b': 'deep' } });
+    expect(page.rows.map((r) => r.id)).toContain('r11');
+  });
+
+  it('leaves the sort alone — json_extract answers in the JSON\u2019s own type', () => {
+    // '10' before '2' if this were pushed down, so it must not be.
+    const page = store.queryRows('t1', { sort: [{ field: 'ghost', asc: true }] });
+    expect(page.partial).toBe(true);
   });
 });
