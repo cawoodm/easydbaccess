@@ -7,7 +7,7 @@
 
 import type { Dialogs } from '@easydb/shared';
 import { forgetLastWorkspace, getContext, slugifyWorkspace } from '../app-context.js';
-import { getDb } from '../db/index.js';
+import { storeBridge } from '../db/edb/active-bridge.js';
 import { cloneWorkspace, type CloneMode } from '../db/clone-workspace.js';
 import { countWorkspaceContents, deleteWorkspace, describeWorkspaceContents } from '../db/delete-workspace.js';
 import { EDB_EXTENSION } from '../db/edb/file-handle.js';
@@ -101,7 +101,7 @@ export async function newWorkspaceFlow(): Promise<void> {
   // Create the workspace here rather than letting init() do it on first load:
   // only this side knows what to copy, and the copy must be in place before the
   // new workspace boots.
-  await cloneWorkspace(getDb(), { from: ctx.workspaceId, to: slugifyWorkspace(name), name, mode });
+  await cloneWorkspace(storeBridge(), { from: ctx.workspaceId, to: slugifyWorkspace(name), name, mode });
   openWorkspace(name);
 }
 
@@ -147,7 +147,7 @@ export async function deleteWorkspaceFlow(): Promise<void> {
   const target = all.find((w) => w.id === ctx.workspaceId);
   if (!target) return;
 
-  const what = describeWorkspaceContents(await countWorkspaceContents(getDb(), target.id));
+  const what = describeWorkspaceContents(await countWorkspaceContents(storeBridge(), target.id));
   const isLast = all.length === 1;
   const ok = await ctx.api.ui.dialogs.confirm(
     `Delete the workspace "${target.name}"?\n\n${what} will be deleted. This cannot be undone.` + (isLast ? '\n\nIt is the only workspace, so an empty one will be created in its place.' : ''),
@@ -155,7 +155,7 @@ export async function deleteWorkspaceFlow(): Promise<void> {
   );
   if (!ok) return;
 
-  await deleteWorkspace(getDb(), target.id);
+  await deleteWorkspace(storeBridge(), target.id);
   forgetLastWorkspace(target.id);
 
   const survivor = all.find((w) => w.id !== target.id);

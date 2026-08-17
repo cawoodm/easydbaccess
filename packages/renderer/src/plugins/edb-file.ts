@@ -18,7 +18,7 @@ import {
   writeBytes,
   EDB_EXTENSION,
 } from '../db/edb/file-handle.js';
-import { activeEdbName, lastEdbError, setActiveEdbName } from '../db/edb/session.js';
+import { activeEdbName, adoptedFileName, setActiveEdbName } from '../db/edb/session.js';
 import { createAutosavePolicy } from '../db/edb/dirty.js';
 import { edbBridge, edbHandle, setEdbHandle } from '../db/edb/active-bridge.js';
 import { createEdbBridge } from '../db/edb/worker-bridge.js';
@@ -75,7 +75,7 @@ export function init(api: HostApi): void {
     if (!handle) {
       // No file yet, or a browser with no picker: hand the bytes over instead of
       // silently doing nothing.
-      downloadBytes(activeEdbName() ?? `workspace${EDB_EXTENSION}`, bytes);
+      downloadBytes(activeEdbName(), bytes);
       return true;
     }
     if (!(await ensureWritable(handle, true))) {
@@ -119,7 +119,7 @@ export function init(api: HostApi): void {
   }
 
   async function saveAs(): Promise<void> {
-    const target = await chooseEdbTarget(api.ui.dialogs, activeEdbName() ?? `workspace${EDB_EXTENSION}`);
+    const target = await chooseEdbTarget(api.ui.dialogs, activeEdbName());
     if (!target) return;
     setEdbHandle(target.handle);
     if (target.handle) await rememberHandle(target.handle);
@@ -221,7 +221,7 @@ export function init(api: HostApi): void {
   }
 
   async function leaveFileMode(): Promise<void> {
-    if (!(await api.ui.dialogs.confirm('Go back to browser storage? The file stays where it is.', 'Local storage'))) return;
+    if (!(await api.ui.dialogs.confirm('Go back to this browser\u2019s own database? The file stays where it is.', 'Local database'))) return;
     await forgetHandle();
     setActiveEdbName(null);
     location.reload();
@@ -236,7 +236,7 @@ export function init(api: HostApi): void {
     icon: 'storage',
     tooltip: 'Workspace file — open, save, autosave',
     onClick: async (_api, ctx) => {
-      const inFileMode = activeEdbName() !== null;
+      const inFileMode = adoptedFileName() !== null;
       const rect = ctx?.anchor?.getBoundingClientRect();
       if (!rect) return;
       const picked = await AnchoredMenu.open(rect, [
@@ -268,16 +268,46 @@ export function init(api: HostApi): void {
   });
 }
 
+/** Marks the one-time notice below as shown, so it never nags. */
+const DEXIE_NOTICE_KEY = 'easydb:legacy-idb-notice';
+
+/**
+ * Tell a returning user that their old data is not being read.
+ *
+ * Before the SQLite flip the browser kept workspaces in an IndexedDB database
+ * called `easydb`. That database is no longer opened, and it is NOT migrated —
+ * a deliberate call, the same one made for `.edb` format v1. From the user's
+ * side an unannounced switch is indistinguishable from the app having lost
+ * everything, so it gets said once.
+ *
+ * Nothing is deleted here. The old database still exists, which is what leaves
+ * the door open to reinstalling an older build and exporting from it.
+ */
+async function noticeOrphanedBrowserData(api: HostApi): Promise<void> {
+  try {
+    if (globalThis.localStorage?.getItem(DEXIE_NOTICE_KEY)) return;
+    // `databases()` is absent on Firefox, where there is no way to ask without
+    // opening the database and thereby creating it. Staying quiet is better than
+    // warning everybody on the off chance.
+    const list = await indexedDB.databases?.();
+    if (!list?.some((d) => d.name === 'easydb')) return;
+    globalThis.localStorage?.setItem(DEXIE_NOTICE_KEY, '1');
+    await api.ui.dialogs.alert(
+      'This version keeps your workspaces in a SQLite database instead of the browser storage earlier versions used.\n\n' +
+        'Data from before the change is not carried over and is not shown here. It has not been deleted \u2014 it is still in this browser, so an older build can still open and export it.',
+      'Storage has changed',
+    );
+  } catch {
+    /* A notice is not worth failing a boot over. */
+  }
+}
+
 export async function load(api: HostApi): Promise<void> {
   if (!supported()) return;
-  // A session that failed to start fell back to browser storage. Say so, or the
-  // user is left wondering why their file is not open.
-  const failure = lastEdbError();
-  if (failure) {
-    api.ui.dialogs.toast(`Could not open the workspace file, so browser storage is in use: ${String(failure)}`, { kind: 'error' });
-    return;
-  }
-  if (activeEdbName() === null) return;
+  await noticeOrphanedBrowserData(api);
+  // Everything below is about the user's own FILE. The local database needs no
+  // handle and no permission, so a tab that has not adopted a file is done here.
+  if (adoptedFileName() === null) return;
   // Re-check the folder before the file. A folder the user has allowed on every
   // visit covers everything in it, so Save then needs no prompt at all — and
   // asking about the folder once beats asking about each file.

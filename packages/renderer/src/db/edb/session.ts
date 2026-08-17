@@ -35,8 +35,30 @@ export interface EdbSession {
   name: string;
 }
 
-/** The file name this tab should open, or null for the Dexie path. */
-export function activeEdbName(): string | null {
+/**
+ * The database this tab uses when the user has adopted no file of their own.
+ *
+ * Every browser tab is SQLite now, so there is always a database — this is the
+ * one that holds all workspaces, in place of the Dexie database it replaced.
+ */
+export const LOCAL_DB_NAME = 'local.edb';
+
+/**
+ * The file name this tab should open. Never null: with no adopted file it is
+ * {@link LOCAL_DB_NAME}.
+ */
+export function activeEdbName(): string {
+  return adoptedFileName() ?? LOCAL_DB_NAME;
+}
+
+/**
+ * The user's own file, when this tab has adopted one — null when it is on the
+ * built-in local database.
+ *
+ * This is the distinction the File menu means by "file mode". It is NOT "is
+ * there a database?", which is now always yes.
+ */
+export function adoptedFileName(): string | null {
   try {
     return globalThis.localStorage?.getItem(ACTIVE_KEY) ?? null;
   } catch {
@@ -55,7 +77,7 @@ export function setActiveEdbName(name: string | null): void {
 }
 
 /**
- * Start the file-backed session, or return null to leave this tab on Dexie.
+ * Start this tab's SQLite session. Always — there is no other store.
  *
  * The bytes come from the OPFS mirror, never from the user's file: reading their
  * file needs a permission grant, and a grant needs a gesture a boot sequence does
@@ -63,11 +85,17 @@ export function setActiveEdbName(name: string | null): void {
  * comes back straight away and the handle is only re-permissioned on the first
  * Save.
  *
- * A missing mirror is not a failure — it is the first run with a new file.
+ * A missing mirror is not a failure — it is the first run.
+ *
+ * **This THROWS rather than degrading.** It used to fall back to Dexie, which
+ * was a real alternative store; there is none now, so a caught failure would
+ * leave the app looking like it worked while holding nothing. The caller shows a
+ * blocking notice instead. The adopted-file marker is still cleared first, so a
+ * reload after a bad user file lands on the local database rather than retrying
+ * the same failure forever.
  */
-export async function startEdbSession(): Promise<EdbSession | null> {
+export async function startEdbSession(): Promise<EdbSession> {
   const name = activeEdbName();
-  if (!name) return null;
   const bridge = createEdbBridge();
   try {
     const bytes = await bridge.restore(name);
@@ -75,12 +103,9 @@ export async function startEdbSession(): Promise<EdbSession | null> {
     setEdbBridge(bridge);
     return { bridge, name };
   } catch (err) {
-    // A worker that will not start must not take the app down with it. Falling
-    // back to Dexie loses the file view, not the user's ability to work, and the
-    // marker is cleared so the next load does not retry the same failure.
     lastError = err;
     bridge.terminate();
-    setActiveEdbName(null);
-    return null;
+    if (adoptedFileName() !== null) setActiveEdbName(null);
+    throw err;
   }
 }

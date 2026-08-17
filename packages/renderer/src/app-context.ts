@@ -1,7 +1,8 @@
 import type { DataStore, EventBus, HostApi, RowSourceCtx, Table } from '@easydb/shared';
-import { createDataStore, createRoutedDataStore, getDb, withUniqueTableNames } from './db/index.js';
+import { createRoutedDataStore, withUniqueTableNames } from './db/index.js';
 import { createIpcDataStore } from './db/data-store-bridge.js';
-import { startEdbSession } from './db/edb/session.js';
+import { startEdbSession, type EdbSession } from './db/edb/session.js';
+import { showStorageFailure } from './chrome/storage-failure.js';
 import { createEventBus } from './events/bus.js';
 import { createRegistries, type Registries } from './plugin-host/registries.js';
 import { createHostApi } from './plugin-host/api-factory.js';
@@ -20,6 +21,23 @@ export interface AppContext {
 
 let ctxPromise: Promise<AppContext> | null = null;
 
+/**
+ * Start the browser's SQLite session, or put a blocking notice on screen.
+ *
+ * There is no second store to fall back to, so a failure here is fatal by
+ * design. The notice goes up BEFORE the rejection propagates, because the
+ * rejection alone would leave a blank page — `getContext()` is awaited by every
+ * component and nothing else is watching for it.
+ */
+async function startSessionOrExplain(): Promise<EdbSession> {
+  try {
+    return await startEdbSession();
+  } catch (err) {
+    showStorageFailure(err instanceof Error ? err.message : String(err));
+    throw err;
+  }
+}
+
 export function getContext(): Promise<AppContext> {
   if (!ctxPromise) ctxPromise = init();
   return ctxPromise;
@@ -30,22 +48,20 @@ async function init(): Promise<AppContext> {
   // down using this very store — so the store reads the id through this holder,
   // which is filled before any settings access happens.
   let activeWorkspaceId = '';
-  // Electron exposes a `window.easydb.store` bridge to the main-process
-  // SqliteStore (see `db/data-store-bridge.ts`); everywhere else (browser, or
-  // Electron before that bridge lands) keeps using Dexie/IndexedDB. Only
-  // `getDb()` — and the Dexie database it opens — is skipped on the IPC path;
-  // nothing downstream (routing, workspace resolution, plugin host) branches
-  // on which one is active.
-  // A file-backed browser session is the third option, and it reuses the SAME
-  // adapter as Electron: `EdbBridge` implements `EasydbStoreBridge`, so a worker
-  // running sqlite-wasm and a preload talking to the main process are the same
-  // shape to everything downstream. Null here means this tab stays on Dexie.
-  const edb = window.easydb?.store ? null : await startEdbSession();
+  // SQLite everywhere, over one adapter. `EdbBridge` implements the same
+  // `EasydbStoreBridge` the Electron preload does, so a worker running
+  // sqlite-wasm and a preload talking to the main process are the same shape to
+  // everything downstream — routing, workspace resolution and the plugin host
+  // all see one store.
+  //
+  // The two differ only in WHERE the database lives: a file the desktop opened,
+  // or this tab's own SQLite database (`LOCAL_DB_NAME`, or a `.edb` the user
+  // adopted). Persistence is a separate concern from being in SQL mode — the
+  // database is live and queryable whether or not anything has been written to
+  // disk yet.
   const baseStore = window.easydb?.store
     ? createIpcDataStore(window.easydb.store, () => activeWorkspaceId)
-    : edb
-      ? createIpcDataStore(edb.bridge, () => activeWorkspaceId)
-      : createDataStore(await getDb(), () => activeWorkspaceId);
+    : createIpcDataStore((await startSessionOrExplain()).bridge, () => activeWorkspaceId);
   const events = createEventBus();
   const registries = createRegistries();
 
