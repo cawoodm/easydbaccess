@@ -1,5 +1,5 @@
 import Dexie, { type Table as DexieTable } from 'dexie';
-import type { PluginRecord, Row, Setting, Table, ViewInstance, ViewTemplate, Workspace } from '@easydb/shared';
+import { settingId, type PluginRecord, type Row, type Setting, type Table, type ViewInstance, type ViewTemplate, type Workspace } from '@easydb/shared';
 
 /**
  * easyDB local store: one IndexedDB database, one Dexie table per logical
@@ -16,15 +16,6 @@ import type { PluginRecord, Row, Setting, Table, ViewInstance, ViewTemplate, Wor
  */
 
 const DB_NAME = 'easydb';
-
-/**
- * Physical primary key of a setting: the workspace it belongs to plus its logical
- * name. `::` separates them — a workspace id is a slug (see `slugifyWorkspace`),
- * so it never contains one.
- */
-export function settingId(workspaceId: string, name: string): string {
-  return `${workspaceId}::${name}`;
-}
 
 export interface EasyDb {
   raw: Dexie;

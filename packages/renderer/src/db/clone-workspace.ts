@@ -1,5 +1,5 @@
-import type { Row, Setting, Table, ViewInstance, ViewTemplate } from '@easydb/shared';
-import { settingId, type EasyDb } from './dexie-db.js';
+import { settingId, type Row, type Setting, type Table, type ViewInstance, type ViewTemplate } from '@easydb/shared';
+import { type EasyDb } from './dexie-db.js';
 
 /**
  * What a new workspace takes over from the one it was created in.

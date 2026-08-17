@@ -1,7 +1,7 @@
 import Dexie, { liveQuery, rangesOverlap, type IntervalTree, type ObservabilitySet, type Table as DexieTable } from 'dexie';
 import type { DataCollection, DataStore, DistinctPage, DistinctQuery, PluginRecord, Row, RowPage, RowQuery, Setting, Table, Unsubscribe, ViewInstance, ViewTemplate, Workspace } from '@easydb/shared';
-import { isPlainSlice } from '@easydb/shared';
-import { settingId, type EasyDb } from './dexie-db.js';
+import { isPlainSlice, settingId } from '@easydb/shared';
+import { type EasyDb } from './dexie-db.js';
 import { applyRowRequest, projectFields } from './row-reader.js';
 import { ROW_FETCH_CAP } from './data-store-bridge.js';
 import { FACET_MAX_OPTIONS, facetCounts } from '../search/facet-values.js';

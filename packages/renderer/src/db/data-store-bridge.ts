@@ -15,7 +15,7 @@ import type {
   ViewTemplate,
   Workspace,
 } from '@easydb/shared';
-import { settingId } from './dexie-db.js';
+import { settingId } from '@easydb/shared';
 
 /**
  * A `DataStore` over an ASYNC MESSAGE BRIDGE — nothing here is Electron-specific.
