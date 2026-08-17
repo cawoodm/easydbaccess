@@ -34,7 +34,8 @@ import type { DistinctPage, DistinctQuery, RowPage, RowQuery } from './row-query
 import type { SqlDriver } from './sql-driver.js';
 import type { SqlRunOptions, SqlRunResult } from './sql-run.js';
 import { decodeValue, encodeValue, quoteIdent, sanitizeTableName, sqlAffinity } from './sql-mapping.js';
-import type { ColumnSpec, Row } from './types.js';
+import type { CloneMode, ColumnSpec, Row, WorkspaceContents } from './types.js';
+import { settingId } from './setting-key.js';
 
 /** What `coll='_meta', key='format'` holds. Read before anything else is trusted. */
 export interface EdbFormat {
@@ -64,6 +65,37 @@ const DOC_COLLECTIONS: Record<string, string> = {
  */
 const SQL_TABLE_KEY = '_sqlTable';
 const ORDINAL_KEY = '_ordinal';
+
+/**
+ * A fresh id for a copied document.
+ *
+ * `crypto.randomUUID` is present in every runtime this package targets (browser,
+ * worker, Node 24, Electron main), but the fallback costs two lines and covers
+ * an insecure context, where `crypto` exists without it.
+ */
+function newId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+/**
+ * The same thing as a SQL expression, evaluated once per row.
+ *
+ * Needed so a table copy can be one `INSERT … SELECT` instead of pulling every
+ * row into JS to re-id it. `randomblob` is non-deterministic, so SQLite calls it
+ * per row rather than folding it to a constant. The shape matches
+ * {@link newId}'s — version 4, variant 8-b — because a store that mixed two id
+ * formats would invite code to start guessing which one it had.
+ */
+function uuidV4Sql(): string {
+  return `lower(
+    substr(hex(randomblob(4)), 1, 8) || '-' ||
+    substr(hex(randomblob(2)), 1, 4) || '-4' ||
+    substr(hex(randomblob(2)), 2, 3) || '-' ||
+    substr('89ab', abs(random()) % 4 + 1, 1) ||
+    substr(hex(randomblob(2)), 2, 3) || '-' ||
+    hex(randomblob(6))
+  )`;
+}
 
 function unknownCollection(coll: string): Error {
   const known = ['tables', 'rows', ...Object.keys(DOC_COLLECTIONS)].join(', ');
@@ -241,6 +273,173 @@ export class EdbStore {
     if (sqlTable === null) return 0;
     const r = this.db.prepare(`SELECT COUNT(*) AS n FROM ${quoteIdent(sqlTable)}`).get();
     return Number(r?.n ?? 0);
+  }
+
+  // -- whole workspaces --------------------------------------------------
+  //
+  // These three exist because `DataStore` cannot express them: its `settings`
+  // view is scoped to the ACTIVE workspace, so nothing above this layer can even
+  // SEE another workspace's settings. Under Dexie that forced the renderer to
+  // reach past the abstraction and walk five collections by hand; here
+  // `_easydb.workspaceId` is an indexed column and each one is a few statements.
+
+  /** The table ids belonging to one workspace. */
+  private tableIdsOf(workspaceId: string): string[] {
+    return this.db
+      .prepare(`SELECT key FROM _easydb WHERE coll = 'tables' AND workspaceId = ?`)
+      .all(workspaceId)
+      .map((r) => String(r.key));
+  }
+
+  private countDocsIn(coll: string, workspaceId: string): number {
+    return Number(this.db.prepare(`SELECT COUNT(*) AS n FROM _easydb WHERE coll = ? AND workspaceId = ?`).get(coll, workspaceId)?.n ?? 0);
+  }
+
+  /**
+   * What a delete would take with it — asked BEFORE the confirm dialog.
+   *
+   * `countRows` survives from the Dexie implementation, where counting the rows
+   * of a workspace holding a 609,283-row table cost 14 seconds and made the
+   * confirm dialog read as a dead button. Here it is a `COUNT(*)` per table, so
+   * the caller can afford to ask; the flag and the `-1` sentinel stay for the
+   * callers and the message formatter that already understand them.
+   */
+  countWorkspaceContents(workspaceId: string, opts: { countRows?: boolean | undefined } = {}): WorkspaceContents {
+    const tableIds = this.tableIdsOf(workspaceId);
+    return {
+      tables: tableIds.length,
+      rows: opts.countRows === true ? tableIds.reduce((n, id) => n + this.countRowsIn(id), 0) : -1,
+      views: this.countDocsIn('viewInstances', workspaceId),
+      templates: this.countDocsIn('viewTemplates', workspaceId),
+      settings: this.countDocsIn('settings', workspaceId),
+    };
+  }
+
+  /**
+   * Remove a workspace and everything scoped to it. Returns what went.
+   *
+   * Dropping a table takes its rows with it — the rows ARE that SQL table — so
+   * the row enumeration the Dexie version needed (read 609k keys, then
+   * `bulkDelete` them) has no equivalent here.
+   *
+   * A leftover settings row would not be inert: workspace ids are slugified
+   * names, so creating "Demo" again re-uses the id `demo` and the new workspace
+   * would inherit the old one's server URL, tokens and view-seed flags.
+   *
+   * The workspace record goes last, which inside a transaction is a matter of
+   * taste rather than safety — but it costs nothing and it keeps the ordering
+   * the Dexie version depended on.
+   */
+  deleteWorkspace(workspaceId: string): WorkspaceContents {
+    return this.tx(() => {
+      const counts = this.countWorkspaceContents(workspaceId, { countRows: true });
+      for (const id of this.tableIdsOf(workspaceId)) this.removeTableNoTx(id);
+      for (const coll of ['viewInstances', 'viewTemplates', 'settings']) {
+        this.db.prepare(`DELETE FROM _easydb WHERE coll = ? AND workspaceId = ?`).run(coll, workspaceId);
+      }
+      // Its own statement: a `workspaces` doc carries no `workspaceId` of its
+      // own, so `putRaw` stored NULL in that column and the deletes above cannot
+      // reach it.
+      this.db.prepare(`DELETE FROM _easydb WHERE coll = 'workspaces' AND key = ?`).run(workspaceId);
+      return counts;
+    });
+  }
+
+  /**
+   * Create workspace `to` and copy the requested slice of `from` into it.
+   *
+   * Every copied record gets a fresh id, because ids are global rather than
+   * per-workspace. Rows and view instances are re-pointed at the new table ids
+   * through maps built while the tables are copied — a copied row still
+   * referencing the source table would show up in BOTH workspaces.
+   *
+   * The copy is ADDITIVE: it never deletes from the source.
+   */
+  cloneWorkspace(opts: { from: string; to: string; name: string; mode: CloneMode }): string {
+    const { from, to, name, mode } = opts;
+    return this.tx(() => {
+      const source = this.getRaw('workspaces', from);
+      this.putRaw('workspaces', to, null, {
+        id: to,
+        name,
+        createdAt: Date.now(),
+        // The plugin list decides which plugins load, so it rides along with the
+        // settings rather than with the data.
+        pluginUrls: mode === 'empty' ? [] : [...((source?.pluginUrls as string[]) ?? [])],
+      });
+      if (mode === 'empty') return to;
+      if (mode === 'all') this.cloneWorkspaceDataNoTx(from, to);
+      this.cloneSettingsNoTx(from, to);
+      return to;
+    });
+  }
+
+  /** Tables, rows, templates and view instances. The `mode: 'all'` half of a clone. */
+  private cloneWorkspaceDataNoTx(from: string, to: string): void {
+    const tableIdMap = new Map<string, string>();
+    for (const stored of this.storedTableDocs()) {
+      if (stored.workspaceId !== from) continue;
+      const oldId = String(stored.id);
+      const tableId = newId();
+      tableIdMap.set(oldId, tableId);
+      // Through `writeTableNoTx` rather than `putRaw`, so the copy gets its own
+      // physical SQL table with reconciled columns and a name uniqued against
+      // everything already in the file.
+      this.writeTableNoTx('insert', { ...this.publicTableDoc(stored), id: tableId, workspaceId: to, updatedAt: Date.now() });
+      this.copyRowsNoTx(String(stored[SQL_TABLE_KEY]), String(this.getRaw('tables', tableId)?.[SQL_TABLE_KEY]));
+    }
+
+    const templateIdMap = new Map<string, string>();
+    for (const vt of this.findDocs('viewTemplates', { workspaceId: from }) as Record<string, unknown>[]) {
+      const templateId = newId();
+      templateIdMap.set(String(vt.id), templateId);
+      this.writeDocNoTx('upsert', 'viewTemplates', { ...vt, id: templateId, workspaceId: to });
+    }
+
+    for (const inst of this.findDocs('viewInstances', { workspaceId: from }) as Record<string, unknown>[]) {
+      // A view whose table did not come along would dangle, so skip it.
+      const tableId = tableIdMap.get(String(inst.tableId));
+      if (tableId === undefined) continue;
+      this.writeDocNoTx('upsert', 'viewInstances', {
+        ...inst,
+        id: newId(),
+        workspaceId: to,
+        tableId,
+        templateId: templateIdMap.get(String(inst.templateId)) ?? inst.templateId,
+      });
+    }
+  }
+
+  /**
+   * Copy every row of one physical table into another, without any of them
+   * crossing into JS.
+   *
+   * Only the columns BOTH tables have are copied. The source may carry columns
+   * the copy does not: reconciliation is additive-only, so a field dropped from
+   * `columns` leaves its SQL column behind, orphaned, and the fresh table is
+   * built from the current spec list.
+   */
+  private copyRowsNoTx(fromSqlTable: string, toSqlTable: string): void {
+    const columnsOf = (t: string) =>
+      this.db
+        .prepare(`PRAGMA table_info(${quoteIdent(t)})`)
+        .all()
+        .map((c) => String(c.name));
+    const target = new Set(columnsOf(toSqlTable));
+    const shared = columnsOf(fromSqlTable).filter((c) => c !== '_id' && target.has(c));
+    const cols = ['_id', ...shared].map(quoteIdent).join(', ');
+    // `_id` is replaced rather than carried: ids are global, and a duplicate
+    // would make the row ambiguous across the two workspaces.
+    const select = [uuidV4Sql(), ...shared.map(quoteIdent)].join(', ');
+    this.db.exec(`INSERT INTO ${quoteIdent(toSqlTable)} (${cols}) SELECT ${select} FROM ${quoteIdent(fromSqlTable)}`);
+  }
+
+  /** Settings, re-keyed to the new workspace. Copied for both `all` and `settings`. */
+  private cloneSettingsNoTx(from: string, to: string): void {
+    for (const s of this.findDocs('settings', { workspaceId: from }) as Record<string, unknown>[]) {
+      const nameOf = String(s.name);
+      this.writeDocNoTx('upsert', 'settings', { ...s, key: settingId(to, nameOf), workspaceId: to, name: nameOf });
+    }
   }
 
   // -- raw SQL -----------------------------------------------------------

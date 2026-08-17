@@ -19,7 +19,7 @@
  */
 
 import { copyFileSync } from 'node:fs';
-import { EdbStore, type DistinctPage, type DistinctQuery, type RowPage, type RowQuery, type SqlRunOptions, type SqlRunResult } from '@easydb/shared';
+import { EdbStore, type CloneMode, type DistinctPage, type DistinctQuery, type RowPage, type RowQuery, type SqlRunOptions, type SqlRunResult, type WorkspaceContents } from '@easydb/shared';
 import { nodeSqlDriver, type NodeSqlDriver } from './node-sqlite-driver';
 
 export interface SqliteStoreOptions {
@@ -148,6 +148,21 @@ export class SqliteStore {
   /** For `rows`, the distinct tables the rows came out of. */
   bulkRemove(coll: string, keys: string[]): string[] {
     return this.store.bulkRemove(coll, keys);
+  }
+
+  /** What a workspace holds. `countRows` is cheap here — a COUNT(*) per table. */
+  countWorkspaceContents(workspaceId: string, opts?: { countRows?: boolean | undefined }): WorkspaceContents {
+    return this.store.countWorkspaceContents(workspaceId, opts);
+  }
+
+  /** Remove a workspace and everything scoped to it. Returns what went. */
+  deleteWorkspace(workspaceId: string): WorkspaceContents {
+    return this.store.deleteWorkspace(workspaceId);
+  }
+
+  /** Create a workspace and copy the requested slice of another into it. */
+  cloneWorkspace(opts: { from: string; to: string; name: string; mode: CloneMode }): string {
+    return this.store.cloneWorkspace(opts);
   }
 
   /** One arbitrary SQL statement. Read-only unless `write` — see `EdbStore.runSql`. */

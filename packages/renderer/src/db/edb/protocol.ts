@@ -1,4 +1,4 @@
-import type { DistinctQuery, RowQuery } from '@easydb/shared';
+import type { CloneMode, DistinctQuery, RowQuery } from '@easydb/shared';
 
 /**
  * The worker protocol.
@@ -31,6 +31,14 @@ export type EdbRequest =
    * enforces that through SQLite, not by inspecting the statement.
    */
   | { id: number; op: 'runSql'; sql: string; params?: unknown[] | undefined; write?: boolean | undefined; maxRows?: number | undefined }
+  /**
+   * Whole-workspace operations, which `DataStore` cannot express: its `settings`
+   * view is scoped to the ACTIVE workspace, so nothing above the store can see
+   * another workspace's settings to copy or delete them.
+   */
+  | { id: number; op: 'countWorkspaceContents'; workspaceId: string; countRows?: boolean | undefined }
+  | { id: number; op: 'deleteWorkspace'; workspaceId: string }
+  | { id: number; op: 'cloneWorkspace'; from: string; to: string; name: string; mode: CloneMode }
   | { id: number; op: 'export' }
   /**
    * Write the OPFS mirror NOW, without waiting for the debounce.

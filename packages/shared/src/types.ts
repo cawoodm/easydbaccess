@@ -124,6 +124,30 @@ export interface WindowGeometry {
   closed?: boolean;
 }
 
+/**
+ * What a new workspace takes over from the one it was created in.
+ *
+ *  - `all` — tables with their rows, view templates and instances, settings and
+ *    the plugin list. A working copy to experiment in.
+ *  - `settings` — settings and the plugin list only: same server, same token,
+ *    same plugins, no data.
+ *  - `empty` — nothing at all.
+ *
+ * Device-local `user` settings are never involved: they live outside the store
+ * and are global to the device by design.
+ */
+export type CloneMode = 'all' | 'settings' | 'empty';
+
+/** How much a workspace holds. The delete confirmation quotes these numbers. */
+export interface WorkspaceContents {
+  tables: number;
+  /** `-1` when nobody paid for the count — see `EdbStore.countWorkspaceContents`. */
+  rows: number;
+  views: number;
+  templates: number;
+  settings: number;
+}
+
 export interface Workspace {
   id: string;
   name: string;

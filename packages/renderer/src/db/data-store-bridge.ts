@@ -1,4 +1,5 @@
 import type {
+  CloneMode,
   ColumnSpec,
   DataCollection,
   DataStore,
@@ -16,6 +17,7 @@ import type {
   ViewInstance,
   ViewTemplate,
   Workspace,
+  WorkspaceContents,
 } from '@easydb/shared';
 import { settingId } from '@easydb/shared';
 
@@ -56,6 +58,15 @@ export interface EasydbStoreBridge {
    * this store is a real database, so a SQL console can be offered at all.
    */
   runSql?(sql: string, opts?: SqlRunOptions): Promise<SqlRunResult>;
+  /**
+   * Whole-workspace operations. `DataStore` cannot express these — its
+   * `settings` view is scoped to the ACTIVE workspace — so they sit on the
+   * bridge rather than on the store the plugins see. Optional for the same
+   * reason as the reads above: an older preload does not have them.
+   */
+  countWorkspaceContents?(workspaceId: string, opts?: { countRows?: boolean | undefined }): Promise<WorkspaceContents>;
+  deleteWorkspace?(workspaceId: string): Promise<WorkspaceContents>;
+  cloneWorkspace?(opts: { from: string; to: string; name: string; mode: CloneMode }): Promise<string>;
   findOne(coll: string, key: string): Promise<unknown | null>;
   insert(coll: string, doc: Record<string, unknown>): Promise<unknown>;
   bulkInsert(coll: string, docs: Record<string, unknown>[]): Promise<unknown[]>;

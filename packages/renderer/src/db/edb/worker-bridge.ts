@@ -1,4 +1,4 @@
-import type { DistinctPage, DistinctQuery, RowPage, RowQuery, SqlRunResult } from '@easydb/shared';
+import type { DistinctPage, DistinctQuery, RowPage, RowQuery, SqlRunResult, WorkspaceContents } from '@easydb/shared';
 import type { EasydbStoreBridge } from '../data-store-bridge.js';
 import type { EdbCall, EdbRequest, EdbResponse } from './protocol.js';
 
@@ -97,6 +97,9 @@ export function createEdbBridge(): EdbBridge {
     // Also feature-detected: its presence is what tells the chrome this
     // workspace is a real database it can offer a SQL console for.
     runSql: (sql, opts) => call<SqlRunResult>({ op: 'runSql', sql, params: opts?.params, write: opts?.write, maxRows: opts?.maxRows }),
+    countWorkspaceContents: (workspaceId, opts) => call<WorkspaceContents>({ op: 'countWorkspaceContents', workspaceId, countRows: opts?.countRows }),
+    deleteWorkspace: (workspaceId) => call<WorkspaceContents>({ op: 'deleteWorkspace', workspaceId }),
+    cloneWorkspace: (opts) => call<string>({ op: 'cloneWorkspace', ...opts }),
     dbPath: () => call<string>({ op: 'dbName' }),
     onWarning(cb) {
       warners.add(cb);

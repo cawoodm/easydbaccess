@@ -139,6 +139,12 @@ function handle(req: EdbRequest): unknown {
       return s().queryRows(req.tableId, req.query);
     case 'distinctValues':
       return s().distinctValues(req.tableId, req.query);
+    case 'countWorkspaceContents':
+      return s().countWorkspaceContents(req.workspaceId, { countRows: req.countRows });
+    case 'deleteWorkspace':
+      return s().deleteWorkspace(req.workspaceId);
+    case 'cloneWorkspace':
+      return s().cloneWorkspace({ from: req.from, to: req.to, name: req.name, mode: req.mode });
     case 'runSql':
       return s().runSql(req.sql, { params: req.params, write: req.write, maxRows: req.maxRows });
     case 'export':
@@ -176,10 +182,11 @@ self.onmessage = async (e: MessageEvent<EdbRequest>) => {
       post({ changed: req.coll, scope: changeScopeOf(req.coll, result) });
       // One call per RPC, so a 600k-row bulkInsert marks the mirror dirty once.
       mirror?.changed();
-    } else if (req.op === 'runSql' && req.write) {
-      // Raw SQL says nothing about what it touched — it could have rewritten the
-      // registry itself — so every collection is announced. Anything narrower
-      // would leave a stale panel on screen after a hand-written UPDATE.
+    } else if ((req.op === 'runSql' && req.write) || req.op === 'deleteWorkspace' || req.op === 'cloneWorkspace') {
+      // These say nothing about what they touched — raw SQL could have rewritten
+      // the registry itself, and a workspace operation spans every collection —
+      // so all of them are announced. Anything narrower would leave a stale
+      // panel on screen.
       for (const coll of ALL_COLLECTIONS) post({ changed: coll });
       mirror?.changed();
     }

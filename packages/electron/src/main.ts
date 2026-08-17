@@ -20,7 +20,7 @@ import { getStore, pickDatabaseToOpen, switchToDatabase, saveDbAs, importDb, imp
 import { prepareImport, probeDatabaseFile, type ImportPlanEntry } from './db-import';
 import { runImport } from './import-runner';
 import { listBrowsable, readBrowseRows } from './db-browse';
-import { ALL_COLLECTIONS, changeScopeOf, type ColumnSpec, type RowQuery, type SqlRunOptions } from '@easydb/shared';
+import { ALL_COLLECTIONS, changeScopeOf, type CloneMode, type ColumnSpec, type RowQuery, type SqlRunOptions } from '@easydb/shared';
 import type { ImportDecision } from './db-import';
 
 const isDev = !!process.env.EASYDB_RENDERER_URL;
@@ -126,6 +126,19 @@ function registerStoreIpc(): void {
     const result = getStore().runSql(sql, opts);
     if (opts?.write) for (const coll of ALL_COLLECTIONS) broadcastChanged(coll);
     return result;
+  });
+  // Whole-workspace operations. Like a raw SQL write, a clone or a delete spans
+  // every collection and cannot say which, so both announce all of them.
+  handle('store:countWorkspaceContents', (workspaceId: string, opts?: { countRows?: boolean }) => getStore().countWorkspaceContents(workspaceId, opts));
+  handle('store:deleteWorkspace', (workspaceId: string) => {
+    const removed = getStore().deleteWorkspace(workspaceId);
+    for (const coll of ALL_COLLECTIONS) broadcastChanged(coll);
+    return removed;
+  });
+  handle('store:cloneWorkspace', (opts: { from: string; to: string; name: string; mode: CloneMode }) => {
+    const id = getStore().cloneWorkspace(opts);
+    for (const coll of ALL_COLLECTIONS) broadcastChanged(coll);
+    return id;
   });
   handle('store:count', (coll: string) => getStore().count(coll));
   handle('db:path', () => getStore().filePath);
