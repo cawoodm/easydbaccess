@@ -20,7 +20,7 @@ import { getStore, pickDatabaseToOpen, switchToDatabase, saveDbAs, importDb, imp
 import { prepareImport, probeDatabaseFile, type ImportPlanEntry } from './db-import';
 import { runImport } from './import-runner';
 import { listBrowsable, readBrowseRows } from './db-browse';
-import { changeScopeOf, type ColumnSpec, type RowQuery } from '@easydb/shared';
+import { ALL_COLLECTIONS, changeScopeOf, type ColumnSpec, type RowQuery, type SqlRunOptions } from '@easydb/shared';
 import type { ImportDecision } from './db-import';
 
 const isDev = !!process.env.EASYDB_RENDERER_URL;
@@ -119,6 +119,14 @@ function registerStoreIpc(): void {
   handleMutating('store:patch', (coll: string, key: string, patch: Record<string, unknown>) => getStore().patch(coll, key, patch));
   handleMutating('store:remove', (coll: string, key: string) => getStore().remove(coll, key));
   handleMutating('store:bulkRemove', (coll: string, keys: string[]) => getStore().bulkRemove(coll, keys));
+  // Raw SQL. Not `handleMutating`: that reads args[0] as the collection, which
+  // here is the statement text. A write also cannot say what it touched, so it
+  // announces every collection rather than leaving a stale panel on screen.
+  handle('store:runSql', (sql: string, opts?: SqlRunOptions) => {
+    const result = getStore().runSql(sql, opts);
+    if (opts?.write) for (const coll of ALL_COLLECTIONS) broadcastChanged(coll);
+    return result;
+  });
   handle('store:count', (coll: string) => getStore().count(coll));
   handle('db:path', () => getStore().filePath);
 }

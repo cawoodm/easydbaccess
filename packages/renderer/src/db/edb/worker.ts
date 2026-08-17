@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import sqlite3InitModule, { type Database, type Sqlite3Static } from '@sqlite.org/sqlite-wasm';
-import { EdbStore, changeScopeOf } from '@easydb/shared';
+import { ALL_COLLECTIONS, EdbStore, changeScopeOf } from '@easydb/shared';
 import { type EdbRequest, type EdbResponse } from './protocol.js';
 import { createAutosavePolicy, type AutosavePolicy } from './dirty.js';
 import { readMirror, writeMirror } from './mirror.js';
@@ -147,6 +147,8 @@ function handle(req: EdbRequest): unknown {
       return s().queryRows(req.tableId, req.query);
     case 'distinctValues':
       return s().distinctValues(req.tableId, req.query);
+    case 'runSql':
+      return s().runSql(req.sql, { params: req.params, write: req.write, maxRows: req.maxRows });
     case 'export':
       return require(driver, 'export requested').export();
     case 'dbName':
@@ -181,6 +183,12 @@ self.onmessage = async (e: MessageEvent<EdbRequest>) => {
       // which table they hit until the store has looked. See `changeScopeOf`.
       post({ changed: req.coll, scope: changeScopeOf(req.coll, result) });
       // One call per RPC, so a 600k-row bulkInsert marks the mirror dirty once.
+      mirror?.changed();
+    } else if (req.op === 'runSql' && req.write) {
+      // Raw SQL says nothing about what it touched — it could have rewritten the
+      // registry itself — so every collection is announced. Anything narrower
+      // would leave a stale panel on screen after a hand-written UPDATE.
+      for (const coll of ALL_COLLECTIONS) post({ changed: coll });
       mirror?.changed();
     }
   } catch (err) {

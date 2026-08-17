@@ -23,6 +23,17 @@
 /** The one collection whose subscribers are per-table rather than per-collection. */
 export const ROW_COLLECTION = 'rows';
 
+/**
+ * Every collection a subscriber can be watching.
+ *
+ * Needed because raw SQL can change anything and reports nothing about what it
+ * touched — it could have rewritten the registry itself — so a `runSql` write
+ * announces all of them. Anything narrower would leave a stale panel on screen
+ * after a hand-written UPDATE. Both transports need this, which is why it is
+ * here rather than in either one's protocol.
+ */
+export const ALL_COLLECTIONS = ['workspaces', 'tables', 'rows', 'settings', 'plugins', 'viewTemplates', 'viewInstances'] as const;
+
 /** A write's result, as much of it as this rule reads. */
 function tableIdOf(value: unknown): string | undefined {
   if (typeof value === 'string') return value; // `remove` returns the table id itself

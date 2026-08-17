@@ -19,7 +19,7 @@
  */
 
 import { copyFileSync } from 'node:fs';
-import { EdbStore, type DistinctPage, type DistinctQuery, type RowPage, type RowQuery } from '@easydb/shared';
+import { EdbStore, type DistinctPage, type DistinctQuery, type RowPage, type RowQuery, type SqlRunOptions, type SqlRunResult } from '@easydb/shared';
 import { nodeSqlDriver, type NodeSqlDriver } from './node-sqlite-driver';
 
 export interface SqliteStoreOptions {
@@ -148,6 +148,11 @@ export class SqliteStore {
   /** For `rows`, the distinct tables the rows came out of. */
   bulkRemove(coll: string, keys: string[]): string[] {
     return this.store.bulkRemove(coll, keys);
+  }
+
+  /** One arbitrary SQL statement. Read-only unless `write` — see `EdbStore.runSql`. */
+  runSql(sql: string, opts?: SqlRunOptions): SqlRunResult {
+    return this.store.runSql(sql, opts);
   }
 
   count(coll: string): number {

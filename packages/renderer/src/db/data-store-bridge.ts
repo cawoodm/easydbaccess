@@ -9,6 +9,8 @@ import type {
   RowPage,
   RowQuery,
   Setting,
+  SqlRunOptions,
+  SqlRunResult,
   Table,
   Unsubscribe,
   ViewInstance,
@@ -48,6 +50,12 @@ export interface EasydbStoreBridge {
    * `queryRows`: an older preload does not have it, and the caller feature-detects.
    */
   distinctValues?(tableId: string, q: DistinctQuery): Promise<DistinctPage>;
+  /**
+   * One arbitrary SQL statement against the workspace. Optional for the same
+   * reason as the two above — and its presence is also what tells the chrome
+   * this store is a real database, so a SQL console can be offered at all.
+   */
+  runSql?(sql: string, opts?: SqlRunOptions): Promise<SqlRunResult>;
   findOne(coll: string, key: string): Promise<unknown | null>;
   insert(coll: string, doc: Record<string, unknown>): Promise<unknown>;
   bulkInsert(coll: string, docs: Record<string, unknown>[]): Promise<unknown[]>;
@@ -515,5 +523,10 @@ export function createIpcDataStore(bridge: EasydbStoreBridge, workspaceId: () =>
     viewTemplates: wrapIpc<ViewTemplate>(bridge, 'viewTemplates'),
     viewInstances: wrapIpc<ViewInstance>(bridge, 'viewInstances'),
     rows: (tableId: string) => rowsViewIpc(bridge, tableId),
+    // Present only when the transport offers it, so `store.sql` is a truthful
+    // answer to "can this workspace run SQL?" rather than a method that rejects.
+    // `runSql` is read-bound by default in the store itself; nothing is relaxed
+    // by handing the capability over here.
+    sql: bridge.runSql ? { run: (sql, opts) => bridge.runSql!(sql, opts) } : undefined,
   };
 }

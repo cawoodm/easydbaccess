@@ -26,6 +26,11 @@ export type EdbRequest =
   | { id: number; op: 'countRows'; tableId: string }
   | { id: number; op: 'queryRows'; tableId: string; query: RowQuery }
   | { id: number; op: 'distinctValues'; tableId: string; query: DistinctQuery }
+  /**
+   * One arbitrary SQL statement. Read-only unless `write` is set — the worker
+   * enforces that through SQLite, not by inspecting the statement.
+   */
+  | { id: number; op: 'runSql'; sql: string; params?: unknown[] | undefined; write?: boolean | undefined; maxRows?: number | undefined }
   | { id: number; op: 'export' }
   /**
    * Write the OPFS mirror NOW, without waiting for the debounce.

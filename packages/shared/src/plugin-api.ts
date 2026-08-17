@@ -9,6 +9,7 @@
 
 import type { ColumnSpec, ColumnType, PluginRecord, Row, Setting, Table, TableSource, ViewInstance, ViewTemplate, VizAggregate, Workspace } from './types.js';
 import type { DistinctPage, DistinctQuery, QueryPage, RowQuery } from './row-query.js';
+import type { SqlRunner } from './sql-run.js';
 
 // -- Plugin module shape --------------------------------------------------
 
@@ -159,6 +160,16 @@ export interface DataStore {
   viewTemplates: DataCollection<ViewTemplate>;
   /** Per-table view instances rendered read-only in their own windows. */
   viewInstances: DataCollection<ViewInstance>;
+  /**
+   * Raw SQL against the workspace, when the backing store is a real database.
+   *
+   * Optional because not every store is one: the browser's Dexie path leaves it
+   * undefined, so a caller feature-detects rather than assuming. A store that
+   * offers it is a SQLite file — the desktop, or a `.edb`-backed browser tab.
+   *
+   * Reads are the default and are enforced by SQLite itself; see `SqlRunOptions`.
+   */
+  sql?: SqlRunner | undefined;
 }
 
 // -- Row-source providers (routing seam) ----------------------------------

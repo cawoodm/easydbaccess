@@ -1,4 +1,4 @@
-import type { DistinctPage, DistinctQuery, RowPage, RowQuery } from '@easydb/shared';
+import type { DistinctPage, DistinctQuery, RowPage, RowQuery, SqlRunResult } from '@easydb/shared';
 import type { EasydbStoreBridge } from '../data-store-bridge.js';
 import type { EdbCall, EdbRequest, EdbResponse } from './protocol.js';
 
@@ -94,6 +94,9 @@ export function createEdbBridge(): EdbBridge {
     // Feature-detected by the caller, so declaring it here is what turns a
     // funnel's value list from a client-side scan into a SQL GROUP BY.
     distinctValues: (tableId, q: DistinctQuery) => call<DistinctPage>({ op: 'distinctValues', tableId, query: q }),
+    // Also feature-detected: its presence is what tells the chrome this
+    // workspace is a real database it can offer a SQL console for.
+    runSql: (sql, opts) => call<SqlRunResult>({ op: 'runSql', sql, params: opts?.params, write: opts?.write, maxRows: opts?.maxRows }),
     dbPath: () => call<string>({ op: 'dbName' }),
     onWarning(cb) {
       warners.add(cb);

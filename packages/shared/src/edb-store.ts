@@ -32,6 +32,7 @@
 import { buildWhere } from './filter-sql.js';
 import type { DistinctPage, DistinctQuery, RowPage, RowQuery } from './row-query.js';
 import type { SqlDriver } from './sql-driver.js';
+import type { SqlRunOptions, SqlRunResult } from './sql-run.js';
 import { decodeValue, encodeValue, quoteIdent, sanitizeTableName, sqlAffinity } from './sql-mapping.js';
 import type { ColumnSpec, Row } from './types.js';
 
@@ -240,6 +241,68 @@ export class EdbStore {
     if (sqlTable === null) return 0;
     const r = this.db.prepare(`SELECT COUNT(*) AS n FROM ${quoteIdent(sqlTable)}`).get();
     return Number(r?.n ?? 0);
+  }
+
+  // -- raw SQL -----------------------------------------------------------
+
+  /**
+   * Runs ONE arbitrary statement and returns its rows.
+   *
+   * This is the payoff of keeping a workspace in a real database, and it is also
+   * the one entry point that can wreck one — so reads and writes are separated
+   * hard:
+   *
+   * **A read is enforced by SQLite, not guessed at.** `PRAGMA query_only = ON`
+   * makes the connection refuse every write for the duration. Classifying the
+   * statement by its leading keyword instead would pass
+   * `WITH x AS (...) INSERT ...` straight through, and a console is exactly
+   * where somebody types that.
+   *
+   * **A write is the caller's responsibility.** Raw SQL bypasses every rule this
+   * store enforces — the physical table name a `tables` doc points at,
+   * additive-only column reconciliation, `_extra` overflow — so a `DROP TABLE`
+   * here leaves a registered table with nothing behind it. Writes are also NOT
+   * wrapped in a transaction: a console user running `BEGIN` themselves would
+   * otherwise get "cannot start a transaction within a transaction".
+   *
+   * One statement only. `prepare` compiles the first and ignores the rest, so a
+   * caller with a script splits it with `splitStatements` and calls this per
+   * statement.
+   */
+  runSql(sql: string, opts: SqlRunOptions = {}): SqlRunResult {
+    const params = opts.params ?? [];
+    const maxRows = opts.maxRows;
+    const started = Date.now();
+
+    // `query_only` is a connection-level flag, so it MUST come back off however
+    // this exits — a throw that left it on would make every later write fail
+    // with a message pointing nowhere near the cause.
+    if (!opts.write) this.db.exec('PRAGMA query_only = ON');
+    let raw: Record<string, unknown>[];
+    try {
+      raw = this.db.prepare(sql).all(...params);
+    } finally {
+      if (!opts.write) this.db.exec('PRAGMA query_only = OFF');
+    }
+
+    const truncated = typeof maxRows === 'number' && raw.length > maxRows;
+    const kept = truncated ? raw.slice(0, maxRows) : raw;
+    // Column order comes from the first row's key order, which both drivers
+    // build from the result's column order. A statement that returned nothing
+    // reports no columns rather than inventing them — the driver seam hands over
+    // rows, not a description of the shape a query would have had.
+    const columns = kept.length > 0 ? Object.keys(kept[0]!) : [];
+    const rows = kept.map((r) => columns.map((c) => r[c]));
+
+    return {
+      columns,
+      rows,
+      // `changes()` reports the most recent statement's row count, so it is only
+      // meaningful straight after a write and only when one happened.
+      changes: opts.write ? Number(this.db.prepare('SELECT changes() AS n').get()?.n ?? 0) : null,
+      truncated,
+      elapsedMs: Date.now() - started,
+    };
   }
 
   // -- transactions ------------------------------------------------------

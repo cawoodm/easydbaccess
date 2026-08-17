@@ -6,6 +6,8 @@ export * from './filter-sql.js';
 export * from './sql-mapping.js';
 export * from './setting-key.js';
 export * from './change-scope.js';
+export * from './sql-run.js';
+export * from './sql-split.js';
 export * from './sql-driver.js';
 export * from './edb-store.js';
 export * from './array-cell.js';
