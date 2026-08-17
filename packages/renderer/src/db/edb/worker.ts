@@ -237,6 +237,23 @@ function handle(req: EdbRequest): unknown {
   }
 }
 
+/**
+ * Does this browser already hold a database called `name`?
+ *
+ * Two substrates, two places to look: a pooled database is a file in the pool's
+ * own list, and the memory fallback's only copy is its mirror.
+ *
+ * Nothing is opened. `new OpfsSAHPoolDb(path)` on an unused name CREATES that
+ * file, so probing by opening would answer yes to everything and adopt an empty
+ * database over the one the user asked for.
+ */
+async function hasDatabase(name: string): Promise<boolean> {
+  sqlite3 ??= await sqlite3InitModule();
+  const pool = await ensurePool(sqlite3);
+  if (pool) return pool.getFileNames().includes(poolPath(name));
+  return (await readMirror(name)) !== null;
+}
+
 /** The three operations that touch OPFS, and therefore cannot be synchronous. */
 async function handleAsync(req: EdbRequest): Promise<unknown> {
   switch (req.op) {
@@ -253,6 +270,8 @@ async function handleAsync(req: EdbRequest): Promise<unknown> {
       return flushNow();
     case 'export':
       return exportBytes();
+    case 'hasDatabase':
+      return hasDatabase(req.name);
     default:
       return handle(req);
   }

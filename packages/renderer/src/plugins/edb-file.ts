@@ -24,6 +24,8 @@ import { edbBridge, edbHandle, setEdbHandle } from '../db/edb/active-bridge.js';
 import { copyWorkspace } from '../db/edb/convert.js';
 import { putSnapshot, readSnapshot, snapshotInfo, SnapshotQuotaError, type SnapshotInfo } from '../db/edb/idb-snapshot.js';
 import { adoptEdbFile, buildEdbFile, chooseEdbTarget, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
+import { adoptFolderFile, clearPendingSpaceRequest, pendingSpaceRequest } from '../db/edb/space-adopt.js';
+import { spaceFileName } from '../db/edb/space-resolve.js';
 
 /**
  * The `.edb` file surface in the browser: New, Open, Save, Save As, and the
@@ -351,8 +353,37 @@ async function noticeOrphanedBrowserData(api: HostApi): Promise<void> {
   }
 }
 
+/**
+ * `?space=NAME` named a workspace this browser does not hold, and telling whether
+ * `NAME.edb` is in the user's folder needs a permission grant.
+ *
+ * Asked HERE, not during boot: `requestPermission` resolves only from a user
+ * gesture, and this dialog's button is the first gesture the page gets. Boot has
+ * already created the workspace under that name, so declining leaves a working
+ * app rather than a dead end.
+ */
+async function offerSpaceFolder(api: HostApi): Promise<void> {
+  const requested = pendingSpaceRequest();
+  if (requested === null) return;
+  // Cleared before the awaits: a second `load()` (the Plugin Manager re-emits
+  // `app:ready` on a hot install) must not ask the same question again.
+  clearPendingSpaceRequest();
+  const file = spaceFileName(requested);
+  const ok = await api.ui.dialogs.confirm(`"${requested}" is not in this browser. Look for ${file} in your workspace folder?`, 'Open workspace');
+  if (!ok) return;
+  const dir = await workspaceFolder();
+  if (!dir) return;
+  if (!(await listWorkspaceFiles(dir)).includes(file)) {
+    api.ui.dialogs.toast(`There is no ${file} in "${dir.name}".`, { kind: 'info' });
+    return;
+  }
+  // Reloads on success. A stale listing is the only way this returns.
+  await adoptFolderFile(requested);
+}
+
 export async function load(api: HostApi): Promise<void> {
   if (!supported()) return;
+  await offerSpaceFolder(api);
   await noticeOrphanedBrowserData(api);
   // Everything below is about the user's own FILE. The local database needs no
   // handle and no permission, so a tab that has not adopted a file is done here.

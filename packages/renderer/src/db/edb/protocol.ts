@@ -60,6 +60,15 @@ export type EdbRequest =
    * forced write the reload would find no mirror and start empty.
    */
   | { id: number; op: 'flush' }
+  /**
+   * Does this browser already hold a database of this name?
+   *
+   * Asked by `?space=NAME` resolution, which has to tell "a workspace this
+   * browser has under a name the OPEN database does not mention" from "a name
+   * nobody has ever used". Deliberately does NOT open the database: opening
+   * creates the pool file, which would make every answer yes.
+   */
+  | { id: number; op: 'hasDatabase'; name: string }
   | { id: number; op: 'dbName' };
 
 /** What comes back. A `changed` message is unsolicited and carries no id. */

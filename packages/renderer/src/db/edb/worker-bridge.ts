@@ -42,6 +42,13 @@ export interface EdbBridge extends EasydbStoreBridge {
    * Convert both do, because the boot reads the mirror and nothing else.
    */
   flush(): Promise<void>;
+  /**
+   * Does this browser already hold a database of that name?
+   *
+   * `?space=NAME` resolution asks before adopting anything, so a link can reach a
+   * workspace this browser has but the OPEN database has never heard of.
+   */
+  hasDatabase(name: string): Promise<boolean>;
   terminate(): void;
 }
 
@@ -90,6 +97,7 @@ export function createEdbBridge(): EdbBridge {
     restore: (name) => call<Uint8Array | null>({ op: 'restore', name }),
     importBytes: (name, bytes) => call<void>({ op: 'importBytes', name, bytes }),
     flush: () => call<void>({ op: 'flush' }),
+    hasDatabase: (name) => call<boolean>({ op: 'hasDatabase', name }),
     export: () => call<Uint8Array>({ op: 'export' }),
     find: (coll, query, limit) => call<unknown[]>({ op: 'find', coll, query, limit }),
     findOne: (coll, key) => call<unknown | null>({ op: 'findOne', coll, key }),

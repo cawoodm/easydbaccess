@@ -2,6 +2,7 @@ import type { DataStore, EventBus, HostApi, RowSourceCtx, Table } from '@easydb/
 import { createRoutedDataStore, withUniqueTableNames } from './db/index.js';
 import { createIpcDataStore } from './db/data-store-bridge.js';
 import { startEdbSession, type EdbSession } from './db/edb/session.js';
+import { adoptFolderFile, adoptLocalDb, planForMissingSpace } from './db/edb/space-adopt.js';
 import { showStorageFailure } from './chrome/storage-failure.js';
 import { createEventBus } from './events/bus.js';
 import { createRegistries, type Registries } from './plugin-host/registries.js';
@@ -140,6 +141,15 @@ async function init(): Promise<AppContext> {
     if (hit) {
       workspaceId = hit.id;
     } else {
+      // Not here — but "not in the database this tab happens to have open" is not
+      // the same as "does not exist". `<id>.edb` may be a database this browser
+      // already holds, or a file sitting in the user's workspace folder, and a
+      // link to a workspace has to be able to find it. Anything but `create`
+      // reloads and never comes back. See `db/edb/space-resolve.ts`.
+      const action = await planForMissingSpace(id);
+      if (action === 'adopt-local-db') await adoptLocalDb(id);
+      // Falls through when the listing was stale and the file has gone.
+      if (action === 'adopt-folder-file') await adoptFolderFile(id);
       const created = await store.workspaces.insert({
         id,
         name: requested,
@@ -251,10 +261,17 @@ async function init(): Promise<AppContext> {
   return { store, events, workspaceId, registries, api };
 }
 
+/**
+ * The workspace the URL asks for.
+ *
+ * `?space=` is the spelling every link in this app writes. `?workspace=` is
+ * accepted because it is what people type from memory, and a parameter that is
+ * silently ignored looks like the workspace itself failed to load.
+ */
 function readWorkspaceFromUrl(): string | null {
   if (typeof location === 'undefined') return null;
   const sp = new URLSearchParams(location.search);
-  const v = sp.get('space');
+  const v = sp.get('space') ?? sp.get('workspace');
   return v && v.trim().length > 0 ? v.trim() : null;
 }
 

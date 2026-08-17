@@ -4,6 +4,7 @@
 
 ### Features
 
+- 🪶 `?space=NAME` now finds a workspace this browser or the workspace folder already holds, instead of creating an empty one (v0.0.388)
 - 🪶 Saving with no file to save to keeps a copy in this browser, and the File menu can restore it — a browser without file access is no longer save-or-lose (v0.0.386)
 - 🪶 Run SQL against a workspace: a SQL button in the footer and `api.store.sql` for plugins. Reads by default, writes behind a checkbox (v0.0.376)
 
