@@ -49,20 +49,20 @@ export function init(api: HostApi): void {
   // on, and it is deliberately a capability check rather than a platform check.
   if (!api.store.sql) return;
 
+  // The button alone. The command palette already aggregates every header and
+  // footer button into its "Actions" group (`command-palette-dialog.ts`), so
+  // also calling `registerCommand` would list the console twice — once as
+  // "SQL", once under whatever the command was titled. Every other footer-button
+  // plugin (`edb-file`, `gist-sync`, `dump-export`, `server-sync`,
+  // `electron-db`) registers only the button for the same reason.
+  //
+  // The palette matches on label + tooltip, which is why the tooltip is worded
+  // as a phrase somebody would actually type.
   api.ui.registerFooterButton({
     id: 'sql-console:open',
     label: 'SQL',
     icon: 'terminal',
-    tooltip: 'Run SQL against this workspace',
+    tooltip: 'Run a SQL query against this workspace',
     onClick: () => void openConsole(),
-  });
-
-  api.ui.registerCommand({
-    id: 'sql-console:open',
-    title: 'Run SQL',
-    group: 'Data',
-    icon: 'terminal',
-    keywords: ['query', 'sqlite', 'select', 'console'],
-    run: () => openConsole(),
   });
 }
