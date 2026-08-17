@@ -14,6 +14,8 @@
 import { edbBridge } from './active-bridge.js';
 import { activeEdbName, setActiveEdbName } from './session.js';
 import { canPickFolder, ensureWritable, fileInFolder, listWorkspaceFiles, readBytes, rememberHandle, rememberedFolder } from './file-handle.js';
+import { readSnapshot, snapshotInfo } from './idb-snapshot.js';
+import { placeForNextBoot } from './new-file.js';
 import { decideSpace, spaceFileName, type SpaceAction } from './space-resolve.js';
 
 /**
@@ -88,6 +90,7 @@ export async function planForMissingSpace(workspaceId: string): Promise<SpaceAct
     // No bridge means Electron, which has its own file operations and no pool.
     hasLocalDb: bridge ? await bridge.hasDatabase(file) : false,
     inGrantedFolder: dir ? (await listWorkspaceFiles(dir)).includes(file) : false,
+    hasSnapshot: (await snapshotInfo(file)) !== null,
     canAskForFolder: canPickFolder(),
   });
 
@@ -106,8 +109,10 @@ async function adoptAndReload(file: string, bytes: Uint8Array | null, handle: Fi
   markTried(file);
   // Order matters: the bytes have to be in the pool before the marker points at
   // the name, or the reload opens a database that does not exist yet and the
-  // pool obligingly creates it empty.
-  if (bytes) await edbBridge()?.open(bytes, file);
+  // pool obligingly creates it empty. `placeForNextBoot` imports WITHOUT
+  // switching the live session, which `open` would do — pointless work on a page
+  // that is about to be replaced, and a store the rest of the app still holds.
+  if (bytes) await placeForNextBoot(file, bytes);
   if (handle) await rememberHandle(handle);
   setActiveEdbName(file);
   location.reload();
@@ -131,4 +136,19 @@ export async function adoptFolderFile(workspaceId: string): Promise<SpaceAction>
   const handle = dir ? await fileInFolder(dir, file, false) : null;
   if (!handle) return 'create';
   return adoptAndReload(file, await readBytes(handle), handle);
+}
+
+/**
+ * Restore the IndexedDB dump of that name, then switch to it.
+ *
+ * No handle goes with it: a dump exists precisely because there was no file to
+ * save to, so the restored workspace is still file-less and Save keeps writing
+ * another dump until the user chooses one.
+ */
+export async function adoptSnapshot(workspaceId: string): Promise<SpaceAction> {
+  const file = spaceFileName(workspaceId);
+  const bytes = await readSnapshot(file);
+  // Gone between the probe and here, or unreadable. Creating is the honest answer.
+  if (!bytes || bytes.byteLength === 0) return 'create';
+  return adoptAndReload(file, bytes, null);
 }
