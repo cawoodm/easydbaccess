@@ -22,6 +22,7 @@ import { activeEdbName, adoptedFileName, setActiveEdbName } from '../db/edb/sess
 import { createAutosavePolicy } from '../db/edb/dirty.js';
 import { edbBridge, edbHandle, setEdbHandle } from '../db/edb/active-bridge.js';
 import { copyWorkspace } from '../db/edb/convert.js';
+import { putSnapshot, readSnapshot, snapshotInfo, SnapshotQuotaError, type SnapshotInfo } from '../db/edb/idb-snapshot.js';
 import { adoptEdbFile, buildEdbFile, chooseEdbTarget, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
 
 /**
@@ -65,28 +66,42 @@ function supported(): boolean {
 export function init(api: HostApi): void {
   if (!supported()) return;
 
-  /** Writes the database to the file the user chose. Returns false when it could not. */
-  async function saveToHandle(): Promise<boolean> {
+  /** Where a save actually landed. */
+  type SaveTarget = 'file' | 'snapshot' | 'none';
+
+  /**
+   * Put the database somewhere it will survive this tab.
+   *
+   * The file, when there is one this app may write. Otherwise a raw dump into
+   * IndexedDB, which is the only durable place left — a download hands the user
+   * a file but leaves the app with nothing it can ever read back, so it is what
+   * a MANUAL save does as well, not instead.
+   *
+   * `handOver` is the difference between the two callers. A manual Save is a
+   * user asking for their file and gets the download; autosave is a timer and
+   * must never start one.
+   */
+  async function persist(handOver: boolean): Promise<SaveTarget> {
     const bridge = edbBridge();
-    if (!bridge) return false;
+    if (!bridge) return 'none';
     const bytes = await bridge.export();
     const handle = edbHandle();
-    if (!handle) {
-      // No file yet, or a browser with no picker: hand the bytes over instead of
-      // silently doing nothing.
-      downloadBytes(activeEdbName(), bytes);
-      return true;
+    if (handle) {
+      if (!(await ensureWritable(handle, true))) {
+        await api.ui.dialogs.alert('easyDBAccess may not write that file. Use Save As to choose another.', 'Save');
+        return 'none';
+      }
+      await writeBytes(handle, bytes);
+      return 'file';
     }
-    if (!(await ensureWritable(handle, true))) {
-      await api.ui.dialogs.alert('easyDBAccess may not write that file. Use Save As to choose another.', 'Save');
-      return false;
-    }
-    await writeBytes(handle, bytes);
-    return true;
+    // No file yet, or a browser with no picker.
+    await putSnapshot(activeEdbName(), bytes);
+    if (handOver) downloadBytes(activeEdbName(), bytes);
+    return 'snapshot';
   }
 
   const autosave = createAutosavePolicy({
-    save: async () => void (await saveToHandle()),
+    save: async () => void (await persist(false)),
     onError: (err) => api.ui.dialogs.toast(`Autosave failed: ${String(err)}`, { kind: 'error' }),
   });
 
@@ -103,9 +118,52 @@ export function init(api: HostApi): void {
   api.events.on('import:after', () => autosave.endBatch());
 
   async function save(): Promise<void> {
-    if (await saveToHandle()) {
-      autosave.markClean();
-      api.ui.dialogs.toast('Workspace saved', { kind: 'success' });
+    let where: SaveTarget;
+    try {
+      where = await persist(true);
+    } catch (err) {
+      // Out of room is the one failure the user can act on, and it is not a
+      // toast: a message about a save that did not happen must not vanish after
+      // seven seconds. Everything saved before this is still intact — the
+      // workspace itself is in SQLite and was never in the way.
+      const quota = err instanceof SnapshotQuotaError;
+      await api.ui.dialogs.alert(
+        quota
+          ? 'This browser is out of storage, so the copy could not be saved here. Everything you saved before it is intact. Free some space, or save this workspace to a file, and try again.'
+          : `The workspace could not be saved: ${err instanceof Error ? err.message : String(err)}`,
+        'Save',
+      );
+      return;
+    }
+    if (where === 'none') return;
+    autosave.markClean();
+    if (where === 'file') api.ui.dialogs.toast('Workspace saved', { kind: 'success' });
+    // Named rather than called "saved", because where it went decides what the
+    // user has to do next: a copy in this browser is not a copy they own.
+    else api.ui.dialogs.toast('Saved a copy in this browser, and downloaded one. Use Save As for a file this app can write.', { kind: 'success' });
+  }
+
+  /**
+   * Put the browser's copy back, and reload into it.
+   *
+   * The bytes go through the live worker's substrate, exactly as Open does with
+   * a file the user picked — this is the same operation with the blob coming
+   * from IndexedDB instead of a disk.
+   */
+  async function restoreSnapshot(info: SnapshotInfo): Promise<void> {
+    const when = new Date(info.at).toLocaleString();
+    if (!(await api.ui.dialogs.confirm(`Replace this workspace with the copy saved in this browser on ${when}? Anything changed since then is lost.`, 'Restore a copy'))) return;
+    try {
+      const bytes = await readSnapshot(info.slot);
+      if (!bytes) {
+        await api.ui.dialogs.alert('That copy is no longer in this browser.', 'Restore a copy');
+        return;
+      }
+      await placeForNextBoot(info.slot, bytes);
+      setActiveEdbName(info.slot);
+      location.reload();
+    } catch (err) {
+      await api.ui.dialogs.alert(err instanceof Error ? err.message : String(err), 'Restore a copy');
     }
   }
 
@@ -224,21 +282,27 @@ export function init(api: HostApi): void {
       const inFileMode = adoptedFileName() !== null;
       const rect = ctx?.anchor?.getBoundingClientRect();
       if (!rect) return;
+      // Looked up before the menu is drawn, because the entry is only worth
+      // offering when there is something behind it — a Restore that reports
+      // "there is no copy" is a menu item that exists to disappoint.
+      const copy = await snapshotInfo(activeEdbName());
       const picked = await AnchoredMenu.open(rect, [
         { id: 'new', label: 'New .edb file…', icon: 'note_add' },
         { id: 'open', label: 'Open .edb file…', icon: 'folder_open' },
         ...(inFileMode
           ? [
-              { id: 'save', label: canSaveInPlace() && edbHandle() ? 'Save' : 'Download a copy', icon: 'save' },
+              { id: 'save', label: canSaveInPlace() && edbHandle() ? 'Save' : 'Save a copy in this browser', icon: 'save' },
               { id: 'saveAs', label: 'Save As…', icon: 'save_as' },
               { id: 'autosave', label: `${autosave.enabled() ? 'Turn off' : 'Turn on'} autosave`, icon: 'autorenew' },
               { id: 'leave', label: 'Back to browser storage', icon: 'logout', danger: true },
             ]
           : []),
+        ...(copy ? [{ id: 'restore', label: `Restore this browser's copy (${new Date(copy.at).toLocaleString()})`, icon: 'restore' }] : []),
         ...(canPickFolder() ? [{ id: 'folder', label: 'Workspace folder…', icon: 'folder_special' }] : []),
       ]);
       if (picked === 'new') await newFile();
       else if (picked === 'open') await open();
+      else if (picked === 'restore' && copy) await restoreSnapshot(copy);
       else if (picked === 'save') await save();
       else if (picked === 'saveAs') await saveAs();
       else if (picked === 'folder') await chooseFolder();

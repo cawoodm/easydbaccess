@@ -13,6 +13,9 @@ differs is only where that database lives and which SQLite the code is bound to.
   the `opfs-sahpool` VFS: a real origin-private file that SQLite writes
   incrementally, so every `COMMIT` is durable. A browser that cannot install the
   pool falls back to an in-memory database mirrored to OPFS on a debounce.
+  IndexedDB is not a store here at all — it holds a raw dump of the database,
+  written on Save when there is no file to save to, and read back only by
+  handing it to SQLite. See *The IndexedDB dump* below.
 - **Electron** — the renderer talks over IPC to a `node:sqlite` store in the
   **main process**, and the workspace is a `.db` file on disk.
 
@@ -407,25 +410,57 @@ A map from "thing" to its actual storage location on one device — useful when
 reasoning about what `gist-sync` (see `SYNCH.md`) does and doesn't carry
 across devices, since it only ever reads from a subset of this list.
 
-The table below is the **browser** layout. Under Electron every IndexedDB row
-becomes SQL in the open `.db` file instead (`rows` → one real SQL table per
-logical table, everything else — `tables` included — → `_easydb`), while the
-three `localStorage` entries stay exactly as they are — user-layer settings,
-the secrets store, and the last-active workspace id are device-local either
-way and do not travel with the `.db` file.
+**There is one layout now, browser and desktop alike** — the same `EdbStore`
+over the same `.edb` format. The only difference is where the SQLite file sits:
+the `opfs-sahpool` VFS in the browser, the `.db` the user opened on the desktop.
+The three `localStorage` entries stay device-local either way and do not travel
+with the file.
 
 | Data | Where stored today |
 |---|---|
-| Table fields (`name`, `title`, `columns`, `view`, `windowGeometry`, `sortColumn`/`sortAsc`, `filters`, `labelColumn`, `deletedColumns`, `readonly`, `info`, `source`, `origin`) | IndexedDB (`easydb`) → `tables` |
-| Row data (`row.data`) | IndexedDB → `rows` |
-| View templates | IndexedDB → `viewTemplates` |
-| View instances (incl. their own `windowGeometry`) | IndexedDB → `viewInstances` |
-| Workspace record (`title`, `pluginUrls`, `id`, `name`) | IndexedDB → `workspaces` |
-| Workspace-layer settings (`${pluginId}:${key}`, e.g. `user`/`gist_id`, `server-sync:url`, non-token `datasette:*`) | IndexedDB → `settings` |
-| Installed third-party plugin state + cached module body, and toggled built-ins (`builtin:<id>`) | IndexedDB → `plugins` |
+| Row data (`row.data`) | One REAL SQL table per logical table — a column per `ColumnSpec`, overflow in `_extra` |
+| Table fields (`name`, `title`, `columns`, `view`, `windowGeometry`, `sortColumn`/`sortAsc`, `filters`, `labelColumn`, `deletedColumns`, `readonly`, `info`, `source`, `origin`) | `_easydb` → `coll='tables'` |
+| View templates | `_easydb` → `coll='viewTemplates'` |
+| View instances (incl. their own `windowGeometry`) | `_easydb` → `coll='viewInstances'` |
+| Workspace record (`title`, `pluginUrls`, `id`, `name`) | `_easydb` → `coll='workspaces'` |
+| Workspace-layer settings (`${pluginId}:${key}`, e.g. `user`/`gist_id`, `server-sync:url`, non-token `datasette:*`) | `_easydb` → `coll='settings'`, keyed `<workspaceId>::<name>` |
+| Installed third-party plugin state + cached module body, and toggled built-ins (`builtin:<id>`) | `_easydb` → `coll='plugins'` |
 | User-layer settings (any field promoted to `scope: 'user'`, e.g. `gist_token`) | `localStorage` blob `/easydbaccess/settings.json` |
 | Secrets referenced via `${secret:name}` | `localStorage` blob `/easydbaccess/secrets.txt` |
 | Last-active workspace id | `localStorage` key `eda:lastWorkspaceId` |
+| The remembered workspace folder / file handle | IndexedDB `easydb-edb-handles` — handles only, never data |
+| A Save with no file to save to | IndexedDB `easydb-snapshots` → one raw blob per `.edb` name (see below) |
+
+### The IndexedDB dump
+
+IndexedDB is **not a store** here and nothing queries it. It holds one thing:
+the bytes of the SQLite database, written on Save when there is no file to save
+to — a browser with no FileSystem Access API, or a user who has not granted a
+folder. Without it such a save could only produce a download, and a download is
+a file the app can never read back.
+
+`db/edb/idb-snapshot.ts` is the whole of it: database `easydb-snapshots`, one
+object store `snapshots`, one record per slot (the `.edb` name), holding
+`{slot, bytes: Blob, byteLength, at, formatVersion}` and nothing else. `put`
+replaces, so writing to it cannot make it grow. The blob is a `Blob` rather than
+an `ArrayBuffer` because Firefox and Safari store one as a file reference
+instead of inline in the record, which is what keeps a large workspace clear of
+the structured-clone size ceiling.
+
+Two rules it exists to keep:
+
+- **Resolve on the transaction's `oncomplete`, never the request's `onsuccess`.**
+  A request succeeding does not mean the data committed, and the failure that
+  matters — a full origin — aborts the transaction. A safety net that reports a
+  save it did not make is worse than none.
+- **The way back in is `importBytes`, the same door a file uses.** Restoring
+  hands the blob to the live worker, which puts it in the pool and lets the
+  reload open it. Nothing reads a workspace field out of IndexedDB, and the
+  moment something did there would be two stores again.
+
+Manual Save also downloads, because the copy in the browser is not a copy the
+user owns. Autosave does not — it is a timer, and a timer must never start a
+download.
 
 Cross-reference with `SYNCH.md`: `gist-sync` only ever touches the `tables`,
 `rows`, `viewTemplates`, `viewInstances` collections and the workspace-layer

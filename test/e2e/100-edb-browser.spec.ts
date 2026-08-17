@@ -98,7 +98,7 @@ async function reload(page: Page): Promise<void> {
 async function downloadViaSave(page: Page, to: string): Promise<Buffer> {
   const download = page.waitForEvent('download');
   await page.locator('app-shell').getByRole('button', { name: /File/ }).click();
-  await page.getByRole('menuitem', { name: /Download a copy/ }).click();
+  await page.getByRole('menuitem', { name: /Save a copy in this browser/ }).click();
   await (await download).saveAs(to);
   return readFileSync(to);
 }
@@ -119,10 +119,11 @@ test.describe('browser .edb storage', () => {
     expect(await opfsEntries(page)).toContain('.easydb-sahpool');
 
     // And IndexedDB holds no database at all. The workspace lived in one called
-    // `easydb` until the SQLite flip; `easydb-file-handles` only ever appears
-    // once a real file handle has been remembered, which no picker here can do.
+    // `easydb` until the SQLite flip; `easydb-edb-handles` only appears once a
+    // real file handle has been remembered, which no picker here can do, and
+    // `easydb-snapshots` only once the user has saved with no file to save to.
     const dbNames = await page.evaluate(async () => ((await indexedDB.databases?.()) ?? []).map((d) => d.name));
-    expect(dbNames).not.toContain('easydb');
+    expect(dbNames).toEqual([]);
   });
 
   test('a reload restores the workspace, with nothing saved to a file', async ({ page }, testInfo) => {
@@ -206,6 +207,89 @@ test.describe('browser .edb storage', () => {
     } finally {
       db.close();
     }
+  });
+
+  test('a Save with no file to save to dumps the database into IndexedDB, and can be restored from it', async ({ page }, testInfo) => {
+    const edbName = `${testInfo.testId}.edb`;
+    await bootFileBacked(page, edbName, `edb-${testInfo.testId}`);
+
+    const tableId = await createTable(page, 'parts', [
+      { field: 'part', type: 'string', renderer: 'link' },
+      { field: 'qty', type: 'number' },
+    ]);
+    await addRow(page, tableId, { part: 'bolt', qty: 4 });
+    await waitForPanel(page, tableId);
+
+    // Nothing yet: the dump is written on Save, not as the workspace goes.
+    expect(await page.evaluate(async () => ((await indexedDB.databases?.()) ?? []).map((d) => d.name))).not.toContain('easydb-snapshots');
+
+    await downloadViaSave(page, testInfo.outputPath('saved.edb'));
+
+    // One record, keyed by the .edb name, holding the whole database as a blob
+    // and nothing else. Read here through the raw IndexedDB API on purpose:
+    // this is the shape the app promises, and the app must be the only thing
+    // that ever needs to know it.
+    const record = await page.evaluate(
+      (slot) =>
+        new Promise<{ keys: string[]; stores: string[]; slot: string; byteLength: number; type: string; fields: string[] } | null>((resolve, reject) => {
+          const req = indexedDB.open('easydb-snapshots');
+          req.onerror = () => reject(req.error);
+          req.onsuccess = () => {
+            const db = req.result;
+            const stores = [...db.objectStoreNames];
+            const tx = db.transaction('snapshots', 'readonly');
+            const store = tx.objectStore('snapshots');
+            const all = store.getAll();
+            const keys = store.getAllKeys();
+            tx.oncomplete = () => {
+              const rec = all.result[0] as { slot: string; bytes: Blob; byteLength: number } | undefined;
+              db.close();
+              resolve(rec ? { keys: keys.result.map(String), stores, slot: rec.slot, byteLength: rec.byteLength, type: rec.bytes.type, fields: Object.keys(rec).sort() } : null);
+            };
+            tx.onerror = () => reject(tx.error);
+          };
+        }),
+      edbName,
+    );
+    expect(record).not.toBeNull();
+    expect(record!.stores).toEqual(['snapshots']);
+    expect(record!.keys).toEqual([edbName]);
+    expect(record!.slot).toBe(edbName);
+    expect(record!.type).toBe('application/x-sqlite3');
+    // A SQLite file, not a JSON dump of the workspace — the whole point of
+    // calling this a raw copy rather than a store.
+    expect(record!.byteLength).toBeGreaterThan(1024);
+    expect(record!.fields).toEqual(['at', 'byteLength', 'bytes', 'formatVersion', 'slot']);
+
+    // Change the workspace AFTER the save, so restoring has something to undo.
+    await addRow(page, tableId, { part: 'nut', qty: 9 });
+    await expect
+      .poll(
+        async () =>
+          (await page.evaluate(async (id) => (window as unknown as { __easydb: { store: { rows(i: string): { find(): Promise<unknown[]> } } } }).__easydb.store.rows(id).find(), tableId)).length,
+      )
+      .toBe(2);
+
+    await page.locator('app-shell').getByRole('button', { name: /File/ }).click();
+    await page.getByRole('menuitem', { name: /Restore this browser's copy/ }).click();
+    // The restore reloads, and the wait has to be for THAT load — `__easydb` is
+    // already true on the page being replaced, so waiting on it alone would read
+    // the pre-restore workspace and pass for the wrong reason.
+    const restored = page.waitForEvent('load');
+    await page.locator('host-dialogs').getByRole('button', { name: 'Yes', exact: true }).click();
+    await restored;
+    await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
+
+    // Back to the one row that was there when Save ran. The blob went into
+    // SQLite to be read — nothing queried IndexedDB for it.
+    const rows = await page.evaluate(async () => {
+      const store = (
+        window as unknown as { __easydb: { store: { tables: { find(): Promise<{ id: string; name: string }[]> }; rows(id: string): { find(): Promise<{ data: Record<string, unknown> }[]> } } } }
+      ).__easydb.store;
+      const parts = (await store.tables.find()).find((t) => t.name === 'parts')!;
+      return store.rows(parts.id).find();
+    });
+    expect(byPart(rows)).toEqual([{ part: 'bolt', qty: 4 }]);
   });
 });
 

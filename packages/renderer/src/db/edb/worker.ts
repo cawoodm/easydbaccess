@@ -131,14 +131,32 @@ async function openInMemory(bytes: Uint8Array | null, name: string): Promise<voi
 }
 
 /**
- * Place a database under `name` without touching the open one.
+ * Place a database under `name`, for the next boot to open.
  *
  * The pool is the only place a boot looks, and only this worker can hold it —
  * hence the op. On the memory fallback the mirror plays the same role, so the
  * bytes go there instead.
+ *
+ * **Importing over the database this worker has OPEN closes it first**, and the
+ * caller must then reload. An open connection holds cached pages and a journal
+ * for the file it was given; leaving it open means SQLite writing those back
+ * over the bytes just imported, so the import appeared to work and the reload
+ * came up on the OLD database. Restoring a copy of the workspace you are in is
+ * exactly that case, and it is the common one. After this the worker has no
+ * store, so every later call fails loudly rather than answering from a database
+ * that is no longer the one on disk.
  */
 async function importBytes(name: string, bytes: Uint8Array): Promise<void> {
   sqlite3 ??= await sqlite3InitModule();
+  if (name === dbName) {
+    driver?.close();
+    mirror?.dispose();
+    driver = null;
+    store = null;
+    db = null;
+    mirror = null;
+    pooled = null;
+  }
   const pool = await ensurePool(sqlite3);
   if (pool) {
     await pool.importDb(poolPath(name), bytes);
