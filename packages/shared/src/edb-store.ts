@@ -91,7 +91,7 @@ function uuidV4Sql(): string {
     substr(hex(randomblob(4)), 1, 8) || '-' ||
     substr(hex(randomblob(2)), 1, 4) || '-4' ||
     substr(hex(randomblob(2)), 2, 3) || '-' ||
-    substr('89ab', abs(random()) % 4 + 1, 1) ||
+    substr('89ab', (random() & 3) + 1, 1) ||
     substr(hex(randomblob(2)), 2, 3) || '-' ||
     hex(randomblob(6))
   )`;
@@ -386,7 +386,11 @@ export class EdbStore {
       // physical SQL table with reconciled columns and a name uniqued against
       // everything already in the file.
       this.writeTableNoTx('insert', { ...this.publicTableDoc(stored), id: tableId, workspaceId: to, updatedAt: Date.now() });
-      this.copyRowsNoTx(String(stored[SQL_TABLE_KEY]), String(this.getRaw('tables', tableId)?.[SQL_TABLE_KEY]));
+      const target = this.getRaw('tables', tableId)?.[SQL_TABLE_KEY];
+      // Naming the real fault: without this the miss becomes the string
+      // "undefined" and then a baffling `no such table: undefined`.
+      if (typeof target !== 'string') throw new Error(`EdbStore.cloneWorkspace: the copy of table "${oldId}" has no physical table`);
+      this.copyRowsNoTx(String(stored[SQL_TABLE_KEY]), target);
     }
 
     const templateIdMap = new Map<string, string>();
@@ -479,11 +483,25 @@ export class EdbStore {
     if (!opts.write) this.db.exec('PRAGMA query_only = ON');
     let raw: Record<string, unknown>[];
     try {
-      raw = this.db.prepare(sql).all(...params);
+      const stmt = this.db.prepare(sql);
+      // Stop reading at the cap rather than reading everything and slicing:
+      // `SELECT * FROM` a 609k-row table would otherwise build 609k JS objects
+      // to keep 500. One row past the cap is enough to know it was truncated.
+      if (typeof maxRows === 'number' && stmt.iterate) {
+        raw = [];
+        for (const row of stmt.iterate(...params)) {
+          raw.push(row);
+          if (raw.length > maxRows) break;
+        }
+      } else {
+        raw = stmt.all(...params);
+      }
     } finally {
       if (!opts.write) this.db.exec('PRAGMA query_only = OFF');
     }
 
+    // The read above stops ONE row past the cap, so an over-long result is
+    // recognisable without having fetched the rest of it.
     const truncated = typeof maxRows === 'number' && raw.length > maxRows;
     const kept = truncated ? raw.slice(0, maxRows) : raw;
     // Column order comes from the first row's key order, which both drivers
@@ -496,9 +514,11 @@ export class EdbStore {
     return {
       columns,
       rows,
-      // `changes()` reports the most recent statement's row count, so it is only
-      // meaningful straight after a write and only when one happened.
-      changes: opts.write ? Number(this.db.prepare('SELECT changes() AS n').get()?.n ?? 0) : null,
+      // `changes()` reports the most recently COMPLETED write, and a SELECT does
+      // not reset it — so asking after a statement that returned rows would
+      // repeat the previous write's count, and a caller summing a script would
+      // double it. Only a write that produced no result set reports one.
+      changes: opts.write && columns.length === 0 ? Number(this.db.prepare('SELECT changes() AS n').get()?.n ?? 0) : null,
       truncated,
       elapsedMs: Date.now() - started,
     };

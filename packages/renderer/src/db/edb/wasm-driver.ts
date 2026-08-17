@@ -23,7 +23,15 @@ type Bindable = string | number | bigint | null | Uint8Array;
  * same INSERT thousands of times — compiling it afresh each time is pure waste.
  * A cached statement carries state from its last use, so every entry point
  * resets it before binding.
+ *
+ * **The cache is bounded.** It was safe unbounded while every statement came
+ * from `EdbStore`'s fixed vocabulary, but the SQL console now feeds it whatever
+ * a user types, and each distinct statement would otherwise be compiled and
+ * retained for the life of the worker. Eviction is oldest-first, which suits
+ * the access pattern: the store's hot statements are re-prepared constantly and
+ * keep re-entering the cache, while a one-off console query ages out.
  */
+const MAX_CACHED_STATEMENTS = 64;
 export function wasmDriver(sqlite3: Sqlite3Static, db: Database): SqlDriver & { export(): Uint8Array; close(): void } {
   const cache = new Map<string, ReturnType<Database['prepare']>>();
 
@@ -31,6 +39,14 @@ export function wasmDriver(sqlite3: Sqlite3Static, db: Database): SqlDriver & { 
     let stmt = cache.get(sql);
     if (!stmt) {
       stmt = db.prepare(sql);
+      if (cache.size >= MAX_CACHED_STATEMENTS) {
+        // Map iterates in insertion order, so the first key is the oldest.
+        const oldest = cache.keys().next();
+        if (!oldest.done) {
+          cache.get(oldest.value)?.finalize();
+          cache.delete(oldest.value);
+        }
+      }
       cache.set(sql, stmt);
     } else {
       stmt.reset(true);
@@ -71,6 +87,17 @@ export function wasmDriver(sqlite3: Sqlite3Static, db: Database): SqlDriver & { 
           bind(stmt, params);
           stmt.step();
           stmt.reset(true);
+        },
+        *iterate(...params: unknown[]) {
+          const stmt = stmtFor(sql);
+          bind(stmt, params);
+          try {
+            while (stmt.step()) yield stmt.get({}) as Record<string, unknown>;
+          } finally {
+            // A caller that stops early leaves the statement mid-scan, and the
+            // cache would hand the next caller that same position.
+            stmt.reset(true);
+          }
         },
       };
     },

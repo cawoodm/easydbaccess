@@ -133,3 +133,55 @@ describe('writing, when the caller asks for it', () => {
     expect(res.rows).toEqual([['nut']]);
   });
 });
+
+describe('the row cap is a fetch cap, not a render cap', () => {
+  it('stops reading at the cap instead of materialising the whole result', () => {
+    // Proven by counting what the driver was asked for: `all()` would pull every
+    // row and slice after. A 609k-row table is the case this protects.
+    let iterated = 0;
+    const counting = {
+      exec: (sql: string) => driver.exec(sql),
+      prepare: (sql: string) => {
+        const inner = driver.prepare(sql);
+        return {
+          get: (...p: unknown[]) => inner.get(...p),
+          all: (...p: unknown[]) => inner.all(...p),
+          run: (...p: unknown[]) => inner.run(...p),
+          *iterate(...p: unknown[]) {
+            for (const row of inner.iterate!(...p)) {
+              iterated++;
+              yield row;
+            }
+          },
+        };
+      },
+    };
+    const counted = new EdbStore(counting);
+    counted.insert('tables', table({ id: 'big', name: 'Big' }));
+    counted.bulkInsert(
+      'rows',
+      Array.from({ length: 50 }, (_, i) => row(`b${i}`, { name: `n${i}` }, 'big')),
+    );
+
+    iterated = 0;
+    const res = counted.runSql('SELECT * FROM "Big"', { maxRows: 5 });
+    expect(res.rows).toHaveLength(5);
+    expect(res.truncated).toBe(true);
+    // One past the cap is what makes `truncated` knowable; anything more is waste.
+    expect(iterated).toBe(6);
+  });
+});
+
+describe('changes(), across a script', () => {
+  it('reports nothing for a SELECT that follows a write', () => {
+    // SQLite does not reset `changes()` on a SELECT, so reporting it whenever
+    // `write` was asked for made a caller summing a script double-count.
+    store.runSql(`UPDATE "Parts" SET qty = 0`, { write: true });
+    const read = store.runSql(`SELECT name FROM "Parts"`, { write: true });
+    expect(read.changes).toBeNull();
+  });
+
+  it('still reports the count for the write itself', () => {
+    expect(store.runSql(`UPDATE "Parts" SET qty = 1`, { write: true }).changes).toBe(2);
+  });
+});

@@ -69,8 +69,10 @@ export type EdbResponse =
    */
   | { warning: string };
 
-/** Collections whose writes should be announced as row changes scoped to a table. */
-export const ROW_COLLECTION = 'rows';
+/**
+ * `ROW_COLLECTION` used to live here. It is now in `@easydb/shared`
+ * (`change-scope.ts`), beside the rule that reads it, so the two cannot drift.
+ */
 
 /**
  * One request minus the id the bridge assigns.

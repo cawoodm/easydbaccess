@@ -208,3 +208,17 @@ describe('cloneWorkspace', () => {
     expect((store.find('rows', { tableId: copiedId }) as Row[])[0]!.data).toHaveProperty('name');
   });
 });
+
+describe('a clone keeps what other things bind to', () => {
+  beforeEach(() => {
+    seedWorkspace('src', { tables: 1, rows: 2 });
+  });
+
+  it('keeps the logical table name \u2014 projections and views bind BY NAME', () => {
+    // Only the PHYSICAL name (`_sqlTable`) is uniqued. If the logical name moved,
+    // every name-bound projection in the copy would silently resolve to nothing.
+    store.cloneWorkspace({ from: 'src', to: 'copy', name: 'Copy', mode: 'all' });
+    const copied = store.find('tables', { workspaceId: 'copy' }) as Table[];
+    expect(copied.map((t) => t.name)).toEqual(['Parts0']);
+  });
+});

@@ -100,3 +100,67 @@ describe('EdbStore on sqlite-wasm', () => {
     driver.close();
   });
 });
+
+/**
+ * The SQL surface on the binding the browser actually ships.
+ *
+ * `edb-sql.test.ts` proves all of this against `node:sqlite`; none of it was
+ * exercised through the WASM shim, which is the one carrying the statement
+ * cache and its own `iterate` implementation.
+ */
+describe('raw SQL through the WASM driver', () => {
+  function seeded() {
+    const { driver, store } = freshStore();
+    store.insert('tables', { id: 't1', workspaceId: 'w1', name: 'Parts', columns: COLUMNS, updatedAt: 1 });
+    store.bulkInsert(
+      'rows',
+      Array.from({ length: 20 }, (_, i) => ({ id: `r${i}`, tableId: 't1', data: { name: `p${i}`, qty: i }, updatedAt: 1 })),
+    );
+    return { driver, store };
+  }
+
+  it('reads rows back', () => {
+    const { store } = seeded();
+    expect(store.runSql(`SELECT COUNT(*) AS n FROM "Parts"`).rows).toEqual([[20]]);
+  });
+
+  it('enforces read-only through query_only, CTE and all', () => {
+    const { store } = seeded();
+    expect(() => store.runSql(`DELETE FROM "Parts"`)).toThrow();
+    expect(() => store.runSql(`WITH d AS (SELECT _id FROM "Parts") DELETE FROM "Parts" WHERE _id IN (SELECT _id FROM d)`)).toThrow();
+    expect(store.countRowsIn('t1')).toBe(20);
+  });
+
+  it('leaves the connection writable after a refused write', () => {
+    const { store } = seeded();
+    expect(() => store.runSql(`DELETE FROM "Parts"`)).toThrow();
+    expect(() => store.insert('rows', { id: 'x', tableId: 't1', data: { name: 'ok' }, updatedAt: 1 })).not.toThrow();
+  });
+
+  it('caps the read and reports truncation', () => {
+    const { store } = seeded();
+    const res = store.runSql(`SELECT name FROM "Parts"`, { maxRows: 5 });
+    expect(res.rows).toHaveLength(5);
+    expect(res.truncated).toBe(true);
+  });
+
+  it('resets a cached statement that a capped read stopped mid-scan', () => {
+    // The cache hands the same compiled statement to the next caller, so an
+    // early `break` that left it part-way through would silently return the
+    // remainder rather than starting again.
+    const { store } = seeded();
+    expect(store.runSql(`SELECT name FROM "Parts"`, { maxRows: 5 }).rows).toHaveLength(5);
+    expect(store.runSql(`SELECT name FROM "Parts"`, { maxRows: 5 }).rows[0]).toEqual(['p0']);
+    expect(store.runSql(`SELECT name FROM "Parts"`).rows).toHaveLength(20);
+  });
+
+  it('writes when asked, and clones a workspace in SQL', () => {
+    const { store } = seeded();
+    expect(store.runSql(`UPDATE "Parts" SET qty = 0`, { write: true }).changes).toBe(20);
+    store.upsert('workspaces', { id: 'w1', name: 'w1', createdAt: 1, pluginUrls: [] });
+    store.cloneWorkspace({ from: 'w1', to: 'w2', name: 'W2', mode: 'all' });
+    // The clone's INSERT ... SELECT and its SQL-side UUID have to work on this
+    // binding too, not just on node:sqlite.
+    expect(store.countWorkspaceContents('w2', { countRows: true })).toMatchObject({ tables: 1, rows: 20 });
+  });
+});

@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 17 Aug 2026
+
+### Features
+
+- 🪶 Run SQL against a workspace: a SQL button in the footer and `api.store.sql` for plugins. Reads by default, writes behind a checkbox (v0.0.376)
+
+### Bugs
+
+- 🐛 Deleting or editing rows in one table no longer makes every other open grid re-read itself — on the desktop that happened on every write (v0.0.375)
+
 ## 14 Aug 2026
 
 ### Features

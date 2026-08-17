@@ -183,10 +183,15 @@ export class SqlConsoleDialog extends LitElement {
     let changes = 0;
     let elapsedMs = 0;
     let last: SqlRunResult | null = null;
+    let at = 0;
     try {
-      for (const statement of statements) {
+      for (const [index, statement] of statements.entries()) {
+        at = index;
         const res = await sql.run(statement.sql, { write: this.allowWrites, maxRows: MAX_ROWS });
         elapsedMs += res.elapsedMs;
+        // `runSql` reports `changes` only for a statement that wrote and
+        // returned no rows, so this cannot double-count a SELECT that follows a
+        // write — see `EdbStore.runSql`.
         changes += res.changes ?? 0;
         // The grid shows the last statement that actually produced rows, so a
         // script ending in a write still displays the SELECT before it.
@@ -194,9 +199,15 @@ export class SqlConsoleDialog extends LitElement {
       }
       this.summary = { statements: statements.length, changes, elapsedMs, result: last };
     } catch (err) {
-      // Which statement failed matters when a script is half-applied — the
-      // earlier ones have already run and are not rolled back.
-      this.errorMsg = err instanceof Error ? err.message : String(err);
+      // WHICH statement failed matters when a script is half-applied: the ones
+      // before it have already run and are not rolled back. The line number
+      // comes from the slice's offset into the original text, so it points at
+      // what the user typed rather than at statement 3 of something they have
+      // to count themselves.
+      const failed = statements[at];
+      const line = failed ? this.sql.slice(0, failed.offset).split('\n').length : 0;
+      const where = statements.length > 1 && failed ? `Statement ${at + 1} of ${statements.length}, line ${line}:\n` : '';
+      this.errorMsg = `${where}${err instanceof Error ? err.message : String(err)}`;
       this.summary = null;
     } finally {
       this.busy = false;
