@@ -21,9 +21,8 @@ import {
 import { activeEdbName, adoptedFileName, setActiveEdbName } from '../db/edb/session.js';
 import { createAutosavePolicy } from '../db/edb/dirty.js';
 import { edbBridge, edbHandle, setEdbHandle } from '../db/edb/active-bridge.js';
-import { createEdbBridge } from '../db/edb/worker-bridge.js';
 import { copyWorkspace } from '../db/edb/convert.js';
-import { adoptEdbFile, buildEdbFile, chooseEdbTarget, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
+import { adoptEdbFile, buildEdbFile, chooseEdbTarget, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
 
 /**
  * The `.edb` file surface in the browser: New, Open, Save, Save As, and the
@@ -140,23 +139,6 @@ export function init(api: HostApi): void {
     location.reload();
   }
 
-  /**
-   * Put an opened file's bytes where the next boot will find them.
-   *
-   * The boot reads the OPFS mirror and never the user's file, because reading the
-   * file needs a permission gesture no boot sequence has. So Open fills a
-   * throwaway worker and forces its mirror out before it reloads.
-   */
-  async function seedFromBytes(name: string, bytes: Uint8Array): Promise<void> {
-    const bridge = createEdbBridge();
-    try {
-      await bridge.open(bytes, name);
-      await bridge.flush();
-    } finally {
-      bridge.terminate();
-    }
-  }
-
   /** Copy this workspace into a new file's store, and say what travelled. */
   async function copyInto(store: DataStore, workspaceId: string): Promise<void> {
     const result = await copyWorkspace(api.store, store, workspaceId);
@@ -191,7 +173,10 @@ export function init(api: HostApi): void {
     }
     picked ??= await pickFileToOpen();
     if (!picked) return;
-    await seedFromBytes(picked.name, picked.bytes);
+    // The boot never reads the user's file — that would need a permission
+    // gesture no boot sequence has — so the bytes go into this tab's own
+    // substrate first, and the reload finds them there.
+    await placeForNextBoot(picked.name, picked.bytes);
     await adopt({ name: picked.name, handle: picked.handle }, `Opening "${picked.name}". The page will reload.`);
   }
 

@@ -37,9 +37,9 @@ function canUseFileStorage(): boolean {
 
 /**
  * Open a workspace by RELOADING with `?space=<name>`. A reload is the cleanest
- * cut: Dexie collections, panel windows and the plugin host all bind to one
- * workspaceId at boot, so swapping it live would mean tearing down every panel
- * and rebinding every subscription.
+ * cut: the store's collections, panel windows and the plugin host all bind to
+ * one workspaceId at boot, so swapping it live would mean tearing down every
+ * panel and rebinding every subscription.
  */
 export function openWorkspace(name: string): void {
   const sp = new URLSearchParams(location.search);

@@ -167,6 +167,29 @@ export async function chooseSimpleStorage(page: Page): Promise<void> {
     .click();
 }
 
+/**
+ * Waits until the built-in view templates have finished seeding.
+ *
+ * `plugins/views.ts`'s `seedDefaults` walks its four built-ins one at a time,
+ * and each one is several store round trips. Opening the Views dialog before it
+ * finishes shows a list that is short and then never grows — the dialog reads
+ * the templates once, when it opens. Under Dexie the seeding was over before a
+ * test could get there.
+ */
+export async function waitForViewTemplates(page: Page, count = 4) {
+  await page.waitForFunction(
+    async (n) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      if (!ctx) return false;
+      const all = (await ctx.store.viewTemplates.find({ workspaceId: ctx.workspaceId })) as Array<{ builtin?: boolean }>;
+      return all.filter((t) => t.builtin).length >= n;
+    },
+    count,
+    { timeout: 20_000 },
+  );
+}
+
 /** Returns the jsPanel DOM id derived from a table id (mirrors cssSafe()). */
 export function panelDomId(tableId: string): string {
   return `panel-${tableId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
@@ -184,13 +207,48 @@ export function viewInstanceIdOf(panelId: string): string {
 }
 
 /**
- * Waits until the panel for a given table is mounted in the DOM.
+ * Waits until the panel for a given table is mounted AND its grid has settled.
  *
  * `state: 'attached'`, not Playwright's default `'visible'`: a panel that
  * boots (or is driven) minimized is `display:none` in the shell — a
  * deliberate change from jsPanel's old off-screen `left:-9999` parking (see
  * panel-shell.ts) — so it would never satisfy a visibility wait.
+ *
+ * The settle half is the part that matters now. A panel attaches BEFORE its
+ * `<data-table>` has bound to the store and read its first rows, and every read
+ * is a round trip to the SQLite worker. Anything a test does in that gap races
+ * the grid's own first pass: a click lands on a cell the next render replaces,
+ * so the event's `composedPath()` runs out in a detached subtree and whatever
+ * reads the click's context (`commandlets`' `$TABLE`, for one) finds nothing;
+ * a drag reads a column width that a re-render then overwrites; a
+ * `locator.all()` snapshots a `<tbody>` that has not been filled in yet. Under
+ * Dexie the first read resolved fast enough that the gap rarely opened.
+ *
+ * Settled means bound, and then unchanged — same row count, same load
+ * generation — for a beat. A minimized panel mounts no grid at all, which
+ * counts as settled: there is nothing to wait for.
  */
 export async function waitForPanel(page: Page, tableId: string) {
-  await page.locator(`#${panelDomId(tableId)}`).waitFor({ state: 'attached' });
+  const domId = panelDomId(tableId);
+  await page.locator(`#${domId}`).waitFor({ state: 'attached' });
+  await page.waitForFunction(
+    (pid) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dt = document.querySelector(`#${pid} data-table`) as any;
+      if (!dt) return true;
+      if (!dt.boundKey) return false;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const w = window as any;
+      const seen: Record<string, { key: string; at: number }> = (w.__gridSettle ??= {});
+      const key = `${dt.rows?.length ?? -1}|${dt.loadGeneration ?? -1}|${dt.loading ? 1 : 0}`;
+      const prev = seen[pid];
+      if (!prev || prev.key !== key) {
+        seen[pid] = { key, at: performance.now() };
+        return false;
+      }
+      return performance.now() - prev.at > 150;
+    },
+    domId,
+    { timeout: 20_000 },
+  );
 }

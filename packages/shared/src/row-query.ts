@@ -15,8 +15,10 @@
  * So this is deliberately expressed as a QUERY rather than a window over a
  * fetched array. It has to survive three different backends without changing
  * meaning:
- *   - the Electron SQLite store, where it becomes WHERE / ORDER BY / LIMIT;
- *   - Dexie in the browser, where the existing in-memory matcher applies it;
+ *   - the SQLite store, where it becomes WHERE / ORDER BY / LIMIT — the same
+ *     store on the desktop and in the browser;
+ *   - the in-memory matcher, which finishes whatever the store reported it
+ *     could not express (a computed or `array` column);
  *   - HTTP — the sync server, or a Datasette instance, where it becomes query
  *     parameters.
  *
@@ -136,7 +138,8 @@ export type RowPage = QueryPage<Row>;
  * default and this is what the refresh icon asks for.
  *
  * Deliberately says nothing about HOW: `GROUP BY` in SQLite, a facet query at a
- * Datasette instance, a scan in Dexie. The caller must not be able to tell which.
+ * Datasette instance, a scan over rows already in hand. The caller must not be
+ * able to tell which.
  */
 export interface DistinctQuery {
   /** The field whose values are wanted. */

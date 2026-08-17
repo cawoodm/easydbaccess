@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { DatabaseSync } from 'node:sqlite';
-import { writeFileSync } from 'node:fs';
-import { addRow, createTable } from './helpers.js';
+import { readFileSync } from 'node:fs';
+import { addRow, createTable, waitForPanel } from './helpers.js';
 
 /**
  * The browser's file-backed mode: a workspace kept in a real SQLite `.edb`.
@@ -10,13 +10,22 @@ import { addRow, createTable } from './helpers.js';
  * one. Two ways round it:
  *
  * 1. Most tests set the marker `localStorage` key the picker would have written,
- *    then exercise everything downstream — worker, store, OPFS mirror, reload.
- * 2. The conversion test hides `showSaveFilePicker`, which is what a browser
- *    without the FileSystem API looks like. The plugin then takes its download
- *    path, and the whole menu flow runs for real.
+ *    then exercise everything downstream — worker, store, OPFS pool, reload.
+ * 2. The rest hide `showSaveFilePicker`, which is what a browser without the
+ *    FileSystem API looks like. The plugin then takes its download path, and the
+ *    whole menu flow runs for real.
  *
  * Two tests open the produced bytes in **Node's** SQLite. That is the point of
  * the feature, and the assertion goes nowhere near the app's own code.
+ *
+ * There is no mirror any more. The database is a file in the `opfs-sahpool`
+ * VFS, so SQLite writes its pages there as it goes and every COMMIT is already
+ * durable — nothing is serialised, debounced or flushed on the way to storage.
+ * That is why a reload needs no waiting here, and why the pool's files are
+ * opaque: they are a slab the VFS manages, not a `.edb` sitting in OPFS under a
+ * readable name. The way OUT of the pool is `export`, which is what the File
+ * menu's Save does — so the "these bytes are a real database" test now goes
+ * through the menu instead of reading a mirror file.
  */
 
 /** The key `db/edb/session.ts` reads at boot to decide this tab is file-backed. */
@@ -25,32 +34,49 @@ const ACTIVE_KEY = 'easydb:edb:active';
 /**
  * Row data in a fixed order, for comparing.
  *
- * `DataCollection.find()` promises no order, and the two stores really do differ:
- * SQLite scans a table in insertion order, while Dexie walks its `tableId` index,
- * which is ordered by the row's own id — a random UUID. So a conversion, which
- * READS from Dexie, hands back a different order on different runs. Asserting the
- * order tested the shuffle, not the copy.
+ * `DataCollection.find()` promises no order. SQLite happens to scan a table in
+ * insertion order, but a copy goes through the store contract and nothing in it
+ * says so — asserting the order would test the copy's incidental shape rather
+ * than the copy.
  */
 function byPart(rows: Array<{ data: Record<string, unknown> }>): Record<string, unknown>[] {
   return rows.map((r) => r.data).sort((a, b) => String(a['part']).localeCompare(String(b['part'])));
 }
 
-/** Mirrors `db/edb/mirror.ts` — one file per workspace, under its own directory. */
-function mirrorPath(edbName: string): string {
-  return `edb-mirror/${encodeURIComponent(edbName)}.edb`;
+/**
+ * The names of the top-level OPFS entries.
+ *
+ * The SAHPool keeps its slab in a directory of its own, named after the VFS
+ * (`db/edb/substrate.ts`'s `VFS_NAME`), so its presence is what says the
+ * database really is on disk in this origin rather than in RAM.
+ */
+async function opfsEntries(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    const root = (await navigator.storage.getDirectory()) as FileSystemDirectoryHandle & { keys(): AsyncIterableIterator<string> };
+    const names: string[] = [];
+    for await (const name of root.keys()) names.push(name);
+    return names;
+  });
 }
 
 /**
- * Boot a tab that is backed by `edbName`.
+ * Boot a tab that has adopted `edbName`, with no file pickers.
  *
  * The marker is written by an init script, so it is in place before the app's
- * first line runs. Loading the app even once without it would open the Dexie
- * database this mode replaces, and the "not in Dexie" assertion below could then
- * never be trusted. Storage is not wiped: Playwright gives each test its own
- * browser context, so IndexedDB and OPFS start empty anyway.
+ * first line runs. Deleting the pickers is what makes the File menu's Save take
+ * its download path — the only way to get bytes out without an OS dialog.
+ * Storage is not wiped: Playwright gives each test its own browser context, so
+ * IndexedDB and OPFS start empty anyway.
  */
 async function bootFileBacked(page: Page, edbName: string, workspaceId: string): Promise<void> {
-  await page.addInitScript(({ key, value }) => localStorage.setItem(key, value), { key: ACTIVE_KEY, value: edbName });
+  await page.addInitScript(
+    ({ key, value }) => {
+      localStorage.setItem(key, value);
+      delete (window as unknown as Record<string, unknown>)['showSaveFilePicker'];
+      delete (window as unknown as Record<string, unknown>)['showDirectoryPicker'];
+    },
+    { key: ACTIVE_KEY, value: edbName },
+  );
   await page.goto(`/?test=1&space=${encodeURIComponent(workspaceId)}`);
   await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
 }
@@ -61,34 +87,24 @@ async function reload(page: Page): Promise<void> {
   await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
 }
 
-/** The mirrored bytes, base64 — the only shape that survives `page.evaluate`. */
-async function mirrorBase64(page: Page, edbName: string): Promise<string | null> {
-  return page.evaluate(async (path) => {
-    const [dir, file] = path.split('/');
-    try {
-      const root = await navigator.storage.getDirectory();
-      const handle = await (await root.getDirectoryHandle(dir!)).getFileHandle(file!);
-      const bytes = new Uint8Array(await (await handle.getFile()).arrayBuffer());
-      if (bytes.byteLength === 0) return null;
-      let binary = '';
-      // Chunked: spreading 100k+ bytes into `fromCharCode` blows the argument limit.
-      for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-      return btoa(binary);
-    } catch {
-      return null; // not written yet — the caller polls
-    }
-  }, mirrorPath(edbName));
-}
-
-/** Wait out the mirror's 2s debounce and hand back its bytes. */
-async function waitForMirror(page: Page, edbName: string): Promise<Buffer> {
-  let b64: string | null = null;
-  await expect.poll(async () => (b64 = await mirrorBase64(page, edbName)) !== null, { timeout: 20_000, message: 'the OPFS mirror was never written' }).toBe(true);
-  return Buffer.from(b64!, 'base64');
+/**
+ * The bytes the File menu hands over, via Save.
+ *
+ * The way out of the pool is `export`, and the menu item that calls it is Save
+ * — which downloads when there is no file handle, i.e. exactly the browser this
+ * spec pretends to be. So this drives the real menu rather than reaching into
+ * the store, and what it returns is what a user would have on disk.
+ */
+async function downloadViaSave(page: Page, to: string): Promise<Buffer> {
+  const download = page.waitForEvent('download');
+  await page.locator('app-shell').getByRole('button', { name: /File/ }).click();
+  await page.getByRole('menuitem', { name: /Download a copy/ }).click();
+  await (await download).saveAs(to);
+  return readFileSync(to);
 }
 
 test.describe('browser .edb storage', () => {
-  test('keeps the workspace in the worker, not in Dexie', async ({ page }, testInfo) => {
+  test('keeps the workspace in the OPFS pool, and nothing in IndexedDB', async ({ page }, testInfo) => {
     await bootFileBacked(page, `${testInfo.testId}.edb`, `edb-${testInfo.testId}`);
 
     const tableId = await createTable(page, 'parts', [
@@ -97,13 +113,19 @@ test.describe('browser .edb storage', () => {
     ]);
     await addRow(page, tableId, { part: 'bolt', qty: 4 });
 
-    // The app's own Dexie database is what a browser-storage session would have
-    // created. Its absence is the proof that the store really is the worker's.
+    // The pool's own directory, named after the VFS. Its presence is the proof
+    // that SQLite is writing pages into origin-private storage rather than
+    // holding the database in RAM.
+    expect(await opfsEntries(page)).toContain('.easydb-sahpool');
+
+    // And IndexedDB holds no database at all. The workspace lived in one called
+    // `easydb` until the SQLite flip; `easydb-file-handles` only ever appears
+    // once a real file handle has been remembered, which no picker here can do.
     const dbNames = await page.evaluate(async () => ((await indexedDB.databases?.()) ?? []).map((d) => d.name));
     expect(dbNames).not.toContain('easydb');
   });
 
-  test('a reload restores the workspace from the OPFS mirror', async ({ page }, testInfo) => {
+  test('a reload restores the workspace, with nothing saved to a file', async ({ page }, testInfo) => {
     const edbName = `${testInfo.testId}.edb`;
     await bootFileBacked(page, edbName, `edb-${testInfo.testId}`);
 
@@ -113,13 +135,15 @@ test.describe('browser .edb storage', () => {
     ]);
     await addRow(page, tableId, { part: 'bolt', qty: 4 });
     await addRow(page, tableId, { part: 'nut', qty: 9 });
-    await waitForMirror(page, edbName);
 
+    // No wait, and that is the assertion. Under the old mirror the bytes went
+    // out on a 2s debounce, so anything written in the last moments before a
+    // reload was gone. In the pool each COMMIT has already reached OPFS.
     await reload(page);
 
-    // Nothing was ever written to the user's file — no picker was opened. So this
-    // can only have come back from the mirror, which is exactly the path a crashed
-    // tab takes.
+    // Nothing was ever written to the user's file — no picker was opened. So
+    // this can only have come back from the pool, which is exactly the path a
+    // crashed tab takes.
     const tables = await page.evaluate(async () => (window as unknown as { __easydb: { store: { tables: { find(): Promise<{ name: string }[]> } } } }).__easydb.store.tables.find());
     expect(tables.map((t) => t.name)).toContain('parts');
 
@@ -142,12 +166,16 @@ test.describe('browser .edb storage', () => {
       { field: 'qty', type: 'number' },
     ]);
     await addRow(page, tableId, { part: 'bolt', qty: 4 });
+    await waitForPanel(page, tableId);
 
-    const bytes = await waitForMirror(page, edbName);
+    // Out through the File menu, because that is the only way out: the pool's
+    // OPFS files are an opaque slab the VFS manages, not a `.edb` sitting under
+    // a readable name. With no `showSaveFilePicker` the menu item is "Download
+    // a copy" and the bytes arrive as a download.
+    const file = testInfo.outputPath('workspace.edb');
+    const bytes = await downloadViaSave(page, file);
     expect(bytes.subarray(0, 15).toString('latin1')).toBe('SQLite format 3');
 
-    const file = testInfo.outputPath('workspace.edb');
-    writeFileSync(file, bytes);
     const db = new DatabaseSync(file, { readOnly: true });
     try {
       const names = db
@@ -194,7 +222,8 @@ test.describe('converting a browser workspace to a file', () => {
     await page.goto(`/?test=1&space=${encodeURIComponent(workspaceId)}`);
     await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
 
-    // This data goes to Dexie. The conversion has to find it there.
+    // This data goes into this tab's own database. The conversion has to find
+    // it there and copy it into the new file.
     const tableId = await createTable(page, 'parts', [
       { field: 'part', type: 'string', renderer: 'link' },
       { field: 'qty', type: 'number' },

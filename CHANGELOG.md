@@ -8,6 +8,10 @@
 
 ### Bugs
 
+- 🐛 Renaming a column keeps its values. In a workspace file the rename added an empty column beside the old one, so the renamed column read as blank and anything reading it — a projection, a join key — stopped resolving (v0.0.385)
+- 🐛 A column with a script gets the stored value its script reads. In a workspace file that value was left out of the read, so every scripted cell rendered from `undefined` (v0.0.385)
+- 🐛 Open and Convert land on the workspace they just built instead of an empty one (v0.0.385)
+- 🐛 A filter matching most of a huge table is cut to the 20,000-row read cap again, and says so, instead of putting every match in the grid (v0.0.385)
 - 🐛 Deleting or editing rows in one table no longer makes every other open grid re-read itself — on the desktop that happened on every write (v0.0.375)
 
 ## 14 Aug 2026

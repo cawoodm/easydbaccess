@@ -53,10 +53,11 @@ guards that would block that.
 New events go on the `AppEvents` map, not on a sibling type — `EventBus.on`
 is typed against this map and silently drops unknown keys.
 
-`PluginModule.meta.optional = true` is the user-toggleable flag for built-ins.
-The renderer's Plugin Manager dialog reads this; disabled state is stored
-under the synthetic key `builtin:<name>` in the `plugins` collection. Don't
-repurpose `optional` for other semantics.
+`PluginModule.meta.fixed = true` marks a built-in the user cannot turn off;
+every other built-in is toggleable and defaults to enabled. The renderer's
+Plugin Manager dialog reads this; disabled state is stored under the synthetic
+key `builtin:<name>` in the `plugins` collection. Don't repurpose `fixed` for
+other semantics.
 
 ## Build
 

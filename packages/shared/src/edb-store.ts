@@ -672,7 +672,7 @@ export class EdbStore {
       this.db.exec(`CREATE TABLE ${quoteIdent(sqlTable)} (_id TEXT PRIMARY KEY, _updatedAt INTEGER, _extra TEXT)`);
     }
 
-    this.reconcileColumnsNoTx(sqlTable, columns);
+    this.reconcileColumnsNoTx(sqlTable, columns, existing ? this.columnsOf(existing) : []);
 
     const stored: Record<string, unknown> = { ...doc, [SQL_TABLE_KEY]: sqlTable, [ORDINAL_KEY]: ordinal };
     const workspaceId = typeof doc.workspaceId === 'string' ? doc.workspaceId : null;
@@ -681,23 +681,49 @@ export class EdbStore {
   }
 
   /**
-   * Additive-only column reconciliation: a field with no SQL column gets one.
-   * Never RENAME, never DROP.
+   * Column reconciliation: a field with no SQL column gets one, and a field
+   * that changed its NAME in place takes its column with it. **Never DROP.**
    *
    * `ColumnSpec` has no stable id, so diffing two column lists cannot tell a
    * rename from a drop-plus-add — and dropping on that guess destroyed data
-   * once already (v0.0.218). A column dropped from `columns` just lingers,
-   * orphaned and harmless: the doc, not the DDL, says what is visible. A rename
-   * arrives here as a new column beside the old one, and the renderer re-keys
-   * row `data` on rename, so the value lands in the new column by itself.
+   * once already (v0.0.218). So a column dropped from `columns` just lingers,
+   * orphaned and harmless: the doc, not the DDL, says what is visible.
+   *
+   * A RENAME is a different call, and it used to be got wrong in the other
+   * direction. Adding the new name beside the old one left every value in a
+   * column nothing reads, which is "renaming a column empties it" — the same
+   * data loss, arrived at by being careful. Renaming moves the values and
+   * destroys nothing, so it is safe where a drop is not; the guess it rests on
+   * is guarded below and falls back to the additive behaviour when unsure.
    */
-  private reconcileColumnsNoTx(sqlTable: string, columns: ColumnSpec[]): void {
+  private reconcileColumnsNoTx(sqlTable: string, columns: ColumnSpec[], before: ColumnSpec[] = []): void {
     const existing = new Set(
       this.db
         .prepare(`PRAGMA table_info(${quoteIdent(sqlTable)})`)
         .all()
         .map((c) => String(c.name)),
     );
+    // RENAMES first, or the add loop below would create an empty column under
+    // the new name and strand every value in the old one — a rename in the
+    // columns editor would silently empty the column it renamed.
+    //
+    // A `ColumnSpec` carries no stable identity, so a rename is only knowable
+    // POSITIONALLY: the same slot of the columns array holding a different
+    // field name. The two guards are what keep a delete-plus-add from being
+    // read as one — a name that is still somewhere in the new list has not gone
+    // anywhere, and a name that was already somewhere in the old one is not new.
+    const newFields = new Set(columns.map((c) => c.field));
+    const oldFields = new Set(before.map((c) => c.field));
+    for (let i = 0; i < Math.min(before.length, columns.length); i++) {
+      const was = before[i]?.field;
+      const now = columns[i]?.field;
+      if (!was || !now || was === now) continue;
+      if (!existing.has(was) || existing.has(now)) continue;
+      if (newFields.has(was) || oldFields.has(now)) continue;
+      this.db.exec(`ALTER TABLE ${quoteIdent(sqlTable)} RENAME COLUMN ${quoteIdent(was)} TO ${quoteIdent(now)}`);
+      existing.delete(was);
+      existing.add(now);
+    }
     for (const spec of columns) {
       if (existing.has(spec.field)) continue;
       this.db.exec(`ALTER TABLE ${quoteIdent(sqlTable)} ADD COLUMN ${quoteIdent(spec.field)} ${sqlAffinity(spec.type)}`);
@@ -925,8 +951,15 @@ export class EdbStore {
 
     // Only the fields asked for, plus the bookkeeping a Row needs. `_extra` comes
     // along because a requested field may live in it.
+    //
+    // A SCRIPTED column IS selected here, unlike in the WHERE and the ORDER BY
+    // above. What a script COMPUTES has no SQL form, but the value it computes
+    // FROM is ordinary stored data with a real column of its own — that is the
+    // whole of "the pencil edits the stored value, not the computed URL". Leave
+    // it out and every `script` reads `row.<field>` as `undefined`, so the cell
+    // renders the script's answer for nothing.
     const wanted = q.fields && q.fields.length > 0 ? columns.filter((c) => q.fields?.includes(c.field)) : columns;
-    const selected = ['_id', '_updatedAt', '_extra', ...wanted.filter((c) => !c.script).map((c) => quoteIdent(c.field))];
+    const selected = ['_id', '_updatedAt', '_extra', ...wanted.map((c) => quoteIdent(c.field))];
 
     const raws = this.db.prepare(`SELECT ${selected.join(', ')} FROM ${table}${whereSql}${stableSql}${limitSql}${offsetSql}`).all(...where.params);
 

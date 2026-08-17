@@ -118,9 +118,9 @@ interface PluginRow {
  * Lists every plugin the workspace knows about — built-in, available from a
  * catalog, and installed by URL — as one filterable, searchable list. Plugin
  * URLs live on Workspace.pluginUrls so they sync across devices; per-URL
- * state (cached body, enabled flag, last error) lives on the `plugins` Dexie
- * table; built-in enable state lives under the synthetic `builtin:<id>` key
- * in the same table.
+ * state (cached body, enabled flag, last error) lives in the `plugins`
+ * collection; built-in enable state lives under the synthetic `builtin:<id>`
+ * key in the same collection.
  *
  * Toggling enable/disable applies on the next reload — hot-loading a plugin
  * would require unregistering its slot registrations and re-instantiating,

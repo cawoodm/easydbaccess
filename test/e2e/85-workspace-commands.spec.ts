@@ -133,11 +133,13 @@ test('Delete workspace takes the tables, the rows and the settings with it', asy
 
   await runCommand(page, 'workspace', 'Delete workspace');
   const dialogs = page.locator('host-dialogs');
-  // The dialog names the tables it will take and promises their rows without
-  // counting them — counting a big workspace costs 14 seconds, and the user is
-  // waiting for this dialog. The view and setting totals are whatever the seeded
-  // workspace holds, so they are not asserted here.
-  await expect(dialogs.getByText(/1 table,.* and all their rows/)).toBeVisible();
+  // The dialog names the tables it will take AND how many rows go with them.
+  // Under Dexie the count stood aside — walking a 609k-row workspace cost 14
+  // seconds and the user is waiting for this dialog. In SQL it is one
+  // `COUNT(*)` per table, so the dialog quotes a real number again. The view
+  // and setting totals are whatever the seeded workspace holds, so they are not
+  // asserted here.
+  await expect(dialogs.getByText(/1 table, 1 row,/)).toBeVisible();
   // `confirm` is a two-choice dialog — Yes / No, not OK / Cancel. The active
   // workspace goes, so this navigates into the survivor.
   await Promise.all([bootedAt(page, 'survivor'), dialogs.getByRole('button', { name: 'Yes', exact: true }).click()]);

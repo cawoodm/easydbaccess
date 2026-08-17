@@ -163,10 +163,11 @@ export interface Workspace {
 
 /**
  * Optional backing-store descriptor for a table. Absent ⇒ the table is a
- * plain local (Dexie) table and behaves exactly as it always has. When
- * present, the routed DataStore hands `rows(tableId)` to the
- * `RowCollectionProvider` registered for `type` (see plugin-api.ts), letting
- * a plugin back the table with live remote data instead of IndexedDB.
+ * plain local table — a real SQL table in the workspace's database — and
+ * behaves exactly as it always has. When present, the routed DataStore hands
+ * `rows(tableId)` to the `RowCollectionProvider` registered for `type` (see
+ * plugin-api.ts), letting a plugin back the table with live remote data
+ * instead of the local database.
  */
 export interface TableSource {
   /** Provider key, matched against a registered `RowCollectionProvider.type` (e.g. 'datasette'). */

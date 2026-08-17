@@ -552,9 +552,9 @@ export class NewTableDialog extends LitElement {
    * of them.
    *
    * `readRows` is used instead of `find()` so a backend that can narrow does:
-   * the Electron SQLite store turns the limit into `LIMIT` and answers in
-   * milliseconds, and the cap bounds the read for the backends that cannot
-   * (Dexie has no `query`). A failure is REPORTED rather than shown as an empty
+   * the SQLite store turns the limit into `LIMIT` and answers in milliseconds,
+   * and the cap bounds the read for a routed collection that cannot narrow at
+   * all. A failure is REPORTED rather than shown as an empty
    * table — the column settings still save either way, so the editor stays
    * usable without its preview.
    */

@@ -67,12 +67,14 @@ Four things are worth knowing here:
   sqlite-wasm is synchronous, so a bulk insert on the main thread would freeze
   the tab for the length of the import.
 - **The file is written only on Save** (or by autosave, which is off by
-  default). Between saves the bytes are mirrored to OPFS.
-- **The mirror is load-bearing, not insurance.** A remembered
+  default). Between saves the live database is the one in the OPFS pool.
+- **The pool is load-bearing, not insurance.** A remembered
   `FileSystemFileHandle` needs a user gesture to re-grant write permission, and
-  a page load has none. The mirror is origin-private and always readable, so a
-  reload restores from it and the handle is only re-permissioned on the first
-  Save.
+  a page load has none. The pool is origin-private and always readable, so a
+  reload reopens it and the handle is only re-permissioned on the first Save.
+  The same fact is why Open and Convert hand their bytes to the LIVE worker
+  (`placeForNextBoot`) before reloading: the pool is exclusive origin-wide, so
+  a second worker could not put them anywhere the next boot would look.
 - **Permission is granted per FOLDER.** One `showDirectoryPicker` grant covers
   every workspace file in it, so New types a name and Open picks from a list,
   with no OS dialog either time. The per-file pickers remain for a browser

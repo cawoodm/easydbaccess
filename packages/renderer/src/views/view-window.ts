@@ -540,7 +540,7 @@ export class ViewWindow extends LitElement {
   private loadRows(): Promise<void> {
     // Collapse overlapping reads. The rows subscription delivers once on connect —
     // the same read `reload` has already started — and once per write after that,
-    // and on the Dexie path every delivery costs a full read of the table. A
+    // and every delivery costs a full read of the table. A
     // 20 000-row view read it FOUR times over while it opened, which is seconds.
     // A request that arrives mid-read is not dropped: it becomes one more read
     // after this one, so the last state still wins.

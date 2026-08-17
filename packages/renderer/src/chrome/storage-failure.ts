@@ -1,7 +1,7 @@
 /**
  * The full-screen "storage did not start" notice.
  *
- * Lifted almost verbatim from the overlay `db/dexie-db.ts` used when an
+ * Lifted almost verbatim from the overlay the deleted `db/dexie-db.ts` used when an
  * IndexedDB upgrade was blocked by an older tab — the situation is different but
  * the requirement is identical, and it was already the right shape: fixed,
  * idempotent, `role="alertdialog"`, one obvious action.

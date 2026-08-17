@@ -14,7 +14,7 @@ export class StoreBusyError extends Error {
  * Whether this tab is file-backed, and the bridge if it is.
  *
  * The choice is made ONCE at boot, because `app-context.ts` builds the
- * `DataStore` once. Switching between Dexie and a file therefore reloads the
+ * `DataStore` once. Switching between the local database and a file therefore reloads the
  * page — the same thing the desktop does when it opens another `.db`, and far
  * simpler than making every holder of a store handle re-bind mid-session.
  *
@@ -48,7 +48,7 @@ export interface EdbSession {
  * The database this tab uses when the user has adopted no file of their own.
  *
  * Every browser tab is SQLite now, so there is always a database — this is the
- * one that holds all workspaces, in place of the Dexie database it replaced.
+ * one that holds all workspaces, in place of the IndexedDB database it replaced.
  */
 export const LOCAL_DB_NAME = 'local.edb';
 
@@ -81,23 +81,25 @@ export function setActiveEdbName(name: string | null): void {
     if (name === null) globalThis.localStorage?.removeItem(ACTIVE_KEY);
     else globalThis.localStorage?.setItem(ACTIVE_KEY, name);
   } catch {
-    /* private mode — the tab stays on Dexie, which is the safe direction */
+    /* private mode — the tab keeps the local database, which is the safe direction */
   }
 }
 
 /**
  * Start this tab's SQLite session. Always — there is no other store.
  *
- * The bytes come from the OPFS mirror, never from the user's file: reading their
- * file needs a permission grant, and a grant needs a gesture a boot sequence does
- * not have. The mirror is origin-private and always readable, so the workspace
- * comes back straight away and the handle is only re-permissioned on the first
- * Save.
+ * The database comes from the OPFS pool, never from the user's file: reading
+ * their file needs a permission grant, and a grant needs a gesture a boot
+ * sequence does not have. The pool is origin-private and always readable, so
+ * the workspace comes back straight away and the handle is only
+ * re-permissioned on the first Save. (It is also why Open and Convert push
+ * their bytes into the pool through the LIVE worker before reloading — see
+ * `new-file.ts`'s `placeForNextBoot`.)
  *
- * A missing mirror is not a failure — it is the first run.
+ * A pool file that is not there yet is not a failure — it is the first run.
  *
- * **This THROWS rather than degrading.** It used to fall back to Dexie, which
- * was a real alternative store; there is none now, so a caught failure would
+ * **This THROWS rather than degrading.** It used to fall back to a second,
+ * IndexedDB-backed store; there is none now, so a caught failure would
  * leave the app looking like it worked while holding nothing. The caller shows a
  * blocking notice instead. The adopted-file marker is still cleared first, so a
  * reload after a bad user file lands on the local database rather than retrying

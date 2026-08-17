@@ -64,7 +64,7 @@ async function init(): Promise<AppContext> {
   const registries = createRegistries();
 
   // Row-source routing (Phase 2a): tables that declare a `source` are backed
-  // by a registered provider instead of Dexie. `rows(tableId)` needs the
+  // by a registered provider instead of the local database. `rows(tableId)` needs the
   // Table synchronously, so keep a cache primed from a live subscription. A
   // cache miss falls through to the local path, so local tables — and the
   // window before the cache warms — behave exactly as before.

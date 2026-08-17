@@ -12,6 +12,17 @@ import type { CloneMode, DistinctQuery, RowQuery } from '@easydb/shared';
 /** A call the main thread makes into the worker. */
 export type EdbRequest =
   | { id: number; op: 'open'; bytes: Uint8Array | null; name: string }
+  /**
+   * Put a database into the substrate under `name`, WITHOUT switching to it.
+   *
+   * What Open and Convert need. Both produce the bytes of a file this tab is
+   * about to adopt, and adopting is a reload — so the bytes have to be where the
+   * next boot will look before the reload happens. They cannot be placed by a
+   * throwaway worker: the `opfs-sahpool` VFS is exclusive origin-wide, so a
+   * second worker never gets the pool and writes its copy somewhere the boot
+   * does not read.
+   */
+  | { id: number; op: 'importBytes'; name: string; bytes: Uint8Array }
   /** The OPFS mirror's bytes for a workspace, if it has any. Needs no file permission. */
   | { id: number; op: 'restore'; name: string }
   | { id: number; op: 'find'; coll: string; query?: Record<string, unknown> | undefined; limit?: number | undefined }

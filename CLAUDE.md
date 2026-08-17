@@ -190,9 +190,12 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
   the core if it can be a plugin. (Exception: the Plugin Manager button is core
   chrome in `app-shell.ts`, not a plugin — it opens the manager that governs
   plugins.)
-- `meta.optional = true` marks a built-in as user-toggleable. The Plugin
-  Manager dialog surfaces these; disabled state is stored under the synthetic
-  key `builtin:<name>` in the `plugins` collection.
+- **Every built-in is user-toggleable by default**; `meta.fixed = true` is what
+  makes one always-on. The Plugin Manager surfaces the toggleable ones and the
+  loader never skips a fixed one; disabled state is stored under the synthetic
+  key `builtin:<name>` in the `plugins` collection. `settings` and `edb-file`
+  are fixed, because turning either off would remove the way out of a broken
+  workspace.
 
 ## Projections bind to their sources BY NAME
 

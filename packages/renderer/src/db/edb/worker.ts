@@ -131,6 +131,23 @@ async function openInMemory(bytes: Uint8Array | null, name: string): Promise<voi
 }
 
 /**
+ * Place a database under `name` without touching the open one.
+ *
+ * The pool is the only place a boot looks, and only this worker can hold it —
+ * hence the op. On the memory fallback the mirror plays the same role, so the
+ * bytes go there instead.
+ */
+async function importBytes(name: string, bytes: Uint8Array): Promise<void> {
+  sqlite3 ??= await sqlite3InitModule();
+  const pool = await ensurePool(sqlite3);
+  if (pool) {
+    await pool.importDb(poolPath(name), bytes);
+    return;
+  }
+  await writeMirror(name, bytes);
+}
+
+/**
  * Make everything written so far durable, now.
  *
  * A near no-op on the pooled path — SQLite already committed it to the file —
@@ -212,6 +229,8 @@ async function handleAsync(req: EdbRequest): Promise<unknown> {
       // and the memory fallback reads its own mirror, so nobody needs bytes
       // handed back to pass into `open`.
       return null;
+    case 'importBytes':
+      return importBytes(req.name, req.bytes);
     case 'flush':
       return flushNow();
     case 'export':

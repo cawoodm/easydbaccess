@@ -32,9 +32,9 @@ Lit web components + sqlite-wasm + Vite. The identical bundle runs in the browse
 2. Resolve workspace (URL `?space=` → existing → create `default`).
 3. Build `HostApi` from store + events + registries.
 4. `loadBuiltinPlugins(api)` — runs every `init()` synchronously, returns a
-   function that runs every `load()`. Optional built-ins
-   (`meta.optional === true`) are skipped if the user disabled them via
-   `plugins[builtin:<name>].enabled === false`.
+   function that runs every `load()`. A built-in is skipped if the user
+   disabled it (`plugins[builtin:<name>].enabled === false`) — unless it is
+   `meta.fixed`, which is never skipped.
 5. `loadUrlPlugins(api)` — iterates `workspace.pluginUrls`, fetches each,
    wraps in a Blob URL, dynamic-imports, calls `init()`.
 6. `queueMicrotask` → emit `app:ready` → run all queued `load()`s.
@@ -146,9 +146,10 @@ Self-contained ES modules only.
 
 1. Drop a `src/plugins/<name>.ts` exporting `meta`, `init(api)`, optionally `load(api)`.
 2. Import + add to the `builtins` array in `src/plugin-host/loader.ts`.
-3. If user-toggleable: set `meta.optional = true`. The dialog's "Optional
-   built-ins" section will surface a checkbox, and `loader.ts` will check
-   `plugins[builtin:<name>].enabled` before calling `init`.
+3. Nothing more, if it should be user-toggleable: that is the default. The
+   Plugin Manager surfaces a checkbox for it and `loader.ts` checks
+   `plugins[builtin:<name>].enabled` before calling `init`. Set
+   `meta.fixed = true` only for a plugin the app cannot be recovered without.
 
 ## Commandlets
 

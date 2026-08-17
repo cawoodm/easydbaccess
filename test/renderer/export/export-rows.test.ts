@@ -154,7 +154,9 @@ describe('prepareExport — the limit', () => {
     const c = coll(STOCK);
     const t = table({ sortBy: [{ field: 'qty', asc: true }] });
     await prepareExport(c, t, opts({ limitRows: 2, order: 'sorted' }));
-    expect(c.asked[0]?.limit).toBeUndefined();
+    // The export's own limit does not travel — only the read cap, which bounds
+    // every whole-table read whoever narrowed it (see `row-reader.ts`).
+    expect(c.asked[0]?.limit).toBe(20_000);
   });
 
   it('takes the limit AFTER sorting, so it is the first N of the sorted set', async () => {
@@ -171,7 +173,8 @@ describe('prepareExport — the limit', () => {
     const t = table({ filters: { name: 'p' } });
     const out = await prepareExport(c, t, opts({ limitRows: 1, rows: 'filtered', order: 'unsorted' }));
     expect(out.rows.map((r) => r.data.name)).toEqual(['Pear']);
-    expect(c.asked[0]?.limit).toBeUndefined();
+    // Again the read cap and not the export's limit of 1.
+    expect(c.asked[0]?.limit).toBe(20_000);
   });
 
   it('reads everything for a limit of 0', async () => {

@@ -143,9 +143,12 @@ test('under the threshold the grid settles on holding the table whole', async ({
   const id = await createTable(page, 'Small', [{ field: 'name' }]);
   await waitForPanel(page, id);
 
-  // No slice at all — not even the read cap, which only travels when a predicate
-  // had to be held back. The store answers the whole query, as it always did.
-  await expect.poll(async () => (await lastQuery(page))?.limit, { timeout: 5000 }).toBeUndefined();
+  // No PAGE — no offset, and the limit that does travel is the read cap rather
+  // than a window. The cap bounds what any read brings back, whoever narrowed
+  // it: a filter matching most of a 600k-row table is answerable in SQL, and
+  // without the cap on that path the whole match would land in the grid. A cap
+  // of 20,000 over a table of 5,000 changes no answer.
+  await expect.poll(async () => (await lastQuery(page))?.limit, { timeout: 5000 }).toBe(20_000);
   expect((await lastQuery(page)).offset).toBeUndefined();
 });
 

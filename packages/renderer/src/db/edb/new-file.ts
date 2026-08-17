@@ -16,6 +16,7 @@ import {
   writeBytes,
   EDB_EXTENSION,
 } from './file-handle.js';
+import { edbBridge } from './active-bridge.js';
 import { setActiveEdbName } from './session.js';
 import { createEdbBridge } from './worker-bridge.js';
 
@@ -78,25 +79,52 @@ export async function chooseEdbTarget(dialogs: Dialogs, suggested: string): Prom
 }
 
 /**
- * Build a database in a throwaway worker and put it on disk.
+ * Build a database in a throwaway worker, put it on disk, and hand it to the
+ * live worker so the reload that follows lands on it.
  *
  * `fill` writes the initial contents through a `DataStore` scoped to
  * `workspaceId` — a fresh workspace record, or a copy of an existing one. It is
  * optional: without it the file holds an empty database.
  *
- * The mirror is flushed before returning, because the caller reloads and the boot
- * after that reload reads the OPFS mirror. It never reads the user's file, which
- * would need a permission gesture no boot sequence has.
+ * The throwaway worker cannot place the result itself. The `opfs-sahpool` VFS is
+ * exclusive origin-wide and the live worker holds it, so a second worker falls
+ * back to memory and writes its copy where no boot looks. The bytes therefore go
+ * back through `importBytes` on the bridge this tab is actually using. Nothing
+ * reads the user's FILE at boot — that would need a permission gesture no boot
+ * sequence has.
  */
 export async function buildEdbFile(target: EdbTarget, workspaceId: string, fill?: (store: DataStore) => Promise<void>): Promise<void> {
   const bridge = createEdbBridge();
+  let bytes: Uint8Array;
   try {
     await bridge.open(null, target.name);
     if (fill) await fill(createIpcDataStore(bridge, () => workspaceId));
-    const bytes = await bridge.export();
-    if (target.handle) await writeBytes(target.handle, bytes);
-    else downloadBytes(target.name, bytes);
-    await bridge.flush();
+    bytes = await bridge.export();
+  } finally {
+    bridge.terminate();
+  }
+  if (target.handle) await writeBytes(target.handle, bytes);
+  else downloadBytes(target.name, bytes);
+  await placeForNextBoot(target.name, bytes);
+}
+
+/**
+ * Put `bytes` where the next boot will find them, under `name`.
+ *
+ * Shared by Convert (above) and Open (`plugins/edb-file.ts`), which have the
+ * same shape: produce a database, then reload into it.
+ */
+export async function placeForNextBoot(name: string, bytes: Uint8Array): Promise<void> {
+  const live = edbBridge();
+  if (live) {
+    await live.importBytes(name, bytes);
+    return;
+  }
+  // No live session — the very first boot could not start one. Fall back to a
+  // worker of our own, which then DOES get the pool.
+  const bridge = createEdbBridge();
+  try {
+    await bridge.importBytes(name, bytes);
   } finally {
     bridge.terminate();
   }

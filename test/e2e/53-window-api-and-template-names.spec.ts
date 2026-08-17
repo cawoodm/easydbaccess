@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { createTable, panelDomId, waitForPanel } from './helpers.js';
+import { createTable, panelDomId, waitForPanel, waitForViewTemplates } from './helpers.js';
 
 /**
  * Two small guarantees:
@@ -51,6 +51,10 @@ test.describe('window.api and template names', () => {
   test('a template cannot take a name another template already has', async ({ page }) => {
     const id = await createTable(page, 'Feed', [{ field: 'title' }]);
     await waitForPanel(page, id);
+    // The count below is taken once, so the built-ins have to be all there
+    // before it: a template still being seeded would land after `before` was
+    // read and show up as a second addition.
+    await waitForViewTemplates(page);
     await page
       .locator(`#${panelDomId(id)} panel-footer`)
       .getByRole('button', { name: /Views/ })

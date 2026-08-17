@@ -19,6 +19,16 @@ export interface EdbBridge extends EasydbStoreBridge {
   /** Replace the contents — a fresh workspace, or a file the user just opened. */
   open(bytes: Uint8Array | null, name: string): Promise<void>;
   /**
+   * Put a database under `name` where the next boot will find it, without
+   * switching to it.
+   *
+   * Open and Convert both end in a reload, and the bytes have to be in place
+   * first. Only this worker can put them there: the `opfs-sahpool` VFS is
+   * exclusive origin-wide, so the throwaway worker that BUILT them never got the
+   * pool and wrote its copy where no boot looks.
+   */
+  importBytes(name: string, bytes: Uint8Array): Promise<void>;
+  /**
    * The OPFS mirror's bytes for a workspace, or null.
    *
    * What a reload uses: the mirror needs no file permission, so the workspace
@@ -78,6 +88,7 @@ export function createEdbBridge(): EdbBridge {
   return {
     open: (bytes, name) => call<void>({ op: 'open', bytes, name }),
     restore: (name) => call<Uint8Array | null>({ op: 'restore', name }),
+    importBytes: (name, bytes) => call<void>({ op: 'importBytes', name, bytes }),
     flush: () => call<void>({ op: 'flush' }),
     export: () => call<Uint8Array>({ op: 'export' }),
     find: (coll, query, limit) => call<unknown[]>({ op: 'find', coll, query, limit }),

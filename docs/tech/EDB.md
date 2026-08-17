@@ -159,10 +159,9 @@ cannot recover one. `coll='_meta', key='format'` is what distinguishes them.
 - `test/renderer/db/wasm-driver.test.ts` — the same store on sqlite-wasm
 - `test/renderer/db/edb-convert.test.ts` — copying a workspace in
 - `test/renderer/db/edb-dirty.test.ts` — autosave timing
-- `test/e2e/100-edb-browser.spec.ts` — the browser flow in a real tab
 - `test/e2e/desktop/` — the desktop app writing and reopening a real file
   (`npm run test:e2e:desktop`)
-- `test/e2e/100-edb-browser.spec.ts` — the worker, the mirror, the reload, the
+- `test/e2e/100-edb-browser.spec.ts` — the worker, the pool, the reload, the
   File menu, the storage question and the folder helpers
 
 The OS file picker cannot be driven from Playwright. Two ways round it: set the

@@ -470,13 +470,14 @@ describe('SqliteStore — additive column reconciliation', () => {
     store2.close();
   });
 
-  it('a rename (remove old field + add new field) does NOT drop the old column', () => {
+  it('a rename carries the column and its values across', () => {
     const store = new SqliteStore({ path: dbPath });
     store.insert('tables', baseTable()); // has `name`
     store.insert('rows', { id: 'r1', tableId: 't1', data: { name: 'Alice' }, updatedAt: 1 });
 
-    // Column editor "renamed" name -> fullName: old field removed from
-    // columns_json, new field added. Never a DDL RENAME/DROP.
+    // Column editor renamed name -> fullName: the same slot of `columns`
+    // holding a different field name. That is the only shape a rename has —
+    // a `ColumnSpec` carries no id — so the store reads it positionally.
     store.patch('tables', 't1', {
       columns: [{ field: 'fullName', label: 'Full Name', type: 'string' }],
       updatedAt: 2,
@@ -485,15 +486,33 @@ describe('SqliteStore — additive column reconciliation', () => {
 
     const raw = inspect(dbPath);
     const cols = columnInfo(raw, 'people').map((c) => c.name);
-    // Both the old AND the new column exist — nothing was dropped.
-    expect(cols).toEqual(['_id', '_updatedAt', '_extra', 'name', 'fullName']);
-    // The old column's data is untouched (still there, just no longer surfaced).
-    const row = raw.prepare('SELECT name, fullName FROM people WHERE _id = ?').get('r1') as {
-      name: string;
-      fullName: string | null;
-    };
-    expect(row.name).toBe('Alice');
-    expect(row.fullName).toBeNull();
+    // One column, under the new name. Adding `fullName` alongside `name` and
+    // leaving the values in `name` is what this used to do, and it read to the
+    // user as "renaming a column empties it".
+    expect(cols).toEqual(['_id', '_updatedAt', '_extra', 'fullName']);
+    const row = raw.prepare('SELECT fullName FROM people WHERE _id = ?').get('r1') as { fullName: string };
+    expect(row.fullName).toBe('Alice');
+    raw.close();
+  });
+
+  it('a REMOVED field is left alone — a delete is not a rename', () => {
+    // Two columns in, one column out: no slot changed its name, so nothing is
+    // renamed and nothing is dropped. The values stay reachable in the file.
+    const store = new SqliteStore({ path: dbPath });
+    store.insert('tables', {
+      ...baseTable(),
+      columns: [
+        { field: 'name', label: 'Name', type: 'string' },
+        { field: 'age', label: 'Age', type: 'number' },
+      ],
+    });
+    store.insert('rows', { id: 'r1', tableId: 't1', data: { name: 'Alice', age: 30 }, updatedAt: 1 });
+    store.patch('tables', 't1', { columns: [{ field: 'name', label: 'Name', type: 'string' }], updatedAt: 2 });
+    store.close();
+
+    const raw = inspect(dbPath);
+    expect(columnInfo(raw, 'people').map((c) => c.name)).toEqual(['_id', '_updatedAt', '_extra', 'name', 'age']);
+    expect((raw.prepare('SELECT age FROM people WHERE _id = ?').get('r1') as { age: number }).age).toBe(30);
     raw.close();
   });
 });

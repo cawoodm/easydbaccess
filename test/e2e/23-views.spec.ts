@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js';
+import { bulkAddRows, createTable, panelDomId, waitForPanel, waitForViewTemplates } from './helpers.js';
 
 /**
  * The View system: a workspace-global HTML template + per-table instances shown
@@ -819,6 +819,7 @@ test.describe('views: sort, field search, standard templates', () => {
   test('the new standard templates are seeded and listed', async ({ page }) => {
     const id = await createTable(page, 'T', [{ field: 'a' }]);
     await waitForPanel(page, id);
+    await waitForViewTemplates(page);
     await page
       .locator(`#${panelDomId(id)} panel-footer`)
       .getByRole('button', { name: /Views/ })
