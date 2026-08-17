@@ -4,7 +4,7 @@
  * A BrowserWindow that loads the Vite-served renderer in dev (via
  * EASYDB_RENDERER_URL) or the built renderer in production. Unlike the browser
  * build, this renderer stores its data in the main-process SQLite file rather
- * than Dexie/IndexedDB — see `renderer/src/app-context.ts` for where it picks.
+ * than in the renderer — see `renderer/src/app-context.ts` for where it picks.
  *
  * This file wires up the main-process SQLite store's IPC surface: the
  * `store:*` / `db:path` channels (data access, `sqlite-store.ts`) and the
@@ -49,7 +49,7 @@ function toErrorMessage(err: unknown): string {
 }
 
 /**
- * Notifies every window that a collection changed — replaces Dexie's liveQuery.
+ * Notifies every window that a collection changed.
  *
  * `scope` narrows it to ONE table's rows. Without it, every subscribed
  * `rows(tableId)` view re-reads its whole result set, which is quadratic during

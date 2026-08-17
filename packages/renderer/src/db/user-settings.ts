@@ -1,7 +1,7 @@
 /**
  * Device-local settings layer + secrets store.
  *
- * The workspace layer lives in the synced `settings` Dexie table. This module
+ * The workspace layer lives in the synced `settings` collection. This module
  * is the *user* layer: a single JSON blob in localStorage that never syncs, so
  * it holds device-local overrides (tokens, poll intervals, machine URLs). It
  * shadows the workspace layer at read time — see `SettingsApi` in api-factory.

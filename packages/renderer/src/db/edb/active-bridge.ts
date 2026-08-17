@@ -8,7 +8,8 @@ import type { EasydbStoreBridge } from '../data-store-bridge.js';
  * Module state rather than something on `HostApi`: only `plugins/edb-file.ts`
  * has any business exporting database bytes or writing the user's file, and
  * putting it on the plugin API would offer it to every plugin. `app-context.ts`
- * fills this in as it builds the store; a tab on Dexie leaves it empty.
+ * fills this in as it builds the store; inside Electron it stays empty, because
+ * the preload supplies the bridge instead.
  */
 
 let bridge: EdbBridge | null = null;

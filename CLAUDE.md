@@ -14,7 +14,7 @@ That file no longer exists; the dated per-feature notes still in
 `.claude/plans/` are what survives of it, and they remain more authoritative
 than this file for the _why_ behind anything they cover. Read the relevant one
 before making structural changes. Phases 1–6 are landed (skeleton +
-shared types + Dexie + plugin host + built-in plugins + jsPanel windows +
+shared types + SQLite + plugin host + built-in plugins + jsPanel windows +
 standalone Hono server with `/sync`, `/fetch`, `/plugins/registry`). Phase 8's
 storage half is landed too: inside Electron the renderer talks to a
 main-process SQLite store over IPC (`node:sqlite`, not `better-sqlite3`) and
@@ -164,7 +164,7 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
 
 - A plugin is a single ES module `.js` file. Built-ins are static-imported
   from `packages/renderer/src/plugins/`; third-party plugins are URL-loaded
-  by the host, cached in the `plugins` Dexie table (offline reuse),
+  by the host, cached in the `plugins` collection (offline reuse),
   wrapped in a Blob URL, dynamic-`import()`ed, then `init(api)` / `load(api)`.
 - The `api` object exposes `store` (data layer), `events` (typed bus), `ui`
   (slot registries: header/footer/table buttons, cell/row/table renderers,
@@ -217,32 +217,33 @@ and a join key left on the old name matched nothing.
 
 ## The DataStore abstraction (don't bypass it)
 
-The renderer opens a Dexie database (`db/dexie-db.ts`) and wraps each Dexie
-table in the minimal `DataCollection<T>` shape from `plugin-api.ts`
-(`db/data-store-dexie.ts`). The wrapper is the only surface plugins see — the
-storage layer remains swappable, and Electron proves it: there
-`app-context.ts` builds the same contract over IPC instead
-(`db/data-store-bridge.ts` → `packages/electron/src/sqlite-store.ts`). When
-adding new collections, touch **four** places in lockstep:
+The renderer talks to SQLite through one adapter, `db/data-store-bridge.ts`,
+which wraps each collection in the minimal `DataCollection<T>` shape from
+`plugin-api.ts`. Two transports satisfy it and nothing downstream knows which is
+active: a sqlite-wasm Web Worker in the browser (`db/edb/`), and IPC to the
+main-process `node:sqlite` store in Electron. Dexie was the browser's default
+until v0.0.383 and is gone.
+
+In the browser the database lives in the `opfs-sahpool` VFS, so every `COMMIT`
+is durable and a reload just reopens the file; where the pool cannot be
+installed it falls back to memory. One tab owns it, elected by a Web Lock
+(`db/edb/tab-lock.ts`), because the pool's files are exclusive origin-wide.
+
+When adding a new collection, touch **three** places in lockstep:
 
 1. Type → `packages/shared/src/types.ts`
-2. Dexie schema + typed table → `packages/renderer/src/db/dexie-db.ts`
-3. Plugin-facing wrapper → `packages/renderer/src/db/data-store-dexie.ts`
-4. The IPC store's collection list → `packages/renderer/src/db/data-store-bridge.ts`
-   and `packages/electron/src/sqlite-store.ts` (an unknown collection throws
-   there rather than failing silently)
+2. Plugin-facing wrapper → `packages/renderer/src/db/data-store-bridge.ts`
+3. `packages/shared/src/edb-store.ts` — an unknown collection throws there
+   rather than failing silently
 
-`store.rows(tableId)` returns a _view_ (not a separate Dexie table) that
-auto-injects `tableId` into inserts and queries. There is one underlying
-`rows` table indexed on `tableId`. The SQLite store keeps that same view
-semantics, but each logical table there really is its own SQL table, so
-`tableId` selects _which_ table rather than filtering a column.
+`store.rows(tableId)` returns a _view_, but each logical table really is its own
+SQL table, so `tableId` selects WHICH table rather than filtering a column.
 
-Subscriptions use Dexie's `liveQuery`, which re-runs the query closure on any
-write to the underlying table. Chrome callers consume the full result set
-each time, so the coarse granularity is harmless. On the IPC path the main
-process broadcasts `store:changed` per collection and the collection re-runs
-its query — same coarse granularity, same contract.
+Subscriptions re-run their query on a `changed` broadcast for that collection.
+Row changes carry a `scope` — the table id — so a write to one table does not
+wake the others' grids. `changeScopeOf` in `@easydb/shared` is the single rule,
+and it reads the scope off what the write RETURNED, because a remove or a patch
+request cannot say which table it touched.
 
 ## Cross-cutting gotchas
 
@@ -260,9 +261,9 @@ These have already bitten this codebase. Don't re-litigate them.
   properties whose values can be `undefined` need an explicit `| undefined`
   in the type. Array indexing returns `T | undefined`. Don't paper over with
   `!` — handle the case.
-- **No barrel-imports of Dexie outside `packages/renderer/src/db/`.** Plugins
-  receive `DataStore` from `@easydb/shared`; if you find yourself reaching
-  for `dexie` directly elsewhere, the abstraction is leaking.
+- **Plugins never touch a transport.** They receive `DataStore` from
+  `@easydb/shared`; if you find yourself reaching for a bridge or the worker
+  outside `packages/renderer/src/db/`, the abstraction is leaking.
 - **URL-loaded plugins are self-contained ES modules.** They run via Blob
   URL dynamic-import and cannot use bare imports (`import x from 'lit'`).
   Built-in plugins, by contrast, freely import workspace packages.

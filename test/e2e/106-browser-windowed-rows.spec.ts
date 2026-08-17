@@ -4,10 +4,9 @@ import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js
 /**
  * The BROWSER reads a big table one page at a time too.
  *
- * Phase 1 windowed the fetch wherever the store could answer a `RowQuery`, which
- * in the browser was nowhere: Dexie implemented none, so every table took the
- * read-it-all path and the browser and the desktop behaved differently on the same
- * table. Dexie now answers one.
+ * The browser answers a `RowQuery` in SQL, the same as the desktop, so a big
+ * table is read one page at a time on both. This spec is what proves that did
+ * not regress when the browser's store became SQLite.
  *
  * What has to stay true is the harder half. A page in memory must not narrow what a
  * filter or a sort covers — those go to the store, which applies them over every
