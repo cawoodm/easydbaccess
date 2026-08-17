@@ -661,9 +661,7 @@ export class ViewsDialog extends LitElement {
         // A `text` column is prose by definition, which is exactly what a cloud
         // wants; a `string` one only might be.
         return (
-          nameHit(['description', 'text', 'body', 'comment', 'notes', 'title', 'name']) ||
-          this.firstColumn((c) => ok(c) && c.type === 'text') ||
-          this.firstColumn((c) => ok(c) && c.type === 'string')
+          nameHit(['description', 'text', 'body', 'comment', 'notes', 'title', 'name']) || this.firstColumn((c) => ok(c) && c.type === 'text') || this.firstColumn((c) => ok(c) && c.type === 'string')
         );
       case 'category':
         return this.firstColumn((c) => ok(c) && (c.type === 'string' || c.type === 'array')) || this.firstColumn(ok);
@@ -1313,7 +1311,12 @@ export class ViewsDialog extends LitElement {
     if (!spec?.options || spec.options.length === 0) {
       // A kind with no declared options may still aggregate — a plain bar chart
       // does — so the section is not gated on the options alone.
-      return agg === nothing ? nothing : html`<div class="section"><h3>Settings for this view</h3>${agg}</div>`;
+      return agg === nothing
+        ? nothing
+        : html`<div class="section">
+            <h3>Settings for this view</h3>
+            ${agg}
+          </div>`;
     }
     const tpl = this.templates.find((t) => t.id === d.templateId);
     const overridden = overriddenKeys(tpl?.viz?.options, d.vizOptions);
@@ -1370,8 +1373,7 @@ export class ViewsDialog extends LitElement {
     };
     const row = (key: string, control: unknown) => html`
       <div class="viz-override ${overridden.has(key) ? 'changed' : ''}">
-        ${control}
-        ${overridden.has(key) ? html`<button type="button" class="mini" title="Go back to the chart definition's value" @click=${() => reset(key)}>Reset</button>` : nothing}
+        ${control} ${overridden.has(key) ? html`<button type="button" class="mini" title="Go back to the chart definition's value" @click=${() => reset(key)}>Reset</button>` : nothing}
       </div>
     `;
 

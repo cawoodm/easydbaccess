@@ -221,7 +221,12 @@ export class SqlConsoleDialog extends LitElement {
             </tr>
           </thead>
           <tbody>
-            ${res.rows.map((r) => html`<tr>${r.map((v) => this.renderCell(v))}</tr>`)}
+            ${res.rows.map(
+              (r) =>
+                html`<tr>
+                  ${r.map((v) => this.renderCell(v))}
+                </tr>`,
+            )}
           </tbody>
         </table>
       </div>
@@ -264,8 +269,8 @@ export class SqlConsoleDialog extends LitElement {
             </div>
             ${this.allowWrites
               ? html`<div class="warn">
-                  Writes go straight to the database, around the rules the app enforces. Dropping or renaming a table here leaves the workspace pointing at something that is no longer
-                  there. Nothing is rolled back if a later statement in the script fails.
+                  Writes go straight to the database, around the rules the app enforces. Dropping or renaming a table here leaves the workspace pointing at something that is no longer there. Nothing
+                  is rolled back if a later statement in the script fails.
                 </div>`
               : ''}
             ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''} ${this.renderResults()}

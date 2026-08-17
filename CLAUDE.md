@@ -180,6 +180,7 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
   `cell-boolean`, `cell-tags`, `auto-renderer`, `preview`, `html-render`, `cell-markdown`,
   `delete-table`,
   `table-copy`,
+  `sql-console`,
   `import-data`, `auto-sync`, `views`, `settings`, `url-source`,
   `datasette-import` (+ `datasette-views`), `datasette-connect`, `connect-menu`,
   `projection`, `command-palette-button`, `electron-db`, `sqlitefile-source`,

@@ -83,9 +83,7 @@ async function mirrorBase64(page: Page, edbName: string): Promise<string | null>
 /** Wait out the mirror's 2s debounce and hand back its bytes. */
 async function waitForMirror(page: Page, edbName: string): Promise<Buffer> {
   let b64: string | null = null;
-  await expect
-    .poll(async () => (b64 = await mirrorBase64(page, edbName)) !== null, { timeout: 20_000, message: 'the OPFS mirror was never written' })
-    .toBe(true);
+  await expect.poll(async () => (b64 = await mirrorBase64(page, edbName)) !== null, { timeout: 20_000, message: 'the OPFS mirror was never written' }).toBe(true);
   return Buffer.from(b64!, 'base64');
 }
 
@@ -126,8 +124,7 @@ test.describe('browser .edb storage', () => {
     expect(tables.map((t) => t.name)).toContain('parts');
 
     const rows = await page.evaluate(
-      async (id) =>
-        (window as unknown as { __easydb: { store: { rows(id: string): { find(): Promise<{ data: Record<string, unknown> }[]> } } } }).__easydb.store.rows(id).find(),
+      async (id) => (window as unknown as { __easydb: { store: { rows(id: string): { find(): Promise<{ data: Record<string, unknown> }[]> } } } }).__easydb.store.rows(id).find(),
       tableId,
     );
     expect(byPart(rows)).toEqual([
@@ -223,8 +220,7 @@ test.describe('converting a browser workspace to a file', () => {
     expect(await page.evaluate((k) => localStorage.getItem(k), ACTIVE_KEY)).toBe(`${workspaceId}.edb`);
 
     const rows = await page.evaluate(
-      async (id) =>
-        (window as unknown as { __easydb: { store: { rows(id: string): { find(): Promise<{ data: Record<string, unknown> }[]> } } } }).__easydb.store.rows(id).find(),
+      async (id) => (window as unknown as { __easydb: { store: { rows(id: string): { find(): Promise<{ data: Record<string, unknown> }[]> } } } }).__easydb.store.rows(id).find(),
       tableId,
     );
     expect(byPart(rows)).toEqual([

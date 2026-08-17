@@ -249,9 +249,7 @@ function rowCountOf(db: DatabaseSyncType, sqlTable: string): number {
  */
 function easydbTableDocs(db: DatabaseSyncType): Array<Record<string, unknown>> {
   const rows = db.prepare(`SELECT doc FROM _easydb WHERE coll = 'tables'`).all() as Array<{ doc: string }>;
-  return rows
-    .map((r) => JSON.parse(r.doc) as Record<string, unknown>)
-    .sort((a, b) => Number(a['_ordinal'] ?? 0) - Number(b['_ordinal'] ?? 0));
+  return rows.map((r) => JSON.parse(r.doc) as Record<string, unknown>).sort((a, b) => Number(a['_ordinal'] ?? 0) - Number(b['_ordinal'] ?? 0));
 }
 
 function columnsOfDoc(doc: Record<string, unknown>): ColumnSpec[] {

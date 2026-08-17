@@ -68,14 +68,7 @@ async function open(bytes: Uint8Array | null, name: string): Promise<void> {
     // memory first rather than passed by reference.
     const p = sqlite3.wasm.allocFromTypedArray(bytes);
     db = new sqlite3.oo1.DB();
-    const rc = sqlite3.capi.sqlite3_deserialize(
-      db.pointer!,
-      'main',
-      p,
-      bytes.byteLength,
-      bytes.byteLength,
-      sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE | sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE,
-    );
+    const rc = sqlite3.capi.sqlite3_deserialize(db.pointer!, 'main', p, bytes.byteLength, bytes.byteLength, sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE | sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE);
     db.checkRc(rc);
   } else {
     db = new sqlite3.oo1.DB(':memory:');
@@ -118,7 +111,6 @@ function require<T>(value: T | null, what: string): T {
   if (value === null) throw new Error(`edb worker: ${what} before the database was opened`);
   return value;
 }
-
 
 function handle(req: EdbRequest): unknown {
   const s = () => require(store, 'store used');

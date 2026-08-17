@@ -349,9 +349,7 @@ export class EdbStore {
     // only query key hot enough to matter (every settings read carries it).
     const ws = query?.workspaceId;
     const rows =
-      typeof ws === 'string'
-        ? this.db.prepare(`SELECT doc FROM _easydb WHERE coll = ? AND workspaceId = ?`).all(coll, ws)
-        : this.db.prepare(`SELECT doc FROM _easydb WHERE coll = ?`).all(coll);
+      typeof ws === 'string' ? this.db.prepare(`SELECT doc FROM _easydb WHERE coll = ? AND workspaceId = ?`).all(coll, ws) : this.db.prepare(`SELECT doc FROM _easydb WHERE coll = ?`).all(coll);
     let docs = rows.map((r) => JSON.parse(String(r.doc)) as Record<string, unknown>);
     const entries = Object.entries(query ?? {}).filter(([k]) => k !== 'workspaceId' || typeof ws !== 'string');
     if (entries.length > 0) docs = docs.filter((d) => matchesAll(d, entries));
@@ -475,7 +473,12 @@ export class EdbStore {
    * row `data` on rename, so the value lands in the new column by itself.
    */
   private reconcileColumnsNoTx(sqlTable: string, columns: ColumnSpec[]): void {
-    const existing = new Set(this.db.prepare(`PRAGMA table_info(${quoteIdent(sqlTable)})`).all().map((c) => String(c.name)));
+    const existing = new Set(
+      this.db
+        .prepare(`PRAGMA table_info(${quoteIdent(sqlTable)})`)
+        .all()
+        .map((c) => String(c.name)),
+    );
     for (const spec of columns) {
       if (existing.has(spec.field)) continue;
       this.db.exec(`ALTER TABLE ${quoteIdent(sqlTable)} ADD COLUMN ${quoteIdent(spec.field)} ${sqlAffinity(spec.type)}`);
@@ -558,9 +561,7 @@ export class EdbStore {
     const { cols, values, extraJson } = this.encodeRowColumns(columns, data);
     const allCols = ['_id', '_updatedAt', '_extra', ...cols];
     const placeholders = allCols.map(() => '?').join(', ');
-    this.db
-      .prepare(`INSERT OR REPLACE INTO ${quoteIdent(sqlTable)} (${allCols.map(quoteIdent).join(', ')}) VALUES (${placeholders})`)
-      .run(id, updatedAt, extraJson, ...values);
+    this.db.prepare(`INSERT OR REPLACE INTO ${quoteIdent(sqlTable)} (${allCols.map(quoteIdent).join(', ')}) VALUES (${placeholders})`).run(id, updatedAt, extraJson, ...values);
     return this.findOneRow(id);
   }
 
@@ -585,9 +586,7 @@ export class EdbStore {
       const { cols, values, extraJson } = this.encodeRowColumns(target.columns, data);
       const allCols = ['_id', '_updatedAt', '_extra', ...cols];
       const placeholders = allCols.map(() => '?').join(', ');
-      this.db
-        .prepare(`INSERT OR REPLACE INTO ${quoteIdent(target.sqlTable)} (${allCols.map(quoteIdent).join(', ')}) VALUES (${placeholders})`)
-        .run(id, updatedAt, extraJson, ...values);
+      this.db.prepare(`INSERT OR REPLACE INTO ${quoteIdent(target.sqlTable)} (${allCols.map(quoteIdent).join(', ')}) VALUES (${placeholders})`).run(id, updatedAt, extraJson, ...values);
     }
   }
 
@@ -755,9 +754,7 @@ export class EdbStore {
     const scope = where.sql ? `(${where.sql}) AND ` : '';
 
     // One more row than asked for, so "there are more" needs no second query.
-    const rows = this.db
-      .prepare(`SELECT ${col} AS v, COUNT(*) AS n FROM ${table} WHERE ${scope}NOT ${blankSql} GROUP BY ${col} ORDER BY n DESC, v ASC LIMIT ${limit + 1}`)
-      .all(...where.params);
+    const rows = this.db.prepare(`SELECT ${col} AS v, COUNT(*) AS n FROM ${table} WHERE ${scope}NOT ${blankSql} GROUP BY ${col} ORDER BY n DESC, v ASC LIMIT ${limit + 1}`).all(...where.params);
     const blanks = Number(this.db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${scope}${blankSql}`).get(...where.params)?.n ?? 0);
 
     const more = rows.length > limit;
