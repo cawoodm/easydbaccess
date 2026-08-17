@@ -106,12 +106,12 @@ test('Re-Create takes the columns from the file', async ({ page }) => {
   await dialogs(page).locator('button.choice', { hasText: 'Re-Create' }).click();
 
   await expect.poll(async () => (await readTable(page, id)).columns.map((c: { field: string }) => c.field)).toEqual(['town', 'mayor']);
-  // Polled, not read once: Re-Create writes the table's new shape and its rows
-  // as separate store calls, so the columns are already the file's while the
-  // row is still on its way.
+  // The row is polled for BY ITS CONTENT, in one read. Re-Create clears the old
+  // rows and inserts the file's as separate store calls, so the count passes
+  // through 1 on the way — polling the count and then reading again can catch
+  // two different moments and find nothing at all the second time.
+  await expect.poll(async () => (await readRows(page, id))[0]?.data).toMatchObject({ town: 'Zug', mayor: 'Ada' });
   await expect.poll(async () => (await readRows(page, id)).length).toBe(1);
-  const rows = await readRows(page, id);
-  expect(rows[0]?.data).toMatchObject({ town: 'Zug', mayor: 'Ada' });
   // Still the same table — the id, and so the window and anything bound to it.
   expect((await readTable(page, id)).name).toBe('Cities');
 });

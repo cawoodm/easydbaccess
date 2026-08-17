@@ -804,9 +804,34 @@ export class EdbStore {
     const data = (doc.data as Record<string, unknown>) ?? {};
     const updatedAt = typeof doc.updatedAt === 'number' ? doc.updatedAt : 0;
     const { cols, values, extraJson } = this.encodeRowColumns(columns, data);
+    const table = quoteIdent(sqlTable);
+
+    // An UPDATE for a row that is already there, and only then an INSERT.
+    //
+    // `INSERT OR REPLACE` would do both in one statement, and it is what this
+    // used to do — but on a conflict SQLite DELETES the old row and inserts a
+    // new one, which hands it a fresh `rowid`. A table read with no ORDER BY
+    // comes back in rowid order, so editing one cell sent its row to the BOTTOM
+    // of the grid. Under the previous browser store the order came from the row
+    // id and never moved, so this only became visible when SQLite became the
+    // only store.
+    //
+    // Every declared column is written, absent fields as NULL, because a write
+    // here means "this doc is the whole row" — the same thing `INSERT OR
+    // REPLACE` meant. A physical column no longer in `columns` is left alone;
+    // nothing reads it (`decodeRow` walks the doc's columns), and clearing it
+    // would destroy data the doc has merely stopped surfacing.
+    if (mode === 'upsert' && this.db.prepare(`SELECT _id FROM ${table} WHERE _id = ?`).get(id)) {
+      const written = new Map(cols.map((c, i) => [c, values[i]] as const));
+      const setCols = ['_updatedAt', '_extra', ...columns.map((c) => c.field)];
+      const setValues: unknown[] = [updatedAt, extraJson, ...columns.map((c) => (written.has(c.field) ? written.get(c.field) : null))];
+      this.db.prepare(`UPDATE ${table} SET ${setCols.map((c) => `${quoteIdent(c)} = ?`).join(', ')} WHERE _id = ?`).run(...setValues, id);
+      return this.findOneRow(id);
+    }
+
     const allCols = ['_id', '_updatedAt', '_extra', ...cols];
     const placeholders = allCols.map(() => '?').join(', ');
-    this.db.prepare(`INSERT OR REPLACE INTO ${quoteIdent(sqlTable)} (${allCols.map(quoteIdent).join(', ')}) VALUES (${placeholders})`).run(id, updatedAt, extraJson, ...values);
+    this.db.prepare(`INSERT INTO ${table} (${allCols.map(quoteIdent).join(', ')}) VALUES (${placeholders})`).run(id, updatedAt, extraJson, ...values);
     return this.findOneRow(id);
   }
 

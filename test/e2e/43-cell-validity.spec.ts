@@ -34,7 +34,10 @@ test.describe('cell-boolean four-state rendering', () => {
     const idxOf = (pred: (v: unknown) => boolean) => rows.findIndex((r) => pred(r.data.flag));
     const trueIdx = idxOf((v) => v === 'true');
     const falseIdx = idxOf((v) => v === 'false');
-    const emptyIdx = idxOf((v) => v === null);
+    // `== null`, not `=== null`: `EdbStore.decodeRow` OMITS a decoded null, so a
+    // cell that holds nothing reads back as an absent key rather than as null —
+    // "a row that stored nothing reads the same as one that never held the key".
+    const emptyIdx = idxOf((v) => v == null);
     const invalidIdx = idxOf((v) => v === 'foo');
     expect([trueIdx, falseIdx, emptyIdx, invalidIdx].every((i) => i >= 0)).toBe(true);
 
@@ -59,6 +62,9 @@ test.describe('cell-boolean four-state rendering', () => {
     await expect(emptyCheckbox).toHaveAttribute('title', /Empty/);
 
     // Clicking the empty checkbox commits true — an empty cell can be filled in.
+    // It arrives at the store as boolean `true` and comes back as the STRING
+    // 'true', because this column is untyped and therefore TEXT: `encodeValue`
+    // stringifies anything it is not told to treat as a boolean or a number.
     await emptyCheckbox.click();
     await expect(emptyCheckbox).toBeChecked();
     const emptyRowId = rows[emptyIdx]!.id;
@@ -67,7 +73,7 @@ test.describe('cell-boolean four-state rendering', () => {
         const fresh = await readRows(page, id);
         return fresh.find((r: { id: string }) => r.id === emptyRowId)?.data.flag;
       })
-      .toBe(true);
+      .toBe('true');
 
     // invalid ('foo') → no checkbox at all; red-bordered raw text + pencil.
     const invalidCell = cellAt(invalidIdx);

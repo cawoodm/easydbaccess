@@ -183,6 +183,38 @@ describe('rows', () => {
     expect(store.findOne('rows', 'r1')).toEqual(written);
   });
 
+  it('keeps a row where it was when it is edited, so the grid does not reshuffle', () => {
+    // `INSERT OR REPLACE` used to do both halves of an upsert in one statement,
+    // and on a conflict SQLite deletes the old row and inserts a new one — a
+    // fresh `rowid`, so the edited row moved to the END of a read with no
+    // ORDER BY. On screen that is an edited cell sending its row to the bottom
+    // of the grid.
+    store.insert('rows', row('r1', { name: 'a' }));
+    store.insert('rows', row('r2', { name: 'b' }));
+    store.insert('rows', row('r3', { name: 'c' }));
+
+    store.patch('rows', 'r2', { data: { name: 'b!' } });
+
+    const order = () =>
+      driver
+        .prepare(`SELECT _id FROM "Parts"`)
+        .all()
+        .map((r) => String(r._id));
+    expect(order()).toEqual(['r1', 'r2', 'r3']);
+    // An upsert of an existing row goes the same way.
+    store.upsert('rows', row('r1', { name: 'a!' }));
+    expect(order()).toEqual(['r1', 'r2', 'r3']);
+  });
+
+  it('an upsert still means the WHOLE row — a field left out goes back to empty', () => {
+    // The UPDATE has to clear what it was not given, because that is what
+    // `INSERT OR REPLACE` meant and callers were written against it.
+    store.insert('rows', row('r1', { name: 'bolt', qty: 4, ghost: 'kept' }));
+    store.upsert('rows', row('r1', { name: 'bolt' }));
+    expect((store.findOne('rows', 'r1') as { data: Record<string, unknown> }).data).toEqual({ name: 'bolt' });
+    expect(driver.prepare(`SELECT qty, _extra FROM "Parts" WHERE _id = 'r1'`).get()).toEqual({ qty: null, _extra: null });
+  });
+
   it('stores a value per column, so the file is queryable as SQL', () => {
     store.insert('rows', row('r1', { name: 'bolt', qty: 4, done: true }));
     const raw = driver.prepare(`SELECT name, qty, done FROM "Parts" WHERE _id = 'r1'`).get();
