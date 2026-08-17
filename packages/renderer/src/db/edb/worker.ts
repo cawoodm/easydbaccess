@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import sqlite3InitModule, { type Database, type Sqlite3Static } from '@sqlite.org/sqlite-wasm';
-import { EdbStore } from '@easydb/shared';
-import { ROW_COLLECTION, type EdbRequest, type EdbResponse } from './protocol.js';
+import { EdbStore, changeScopeOf } from '@easydb/shared';
+import { type EdbRequest, type EdbResponse } from './protocol.js';
 import { createAutosavePolicy, type AutosavePolicy } from './dirty.js';
 import { readMirror, writeMirror } from './mirror.js';
 import { wasmDriver } from './wasm-driver.js';
@@ -119,15 +119,6 @@ function require<T>(value: T | null, what: string): T {
   return value;
 }
 
-/** Which table a row write touched, so the broadcast can be scoped to it. */
-function rowScope(req: EdbRequest): string | undefined {
-  if ('doc' in req && req.doc && typeof req.doc.tableId === 'string') return req.doc.tableId;
-  if ('docs' in req && Array.isArray(req.docs)) {
-    const first = req.docs[0];
-    if (first && typeof first.tableId === 'string') return first.tableId;
-  }
-  return undefined;
-}
 
 function handle(req: EdbRequest): unknown {
   const s = () => require(store, 'store used');
@@ -185,7 +176,10 @@ self.onmessage = async (e: MessageEvent<EdbRequest>) => {
     const result = await handleAsync(req);
     post({ id: req.id, ok: true, result });
     if (isMutation(req)) {
-      post({ changed: req.coll, scope: req.coll === ROW_COLLECTION ? rowScope(req) : undefined });
+      // Scoped from the RESULT, not the request: a remove/bulkRemove names row
+      // ids and a patch names only the changed fields, so none of them can say
+      // which table they hit until the store has looked. See `changeScopeOf`.
+      post({ changed: req.coll, scope: changeScopeOf(req.coll, result) });
       // One call per RPC, so a 600k-row bulkInsert marks the mirror dirty once.
       mirror?.changed();
     }

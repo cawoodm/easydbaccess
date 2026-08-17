@@ -183,14 +183,27 @@ export class EdbStore {
     });
   }
 
-  remove(coll: string, key: string): void {
-    this.tx(() => this.removeNoTx(coll, key));
+  /**
+   * Removes one document. For `rows`, returns the table it came out of.
+   *
+   * The return value exists for the change broadcast, not for the caller's own
+   * use: a `remove` request names a row id and nothing else, so without this the
+   * broadcast has no scope and every open grid re-reads itself.
+   */
+  remove(coll: string, key: string): string | undefined {
+    return this.tx(() => this.removeNoTx(coll, key));
   }
 
-  bulkRemove(coll: string, keys: string[]): void {
-    if (keys.length === 0) return;
-    this.tx(() => {
-      for (const key of keys) this.removeNoTx(coll, key);
+  /** Removes many. For `rows`, returns the distinct tables they came out of. */
+  bulkRemove(coll: string, keys: string[]): string[] {
+    if (keys.length === 0) return [];
+    return this.tx(() => {
+      const touched = new Set<string>();
+      for (const key of keys) {
+        const tableId = this.removeNoTx(coll, key);
+        if (tableId !== undefined) touched.add(tableId);
+      }
+      return [...touched];
     });
   }
 
@@ -253,11 +266,16 @@ export class EdbStore {
     return this.writeDocNoTx(mode, coll, doc);
   }
 
-  private removeNoTx(coll: string, key: string): void {
-    if (coll === 'tables') return this.removeTableNoTx(key);
+  /** Returns the table a ROW was removed from, so the caller can scope its broadcast. */
+  private removeNoTx(coll: string, key: string): string | undefined {
+    if (coll === 'tables') {
+      this.removeTableNoTx(key);
+      return undefined;
+    }
     if (coll === 'rows') return this.removeRowNoTx(key);
     docPk(coll);
     this.db.prepare(`DELETE FROM _easydb WHERE coll = ? AND key = ?`).run(coll, key);
+    return undefined;
   }
 
   // -- document collections ----------------------------------------------
@@ -510,15 +528,26 @@ export class EdbStore {
     }
   }
 
-  private removeRowNoTx(id: string): void {
+  /**
+   * Deletes one row, wherever it lives, and reports WHICH table that was.
+   *
+   * The id alone does not say which table holds it, so this scans — see the note
+   * on `findOneRow`. Returning the table it found is what lets a delete broadcast
+   * a scoped change instead of waking every open grid: the request carries only
+   * row ids, so the answer cannot come from anywhere else.
+   *
+   * `undefined` means no table held it, which is a no-op delete, not an error.
+   */
+  private removeRowNoTx(id: string): string | undefined {
     for (const stored of this.storedTableDocs()) {
       const sqlTable = String(stored[SQL_TABLE_KEY]);
       const hit = this.db.prepare(`SELECT _id FROM ${quoteIdent(sqlTable)} WHERE _id = ?`).get(id);
       if (hit) {
         this.db.prepare(`DELETE FROM ${quoteIdent(sqlTable)} WHERE _id = ?`).run(id);
-        return;
+        return String(stored.id);
       }
     }
+    return undefined;
   }
 
   private findOneRow(id: string): unknown | null {

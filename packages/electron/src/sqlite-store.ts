@@ -140,12 +140,14 @@ export class SqliteStore {
     return this.store.patch(coll, key, patch);
   }
 
-  remove(coll: string, key: string): void {
-    this.store.remove(coll, key);
+  /** For `rows`, the table the row came out of — see `EdbStore.remove`. */
+  remove(coll: string, key: string): string | undefined {
+    return this.store.remove(coll, key);
   }
 
-  bulkRemove(coll: string, keys: string[]): void {
-    this.store.bulkRemove(coll, keys);
+  /** For `rows`, the distinct tables the rows came out of. */
+  bulkRemove(coll: string, keys: string[]): string[] {
+    return this.store.bulkRemove(coll, keys);
   }
 
   count(coll: string): number {

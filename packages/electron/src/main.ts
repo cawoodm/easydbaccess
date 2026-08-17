@@ -20,7 +20,7 @@ import { getStore, pickDatabaseToOpen, switchToDatabase, saveDbAs, importDb, imp
 import { prepareImport, probeDatabaseFile, type ImportPlanEntry } from './db-import';
 import { runImport } from './import-runner';
 import { listBrowsable, readBrowseRows } from './db-browse';
-import type { ColumnSpec, RowQuery } from '@easydb/shared';
+import { changeScopeOf, type ColumnSpec, type RowQuery } from '@easydb/shared';
 import type { ImportDecision } from './db-import';
 
 const isDev = !!process.env.EASYDB_RENDERER_URL;
@@ -77,12 +77,22 @@ function handle<Args extends unknown[], R>(channel: string, fn: (...args: Args) 
   });
 }
 
-/** Same as `handle`, but also broadcasts `store:changed` for the mutated collection. */
+/**
+ * Same as `handle`, but also broadcasts `store:changed` for the mutated
+ * collection.
+ *
+ * The scope comes from what the store RETURNED, by the same rule the browser
+ * worker uses (`changeScopeOf` in `@easydb/shared`) — the request cannot supply
+ * it for a remove, a bulk remove or a patch. Until this was wired the desktop
+ * broadcast every row write unscoped, which is the quadratic case
+ * `broadcastChanged` describes.
+ */
 function handleMutating<Args extends [string, ...unknown[]], R>(channel: string, fn: (...args: Args) => R): void {
   ipcMain.handle(channel, (_event, ...args: unknown[]) => {
     try {
       const result = fn(...(args as Args));
-      broadcastChanged(args[0] as string);
+      const coll = args[0] as string;
+      broadcastChanged(coll, changeScopeOf(coll, result));
       return result;
     } catch (err) {
       throw new Error(toErrorMessage(err), { cause: err });

@@ -239,6 +239,53 @@ describe('rows', () => {
   });
 });
 
+/**
+ * A delete names only a row id, so the store is the only thing that can say
+ * which table it emptied. Without that answer the change broadcast goes wide and
+ * every open grid re-reads itself — once per chunk of a chunked delete.
+ */
+describe('a removal reports which table it touched', () => {
+  beforeEach(() => {
+    store.insert('tables', table());
+    store.insert('tables', table({ id: 't2', name: 'Other' }));
+  });
+
+  it('returns the table a removed row came out of', () => {
+    store.insert('rows', row('r1', { name: 'a' }));
+    expect(store.remove('rows', 'r1')).toBe('t1');
+  });
+
+  it('returns the table even when the row is not in the first one searched', () => {
+    store.insert('rows', row('r1', { name: 'a' }, 't2'));
+    expect(store.remove('rows', 'r1')).toBe('t2');
+  });
+
+  it('reports nothing for a row that was not there — a no-op, not an error', () => {
+    expect(store.remove('rows', 'nope')).toBeUndefined();
+  });
+
+  it('reports nothing for a collection whose subscribers are not per-table', () => {
+    store.upsert('viewTemplates', { id: 'v1', workspaceId: 'w1', name: 'V' });
+    expect(store.remove('viewTemplates', 'v1')).toBeUndefined();
+    expect(store.remove('tables', 't2')).toBeUndefined();
+  });
+
+  it('returns the one table a bulk delete emptied', () => {
+    store.bulkInsert('rows', [row('r1', { name: 'a' }), row('r2', { name: 'b' })]);
+    expect(store.bulkRemove('rows', ['r1', 'r2'])).toEqual(['t1']);
+    expect(store.countRowsIn('t1')).toBe(0);
+  });
+
+  it('returns every table a bulk delete spanned, without duplicates', () => {
+    store.bulkInsert('rows', [row('r1', { name: 'a' }), row('r2', { name: 'b' }), row('r3', { name: 'c' }, 't2')]);
+    expect(store.bulkRemove('rows', ['r1', 'r2', 'r3']).sort()).toEqual(['t1', 't2']);
+  });
+
+  it('returns nothing for an empty batch, without opening a transaction', () => {
+    expect(store.bulkRemove('rows', [])).toEqual([]);
+  });
+});
+
 describe('queryRows', () => {
   beforeEach(() => {
     store.insert('tables', table());
