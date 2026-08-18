@@ -15,7 +15,6 @@ const NOTHING: SpaceEvidence = {
   isActive: false,
   hasLocalDb: false,
   inGrantedFolder: false,
-  hasSnapshot: false,
   canAskForFolder: false,
 };
 
@@ -48,21 +47,8 @@ describe('decideSpace', () => {
     expect(decideSpace(evidence({ inGrantedFolder: true }))).toBe('adopt-folder-file');
   });
 
-  it('falls back to the IndexedDB dump when there is no file anywhere', () => {
-    expect(decideSpace(evidence({ hasSnapshot: true }))).toBe('adopt-snapshot');
-  });
-
-  it('prefers a real file to the dump, which is the copy nobody chose a place for', () => {
-    expect(decideSpace(evidence({ inGrantedFolder: true, hasSnapshot: true }))).toBe('adopt-folder-file');
-    expect(decideSpace(evidence({ hasLocalDb: true, hasSnapshot: true }))).toBe('adopt-local-db');
-  });
-
   it('asks for a folder only when nothing was reachable unprompted', () => {
     expect(decideSpace(evidence({ canAskForFolder: true }))).toBe('ask-for-folder');
-  });
-
-  it('does not ask when a dump is already there to use', () => {
-    expect(decideSpace(evidence({ hasSnapshot: true, canAskForFolder: true }))).toBe('adopt-snapshot');
   });
 
   it('does not ask where the browser has no directory picker', () => {

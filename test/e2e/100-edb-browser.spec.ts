@@ -11,11 +11,13 @@ import { addRow, createTable, waitForPanel } from './helpers.js';
  *
  * 1. Most tests set the marker `localStorage` key the picker would have written,
  *    then exercise everything downstream — worker, store, OPFS pool, reload.
- * 2. The rest hide `showSaveFilePicker`, which is what a browser without the
- *    FileSystem API looks like. The plugin then takes its download path, and the
- *    whole menu flow runs for real.
+ * 2. One test REPLACES `showSaveFilePicker` with a stub that hands back a handle
+ *    writing into a page global. Everything after the picker is the real path —
+ *    the File menu, the "where does this go?" dialog, `ensureWritable`,
+ *    `writeBytes`. Hiding the picker instead would test a browser that cannot
+ *    save at all, which is its own test.
  *
- * Two tests open the produced bytes in **Node's** SQLite. That is the point of
+ * One test opens the produced bytes in **Node's** SQLite. That is the point of
  * the feature, and the assertion goes nowhere near the app's own code.
  *
  * There is no mirror any more. The database is a file in the `opfs-sahpool`
@@ -63,8 +65,8 @@ async function opfsEntries(page: Page): Promise<string[]> {
  * Boot a tab that has adopted `edbName`, with no file pickers.
  *
  * The marker is written by an init script, so it is in place before the app's
- * first line runs. Deleting the pickers is what makes the File menu's Save take
- * its download path — the only way to get bytes out without an OS dialog.
+ * first line runs. Both pickers are deleted, so this tab is a browser with no
+ * FileSystem Access API — the state in which a Save has nowhere to go.
  * Storage is not wiped: Playwright gives each test its own browser context, so
  * IndexedDB and OPFS start empty anyway.
  */
@@ -88,72 +90,89 @@ async function reload(page: Page): Promise<void> {
 }
 
 /**
- * The `.edb` names IndexedDB currently holds a dump for.
+ * Boot with a save picker that writes into a page global instead of to disk.
  *
- * Read through the raw IndexedDB API on purpose: the record shape is what the
- * app promises, and the app must be the only thing that ever needs to know it.
- * Resolves `[]` for a database that exists but holds nothing, which is what a
- * boot-time probe leaves behind.
+ * Playwright cannot drive an OS dialog, so the picker is REPLACED rather than
+ * removed. `showSaveFilePicker` hands back a handle whose `createWritable`
+ * collects what is written into `window.__savedEdb`. Everything downstream of
+ * the picker is the app's real code.
+ *
+ * The handle's methods live on a PROTOTYPE, which is load-bearing: `saveAs`
+ * stores the handle in IndexedDB, structured clone copies own properties only,
+ * and a function as an own property would throw `DataCloneError` and fail the
+ * Save for a reason that has nothing to do with the app.
  */
-async function snapshotKeys(page: Page): Promise<string[]> {
-  return page.evaluate(
-    () =>
-      new Promise<string[]>((resolve, reject) => {
-        const req = indexedDB.open('easydb-snapshots');
-        req.onerror = () => reject(req.error);
-        req.onsuccess = () => {
-          const db = req.result;
-          if (!db.objectStoreNames.contains('snapshots')) {
-            db.close();
-            resolve([]);
-            return;
-          }
-          const tx = db.transaction('snapshots', 'readonly');
-          const keys = tx.objectStore('snapshots').getAllKeys();
-          tx.oncomplete = () => {
-            db.close();
-            resolve(keys.result.map(String));
+async function bootWithSavePicker(page: Page, edbName: string, workspaceId: string): Promise<void> {
+  await page.addInitScript(
+    ({ key, value }) => {
+      localStorage.setItem(key, value);
+      delete (window as unknown as Record<string, unknown>)['showDirectoryPicker'];
+      class StubHandle {
+        kind = 'file';
+        constructor(public name: string) {}
+        async queryPermission() {
+          return 'granted';
+        }
+        async requestPermission() {
+          return 'granted';
+        }
+        async createWritable() {
+          const parts: BlobPart[] = [];
+          const name = this.name;
+          return {
+            async write(data: BlobPart) {
+              parts.push(data);
+            },
+            async close() {
+              const buffer = await new Blob(parts).arrayBuffer();
+              let binary = '';
+              for (const byte of new Uint8Array(buffer)) binary += String.fromCharCode(byte);
+              (window as unknown as Record<string, unknown>)['__savedEdb'] = { name, base64: btoa(binary) };
+            },
           };
-          tx.onerror = () => reject(tx.error);
-        };
-      }),
+        }
+      }
+      (window as unknown as Record<string, unknown>)['showSaveFilePicker'] = async (opts?: { suggestedName?: string }) => new StubHandle(opts?.suggestedName ?? 'workspace.edb');
+    },
+    { key: ACTIVE_KEY, value: edbName },
   );
+  await page.goto(`/?test=1&space=${encodeURIComponent(workspaceId)}`);
+  await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
 }
 
 /**
- * Save through the File menu, and hand back the bytes it stored.
+ * Open the File menu and click one item by its LABEL.
  *
- * With no file handle a Save writes ONE place — the IndexedDB dump — so that is
- * where the bytes are read from. It does not also produce a download: a save is
- * about the workspace surviving, and getting a file is Save As.
+ * Not `getByRole('menuitem', { name })`: a menu item's accessible name is the
+ * Material Icons ligature plus the label ("save Save"), so matching on the name
+ * couples the test to which icon the item happens to carry. The label lives in
+ * its own span, and matching that span exactly is what tells "Save" from
+ * "Save As…".
  */
-async function saveToBrowserCopy(page: Page, to?: string): Promise<Buffer> {
+async function clickFileMenu(page: Page, label: string): Promise<void> {
   await page.locator('app-shell').getByRole('button', { name: /File/ }).click();
-  await page.getByRole('menuitem', { name: /Save a copy in this browser/ }).click();
-  await expect.poll(async () => (await snapshotKeys(page)).length).toBeGreaterThan(0);
+  await page
+    .getByRole('menuitem')
+    .filter({ has: page.getByText(label, { exact: true }) })
+    .click();
+}
 
-  const b64 = await page.evaluate(
-    () =>
-      new Promise<string>((resolve, reject) => {
-        const req = indexedDB.open('easydb-snapshots');
-        req.onerror = () => reject(req.error);
-        req.onsuccess = () => {
-          const db = req.result;
-          const tx = db.transaction('snapshots', 'readonly');
-          const all = tx.objectStore('snapshots').getAll();
-          tx.oncomplete = () => {
-            db.close();
-            const rec = all.result[0] as { bytes: Blob } | undefined;
-            if (!rec) return reject(new Error('no snapshot stored'));
-            const reader = new FileReader();
-            reader.onerror = () => reject(reader.error);
-            reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
-            reader.readAsDataURL(rec.bytes);
-          };
-          tx.onerror = () => reject(tx.error);
-        };
-      }),
-  );
+/**
+ * Save through the File menu, and hand back the bytes the picker's handle got.
+ *
+ * A workspace with no file yet cannot save silently any more — there is no
+ * browser-side copy to fall back on — so Save ASKS where the bytes go. Clicking
+ * through that dialog is part of the flow, not setup for it.
+ */
+async function saveThroughPicker(page: Page, to?: string): Promise<Buffer> {
+  await clickFileMenu(page, 'Save');
+
+  const dialog = page.locator('host-dialogs');
+  await expect(dialog.getByText(/no file yet/)).toBeVisible();
+  await dialog.getByRole('button', { name: 'Choose a file…', exact: true }).click();
+
+  await expect.poll(async () => page.evaluate(() => Boolean((window as unknown as Record<string, unknown>)['__savedEdb']))).toBe(true);
+  const b64 = await page.evaluate(() => ((window as unknown as Record<string, { base64: string }>)['__savedEdb'] as { base64: string }).base64);
   const bytes = Buffer.from(b64, 'base64');
   if (to) writeFileSync(to, bytes);
   return bytes;
@@ -175,14 +194,14 @@ test.describe('browser .edb storage', () => {
     expect(await opfsEntries(page)).toContain('.easydb-sahpool');
 
     // And no WORKSPACE is in IndexedDB. `easydb` is the database the browser
-    // kept them in until the SQLite flip, so its absence is the assertion.
-    //
-    // Deliberately not "IndexedDB is empty": `?space=` resolution probes for a
-    // saved copy on every boot (`space-adopt.ts`), which opens
-    // `easydb-snapshots` before anything has been written to it. That the
-    // snapshot store holds nothing until a Save is the next test's job.
+    // kept them in until the SQLite flip, and `easydb-snapshots` held the raw
+    // dump a Save used to write when there was no file. Both are gone: the pool
+    // IS the durable copy, so a second one beside it answered nothing. The only
+    // IndexedDB database this app still opens holds FileSystem handles, which
+    // is the one thing OPFS cannot store.
     const dbNames = await page.evaluate(async () => ((await indexedDB.databases?.()) ?? []).map((d) => d.name));
     expect(dbNames).not.toContain('easydb');
+    expect(dbNames).not.toContain('easydb-snapshots');
   });
 
   test('a reload restores the workspace, with nothing saved to a file', async ({ page }, testInfo) => {
@@ -219,7 +238,7 @@ test.describe('browser .edb storage', () => {
 
   test('the bytes are a real SQLite database Node can open', async ({ page }, testInfo) => {
     const edbName = `${testInfo.testId}.edb`;
-    await bootFileBacked(page, edbName, `edb-${testInfo.testId}`);
+    await bootWithSavePicker(page, edbName, `edb-${testInfo.testId}`);
 
     const tableId = await createTable(page, 'parts', [
       { field: 'part', type: 'string', renderer: 'link' },
@@ -230,10 +249,10 @@ test.describe('browser .edb storage', () => {
 
     // Out through the File menu, because that is the only way out: the pool's
     // OPFS files are an opaque slab the VFS manages, not a `.edb` sitting under
-    // a readable name. With no `showSaveFilePicker` the menu item is "Download
-    // a copy" and the bytes arrive as a download.
+    // a readable name. Save is the way, and Save now goes through a real file
+    // handle — the stub picker's — because there is nowhere else for it to go.
     const file = testInfo.outputPath('workspace.edb');
-    const bytes = await saveToBrowserCopy(page, file);
+    const bytes = await saveThroughPicker(page, file);
     expect(bytes.subarray(0, 15).toString('latin1')).toBe('SQLite format 3');
 
     const db = new DatabaseSync(file, { readOnly: true });
@@ -268,9 +287,8 @@ test.describe('browser .edb storage', () => {
     }
   });
 
-  test('a Save with no file to save to dumps the database into IndexedDB, and can be restored from it', async ({ page }, testInfo) => {
-    const edbName = `${testInfo.testId}.edb`;
-    await bootFileBacked(page, edbName, `edb-${testInfo.testId}`);
+  test('a Save with no file asks where it goes, and writes nothing until it has one', async ({ page }, testInfo) => {
+    await bootWithSavePicker(page, `${testInfo.testId}.edb`, `edb-${testInfo.testId}`);
 
     const tableId = await createTable(page, 'parts', [
       { field: 'part', type: 'string', renderer: 'link' },
@@ -279,81 +297,48 @@ test.describe('browser .edb storage', () => {
     await addRow(page, tableId, { part: 'bolt', qty: 4 });
     await waitForPanel(page, tableId);
 
-    // Nothing yet: the dump is written on Save, not as the workspace goes.
-    //
-    // Asserted as an empty STORE rather than an absent database. `?space=`
-    // resolution probes for a saved copy on every boot (`space-adopt.ts`), and
-    // `indexedDB.open` creates what it opens — so the database exists from the
-    // first load and only its emptiness can say the dump has not happened.
-    expect(await snapshotKeys(page)).toEqual([]);
+    const dialog = page.locator('host-dialogs');
 
-    await saveToBrowserCopy(page);
+    // Cancelling the question writes NOTHING. This is the assertion the old
+    // IndexedDB dump made impossible: a Save used to always land somewhere, so
+    // "saved" could mean a copy the user never chose the location of and could
+    // not hand to anyone. Now a Save either reaches the user's file or does not
+    // happen, and the workspace stays durable in the pool either way.
+    await clickFileMenu(page, 'Save');
+    await expect(dialog.getByText(/no file yet/)).toBeVisible();
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    expect(await page.evaluate(() => (window as unknown as Record<string, unknown>)['__savedEdb'] ?? null)).toBeNull();
 
-    // One record, keyed by the .edb name, holding the whole database as a blob
-    // and nothing else. Read here through the raw IndexedDB API on purpose:
-    // this is the shape the app promises, and the app must be the only thing
-    // that ever needs to know it.
-    const record = await page.evaluate(
-      (slot) =>
-        new Promise<{ keys: string[]; stores: string[]; slot: string; byteLength: number; type: string; fields: string[] } | null>((resolve, reject) => {
-          const req = indexedDB.open('easydb-snapshots');
-          req.onerror = () => reject(req.error);
-          req.onsuccess = () => {
-            const db = req.result;
-            const stores = [...db.objectStoreNames];
-            const tx = db.transaction('snapshots', 'readonly');
-            const store = tx.objectStore('snapshots');
-            const all = store.getAll();
-            const keys = store.getAllKeys();
-            tx.oncomplete = () => {
-              const rec = all.result[0] as { slot: string; bytes: Blob; byteLength: number } | undefined;
-              db.close();
-              resolve(rec ? { keys: keys.result.map(String), stores, slot: rec.slot, byteLength: rec.byteLength, type: rec.bytes.type, fields: Object.keys(rec).sort() } : null);
-            };
-            tx.onerror = () => reject(tx.error);
-          };
-        }),
-      edbName,
+    // Answering it writes the file, once, through the handle the picker gave.
+    const bytes = await saveThroughPicker(page);
+    expect(bytes.subarray(0, 15).toString('latin1')).toBe('SQLite format 3');
+  });
+
+  test('a browser with no file access says so instead of saving nowhere', async ({ page }, testInfo) => {
+    // No pickers at all — Firefox and Safari. There is no IndexedDB dump to
+    // quietly fall back on any more, so the only honest answer is to say that
+    // this browser cannot produce a file, and to say that the workspace is
+    // nonetheless still here.
+    await bootFileBacked(page, `${testInfo.testId}.edb`, `edb-${testInfo.testId}`);
+    const tableId = await createTable(page, 'parts', [{ field: 'part', type: 'string' }]);
+    await addRow(page, tableId, { part: 'bolt' });
+    await waitForPanel(page, tableId);
+
+    await clickFileMenu(page, 'Save');
+
+    const dialog = page.locator('host-dialogs');
+    await expect(dialog.getByText(/cannot give easyDBAccess a file/)).toBeVisible();
+    // It says the data is safe, not only that the save failed.
+    await expect(dialog.getByText(/survives a reload/)).toBeVisible();
+    await dialog.getByRole('button', { name: 'OK', exact: true }).click();
+
+    // And the workspace really is still there.
+    await reload(page);
+    const rows = await page.evaluate(
+      async (id) => (window as unknown as { __easydb: { store: { rows(i: string): { find(): Promise<{ data: Record<string, unknown> }[]> } } } }).__easydb.store.rows(id).find(),
+      tableId,
     );
-    expect(record).not.toBeNull();
-    expect(record!.stores).toEqual(['snapshots']);
-    expect(record!.keys).toEqual([edbName]);
-    expect(record!.slot).toBe(edbName);
-    expect(record!.type).toBe('application/x-sqlite3');
-    // A SQLite file, not a JSON dump of the workspace — the whole point of
-    // calling this a raw copy rather than a store.
-    expect(record!.byteLength).toBeGreaterThan(1024);
-    expect(record!.fields).toEqual(['at', 'byteLength', 'bytes', 'formatVersion', 'slot']);
-
-    // Change the workspace AFTER the save, so restoring has something to undo.
-    await addRow(page, tableId, { part: 'nut', qty: 9 });
-    await expect
-      .poll(
-        async () =>
-          (await page.evaluate(async (id) => (window as unknown as { __easydb: { store: { rows(i: string): { find(): Promise<unknown[]> } } } }).__easydb.store.rows(id).find(), tableId)).length,
-      )
-      .toBe(2);
-
-    await page.locator('app-shell').getByRole('button', { name: /File/ }).click();
-    await page.getByRole('menuitem', { name: /Restore this browser's copy/ }).click();
-    // The restore reloads, and the wait has to be for THAT load — `__easydb` is
-    // already true on the page being replaced, so waiting on it alone would read
-    // the pre-restore workspace and pass for the wrong reason.
-    const restored = page.waitForEvent('load');
-    await page.locator('host-dialogs').getByRole('button', { name: 'Yes', exact: true }).click();
-    await restored;
-    await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
-
-    // Back to the one row that was there when Save ran. The blob went into
-    // SQLite to be read — nothing queried IndexedDB for it.
-    const rows = await page.evaluate(async () => {
-      const store = (
-        window as unknown as { __easydb: { store: { tables: { find(): Promise<{ id: string; name: string }[]> }; rows(id: string): { find(): Promise<{ data: Record<string, unknown> }[]> } } } }
-      ).__easydb.store;
-      const parts = (await store.tables.find()).find((t) => t.name === 'parts')!;
-      return store.rows(parts.id).find();
-    });
-    expect(byPart(rows)).toEqual([{ part: 'bolt', qty: 4 }]);
+    expect(byPart(rows)).toEqual([{ part: 'bolt' }]);
   });
 });
 

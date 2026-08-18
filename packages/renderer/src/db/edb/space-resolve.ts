@@ -36,8 +36,6 @@ export interface SpaceEvidence {
   hasLocalDb: boolean;
   /** The candidate file is in a folder this app can already read, unprompted. */
   inGrantedFolder: boolean;
-  /** An IndexedDB dump of that name exists — what a Save with no file writes. */
-  hasSnapshot: boolean;
   /**
    * A folder this user has already chosen, which could be re-permissioned.
    *
@@ -55,15 +53,13 @@ export type SpaceAction =
   | 'adopt-local-db'
   /** Import the folder's file into this browser, then reload. */
   | 'adopt-folder-file'
-  /** Restore the IndexedDB dump of that name, then reload. */
-  | 'adopt-snapshot'
   /** Nothing found unprompted, but a folder could be granted. Needs a gesture. */
   | 'ask-for-folder'
   /** Create the workspace, which is what this always used to do. */
   | 'create';
 
 /**
- * Which of the five to do.
+ * Which of the four to do.
  *
  * Two orderings here are deliberate and both are about not destroying data.
  *
@@ -80,18 +76,12 @@ export type SpaceAction =
  * — boot never reads the user's file at all (see `session.ts`), so unsaved work
  * lives only in the browser. Preferring the file would discard it without asking.
  * When there is no local copy there is nothing to lose and the file is used.
- *
- * The IndexedDB dump comes last of the three copies because it is the one the
- * user did not choose the location of: it is what a Save writes when there is no
- * file to write to (`idb-snapshot.ts`), so a real file of the same name is the
- * better answer whenever there is one.
  */
 export function decideSpace(e: SpaceEvidence): SpaceAction {
   if (e.inOpenDb) return 'use-open';
   if (e.isActive) return 'create';
   if (e.hasLocalDb) return 'adopt-local-db';
   if (e.inGrantedFolder) return 'adopt-folder-file';
-  if (e.hasSnapshot) return 'adopt-snapshot';
   if (e.canAskForFolder) return 'ask-for-folder';
   return 'create';
 }

@@ -2,7 +2,7 @@ import type { DataStore, EventBus, HostApi, RowSourceCtx, Table } from '@easydb/
 import { createRoutedDataStore, withUniqueTableNames } from './db/index.js';
 import { createIpcDataStore } from './db/data-store-bridge.js';
 import { startEdbSession, type EdbSession } from './db/edb/session.js';
-import { adoptFolderFile, adoptLocalDb, adoptSnapshot, planForMissingSpace } from './db/edb/space-adopt.js';
+import { adoptFolderFile, adoptLocalDb, planForMissingSpace } from './db/edb/space-adopt.js';
 import { showStorageFailure } from './chrome/storage-failure.js';
 import { createEventBus } from './events/bus.js';
 import { createRegistries, type Registries } from './plugin-host/registries.js';
@@ -150,7 +150,6 @@ async function init(): Promise<AppContext> {
       if (action === 'adopt-local-db') await adoptLocalDb(id);
       // These two fall through when what the probe saw has since gone.
       if (action === 'adopt-folder-file') await adoptFolderFile(id);
-      if (action === 'adopt-snapshot') await adoptSnapshot(id);
       const created = await store.workspaces.insert({
         id,
         name: requested,
