@@ -3,7 +3,6 @@ import { AnchoredMenu } from '@marccawood/lit-menu';
 import {
   canPickFolder,
   canSaveInPlace,
-  downloadBytes,
   ensureWritable,
   fileInFolder,
   forgetHandle,
@@ -85,15 +84,11 @@ export function init(api: HostApi): void {
    * Put the database somewhere it will survive this tab.
    *
    * The file, when there is one this app may write. Otherwise a raw dump into
-   * IndexedDB, which is the only durable place left — a download hands the user
-   * a file but leaves the app with nothing it can ever read back, so it is what
-   * a MANUAL save does as well, not instead.
-   *
-   * `handOver` is the difference between the two callers. A manual Save is a
-   * user asking for their file and gets the download; autosave is a timer and
-   * must never start one.
+   * IndexedDB — and ONLY that. Save does not also hand over a download: a save
+   * is about the workspace surviving, and producing a file is a separate thing
+   * the user asks for separately (Save As, or New .edb file).
    */
-  async function persist(handOver: boolean): Promise<SaveTarget> {
+  async function persist(): Promise<SaveTarget> {
     const bridge = edbBridge();
     if (!bridge) return 'none';
     const bytes = await bridge.export();
@@ -108,12 +103,11 @@ export function init(api: HostApi): void {
     }
     // No file yet, or a browser with no picker.
     await putSnapshot(activeEdbName(), bytes);
-    if (handOver) downloadBytes(activeEdbName(), bytes);
     return 'snapshot';
   }
 
   const autosave = createAutosavePolicy({
-    save: async () => void (await persist(false)),
+    save: async () => void (await persist()),
     onError: (err) => api.ui.dialogs.toast(`Autosave failed: ${String(err)}`, { kind: 'error' }),
   });
 
@@ -132,7 +126,7 @@ export function init(api: HostApi): void {
   async function save(): Promise<void> {
     let where: SaveTarget;
     try {
-      where = await persist(true);
+      where = await persist();
     } catch (err) {
       // Out of room is the one failure the user can act on, and it is not a
       // toast: a message about a save that did not happen must not vanish after
@@ -152,7 +146,7 @@ export function init(api: HostApi): void {
     if (where === 'file') api.ui.dialogs.toast('Workspace saved', { kind: 'success' });
     // Named rather than called "saved", because where it went decides what the
     // user has to do next: a copy in this browser is not a copy they own.
-    else api.ui.dialogs.toast('Saved a copy in this browser, and downloaded one. Use Save As for a file this app can write.', { kind: 'success' });
+    else api.ui.dialogs.toast('Saved a copy in this browser. Use Save As for a file you keep.', { kind: 'success' });
   }
 
   /**

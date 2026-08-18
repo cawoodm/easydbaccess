@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { addRow, createTable, waitForPanel } from './helpers.js';
 
 /**
@@ -121,19 +121,42 @@ async function snapshotKeys(page: Page): Promise<string[]> {
 }
 
 /**
- * The bytes the File menu hands over, via Save.
+ * Save through the File menu, and hand back the bytes it stored.
  *
- * The way out of the pool is `export`, and the menu item that calls it is Save
- * — which downloads when there is no file handle, i.e. exactly the browser this
- * spec pretends to be. So this drives the real menu rather than reaching into
- * the store, and what it returns is what a user would have on disk.
+ * With no file handle a Save writes ONE place — the IndexedDB dump — so that is
+ * where the bytes are read from. It does not also produce a download: a save is
+ * about the workspace surviving, and getting a file is Save As.
  */
-async function downloadViaSave(page: Page, to: string): Promise<Buffer> {
-  const download = page.waitForEvent('download');
+async function saveToBrowserCopy(page: Page, to?: string): Promise<Buffer> {
   await page.locator('app-shell').getByRole('button', { name: /File/ }).click();
   await page.getByRole('menuitem', { name: /Save a copy in this browser/ }).click();
-  await (await download).saveAs(to);
-  return readFileSync(to);
+  await expect.poll(async () => (await snapshotKeys(page)).length).toBeGreaterThan(0);
+
+  const b64 = await page.evaluate(
+    () =>
+      new Promise<string>((resolve, reject) => {
+        const req = indexedDB.open('easydb-snapshots');
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          const db = req.result;
+          const tx = db.transaction('snapshots', 'readonly');
+          const all = tx.objectStore('snapshots').getAll();
+          tx.oncomplete = () => {
+            db.close();
+            const rec = all.result[0] as { bytes: Blob } | undefined;
+            if (!rec) return reject(new Error('no snapshot stored'));
+            const reader = new FileReader();
+            reader.onerror = () => reject(reader.error);
+            reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+            reader.readAsDataURL(rec.bytes);
+          };
+          tx.onerror = () => reject(tx.error);
+        };
+      }),
+  );
+  const bytes = Buffer.from(b64, 'base64');
+  if (to) writeFileSync(to, bytes);
+  return bytes;
 }
 
 test.describe('browser .edb storage', () => {
@@ -210,7 +233,7 @@ test.describe('browser .edb storage', () => {
     // a readable name. With no `showSaveFilePicker` the menu item is "Download
     // a copy" and the bytes arrive as a download.
     const file = testInfo.outputPath('workspace.edb');
-    const bytes = await downloadViaSave(page, file);
+    const bytes = await saveToBrowserCopy(page, file);
     expect(bytes.subarray(0, 15).toString('latin1')).toBe('SQLite format 3');
 
     const db = new DatabaseSync(file, { readOnly: true });
@@ -264,7 +287,7 @@ test.describe('browser .edb storage', () => {
     // first load and only its emptiness can say the dump has not happened.
     expect(await snapshotKeys(page)).toEqual([]);
 
-    await downloadViaSave(page, testInfo.outputPath('saved.edb'));
+    await saveToBrowserCopy(page);
 
     // One record, keyed by the .edb name, holding the whole database as a blob
     // and nothing else. Read here through the raw IndexedDB API on purpose:
