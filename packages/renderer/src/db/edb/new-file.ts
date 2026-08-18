@@ -90,8 +90,7 @@ export async function chooseEdbTarget(dialogs: Dialogs, suggested: string): Prom
  * exclusive origin-wide and the live worker holds it, so a second worker falls
  * back to memory and writes its copy where no boot looks. The bytes therefore go
  * back through `importBytes` on the bridge this tab is actually using. Nothing
- * reads the user's FILE at boot — that would need a permission gesture no boot
- * sequence has.
+ * reads the user's FILE at boot — see `session.ts` for why boot never does.
  */
 export async function buildEdbFile(target: EdbTarget, workspaceId: string, fill?: (store: DataStore) => Promise<void>): Promise<void> {
   const bridge = createEdbBridge();

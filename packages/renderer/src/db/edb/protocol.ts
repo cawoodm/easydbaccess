@@ -56,8 +56,8 @@ export type EdbRequest =
    *
    * What makes Open and Convert work. Both put bytes into a worker and then
    * reload the page, and the boot after that reload reads the mirror — never the
-   * user's file, which would need a permission gesture no boot has. Without a
-   * forced write the reload would find no mirror and start empty.
+   * user's file, which boot does not read (see `session.ts`). Without a forced
+   * write the reload would find no mirror and start empty.
    */
   | { id: number; op: 'flush' }
   /**

@@ -77,7 +77,7 @@ export type SpaceAction =
  * user's own file ought to win over a browser-held copy. It does not, because
  * adopting the folder file means `SAHPoolUtil.importDb` over the copy this
  * browser holds, and that copy may contain edits never written back to the file
- * — boot has never read the user's file (no permission gesture), so unsaved work
+ * — boot never reads the user's file at all (see `session.ts`), so unsaved work
  * lives only in the browser. Preferring the file would discard it without asking.
  * When there is no local copy there is nothing to lose and the file is used.
  *

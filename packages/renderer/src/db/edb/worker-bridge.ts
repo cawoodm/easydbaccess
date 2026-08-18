@@ -31,8 +31,8 @@ export interface EdbBridge extends EasydbStoreBridge {
   /**
    * The OPFS mirror's bytes for a workspace, or null.
    *
-   * What a reload uses: the mirror needs no file permission, so the workspace
-   * comes back without the user gesture a `FileSystemFileHandle` would demand.
+   * What a reload uses: the mirror needs no file permission at all, so the
+   * workspace comes back whatever state the `FileSystemFileHandle` is in.
    */
   restore(name: string): Promise<Uint8Array | null>;
   /**

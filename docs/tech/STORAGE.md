@@ -72,9 +72,12 @@ Four things are worth knowing here:
 - **The file is written only on Save** (or by autosave, which is off by
   default). Between saves the live database is the one in the OPFS pool.
 - **The pool is load-bearing, not insurance.** A remembered
-  `FileSystemFileHandle` needs a user gesture to re-grant write permission, and
-  a page load has none. The pool is origin-private and always readable, so a
-  reload reopens it and the handle is only re-permissioned on the first Save.
+  `FileSystemFileHandle` usually comes back needing a re-grant, and
+  `requestPermission` needs a user gesture a page load does not have. Chrome is
+  the exception: a user who chooses "Allow on every visit" makes
+  `queryPermission` return `granted` at boot, with no gesture. The pool does not
+  depend on either case. It is origin-private and always readable, so a reload
+  reopens it whatever the handle's permission state says.
   The same fact is why Open and Convert hand their bytes to the LIVE worker
   (`placeForNextBoot`) before reloading: the pool is exclusive origin-wide, so
   a second worker could not put them anywhere the next boot would look.

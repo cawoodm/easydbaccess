@@ -292,9 +292,8 @@ export function init(api: HostApi): void {
     }
     picked ??= await pickFileToOpen();
     if (!picked) return;
-    // The boot never reads the user's file — that would need a permission
-    // gesture no boot sequence has — so the bytes go into this tab's own
-    // substrate first, and the reload finds them there.
+    // The boot never reads the user's file (see `session.ts`), so the bytes go
+    // into this tab's own substrate first, and the reload finds them there.
     await placeForNextBoot(picked.name, picked.bytes);
     await adopt({ name: picked.name, handle: picked.handle }, `Opening "${picked.name}". The page will reload.`);
   }
@@ -454,8 +453,9 @@ export async function load(api: HostApi): Promise<void> {
   // asking about the folder once beats asking about each file.
   const folder = await rememberedFolder();
   if (folder) await ensureWritable(folder, false);
-  // The handle from the last session. Permission is not asked for here: that
-  // needs a gesture, and the workspace already loaded from the OPFS mirror.
+  // The handle from the last session. Permission is READ, not asked for: asking
+  // needs a gesture, and the workspace already loaded from the OPFS mirror. A
+  // Chrome user with a persisted grant reads back `granted` and saves silently.
   const remembered = await rememberedHandle();
   if (remembered) {
     setEdbHandle(remembered);

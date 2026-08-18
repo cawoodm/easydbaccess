@@ -88,9 +88,10 @@ export function setActiveEdbName(name: string | null): void {
 /**
  * Start this tab's SQLite session. Always — there is no other store.
  *
- * The database comes from the OPFS pool, never from the user's file: reading
- * their file needs a permission grant, and a grant needs a gesture a boot
- * sequence does not have. The pool is origin-private and always readable, so
+ * The database comes from the OPFS pool, never from the user's file. Reading
+ * their file needs a live write grant, which a boot usually does not have — and
+ * even where Chrome persisted one, the pool copy may hold edits never written
+ * back, so the file is not the newer of the two. The pool is always readable, so
  * the workspace comes back straight away and the handle is only
  * re-permissioned on the first Save. (It is also why Open and Convert push
  * their bytes into the pool through the LIVE worker before reloading — see

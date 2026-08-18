@@ -6,10 +6,11 @@
  * 1. **Crash insurance.** The database lives in memory between saves, so a
  *    closed or crashed tab would lose everything since the last write.
  * 2. **Restoring on reload without asking.** A remembered `FileSystemFileHandle`
- *    needs a user GESTURE to re-grant write permission, which a boot sequence
- *    does not have. The mirror is origin-private, so the worker can read it with
- *    no permission at all — the workspace comes back, and the handle is only
- *    re-permissioned when the user actually presses Save.
+ *    usually needs a user GESTURE to re-grant write permission, which a boot
+ *    sequence does not have. (Chrome can carry the grant across loads, but only
+ *    if the user chose that, and only in Chrome.) The mirror is origin-private,
+ *    so the worker reads it with no permission at all — the workspace comes back
+ *    whatever the handle's permission state says.
  *
  * Worker-only: `createSyncAccessHandle` exists nowhere else. That is also what
  * keeps this working without the COOP/COEP headers GitHub Pages cannot set.
