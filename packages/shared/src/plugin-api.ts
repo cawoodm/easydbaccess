@@ -236,6 +236,16 @@ export interface ButtonSpec {
    */
   variant?: 'primary' | 'secondary';
   /**
+   * Draw an attention dot on the button — a small red circle in its corner, the
+   * notification convention.
+   *
+   * For state the user must SEE without opening anything: the File plugin's
+   * unsaved-work marker is the first. Set it on the spec and dispatch
+   * `easydb:refresh-buttons`; a `ButtonSpec` is static and the shell renders from
+   * a snapshot, so nothing re-reads this on its own.
+   */
+  badge?: boolean | undefined;
+  /**
    * `ctx.anchor` is the button's own DOM element when the host can supply it
    * (header/footer slot buttons) — use it to anchor a popover/menu under the
    * button. Absent otherwise. Optional + additive: existing plugins ignore it.

@@ -13,7 +13,7 @@ import { addRow, createTable, waitForPanel } from './helpers.js';
  *    then exercise everything downstream — worker, store, OPFS pool, reload.
  * 2. One test REPLACES `showSaveFilePicker` with a stub that hands back a handle
  *    writing into a page global. Everything after the picker is the real path —
- *    the File menu, the "where does this go?" dialog, `ensureWritable`,
+ *    the Save button, the "where does this go?" dialog, `ensureWritable`,
  *    `writeBytes`. Hiding the picker instead would test a browser that cannot
  *    save at all, which is its own test.
  *
@@ -25,9 +25,9 @@ import { addRow, createTable, waitForPanel } from './helpers.js';
  * durable — nothing is serialised, debounced or flushed on the way to storage.
  * That is why a reload needs no waiting here, and why the pool's files are
  * opaque: they are a slab the VFS manages, not a `.edb` sitting in OPFS under a
- * readable name. The way OUT of the pool is `export`, which is what the File
- * menu's Save does — so the "these bytes are a real database" test now goes
- * through the menu instead of reading a mirror file.
+ * readable name. The way OUT of the pool is `export`, which is what Save does —
+ * so the "these bytes are a real database" test now goes through the Save button
+ * instead of reading a mirror file.
  */
 
 /** The key `db/edb/session.ts` reads at boot to decide this tab is file-backed. */
@@ -89,93 +89,107 @@ async function reload(page: Page): Promise<void> {
   await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
 }
 
+/** The folder the stubbed directory picker hands over. */
+const SAVE_FOLDER = 'save-target';
+
 /**
- * Boot with a save picker that writes into a page global instead of to disk.
+ * Boot with a DIRECTORY picker that hands back an OPFS folder.
  *
- * Playwright cannot drive an OS dialog, so the picker is REPLACED rather than
- * removed. `showSaveFilePicker` hands back a handle whose `createWritable`
- * collects what is written into `window.__savedEdb`. Everything downstream of
- * the picker is the app's real code.
+ * Save writes into a connected workspace folder and nowhere else — there is no
+ * per-file answer any more — and OPFS gives out a real
+ * `FileSystemDirectoryHandle` with no OS dialog at all, so everything after the
+ * picker is the app's own code, including the handle going through structured
+ * clone into IndexedDB. The save-FILE picker is deleted: nothing should be
+ * reaching for one.
  *
- * The handle's methods live on a PROTOTYPE, which is load-bearing: `saveAs`
- * stores the handle in IndexedDB, structured clone copies own properties only,
- * and a function as an own property would throw `DataCloneError` and fail the
- * Save for a reason that has nothing to do with the app.
+ * `edbName` is optional. Without it the tab has never adopted a file, which is
+ * the state that matters for a first Save.
  */
-async function bootWithSavePicker(page: Page, edbName: string, workspaceId: string): Promise<void> {
+async function bootWithFolderPicker(page: Page, workspaceId: string, edbName?: string): Promise<void> {
   await page.addInitScript(
-    ({ key, value }) => {
-      localStorage.setItem(key, value);
-      delete (window as unknown as Record<string, unknown>)['showDirectoryPicker'];
-      class StubHandle {
-        kind = 'file';
-        constructor(public name: string) {}
-        async queryPermission() {
-          return 'granted';
-        }
-        async requestPermission() {
-          return 'granted';
-        }
-        async createWritable() {
-          const parts: BlobPart[] = [];
-          const name = this.name;
-          return {
-            async write(data: BlobPart) {
-              parts.push(data);
-            },
-            async close() {
-              const buffer = await new Blob(parts).arrayBuffer();
-              let binary = '';
-              for (const byte of new Uint8Array(buffer)) binary += String.fromCharCode(byte);
-              (window as unknown as Record<string, unknown>)['__savedEdb'] = { name, base64: btoa(binary) };
-            },
-          };
-        }
-      }
-      (window as unknown as Record<string, unknown>)['showSaveFilePicker'] = async (opts?: { suggestedName?: string }) => new StubHandle(opts?.suggestedName ?? 'workspace.edb');
+    ({ key, value, folder }) => {
+      if (value) localStorage.setItem(key, value);
+      delete (window as unknown as Record<string, unknown>)['showSaveFilePicker'];
+      (window as unknown as Record<string, unknown>)['showDirectoryPicker'] = async () => {
+        const root = await navigator.storage.getDirectory();
+        return root.getDirectoryHandle(folder, { create: true });
+      };
     },
-    { key: ACTIVE_KEY, value: edbName },
+    { key: ACTIVE_KEY, value: edbName ?? '', folder: SAVE_FOLDER },
   );
   await page.goto(`/?test=1&space=${encodeURIComponent(workspaceId)}`);
   await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
 }
 
-/**
- * Open the File menu and click one item by its LABEL.
- *
- * Not `getByRole('menuitem', { name })`: a menu item's accessible name is the
- * Material Icons ligature plus the label ("save Save"), so matching on the name
- * couples the test to which icon the item happens to carry. The label lives in
- * its own span, and matching that span exactly is what tells "Save" from
- * "Save As…".
- */
-async function clickFileMenu(page: Page, label: string): Promise<void> {
-  await page.locator('app-shell').getByRole('button', { name: /File/ }).click();
-  await page
-    .getByRole('menuitem')
-    .filter({ has: page.getByText(label, { exact: true }) })
-    .click();
+/** The bytes of one file in the stub folder, or null while it is not there yet. */
+async function folderFile(page: Page, name: string): Promise<Buffer | null> {
+  const b64 = await page.evaluate(
+    async ({ folder, file }) => {
+      try {
+        const root = await navigator.storage.getDirectory();
+        const dir = await root.getDirectoryHandle(folder);
+        const handle = await dir.getFileHandle(file);
+        const buffer = await (await handle.getFile()).arrayBuffer();
+        let binary = '';
+        for (const byte of new Uint8Array(buffer)) binary += String.fromCharCode(byte);
+        return binary.length > 0 ? btoa(binary) : null;
+      } catch {
+        return null;
+      }
+    },
+    { folder: SAVE_FOLDER, file: name },
+  );
+  return b64 === null ? null : Buffer.from(b64, 'base64');
 }
 
 /**
- * Save through the File menu, and hand back the bytes the picker's handle got.
+ * Run one of the file commands through the command palette.
  *
- * A workspace with no file yet cannot save silently any more — there is no
- * browser-side copy to fall back on — so Save ASKS where the bytes go. Clicking
- * through that dialog is part of the flow, not setup for it.
+ * There is no File menu any more — these are palette entries, so this is how a
+ * user reaches them. The palette is opened by its header button rather than by
+ * Ctrl+K, because the button is a real target and the shortcut is covered by its
+ * own spec.
  */
-async function saveThroughPicker(page: Page, to?: string): Promise<Buffer> {
-  await clickFileMenu(page, 'Save');
+async function runFileCommand(page: Page, title: string): Promise<void> {
+  await page
+    .locator('app-shell header')
+    .getByTitle(/open the command palette/i)
+    .click();
+  const palette = page.locator('command-palette-dialog dialog');
+  await expect(palette).toBeVisible();
+  await palette.locator('input').fill(title);
+  await palette
+    .locator('.item')
+    .filter({ has: page.getByText(title, { exact: true }) })
+    .first()
+    .click();
+}
+
+/** The header's Save button — the one file operation that is still a button. */
+function saveButton(page: Page) {
+  return page.locator('app-shell').getByRole('button', { name: /Save/ });
+}
+
+/**
+ * Save with no folder connected yet, and hand back the bytes that landed in the
+ * folder.
+ *
+ * The first Save of a workspace that has never had one asks for a folder — the
+ * only thing it asks for. After that the name is a foregone conclusion
+ * (`<workspace-id>.edb`), so nothing else is clicked here.
+ */
+async function saveIntoNewFolder(page: Page, workspaceId: string, to?: string): Promise<Buffer> {
+  await saveButton(page).click();
 
   const dialog = page.locator('host-dialogs');
-  await expect(dialog.getByText(/no file yet/)).toBeVisible();
-  await dialog.getByRole('button', { name: 'Choose a file…', exact: true }).click();
+  await expect(dialog.getByText(/stored in this browser/)).toBeVisible();
+  await dialog.getByRole('button', { name: 'Connect a folder…', exact: true }).click();
 
-  await expect.poll(async () => page.evaluate(() => Boolean((window as unknown as Record<string, unknown>)['__savedEdb']))).toBe(true);
-  const b64 = await page.evaluate(() => ((window as unknown as Record<string, { base64: string }>)['__savedEdb'] as { base64: string }).base64);
-  const bytes = Buffer.from(b64, 'base64');
-  if (to) writeFileSync(to, bytes);
-  return bytes;
+  const name = `${workspaceId}.edb`;
+  let bytes: Buffer | null = null;
+  await expect.poll(async () => (bytes = await folderFile(page, name)) !== null, { timeout: 20_000, message: `${name} never appeared in the folder` }).toBe(true);
+  if (to) writeFileSync(to, bytes!);
+  return bytes!;
 }
 
 test.describe('browser .edb storage', () => {
@@ -237,8 +251,8 @@ test.describe('browser .edb storage', () => {
   });
 
   test('the bytes are a real SQLite database Node can open', async ({ page }, testInfo) => {
-    const edbName = `${testInfo.testId}.edb`;
-    await bootWithSavePicker(page, edbName, `edb-${testInfo.testId}`);
+    const workspaceId = `edb-${testInfo.testId}`;
+    await bootWithFolderPicker(page, workspaceId);
 
     const tableId = await createTable(page, 'parts', [
       { field: 'part', type: 'string', renderer: 'link' },
@@ -247,12 +261,12 @@ test.describe('browser .edb storage', () => {
     await addRow(page, tableId, { part: 'bolt', qty: 4 });
     await waitForPanel(page, tableId);
 
-    // Out through the File menu, because that is the only way out: the pool's
+    // Out through Save, because that is the only way out: the pool's
     // OPFS files are an opaque slab the VFS manages, not a `.edb` sitting under
-    // a readable name. Save is the way, and Save now goes through a real file
-    // handle — the stub picker's — because there is nowhere else for it to go.
+    // a readable name. Save is the way, and it writes into the folder it just
+    // asked for, under the workspace's own name.
     const file = testInfo.outputPath('workspace.edb');
-    const bytes = await saveThroughPicker(page, file);
+    const bytes = await saveIntoNewFolder(page, workspaceId, file);
     expect(bytes.subarray(0, 15).toString('latin1')).toBe('SQLite format 3');
 
     const db = new DatabaseSync(file, { readOnly: true });
@@ -287,8 +301,9 @@ test.describe('browser .edb storage', () => {
     }
   });
 
-  test('a Save with no file asks where it goes, and writes nothing until it has one', async ({ page }, testInfo) => {
-    await bootWithSavePicker(page, `${testInfo.testId}.edb`, `edb-${testInfo.testId}`);
+  test('a Save with no folder asks for one, and writes nothing until it has one', async ({ page }, testInfo) => {
+    const workspaceId = `edb-${testInfo.testId}`;
+    await bootWithFolderPicker(page, workspaceId);
 
     const tableId = await createTable(page, 'parts', [
       { field: 'part', type: 'string', renderer: 'link' },
@@ -299,19 +314,130 @@ test.describe('browser .edb storage', () => {
 
     const dialog = page.locator('host-dialogs');
 
-    // Cancelling the question writes NOTHING. This is the assertion the old
-    // IndexedDB dump made impossible: a Save used to always land somewhere, so
-    // "saved" could mean a copy the user never chose the location of and could
-    // not hand to anyone. Now a Save either reaches the user's file or does not
-    // happen, and the workspace stays durable in the pool either way.
-    await clickFileMenu(page, 'Save');
-    await expect(dialog.getByText(/no file yet/)).toBeVisible();
+    // Cancelling writes NOTHING. This is the assertion the old IndexedDB dump made
+    // impossible: a Save used to always land somewhere, so "saved" could mean a
+    // copy the user never chose the location of and could not hand to anyone. Now a
+    // Save either reaches the user's disk or does not happen, and the workspace
+    // stays durable in the pool either way.
+    await saveButton(page).click();
+    await expect(dialog.getByText(/stored in this browser/)).toBeVisible();
+    // And it says so without claiming the data is at risk.
+    await expect(dialog.getByText(/stays there/)).toBeVisible();
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-    expect(await page.evaluate(() => (window as unknown as Record<string, unknown>)['__savedEdb'] ?? null)).toBeNull();
+    expect(await folderFile(page, `${workspaceId}.edb`)).toBeNull();
 
-    // Answering it writes the file, once, through the handle the picker gave.
-    const bytes = await saveThroughPicker(page);
+    // Connecting one writes the file, under the workspace's own name and with no
+    // second question about what to call it.
+    const bytes = await saveIntoNewFolder(page, workspaceId);
     expect(bytes.subarray(0, 15).toString('latin1')).toBe('SQLite format 3');
+  });
+
+  /**
+   * The file operations live in the command palette, under "File". There is no
+   * footer menu: it was a second way to navigate five things the palette already
+   * listed, and the footer otherwise belongs to the workspace's own buttons.
+   *
+   * The other half of this test is what must NOT be offered. Every entry left out
+   * is one something else already does.
+   */
+  test('the file operations are palette commands, not a File menu', async ({ page }, testInfo) => {
+    const workspaceId = `edb-${testInfo.testId}`;
+    await bootWithFolderPicker(page, workspaceId);
+
+    // The button that opened the menu is gone. Save is the one that stayed, and it
+    // is in the header rather than the footer.
+    await expect(page.locator('app-shell').getByRole('button', { name: 'File', exact: true })).toHaveCount(0);
+    await expect(saveButton(page)).toBeVisible();
+
+    await page
+      .locator('app-shell header')
+      .getByTitle(/open the command palette/i)
+      .click();
+    const palette = page.locator('command-palette-dialog dialog');
+    await palette.locator('input').fill('file');
+    const entries = palette.locator('.item');
+
+    await expect(entries.filter({ has: page.getByText('Open workspace file…', { exact: true }) })).toHaveCount(1);
+    await expect(entries.filter({ has: page.getByText('Turn on autosave', { exact: true }) })).toHaveCount(1);
+    // No folder has been granted yet, so the command says "Connect".
+    await expect(entries.filter({ has: page.getByText('Connect workspace folder…', { exact: true }) })).toHaveCount(1);
+    await expect(entries.filter({ has: page.getByText('Change workspace folder…', { exact: true }) })).toHaveCount(0);
+    // Save is here because the palette lists every BUTTON too — once, not twice: the
+    // plugin registers no Save command while the header button exists.
+    await expect(entries.filter({ has: page.getByText('Save', { exact: true }) })).toHaveCount(1);
+    // Gone: New workspace → Advanced makes a file-backed workspace, and a file's
+    // NAME is the workspace inside it, so writing this workspace out under another
+    // name is the one thing that must not happen.
+    await expect(entries.filter({ has: page.getByText(/New .edb/) })).toHaveCount(0);
+    await expect(entries.filter({ has: page.getByText(/Save As/) })).toHaveCount(0);
+
+    // Connect a folder — by saving into it, which is the only way there is — and the
+    // folder command turns over to "Change".
+    await page.keyboard.press('Escape');
+    await expect(palette).toBeHidden();
+    await saveIntoNewFolder(page, workspaceId);
+
+    await page
+      .locator('app-shell header')
+      .getByTitle(/open the command palette/i)
+      .click();
+    await palette.locator('input').fill('folder');
+    await expect(entries.filter({ has: page.getByText('Change workspace folder…', { exact: true }) })).toHaveCount(1);
+    await expect(entries.filter({ has: page.getByText('Connect workspace folder…', { exact: true }) })).toHaveCount(0);
+  });
+
+  /**
+   * A palette is one flat list, so a command has to answer for the state it is run
+   * in rather than being hidden. Both of these used to be menu items the menu could
+   * leave out.
+   */
+  test('a command with nothing to act on says so', async ({ page }, testInfo) => {
+    await bootWithFolderPicker(page, `edb-${testInfo.testId}`);
+    const toast = page.locator('toast-host');
+
+    await runFileCommand(page, 'Sync workspace folder');
+    await expect(toast.getByText(/No workspace folder is connected/)).toBeVisible();
+
+    await runFileCommand(page, 'Back to browser storage');
+    await expect(toast.getByText(/not in a file/)).toBeVisible();
+  });
+
+  /**
+   * The dot means "there is something not on disk", so a workspace that has never
+   * been saved carries it from the first moment — boot writes the workspace record
+   * and the seeded view templates, and none of that is in a file yet. What the test
+   * pins down is the CYCLE: the dot clears on a save and comes back on the next
+   * edit.
+   */
+  test('the header Save button marks unsaved work and clears it on a save', async ({ page }, testInfo) => {
+    const workspaceId = `edb-${testInfo.testId}`;
+    await bootWithFolderPicker(page, workspaceId);
+    const save = page.locator('app-shell').getByRole('button', { name: /Save/ });
+    // The marker is the red dot the shell draws for `ButtonSpec.badge`, not text in
+    // the label — so it is located as an element inside the button.
+    const dot = save.locator('.badge');
+
+    const tableId = await createTable(page, 'parts', [{ field: 'part', type: 'string' }]);
+    await addRow(page, tableId, { part: 'bolt' });
+    await waitForPanel(page, tableId);
+
+    // A write marks it. The store's own change broadcast drives this, so nothing
+    // had to remember to announce itself.
+    await expect(dot).toBeVisible();
+    // Red and round, because "notification dot" is the whole point of it.
+    expect(await dot.evaluate((el) => getComputedStyle(el).borderRadius)).toBe('50%');
+    expect(await dot.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(239, 68, 68)');
+
+    await save.click();
+    await page.locator('host-dialogs').getByRole('button', { name: 'Connect a folder…', exact: true }).click();
+
+    // Saved, so the dot goes while the button stays.
+    await expect(dot).toHaveCount(0, { timeout: 20_000 });
+    await expect(save).toBeVisible();
+
+    // The next edit brings it back — the indicator tracks the file, not the boot.
+    await addRow(page, tableId, { part: 'nut' });
+    await expect(dot).toBeVisible();
   });
 
   test('a browser with no file access says so instead of saving nowhere', async ({ page }, testInfo) => {
@@ -324,7 +450,9 @@ test.describe('browser .edb storage', () => {
     await addRow(page, tableId, { part: 'bolt' });
     await waitForPanel(page, tableId);
 
-    await clickFileMenu(page, 'Save');
+    // No header Save button in a browser like this, so the palette command is the
+    // only Save there is — and saying why is its whole job here.
+    await runFileCommand(page, 'Save workspace to a file');
 
     const dialog = page.locator('host-dialogs');
     await expect(dialog.getByText(/cannot give easyDBAccess a file/)).toBeVisible();
@@ -343,42 +471,31 @@ test.describe('browser .edb storage', () => {
 });
 
 test.describe('converting a browser workspace to a file', () => {
-  test('the File menu copies this workspace into a new .edb and switches to it', async ({ page }, testInfo) => {
-    // No pickers at all: this is what Firefox and Safari look like, and it is what
-    // lets the whole menu flow run without an OS dialog Playwright cannot touch.
-    // The directory picker has to go too, or the folder path opens one.
-    await page.addInitScript(() => {
-      delete (window as unknown as Record<string, unknown>)['showSaveFilePicker'];
-      delete (window as unknown as Record<string, unknown>)['showDirectoryPicker'];
-    });
+  /**
+   * The conversion IS a Save now. "New .edb file → Copy this workspace into it" is
+   * gone: New workspace → Advanced already makes a workspace in its own file, and
+   * a Save of a workspace that has none writes it into the connected folder and
+   * adopts it — no separate convert step, and nothing to keep in step with it.
+   */
+  test('a Save puts a browser workspace into a file and switches this tab to it', async ({ page }, testInfo) => {
     const workspaceId = `conv-${testInfo.testId}`;
-    await page.goto(`/?test=1&space=${encodeURIComponent(workspaceId)}`);
-    await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
+    await bootWithFolderPicker(page, workspaceId);
 
-    // This data goes into this tab's own database. The conversion has to find
-    // it there and copy it into the new file.
+    // This data lives in this tab's own database. The Save has to find it there and
+    // put it in the file.
     const tableId = await createTable(page, 'parts', [
       { field: 'part', type: 'string', renderer: 'link' },
       { field: 'qty', type: 'number' },
     ]);
     await addRow(page, tableId, { part: 'bolt', qty: 4 });
     await addRow(page, tableId, { part: 'nut', qty: 9 });
+    await waitForPanel(page, tableId);
 
-    const shell = page.locator('app-shell');
-    await shell.getByRole('button', { name: /File/ }).click();
-    await page.getByRole('menuitem', { name: /New .edb file/ }).click();
+    const file = testInfo.outputPath('converted.edb');
+    await saveIntoNewFolder(page, workspaceId, file);
 
-    const dialog = page.locator('host-dialogs');
-    const download = page.waitForEvent('download');
-    await dialog.getByRole('button', { name: 'Copy this workspace into it', exact: true }).click();
-
-    // The alert that announces the reload is the plugin's last step, so its
-    // arrival means the copy, the export and the download all finished.
-    await dialog.getByRole('button', { name: 'OK', exact: true }).click();
-    await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
-
-    // The tab is now file-backed. A session that failed to start clears this key,
-    // so its survival is the proof.
+    // The tab is file-backed from here on, with no reload: the Save adopted the
+    // file it just wrote, so the next Save goes to the same place unasked.
     expect(await page.evaluate((k) => localStorage.getItem(k), ACTIVE_KEY)).toBe(`${workspaceId}.edb`);
 
     const rows = await page.evaluate(
@@ -390,9 +507,7 @@ test.describe('converting a browser workspace to a file', () => {
       { part: 'nut', qty: 9 },
     ]);
 
-    // And the file the user was handed is a database, with both rows in it.
-    const file = testInfo.outputPath('converted.edb');
-    await (await download).saveAs(file);
+    // And the file on disk is a database with both rows in it.
     const db = new DatabaseSync(file, { readOnly: true });
     try {
       const doc = JSON.parse(String(db.prepare(`SELECT doc FROM _easydb WHERE coll = 'tables'`).get()!['doc'])) as Record<string, unknown>;
@@ -437,6 +552,9 @@ test.describe('the storage strategy question', () => {
     await dialog.getByRole('button', { name: 'OK', exact: true }).click();
 
     const download = page.waitForEvent('download');
+    // The last QUESTION. What follows is the notice that the page is about to
+    // reload — never a "name the file" prompt, because the file is named after the
+    // workspace (`sales.edb`) and that is how Open finds the workspace again.
     await dialog.getByRole('button', { name: /^Advanced/ }).click();
     await dialog.getByRole('button', { name: 'OK', exact: true }).click();
     // The flow navigates to `?space=`. Waiting on `__easydb` alone would pass on
@@ -517,5 +635,162 @@ test.describe('the workspace folder', () => {
     expect(result.after).toEqual(['alpha.edb', 'new.edb', 'zeta.edb']);
     // A name that is not there is null, not a thrown error the caller must catch.
     expect(result.missing).toBeNull();
+  });
+
+  /**
+   * Opening `<name>.edb` lands in the workspace `<name>`.
+   *
+   * It used to reload with no `?space=` at all, so boot fell back to the
+   * device-global last-workspace id and then to whichever record the file returned
+   * first — which is how opening a file could show a workspace called `default`, or
+   * the one the tab came from, instead of the file's own.
+   *
+   * The tab starts in a DIFFERENT workspace with `?space=` in the URL, because that
+   * stale parameter is the thing that has to lose.
+   */
+  test('Open lands in the workspace the file is named after', async ({ page }, testInfo) => {
+    const fileWs = `opened-${testInfo.testId}`;
+    await bootWithFolderPicker(page, `elsewhere-${testInfo.testId}`);
+
+    // A file in the folder holding one workspace of its own, with a table in it.
+    await page.evaluate(
+      async ({ ws, folder }) => {
+        const { createEdbBridge } = await import('/src/db/edb/worker-bridge.ts');
+        const { createIpcDataStore } = await import('/src/db/data-store-bridge.ts');
+        const { fileInFolder, writeBytes } = await import('/src/db/edb/file-handle.ts');
+        const scratch = createEdbBridge();
+        try {
+          await scratch.open(null, 'open-fixture.edb');
+          const store = createIpcDataStore(scratch, () => ws);
+          await store.workspaces.insert({ id: ws, name: ws, createdAt: Date.now(), pluginUrls: [] });
+          await store.tables.insert({ id: `${ws}-t`, workspaceId: ws, name: 'fromfile', code: '', columns: [{ field: 'part', type: 'string' }], view: 'table' });
+          const root = await navigator.storage.getDirectory();
+          const dir = await root.getDirectoryHandle(folder, { create: true });
+          const handle = await fileInFolder(dir, `${ws}.edb`, true);
+          await writeBytes(handle!, await scratch.export());
+        } finally {
+          scratch.terminate();
+        }
+      },
+      { ws: fileWs, folder: SAVE_FOLDER },
+    );
+
+    await runFileCommand(page, 'Open workspace file…');
+    const dialog = page.locator('host-dialogs');
+    await dialog.getByRole('button', { name: `${fileWs}.edb`, exact: true }).click();
+    // The alert naming the workspace is the plugin's last step before the reload.
+    await expect(dialog.getByText(new RegExp(`as the workspace "${fileWs}"`))).toBeVisible();
+    await dialog.getByRole('button', { name: 'OK', exact: true }).click();
+
+    await page.waitForURL(new RegExp(`space=${fileWs}`), { timeout: 20_000 });
+    await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
+
+    // In the file's own workspace, looking at the file's own table.
+    expect(await page.evaluate(() => (window as unknown as { __easydb: { workspaceId: string } }).__easydb.workspaceId)).toBe(fileWs);
+    const tables = await page.evaluate(async () => {
+      const store = (window as unknown as { __easydb: { store: { tables: { find(): Promise<{ name: string }[]> } } } }).__easydb.store;
+      return (await store.tables.find()).map((t) => t.name);
+    });
+    expect(tables).toEqual(['fromfile']);
+  });
+
+  /**
+   * `?space=NAME` CREATES the workspace when it cannot find one, and at boot it
+   * cannot look inside a folder nobody has connected yet. So a private window that
+   * opens such a link always holds an empty workspace of that name by the time the
+   * folder is chosen, and the sync used to ask which of the two copies was real —
+   * about a workspace the app had made itself seconds earlier.
+   *
+   * The scenario is built the only way it can be: give the workspace a table, copy
+   * it into a `.edb` in the folder, then take the local table away. That leaves the
+   * file holding the work and this browser holding an empty workspace of the same
+   * name, which is the private-window state exactly.
+   */
+  test('a folder file wins over the empty workspace the URL just created, unasked', async ({ page }, testInfo) => {
+    const ws = `simon-${testInfo.testId}`;
+    await page.goto(`/?test=1&space=${ws}`);
+    await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
+
+    const tableId = await createTable(page, 'fromfile', [{ field: 'part', type: 'string' }]);
+    await addRow(page, tableId, { part: 'bolt' });
+    await waitForPanel(page, tableId);
+
+    await page.evaluate(
+      async ({ name, table }) => {
+        const { createEdbBridge } = await import('/src/db/edb/worker-bridge.ts');
+        const { createIpcDataStore } = await import('/src/db/data-store-bridge.ts');
+        const { copyWorkspace } = await import('/src/db/edb/convert.ts');
+        const { fileInFolder, writeBytes, rememberFolder } = await import('/src/db/edb/file-handle.ts');
+        const live = (window as unknown as { __easydb: { store: Parameters<typeof copyWorkspace>[0] } }).__easydb.store;
+
+        const scratch = createEdbBridge();
+        try {
+          await scratch.open(null, 'sync-fixture.edb');
+          await copyWorkspace(
+            live,
+            createIpcDataStore(scratch, () => name),
+            name,
+          );
+          const root = await navigator.storage.getDirectory();
+          const dir = await root.getDirectoryHandle('folder-sync-test', { create: true });
+          const handle = await fileInFolder(dir, `${name}.edb`, true);
+          await writeBytes(handle!, await scratch.export());
+          await rememberFolder(dir);
+        } finally {
+          scratch.terminate();
+        }
+
+        // The local copy goes back to being the empty shell `?space=` created.
+        await live.tables.remove(table);
+      },
+      { name: ws, table: tableId },
+    );
+
+    // Set BEFORE the sync starts, and awaited: the wait below is "this flag is
+    // gone", so a flag set inside the un-awaited call could still be missing on
+    // the first poll and pass the wait against the page we came from.
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>)['__beforeAdopt'] = true;
+    });
+
+    // A stub for the one dialog that must NOT open. It records into
+    // `localStorage`, which survives the reload an adopt ends in.
+    const asked = 'test:conflictAsked';
+    void page
+      .evaluate(
+        async ({ name, key }) => {
+          const { syncFolder } = await import('/src/db/edb/folder-sync.ts');
+          const { rememberedFolder } = await import('/src/db/edb/file-handle.ts');
+          const store = (window as unknown as { __easydb: { store: Parameters<typeof syncFolder>[1] } }).__easydb.store;
+          const dialogs = {
+            choice: async (message: string) => {
+              localStorage.setItem(key, message);
+              return 'Cancel';
+            },
+            alert: async () => {},
+            toast: () => {},
+          } as unknown as Parameters<typeof syncFolder>[2];
+          await syncFolder((await rememberedFolder())!, store, dialogs, async () => {});
+          void name;
+        },
+        { name: ws, key: asked },
+      )
+      .catch(() => {
+        /* the adopt reloads the page, which destroys this call's context */
+      });
+
+    // The adopt reloads, so the proof is the NEW page: the flag is gone and the
+    // app has booted again.
+    await page.waitForFunction(() => !(window as unknown as Record<string, unknown>)['__beforeAdopt'] && Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 30_000 });
+
+    // Nothing was asked.
+    expect(await page.evaluate((k) => localStorage.getItem(k), asked)).toBeNull();
+    // The tab is now the folder's file, and the table from it is here.
+    expect(await page.evaluate((k) => localStorage.getItem(k), ACTIVE_KEY)).toBe(`${ws}.edb`);
+    const tables = await page.evaluate(async () => {
+      const store = (window as unknown as { __easydb: { store: { tables: { find(): Promise<{ id: string; name: string }[]> } } } }).__easydb.store;
+      return (await store.tables.find()).map((t) => t.name);
+    });
+    expect(tables).toEqual(['fromfile']);
   });
 });

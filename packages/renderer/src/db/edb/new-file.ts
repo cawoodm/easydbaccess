@@ -14,7 +14,6 @@ import {
   rememberHandle,
   rememberedFolder,
   writeBytes,
-  EDB_EXTENSION,
 } from './file-handle.js';
 import { edbBridge } from './active-bridge.js';
 import { setActiveEdbName } from './session.js';
@@ -23,9 +22,9 @@ import { createEdbBridge } from './worker-bridge.js';
 /**
  * Making a new `.edb` file and switching this tab to it.
  *
- * Two callers need exactly this: the File menu's "New .edb file", and creating a
- * workspace with the Advanced storage strategy. It lives here, in the storage
- * layer, rather than in either of them — and it takes {@link Dialogs} as an
+ * The caller is New workspace → Advanced (`chrome/workspace-actions.ts`), plus Open
+ * and Save through `placeForNextBoot` / `adoptEdbFile` below. It lives here, in the
+ * storage layer, rather than in any of them — and it takes {@link Dialogs} as an
  * argument instead of reaching for a `HostApi`, so the chrome can call it without
  * importing a plugin.
  */
@@ -54,27 +53,31 @@ export async function workspaceFolder(): Promise<FileSystemDirectoryHandle | nul
 }
 
 /**
- * Where to write a workspace file, and under what name.
+ * The file to write a workspace into, under the name that workspace maps to.
  *
- * Inside the folder there is no OS dialog at all — the grant already covers it,
- * so the user just types a name.
+ * The name is not up for discussion. A workspace id and its file name are one
+ * convention (`spaceFileName`), and Open reads the workspace back OUT of the file
+ * name — so a user who typed a different name here got `sales.edb` holding the
+ * workspace `q3`, and opening it then created an empty `sales` and hid the data.
+ *
+ * That leaves one question worth asking: whether to lose a file already there.
+ * Inside the folder there is no OS dialog at all, because the grant covers it.
  */
-export async function chooseEdbTarget(dialogs: Dialogs, suggested: string): Promise<EdbTarget | null> {
+export async function edbTargetNamed(dialogs: Dialogs, name: string): Promise<EdbTarget | null> {
   const dir = await workspaceFolder();
   if (dir) {
-    const existing = await listWorkspaceFiles(dir);
-    const typed = await dialogs.prompt(`Name for the workspace file in "${dir.name}"`, suggested, 'Workspace file');
-    if (!typed) return null;
-    const name = typed.toLowerCase().endsWith(EDB_EXTENSION) ? typed : `${typed}${EDB_EXTENSION}`;
     // `getFileHandle` with `create` opens an existing name rather than refusing,
     // so the only thing standing between the user and a lost file is this.
-    if (existing.includes(name) && !(await dialogs.confirm(`"${name}" is already in this folder. Replace it?`, 'Workspace file'))) return null;
+    if ((await listWorkspaceFiles(dir)).includes(name) && !(await dialogs.confirm(`"${name}" is already in this folder. Replace it?`, 'Workspace file'))) return null;
     const handle = await fileInFolder(dir, name, true);
     if (handle) return { handle, name };
     // The folder stopped working. Fall through rather than dead-ending.
   }
-  if (!canSaveInPlace()) return { handle: null, name: suggested };
-  const picked = await pickFileToSave(suggested);
+  if (!canSaveInPlace()) return { handle: null, name };
+  // The OS dialog is the one place a name can still drift, because the OS owns
+  // that field. Open copes: a file whose workspace is not the one its name says
+  // gets that workspace created inside it.
+  const picked = await pickFileToSave(name);
   return picked ? { handle: picked, name: picked.name } : null;
 }
 

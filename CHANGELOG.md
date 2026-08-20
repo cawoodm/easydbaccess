@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## 20 Aug 2026
+
+### Features
+
+- 🪶 The File menu is gone: Open, autosave and the workspace folder are commands in the palette (v0.0.397)
+- ✨ Unsaved work shows as a red dot on the header Save button (v0.0.397)
+- ✨ Save As, the prompt for a file name and a folder-sync item that did nothing are all gone (v0.0.397)
+
+### Bugs
+
+- 🐛 Connecting the workspace folder asked which copy of a workspace was real about one the URL had just created empty (v0.0.397)
+- 🐛 The File menu offered no way to save a workspace that had never been saved, and Open landed in the wrong workspace (v0.0.397)
+- 🐛 The workspace list showed the technical name, so editing the workspace title looked as if it had not taken (v0.0.397)
+
 ## 17 Aug 2026
 
 ### Features

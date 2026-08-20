@@ -6,10 +6,10 @@ and hand to anyone. This page explains how.
 There are two versions of this, because the desktop app and a browser tab reach
 your disk in different ways:
 
-| | Button | File | Saving |
-|---|---|---|---|
-| **Desktop app** | **Database** | `.db` | Every change goes straight into the file |
-| **Browser** | **File** | `.edb` | Only when you press **Save**, or turn on autosave |
+|                 | Where the commands are                                             | File   | Saving                                            |
+| --------------- | ------------------------------------------------------------------ | ------ | ------------------------------------------------- |
+| **Desktop app** | **Database** button in the footer                                  | `.db`  | Every change goes straight into the file          |
+| **Browser**     | **Save** in the header, plus the command palette (Ctrl+K → "file") | `.edb` | Only when you press **Save**, or turn on autosave |
 
 Both write a real SQLite database. The rest of this page covers the desktop
 first, then [the browser](#a-workspace-file-in-the-browser).
@@ -22,11 +22,11 @@ should live, and the answer can simply be "this browser" — see
 
 The **Database** button in the footer opens a small menu:
 
-| Menu item | What it does |
-|---|---|
-| **Open…** | Pick a `.db` file and choose what to do with it (see below). |
-| **Save As…** | Save a copy of the current file somewhere else. |
-| **Import…** | Add tables from another database into the workspace you have open now. |
+| Menu item    | What it does                                                           |
+| ------------ | ---------------------------------------------------------------------- |
+| **Open…**    | Pick a `.db` file and choose what to do with it (see below).           |
+| **Save As…** | Save a copy of the current file somewhere else.                        |
+| **Import…**  | Add tables from another database into the workspace you have open now. |
 
 You can also **drag a `.db` file onto the window**. That asks the same question
 as **Open…** — the two are the same path.
@@ -35,11 +35,11 @@ as **Open…** — the two are the same path.
 
 When you pick or drop a database file, the app asks which one you want:
 
-| Choice | What you get |
-|---|---|
-| **Open Workspace** | That file becomes your workspace. Your tables, rows and window layout come from it, and your changes go into it. |
+| Choice              | What you get                                                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| **Open Workspace**  | That file becomes your workspace. Your tables, rows and window layout come from it, and your changes go into it.                      |
 | **Browse .db file** | A read-only look. Every table **and every view** in the file opens as a window. Nothing is written, to the file or to your workspace. |
-| **Import data** | Copy tables or views into the workspace you have open now. You choose which ones. |
+| **Import data**     | Copy tables or views into the workspace you have open now. You choose which ones.                                                     |
 
 **Browse** is the safe choice for a file you did not make. The rows are read
 from the file when you look at them, so the file is not changed at all — not
@@ -60,10 +60,10 @@ confirm, names the file, and then shows its data.
 If you pick some other SQLite file, it cannot be opened as a workspace —
 there is no workspace in it. The app offers two ways forward instead:
 
-| Choice | What happens |
-|---|---|
+| Choice             | What happens                                                                                                                                    |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Convert to EDA** | The app asks **which tables** to take, then writes a **new** file holding them as a workspace and opens it. The file you picked is not changed. |
-| **Browse** | A read-only look at the file, as above. |
+| **Browse**         | A read-only look at the file, as above.                                                                                                         |
 
 If the file is not a database at all, the app says so and stops.
 
@@ -97,11 +97,11 @@ view itself does not come along — see the note above about Projections.
 If a table name is already used in your workspace, the app asks you what to
 do — once per table:
 
-| Choice | Result |
-|---|---|
-| **Overwrite** | Replace the rows of your table with the ones from the file. |
-| **Rename** | Import as a new table with a free name, such as `Orders (2)`. |
-| **Skip** | Leave your table alone and import nothing for it. |
+| Choice        | Result                                                        |
+| ------------- | ------------------------------------------------------------- |
+| **Overwrite** | Replace the rows of your table with the ones from the file.   |
+| **Rename**    | Import as a new table with a free name, such as `Orders (2)`. |
+| **Skip**      | Leave your table alone and import nothing for it.             |
 
 At the end you get a short report: how many tables were new, renamed,
 overwritten or skipped, and how many rows arrived in total.
@@ -137,31 +137,50 @@ Two ways to start:
 
 - **New workspace** asks where its data should live. Pick **Advanced** and it
   goes in a file.
-- The **File** button in the footer turns the workspace you already have into a
-  file: **New .edb file…** → **Copy this workspace into it**. Your browser copy
-  is left exactly as it was, so you can go back to it.
+- Press **Save** on the workspace you already have. The first Save asks for a
+  folder and then writes `<workspace>.edb` into it.
 
 ### One folder holds them all
 
-The first time you use a file, the browser asks you to choose a **folder**. Pick
-one place for your workspaces — a `easyDBAccess` folder in Documents, say.
+The first time you save, the browser asks you to choose a **folder**. Pick one
+place for your workspaces — an `easyDBAccess` folder in Documents, say.
 
 That one permission covers everything in that folder, for good. After it:
 
-- **New .edb file…** just asks for a name.
-- **Open .edb file…** lists the workspaces already in the folder.
+- **Save** writes your workspace to its own file, named after it. No dialog.
+- **Open workspace file…** lists the workspaces already in the folder.
 
-No file dialog either time. **Workspace folder…** in the same menu changes it
-later; files already saved stay where they are.
+**Change workspace folder…** picks a different folder later; files already saved
+stay where they are. **Sync workspace folder** re-reads the one you have, for
+files that arrived from another machine.
+
+### Where these live
+
+**Save** is a button in the header. Everything else is a **command**: press
+**Ctrl+K** (or the **>** button in the header), type `file`, and the list shows
+Open, autosave, and the workspace folder. There is no File menu — commands are
+searched, so there is nothing to hunt through.
+
+### A file is a workspace
+
+`sales.edb` holds the workspace `sales`. Open it and that is the workspace you
+land in — and if the file has no workspace of that name yet, you get an empty one
+called `sales` inside it.
+
+This is why you are never asked what to call the file: it is named after the
+workspace, or it could not be found again. To get a **copy** under another name,
+make a new workspace with **Clone everything** and then press **Save** — the copy
+is written to its own file.
 
 ### Saving is yours to do
 
-Nothing is written to your file until you press **Save**. This is the main
-difference from the desktop app, where every change lands in the file at once.
+Nothing is written to your file until you press **Save** in the header. A **red
+dot** in the corner of that button means there is something not in the file yet;
+it goes when you save. This is the main difference from the desktop app, where
+every change lands in the file at once.
 
-**Turn on autosave** in the **File** menu if you would rather not think about
-it. It saves shortly after a change, and once at the end of an import rather
-than once per row.
+Run **Turn on autosave** if you would rather not think about it. It saves shortly
+after a change, and once at the end of an import rather than once per row.
 
 You will not lose work in the meantime. The browser keeps its own private copy
 as you go, so closing the tab, a crash or a reload all come back to where you
@@ -169,12 +188,13 @@ were. Only your `.edb` file waits for Save.
 
 ### Which browsers
 
-Saving in place needs the File System Access API, which today means Chrome,
-Edge and other Chromium browsers.
+Writing a file needs the File System Access API, which today means Chrome, Edge
+and other Chromium browsers.
 
-In Firefox and Safari the **File** menu still works, but Save hands you a
-**download** instead of writing back to the file you opened, and there is no
-folder to choose. Opening a file works everywhere.
+Firefox and Safari can **open** a `.edb` file, and everything in the app works
+on the data. What they cannot do is write it back: Save says so instead, and the
+workspace stays in the browser's own storage, where it survives a reload. Use
+**Export** to get data out of those browsers.
 
 ### Moving a workspace between the browser and the desktop
 

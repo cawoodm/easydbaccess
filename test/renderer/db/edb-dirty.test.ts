@@ -14,9 +14,11 @@ function harness(over: { debounceMs?: number } = {}) {
   let nextHandle = 1;
   const save = vi.fn(() => Promise.resolve());
   const onError = vi.fn();
+  const onDirtyChange = vi.fn();
   const policy = createAutosavePolicy({
     save,
     onError,
+    onDirtyChange,
     debounceMs: over.debounceMs ?? 1000,
     setTimer: (fn) => {
       const h = nextHandle++;
@@ -31,8 +33,64 @@ function harness(over: { debounceMs?: number } = {}) {
     timers.clear();
     for (const fn of armed) fn();
   };
-  return { policy, save, onError, tick, pending: () => timers.size };
+  return { policy, save, onError, onDirtyChange, tick, pending: () => timers.size };
 }
+
+/**
+ * The unsaved marker the header's Save button shows.
+ *
+ * It has to be pushed rather than polled: the button is rendered from a static
+ * spec, so nothing re-reads `isDirty()` on its own.
+ */
+describe('the dirty signal', () => {
+  it('announces the first change, and does not repeat itself', () => {
+    const { policy, onDirtyChange } = harness();
+    policy.changed();
+    policy.changed();
+    expect(onDirtyChange.mock.calls).toEqual([[true]]);
+  });
+
+  it('announces a manual save clearing it', () => {
+    const { policy, onDirtyChange } = harness();
+    policy.changed();
+    onDirtyChange.mockClear();
+    policy.markClean();
+    expect(onDirtyChange.mock.calls).toEqual([[false]]);
+  });
+
+  it('says nothing when a clean workspace is marked clean again', () => {
+    const { policy, onDirtyChange } = harness();
+    policy.markClean();
+    expect(onDirtyChange).not.toHaveBeenCalled();
+  });
+
+  it('goes back to dirty when the save it announced failed', async () => {
+    const timers = new Map<number, () => void>();
+    let nextHandle = 1;
+    const onDirtyChange = vi.fn();
+    const policy = createAutosavePolicy({
+      save: () => Promise.reject(new Error('no permission')),
+      onDirtyChange,
+      onError: () => {},
+      setTimer: (fn) => {
+        const h = nextHandle++;
+        timers.set(h, fn);
+        return h;
+      },
+      clearTimer: (h) => void timers.delete(h),
+    });
+    policy.setEnabled(true);
+    policy.changed();
+    onDirtyChange.mockClear();
+    for (const fn of [...timers.values()]) fn();
+    await Promise.resolve();
+    await Promise.resolve();
+    // Clean while the write was in flight, dirty again when it failed — the
+    // button must not sit there claiming the workspace is saved.
+    expect(onDirtyChange.mock.calls).toEqual([[false], [true]]);
+    expect(policy.isDirty()).toBe(true);
+  });
+});
 
 describe('autosave', () => {
   it('is off until switched on, so a workspace with no file is never written', () => {

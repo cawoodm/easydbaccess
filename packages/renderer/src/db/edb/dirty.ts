@@ -20,6 +20,14 @@ export interface AutosavePolicyOptions {
   clearTimer?: (handle: number) => void;
   /** Told when a save fails, so the UI can say so rather than looking clean. */
   onError?: (err: unknown) => void;
+  /**
+   * Told when there is, or is no longer, something unsaved. Only on a real change
+   * of state, so a caller can turn this straight into a re-render.
+   *
+   * Pushed rather than polled because the header's Save button is rendered from a
+   * static spec and nothing would re-read `isDirty()` on its own.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 export interface AutosavePolicy {
@@ -60,17 +68,24 @@ export function createAutosavePolicy(opts: AutosavePolicyOptions): AutosavePolic
     }
   }
 
+  /** The single place the flag moves, so no state change goes unannounced. */
+  function setDirty(next: boolean): void {
+    if (dirty === next) return;
+    dirty = next;
+    opts.onDirtyChange?.(next);
+  }
+
   function runSave(): void {
     cancel();
     if (!dirty || saving) return;
     saving = true;
-    dirty = false;
+    setDirty(false);
     void opts
       .save()
       .catch((err: unknown) => {
         // Nothing was written, so the workspace is still unsaved. Saying it is
         // clean would be a lie the user pays for later.
-        dirty = true;
+        setDirty(true);
         opts.onError?.(err);
       })
       .finally(() => {
@@ -92,7 +107,7 @@ export function createAutosavePolicy(opts: AutosavePolicyOptions): AutosavePolic
     },
     enabled: () => on,
     changed(): void {
-      dirty = true;
+      setDirty(true);
       schedule();
     },
     beginBatch(): void {
@@ -107,7 +122,7 @@ export function createAutosavePolicy(opts: AutosavePolicyOptions): AutosavePolic
     },
     isDirty: () => dirty,
     markClean(): void {
-      dirty = false;
+      setDirty(false);
       cancel();
     },
     dispose: cancel,

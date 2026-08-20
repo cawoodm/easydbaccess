@@ -16,14 +16,49 @@
 import { EDB_EXTENSION } from './file-handle.js';
 
 /**
+ * A workspace id from anything a user typed.
+ *
+ * Lives here rather than in `app-context.ts` because it is half of the id ⇄ file
+ * name pair below, and the two rules have to agree: a workspace created from the
+ * name "My Data" gets the id `my-data`, so opening `My Data.edb` has to arrive at
+ * the same id or it would land in a workspace of its own.
+ *
+ * Only `a-z0-9_-` survive, so an id never contains the `::` that separates a
+ * setting's workspace from its name (see `settingId`).
+ */
+export function slugifyWorkspace(s: string): string {
+  return (
+    s
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'default'
+  );
+}
+
+/**
  * The file name a workspace id maps to.
  *
- * By convention only — `chooseEdbTarget` suggests this name and the user may
- * type another, so a match here is a strong hint and never a guarantee. That is
- * why the caller still checks what is actually inside the file it opens.
+ * Nothing asks the user to name a file any more (`edbTargetNamed` takes the name),
+ * so inside the workspace folder this holds. It is still only a convention: an OS
+ * save dialog lets the name be changed, and a file can arrive from anywhere. That
+ * is why the caller still checks what is actually inside the file it opens.
  */
 export function spaceFileName(workspaceId: string): string {
   return `${workspaceId}${EDB_EXTENSION}`;
+}
+
+/**
+ * The workspace a file is about: `a.edb` is the workspace `a`.
+ *
+ * The same convention as {@link spaceFileName}, read the other way, and it is
+ * what Open uses to decide which workspace to land in. A path is accepted because
+ * `pickFileToOpen` hands back whatever the OS dialog gave it.
+ */
+export function workspaceIdFromFileName(file: string): string {
+  const base = file.split(/[\\/]/).pop() ?? file;
+  const stem = base.toLowerCase().endsWith(EDB_EXTENSION) ? base.slice(0, -EDB_EXTENSION.length) : base;
+  return slugifyWorkspace(stem);
 }
 
 /** Everything the decision below reads. Gathered by the caller, cheapest first. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decideSpace, spaceFileName, type SpaceEvidence } from '../../../packages/renderer/src/db/edb/space-resolve.js';
+import { decideSpace, slugifyWorkspace, spaceFileName, workspaceIdFromFileName, type SpaceEvidence } from '../../../packages/renderer/src/db/edb/space-resolve.js';
 
 /**
  * What `?space=NAME` does when the open database has no such workspace.
@@ -21,8 +21,42 @@ const NOTHING: SpaceEvidence = {
 const evidence = (over: Partial<SpaceEvidence> = {}): SpaceEvidence => ({ ...NOTHING, ...over });
 
 describe('spaceFileName', () => {
-  it('maps a workspace id to the file name chooseEdbTarget suggests', () => {
+  it('maps a workspace id to the file name a Save writes', () => {
     expect(spaceFileName('sales')).toBe('sales.edb');
+  });
+});
+
+/**
+ * The other direction: Open `a.edb` lands in the workspace `a`.
+ *
+ * Opening used to reload with no `?space=` at all, so boot fell back to the
+ * device-global last-workspace id and then to the file's first record — which is
+ * how opening `a.edb` could show a workspace called `default`.
+ */
+describe('workspaceIdFromFileName', () => {
+  it('is the file name without its extension', () => {
+    expect(workspaceIdFromFileName('sales.edb')).toBe('sales');
+  });
+
+  it('lower-cases, because a workspace id is a slug and Windows names are not', () => {
+    expect(workspaceIdFromFileName('Sales.EDB')).toBe('sales');
+  });
+
+  it('takes the name out of a path the picker handed over', () => {
+    expect(workspaceIdFromFileName('C:/Users/marc/data/sales.edb')).toBe('sales');
+  });
+
+  it('slugifies a name that is not one already, so the id matches what a new workspace would get', () => {
+    expect(workspaceIdFromFileName('My Data.edb')).toBe(slugifyWorkspace('My Data'));
+    expect(workspaceIdFromFileName('My Data.edb')).toBe('my-data');
+  });
+
+  it('falls back rather than returning an empty id', () => {
+    expect(workspaceIdFromFileName('.edb')).toBe('default');
+  });
+
+  it('round-trips with spaceFileName', () => {
+    expect(workspaceIdFromFileName(spaceFileName('sales'))).toBe('sales');
   });
 });
 

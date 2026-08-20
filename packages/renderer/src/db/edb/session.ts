@@ -40,7 +40,7 @@ export function lastEdbError(): unknown {
 
 export interface EdbSession {
   bridge: EdbBridge;
-  /** The file name this session is backed by, used for the mirror and Save As. */
+  /** The file name this session is backed by — what the pool and the mirror key on. */
   name: string;
 }
 
@@ -64,7 +64,7 @@ export function activeEdbName(): string {
  * The user's own file, when this tab has adopted one — null when it is on the
  * built-in local database.
  *
- * This is the distinction the File menu means by "file mode". It is NOT "is
+ * This is the distinction the file commands mean by "file mode". It is NOT "is
  * there a database?", which is now always yes.
  */
 export function adoptedFileName(): string | null {
@@ -147,5 +147,25 @@ export function reloadWithoutSpace(): void {
   const url = new URL(location.href);
   url.searchParams.delete('space');
   url.searchParams.delete('workspace');
+  location.replace(url.toString());
+}
+
+/**
+ * Reload onto the adopted database, asking for ONE named workspace inside it.
+ *
+ * What Open uses: `a.edb` is the workspace `a`, so the stale `?space=` goes and
+ * the file's own name takes its place. Dropping the parameter entirely (above)
+ * left boot to guess from the device-global last-workspace id and then from
+ * whichever record the file happened to return first, which is how opening
+ * `a.edb` could land in a workspace called `default`.
+ *
+ * A file that holds no workspace of that name gets one created inside it, by the
+ * `isActive` short-circuit in `decideSpace` — this tab's database IS that file, so
+ * there is nothing left to adopt and nothing to loop on.
+ */
+export function reloadWithSpace(workspaceId: string): void {
+  const url = new URL(location.href);
+  url.searchParams.delete('workspace');
+  url.searchParams.set('space', workspaceId);
   location.replace(url.toString());
 }

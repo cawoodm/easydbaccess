@@ -1,5 +1,4 @@
-import type { DataStore, HostApi, PluginModule } from '@easydb/shared';
-import { AnchoredMenu } from '@marccawood/lit-menu';
+import type { ButtonSpec, CommandSpec, HostApi, PluginModule } from '@easydb/shared';
 import {
   canPickFolder,
   canSaveInPlace,
@@ -15,22 +14,46 @@ import {
   rememberedFolder,
   rememberedHandle,
   writeBytes,
-  EDB_EXTENSION,
 } from '../db/edb/file-handle.js';
-import { activeEdbName, adoptedFileName, reloadWithoutSpace, setActiveEdbName } from '../db/edb/session.js';
-import { createAutosavePolicy } from '../db/edb/dirty.js';
+import { adoptedFileName, reloadWithoutSpace, reloadWithSpace, setActiveEdbName } from '../db/edb/session.js';
+import { createAutosavePolicy, type AutosavePolicy } from '../db/edb/dirty.js';
 import { edbBridge, edbHandle, setEdbHandle } from '../db/edb/active-bridge.js';
 import { copyWorkspace } from '../db/edb/convert.js';
 import { syncFolder } from '../db/edb/folder-sync.js';
 import { createEdbBridge } from '../db/edb/worker-bridge.js';
 import { createIpcDataStore } from '../db/data-store-bridge.js';
-import { adoptEdbFile, buildEdbFile, chooseEdbTarget, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
+import { adoptEdbFile, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
 import { adoptFolderFile, clearPendingSpaceRequest, pendingSpaceRequest } from '../db/edb/space-adopt.js';
-import { spaceFileName } from '../db/edb/space-resolve.js';
+import { spaceFileName, workspaceIdFromFileName } from '../db/edb/space-resolve.js';
 
 /**
- * The `.edb` file surface in the browser: New, Open, Save, Save As, and the
- * autosave switch.
+ * The `.edb` file surface in the browser: Open, Save, the autosave switch and the
+ * workspace folder.
+ *
+ * **These are palette commands, not a menu.** They sat behind a "File" footer
+ * button until v0.0.402, which was a second navigation model for five items the
+ * palette already indexed — and every other footer button belongs to the workspace
+ * (Views, Import, Export), so a global File menu was in the wrong place besides.
+ * Ctrl+K and a word is the whole interaction now. The header's Save button stays,
+ * because Save is the one of these done often enough to want a mouse target, and
+ * because the unsaved dot has to live somewhere always visible.
+ *
+ * Save and autosave are offered whether or not this workspace has a file yet. They
+ * used to appear only once one had been adopted, which read as "this app cannot
+ * save" to anyone who had connected a folder and never opened a file — the one
+ * state in which saving is both possible and not yet done.
+ *
+ * TWO items are deliberately absent, and both were removed because something else
+ * already did the job:
+ *
+ * - **New .edb file** — New workspace → Advanced creates a workspace in its own
+ *   file (`chrome/workspace-actions.ts`).
+ * - **Save As** — it existed to write the workspace somewhere else under another
+ *   name, which is now the one thing that MUST not happen: a file's name is the
+ *   workspace inside it (`spaceFileName` / `workspaceIdFromFileName`), so
+ *   `sales.edb` holding the workspace `q3` is a file Open cannot make sense of. A
+ *   copy comes from New workspace → "Clone everything" and then Save, which writes
+ *   the clone under its own name.
  *
  * A plugin, not core, because everything that can be a plugin in this app is
  * one. It registers nothing at all outside a browser that can host the worker,
@@ -55,23 +78,50 @@ export const meta: NonNullable<PluginModule['meta']> = {
 const AUTOSAVE_KEY = 'autosave';
 
 /**
+ * The palette group these commands appear under.
+ *
+ * "File" because that is the word the user came looking for, and because the
+ * palette buckets by group heading rather than by which plugin registered what.
+ */
+const FILE_GROUP = 'File';
+
+/**
+ * What `load()` needs out of `init()`'s closure.
+ *
+ * `load` is a separate export and cannot see the autosave policy, which is why the
+ * stored autosave flag used to be read at boot and then only toasted about, never
+ * applied — autosave did not actually resume after a reload, while the menu said
+ * "Turn on autosave" as if it had never been on.
+ */
+let session: { autosave: AutosavePolicy; refreshSaveButton: () => void; refreshFileCommands: () => Promise<void> } | null = null;
+
+/**
  * The name the throwaway worker opens a file under while Overwrite rewrites it.
  * Not a real workspace file, and deliberately not any name a user could pick, so
  * its OPFS mirror cannot land on top of a database that matters.
  */
 const SYNC_SCRATCH = '__edb-sync-scratch.edb';
 
-/** The two answers "New .edb file" offers. Compared by value, so they live here. */
-const COPY_WORKSPACE = 'Copy this workspace into it';
-const EMPTY_WORKSPACE = 'Start with an empty workspace';
-
 /** The escape hatch in the Open list, for a file outside the workspace folder. */
 const BROWSE = 'Another file…';
 
-/** The answers offered when a save has nowhere to go. Compared by value. */
-const CHOOSE_FILE = 'Choose a file…';
+/**
+ * The answers offered when a save has nowhere to go. Compared by value.
+ *
+ * No explicit "Cancel" among them: `dialogs.choice` already carries a dismiss
+ * button, and adding one produced two Cancels side by side.
+ */
 const CONNECT_FOLDER = 'Connect a folder…';
 const TURN_OFF_AUTOSAVE = 'Turn off autosave';
+
+/**
+ * Said when a Save has no folder behind it.
+ *
+ * The workspace is NOT at risk — it is a real SQLite database in the OPFS pool and
+ * it survives a reload — so the message leads with that and then says what a folder
+ * would add. Anything shorter reads as "your data is not saved".
+ */
+const NO_FOLDER_YET = 'This workspace is stored in this browser, and stays there. To keep it in a file you can move, back up or open on another machine, connect a workspace folder.';
 
 /**
  * Said when this browser cannot hand the app a file at all.
@@ -115,8 +165,7 @@ export function init(api: HostApi): void {
    * answered, and it made "saved" mean two different things.
    *
    * Save does not hand over a download either. A save is about the workspace
-   * surviving. Producing a file is a separate thing the user asks for
-   * separately — Save As, or New .edb file.
+   * surviving; producing a copy to give away is what Export is for.
    */
   async function persist(): Promise<SaveTarget> {
     const bridge = edbBridge();
@@ -124,47 +173,105 @@ export function init(api: HostApi): void {
     const handle = edbHandle();
     if (!handle) return 'no-handle';
     if (!(await ensureWritable(handle, true))) {
-      await api.ui.dialogs.alert('easyDBAccess may not write that file. Use Save As to choose another.', 'Save');
+      await api.ui.dialogs.alert('easyDBAccess is not allowed to write that file. Run the "Connect workspace folder" command to grant it again.', 'Save');
       return 'none';
     }
     await writeBytes(handle, await bridge.export());
     return 'file';
   }
 
+  /**
+   * Remember the folder the user just granted, and put the commands in step with it.
+   *
+   * One function for all three places that can connect a folder — the folder command
+   * and both "there is nowhere to save this" answers. When only the first of them
+   * refreshed, saving into a brand-new folder left the palette still offering to
+   * *connect* one.
+   */
+  async function connectFolder(dir: FileSystemDirectoryHandle): Promise<void> {
+    await rememberFolder(dir);
+    await refreshFileCommands();
+  }
+
+  /** The folder this app may already write in. Never asks for one. */
+  async function connectedFolder(): Promise<FileSystemDirectoryHandle | null> {
+    const dir = await rememberedFolder();
+    return dir && (await ensureWritable(dir, true)) ? dir : null;
+  }
+
   const autosave = createAutosavePolicy({
     save: async () => {
-      if ((await persist()) === 'no-handle') await autosaveHasNowhereToGo();
+      if ((await persist()) !== 'no-handle') return;
+      // Same rule as a manual Save: a connected folder needs no question. The
+      // folder's grant covers creating the file, so this works from a timer,
+      // which has no user gesture of its own.
+      const dir = await connectedFolder();
+      if (dir) await saveIntoFolder(dir);
+      else await autosaveHasNowhereToGo();
     },
     onError: (err) => api.ui.dialogs.toast(`Autosave failed: ${String(err)}`, { kind: 'error' }),
+    onDirtyChange: () => refreshSaveButton(),
   });
+
+  /** A new file in the granted folder. Null only if the folder stopped working. */
+  async function fresh(dir: FileSystemDirectoryHandle, name: string): Promise<EdbTarget | null> {
+    const handle = await fileInFolder(dir, name, true);
+    return handle ? { handle, name } : null;
+  }
+
+  /**
+   * Save this workspace into the connected folder as `<workspace-id>.edb`.
+   *
+   * No name prompt in the ordinary case. A workspace id and its file name are one
+   * convention (`spaceFileName`), the folder grant already covers writing in it,
+   * and being asked to name a file whose name is a foregone conclusion is the sort
+   * of dialog that makes Save feel like paperwork.
+   *
+   * A name already in the folder is the one exception, and it is confirmed rather
+   * than dodged: that file may hold work from another machine, and this Save writes
+   * the WHOLE open database over it. Offering another NAME instead — which is what
+   * this did — only moved the workspace into a file whose name denies it.
+   */
+  async function saveIntoFolder(dir: FileSystemDirectoryHandle): Promise<void> {
+    const workspaceId = api.workspaceId();
+    // Unreachable from the menu or the timer — boot resolves a workspace before
+    // either exists — but the file has to be named after something.
+    if (!workspaceId) return;
+    const name = spaceFileName(workspaceId);
+    const taken = (await listWorkspaceFiles(dir)).includes(name);
+    if (taken && !(await api.ui.dialogs.confirm(`"${name}" is already in "${dir.name}". Replace it with the workspace open here?`, 'Save'))) return;
+    const target = await fresh(dir, name);
+    if (!target?.handle) return;
+    setEdbHandle(target.handle);
+    await rememberHandle(target.handle);
+    setActiveEdbName(target.name);
+    await save();
+  }
 
   /**
    * A manual Save with no file behind it.
    *
-   * There is no browser-side copy to fall back on any more, so the honest answer
-   * is to ask where the file goes rather than to report a save that put the
-   * bytes nowhere the user can reach. This runs from a click, so both pickers
-   * have the user gesture they need.
+   * Save always means "write to the user's disk", so the only question is where —
+   * and the answer is a folder, never a lone file: a folder grant covers every
+   * later save and every other workspace, where a per-file grant has to be
+   * re-obtained from a gesture the autosave timer does not have.
+   *
+   * Runs from a click, so the picker has the user gesture it needs.
    */
   async function askForSaveTarget(): Promise<void> {
-    if (!canReachAFile()) {
+    if (!canPickFolder()) {
       await api.ui.dialogs.alert(NO_FILE_ACCESS, 'Save');
       return;
     }
-    const answer = await api.ui.dialogs.choice(
-      'This workspace has no file yet, so there is nowhere to save it.',
-      [...(canSaveInPlace() ? [CHOOSE_FILE] : []), ...(canPickFolder() ? [CONNECT_FOLDER] : [])],
-      'Save',
-    );
-    if (answer === null) return;
-    if (answer === CONNECT_FOLDER) {
-      const picked = await pickFolder();
-      if (!picked) return;
-      // Remembered, but NOT scanned: the user asked to save, not to rebuild the
-      // workspace list. `chooseEdbTarget` picks the name up from here.
-      await rememberFolder(picked);
-    }
-    await saveAs();
+    // A dismissed dialog is a cancelled Save, which writes nothing.
+    const answer = await api.ui.dialogs.choice(NO_FOLDER_YET, [CONNECT_FOLDER], 'Save');
+    if (answer !== CONNECT_FOLDER) return;
+    const picked = await pickFolder();
+    if (!picked) return;
+    // Remembered, but NOT scanned: the user asked to save, not to rebuild the
+    // workspace list.
+    await connectFolder(picked);
+    await saveIntoFolder(picked);
   }
 
   /**
@@ -183,17 +290,18 @@ export function init(api: HostApi): void {
     if (askingAboutAutosave) return;
     askingAboutAutosave = true;
     try {
-      const answer = await api.ui.dialogs.choice('Autosave has no file to write to.', [...(canPickFolder() ? [CONNECT_FOLDER] : []), TURN_OFF_AUTOSAVE], 'Autosave');
+      const answer = await api.ui.dialogs.choice('Autosave has no folder to write to.', [...(canPickFolder() ? [CONNECT_FOLDER] : []), TURN_OFF_AUTOSAVE], 'Autosave');
       if (answer === CONNECT_FOLDER && canPickFolder()) {
         const picked = await pickFolder();
         if (picked) {
-          await rememberFolder(picked);
-          await saveAs();
+          await connectFolder(picked);
+          await saveIntoFolder(picked);
           return;
         }
       }
       autosave.setEnabled(false);
       await api.settings.set(meta.id, AUTOSAVE_KEY, false, 'user');
+      await refreshFileCommands();
       api.ui.dialogs.toast('Autosave is off until this workspace has a file.', { kind: 'info' });
     } finally {
       askingAboutAutosave = false;
@@ -224,7 +332,11 @@ export function init(api: HostApi): void {
       return;
     }
     if (where === 'no-handle') {
-      await askForSaveTarget();
+      // A connected folder is already an answer to "where does this go?", so the
+      // first Save after connecting one asks nothing.
+      const dir = await connectedFolder();
+      if (dir) await saveIntoFolder(dir);
+      else await askForSaveTarget();
       return;
     }
     if (where === 'none') return;
@@ -276,12 +388,23 @@ export function init(api: HostApi): void {
   async function chooseFolder(): Promise<void> {
     const picked = await pickFolder();
     if (!picked) return;
-    await rememberFolder(picked);
+    // "Connect" becomes "Change" from here on.
+    await connectFolder(picked);
     await syncFolderNow(picked);
   }
 
-  /** Re-read the connected folder. Offered separately, because files change on disk. */
+  /**
+   * Re-read the connected folder. Offered separately, because files change on disk.
+   *
+   * Says so rather than opening a picker when there is no folder: a palette is a
+   * flat list of everything, so a command has to answer for the state it is run
+   * in — and "connect a folder" is the command next to this one.
+   */
   async function syncConnectedFolder(): Promise<void> {
+    if ((await rememberedFolder()) === null) {
+      api.ui.dialogs.toast('No workspace folder is connected yet.', { kind: 'info' });
+      return;
+    }
     const dir = await workspaceFolder();
     if (!dir) return;
     await syncFolderNow(dir);
@@ -295,44 +418,22 @@ export function init(api: HostApi): void {
     window.dispatchEvent(new CustomEvent('easydb:folder-index-changed'));
   }
 
-  async function saveAs(): Promise<void> {
-    const target = await chooseEdbTarget(api.ui.dialogs, activeEdbName());
-    if (!target) return;
-    // A target with no handle means the browser could not give this app one, so
-    // there is nothing to write to. Saying so ENDS the flow. Calling `save()`
-    // here would find no handle, ask where to save, and arrive back at this same
-    // answer — a loop with a dialog in it.
-    if (!target.handle) {
-      await api.ui.dialogs.alert(NO_FILE_ACCESS, 'Save As');
-      return;
-    }
-    setEdbHandle(target.handle);
-    await rememberHandle(target.handle);
-    setActiveEdbName(target.name);
-    await save();
-  }
-
   /**
-   * Make this tab use `name` from the next load on, and reload.
+   * Make this tab use `name` from the next load on, and reload into the workspace
+   * that file is named after.
    *
    * The store is built once per load, so adopting another file is a reload — the
    * same thing the desktop does when it opens another database.
+   *
+   * `a.edb` is the workspace `a` (`workspaceIdFromFileName`), and the reload asks
+   * for it by name. The old `?space=` from whatever was open before must not
+   * survive; dropping it and letting boot guess is what made Open land in
+   * `default`, or in whichever workspace the file returned first.
    */
   async function adopt(target: EdbTarget, message: string): Promise<void> {
     await adoptEdbFile(target);
     await api.ui.dialogs.alert(message, 'Workspace file');
-    reloadWithoutSpace();
-  }
-
-  /** Copy this workspace into a new file's store, and say what travelled. */
-  async function copyInto(store: DataStore, workspaceId: string): Promise<void> {
-    const result = await copyWorkspace(api.store, store, workspaceId);
-    if (result.skipped.length > 0) {
-      // A source-backed table reads its rows from a server on every load, so only
-      // its definition travels. Saying so beats a file that looks short.
-      api.ui.dialogs.toast(`These tables read their rows from a server, so only their settings were copied: ${result.skipped.join(', ')}.`, { kind: 'warning' });
-    }
-    api.ui.dialogs.toast(`Copied ${result.tables} table${result.tables === 1 ? '' : 's'} and ${result.rows} row${result.rows === 1 ? '' : 's'}.`, { kind: 'success' });
+    reloadWithSpace(workspaceIdFromFileName(target.name));
   }
 
   /**
@@ -361,82 +462,146 @@ export function init(api: HostApi): void {
     // The boot never reads the user's file (see `session.ts`), so the bytes go
     // into this tab's own substrate first, and the reload finds them there.
     await placeForNextBoot(picked.name, picked.bytes);
-    await adopt({ name: picked.name, handle: picked.handle }, `Opening "${picked.name}". The page will reload.`);
-  }
-
-  /**
-   * Start a new file, either empty or holding a copy of the open workspace.
-   *
-   * Converting never touches the source. A user who copies a workspace into a
-   * file and then goes back to browser storage still finds everything there.
-   */
-  async function newFile(): Promise<void> {
-    const workspaceId = api.workspaceId();
-    // Only reachable before boot resolves a workspace, which the menu is not. The
-    // guard is here because the file has to be NAMED after something.
-    if (!workspaceId) return;
-    const answer = await api.ui.dialogs.choice(`What goes into the new file?`, [COPY_WORKSPACE, EMPTY_WORKSPACE], 'New .edb file');
-    if (answer === null) return;
-    const copy = answer === COPY_WORKSPACE;
-
-    // Chosen FIRST, while the click that answered the question above still counts
-    // as a user gesture. Both the folder picker and the file picker need one, and
-    // a long copy in between would spend it.
-    const target = await chooseEdbTarget(api.ui.dialogs, `${workspaceId}${EDB_EXTENSION}`);
-    if (!target) return;
-
-    await buildEdbFile(target, workspaceId, copy ? (store) => copyInto(store, workspaceId) : undefined);
-    await adopt(target, `"${target.name}" is now this tab's workspace file. The page will reload.`);
+    await adopt({ name: picked.name, handle: picked.handle }, `Opening "${picked.name}" as the workspace "${workspaceIdFromFileName(picked.name)}". The page will reload.`);
   }
 
   async function leaveFileMode(): Promise<void> {
+    // Reachable with no file behind it now that this is a command rather than a
+    // menu item the file mode could hide.
+    if (adoptedFileName() === null) {
+      api.ui.dialogs.toast('This workspace is not in a file \u2014 there is nothing to come back from.', { kind: 'info' });
+      return;
+    }
     if (!(await api.ui.dialogs.confirm('Go back to this browser\u2019s own database? The file stays where it is.', 'Local database'))) return;
     await forgetHandle();
     setActiveEdbName(null);
     reloadWithoutSpace();
   }
 
-  api.ui.registerFooterButton({
-    id: 'edb-file:menu',
-    label: 'File',
-    // `storage`, not `database`: the Material Icons font has no `database`
-    // ligature, so it drew the literal word. Same icon as `electron-db`'s
-    // button, which does the same job on the desktop.
-    icon: 'storage',
-    tooltip: 'Workspace file — open, save, autosave',
-    onClick: async (_api, ctx) => {
-      const inFileMode = adoptedFileName() !== null;
-      const rect = ctx?.anchor?.getBoundingClientRect();
-      if (!rect) return;
-      const picked = await AnchoredMenu.open(rect, [
-        { id: 'new', label: 'New .edb file…', icon: 'note_add' },
-        { id: 'open', label: 'Open .edb file…', icon: 'folder_open' },
-        ...(inFileMode
-          ? [
-              { id: 'save', label: 'Save', icon: 'save' },
-              { id: 'saveAs', label: 'Save As…', icon: 'save_as' },
-              { id: 'autosave', label: `${autosave.enabled() ? 'Turn off' : 'Turn on'} autosave`, icon: 'autorenew' },
-              { id: 'leave', label: 'Back to browser storage', icon: 'logout', danger: true },
-            ]
-          : []),
-        ...(canPickFolder() ? [{ id: 'folder', label: 'Workspace folder…', icon: 'folder_special' }] : []),
-        ...(canPickFolder() ? [{ id: 'syncFolder', label: 'Sync workspace folder', icon: 'sync' }] : []),
-      ]);
-      if (picked === 'new') await newFile();
-      else if (picked === 'open') await open();
-      else if (picked === 'save') await save();
-      else if (picked === 'saveAs') await saveAs();
-      else if (picked === 'folder') await chooseFolder();
-      else if (picked === 'syncFolder') await syncConnectedFolder();
-      else if (picked === 'leave') await leaveFileMode();
-      else if (picked === 'autosave') {
-        const next = !autosave.enabled();
-        autosave.setEnabled(next);
-        await api.settings.set(meta.id, AUTOSAVE_KEY, next, 'user');
-        api.ui.dialogs.toast(`Autosave ${next ? 'on' : 'off'}`, { kind: 'info' });
-      }
-    },
+  /**
+   * The header's Save button, with the unsaved marker on its label.
+   *
+   * A `ButtonSpec` is static and the shell renders from a snapshot of the registry,
+   * so the label is edited in place and the shell is asked to re-render. The
+   * alternative — a live-updating button type in the plugin API — would be a new
+   * contract for every plugin to support one dot.
+   *
+   * Not registered where the browser cannot produce a file at all: a permanent
+   * button whose only answer is "this browser cannot save" is worse than no button.
+   */
+  const saveButton: ButtonSpec = {
+    id: 'edb-file:save',
+    label: 'Save',
+    icon: 'save',
+    tooltip: 'Save this workspace to its file',
+    variant: 'primary',
+    onClick: () => save(),
+  };
+
+  function refreshSaveButton(): void {
+    const dirty = autosave.isDirty();
+    // The red dot in the button's corner, drawn by the shell — the notification
+    // convention, and the only marker that reads at a glance without changing the
+    // button's width as the label did.
+    saveButton.badge = dirty;
+    saveButton.tooltip = dirty ? 'Unsaved changes — click to write them to the file' : 'Everything here is saved';
+    document.dispatchEvent(new CustomEvent('easydb:refresh-buttons'));
+  }
+
+  if (canReachAFile()) api.ui.registerHeaderButton(saveButton);
+
+  async function toggleAutosave(): Promise<void> {
+    const next = !autosave.enabled();
+    autosave.setEnabled(next);
+    await api.settings.set(meta.id, AUTOSAVE_KEY, next, 'user');
+    await refreshFileCommands();
+    api.ui.dialogs.toast(`Autosave ${next ? 'on' : 'off'}`, { kind: 'info' });
+  }
+
+  /**
+   * Two of the commands say what they will do, so their titles follow the state.
+   *
+   * Edited in place, with nothing told: the palette rebuilds its list on every
+   * open and reads these very objects, so the next open is already right. Called
+   * at boot, and again wherever the state behind a title changes.
+   *
+   * `rememberedFolder` is a plain read of what was granted before — never
+   * `ensureWritable`, because working out a title must not raise a permission
+   * prompt.
+   */
+  async function refreshFileCommands(): Promise<void> {
+    autosaveCommand.title = `${autosave.enabled() ? 'Turn off' : 'Turn on'} autosave`;
+    folderCommand.title = (await rememberedFolder()) ? 'Change workspace folder…' : 'Connect workspace folder…';
+  }
+
+  const autosaveCommand: CommandSpec = {
+    id: 'edb-file:autosave',
+    title: 'Turn on autosave',
+    group: FILE_GROUP,
+    icon: 'autorenew',
+    keywords: ['auto', 'save', 'timer', 'file'],
+    run: () => toggleAutosave(),
+  };
+
+  const folderCommand: CommandSpec = {
+    id: 'edb-file:folder',
+    title: 'Connect workspace folder…',
+    group: FILE_GROUP,
+    icon: 'folder_special',
+    keywords: ['change', 'connect', 'directory', 'file'],
+    run: () => chooseFolder(),
+  };
+
+  session = { autosave, refreshSaveButton, refreshFileCommands };
+
+  api.ui.registerCommand({
+    id: 'edb-file:open',
+    title: 'Open workspace file…',
+    group: FILE_GROUP,
+    icon: 'folder_open',
+    keywords: ['edb', 'file', 'load', 'switch'],
+    run: () => open(),
   });
+
+  // Save is a HEADER BUTTON, and the palette already lists every button under
+  // "Actions" — so registering it as a command too would be the same entry twice.
+  // Where the browser cannot produce a file the button is not there at all, and
+  // then this is the only place left that can explain why.
+  if (!canReachAFile()) {
+    api.ui.registerCommand({
+      id: 'edb-file:save',
+      title: 'Save workspace to a file',
+      group: FILE_GROUP,
+      icon: 'save',
+      keywords: ['write', 'disk', 'edb'],
+      run: () => save(),
+    });
+  }
+
+  api.ui.registerCommand(autosaveCommand);
+
+  if (canPickFolder()) {
+    api.ui.registerCommand(folderCommand);
+    api.ui.registerCommand({
+      id: 'edb-file:sync-folder',
+      title: 'Sync workspace folder',
+      group: FILE_GROUP,
+      icon: 'sync',
+      keywords: ['refresh', 're-read', 'folder', 'file'],
+      run: () => syncConnectedFolder(),
+    });
+  }
+
+  api.ui.registerCommand({
+    id: 'edb-file:leave',
+    title: 'Back to browser storage',
+    group: FILE_GROUP,
+    icon: 'logout',
+    keywords: ['detach', 'forget', 'file'],
+    run: () => leaveFileMode(),
+  });
+
+  void refreshFileCommands();
 }
 
 /** Marks the one-time notice below as shown, so it never nags. */
@@ -505,22 +670,39 @@ export async function load(api: HostApi): Promise<void> {
   if (!supported()) return;
   await offerSpaceFolder(api);
   await noticeOrphanedBrowserData(api);
-  // Everything below is about the user's own FILE. The local database needs no
-  // handle and no permission, so a tab that has not adopted a file is done here.
-  if (adoptedFileName() === null) return;
-  // Re-check the folder before the file. A folder the user has allowed on every
-  // visit covers everything in it, so Save then needs no prompt at all — and
-  // asking about the folder once beats asking about each file.
-  const folder = await rememberedFolder();
-  if (folder) await ensureWritable(folder, false);
-  // The handle from the last session. Permission is READ, not asked for: asking
-  // needs a gesture, and the workspace already loaded from the OPFS mirror. A
-  // Chrome user with a persisted grant reads back `granted` and saves silently.
-  const remembered = await rememberedHandle();
-  if (remembered) {
-    setEdbHandle(remembered);
-    await ensureWritable(remembered, false);
+
+  // The shell snapshots the registry during boot, and boot itself writes — the
+  // workspace record, the seeded view templates — so the button can already be out
+  // of date by its first paint. One push here settles it.
+  session?.refreshSaveButton();
+
+  // The file half. A workspace with no file needs no handle and no permission, but
+  // everything below the `if` is about a file this tab has already adopted.
+  if (adoptedFileName() !== null) {
+    // Re-check the folder before the file. A folder the user has allowed on every
+    // visit covers everything in it, so Save then needs no prompt at all — and
+    // asking about the folder once beats asking about each file.
+    const folder = await rememberedFolder();
+    if (folder) await ensureWritable(folder, false);
+    // The handle from the last session. Permission is READ, not asked for: asking
+    // needs a gesture, and the workspace already loaded from the pool. A Chrome
+    // user with a persisted grant reads back `granted` and saves silently.
+    const remembered = await rememberedHandle();
+    if (remembered) {
+      setEdbHandle(remembered);
+      await ensureWritable(remembered, false);
+    }
   }
+
+  // Autosave last, and for a workspace with or without a file: the timer must not
+  // arm before the handle above is back, or the first tick would find none and ask
+  // where to save a workspace that already has an answer.
   const on = await api.settings.get(meta.id, AUTOSAVE_KEY);
-  if (on === true) api.ui.dialogs.toast('Autosave is on for this workspace file', { kind: 'info' });
+  if (on === true && session) {
+    session.autosave.setEnabled(true);
+    // So the palette says "Turn off autosave" rather than offering to turn on
+    // what is already on.
+    await session.refreshFileCommands();
+    api.ui.dialogs.toast('Autosave is on for this workspace', { kind: 'info' });
+  }
 }

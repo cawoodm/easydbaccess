@@ -7,9 +7,10 @@
 // workspaces is not something to pay for on every page load.
 
 import type { DataStore, Dialogs } from '@easydb/shared';
-import { edbBridge } from './active-bridge.js';
+import { edbBridge, storeBridge } from './active-bridge.js';
+import { countWorkspaceContents } from '../delete-workspace.js';
 import { fileInFolder, listWorkspaceFiles, readBytes } from './file-handle.js';
-import { folderConflicts, writeFolderIndex, type FolderIndex, type FolderWorkspace } from './folder-index.js';
+import { folderConflicts, isEmptyWorkspace, partitionConflicts, writeFolderIndex, type FolderIndex, type FolderWorkspace } from './folder-index.js';
 import { activeEdbName } from './session.js';
 import { adoptFolderFile } from './space-adopt.js';
 
@@ -64,11 +65,41 @@ export async function scanFolder(dir: FileSystemDirectoryHandle): Promise<{ inde
 }
 
 /**
+ * Which of the clashing workspaces hold nothing on this side.
+ *
+ * Only the clashing ones are counted — the folder can hold hundreds and this is
+ * a question about the handful that appear twice. Rows are not counted: a table
+ * is enough to make a workspace non-empty, and the row total is a `COUNT(*)` per
+ * table.
+ *
+ * A store that cannot count leaves the set empty, which asks about every clash —
+ * the behaviour before this existed.
+ */
+async function emptyLocally(clashes: readonly FolderWorkspace[]): Promise<Set<string>> {
+  const empty = new Set<string>();
+  try {
+    const bridge = storeBridge();
+    for (const clash of clashes) {
+      if (isEmptyWorkspace(await countWorkspaceContents(bridge, clash.id, { countRows: false }))) empty.add(clash.id);
+    }
+  } catch {
+    /* no bridge, or a build with no count — every clash gets its prompt */
+  }
+  return empty;
+}
+
+/**
  * Scan `dir`, settle any conflicts with the open database, and store the index.
  *
  * A conflict is one workspace id living both here and in a file. The user answers
  * per workspace, because the right answer is per workspace: a stale copy on disk
  * and a stale copy in the browser can both be in the same folder.
+ *
+ * Except when this side is empty. `?space=<name>` creates the workspace it cannot
+ * find, and at boot it cannot look inside a folder nobody has connected yet, so
+ * every private window that opens such a link has an empty shell of that name by
+ * the time the folder arrives. Asking which of the two is real is a question
+ * about nothing — the file is taken, unasked (`partitionConflicts`).
  *
  *  - **Load from Disk** adopts that file and reloads. The data does not move; the
  *    tab changes which database it is looking at, so everything else in that file
@@ -89,8 +120,9 @@ export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStor
 
   const open = await store.workspaces.find();
   const clashes = folderConflicts(open, index.workspaces, activeEdbName());
+  const { adopt, ask } = partitionConflicts(clashes, await emptyLocally(clashes));
 
-  for (const clash of clashes) {
+  for (const clash of ask) {
     const answer = await dialogs.choice(`"${clash.name}" is in this browser and in ${clash.file}. Which one is the real one?`, [LOAD, OVERWRITE, CANCEL], 'Sync workspace folder');
     // A dismissed dialog is Cancel — the safe answer, and the only one that
     // touches nothing.
@@ -98,5 +130,11 @@ export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStor
     else if (answer === OVERWRITE) await overwrite(clash.id, clash.file);
   }
 
-  return { files: files.length, found: index.workspaces.length, conflicts: clashes.length, unreadable };
+  // Last, because an adopt reloads the tab: doing this first would carry the
+  // prompts above away mid-question. Only the first one can take effect for the
+  // same reason, and that is enough — after the reload the other empty shells sit
+  // in a database this tab no longer has open, so they clash with nothing.
+  for (const empty of adopt) await adoptFolderFile(empty.id);
+
+  return { files: files.length, found: index.workspaces.length, conflicts: ask.length, unreadable };
 }

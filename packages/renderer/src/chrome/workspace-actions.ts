@@ -7,11 +7,12 @@
 
 import type { Dialogs } from '@easydb/shared';
 import { forgetLastWorkspace, getContext, slugifyWorkspace } from '../app-context.js';
+import { workspaceLabel } from '../db/edb/folder-index.js';
 import { storeBridge } from '../db/edb/active-bridge.js';
 import { cloneWorkspace, type CloneMode } from '../db/clone-workspace.js';
 import { countWorkspaceContents, deleteWorkspace, describeWorkspaceContents } from '../db/delete-workspace.js';
 import { EDB_EXTENSION } from '../db/edb/file-handle.js';
-import { adoptEdbFile, buildEdbFile, chooseEdbTarget } from '../db/edb/new-file.js';
+import { adoptEdbFile, buildEdbFile, edbTargetNamed } from '../db/edb/new-file.js';
 
 // The three answers of the "what should it start with?" question. Constants
 // because the choice dialog reports back the label the user picked.
@@ -21,7 +22,10 @@ const CLONE_NOTHING = 'Empty workspace';
 
 // Where the new workspace's data lives. Simple is what every workspace has been
 // until now; Advanced puts it in a real SQLite file the user owns.
-const SIMPLE = 'Simple — in this browser (IndexedDB)';
+// "in this browser" is not IndexedDB any more — it is a SQLite database in the
+// OPFS pool, and it survives a reload exactly as a file does. The old label named
+// a storage engine this app stopped using in v0.0.383.
+const SIMPLE = 'Simple — in this browser';
 const ADVANCED = 'Advanced — in a SQLite file you save (.edb)';
 
 /**
@@ -63,13 +67,14 @@ export async function switchWorkspaceFlow(): Promise<void> {
     ctx.api.ui.dialogs.toast('This is the only workspace.', { kind: 'info', title: 'Workspaces' });
     return;
   }
-  const pick = await ctx.api.ui.dialogs.choice(
-    'Open which workspace?',
-    others.map((w) => w.name),
-    'Switch workspace',
-  );
+  // Titles, like the header selector — the same list of the same things must not
+  // be spelled two ways. The pick comes back as a LABEL, so it is mapped to the
+  // name `?space=` routes on; two workspaces may even carry the same title, and
+  // the first match is as good an answer as a list of identical labels allows.
+  const pick = await ctx.api.ui.dialogs.choice('Open which workspace?', others.map(workspaceLabel), 'Switch workspace');
   if (!pick) return;
-  openWorkspace(pick);
+  const chosen = others.find((w) => workspaceLabel(w) === pick);
+  if (chosen) openWorkspace(chosen.name);
 }
 
 /** Name a new workspace, choose where it is stored and what it inherits, then open it. */
@@ -108,16 +113,17 @@ export async function newWorkspaceFlow(): Promise<void> {
 /**
  * Create a workspace that lives in its own `.edb` file, and switch this tab to it.
  *
- * The file starts EMPTY. Cloning an existing workspace into a file is the File
- * menu's "New .edb file → Copy this workspace into it", and having one job in two
- * places would mean two behaviours to keep in step.
+ * The file starts EMPTY, and its name is the workspace's own (`<id>.edb`) — the
+ * same convention Save writes under and Open reads back. To get a COPY of this
+ * workspace in a file, take the Simple path with "Clone everything" and then Save:
+ * that writes the clone into the folder under its own name.
  *
  * The reload at the end is not optional: the store is built once per load, so a
  * tab only changes where it reads from by starting again.
  */
 async function newFileWorkspace(dialogs: Dialogs, name: string): Promise<void> {
   const id = slugifyWorkspace(name);
-  const target = await chooseEdbTarget(dialogs, `${id}${EDB_EXTENSION}`);
+  const target = await edbTargetNamed(dialogs, `${id}${EDB_EXTENSION}`);
   if (!target) return;
   await buildEdbFile(target, id, async (store) => {
     await store.workspaces.insert({ id, name, createdAt: Date.now(), pluginUrls: [] });

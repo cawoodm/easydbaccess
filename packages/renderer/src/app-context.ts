@@ -3,6 +3,7 @@ import { createRoutedDataStore, withUniqueTableNames } from './db/index.js';
 import { createIpcDataStore } from './db/data-store-bridge.js';
 import { startEdbSession, type EdbSession } from './db/edb/session.js';
 import { adoptFolderFile, adoptLocalDb, planForMissingSpace } from './db/edb/space-adopt.js';
+import { slugifyWorkspace } from './db/edb/space-resolve.js';
 import { showStorageFailure } from './chrome/storage-failure.js';
 import { createEventBus } from './events/bus.js';
 import { createRegistries, type Registries } from './plugin-host/registries.js';
@@ -310,14 +311,7 @@ function persistLastWorkspace(id: string): void {
   }
 }
 
-/** Workspace name → id. Only `a-z0-9_-` survive, so an id never contains the
- *  `::` that separates a setting's workspace from its name (see `settingId`). */
-export function slugifyWorkspace(s: string): string {
-  return (
-    s
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'default'
-  );
-}
+// `slugifyWorkspace` moved to `db/edb/space-resolve.ts`, next to the file-name
+// rules it has to agree with. Re-exported because it is part of this module's
+// published surface — `chrome/` and the plugins import it from here.
+export { slugifyWorkspace } from './db/edb/space-resolve.js';
