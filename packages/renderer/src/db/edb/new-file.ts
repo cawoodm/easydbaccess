@@ -16,6 +16,7 @@ import {
   writeBytes,
 } from './file-handle.js';
 import { edbBridge } from './active-bridge.js';
+import { factsOfHandle, recordAgreement } from './file-stamp.js';
 import { setActiveEdbName } from './session.js';
 import { createEdbBridge } from './worker-bridge.js';
 
@@ -108,6 +109,10 @@ export async function buildEdbFile(target: EdbTarget, workspaceId: string, fill?
   if (target.handle) await writeBytes(target.handle, bytes);
   else downloadBytes(target.name, bytes);
   await placeForNextBoot(target.name, bytes);
+  // The file and the copy just placed in the pool are the same bytes. Recording
+  // that is what stops the next sync reading our own brand-new file back over it.
+  const facts = target.handle ? await factsOfHandle(target.handle) : null;
+  if (facts) recordAgreement(target.name, facts);
 }
 
 /**

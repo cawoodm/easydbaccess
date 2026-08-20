@@ -90,6 +90,16 @@ export interface SpaceEvidence {
   /** The candidate file is in a folder this app can already read, unprompted. */
   inGrantedFolder: boolean;
   /**
+   * The file has been written since this browser's copy was made from it, and
+   * that copy holds nothing unsaved — so the file is simply the newer of the two.
+   *
+   * This is how two origins sharing one folder converge: each holds its own
+   * imported copy (OPFS and the handle store are per-origin), and whoever opens
+   * the workspace next reads what the other one saved. `file-stamp.ts` is what
+   * can answer this at boot, where the in-memory dirty flag does not exist yet.
+   */
+  fileIsNewer: boolean;
+  /**
    * A folder this user has already chosen, which could be re-permissioned.
    *
    * NOT "this browser has a directory picker" — that is true of every Chromium,
@@ -122,7 +132,13 @@ export type SpaceAction =
  * ends in `location.reload()`, an adopt here would reload into the same state
  * and decide the same thing again, forever.
  *
- * `hasLocalDb` is checked BEFORE `inGrantedFolder`, which reads backwards: the
+ * `fileIsNewer` is the one thing that lets the file win over a copy this browser
+ * already holds, and it is narrow on purpose: the file was written after our copy
+ * was made from it, and our copy holds nothing unsaved. Without it two tabs on
+ * different origins never converge — each keeps re-opening its own stale import
+ * of the same file, because everything except the folder is origin-scoped.
+ *
+ * `hasLocalDb` is otherwise checked BEFORE `inGrantedFolder`, which reads backwards: the
  * user's own file ought to win over a browser-held copy. It does not, because
  * adopting the folder file means `SAHPoolUtil.importDb` over the copy this
  * browser holds, and that copy may contain edits never written back to the file
@@ -133,7 +149,7 @@ export type SpaceAction =
 export function decideSpace(e: SpaceEvidence): SpaceAction {
   if (e.inOpenDb) return 'use-open';
   if (e.isActive) return 'create';
-  if (e.hasLocalDb) return 'adopt-local-db';
+  if (e.hasLocalDb) return e.inGrantedFolder && e.fileIsNewer ? 'adopt-folder-file' : 'adopt-local-db';
   if (e.inGrantedFolder) return 'adopt-folder-file';
   if (e.canAskForFolder) return 'ask-for-folder';
   return 'create';

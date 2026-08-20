@@ -2,7 +2,7 @@ import type { DataStore, EventBus, HostApi, RowSourceCtx, Table } from '@easydb/
 import { createRoutedDataStore, withUniqueTableNames } from './db/index.js';
 import { createIpcDataStore } from './db/data-store-bridge.js';
 import { startEdbSession, type EdbSession } from './db/edb/session.js';
-import { adoptFolderFile, adoptLocalDb, planForMissingSpace } from './db/edb/space-adopt.js';
+import { adoptFolderFile, adoptLocalDb, noteSessionOpened, planForMissingSpace } from './db/edb/space-adopt.js';
 import { slugifyWorkspace } from './db/edb/space-resolve.js';
 import { showStorageFailure } from './chrome/storage-failure.js';
 import { createEventBus } from './events/bus.js';
@@ -33,7 +33,11 @@ let ctxPromise: Promise<AppContext> | null = null;
  */
 async function startSessionOrExplain(): Promise<EdbSession> {
   try {
-    return await startEdbSession();
+    const session = await startEdbSession();
+    // The database this boot really opened. An adopt-attempt marker naming it has
+    // done its job — see `noteSessionOpened`.
+    noteSessionOpened(session.name);
+    return session;
   } catch (err) {
     showStorageFailure(err instanceof Error ? err.message : String(err));
     throw err;

@@ -192,6 +192,33 @@ That one permission covers everything in that folder, for good. After it:
 stay where they are. **Sync workspace folder** re-reads the one you have, for
 files that arrived from another machine.
 
+### The same folder in more than one place
+
+Point two browsers — or two tabs on different addresses, or two machines with the
+folder synced between them — at the same folder, and they share the **files** and
+nothing else. Each one keeps its own working copy of a file, because a browser
+gives a page storage of its own and no way to share it with another address.
+
+So a save in one place is not seen in the other until it reads the file again,
+which happens in two moments:
+
+- **Sync workspace folder** — re-reads the folder, and if the file behind the
+  workspace you are looking at has been written since you opened it, loads it and
+  shows what the other one saved.
+- **Switching into the workspace** — from the workspace list, or a `?space=` link.
+  The file wins over your copy when it is the newer of the two.
+
+Both stop short of throwing work away. If your copy has changes that were never
+saved AND the file has been written since, the sync asks which one is real:
+**Load from Disk** takes the file, **Overwrite** writes your workspace over its
+copy in the file (its other workspaces are left alone), and **Cancel** leaves
+both. Turn autosave on, or press **Save** before you leave, and the question does
+not come up.
+
+One thing does not survive this: a change to **settings alone**. Settings are not
+counted as unsaved work — every command you run stores itself as a recent command,
+so they change constantly — which means a newer file replaces them.
+
 ### Where these live
 
 **Save** is a button in the header. Everything else is a **command**: press

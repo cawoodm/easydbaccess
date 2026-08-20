@@ -4,6 +4,7 @@
 
 ### Features
 
+- 🪶 Two browsers sharing one workspace folder now see each other's saves: a sync, or switching in, reads the file when it is the newer one (v0.0.405)
 - 🪶 Drop a `.edb` file on the window and its workspace becomes one of yours, with a choice if the name is taken (v0.0.404)
 - ✨ Settings → Buttons: turn the text in the header and footer bars off, and hide any button you never use (v0.0.400)
 - 🪶 A browser workspace has no row limit: its store is SQLite now, so the 10,000-row refusal it needed is gone (v0.0.398)

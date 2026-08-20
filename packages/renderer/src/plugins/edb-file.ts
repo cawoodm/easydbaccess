@@ -16,7 +16,8 @@ import {
   rememberedHandle,
   writeBytes,
 } from '../db/edb/file-handle.js';
-import { adoptedFileName, reloadWithoutSpace, reloadWithSpace, setActiveEdbName } from '../db/edb/session.js';
+import { activeEdbName, adoptedFileName, reloadWithoutSpace, reloadWithSpace, setActiveEdbName } from '../db/edb/session.js';
+import { factsOfHandle, markLocalChanges, recordAgreement } from '../db/edb/file-stamp.js';
 import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
 import { cloneWorkspace } from '../db/clone-workspace.js';
 import { deleteWorkspace } from '../db/delete-workspace.js';
@@ -222,6 +223,11 @@ export function init(api: HostApi): void {
       return 'none';
     }
     await writeBytes(handle, await bridge.export());
+    // The file now IS this database, so record what it looks like. That is what
+    // lets a later sync tell "someone else wrote this file" from "we wrote it
+    // ourselves" — see `file-stamp.ts`.
+    const facts = await factsOfHandle(handle);
+    if (facts) recordAgreement(activeEdbName(), facts);
     return 'file';
   }
 
@@ -356,6 +362,20 @@ export function init(api: HostApi): void {
   // Every write the worker reports marks the file unsaved. This is the store's
   // own change broadcast, so nothing has to remember to announce itself.
   edbBridge()?.onChanged(() => autosave.changed());
+
+  // Separately, and NOT for every collection: written down, because a sync or a
+  // `?space=` switch decides whether the copy of a file on disk may replace this
+  // one, and both can run at boot, where the policy above does not exist yet.
+  //
+  // `settings` and `plugins` are left out on purpose. Running ANY command through
+  // the palette upserts the recent-command list into `settings`, so counting that
+  // as unsaved work would make "Sync workspace folder" report a conflict with
+  // itself, every time. The cost is that a settings-only difference loses to the
+  // file — the price of the file ever being able to win.
+  edbBridge()?.onChanged((coll) => {
+    if (coll === 'settings' || coll === 'plugins') return;
+    markLocalChanges(activeEdbName());
+  });
 
   // The worker's own warnings — a failed crash-recovery mirror, above all.
   edbBridge()?.onWarning((message) => api.ui.dialogs.toast(message, { kind: 'warning' }));
@@ -617,6 +637,9 @@ export function init(api: HostApi): void {
     // The boot never reads the user's file (see `session.ts`), so the bytes go
     // into this tab's own substrate first, and the reload finds them there.
     await placeForNextBoot(picked.name, picked.bytes);
+    // This copy came straight out of that file, so the two agree.
+    const opened = picked.handle ? await factsOfHandle(picked.handle) : null;
+    if (opened) recordAgreement(picked.name, opened);
     await adopt({ name: picked.name, handle: picked.handle }, `Opening "${picked.name}" as the workspace "${workspaceIdFromFileName(picked.name)}". The page will reload.`);
   }
 

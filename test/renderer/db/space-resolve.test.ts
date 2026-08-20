@@ -15,6 +15,7 @@ const NOTHING: SpaceEvidence = {
   isActive: false,
   hasLocalDb: false,
   inGrantedFolder: false,
+  fileIsNewer: false,
   canAskForFolder: false,
 };
 
@@ -75,6 +76,22 @@ describe('decideSpace', () => {
     // Adopting the folder file means importDb over the browser's copy, and that
     // copy holds anything not yet saved back — boot never reads the user's file.
     expect(decideSpace(evidence({ hasLocalDb: true, inGrantedFolder: true }))).toBe('adopt-local-db');
+  });
+
+  it('takes the folder file when it has been written since this copy was made', () => {
+    // Two tabs on different origins share the folder and nothing else, so this is
+    // the only way the second one ever sees what the first one saved.
+    expect(decideSpace(evidence({ hasLocalDb: true, inGrantedFolder: true, fileIsNewer: true }))).toBe('adopt-folder-file');
+  });
+
+  it('still prefers the browser copy when this tab has unsaved work', () => {
+    // `fileIsNewer` is false whenever the local copy is dirty — see file-stamp's
+    // `conflict` verdict, which a sync asks about rather than deciding here.
+    expect(decideSpace(evidence({ hasLocalDb: true, inGrantedFolder: true, fileIsNewer: false }))).toBe('adopt-local-db');
+  });
+
+  it('does not adopt a newer file that is not in the folder any more', () => {
+    expect(decideSpace(evidence({ hasLocalDb: true, inGrantedFolder: false, fileIsNewer: true }))).toBe('adopt-local-db');
   });
 
   it('opens the folder file when this browser holds nothing to lose', () => {

@@ -14,6 +14,7 @@
 import { edbBridge } from './active-bridge.js';
 import { activeEdbName, setActiveEdbName } from './session.js';
 import { canPickFolder, ensureWritable, fileInFolder, listWorkspaceFiles, readBytes, rememberHandle, rememberedFolder } from './file-handle.js';
+import { factsOfHandle, recordAgreement, verdictFor } from './file-stamp.js';
 import { placeForNextBoot } from './new-file.js';
 import { decideSpace, spaceFileName, type SpaceAction } from './space-resolve.js';
 
@@ -54,6 +55,24 @@ function alreadyTried(file: string): boolean {
   }
 }
 
+/**
+ * Spend the guard once the adopt has demonstrably landed.
+ *
+ * Called at boot with the database that actually opened. A marker matching it
+ * means the import took, so it has done its job — and leaving it would turn the
+ * NEXT switch into this file into a `create`: go back to browser storage, follow
+ * a `?space=` link to that workspace again, and the tab would make an empty one
+ * instead of re-reading the file. The guard is for an adopt that did NOT take, so
+ * only that case keeps it.
+ */
+export function noteSessionOpened(name: string): void {
+  try {
+    if (globalThis.sessionStorage?.getItem(ATTEMPT_KEY) === name) globalThis.sessionStorage.removeItem(ATTEMPT_KEY);
+  } catch {
+    /* no sessionStorage — nothing was recorded to spend */
+  }
+}
+
 function markTried(file: string): void {
   try {
     globalThis.sessionStorage?.setItem(ATTEMPT_KEY, file);
@@ -84,12 +103,17 @@ export async function planForMissingSpace(workspaceId: string): Promise<SpaceAct
   const bridge = edbBridge();
   const remembered = await rememberedFolder();
   const dir = remembered && (await ensureWritable(remembered, false)) ? remembered : null;
+  const inFolder = dir ? (await listWorkspaceFiles(dir)).includes(file) : false;
   const action = decideSpace({
     inOpenDb: false, // the caller only asks after it has looked
     isActive: activeEdbName() === file,
     // No bridge means Electron, which has its own file operations and no pool.
     hasLocalDb: bridge ? await bridge.hasDatabase(file) : false,
-    inGrantedFolder: dir ? (await listWorkspaceFiles(dir)).includes(file) : false,
+    inGrantedFolder: inFolder,
+    // Only asked when the file is there to be compared: reading its facts costs a
+    // `getFile()`, and the answer is `unknown` — never "newer" — without a stamp
+    // from an earlier import or save.
+    fileIsNewer: dir && inFolder ? (await verdictFor(file, await fileInFolder(dir, file, false))) === 'file-newer' : false,
     // A folder this user has ALREADY chosen, not merely a browser that could
     // show a picker. `canPickFolder()` alone is true of every Chromium, so a
     // user who has never used a workspace folder was asked to go looking in one
@@ -124,6 +148,35 @@ async function adoptAndReload(file: string, bytes: Uint8Array | null, handle: Fi
   return new Promise<never>(() => {});
 }
 
+/**
+ * Re-read the file this tab ALREADY has open, then reload onto it.
+ *
+ * What "the file moved on" comes to: another origin, profile or machine wrote the
+ * `.edb` this tab imported, and our copy is behind. The workspace does not change
+ * and neither does the adopted-file marker — only the bytes underneath.
+ *
+ * Deliberately not `adoptFolderFile`: that one is keyed on a workspace id (a file
+ * is named after its workspace) and it marks the file as tried, which is a
+ * boot-loop guard. This runs from a Sync the user asked for, and after it the
+ * stamp matches, so a second Sync does nothing without any marker.
+ *
+ * Returns false when the file cannot be read after all; otherwise never returns —
+ * the reload is on its way. See {@link adoptAndReload}.
+ */
+export async function reloadActiveFromFile(file: string): Promise<boolean> {
+  const dir = await grantedFolder();
+  const handle = dir ? await fileInFolder(dir, file, false) : null;
+  if (!handle) return false;
+  const facts = await factsOfHandle(handle);
+  const bytes = await readBytes(handle);
+  await placeForNextBoot(file, bytes);
+  await rememberHandle(handle);
+  if (facts) recordAgreement(file, facts);
+  location.reload();
+  await new Promise<never>(() => {});
+  return true;
+}
+
 /** Switch to the browser's own database of that name. Nothing to import. */
 export function adoptLocalDb(workspaceId: string): Promise<never> {
   return adoptAndReload(spaceFileName(workspaceId), null, null);
@@ -140,5 +193,12 @@ export async function adoptFolderFile(workspaceId: string): Promise<SpaceAction>
   const dir = await grantedFolder();
   const handle = dir ? await fileInFolder(dir, file, false) : null;
   if (!handle) return 'create';
-  return adoptAndReload(file, await readBytes(handle), handle);
+  // The facts are read from the same handle as the bytes, so the stamp describes
+  // exactly what was imported. A write landing between the two would leave us
+  // believing we match a file we do not — one Sync away from being noticed, and
+  // the alternative is a lock the API does not have.
+  const facts = await factsOfHandle(handle);
+  const bytes = await readBytes(handle);
+  if (facts) recordAgreement(file, facts);
+  return adoptAndReload(file, bytes, handle);
 }

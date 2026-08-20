@@ -11,8 +11,9 @@ import { edbBridge, storeBridge } from './active-bridge.js';
 import { countWorkspaceContents } from '../delete-workspace.js';
 import { fileInFolder, listWorkspaceFiles, readBytes } from './file-handle.js';
 import { folderConflicts, isEmptyWorkspace, partitionConflicts, writeFolderIndex, type FolderIndex, type FolderWorkspace } from './folder-index.js';
-import { activeEdbName } from './session.js';
-import { adoptFolderFile } from './space-adopt.js';
+import { clearStamp, verdictFor } from './file-stamp.js';
+import { activeEdbName, adoptedFileName } from './session.js';
+import { adoptFolderFile, reloadActiveFromFile } from './space-adopt.js';
 
 /** The three answers to one conflicting workspace. Compared by value. */
 const LOAD = 'Load from Disk';
@@ -27,6 +28,13 @@ export interface SyncReport {
   conflicts: number;
   /** Files that held no readable workspace record. */
   unreadable: string[];
+  /**
+   * This tab's own file was written by something else and has been re-read.
+   *
+   * The tab reloads when this is true, so nothing after the sync gets a chance to
+   * report it — it is here for the tests, which cannot see a reload.
+   */
+  reloadedActive?: boolean;
 }
 
 /**
@@ -136,5 +144,52 @@ export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStor
   // in a database this tab no longer has open, so they clash with nothing.
   for (const empty of adopt) await adoptFolderFile(empty.id);
 
-  return { files: files.length, found: index.workspaces.length, conflicts: ask.length, unreadable };
+  const reloadedActive = await refreshActiveFile(dir, dialogs, overwrite, open);
+
+  return { files: files.length, found: index.workspaces.length, conflicts: ask.length, unreadable, reloadedActive };
+}
+
+/**
+ * Bring this tab's OWN file back in step with the copy on disk.
+ *
+ * The rest of a sync is about the workspace LIST — which file holds what — and it
+ * skips the file this tab has open, because those workspaces are already here.
+ * That left the one case a user means by "sync": three tabs on three origins, one
+ * shared folder, and each tab looking at its own imported copy of the same `.edb`.
+ * Everything except the folder is origin-scoped, so nothing told a tab that
+ * another had written the file.
+ *
+ * Only for a file this tab ADOPTED. The built-in local database is this browser's
+ * own, so a `local.edb` that happens to be in the folder is not the same object
+ * and must not be imported over it.
+ *
+ * A file we have never agreed with (`unknown`) is left alone: with no stamp there
+ * is no way to tell "someone else wrote this" from "we have never read it", and
+ * guessing would throw away local work.
+ */
+async function refreshActiveFile(
+  dir: FileSystemDirectoryHandle,
+  dialogs: Dialogs,
+  overwrite: (workspaceId: string, file: string) => Promise<void>,
+  open: readonly { id: string }[],
+): Promise<boolean> {
+  const file = adoptedFileName();
+  if (!file) return false;
+  const verdict = await verdictFor(file, await fileInFolder(dir, file, false));
+  if (verdict === 'file-newer') return reloadActiveFromFile(file);
+  if (verdict !== 'conflict') return false;
+
+  // Both sides moved on. The same three answers as a list conflict, about the
+  // whole file this time — every workspace in it came from those bytes.
+  const answer = await dialogs.choice(`${file} has been written since this tab read it, and there are unsaved changes here.`, [LOAD, OVERWRITE, CANCEL], 'Sync workspace folder');
+  if (answer === LOAD) return reloadActiveFromFile(file);
+  if (answer === OVERWRITE) {
+    // Per workspace, not the whole file: the newer copy on disk may hold
+    // workspaces this tab has never seen, and they are not ours to drop.
+    for (const w of open) await overwrite(w.id, file);
+    // Our copy and the file no longer describe each other in any way we recorded.
+    // `unknown` is the honest answer, and it means the next sync asks nothing.
+    clearStamp(file);
+  }
+  return false;
 }

@@ -432,7 +432,38 @@ with the file.
 | Secrets referenced via `${secret:name}` | `localStorage` blob `/easydbaccess/secrets.txt` |
 | Last-active workspace id | `localStorage` key `eda:lastWorkspaceId` |
 | The remembered workspace folder / file handle | IndexedDB `easydb-edb-handles` — handles only, never data |
+| What each `.edb` looked like when this browser last agreed with it (`mtime`, `size`, plus a flag for local changes since) | `localStorage` key `eda:fileStamps` — a cache; see `db/edb/file-stamp.ts` |
 | A Save with no file to save to | IndexedDB `easydb-snapshots` → one raw blob per `.edb` name (see below) |
+
+### One folder, several origins
+
+A `.edb` in the workspace folder has more than one writer: two tabs on different
+origins (`localhost:5190` and `:5191`), two browser profiles, or a folder synced
+between machines. Everything except the folder is origin-scoped — the OPFS pool
+holding the imported copy, the `easydb-edb-handles` IndexedDB store, the folder
+index — so each origin works on its own copy of the same file, and the FileSystem
+Access API offers no change notification to tell it otherwise.
+
+`db/edb/file-stamp.ts` is what makes them converge. It records `{mtime, size}` at
+every moment a copy and its file are known to agree (an import, a Save) and a
+`dirty` flag for local changes since, then answers one question: `same`,
+`file-newer`, `conflict`, `ahead` or `unknown`. Two places act on it:
+
+- **Sync workspace folder** (`folder-sync.ts` → `refreshActiveFile`) re-reads this
+  tab's own file on `file-newer`, and asks Load / Overwrite / Cancel on `conflict`.
+  Only for a file this tab ADOPTED — `local.edb` is this browser's own database,
+  not a shared object.
+- **`?space=` resolution** (`space-resolve.ts` → `fileIsNewer`) lets the file win
+  over a local copy, which it otherwise never does.
+
+`dirty` deliberately ignores writes to `settings` and `plugins`: running any
+command through the palette upserts the recent-command list into `settings`, so
+counting it would make every sync a conflict with itself. The cost is that a
+settings-only difference loses to a newer file.
+
+Nothing here is live. Convergence happens when a sync or a switch reads the file,
+which is also why `unknown` — no stamp, or the file is gone — leaves both copies
+exactly as they are.
 
 ### SQLite's JSON functions, and where they are used
 
