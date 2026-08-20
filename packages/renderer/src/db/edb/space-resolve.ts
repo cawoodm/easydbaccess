@@ -61,6 +61,24 @@ export function workspaceIdFromFileName(file: string): string {
   return slugifyWorkspace(stem);
 }
 
+/**
+ * A workspace id like `base` that nothing is using yet.
+ *
+ * `northwind` → `northwind-2` → `northwind-3`. What a dropped file needs when the
+ * workspace it holds is already here and the user asks to keep both: an id is
+ * derived from a name and two workspaces cannot share one, so the copy needs an id
+ * of its own before anything is written.
+ *
+ * The suffix starts at 2 because the one already there is the first.
+ */
+export function freeWorkspaceId(base: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) {
+    const candidate = `${base}-${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
 /** Everything the decision below reads. Gathered by the caller, cheapest first. */
 export interface SpaceEvidence {
   /** The requested workspace is already in the database this tab has open. */

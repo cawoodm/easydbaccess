@@ -201,6 +201,26 @@ Save and the autosave switch are offered whether or not a file has been adopted.
 They used to appear only in file mode, which read as "this app cannot save" in the
 one state where saving is both possible and not yet done.
 
+## A dropped `.edb` is COPIED IN, not opened
+
+`edb-file` registers a drop handler, and it is deliberately not Open: opening
+repoints the tab at the user's file and saves into it from then on, which is the
+wrong answer for a file somebody sent you. The bytes are read, the workspace is
+copied into this browser's own database, and the file is left untouched.
+
+- **Which workspace** — the one the FILE NAME names (`workspaceIdFromFileName`),
+  else the only one in the file, else the user is asked. `peekWorkspaces` lists
+  them without importing anything.
+- **Unknown name** → copied in under that id, then `reloadWithSpace`.
+- **Name already here** → replace (`deleteWorkspace`, then copy) or keep both
+  (`freeWorkspaceId` → `northwind-2`). A rename happens INSIDE the throwaway
+  worker with `cloneWorkspace` before anything crosses over, because
+  `copyWorkspace` writes each document under the id it already carries.
+
+One trap this cost: `sql-import` claimed the drop first, because its MIME test was
+`type.includes('sql')` and the type this app puts on its own database files is
+`application/x-sqlite3`. It now matches only a type ENDING in `sql`.
+
 ## Two things deliberately absent
 
 - **New .edb file** — New workspace → Advanced already creates a workspace in its

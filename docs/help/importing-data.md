@@ -130,13 +130,10 @@ the same way a copy does.
 
 ## How much can one import bring in?
 
-In a browser tab, **a workspace holds 10,000 rows** — all its tables together. An
-import that would take it past that is refused, whole, and the message says where
-to go instead: **File → New .edb file…** copies the workspace into a SQLite file
-with no limit, and imports about 25 times faster into it. See
+As much as you have. The 10,000-row limit a browser workspace used to have is gone:
+browser workspaces are SQLite now, the same engine the desktop app and a `.edb`
+file use, and it imports large tables in seconds rather than minutes. See
 [Database Files](database-files.md).
-
-The desktop app has no limit: its workspaces are SQLite files already.
 
 ## Importing many tables at once
 

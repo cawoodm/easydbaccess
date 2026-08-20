@@ -18,26 +18,16 @@ In a browser tab, files are **opt-in**. A new workspace asks you where its data
 should live, and the answer can simply be "this browser" — see
 [Getting Started](getting-started.md).
 
-## 10,000 rows in a browser, and no limit in a file
+## No row limit, in the browser or in a file
 
-**A workspace kept in this browser holds 10,000 rows.** Import more and the app
-refuses it and tells you so — nothing is half-imported.
+There used to be one: a workspace kept in this browser held 10,000 rows and the
+app refused the 10,001st, because the browser's old storage got slow long before
+that. Browser workspaces are SQLite now — the same engine as a `.edb` file, and it
+imported 120,000 rows in twelve seconds where the old storage took five minutes —
+so the limit went with the storage it was measured against.
 
-That is not a licence check, it is what the browser's own database can do well. The
-same table of 120,000 rows takes over five minutes to import into a browser
-workspace, five seconds to count and six to filter. In a `.edb` file it imports in
-twelve seconds, counts instantly and filters in a fifth of a second. So the limit
-is set where the browser is still quick, and the way past it is a file:
-
-**File → New .edb file…** in the window footer. It copies the workspace you are in
-to the file you name, and from then on there is **no row limit** — the same file
-also opens in the desktop app as it is.
-
-The desktop app has no limit anywhere: its workspaces are always SQLite files.
-
-A workspace that is already over the limit — filled before this rule, or on another
-machine — keeps working. You can read it, edit it, sort it, filter it and delete
-from it. You just cannot add to it until you move it into a file.
+A file is still the answer for other reasons: it is yours to copy, back up and
+hand over, and the desktop app opens it as it is.
 
 ## The Database button
 
@@ -160,6 +150,23 @@ Two ways to start:
   goes in a file.
 - Press **Save** on the workspace you already have. The first Save asks for a
   folder and then writes `<workspace>.edb` into it.
+
+### Someone sent you a .edb? Drop it on the window
+
+Drag the file in and its workspace becomes one of yours — `northwind.edb` arrives
+as a workspace called `northwind`, and the app switches to it.
+
+If you already have a workspace of that name, you are asked which you meant:
+
+| Choice                          | What happens                                                                |
+| ------------------------------- | --------------------------------------------------------------------------- |
+| **Replace the one here**        | Your workspace of that name is removed and the file's copy takes its place. |
+| **Keep both, under a new name** | The file's copy arrives as `northwind-2`, and yours is left alone.          |
+
+A drop only **reads** the file. It does not become the file you save into — your
+new workspace lives in this browser, and pressing **Save** later writes it to your
+own workspace folder. That is the difference from **Open workspace file…**, which
+does hand the tab over to that file.
 
 ### One workspace at a time, not the whole browser
 

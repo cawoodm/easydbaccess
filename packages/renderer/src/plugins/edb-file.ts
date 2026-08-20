@@ -1,5 +1,6 @@
 import type { ButtonSpec, CommandSpec, HostApi, PluginModule } from '@easydb/shared';
 import {
+  EDB_EXTENSION,
   canPickFolder,
   canSaveInPlace,
   ensureWritable,
@@ -16,15 +17,18 @@ import {
   writeBytes,
 } from '../db/edb/file-handle.js';
 import { adoptedFileName, reloadWithoutSpace, reloadWithSpace, setActiveEdbName } from '../db/edb/session.js';
+import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
+import { cloneWorkspace } from '../db/clone-workspace.js';
+import { deleteWorkspace } from '../db/delete-workspace.js';
 import { createAutosavePolicy, type AutosavePolicy } from '../db/edb/dirty.js';
-import { edbBridge, edbHandle, setEdbHandle } from '../db/edb/active-bridge.js';
+import { edbBridge, edbHandle, setEdbHandle, storeBridge } from '../db/edb/active-bridge.js';
 import { copyWorkspace } from '../db/edb/convert.js';
 import { syncFolder } from '../db/edb/folder-sync.js';
 import { createEdbBridge } from '../db/edb/worker-bridge.js';
 import { createIpcDataStore } from '../db/data-store-bridge.js';
 import { adoptEdbFile, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
 import { adoptFolderFile, clearPendingSpaceRequest, pendingSpaceRequest } from '../db/edb/space-adopt.js';
-import { spaceFileName, workspaceIdFromFileName } from '../db/edb/space-resolve.js';
+import { freeWorkspaceId, spaceFileName, workspaceIdFromFileName } from '../db/edb/space-resolve.js';
 
 /**
  * The `.edb` file surface in the browser: Open, Save, the autosave switch and the
@@ -104,6 +108,47 @@ const SYNC_SCRATCH = '__edb-sync-scratch.edb';
 
 /** The escape hatch in the Open list, for a file outside the workspace folder. */
 const BROWSE = 'Another file…';
+
+/** The name the throwaway worker opens a DROPPED file under. Never a real file. */
+const DROP_SCRATCH = '__edb-drop-scratch.edb';
+
+/** The two ways a dropped file can meet a workspace of the same name. */
+const OVERWRITE_LOCAL = 'Replace the one here';
+const KEEP_BOTH = 'Keep both, under a new name';
+
+/** As much of a workspace record as a dropped file is asked for. */
+interface WorkspaceDoc {
+  id: string;
+  name: string;
+}
+
+/**
+ * The workspace records in a peeked file, as ids and names.
+ *
+ * `peekWorkspaces` answers raw documents, and a file may have been written by
+ * anything: a record with no usable id is dropped rather than trusted.
+ */
+function workspaceDocs(raw: readonly Record<string, unknown>[]): WorkspaceDoc[] {
+  return raw.map((w) => ({ id: String(w['id'] ?? ''), name: String(w['name'] ?? w['id'] ?? '') })).filter((w) => w.id !== '');
+}
+
+/**
+ * The files a drop hands over.
+ *
+ * `dataTransfer.files` is the ordinary answer; `items` is the fallback some
+ * browsers give for a drag that started inside the page. Each importer carries its
+ * own copy of this — a five-line reader is not worth a shared module that every
+ * plugin then depends on.
+ */
+function filesFrom(event: DragEvent): File[] {
+  const dt = event.dataTransfer;
+  if (!dt) return [];
+  if (dt.files && dt.files.length > 0) return Array.from(dt.files);
+  return Array.from(dt.items ?? [])
+    .filter((i) => i.kind === 'file')
+    .map((i) => i.getAsFile())
+    .filter((f): f is File => f !== null);
+}
 
 /**
  * The answers offered when a save has nowhere to go. Compared by value.
@@ -319,6 +364,116 @@ export function init(api: HostApi): void {
   // the batch open means one save at the end instead of one per chunk.
   api.events.on('import:before', () => autosave.beginBatch());
   api.events.on('import:after', () => autosave.endBatch());
+
+  /**
+   * A dropped `.edb` brings its workspace INTO this browser.
+   *
+   * Not an Open: a drop must not repoint the tab at somebody's file and start
+   * saving into it. The file is read and left alone, and what arrives is an
+   * ordinary workspace of this browser's own — the same end state as New
+   * workspace, with data in it.
+   *
+   * Which workspace, out of a file that may hold several: the one the FILE NAME
+   * names (`northwind.edb` → `northwind`), because that is the convention Save and
+   * Open already use. Failing that, the only one in the file, and failing that the
+   * user is asked.
+   */
+  async function importDroppedFile(file: File): Promise<void> {
+    const live = edbBridge();
+    if (!live) return;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const inside = workspaceDocs(await live.peekWorkspaces(bytes));
+    if (inside.length === 0) {
+      await api.ui.dialogs.alert(`There is no easyDBAccess workspace in "${file.name}".`, 'Open workspace file');
+      return;
+    }
+    const named = workspaceIdFromFileName(file.name);
+    const source = pickWorkspaceIn(inside, named) ?? (await askWhichWorkspace(inside));
+    if (!source) return;
+
+    const taken = new Set((await api.store.workspaces.find()).map((w) => w.id));
+    let target = source.id;
+    let mode: 'fresh' | 'overwrite' | 'rename' = 'fresh';
+    if (taken.has(source.id)) {
+      const answer = await api.ui.dialogs.choice(
+        `"${source.name}" is already a workspace here. Replace what is in this browser with the copy from "${file.name}", or keep both?`,
+        [OVERWRITE_LOCAL, KEEP_BOTH],
+        'Open workspace file',
+      );
+      if (!answer) return;
+      mode = answer === OVERWRITE_LOCAL ? 'overwrite' : 'rename';
+      if (mode === 'rename') target = freeWorkspaceId(source.id, taken);
+    }
+    await bringWorkspaceIn(bytes, file.name, source, target, mode);
+  }
+
+  /** The workspace a file name points at, or the only one in the file. */
+  function pickWorkspaceIn(inside: readonly WorkspaceDoc[], named: string): WorkspaceDoc | null {
+    return inside.find((w) => w.id === named) ?? (inside.length === 1 ? inside[0]! : null);
+  }
+
+  /** Several workspaces and no name to choose by, so the user chooses. */
+  async function askWhichWorkspace(inside: readonly WorkspaceDoc[]): Promise<WorkspaceDoc | null> {
+    const pick = await api.ui.dialogs.choice(
+      'Which workspace should come in?',
+      inside.map((w) => w.name),
+      'Open workspace file',
+    );
+    return inside.find((w) => w.name === pick) ?? null;
+  }
+
+  /**
+   * Copy `source` out of the dropped bytes and into this browser as `target`.
+   *
+   * The bytes go into a THROWAWAY worker, which lands on the memory substrate
+   * because the pool is exclusive to the live session — the same arrangement
+   * `overwriteInFile` and `peekWorkspaces` rely on.
+   *
+   * A rename is done INSIDE that throwaway (`cloneWorkspace`) rather than while
+   * copying: `copyWorkspace` writes each document under the id it already carries,
+   * so the id has to be settled before anything crosses over.
+   */
+  async function bringWorkspaceIn(bytes: Uint8Array, fileName: string, source: WorkspaceDoc, target: string, mode: 'fresh' | 'overwrite' | 'rename'): Promise<void> {
+    const scratch = createEdbBridge();
+    setAppProgress({ label: `Opening ${fileName}` });
+    // The batch directly rather than through `import:before`: that event carries a
+    // table id and a row count, and this is a whole workspace. The effect wanted is
+    // the same — one save at the end, not one per chunk.
+    autosave.beginBatch();
+    try {
+      await scratch.open(bytes, DROP_SCRATCH);
+      if (mode === 'overwrite') await deleteWorkspace(storeBridge(), target);
+      if (mode === 'rename') await cloneWorkspace(scratch, { from: source.id, to: target, name: target, mode: 'all' });
+      const from = createIpcDataStore(scratch, () => target);
+      const to = createIpcDataStore(storeBridge(), () => target);
+      const result = await copyWorkspace(from, to, target, (p) => setAppProgress({ label: `Opening ${fileName}`, detail: p.label }));
+      api.ui.dialogs.toast(`"${target}" is now a workspace here: ${result.tables} table(s), ${result.rows} row(s).`, { kind: 'success' });
+    } catch (err) {
+      await api.ui.dialogs.alert(`"${fileName}" could not be opened: ${err instanceof Error ? err.message : String(err)}`, 'Open workspace file');
+      return;
+    } finally {
+      autosave.endBatch();
+      clearAppProgress();
+      scratch.terminate();
+    }
+    // Switch to what just arrived. A reload, because the store, the panels and the
+    // plugin host all bind to one workspace at boot.
+    reloadWithSpace(target);
+  }
+
+  api.ui.registerDropHandler(async (event) => {
+    const dropped = filesFrom(event).filter((f) => f.name.toLowerCase().endsWith(EDB_EXTENSION));
+    if (dropped.length === 0) return false;
+    event.preventDefault();
+    // One file per drop: each one asks its own questions and ends in a reload, so
+    // a second would be answering into a page that is going away.
+    if (dropped.length > 1) {
+      api.ui.dialogs.toast('One workspace file at a time, please.', { kind: 'info' });
+      return true;
+    }
+    await importDroppedFile(dropped[0]!);
+    return true;
+  });
 
   async function save(): Promise<void> {
     let where: SaveTarget;

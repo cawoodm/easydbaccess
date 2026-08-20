@@ -67,7 +67,7 @@ const importerSpec: ImporterSpec = {
   detect(input) {
     const name = input.kind === 'file' ? (input.file?.name ?? '') : (input.url ?? '');
     if (/\.sql$/i.test(name)) return 1;
-    if ((input.file?.type ?? '').includes('sql')) return 0.9;
+    if (isSqlMime(input.file?.type)) return 0.9;
     // A body starting with a DDL/DML keyword is a script whatever it is called.
     return /^\s*(--|\/\*|BEGIN\b|CREATE\s+TABLE\b|INSERT\s+INTO\b|DROP\s+TABLE\b)/i.test(input.text ?? '') ? 0.6 : 0;
   },
@@ -278,8 +278,21 @@ function filesFrom(event: DragEvent): File[] {
   return out;
 }
 
+/**
+ * A SQL SCRIPT — text of statements, not a database.
+ *
+ * The MIME test ENDS at `sql` rather than merely containing it, because
+ * `application/x-sqlite3` contains it: that is the type this app itself puts on
+ * every `.db` and `.edb` it hands out (`db/edb/file-handle.ts`), so a database
+ * dropped back in was claimed here and parsed as a text script. A `.edb` belongs
+ * to `edb-file`, and it registers later than this.
+ */
 function isSql(file: File): boolean {
-  return /\.sql$/i.test(file.name) || (file.type ?? '').includes('sql');
+  return /\.sql$/i.test(file.name) || isSqlMime(file.type);
+}
+
+function isSqlMime(type: string | undefined): boolean {
+  return /(^|[-+/])sql$/i.test(type ?? '');
 }
 
 /** The importer spec, for callers that dispatch to the kernel themselves. */
