@@ -44,6 +44,7 @@ import * as electronDb from '../plugins/electron-db.js';
 import * as sqliteFileSource from '../plugins/sqlitefile-source.js';
 import * as tips from '../plugins/tips.js';
 import * as edbFile from '../plugins/edb-file.js';
+import * as legacyImport from '../plugins/legacy-import.js';
 import * as commandlets from '../plugins/commandlets.js';
 
 /** A built-in plugin paired with its id (mirrors `meta.id`, cheaply reachable without importing every module). */
@@ -110,6 +111,7 @@ const modules: PluginModule[] = [
   sqliteFileSource,
   tips,
   edbFile,
+  legacyImport,
   commandlets,
 ];
 

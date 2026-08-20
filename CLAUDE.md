@@ -184,8 +184,8 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
   `import-data`, `auto-sync`, `views`, `settings`, `url-source`,
   `datasette-import` (+ `datasette-views`), `datasette-connect`, `connect-menu`,
   `projection`, `command-palette-button`, `electron-db`, `sqlitefile-source`,
-  `tips`, `commandlets`, `edb-file`, `validate`, `viz-charts`, `viz-map`,
-  `viz-wordcloud`, `viz-custom`.
+  `tips`, `commandlets`, `edb-file`, `legacy-import`, `validate`, `viz-charts`,
+  `viz-map`, `viz-wordcloud`, `viz-custom`.
   Don't add a feature to
   the core if it can be a plugin. (Exception: the Plugin Manager button is core
   chrome in `app-shell.ts`, not a plugin — it opens the manager that governs
@@ -299,7 +299,10 @@ Don't "fix" these without checking the plan section first:
   fallback. `dialog.showSaveDialog` is already used for the `.db` file
   operations (`src/db-files.ts`); `backend.saveFile` has not been routed
   through it.
-- **Migration from v1 minniDBMax localStorage** — Phase 9.
+- **Migration from v1 minniDBMax localStorage** — Phase 9. (Not to be confused
+  with the pre-SQLite IndexedDB store THIS app wrote, which the `legacy-import`
+  plugin now copies across — see
+  `.claude/plans/2026-08-20-legacy-indexeddb-migration.md`.)
 
 ## One SQLite store, two bindings
 

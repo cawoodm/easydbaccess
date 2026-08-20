@@ -815,39 +815,13 @@ export function init(api: HostApi): void {
   void refreshFileCommands();
 }
 
-/** Marks the one-time notice below as shown, so it never nags. */
-const DEXIE_NOTICE_KEY = 'easydb:legacy-idb-notice';
-
-/**
- * Tell a returning user that their old data is not being read.
- *
- * Before the SQLite flip the browser kept workspaces in an IndexedDB database
- * called `easydb`. That database is no longer opened, and it is NOT migrated —
- * a deliberate call, the same one made for `.edb` format v1. From the user's
- * side an unannounced switch is indistinguishable from the app having lost
- * everything, so it gets said once.
- *
- * Nothing is deleted here. The old database still exists, which is what leaves
- * the door open to reinstalling an older build and exporting from it.
- */
-async function noticeOrphanedBrowserData(api: HostApi): Promise<void> {
-  try {
-    if (globalThis.localStorage?.getItem(DEXIE_NOTICE_KEY)) return;
-    // `databases()` is absent on Firefox, where there is no way to ask without
-    // opening the database and thereby creating it. Staying quiet is better than
-    // warning everybody on the off chance.
-    const list = await indexedDB.databases?.();
-    if (!list?.some((d) => d.name === 'easydb')) return;
-    globalThis.localStorage?.setItem(DEXIE_NOTICE_KEY, '1');
-    await api.ui.dialogs.alert(
-      'This version keeps your workspaces in a SQLite database instead of the browser storage earlier versions used.\n\n' +
-        'Data from before the change is not carried over and is not shown here. It has not been deleted \u2014 it is still in this browser, so an older build can still open and export it.',
-      'Storage has changed',
-    );
-  } catch {
-    /* A notice is not worth failing a boot over. */
-  }
-}
+// The one-time "Storage has changed" notice used to live here. It told a
+// returning user that their pre-SQLite IndexedDB data was NOT carried over, and
+// pointed them at an older build to export from — advice a phone cannot follow,
+// because there is no File System Access API to export through.
+//
+// `plugins/legacy-import.ts` replaces it with an offer to copy that data across,
+// and owns the `easydb:legacy-idb-notice` flag this used to set.
 
 /**
  * `?space=NAME` named a workspace this browser does not hold, and telling whether
@@ -880,7 +854,6 @@ async function offerSpaceFolder(api: HostApi): Promise<void> {
 export async function load(api: HostApi): Promise<void> {
   if (!supported()) return;
   await offerSpaceFolder(api);
-  await noticeOrphanedBrowserData(api);
 
   // The shell snapshots the registry during boot, and boot itself writes — the
   // workspace record, the seeded view templates — so the button can already be out

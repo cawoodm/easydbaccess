@@ -4,6 +4,7 @@
 
 ### Features
 
+- 🪶 Workspaces left in the browser storage older versions used can be copied into this one, with no file needed (v0.0.413)
 - ✨ Hover a workspace in the list to see which file it is in, and Save says which file it wrote (v0.0.412)
 - ✨ A table is called the same thing in the file as on screen: `Order Details`, not `Order_Details`, and a rename moves the SQL table with it (v0.0.411)
 - ✨ Menus and value pickers use the browser's own popovers: always on top, dismissed by a click outside (v0.0.410)
