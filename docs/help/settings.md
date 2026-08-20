@@ -43,6 +43,18 @@ Preferences for how every grid behaves:
 
 They apply at once to the tables you already have open.
 
+### The Buttons tab
+
+The header and footer bars:
+
+- **Text in header buttons** / **Text in footer buttons** — a button shows its
+  name next to its icon. Turn a bar off for icons alone, which leaves room for
+  more buttons. A phone-width screen shows icons alone whatever these say.
+- **Show "…" in the header / footer** — one switch per button, so a button you
+  never use can leave the bar. The tab lists the buttons you actually have, which
+  includes any a plugin added. Hiding a button does not turn its feature off: it
+  is still in the command palette (Ctrl/⌘K).
+
 ## Editing a field
 
 Click into a field and change it. The field saves on change — no separate

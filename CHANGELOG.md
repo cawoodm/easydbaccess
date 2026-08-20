@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ Settings → Buttons: turn the text in the header and footer bars off, and hide any button you never use (v0.0.400)
 - 🪶 A browser workspace has no row limit: its store is SQLite now, so the 10,000-row refusal it needed is gone (v0.0.398)
 - 🪶 The File menu is gone: Open, autosave and the workspace folder are commands in the palette (v0.0.397)
 - ✨ Unsaved work shows as a red dot on the header Save button (v0.0.397)

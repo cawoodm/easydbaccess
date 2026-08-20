@@ -1,11 +1,13 @@
 import type { ButtonSpec, HostApi } from '@easydb/shared';
-import { LitElement, css, html } from 'lit';
+import { LitElement, css, html, nothing } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import { unsafeSVG } from 'lit/directives/unsafe-svg.js';
 import { defineHostDialogs } from '@marccawood/lit-dialogs';
 import { defineToastHost } from '@marccawood/lit-toast';
 import { getContext } from '../app-context.js';
 import { hasColumnDrag } from '../table/column-drag.js';
+import { CHROME_SETTINGS_ID, CHROME_SETTINGS_NAME, chromeSettingsFields, readButtonText, readHiddenButtons } from './chrome-settings.js';
+import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
 import '../dialogs/csv-paste-dialog.js';
 import type { CsvPasteDialog } from '../dialogs/csv-paste-dialog.js';
 import '../dialogs/new-table-dialog.js';
@@ -288,6 +290,12 @@ export class AppShell extends LitElement {
   @query('input.search') private searchInput?: HTMLInputElement;
   @state() private footerButtons: ButtonSpec[] = [];
   @state() private headerButtons: ButtonSpec[] = [];
+  /** Do the bars show button labels? See `chrome-settings.ts`. */
+  @state() private headerButtonText = true;
+  @state() private footerButtonText = true;
+  /** Button ids the user switched off, per bar. */
+  @state() private hiddenHeaderButtons: ReadonlySet<string> = new Set();
+  @state() private hiddenFooterButtons: ReadonlySet<string> = new Set();
   @state() private searchQuery = '';
   @state() private searchOpen = false;
   @state() private workspaceTitle = '';
@@ -320,6 +328,7 @@ export class AppShell extends LitElement {
     document.addEventListener('easydb:focus-search', this.openSearch);
     document.addEventListener('easydb:set-search', this.onSetSearch as EventListener);
     document.addEventListener('keydown', this.onGlobalKeydown);
+    document.addEventListener(SETTINGS_CHANGED_EVENT, this.onSettingsChanged);
     // Resolved once, not per `dragover`: that event fires continuously while a file
     // moves, and the window manager is loaded at boot by the table list anyway. A
     // dynamic import keeps the chrome from depending on the window layer statically,
@@ -344,6 +353,7 @@ export class AppShell extends LitElement {
     document.removeEventListener('easydb:set-search', this.onSetSearch as EventListener);
     document.removeEventListener('easydb:refresh-buttons', this.onRefreshButtons);
     document.removeEventListener('keydown', this.onGlobalKeydown);
+    document.removeEventListener(SETTINGS_CHANGED_EVENT, this.onSettingsChanged);
     this.workspaceUnsub?.();
   }
 
@@ -466,10 +476,46 @@ export class AppShell extends LitElement {
     });
   }
 
-  private snapshotRegistries(ctx: { registries: { footerButtons: ButtonSpec[]; headerButtons: ButtonSpec[] } }) {
+  private snapshotRegistries(ctx: { api: HostApi; registries: { footerButtons: ButtonSpec[]; headerButtons: ButtonSpec[] } }) {
     this.footerButtons = [...ctx.registries.footerButtons];
     this.headerButtons = [...ctx.registries.headerButtons];
+    void this.syncChromeSettings(ctx.api);
   }
+
+  /**
+   * Publish the Buttons settings tab and read back what it says.
+   *
+   * Re-registering replaces the tab (the registry is keyed by id), and it has to
+   * run on every snapshot: a plugin installed from the Plugin Manager brings its
+   * own button, which needs its own switch without a reload.
+   */
+  private async syncChromeSettings(api: HostApi) {
+    api.ui.registerSettings(CHROME_SETTINGS_ID, CHROME_SETTINGS_NAME, chromeSettingsFields(this.headerButtons, this.footerButtons));
+    await this.readChromeSettings(api);
+  }
+
+  private async readChromeSettings(api: HostApi) {
+    this.headerButtonText = await readButtonText(api.settings, 'header');
+    this.footerButtonText = await readButtonText(api.settings, 'footer');
+    this.hiddenHeaderButtons = await readHiddenButtons(
+      api.settings,
+      'header',
+      this.headerButtons.map((b) => b.id),
+    );
+    this.hiddenFooterButtons = await readHiddenButtons(
+      api.settings,
+      'footer',
+      this.footerButtons.map((b) => b.id),
+    );
+  }
+
+  /** The Settings dialog saves per field, so this is what makes a bar change
+   *  while the dialog is still open. Ignores every other tab's writes. */
+  private onSettingsChanged = (e: Event) => {
+    const detail = (e as CustomEvent<SettingsChangedDetail>).detail;
+    if (detail?.pluginId !== CHROME_SETTINGS_ID) return;
+    if (this.api) void this.readChromeSettings(this.api);
+  };
 
   /** Set once the registries are bound; before that there is nothing to refresh. */
   private refreshButtons: (() => void) | null = null;
@@ -572,13 +618,23 @@ export class AppShell extends LitElement {
       return html` <button class="icon-btn" title=${b.tooltip ?? b.label} aria-label=${b.tooltip ?? b.label} @click=${() => this.runSlot(b)}>${renderButtonIcon(b.icon)}${badge}</button> `;
     }
     const cls = where === 'header' || b.variant === 'primary' ? 'primary' : 'slot';
+    // Text off shows the icon alone — but only where there IS an icon, the same
+    // rule the narrow-screen CSS follows, so a button never comes out blank.
+    const showLabel = (where === 'header' ? this.headerButtonText : this.footerButtonText) || !b.icon;
     return html`
       <button class=${cls} title=${b.tooltip ?? b.label} @click=${(e: Event) => this.runSlot(b, e)}>
         ${renderButtonIcon(b.icon)}
-        <span class="btn-label">${b.label}</span>
+        ${showLabel ? html`<span class="btn-label">${b.label}</span>` : nothing}
         ${badge}
       </button>
     `;
+  }
+
+  /** Buttons in one bar the user has not switched off. */
+  private shownButtons(where: 'header' | 'footer'): ButtonSpec[] {
+    const hidden = where === 'header' ? this.hiddenHeaderButtons : this.hiddenFooterButtons;
+    const list = where === 'header' ? this.headerButtons : this.footerButtons;
+    return list.filter((b) => !hidden.has(b.id));
   }
 
   override render() {
@@ -587,10 +643,12 @@ export class AppShell extends LitElement {
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
           <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
-            ><span class="version">v0.0.399</span></a
+            ><span class="version">v0.0.400</span></a
           ></strong
         >
-        ${this.headerButtons.filter((b) => b.variant !== 'secondary').map((b) => this.renderSlotButton(b, 'header'))}
+        ${this.shownButtons('header')
+          .filter((b) => b.variant !== 'secondary')
+          .map((b) => this.renderSlotButton(b, 'header'))}
         ${this.searchOpen
           ? html`<span class="search-wrap">
               <input class="search" type="search" placeholder="search all tables…" .value=${this.searchQuery} @input=${this.onSearchInput} @blur=${this.closeSearchOnBlur} />
@@ -617,14 +675,16 @@ export class AppShell extends LitElement {
         >
           <span class="mi" aria-hidden="true">help</span>
         </a>
-        ${this.headerButtons.filter((b) => b.variant === 'secondary').map((b) => this.renderSlotButton(b, 'header'))}
+        ${this.shownButtons('header')
+          .filter((b) => b.variant === 'secondary')
+          .map((b) => this.renderSlotButton(b, 'header'))}
       </header>
       <app-progress></app-progress>
       <main><table-list></table-list></main>
       <footer>
         <workspace-selector></workspace-selector>
         <span class="spacer"></span>
-        ${this.footerButtons.map((b) => this.renderSlotButton(b, 'footer'))}
+        ${this.shownButtons('footer').map((b) => this.renderSlotButton(b, 'footer'))}
       </footer>
       <new-table-dialog></new-table-dialog>
       <csv-paste-dialog></csv-paste-dialog>
