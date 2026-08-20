@@ -794,3 +794,110 @@ test.describe('the workspace folder', () => {
     expect(tables).toEqual(['fromfile']);
   });
 });
+
+/**
+ * The conflict prompt itself: what it says, and that each answer does what its
+ * label claims.
+ *
+ * The labels used to be "Load from Disk" / "Overwrite", and the question was
+ * "which one is the real one?" — which asked the user to rule on a metaphysical
+ * point rather than to pick a copy. Both answers now name **the disk version**,
+ * because that is the copy the user cannot see and the one the answer turns on.
+ *
+ * Driven through `syncFolder` with a stub `Dialogs`, as the test above is: the
+ * prompt is a `choice` over strings, so a stub that records the message and answers
+ * with a label is the whole interaction. The real dialog element is covered where
+ * it is opened for real (`123-folder-file-refresh.spec.ts`).
+ */
+test.describe('the folder-sync conflict prompt', () => {
+  const FOLDER = 'conflict-prompt-test';
+
+  /** A workspace here AND in a file, each with a table the other lacks. */
+  async function bothSidesDiffer(page: Page, ws: string): Promise<void> {
+    await page.goto(`/?test=1&space=${ws}`);
+    await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
+
+    const onDisk = await createTable(page, 'from_file', [{ field: 'part', type: 'string' }]);
+    await waitForPanel(page, onDisk);
+    // Snapshot this state into the folder's file, then move on locally: the file
+    // holds `from_file`, this browser ends up holding `from_browser`.
+    await page.evaluate(
+      async ({ name, folder }) => {
+        const { createEdbBridge } = await import('/src/db/edb/worker-bridge.ts');
+        const { createIpcDataStore } = await import('/src/db/data-store-bridge.ts');
+        const { copyWorkspace } = await import('/src/db/edb/convert.ts');
+        const { fileInFolder, writeBytes, rememberFolder } = await import('/src/db/edb/file-handle.ts');
+        const live = (window as unknown as { __easydb: { store: Parameters<typeof copyWorkspace>[0] } }).__easydb.store;
+        const scratch = createEdbBridge();
+        try {
+          await scratch.open(null, 'conflict-fixture.edb');
+          await copyWorkspace(
+            live,
+            createIpcDataStore(scratch, () => name),
+            name,
+          );
+          const root = await navigator.storage.getDirectory();
+          const dir = await root.getDirectoryHandle(folder, { create: true });
+          const handle = await fileInFolder(dir, `${name}.edb`, true);
+          await writeBytes(handle!, await scratch.export());
+          await rememberFolder(dir);
+        } finally {
+          scratch.terminate();
+        }
+      },
+      { name: ws, folder: FOLDER },
+    );
+    const local = await createTable(page, 'from_browser', [{ field: 'part', type: 'string' }]);
+    await waitForPanel(page, local);
+    await page.evaluate(async (id) => {
+      const store = (window as unknown as { __easydb: { store: { tables: { remove(id: string): Promise<unknown> } } } }).__easydb.store;
+      await store.tables.remove(id);
+    }, onDisk);
+  }
+
+  /** Run a sync, answering the prompt with `answer`. Reports what it was asked. */
+  async function syncAnswering(page: Page, answer: string): Promise<{ message: string; options: string[] }> {
+    return page.evaluate(async (answer) => {
+      const { syncFolder } = await import('/src/db/edb/folder-sync.ts');
+      const { rememberedFolder } = await import('/src/db/edb/file-handle.ts');
+      const store = (window as unknown as { __easydb: { store: Parameters<typeof syncFolder>[1] } }).__easydb.store;
+      let seen = { message: '', options: [] as string[] };
+      const dialogs = {
+        choice: async (message: string, options: string[]) => {
+          seen = { message, options };
+          return answer;
+        },
+        alert: async () => {},
+        confirm: async () => true,
+        toast: () => {},
+      } as unknown as Parameters<typeof syncFolder>[2];
+      // The overwrite callback the plugin normally supplies: here it just records
+      // that it was asked for, and for which file.
+      await syncFolder((await rememberedFolder())!, store, dialogs, async (id, file) => {
+        localStorage.setItem('test:overwrote', `${id}|${file}`);
+      });
+      return seen;
+    }, answer);
+  }
+
+  test('names the disk version in both answers', async ({ page }, testInfo) => {
+    const ws = `clash-${testInfo.testId}`;
+    await bothSidesDiffer(page, ws);
+
+    const asked = await syncAnswering(page, 'nothing');
+    expect(asked.message).toContain(`"${ws}" is in this browser and in ${ws}.edb`);
+    expect(asked.message).toContain('which copy do you want to keep?');
+    expect(asked.options).toEqual(['Load disk version', 'Overwrite disk version']);
+  });
+
+  test('Overwrite disk version writes this browser copy out to the file', async ({ page }, testInfo) => {
+    const ws = `clash-${testInfo.testId}`;
+    await bothSidesDiffer(page, ws);
+
+    await syncAnswering(page, 'Overwrite disk version');
+    // The plugin's overwrite callback is what actually rewrites the file, so the
+    // proof at this level is that the sync asked for it, naming the workspace and
+    // the file.
+    expect(await page.evaluate(() => localStorage.getItem('test:overwrote'))).toBe(`${ws}|${ws}.edb`);
+  });
+});

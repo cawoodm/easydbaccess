@@ -14,6 +14,7 @@
 
 ### Bugs
 
+- 🐛 The folder-sync conflict asked which copy was "the real one" and offered a bare "Overwrite" (v0.0.406)
 - 🐛 Two columns renamed to the same name in different capitalisation saved without a word, and one came back empty (v0.0.403)
 - 🐛 Opening a third or fourth workspace file failed with "No available handles to import to." and showed no tables (v0.0.402)
 - 🐛 A columns-editor error appeared below the fold on a wide table, so Save looked as if it had done nothing (v0.0.401)

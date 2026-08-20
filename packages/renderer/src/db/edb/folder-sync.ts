@@ -15,10 +15,17 @@ import { clearStamp, verdictFor } from './file-stamp.js';
 import { activeEdbName, adoptedFileName } from './session.js';
 import { adoptFolderFile, reloadActiveFromFile } from './space-adopt.js';
 
-/** The three answers to one conflicting workspace. Compared by value. */
-const LOAD = 'Load from Disk';
-const OVERWRITE = 'Overwrite';
-const CANCEL = 'Cancel';
+/**
+ * The two answers to one conflicting workspace. Compared by value.
+ *
+ * Both name **the disk version** — the copy the user cannot see — because that is
+ * the one the answer turns on, and "Overwrite" alone never said what was being
+ * overwritten. There is no explicit Cancel: `dialogs.choice` carries its own
+ * dismiss, a dismissed dialog is neither of these, and neither branch runs — which
+ * is exactly what Cancel meant.
+ */
+const LOAD = 'Load disk version';
+const OVERWRITE = 'Overwrite disk version';
 
 export interface SyncReport {
   files: number;
@@ -109,14 +116,14 @@ async function emptyLocally(clashes: readonly FolderWorkspace[]): Promise<Set<st
  * the time the folder arrives. Asking which of the two is real is a question
  * about nothing — the file is taken, unasked (`partitionConflicts`).
  *
- *  - **Load from Disk** adopts that file and reloads. The data does not move; the
- *    tab changes which database it is looking at, so everything else in that file
- *    comes with it. This returns only if the file has gone since the scan.
- *  - **Overwrite** writes the open workspace out over the file's copy of it,
- *    leaving the file's OTHER workspaces alone. Replacing the whole file would be
- *    the simpler read of "overwrite", and it would silently destroy workspaces the
- *    user never mentioned.
- *  - **Cancel** leaves both. The index keeps the file's entry, so the selector
+ *  - **Load disk version** adopts that file and reloads. The data does not move;
+ *    the tab changes which database it is looking at, so everything else in that
+ *    file comes with it. This returns only if the file has gone since the scan.
+ *  - **Overwrite disk version** writes the open workspace out over the file's copy
+ *    of it, leaving the file's OTHER workspaces alone. Replacing the whole file
+ *    would be the simpler read of "overwrite", and it would silently destroy
+ *    workspaces the user never mentioned.
+ *  - **Dismissing** leaves both. The index keeps the file's entry, so the selector
  *    shows the pair with the file name telling them apart.
  *
  * The index is written BEFORE the prompts, so a user who dismisses them still gets
@@ -131,9 +138,9 @@ export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStor
   const { adopt, ask } = partitionConflicts(clashes, await emptyLocally(clashes));
 
   for (const clash of ask) {
-    const answer = await dialogs.choice(`"${clash.name}" is in this browser and in ${clash.file}. Which one is the real one?`, [LOAD, OVERWRITE, CANCEL], 'Sync workspace folder');
-    // A dismissed dialog is Cancel — the safe answer, and the only one that
-    // touches nothing.
+    const answer = await dialogs.choice(`"${clash.name}" is in this browser and in ${clash.file}. The two may differ — which copy do you want to keep?`, [LOAD, OVERWRITE], 'Sync workspace folder');
+    // A dismissed dialog keeps both, which is the safe answer and the only one
+    // that touches nothing.
     if (answer === LOAD) await adoptFolderFile(clash.id);
     else if (answer === OVERWRITE) await overwrite(clash.id, clash.file);
   }
@@ -167,21 +174,20 @@ export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStor
  * is no way to tell "someone else wrote this" from "we have never read it", and
  * guessing would throw away local work.
  */
-async function refreshActiveFile(
-  dir: FileSystemDirectoryHandle,
-  dialogs: Dialogs,
-  overwrite: (workspaceId: string, file: string) => Promise<void>,
-  open: readonly { id: string }[],
-): Promise<boolean> {
+async function refreshActiveFile(dir: FileSystemDirectoryHandle, dialogs: Dialogs, overwrite: (workspaceId: string, file: string) => Promise<void>, open: readonly { id: string }[]): Promise<boolean> {
   const file = adoptedFileName();
   if (!file) return false;
   const verdict = await verdictFor(file, await fileInFolder(dir, file, false));
   if (verdict === 'file-newer') return reloadActiveFromFile(file);
   if (verdict !== 'conflict') return false;
 
-  // Both sides moved on. The same three answers as a list conflict, about the
-  // whole file this time — every workspace in it came from those bytes.
-  const answer = await dialogs.choice(`${file} has been written since this tab read it, and there are unsaved changes here.`, [LOAD, OVERWRITE, CANCEL], 'Sync workspace folder');
+  // Both sides moved on. The same answers as a list conflict, about the whole file
+  // this time — every workspace in it came from those bytes.
+  const answer = await dialogs.choice(
+    `${file} has been written since this tab read it, and there are unsaved changes here. Which copy do you want to keep?`,
+    [LOAD, OVERWRITE],
+    'Sync workspace folder',
+  );
   if (answer === LOAD) return reloadActiveFromFile(file);
   if (answer === OVERWRITE) {
     // Per workspace, not the whole file: the newer copy on disk may hold

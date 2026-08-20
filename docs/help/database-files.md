@@ -209,11 +209,17 @@ which happens in two moments:
   The file wins over your copy when it is the newer of the two.
 
 Both stop short of throwing work away. If your copy has changes that were never
-saved AND the file has been written since, the sync asks which one is real:
-**Load from Disk** takes the file, **Overwrite** writes your workspace over its
-copy in the file (its other workspaces are left alone), and **Cancel** leaves
-both. Turn autosave on, or press **Save** before you leave, and the question does
-not come up.
+saved AND the file has been written since, the sync asks which copy you want to
+keep:
+
+| Choice                     | What happens                                                                                         |
+| -------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **Load disk version**      | The file wins. What is here is replaced by what the other machine saved.                             |
+| **Overwrite disk version** | Your copy wins, written over the file's copy of that workspace. Its other workspaces are left alone. |
+| Closing the dialog         | Neither. Both copies stay as they are.                                                               |
+
+Turn autosave on, or press **Save** before you leave, and the question does not
+come up.
 
 One thing does not survive this: a change to **settings alone**. Settings are not
 counted as unsaved work — every command you run stores itself as a recent command,

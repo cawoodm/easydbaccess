@@ -317,7 +317,7 @@ test.describe('a file written by another origin', () => {
     // A question, not a decision.
     const dialog = page.locator('host-dialogs');
     await expect(dialog.getByText(new RegExp(`${file} has been written since this tab read it`, 'i'))).toBeVisible({ timeout: 20_000 });
-    await dialog.getByRole('button', { name: 'Load from Disk', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Load disk version', exact: true }).click();
 
     // Answered with Load, so the file wins — including the table the other origin
     // saved, and without the local one that was never written.
