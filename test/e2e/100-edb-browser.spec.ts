@@ -812,13 +812,20 @@ test.describe('the workspace folder', () => {
 test.describe('the folder-sync conflict prompt', () => {
   const FOLDER = 'conflict-prompt-test';
 
-  /** A workspace here AND in a file, each with a table the other lacks. */
+  /**
+   * A workspace here AND in a file, each with tables the other lacks — and a
+   * DIFFERENT NUMBER of them, so the prompt's counts have something to say. Two
+   * copies that hold the same number are told apart only by the file's size and
+   * date, which is the weaker half of the answer.
+   */
   async function bothSidesDiffer(page: Page, ws: string): Promise<void> {
     await page.goto(`/?test=1&space=${ws}`);
     await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
 
     const onDisk = await createTable(page, 'from_file', [{ field: 'part', type: 'string' }]);
+    const alsoOnDisk = await createTable(page, 'also_in_file', [{ field: 'part', type: 'string' }]);
     await waitForPanel(page, onDisk);
+    await waitForPanel(page, alsoOnDisk);
     // Snapshot this state into the folder's file, then move on locally: the file
     // holds `from_file`, this browser ends up holding `from_browser`.
     await page.evaluate(
@@ -849,10 +856,13 @@ test.describe('the folder-sync conflict prompt', () => {
     );
     const local = await createTable(page, 'from_browser', [{ field: 'part', type: 'string' }]);
     await waitForPanel(page, local);
-    await page.evaluate(async (id) => {
-      const store = (window as unknown as { __easydb: { store: { tables: { remove(id: string): Promise<unknown> } } } }).__easydb.store;
-      await store.tables.remove(id);
-    }, onDisk);
+    await page.evaluate(
+      async (ids) => {
+        const store = (window as unknown as { __easydb: { store: { tables: { remove(id: string): Promise<unknown> } } } }).__easydb.store;
+        for (const id of ids) await store.tables.remove(id);
+      },
+      [onDisk, alsoOnDisk],
+    );
   }
 
   /** Run a sync, answering the prompt with `answer`. Reports what it was asked. */
@@ -888,6 +898,22 @@ test.describe('the folder-sync conflict prompt', () => {
     expect(asked.message).toContain(`"${ws}" is in this browser and in ${ws}.edb`);
     expect(asked.message).toContain('which copy do you want to keep?');
     expect(asked.options).toEqual(['Load disk version', 'Overwrite disk version']);
+  });
+
+  /**
+   * The numbers are the point: a name cannot tell two copies of `sales` apart, so
+   * the prompt shows what each holds — and, for the copy nobody can see, how big
+   * the file is and when it was last written.
+   */
+  test('shows what each copy holds, and what the file looks like', async ({ page }, testInfo) => {
+    const ws = `clash-${testInfo.testId}`;
+    await bothSidesDiffer(page, ws);
+
+    const asked = await syncAnswering(page, 'nothing');
+    expect(asked.message).toContain('In this browser: 1 table');
+    expect(asked.message).toContain(`${ws}.edb: 2 tables`);
+    // The file's own facts, which is the half of the answer the user cannot look up.
+    expect(asked.message).toMatch(/, \d+ KB, saved /);
   });
 
   test('Overwrite disk version writes this browser copy out to the file', async ({ page }, testInfo) => {

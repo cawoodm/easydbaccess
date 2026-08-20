@@ -1,6 +1,6 @@
 import type { DistinctPage, DistinctQuery, RowPage, RowQuery, SqlRunResult, WorkspaceContents } from '@easydb/shared';
 import type { EasydbStoreBridge } from '../data-store-bridge.js';
-import type { EdbCall, EdbRequest, EdbResponse } from './protocol.js';
+import type { EdbCall, EdbRequest, EdbResponse, PeekedWorkspace } from './protocol.js';
 
 /**
  * The main-thread half of the worker bridge.
@@ -54,8 +54,11 @@ export interface EdbBridge extends EasydbStoreBridge {
    *
    * A folder scan calls this once per file. Nothing is imported and the live
    * session is untouched — see the worker's own note.
+   *
+   * Each record arrives with its table and view counts, which is what lets a
+   * prompt say how the copy in a file differs from the copy in this browser.
    */
-  peekWorkspaces(bytes: Uint8Array): Promise<Record<string, unknown>[]>;
+  peekWorkspaces(bytes: Uint8Array): Promise<PeekedWorkspace[]>;
   terminate(): void;
 }
 
@@ -105,7 +108,7 @@ export function createEdbBridge(): EdbBridge {
     importBytes: (name, bytes) => call<void>({ op: 'importBytes', name, bytes }),
     flush: () => call<void>({ op: 'flush' }),
     hasDatabase: (name) => call<boolean>({ op: 'hasDatabase', name }),
-    peekWorkspaces: (bytes) => call<Record<string, unknown>[]>({ op: 'peekWorkspaces', bytes }),
+    peekWorkspaces: (bytes) => call<PeekedWorkspace[]>({ op: 'peekWorkspaces', bytes }),
     export: () => call<Uint8Array>({ op: 'export' }),
     find: (coll, query, limit) => call<unknown[]>({ op: 'find', coll, query, limit }),
     findOne: (coll, key) => call<unknown | null>({ op: 'findOne', coll, key }),

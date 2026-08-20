@@ -26,6 +26,9 @@ import { edbBridge, edbHandle, setEdbHandle, storeBridge } from '../db/edb/activ
 import { copyWorkspace } from '../db/edb/convert.js';
 import { syncFolder } from '../db/edb/folder-sync.js';
 import { createEdbBridge } from '../db/edb/worker-bridge.js';
+import type { PeekedWorkspace } from '../db/edb/protocol.js';
+import { compareCopies } from '../db/edb/copy-facts.js';
+import { countWorkspaceContents } from '../db/delete-workspace.js';
 import { createIpcDataStore } from '../db/data-store-bridge.js';
 import { adoptEdbFile, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
 import { adoptFolderFile, clearPendingSpaceRequest, pendingSpaceRequest } from '../db/edb/space-adopt.js';
@@ -121,16 +124,19 @@ const KEEP_BOTH = 'Keep both, under a new name';
 interface WorkspaceDoc {
   id: string;
   name: string;
+  /** What that workspace holds inside the file — for the replace-or-keep-both question. */
+  tables: number;
+  views: number;
 }
 
 /**
- * The workspace records in a peeked file, as ids and names.
+ * The workspace records in a peeked file, as ids, names and sizes.
  *
  * `peekWorkspaces` answers raw documents, and a file may have been written by
  * anything: a record with no usable id is dropped rather than trusted.
  */
-function workspaceDocs(raw: readonly Record<string, unknown>[]): WorkspaceDoc[] {
-  return raw.map((w) => ({ id: String(w['id'] ?? ''), name: String(w['name'] ?? w['id'] ?? '') })).filter((w) => w.id !== '');
+function workspaceDocs(raw: readonly PeekedWorkspace[]): WorkspaceDoc[] {
+  return raw.map((w) => ({ id: String(w.doc['id'] ?? ''), name: String(w.doc['name'] ?? w.doc['id'] ?? ''), tables: w.tables, views: w.views })).filter((w) => w.id !== '');
 }
 
 /**
@@ -416,7 +422,7 @@ export function init(api: HostApi): void {
     let mode: 'fresh' | 'overwrite' | 'rename' = 'fresh';
     if (taken.has(source.id)) {
       const answer = await api.ui.dialogs.choice(
-        `"${source.name}" is already a workspace here. Replace what is in this browser with the copy from "${file.name}", or keep both?`,
+        `"${source.name}" is already a workspace here. Replace what is in this browser with the copy from "${file.name}", or keep both?${await bothCopies(source, file)}`,
         [OVERWRITE_LOCAL, KEEP_BOTH],
         'Open workspace file',
       );
@@ -425,6 +431,29 @@ export function init(api: HostApi): void {
       if (mode === 'rename') target = freeWorkspaceId(source.id, taken);
     }
     await bringWorkspaceIn(bytes, file.name, source, target, mode);
+  }
+
+  /**
+   * The two copies, side by side, for the replace-or-keep-both question.
+   *
+   * Without it the question is about a name only, and both copies have the same
+   * name — so "replace" was a decision taken blind, and it is the one that throws
+   * work away. What is counted here is the workspace, and the dropped file's size
+   * and date are the file's; a count this side cannot take is left out rather than
+   * shown as zero.
+   */
+  async function bothCopies(source: WorkspaceDoc, file: File): Promise<string> {
+    let here = {};
+    try {
+      const c = await countWorkspaceContents(storeBridge(), source.id, { countRows: false });
+      here = { tables: c.tables, views: c.views };
+    } catch {
+      /* a build that cannot count — the file's side is still worth showing */
+    }
+    return compareCopies([
+      { label: 'In this browser', facts: here },
+      { label: file.name, facts: { tables: source.tables, views: source.views, size: file.size, mtime: file.lastModified } },
+    ]);
   }
 
   /** The workspace a file name points at, or the only one in the file. */

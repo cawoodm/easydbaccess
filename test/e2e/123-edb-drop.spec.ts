@@ -143,6 +143,10 @@ test.describe('a file whose workspace is already here', () => {
 
     const dialog = page.locator('host-dialogs');
     await expect(dialog.getByText(/already a workspace here/)).toBeVisible();
+    // What each copy holds, so "replace" is not a blind choice between two things
+    // with the same name. The dropped file also says its size and its date.
+    await expect(dialog.getByText(/In this browser: 1 table/)).toBeVisible();
+    await expect(dialog.getByText(/northwind\.edb: 1 table, \d+ KB, saved /)).toBeVisible();
     await dialog.getByRole('button', { name: 'Keep both, under a new name', exact: true }).click();
 
     await bootedAt(page, 'northwind-2');

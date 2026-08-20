@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import sqlite3InitModule, { type Database, type Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 import { ALL_COLLECTIONS, EdbStore, changeScopeOf } from '@easydb/shared';
-import { type EdbRequest, type EdbResponse } from './protocol.js';
+import { type EdbRequest, type EdbResponse, type PeekedWorkspace } from './protocol.js';
 import { createAutosavePolicy, type AutosavePolicy } from './dirty.js';
 import { readMirror, writeMirror } from './mirror.js';
 import { ensurePool, ensureRoomToImport, openInPool, poolPath, tunePooledDb } from './substrate.js';
@@ -254,8 +254,14 @@ function handle(req: EdbRequest): unknown {
  * Anything that is not one of our databases answers `[]` rather than throwing:
  * a folder may hold a `.edb` written by something else, or a truncated one, and
  * one bad file must not abandon the scan.
+ *
+ * Each record comes back with its TABLE and VIEW counts, taken here because here
+ * is where they are free — the file is open, and asking later would mean reading
+ * and deserializing it a second time. Rows are deliberately not counted: that is
+ * a `COUNT(*)` per table over every file in the folder, and no prompt is worth
+ * scanning a 600k-row workspace nobody asked about.
  */
-async function peekWorkspaces(bytes: Uint8Array): Promise<Record<string, unknown>[]> {
+async function peekWorkspaces(bytes: Uint8Array): Promise<PeekedWorkspace[]> {
   if (bytes.byteLength === 0) return [];
   const s3 = (sqlite3 ??= await sqlite3InitModule());
   let probe: Database | null = null;
@@ -264,7 +270,19 @@ async function peekWorkspaces(bytes: Uint8Array): Promise<Record<string, unknown
     probe = new s3.oo1.DB();
     probe.checkRc(s3.capi.sqlite3_deserialize(probe.pointer!, 'main', p, bytes.byteLength, bytes.byteLength, s3.capi.SQLITE_DESERIALIZE_FREEONCLOSE));
     const rows = probe.selectObjects(`SELECT doc FROM _easydb WHERE coll = 'workspaces'`);
-    return rows.map((r) => JSON.parse(String(r.doc)) as Record<string, unknown>);
+    // One grouped pass for both counts. `workspaceId` is a real column of
+    // `_easydb`, so this needs no JSON extraction — and the `workspaces` rows
+    // themselves carry NULL there, which the filter excludes anyway.
+    const counted = probe.selectObjects(
+      `SELECT workspaceId AS ws, SUM(coll = 'tables') AS tables, SUM(coll = 'viewInstances') AS views
+         FROM _easydb WHERE coll IN ('tables', 'viewInstances') GROUP BY workspaceId`,
+    );
+    const counts = new Map(counted.map((r) => [String(r.ws), { tables: Number(r.tables ?? 0), views: Number(r.views ?? 0) }]));
+    return rows.map((r) => {
+      const doc = JSON.parse(String(r.doc)) as Record<string, unknown>;
+      const c = counts.get(String(doc['id'] ?? ''));
+      return { doc, tables: c?.tables ?? 0, views: c?.views ?? 0 };
+    });
   } catch {
     return []; // not our database, or not a database at all
   } finally {

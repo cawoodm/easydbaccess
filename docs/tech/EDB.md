@@ -152,6 +152,34 @@ it, but cannot write one: Save says so (`NO_FILE_ACCESS`) and the workspace stay
 in the pool. There is no download fallback — that went with the IndexedDB dump in
 v0.0.396, because "saved" must not mean two different things.
 
+## "Which copy do you want to keep?" carries the facts
+
+Three prompts ask the user to choose between two copies of one workspace — a
+folder sync finding the same id here and in a file, this tab's own file having been
+written by something else, a dropped file whose workspace name is already here —
+and each of them has an answer that destroys work. They used to ask it on a NAME,
+and both copies have the same name, so the answer was a guess.
+
+`db/edb/copy-facts.ts` is the one builder for what they now show: tables, views,
+the file's size, when the file was last written, and — for this tab's own file —
+what its size was when we last agreed with it (`sizeChangeNote`, off the stamp).
+It is pure, every field is optional, and an absent one is LEFT OUT rather than
+shown as zero: a count that could not be taken is not a count of none.
+
+Where the numbers come from matters, because none of it may cost a second read:
+
+- **The file's counts** ride along with `peekWorkspaces`, which already has the
+  file deserialized in its throwaway database (`PeekedWorkspace`). `scanFolder`
+  stores them, with the file's `size`/`mtime`, on each `FolderWorkspace` — so the
+  index a sync writes is also the answer to "what is in that file". All four
+  fields are optional, because an index written before v0.0.407 has none of them.
+- **Rows are deliberately not counted.** That is a `COUNT(*)` per table across
+  every file in the folder, and no prompt is worth scanning a 600k-row workspace
+  nobody asked about.
+- **This side's counts** come from `countWorkspaceContents(..., { countRows: false })`,
+  taken once per clashing workspace — the same call `partitionConflicts` already
+  needed to spot an empty local shell, so the prompt costs nothing extra.
+
 ## One button, and commands for the rest
 
 There is **no File menu**. It was a footer button opening an anchored menu until
@@ -216,6 +244,8 @@ copied into this browser's own database, and the file is left untouched.
   (`freeWorkspaceId` → `northwind-2`). A rename happens INSIDE the throwaway
   worker with `cloneWorkspace` before anything crosses over, because
   `copyWorkspace` writes each document under the id it already carries.
+- **That question shows both copies' facts** — `db/edb/copy-facts.ts`, the same
+  builder the folder-sync prompts use. See below.
 
 One trap this cost: `sql-import` claimed the drop first, because its MIME test was
 `type.includes('sql')` and the type this app puts on its own database files is

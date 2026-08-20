@@ -623,9 +623,7 @@ export class AppShell extends LitElement {
     const showLabel = (where === 'header' ? this.headerButtonText : this.footerButtonText) || !b.icon;
     return html`
       <button class=${cls} title=${b.tooltip ?? b.label} @click=${(e: Event) => this.runSlot(b, e)}>
-        ${renderButtonIcon(b.icon)}
-        ${showLabel ? html`<span class="btn-label">${b.label}</span>` : nothing}
-        ${badge}
+        ${renderButtonIcon(b.icon)} ${showLabel ? html`<span class="btn-label">${b.label}</span>` : nothing} ${badge}
       </button>
     `;
   }
@@ -643,7 +641,7 @@ export class AppShell extends LitElement {
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
           <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
-            ><span class="version">v0.0.406</span></a
+            ><span class="version">v0.0.407</span></a
           ></strong
         >
         ${this.shownButtons('header')

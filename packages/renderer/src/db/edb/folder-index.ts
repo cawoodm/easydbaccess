@@ -24,6 +24,18 @@ export interface FolderWorkspace {
   title?: string | undefined;
   /** The `.edb` in the connected folder that holds it. */
   file: string;
+  /**
+   * What the copy IN THE FILE holds, and what the file itself looks like.
+   *
+   * All optional: an index written by an older version has none of it, and this
+   * is a cache nothing may depend on. They exist for the conflict prompts, which
+   * cannot ask "which copy do you want" usefully without them — `size` and
+   * `mtime` belong to the FILE, so every workspace in one file repeats them.
+   */
+  tables?: number | undefined;
+  views?: number | undefined;
+  size?: number | undefined;
+  mtime?: number | undefined;
 }
 
 export interface FolderIndex {

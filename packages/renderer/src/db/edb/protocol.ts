@@ -77,6 +77,24 @@ export type EdbRequest =
   | { id: number; op: 'peekWorkspaces'; bytes: Uint8Array }
   | { id: number; op: 'dbName' };
 
+/**
+ * One workspace found inside a peeked file, with what that file holds for it.
+ *
+ * The counts come back with the record because they are free where the peek is:
+ * the file is already open in the throwaway database, and a second visit would
+ * mean reading and deserializing the whole thing again. They are what the
+ * conflict prompts show, so a user picking between two copies of `sales` can see
+ * which is which.
+ */
+export interface PeekedWorkspace {
+  /** The raw `workspaces` document, exactly as the file has it. */
+  doc: Record<string, unknown>;
+  /** Tables that workspace has inside the file. */
+  tables: number;
+  /** Open views (view instances) it has inside the file. */
+  views: number;
+}
+
 /** What comes back. A `changed` message is unsolicited and carries no id. */
 export type EdbResponse =
   | { id: number; ok: true; result: unknown }

@@ -317,6 +317,11 @@ test.describe('a file written by another origin', () => {
     // A question, not a decision.
     const dialog = page.locator('host-dialogs');
     await expect(dialog.getByText(new RegExp(`${file} has been written since this tab read it`, 'i'))).toBeVisible({ timeout: 20_000 });
+    // Both copies are described. Neither answer can be reasoned about from a name
+    // alone — both copies have the same one — so the prompt says what each holds,
+    // and for the file how big it is and when it was written.
+    await expect(dialog.getByText(/Here: \d+ workspace/)).toBeVisible();
+    await expect(dialog.getByText(new RegExp(`${file}: .*\\d+ KB, saved `))).toBeVisible();
     await dialog.getByRole('button', { name: 'Load disk version', exact: true }).click();
 
     // Answered with Load, so the file wins — including the table the other origin

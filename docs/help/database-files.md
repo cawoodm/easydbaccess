@@ -163,6 +163,11 @@ If you already have a workspace of that name, you are asked which you meant:
 | **Replace the one here**        | Your workspace of that name is removed and the file's copy takes its place. |
 | **Keep both, under a new name** | The file's copy arrives as `northwind-2`, and yours is left alone.          |
 
+The question names both copies **and says what each one holds** — how many tables,
+and for the file its size and the date it was last written. Two copies of
+`northwind` cannot be told apart by name, and Replace is the answer that throws
+work away, so the numbers are there before you pick.
+
 A drop only **reads** the file. It does not become the file you save into — your
 new workspace lives in this browser, and pressing **Save** later writes it to your
 own workspace folder. That is the difference from **Open workspace file…**, which
@@ -217,6 +222,20 @@ keep:
 | **Load disk version**      | The file wins. What is here is replaced by what the other machine saved.                             |
 | **Overwrite disk version** | Your copy wins, written over the file's copy of that workspace. Its other workspaces are left alone. |
 | Closing the dialog         | Neither. Both copies stay as they are.                                                               |
+
+The question describes both copies first, so you are not choosing blind:
+
+```
+"sales" is in this browser and in sales.edb. The two may differ —
+which copy do you want to keep?
+
+In this browser: 4 tables, 2 views
+sales.edb: 6 tables, 128 KB, saved 19 Aug 2026, 14:32
+```
+
+When it is your own file that moved, it also says what the file used to be — "It
+was 96 KB when this tab last read it" — because a size that grew is the clearest
+sign the other machine added something.
 
 Turn autosave on, or press **Save** before you leave, and the question does not
 come up.

@@ -6,12 +6,13 @@
 // read whole to learn what workspaces it holds, and a folder of 600k-row
 // workspaces is not something to pay for on every page load.
 
-import type { DataStore, Dialogs } from '@easydb/shared';
+import type { DataStore, Dialogs, WorkspaceContents } from '@easydb/shared';
 import { edbBridge, storeBridge } from './active-bridge.js';
 import { countWorkspaceContents } from '../delete-workspace.js';
-import { fileInFolder, listWorkspaceFiles, readBytes } from './file-handle.js';
+import { fileInFolder, listWorkspaceFiles } from './file-handle.js';
 import { folderConflicts, isEmptyWorkspace, partitionConflicts, writeFolderIndex, type FolderIndex, type FolderWorkspace } from './folder-index.js';
-import { clearStamp, verdictFor } from './file-stamp.js';
+import { clearStamp, factsOf, factsOfHandle, readStamp, verdictFor } from './file-stamp.js';
+import { compareCopies, sizeChangeNote, type CopyFacts } from './copy-facts.js';
 import { activeEdbName, adoptedFileName } from './session.js';
 import { adoptFolderFile, reloadActiveFromFile } from './space-adopt.js';
 
@@ -59,19 +60,26 @@ export async function scanFolder(dir: FileSystemDirectoryHandle): Promise<{ inde
 
   for (const file of files) {
     const handle = await fileInFolder(dir, file, false);
-    const docs = handle && bridge ? await bridge.peekWorkspaces(await readBytes(handle)) : [];
-    if (docs.length === 0) {
+    // The `File` object, not just the bytes: its size and last-modified time are
+    // what the conflict prompts show about the copy the user cannot see, and they
+    // come from the same read.
+    const opened = handle ? await handle.getFile().catch(() => null) : null;
+    const peeked = opened && bridge ? await bridge.peekWorkspaces(new Uint8Array(await opened.arrayBuffer())) : [];
+    if (peeked.length === 0) {
       unreadable.push(file);
       continue;
     }
-    for (const doc of docs) {
-      const id = typeof doc.id === 'string' ? doc.id : '';
+    for (const { doc, tables, views } of peeked) {
+      const id = typeof doc['id'] === 'string' ? doc['id'] : '';
       if (!id) continue;
       workspaces.push({
         id,
-        name: typeof doc.name === 'string' ? doc.name : id,
-        title: typeof doc.title === 'string' ? doc.title : undefined,
+        name: typeof doc['name'] === 'string' ? doc['name'] : id,
+        title: typeof doc['title'] === 'string' ? doc['title'] : undefined,
         file,
+        tables,
+        views,
+        ...(opened ? factsOf(opened) : {}),
       });
     }
   }
@@ -80,27 +88,85 @@ export async function scanFolder(dir: FileSystemDirectoryHandle): Promise<{ inde
 }
 
 /**
- * Which of the clashing workspaces hold nothing on this side.
+ * What each clashing workspace holds ON THIS SIDE.
  *
  * Only the clashing ones are counted — the folder can hold hundreds and this is
  * a question about the handful that appear twice. Rows are not counted: a table
  * is enough to make a workspace non-empty, and the row total is a `COUNT(*)` per
  * table.
  *
- * A store that cannot count leaves the set empty, which asks about every clash —
- * the behaviour before this existed.
+ * Serves two callers at once. `partitionConflicts` asks which side is an empty
+ * shell, and the prompt asks what to SAY about the local copy, so counting once
+ * answers both. A store that cannot count leaves the map empty: every clash then
+ * gets its prompt, and the prompt says nothing about this side — the behaviour
+ * before either existed.
  */
-async function emptyLocally(clashes: readonly FolderWorkspace[]): Promise<Set<string>> {
-  const empty = new Set<string>();
+async function localContents(clashes: readonly FolderWorkspace[]): Promise<Map<string, WorkspaceContents>> {
+  const counts = new Map<string, WorkspaceContents>();
   try {
     const bridge = storeBridge();
-    for (const clash of clashes) {
-      if (isEmptyWorkspace(await countWorkspaceContents(bridge, clash.id, { countRows: false }))) empty.add(clash.id);
-    }
+    for (const clash of clashes) counts.set(clash.id, await countWorkspaceContents(bridge, clash.id, { countRows: false }));
   } catch {
     /* no bridge, or a build with no count — every clash gets its prompt */
   }
+  return counts;
+}
+
+/** The ids whose local copy holds nothing the user put there. */
+function emptyOnes(counts: ReadonlyMap<string, WorkspaceContents>): Set<string> {
+  const empty = new Set<string>();
+  for (const [id, c] of counts) if (isEmptyWorkspace(c)) empty.add(id);
   return empty;
+}
+
+/** What a counted workspace looks like to the prompt. A file has a size; this side has not. */
+function contentsAsFacts(c: WorkspaceContents | undefined): CopyFacts {
+  return c ? { tables: c.tables, views: c.views } : {};
+}
+
+/** What the copy inside a file looks like to the prompt, as the scan recorded it. */
+function fileAsFacts(w: FolderWorkspace): CopyFacts {
+  return { tables: w.tables, views: w.views, size: w.size, mtime: w.mtime };
+}
+
+/**
+ * Everything the OPEN database holds, for the question about this tab's own file.
+ *
+ * That question is about the whole file rather than one workspace, so the answer
+ * is a total: this file was the source of every workspace in here. The count is
+ * best-effort — a store that cannot count still gets the workspace number, which
+ * it knows without asking.
+ */
+async function openFileFacts(open: readonly { id: string }[]): Promise<CopyFacts> {
+  try {
+    const bridge = storeBridge();
+    let tables = 0;
+    let views = 0;
+    for (const w of open) {
+      const c = await countWorkspaceContents(bridge, w.id, { countRows: false });
+      tables += c.tables;
+      views += c.views;
+    }
+    return { workspaces: open.length, tables, views };
+  } catch {
+    return { workspaces: open.length };
+  }
+}
+
+/** The same totals for one FILE, out of the scan that just ran. */
+function fileTotals(index: FolderIndex, file: string): CopyFacts {
+  const mine = index.workspaces.filter((w) => w.file === file);
+  if (mine.length === 0) return {};
+  return {
+    workspaces: mine.length,
+    tables: mine.reduce((n, w) => n + (w.tables ?? 0), 0),
+    views: mine.reduce((n, w) => n + (w.views ?? 0), 0),
+  };
+}
+
+/** "It was 96 KB when this tab last read it", when the size moved. */
+function sinceWeRead(file: string, nowSize: number | undefined): string {
+  return sizeChangeNote(readStamp(file)?.size, nowSize);
 }
 
 /**
@@ -135,10 +201,19 @@ export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStor
 
   const open = await store.workspaces.find();
   const clashes = folderConflicts(open, index.workspaces, activeEdbName());
-  const { adopt, ask } = partitionConflicts(clashes, await emptyLocally(clashes));
+  const counted = await localContents(clashes);
+  const { adopt, ask } = partitionConflicts(clashes, emptyOnes(counted));
 
   for (const clash of ask) {
-    const answer = await dialogs.choice(`"${clash.name}" is in this browser and in ${clash.file}. The two may differ — which copy do you want to keep?`, [LOAD, OVERWRITE], 'Sync workspace folder');
+    const sides = compareCopies([
+      { label: 'In this browser', facts: contentsAsFacts(counted.get(clash.id)) },
+      { label: clash.file, facts: fileAsFacts(clash) },
+    ]);
+    const answer = await dialogs.choice(
+      `"${clash.name}" is in this browser and in ${clash.file}. The two may differ — which copy do you want to keep?${sides}`,
+      [LOAD, OVERWRITE],
+      'Sync workspace folder',
+    );
     // A dismissed dialog keeps both, which is the safe answer and the only one
     // that touches nothing.
     if (answer === LOAD) await adoptFolderFile(clash.id);
@@ -151,7 +226,7 @@ export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStor
   // in a database this tab no longer has open, so they clash with nothing.
   for (const empty of adopt) await adoptFolderFile(empty.id);
 
-  const reloadedActive = await refreshActiveFile(dir, dialogs, overwrite, open);
+  const reloadedActive = await refreshActiveFile(dir, dialogs, overwrite, open, index);
 
   return { files: files.length, found: index.workspaces.length, conflicts: ask.length, unreadable, reloadedActive };
 }
@@ -174,17 +249,29 @@ export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStor
  * is no way to tell "someone else wrote this" from "we have never read it", and
  * guessing would throw away local work.
  */
-async function refreshActiveFile(dir: FileSystemDirectoryHandle, dialogs: Dialogs, overwrite: (workspaceId: string, file: string) => Promise<void>, open: readonly { id: string }[]): Promise<boolean> {
+async function refreshActiveFile(
+  dir: FileSystemDirectoryHandle,
+  dialogs: Dialogs,
+  overwrite: (workspaceId: string, file: string) => Promise<void>,
+  open: readonly { id: string }[],
+  index: FolderIndex,
+): Promise<boolean> {
   const file = adoptedFileName();
   if (!file) return false;
-  const verdict = await verdictFor(file, await fileInFolder(dir, file, false));
+  const handle = await fileInFolder(dir, file, false);
+  const verdict = await verdictFor(file, handle);
   if (verdict === 'file-newer') return reloadActiveFromFile(file);
   if (verdict !== 'conflict') return false;
 
   // Both sides moved on. The same answers as a list conflict, about the whole file
   // this time — every workspace in it came from those bytes.
+  const now = handle ? await factsOfHandle(handle) : null;
+  const sides = compareCopies([
+    { label: 'Here', facts: await openFileFacts(open) },
+    { label: file, facts: { ...fileTotals(index, file), ...(now ?? {}) } },
+  ]);
   const answer = await dialogs.choice(
-    `${file} has been written since this tab read it, and there are unsaved changes here. Which copy do you want to keep?`,
+    `${file} has been written since this tab read it, and there are unsaved changes here. Which copy do you want to keep?${sides}${sinceWeRead(file, now?.size)}`,
     [LOAD, OVERWRITE],
     'Sync workspace folder',
   );
