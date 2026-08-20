@@ -329,9 +329,21 @@ export class NewTableDialog extends LitElement {
         border-radius: 0.25rem;
         cursor: pointer;
       }
+      /* A banner at the TOP of the body, the same shape as the notice above it.
+         It used to be bare red text at the very bottom, below every column row
+         and the preview — on a table with a dozen columns the body scrolls, so
+         pressing Save appeared to do nothing at all. Same reason it is a filled
+         box: this message is the one thing between the user and a saved table.
+         No backticks in this comment: it sits in a tagged template literal. */
       .error {
-        color: #ef4444;
+        background: #fef2f2;
+        border: 1px solid #fca5a5;
+        color: #991b1b;
+        border-radius: 0.35rem;
+        padding: 0.45rem 0.6rem;
         font-size: 0.85rem;
+        /* The constraint report is several lines joined with \n. */
+        white-space: pre-line;
       }
       .notice {
         background: #fef9c3;
@@ -1104,6 +1116,19 @@ export class NewTableDialog extends LitElement {
     return this.fieldRenames().length > 0;
   }
 
+  /**
+   * Bring a new error message into view.
+   *
+   * The banner is at the top of the body and the body SCROLLS, so a user who was
+   * looking at the twentieth column would be told about the first one off screen.
+   * Only on the transition to a message — re-scrolling on every render would fight
+   * whoever is scrolling.
+   */
+  override updated(changed: Map<string, unknown>): void {
+    if (!changed.has('errorMsg') || !this.errorMsg) return;
+    this.renderRoot.querySelector('.dialog-body')?.scrollTo({ top: 0 });
+  }
+
   override render() {
     const title = this.mode === 'edit' ? 'Edit columns' : 'New table';
     const submitLabel = this.mode === 'edit' ? 'Save' : 'Create';
@@ -1121,7 +1146,7 @@ export class NewTableDialog extends LitElement {
             </div>
           </div>
           <div class="dialog-body">
-            ${this.noticeMsg ? html`<div class="notice">${this.noticeMsg}</div>` : ''}
+            ${this.errorMsg ? html`<div class="error" role="alert" data-testid="editor-error">${this.errorMsg}</div>` : ''} ${this.noticeMsg ? html`<div class="notice">${this.noticeMsg}</div>` : ''}
             <label>
               Name
               <input type="text" autofocus .value=${this.name} @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)} />
@@ -1283,7 +1308,7 @@ export class NewTableDialog extends LitElement {
             <button type="button" class="add" @click=${this.addColumn}>+ Add column</button>
             ${this.columnActions.map((a) => html`<button type="button" class="add" title=${a.tooltip ?? a.label} @click=${() => void this.runColumnAction(a)}>${a.label}</button>`)}
             ${this.renderDeleted()} ${this.renameDetected() ? html`<div class="hint">Existing rows are re-keyed on save, so renamed fields keep their data.</div>` : ''}
-            ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''} ${this.mode === 'edit' ? this.renderPreview() : ''}
+            ${this.mode === 'edit' ? this.renderPreview() : ''}
           </div>
         </form>
       </dialog>

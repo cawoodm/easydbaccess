@@ -12,6 +12,7 @@
 
 ### Bugs
 
+- 🐛 A columns-editor error appeared below the fold on a wide table, so Save looked as if it had done nothing (v0.0.401)
 - 🐛 Connecting the workspace folder asked which copy of a workspace was real about one the URL had just created empty (v0.0.397)
 - 🐛 The File menu offered no way to save a workspace that had never been saved, and Open landed in the wrong workspace (v0.0.397)
 - 🐛 The workspace list showed the technical name, so editing the workspace title looked as if it had not taken (v0.0.397)
