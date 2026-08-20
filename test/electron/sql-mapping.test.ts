@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { columnTypeFromSqlType, decodeValue, encodeValue, quoteIdent, sanitizeTableName, sqlAffinity } from '@easydb/shared';
+import { columnTypeFromSqlType, decodeValue, encodeValue, quoteIdent, sanitizeTableName, sqlAffinity, sqlTableNameFor } from '@easydb/shared';
 
 /**
  * Unit tests for the SQL-mapping helpers shared between
@@ -30,6 +30,26 @@ describe('sanitizeTableName', () => {
 
   it('replaces multiple different unsafe characters', () => {
     expect(sanitizeTableName('a b.c!d')).toBe('a_b_c_d');
+  });
+});
+
+describe('sqlTableNameFor', () => {
+  it('keeps the name the user gave, punctuation and all', () => {
+    // Everything that uses it quotes it, so there is nothing to strip — and a
+    // `.edb` is meant to be read by other SQL tools under the names on screen.
+    expect(sqlTableNameFor('Order Details')).toBe('Order Details');
+    expect(sqlTableNameFor('simon-blog/entries')).toBe('simon-blog/entries');
+    expect(sqlTableNameFor('Größe & Preis')).toBe('Größe & Preis');
+  });
+
+  it('trims, because surrounding space in a table name is invisible', () => {
+    expect(sqlTableNameFor('  Parts  ')).toBe('Parts');
+  });
+
+  it('answers empty for an empty name — the STORE picks the fallback', () => {
+    // It cannot choose one itself: the fallback has to be a name nothing is using,
+    // and only the store knows what is taken.
+    expect(sqlTableNameFor('   ')).toBe('');
   });
 });
 

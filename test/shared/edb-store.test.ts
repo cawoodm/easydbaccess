@@ -28,6 +28,14 @@ function row(id: string, data: Record<string, unknown>, tableId = 't1'): Record<
   return { id, tableId, data, updatedAt: 7 };
 }
 
+/** Every table really in the file — what another SQL tool would list. */
+function sqlTables(): string[] {
+  return driver
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+    .all()
+    .map((r) => String(r.name));
+}
+
 beforeEach(() => {
   driver = nodeSqliteDriver();
   store = new EdbStore(driver);
@@ -110,24 +118,74 @@ describe('a user table becomes a real SQL table', () => {
   it('gives two tables of the same name distinct SQL tables', () => {
     store.insert('tables', table({ id: 'a' }));
     store.insert('tables', table({ id: 'b' }));
-    const names = driver
-      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
-      .all()
-      .map((r) => String(r.name));
-    expect(names).toContain('Parts');
-    expect(names).toContain('Parts_2');
+    expect(sqlTables()).toContain('Parts');
+    expect(sqlTables()).toContain('Parts 2');
   });
 
-  it('keeps the SQL table where it is when the table is renamed', () => {
+  it('tells two names apart the way SQLite does — case-insensitively', () => {
+    // `Orders` and `orders` cannot both be table names in one database, so the
+    // second one has to be given a name of its own rather than failing to create.
+    store.insert('tables', table({ id: 'a', name: 'Orders' }));
+    store.insert('tables', table({ id: 'b', name: 'orders' }));
+    expect(sqlTables()).toContain('Orders');
+    expect(sqlTables()).toContain('orders 2');
+  });
+
+  it('keeps the name the user typed, spaces and all', () => {
+    // The point of the format: `Order Details` in the app is `Order Details` in
+    // the file, not `Order_Details` that a reader has to translate back.
+    store.insert('tables', table({ id: 'a', name: 'Order Details' }));
+    store.insert('tables', table({ id: 'b', name: 'Größe & Preis' }));
+    expect(sqlTables()).toContain('Order Details');
+    expect(sqlTables()).toContain('Größe & Preis');
+  });
+
+  it('renames the SQL table with the table, carrying its rows', () => {
     store.insert('tables', table());
+    store.insert('rows', row('r1', { name: 'bolt', qty: 4 }));
     store.patch('tables', 't1', { name: 'Widgets' });
-    const names = driver
-      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
-      .all()
-      .map((r) => String(r.name));
-    expect(names).toContain('Parts'); // the physical name is assigned once
-    expect(names).not.toContain('Widgets');
+
+    expect(sqlTables()).toContain('Widgets');
+    expect(sqlTables()).not.toContain('Parts');
     expect((store.findOne('tables', 't1') as Table).name).toBe('Widgets');
+    // The rows came with it — a rename that emptied the table would be the same
+    // data loss the column rename was fixed for.
+    expect(driver.prepare(`SELECT name, qty FROM "Widgets"`).all()).toEqual([{ name: 'bolt', qty: 4 }]);
+    expect((store.find('rows', { tableId: 't1' }) as { data: Record<string, unknown> }[]).map((r) => r.data.name)).toEqual(['bolt']);
+  });
+
+  it('does not touch the SQL table when something OTHER than the name changes', () => {
+    store.insert('tables', table());
+    store.patch('tables', 't1', { filters: { name: 'bolt' } } as Partial<Table>);
+    expect(sqlTables()).toContain('Parts');
+  });
+
+  it('renames around a name another table already holds', () => {
+    store.insert('tables', table({ id: 'a', name: 'Parts' }));
+    store.insert('tables', table({ id: 'b', name: 'Widgets' }));
+    store.patch('tables', 'b', { name: 'parts' });
+    // `parts` is `Parts` to SQLite, so the rename lands beside it instead of failing.
+    expect(sqlTables()).toContain('Parts');
+    expect(sqlTables()).toContain('parts 2');
+    expect((store.findOne('tables', 'b') as Table).name).toBe('parts');
+  });
+
+  it('leaves a physical name an older version sanitised alone until the table is renamed', () => {
+    // A `.edb` written before v0.0.410 holds `Order_Details`. Nothing renames it
+    // on open — the doc is what this app reads, and rewriting a file to tidy its
+    // names is not something opening it should do.
+    store.insert('tables', table({ id: 'a', name: 'Order Details' }));
+    driver.prepare(`UPDATE _easydb SET doc = ? WHERE coll = 'tables' AND key = 'a'`).run(JSON.stringify({ ...(store.findOne('tables', 'a') as object), _sqlTable: 'Order_Details', _ordinal: 0 }));
+    driver.exec(`ALTER TABLE "Order Details" RENAME TO "Order_Details"`);
+
+    const reopened = new EdbStore(driver);
+    reopened.patch('tables', 'a', { updatedAt: 2 } as Partial<Table>);
+    expect(sqlTables()).toContain('Order_Details');
+
+    // Renaming is what brings it into line.
+    reopened.patch('tables', 'a', { name: 'Order Lines' });
+    expect(sqlTables()).toContain('Order Lines');
+    expect(sqlTables()).not.toContain('Order_Details');
   });
 
   it('drops the SQL table with the table doc', () => {

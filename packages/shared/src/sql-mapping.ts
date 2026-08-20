@@ -22,6 +22,27 @@ export function sanitizeTableName(s: string): string {
   return s.replace(/[^A-Za-z0-9_]/g, '_');
 }
 
+/**
+ * The physical table name for a table the USER named — the name itself.
+ *
+ * Every reference to it goes through {@link quoteIdent}, so a space, a hyphen or
+ * an accent costs nothing, and a `.edb` opened in DB Browser or Datasette shows
+ * the names the user gave rather than `Order_Details`. That is the whole point:
+ * the file is meant to be readable by other tools, and a name it has to be
+ * translated back from is not.
+ *
+ * {@link sanitizeTableName} is still what the server's sync store uses, where the
+ * name arrives from a foreign document rather than from this app's own UI.
+ *
+ * Uniqueness is NOT decided here — the store owns that, because only it knows
+ * which names are taken (`EdbStore.resolveSqlTableName`). Reserved prefixes are
+ * not decided here either, for the same reason: the fallback has to be a free
+ * name.
+ */
+export function sqlTableNameFor(uiName: string): string {
+  return uiName.trim();
+}
+
 /** SQLite column affinity for a `ColumnType`. */
 export function sqlAffinity(t: ColumnType): string {
   switch (t) {

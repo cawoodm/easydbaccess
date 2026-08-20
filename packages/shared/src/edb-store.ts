@@ -34,7 +34,7 @@ import { buildWhere, columnFilterToSql } from './filter-sql.js';
 import type { DistinctPage, DistinctQuery, RowPage, RowQuery } from './row-query.js';
 import type { SqlDriver } from './sql-driver.js';
 import type { SqlRunOptions, SqlRunResult } from './sql-run.js';
-import { decodeValue, encodeValue, quoteIdent, sanitizeTableName, sqlAffinity } from './sql-mapping.js';
+import { decodeValue, encodeValue, quoteIdent, sqlAffinity, sqlTableNameFor } from './sql-mapping.js';
 import type { CloneMode, ColumnSpec, Row, WorkspaceContents } from './types.js';
 import { settingId } from './setting-key.js';
 
@@ -646,22 +646,56 @@ export class EdbStore {
   // -- tables -------------------------------------------------------------
 
   /**
-   * Picks the physical SQL table name for a brand-new table id: the sanitised
-   * `Table.name`, falling back to `table` when it is empty or would collide with
-   * a reserved `_easydb*` name, then `_2`, `_3`, … against what is already taken.
+   * Picks the physical SQL table name for `Table.name`: the name ITSELF, falling
+   * back to `table` when it is empty or reserved, then ` 2`, ` 3`, … against what
+   * is already taken.
    *
-   * Assigned once and never revisited. Renaming `Table.name` rewrites the doc
-   * only — moving the SQL object would risk a fresh collision and buy nothing,
-   * since nothing outside the doc addresses a table by its physical name.
+   * Verbatim, because the file is meant to be opened by other tools — see
+   * `sqlTableNameFor`. Two names are refused: `_easydb*`, which is this format's
+   * own metadata table, and `sqlite_*`, which SQLite reserves and would refuse to
+   * create anyway.
+   *
+   * Comparison is case-INSENSITIVE, because SQLite's is: `Orders` and `orders`
+   * cannot both exist, so a workspace holding both gets `orders 2` for the second.
+   * `except` is the table being renamed, which does not collide with itself.
    */
-  private resolveSqlTableName(base: string): string {
-    const used = new Set(this.storedTableDocs().map((d) => String(d[SQL_TABLE_KEY])));
-    const isReserved = (s: string) => /^_easydb/i.test(s);
+  private resolveSqlTableName(base: string, except?: string): string {
+    const used = new Set(
+      this.storedTableDocs()
+        .map((d) => String(d[SQL_TABLE_KEY]))
+        .filter((n) => n.toLowerCase() !== (except ?? '').toLowerCase())
+        .map((n) => n.toLowerCase()),
+    );
+    const isReserved = (s: string) => /^_easydb/i.test(s) || /^sqlite_/i.test(s);
     const safeBase = base.length > 0 && !isReserved(base) ? base : 'table';
     let candidate = safeBase;
     let n = 2;
-    while (used.has(candidate)) candidate = `${safeBase}_${n++}`;
+    while (used.has(candidate.toLowerCase())) candidate = `${safeBase} ${n++}`;
     return candidate;
+  }
+
+  /**
+   * Move the SQL table when the user renames the table, so the two names stay the
+   * same thing.
+   *
+   * A rename used to rewrite the doc only, which left `Order Details` living in a
+   * SQL table called whatever it was first called — invisible in this app and
+   * confusing in every other tool that opens the file.
+   *
+   * Never fatal. A rename that SQLite refuses (a name it will not take, a clash
+   * this store cannot see) leaves the physical name alone and the save goes
+   * through: the doc is what this app reads, so a stale physical name costs
+   * cosmetics, where a thrown error would cost the edit.
+   */
+  private renameSqlTableNoTx(from: string, uiName: string): string {
+    const wanted = this.resolveSqlTableName(sqlTableNameFor(uiName), from);
+    if (wanted === from) return from;
+    try {
+      this.db.exec(`ALTER TABLE ${quoteIdent(from)} RENAME TO ${quoteIdent(wanted)}`);
+      return wanted;
+    } catch {
+      return from;
+    }
   }
 
   /** Every stored `tables` doc, storage fields still attached, in ordinal order. */
@@ -718,10 +752,15 @@ export class EdbStore {
     let sqlTable: string;
     let ordinal: number;
     if (existing) {
-      sqlTable = String(existing[SQL_TABLE_KEY]);
+      const was = String(existing[SQL_TABLE_KEY]);
+      const wasName = typeof existing.name === 'string' ? existing.name : '';
+      // Only on an actual rename. Every other write — a filter, a column, a window
+      // position — must not touch the DDL, and a table whose physical name was
+      // sanitised by an older version keeps it until the user renames it.
+      sqlTable = name !== wasName ? this.renameSqlTableNoTx(was, name) : was;
       ordinal = Number(existing[ORDINAL_KEY] ?? 0);
     } else {
-      sqlTable = this.resolveSqlTableName(sanitizeTableName(name));
+      sqlTable = this.resolveSqlTableName(sqlTableNameFor(name));
       ordinal = this.storedTableDocs().reduce((max, d) => Math.max(max, Number(d[ORDINAL_KEY] ?? -1)), -1) + 1;
       this.db.exec(`CREATE TABLE ${quoteIdent(sqlTable)} (_id TEXT PRIMARY KEY, _updatedAt INTEGER, _extra TEXT)`);
     }

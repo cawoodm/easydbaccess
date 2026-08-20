@@ -143,13 +143,16 @@ describe('SqliteStore — tables: real SQL objects', () => {
     raw.close();
   });
 
-  it('sanitizes the SQL table name from an unsafe table name', () => {
+  it('keeps a name SQL would need quoting for, rather than mangling it', () => {
     const store = new SqliteStore({ path: dbPath });
     store.insert('tables', baseTable({ id: 't2', name: 'simon-blog/entries' }));
     store.close();
 
     const raw = inspect(dbPath);
-    expect(tableNames(raw)).toContain('simon_blog_entries');
+    // Every reference quotes it, so there is nothing to strip — and the `.db` then
+    // opens in another tool under the name the user gave.
+    expect(tableNames(raw)).toContain('simon-blog/entries');
+    expect(tableNames(raw)).not.toContain('simon_blog_entries');
     raw.close();
   });
 
@@ -214,7 +217,7 @@ describe('SqliteStore — ColumnSpec verbatim round-trip', () => {
 });
 
 describe('SqliteStore — table name collisions and edge cases', () => {
-  it('de-duplicates two names that sanitize to the same SQL identifier', () => {
+  it('keeps two names SQL used to conflate apart, each as itself', () => {
     const store = new SqliteStore({ path: dbPath });
     store.insert('tables', baseTable({ id: 't1', name: 'a/b' }));
     store.insert('tables', baseTable({ id: 't2', name: 'a-b' }));
@@ -222,17 +225,32 @@ describe('SqliteStore — table name collisions and edge cases', () => {
 
     const raw = inspect(dbPath);
     const names = tableNames(raw);
-    expect(names).toContain('a_b');
-    expect(names).toContain('a_b_2');
+    // Both survive verbatim: the two only ever collided because `_` was what a
+    // slash and a hyphen both became.
+    expect(names).toContain('a/b');
+    expect(names).toContain('a-b');
     raw.close();
 
-    // Registry keeps the real (unsanitized) names for both.
     const store2 = new SqliteStore({ path: dbPath });
     const t1 = store2.findOne('tables', 't1') as { name: string };
     const t2 = store2.findOne('tables', 't2') as { name: string };
     expect(t1.name).toBe('a/b');
     expect(t2.name).toBe('a-b');
     store2.close();
+  });
+
+  it('de-duplicates two names SQLite would still call the same', () => {
+    const store = new SqliteStore({ path: dbPath });
+    store.insert('tables', baseTable({ id: 't1', name: 'People' }));
+    store.insert('tables', baseTable({ id: 't2', name: 'people' }));
+    store.close();
+
+    const raw = inspect(dbPath);
+    const names = tableNames(raw);
+    // SQLite compares table names case-insensitively, so the second needs its own.
+    expect(names).toContain('People');
+    expect(names).toContain('people 2');
+    raw.close();
   });
 
   it('an empty table name does not produce a broken SQL identifier', () => {
@@ -260,7 +278,7 @@ describe('SqliteStore — table name collisions and edge cases', () => {
     raw.close();
   });
 
-  it('renaming Table.name does NOT rename the SQL table (sql_table is assigned once)', () => {
+  it('renaming Table.name renames the SQL table with it, keeping the rows', () => {
     const store = new SqliteStore({ path: dbPath });
     store.insert('tables', baseTable());
     store.insert('rows', { id: 'r1', tableId: 't1', data: { name: 'Alice' }, updatedAt: 1 });
@@ -270,9 +288,9 @@ describe('SqliteStore — table name collisions and edge cases', () => {
 
     const raw = inspect(dbPath);
     const names = tableNames(raw);
-    // The physical SQL objects are untouched by the rename.
-    expect(names).toContain('people');
-    expect(names).not.toContain('humans');
+    // The two names are one thing, so the SQL object moves with the doc.
+    expect(names).toContain('humans');
+    expect(names).not.toContain('people');
     raw.close();
 
     const store2 = new SqliteStore({ path: dbPath });

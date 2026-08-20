@@ -36,7 +36,7 @@ how a file is recognised as ours.
 ### Row data: real SQL tables
 
 ```sql
-CREATE TABLE <sanitizeTableName(name)> (
+CREATE TABLE <sqlTableNameFor(name)> (
   _id        TEXT PRIMARY KEY,   -- Row.id
   _updatedAt INTEGER,
   _extra     TEXT,               -- JSON overflow: keys with no ColumnSpec
@@ -49,8 +49,21 @@ it already serves the desktop and the server — one convention across all three
 
 ## Three rules, each of which has already cost a bug
 
-- **`_sqlTable` is assigned once.** Renaming a table rewrites the doc, never the
-  SQL object.
+- **`_sqlTable` is the table's own name, verbatim** — `Order Details`, not
+  `Order_Details`. Every reference quotes it (`quoteIdent`), so nothing has to be
+  stripped, and the file reads in DB Browser or Datasette under the names on
+  screen. Three things are refused, none of them cosmetic: an empty name, the
+  `_easydb*` prefix (this format's own metadata table) and `sqlite_*` (SQLite's).
+  A clash gets ` 2`, ` 3`, … and the comparison is case-INSENSITIVE because
+  SQLite's is — `Orders` and `orders` cannot both exist.
+- **A rename moves the SQL object too** (since v0.0.410), so the two names stay
+  the same thing. `ALTER TABLE … RENAME TO` carries the rows; a rename SQLite
+  refuses leaves the physical name alone rather than failing the edit, because the
+  doc is what this app reads. Only a change to `Table.name` triggers it, so a file
+  written by an older version keeps its sanitised names until the user renames
+  that table — opening a file does not rewrite it to tidy its names.
+  `sanitizeTableName` is still what the SERVER's sync store uses, where the name
+  arrives from a foreign document rather than from this app's UI.
 - **Column reconciliation is additive only** — `ADD COLUMN`, never `RENAME` or
   `DROP`. `ColumnSpec` has no stable id, so a rename cannot be told from a
   drop-plus-add, and guessing destroyed data once already (v0.0.218). A dropped

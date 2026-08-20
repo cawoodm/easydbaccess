@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ A table is called the same thing in the file as on screen: `Order Details`, not `Order_Details`, and a rename moves the SQL table with it (v0.0.411)
 - ✨ Menus and value pickers use the browser's own popovers: always on top, dismissed by a click outside (v0.0.410)
 - ✨ A table of 20,000–50,000 rows is paged like a bigger one, instead of showing the first 20,000 with a note asking you to narrow the filter (v0.0.409)
 - ✨ Charts look better: a colour per category, a grey "Other", rounded bars, separated pie slices, and nothing against the window edge (v0.0.408)

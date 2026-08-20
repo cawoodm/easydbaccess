@@ -47,7 +47,9 @@ cause.
 
 - The physical table name a `tables` doc points at (`_sqlTable`). `DROP TABLE`
   or `ALTER TABLE … RENAME` here leaves a registered table with nothing behind
-  it.
+  it. Since v0.0.410 that name is the table's own, verbatim, so it may hold
+  spaces and punctuation — `SELECT * FROM "Order Details"` needs its quotes, the
+  same as in any other SQL tool.
 - Additive-only column reconciliation.
 - `_extra` overflow encoding.
 

@@ -188,10 +188,15 @@ semantics plugins see are unchanged.
 
 Three rules a naive change would break:
 
-- **The physical table name is assigned once.** Renaming `Table.name` rewrites
-  the `tables` doc, never the SQL object. Nothing outside that doc addresses a
-  table by its physical name (`_sqlTable`), and renaming would risk a fresh
-  collision for no benefit.
+- **The physical table name IS `Table.name`**, verbatim (`sqlTableNameFor`), and a
+  rename moves the SQL object with `ALTER TABLE … RENAME TO` so the two stay the
+  same thing. Every reference quotes it, so `Order Details` needs no mangling —
+  the file is meant to open in other SQL tools under the names on screen. Empty,
+  `_easydb*` and `sqlite_*` are refused, a clash gets ` 2` (compared
+  case-insensitively, as SQLite compares), a rename SQLite refuses leaves the old
+  physical name rather than failing the edit, and a file from before v0.0.410
+  keeps its sanitised names until the user renames that table. Full rules in
+  [`EDB.md`](./EDB.md).
 - **Column reconciliation is additive only** — `ALTER TABLE … ADD COLUMN`,
   never `RENAME` or `DROP`. `ColumnSpec` has no stable id, so a rename is
   indistinguishable from a drop-plus-add, and dropping on that guess destroys
