@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ Hover a workspace in the list to see which file it is in, and Save says which file it wrote (v0.0.412)
 - ✨ A table is called the same thing in the file as on screen: `Order Details`, not `Order_Details`, and a rename moves the SQL table with it (v0.0.411)
 - ✨ Menus and value pickers use the browser's own popovers: always on top, dismissed by a click outside (v0.0.410)
 - ✨ A table of 20,000–50,000 rows is paged like a bigger one, instead of showing the first 20,000 with a note asking you to narrow the filter (v0.0.409)

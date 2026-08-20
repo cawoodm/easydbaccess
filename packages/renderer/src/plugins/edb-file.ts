@@ -545,7 +545,11 @@ export function init(api: HostApi): void {
     }
     if (where === 'none') return;
     autosave.markClean();
-    api.ui.dialogs.toast('Workspace saved', { kind: 'success' });
+    // Names the file. "Workspace saved" left the one question a save raises
+    // unanswered — saved WHERE — and with a workspace folder in play the answer is
+    // not obvious: the file is named after the workspace, not after what the user
+    // last picked in a dialog.
+    api.ui.dialogs.toast(`Workspace saved to ${activeEdbName()}`, { kind: 'success' });
   }
 
   /**

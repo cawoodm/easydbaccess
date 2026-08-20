@@ -68,8 +68,10 @@ test.describe('workspace title', () => {
     await expect(fromFile).toHaveText('elsewhere');
     // The file is there to be hovered, not read.
     await expect(fromFile).toHaveAttribute('title', 'elsewhere.edb');
-    // And this tab's own workspace carries no file tooltip at all.
-    await expect(options.filter({ hasText: workspaceId })).not.toHaveAttribute('title', /.+/);
+    // This tab's own workspace is hoverable too, and it has no file of its own
+    // yet — so it says where it IS rather than naming `local.edb`, which is not a
+    // file the user ever chose.
+    await expect(options.filter({ hasText: workspaceId })).toHaveAttribute('title', 'Stored in this browser');
   });
 
   test('clearing the title reverts the header to the default', async ({ page }) => {

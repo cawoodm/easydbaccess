@@ -1,10 +1,9 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { ifDefined } from 'lit/directives/if-defined.js';
 import type { Workspace } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { mergeWorkspaceList, readFolderIndex, workspaceLabel, type ListEntry } from '../db/edb/folder-index.js';
-import { activeEdbName } from '../db/edb/session.js';
+import { ACTIVE_FILE_CHANGED_EVENT, activeEdbName, adoptedFileName } from '../db/edb/session.js';
 import { materialIconStyles } from './material-icon-css.js';
 // The flows themselves are shared with the command palette — see
 // `workspace-actions.ts`. This element is only their mouse-driven entry point.
@@ -64,16 +63,32 @@ export class WorkspaceSelector extends LitElement {
     // A folder sync rewrites the index while this element is already mounted, and
     // the index is not a store nothing can subscribe to.
     window.addEventListener('easydb:folder-index-changed', this.onIndexChanged);
+    // A first Save adopts a file without reloading, and the tooltip names it.
+    window.addEventListener(ACTIVE_FILE_CHANGED_EVENT, this.onIndexChanged);
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
     this.unsubscribe?.();
     window.removeEventListener('easydb:folder-index-changed', this.onIndexChanged);
+    window.removeEventListener(ACTIVE_FILE_CHANGED_EVENT, this.onIndexChanged);
   }
 
   private remerge() {
     this.entries = mergeWorkspaceList(this.workspaces, readFolderIndex()?.workspaces ?? [], activeEdbName());
+  }
+
+  /**
+   * What to say on hover: the file this workspace lives in.
+   *
+   * An entry from another file carries its own name. Everything else is in the
+   * database this tab has open, which is a file too whenever one was adopted —
+   * `local.edb` is not, and calling it by name would send the user looking for a
+   * file they never chose.
+   */
+  private whereItLives(e: ListEntry): string {
+    if (e.file) return e.file;
+    return adoptedFileName() ?? 'Stored in this browser';
   }
 
   /**
@@ -97,12 +112,18 @@ export class WorkspaceSelector extends LitElement {
    * "workspace ┈ workspace.edb" is a list of names read twice, and the file name
    * matters only when the user is asking which of two copies they are about to
    * open — which is what hovering answers.
+   *
+   * EVERY entry gets one, including the open workspace. `ListEntry.file` is set
+   * only for the ones in other files (that is what makes them a switch), so the
+   * open database's own name has to come from the session — otherwise hovering the
+   * workspace you are actually in answered nothing, which is the one you are most
+   * likely to be asking about.
    */
   override render() {
     return html`
       <select @change=${(e: Event) => this.switchWorkspace((e.target as HTMLSelectElement).value)}>
         ${this.entries.map(
-          (e) => html`<option value=${`${e.id}\u0000${e.file ?? ''}`} title=${ifDefined(e.file)} ?selected=${e.file === undefined && e.id === this.current}>${workspaceLabel(e)}</option>`,
+          (e) => html`<option value=${`${e.id}\u0000${e.file ?? ''}`} title=${this.whereItLives(e)} ?selected=${e.file === undefined && e.id === this.current}>${workspaceLabel(e)}</option>`,
         )}
       </select>
       <button @click=${newWorkspaceFlow} title="New workspace">

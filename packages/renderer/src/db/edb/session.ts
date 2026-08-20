@@ -75,6 +75,16 @@ export function adoptedFileName(): string | null {
   }
 }
 
+/**
+ * Which file this tab is backed by, as an event.
+ *
+ * The marker is `localStorage`, which nothing can subscribe to, and one thing on
+ * screen names it: the workspace list's tooltip. A first Save adopts a file
+ * WITHOUT a reload, so without this the list went on saying the workspace was
+ * "stored in this browser" until something else happened to re-render it.
+ */
+export const ACTIVE_FILE_CHANGED_EVENT = 'easydb:active-file-changed';
+
 /** Make this tab file-backed on its next load. The caller reloads. */
 export function setActiveEdbName(name: string | null): void {
   try {
@@ -83,6 +93,9 @@ export function setActiveEdbName(name: string | null): void {
   } catch {
     /* private mode — the tab keeps the local database, which is the safe direction */
   }
+  // After the write, so a listener that re-reads sees the new value. Most callers
+  // reload immediately and nothing hears it, which costs nothing.
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(ACTIVE_FILE_CHANGED_EVENT));
 }
 
 /**

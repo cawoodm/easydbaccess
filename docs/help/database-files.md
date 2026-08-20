@@ -183,6 +183,12 @@ So there is nothing to switch off. To leave a file, pick another workspace from
 the list. To go back to it, pick it again — the app remembers which file each
 workspace belongs to.
 
+**Hover an entry to see which file it is in.** The list shows names only — a list
+of "workspace ┈ workspace.edb" reads every name twice — so the file name is a
+tooltip, on every entry including the one you are in. A workspace that has never
+been saved says "Stored in this browser". Save says the same thing the other way
+round: it names the file it wrote.
+
 ### One folder holds them all
 
 The first time you save, the browser asks you to choose a **folder**. Pick one
