@@ -1312,7 +1312,7 @@ export class DataTable extends LitElement {
    * Count the table now. Never throws: a grid that cannot count still draws rows.
    *
    * When the count shows the window was the wrong shape — a table of 3,000 rows read
-   * as a page because the threshold is 50,000 — it re-reads the table the way it
+   * as a page because nothing had measured it yet — it re-reads the table the way it
    * should have been read in the first place.
    */
   private async countNow(coll: DataCollection<Row>): Promise<void> {

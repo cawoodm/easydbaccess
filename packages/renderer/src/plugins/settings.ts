@@ -53,7 +53,7 @@ export function init(api: HostApi): void {
       default: WINDOW_ROWS_FROM_DEFAULT,
       scope: 'workspace',
       description:
-        'A table with at least this many rows is read one page at a time as you scroll, instead of being held in memory whole. Filtering, searching and sorting still cover every row, because the store does that work. Set 0 to always read the whole table.',
+        'A table with at least this many rows is read one page at a time as you scroll, instead of being held in memory whole. Filtering, searching and sorting still cover every row, because the store does that work. Set 0 to always read the whole table — which stops at 20,000 rows and says so, so the default is 20,000: from there up, scrolling reaches every row instead.',
     },
   ]);
 

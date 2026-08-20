@@ -12,6 +12,12 @@ import { panelDomId, waitForPanel } from './helpers.js';
  *
  * The cap now bounds what comes BACK. It cuts a result of more than 20,000 rows,
  * and says so.
+ *
+ * Since v0.0.406 the windowing threshold defaults to the cap, so a table this big
+ * is PAGED rather than read whole — reaching every row by scrolling instead of
+ * being cut. The cut therefore only happens where windowing is switched off
+ * (`windowRowsFrom = 0`, "always read the whole table"), which is what the second
+ * test sets. Both paths are covered because both still exist.
  */
 
 const CAP = 20_000;
@@ -87,8 +93,15 @@ test('a value in the last row of a 20k+ table is still found', async ({ page, wo
   await expect(drawn.first().locator('input').first()).toHaveValue(`row ${ROWS - 1}`);
 });
 
-test('a result bigger than the cap is cut, and the count is the real one', async ({ page, workspaceId }) => {
+test('with windowing off, a result bigger than the cap is cut and the count is the real one', async ({ page, workspaceId }) => {
   test.slow();
+  // "Always read the whole table" — the one setting under which the cap still
+  // decides what the grid holds. With the default the same table is paged.
+  await page.evaluate(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (v) => (window as any).__easydb.api.settings.set('grid', 'windowRowsFrom', v),
+    0,
+  );
   const id = await seed(page, workspaceId, ROWS);
   await waitForPanel(page, id);
   await expect.poll(async () => (await gridState(page, id))?.held ?? 0, { timeout: 30_000 }).toBeGreaterThan(0);
@@ -102,4 +115,27 @@ test('a result bigger than the cap is cut, and the count is the real one', async
   // many were left out.
   expect(state?.held).toBe(CAP);
   expect(state?.truncated).toBe(true);
+});
+
+/**
+ * The same table, with the default threshold: paged, not cut.
+ *
+ * This is what lining the threshold up with the cap bought. Before it, a table
+ * between the cap and the old 50,000 threshold was read whole, cut at 20,000, and
+ * told the user to narrow the filter to reach rows that scrolling now reaches.
+ */
+test('with the default threshold the same table is paged, and claims no truncation', async ({ page, workspaceId }) => {
+  test.slow();
+  const id = await seed(page, workspaceId, ROWS);
+  await waitForPanel(page, id);
+  await expect.poll(async () => (await gridState(page, id))?.held ?? 0, { timeout: 30_000 }).toBeGreaterThan(0);
+
+  // A page, not the cap — and the count is the whole table, which is what the
+  // scrollbar spans.
+  await expect.poll(async () => (await gridState(page, id))?.matching, { timeout: 30_000 }).toBe(ROWS);
+  const state = await gridState(page, id);
+  expect(state?.held).toBeLessThan(CAP);
+  expect(state?.truncated).toBe(false);
+  // So the note is not on screen at all.
+  await expect(page.locator(`#${panelDomId(id)} data-table .truncated-note`)).toHaveCount(0);
 });

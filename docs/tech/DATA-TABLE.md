@@ -294,10 +294,13 @@ IndexedDB (`test/e2e/zz-bigtable-perf` is not committed — it seeds for 22 minu
 | A 500-row page at offset 500,000 | 25.7 s (see the cursor note below) |
 
 - **The threshold is a setting** — `grid:windowRowsFrom` on the Table grid tab,
-  default **50 000**, `0` never windows
+  default **`ROW_FETCH_CAP`** (20 000), `0` never windows
   ([`table/grid-settings.ts`](../../packages/renderer/src/table/grid-settings.ts)).
-  50 000 rather than something smaller so every table that works well today keeps
-  the code path it already has, and only the ones that hurt change.
+  It is the cap on purpose: an un-windowed read is cut off there, so a threshold
+  above it left tables of 20 000–50 000 rows too big to read whole and too small to
+  page — they showed the "narrow the filter to see the rest" note about rows that
+  paging simply reaches. Every table that works well today is below the cap, so
+  they keep the code path they already had.
 - **Three conditions, all deliberate** (`shouldWindow`): the collection must
   implement `query`, the setting must be on, and `tableTotal` must reach the
   threshold. Both stores answer a `query` now, so this works in the browser and on

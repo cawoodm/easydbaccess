@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GRID_SETTINGS_ID, readHighlightNulls, readSortDescFirst, readWindowRowsFrom, WINDOW_ROWS_FROM_DEFAULT } from '../../../packages/renderer/src/table/grid-settings.js';
+import { ROW_FETCH_CAP } from '../../../packages/renderer/src/db/data-store-bridge.js';
 
 /**
  * Both grid preferences default to ON when unset, and only an explicit `false`
@@ -41,6 +42,14 @@ describe('grid settings', () => {
  * 0 would quietly stop windowing every table.
  */
 describe('windowRowsFrom', () => {
+  it('defaults to the read cap, never above it', () => {
+    // The invariant the default exists to hold: a read that is NOT windowed is cut
+    // off at `ROW_FETCH_CAP`, so a threshold above the cap leaves a band of table
+    // sizes too big to read whole and too small to page — cut, with a note telling
+    // the user to narrow a filter to reach rows paging would have reached.
+    expect(WINDOW_ROWS_FROM_DEFAULT).toBe(ROW_FETCH_CAP);
+  });
+
   it('defaults when unset', async () => {
     expect(await readWindowRowsFrom(settings({}))).toBe(WINDOW_ROWS_FROM_DEFAULT);
   });

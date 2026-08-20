@@ -123,6 +123,20 @@ test('the core refuses a write to a read-only COLUMN, where a commit does arrive
 
   const cell = page.locator(`#${panelDomId(id)} data-table preview-cell`);
   await expect(cell).toBeVisible();
+  // The patch above goes to the store; the grid re-reads its columns on the
+  // change broadcast a tick later. Dispatching the commit before that lands
+  // means writing to a column this grid still thinks is editable — the write is
+  // accepted and no refusal is ever said.
+  await expect
+    .poll(
+      () =>
+        page.evaluate((domId) => {
+          const dt = document.getElementById(domId)?.querySelector('data-table') as unknown as { columns?: { readonly?: boolean }[] } | null;
+          return (dt?.columns ?? []).every((c) => c.readonly === true);
+        }, panelDomId(id)),
+      { timeout: 10_000 },
+    )
+    .toBe(true);
   await cell.evaluate((el) => {
     el.dispatchEvent(new CustomEvent('change', { detail: { value: 'written' }, bubbles: true, composed: true }));
   });

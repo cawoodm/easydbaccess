@@ -90,8 +90,11 @@ about **how many tables are loaded at once**, not how much of one table is:
 ## Practical implications
 
 - **Don't treat `VIRT_THRESHOLD` as a memory safeguard.** It only affects
-  paint cost; a 50,000-row local table still loads and holds all 50,000
-  rows as JS objects, it just doesn't render 50,000 `<tr>`s.
+  paint cost, not what is held: a table under the windowing threshold
+  (`grid:windowRowsFrom`, default `ROW_FETCH_CAP` = 20,000) loads and holds every
+  one of its rows as JS objects, it just doesn't render that many `<tr>`s. Above
+  the threshold the grid holds one 500-row page instead, which IS a memory
+  safeguard — see `docs/tech/DATA-TABLE.md`.
 - **A Reference isn't a lighter-weight table while it's open** — only
   lighter-weight to keep around (no sync, no Dexie persistence). Both
   Reference and Copy hit the same `maxRows` cap and hold the full capped

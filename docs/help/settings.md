@@ -36,10 +36,13 @@ Preferences for how every grid behaves:
   rows is read one page at a time as you scroll, instead of being held in memory
   whole. It opens in a moment rather than in a second and a half. Sorting,
   filtering and searching still cover every row, because the store does that work.
-  Set it to 0 to always read the whole table. This works in the browser and in the
-  desktop app. The row count in the window title can lag the rows by a few seconds
-  on a very big table — counting it takes longer than showing it, so the rows come
-  first.
+  Set it to 0 to always read the whole table — but note that a whole-table read
+  stops at 20,000 rows and says so, so 0 on a bigger table means seeing the first
+  20,000 and narrowing a filter to reach the rest. That is why the default is
+  20,000: from there up, scrolling reaches every row instead. This works in the
+  browser and in the desktop app. The row count in the window title can lag the
+  rows by a few seconds on a very big table — counting it takes longer than showing
+  it, so the rows come first.
 
 They apply at once to the tables you already have open.
 

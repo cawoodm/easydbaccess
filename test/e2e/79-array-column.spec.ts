@@ -22,6 +22,11 @@ async function tagTable(page: import('@playwright/test').Page, name: string, typ
   const id = await createTable(page, name, [{ field: 'name' }, { field: 'tags', type }]);
   await waitForPanel(page, id);
   for (const r of rows) await addRow(page, id, r);
+  // `addRow` writes to the store and returns; the grid re-reads on the store's
+  // change broadcast, which is a tick or two later. The funnel builds its value
+  // list from the rows the grid HOLDS, so opening it before the last row lands
+  // counts one row's members and misses the rest.
+  await expect(visibleRows(page, id)).toHaveCount(rows.length);
   return id;
 }
 
@@ -79,6 +84,8 @@ test('a JSON-array cell reads the same as a comma list', async ({ page }) => {
   await waitForPanel(page, id);
   await addRow(page, id, { name: 'a', tags: '["Red","Blue"]' });
   await addRow(page, id, { name: 'b', tags: 'Blue,Green' });
+  // Both rows in the grid before the funnel is asked what values it can see.
+  await expect(visibleRows(page, id)).toHaveCount(2);
 
   const panel = page.locator(`#${panelDomId(id)}`);
   await panel.locator('data-table thead th button.funnel').nth(1).click();

@@ -7,6 +7,8 @@
  * element importing a plugin would invert the plugin model, and a plugin
  * importing the grid would pull the whole element in for one string.
  */
+import { ROW_FETCH_CAP } from '../db/data-store-bridge.js';
+
 export const GRID_SETTINGS_ID = 'grid';
 
 /**
@@ -52,15 +54,24 @@ export async function readHighlightErrors(settings: { get<T>(pluginId: string, k
  * Row count from which a grid stops holding the whole table and reads one PAGE at
  * a time (`grid:windowRowsFrom`). `0` never windows.
  *
- * 50 000 rather than something smaller so that every table which works well today
- * keeps the code path it has, and only the ones that hurt change: one measured
- * 609,283-row table cost 1483 ms and a 15.4 MB payload to put about thirty rows on
- * screen, where the same query for 200 rows takes 13 ms.
+ * It is `ROW_FETCH_CAP`, and that is the whole point: a read that is not windowed
+ * is cut off at the cap (`db/row-reader.ts`), so any threshold ABOVE it left a
+ * band of table sizes — 20,000 to 50,000 while this was 50,000 — that were too big
+ * to be read whole and too small to be paged. Those tables showed "Showing the
+ * first 20,000 of 20,000+ matching rows. Narrow the filter to see the rest.",
+ * which asked the user to type a filter to see rows that paging can simply reach.
+ * Lining the two constants up means the note is left saying only what it is
+ * genuinely for: a set the store could not narrow for us.
+ *
+ * The original reason for a higher number — keep every table that works well today
+ * on the code path it has — is unaffected below the cap, which is where all of
+ * those tables are. A measured 609,283-row table cost 1483 ms and a 15.4 MB payload
+ * to put about thirty rows on screen; the same query for 200 rows takes 13 ms.
  *
  * Read into component state, like {@link readHighlightNulls} — the answer decides
  * what a fetch asks for, and a fetch cannot await a settings read per keystroke.
  */
-export const WINDOW_ROWS_FROM_DEFAULT = 50_000;
+export const WINDOW_ROWS_FROM_DEFAULT = ROW_FETCH_CAP;
 
 export async function readWindowRowsFrom(settings: { get<T>(pluginId: string, key: string): Promise<T | undefined> }): Promise<number> {
   const raw: unknown = await settings.get<number>(GRID_SETTINGS_ID, 'windowRowsFrom');
