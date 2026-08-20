@@ -10,10 +10,12 @@ import { customElement, property, query, state } from 'lit/decorators.js';
  * the user types freely, an anchored value list appears below the input,
  * clicking a value fills the input and applies the filter.
  *
- * Positioning uses `position: fixed` against the input's bounding rect, so
- * the dropdown escapes the table's `overflow:auto` clip without needing a
- * document.body portal. Only one combobox can be focused at a time, so we
- * don't have to coordinate with other instances.
+ * The list is a native `popover="manual"` positioned against the input's
+ * bounding rect, so the browser draws it in the top layer: it escapes the
+ * table's `overflow:auto` clip without a document.body portal, and it is not
+ * re-based by the canvas pan/zoom transform the way a plain `position: fixed`
+ * box inside the panel would be. Only one combobox can be focused at a time, so
+ * we don't have to coordinate with other instances.
  *
  * The dropdown closes when the input loses focus, and when nothing matches it
  * is not rendered at all — either way it never sits over the filtered rows.
@@ -76,8 +78,14 @@ export class FilterCombobox extends LitElement {
       color: #111827;
       background: #e5e7eb;
     }
+    /* A native popover, so the list is drawn in the top layer: it is not clipped
+       by the table's overflow, and — unlike a plain position:fixed box — it is
+       not re-based by the pan/zoom transform on the canvas above it. The
+       inset:auto below undoes the UA's inset:0, which would otherwise stretch
+       the box to both viewport edges once the inline top/left landed. */
     .dropdown {
       position: fixed;
+      inset: auto;
       z-index: 150000;
       background: white;
       border: 1px solid #d1d5db;
@@ -168,6 +176,10 @@ export class FilterCombobox extends LitElement {
   private closeDropdown() {
     if (!this.open) return;
     this.open = false;
+    // Removing a shown popover from the DOM hides it anyway, but the next render
+    // is a task away and the list must not outlive the decision to close it.
+    const ul = this.renderRoot.querySelector('ul.dropdown');
+    if (ul instanceof HTMLElement && ul.matches(':popover-open')) ul.hidePopover();
     document.removeEventListener('pointerdown', this.onOutside, true);
     window.removeEventListener('scroll', this.onWindowChange, true);
     window.removeEventListener('resize', this.onWindowChange);
@@ -176,6 +188,20 @@ export class FilterCombobox extends LitElement {
   override disconnectedCallback() {
     super.disconnectedCallback();
     this.closeDropdown();
+  }
+
+  /**
+   * A popover has to be SHOWN, not just rendered — until `showPopover()` runs it
+   * is `display: none` by UA rule. The list is rendered conditionally, so the
+   * call belongs here, after each render that put it back in the DOM.
+   *
+   * `manual`, not `auto`: this list's lifetime follows the input's focus, and an
+   * auto popover would light-dismiss itself on the very pointerdown that focuses
+   * the input to open it.
+   */
+  override updated() {
+    const ul = this.renderRoot.querySelector('ul.dropdown');
+    if (ul instanceof HTMLElement && !ul.matches(':popover-open')) ul.showPopover();
   }
 
   private onOutside = (e: Event) => {
@@ -293,7 +319,7 @@ export class FilterCombobox extends LitElement {
         ${this.value ? html`<button type="button" class="clear" title="Clear filter" tabindex="-1" @mousedown=${(e: Event) => e.preventDefault()} @click=${this.onClear}>×</button>` : nothing}
       </div>
       ${showDropdown
-        ? html`<ul class="dropdown" style=${style} @mousedown=${(e: Event) => e.preventDefault()}>
+        ? html`<ul class="dropdown" popover="manual" style=${style} @mousedown=${(e: Event) => e.preventDefault()}>
             ${opts.map((v, i) => html` <li class=${i === this.highlightIdx ? 'highlighted' : ''} @mousedown=${(e: Event) => e.preventDefault()} @click=${() => this.onPick(v)}>${v}</li> `)}
           </ul>`
         : nothing}

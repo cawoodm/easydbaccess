@@ -63,8 +63,12 @@ const chips = (page: import('@playwright/test').Page) => page.locator('view-wind
 /** Chips that are actually filtering — an idle chip carries `.off`. */
 const activeChips = (page: import('@playwright/test').Page) => page.locator('view-window .eda-pill-chip:not(.off)');
 const idleChips = (page: import('@playwright/test').Page) => page.locator('view-window .eda-pill-chip.off');
-/** The tri-state value checklist — the grid's funnel popover, portaled to body. */
-const checklist = (page: import('@playwright/test').Page) => page.locator('filter-popover:not([hidden])');
+/**
+ * The tri-state value checklist — the grid's funnel popover. A native popover,
+ * so a closed one is `display: none` and the visibility assertions below are
+ * what distinguishes open from closed.
+ */
+const checklist = (page: import('@playwright/test').Page) => page.locator('filter-popover');
 const option = (page: import('@playwright/test').Page, value: string) => checklist(page).locator('li', { hasText: value });
 
 test('the chips ride in the same bar as the sort controls', async ({ page }) => {

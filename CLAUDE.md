@@ -272,6 +272,15 @@ These have already bitten this codebase. Don't re-litigate them.
   Built-in plugins, by contrast, freely import workspace packages.
 - **Vite + dynamic blob imports:** the `import(blobUrl)` call needs a
   `/* @vite-ignore */` comment so Vite doesn't try to statically resolve it.
+- **Popup layers are native popovers.** The anchored menu, the filter popover
+  and the combobox's suggestion list use the Popover API, so the browser owns
+  the top layer and (for the `auto` ones) light dismiss. Don't re-add a
+  `z-index` race or an outside-click listener. Two rules that bite: a `:host`
+  rule with `display` in it must restate the closed state
+  (`:host(:not(:popover-open)) { display: none }`), or the UA rule that hides a
+  closed popover loses; and Escape must still be claimed with a capture-phase
+  `preventDefault`, because the browser's own close is silent and
+  `panel-shell` would then close the window behind it. See `docs/tech/DIALOGS.md`.
 
 ## What's intentionally not wired yet
 

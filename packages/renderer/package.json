@@ -12,7 +12,7 @@
   "dependencies": {
     "@easydb/shared": "*",
     "@marccawood/lit-dialogs": "^0.1.0",
-    "@marccawood/lit-menu": "^0.1.0",
+    "@marccawood/lit-menu": "^0.2.0",
     "@marccawood/lit-toast": "^0.1.0",
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "chart.js": "^4.4.7",

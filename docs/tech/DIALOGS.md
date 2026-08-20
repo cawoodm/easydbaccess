@@ -27,7 +27,7 @@ each lives in an MIT-licensed repo of its own:
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | [`@marccawood/lit-dialogs`](https://github.com/cawoodm/lit-dialogs) | `HostDialogs`, `dialogChromeStyles`, `ctrlEnterSubmits`, `makeDialogDraggable` |
 | [`@marccawood/lit-toast`](https://github.com/cawoodm/lit-toast)     | `ToastHost`, `linkify`, `materialIconStyles`                                   |
-| [`@marccawood/lit-menu`](https://github.com/cawoodm/lit-menu)       | `AnchoredMenu`, `flipIfBelowViewport`, `materialIconStyles`                    |
+| [`@marccawood/lit-menu`](https://github.com/cawoodm/lit-menu)       | `AnchoredMenu`, `placeMenu`, `materialIconStyles`                              |
 
 All three are published npm packages under the `@marccawood` scope; the root
 [`CLAUDE.md`](../../CLAUDE.md) explains how to take a change from one of them.
@@ -208,11 +208,40 @@ the host precisely so it can hand `anchor.getBoundingClientRect()` to
 `AnchoredMenu.open()` and have the menu appear right under itself rather
 than at a guessed fixed position.
 
+**Every popup menu is a native `popover`.** The anchored menu and the filter
+popover are `popover="auto"`; the filter combobox's suggestion list
+(`chrome/filter-combobox.ts`) is `popover="manual"`, because its lifetime follows
+the input's focus and an auto popover would light-dismiss itself on the very
+pointerdown that focuses the input. What the browser now supplies, and no layer
+arranges for itself any more:
+
+- **The top layer**, so no `z-index` has to beat the panel shell's counter and no
+  ancestor's `overflow` clips the layer. This also fixes a real bug: a plain
+  `position: fixed` box inside the pan/zoom canvas is re-based by the canvas
+  transform, so the combobox list drifted from its input when zoomed.
+- **Light dismiss** for the `auto` ones, replacing the capture-phase
+  `mousedown`/`pointerdown` listener each used to install — including the tricky
+  part, which is not counting the click that opened the layer. The close is
+  noticed through `beforetoggle` (fired synchronously, unlike `toggle`, so a
+  reopen is never settled by the previous opening's event) and resolves the
+  layer's promise with `null`.
+
+Positioning stays in JS — `placeMenu` measures the layer and writes viewport
+pixels — because CSS anchor positioning is not portable yet.
+
+One limit to know before wiring a menu somewhere new: `showModal()` makes
+everything outside the dialog inert, and a body-level popover is outside it. No
+dialog opens one of these layers today (they are opened from header buttons,
+footer buttons, grids and view windows), so nothing hits this; a menu opened
+from _inside_ a dialog would have to be mounted inside that dialog.
+
 **Escape closes every transient layer, and exactly one of them.** The convention
 is a capture-phase `keydown` listener on `document` that calls `preventDefault()`
 — the anchored menu, the filter popover (`chrome/filter-popover.ts`) and the cell
 editors all do this — because `panel-shell`'s own Escape handler bails out on
-`e.defaultPrevented`. That is what stops one press closing the popover AND the
+`e.defaultPrevented`. A popover would close on Escape by itself, but silently,
+which is exactly the case the convention exists to prevent; so the layers still
+claim the key and close themselves. That is what stops one press closing the popover AND the
 window behind it. Dismissing the filter popover this way keeps whatever was
 already ticked: each value is applied as it is clicked, so Escape means "done with
 the list", not "undo".

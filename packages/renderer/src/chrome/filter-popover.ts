@@ -12,10 +12,10 @@ function keyOf(token: FilterToken): string {
 }
 
 /**
- * Portal-positioned dropdown for picking column-filter values from the set of
- * values actually present in the column. Mounted into document.body so it
- * escapes the data-table's overflow:auto clip boundary; the manager positions
- * it under the anchoring funnel button.
+ * Dropdown for picking column-filter values from the set of values actually
+ * present in the column. A native `popover`, so the browser draws it in the top
+ * layer and it escapes both the data-table's overflow:auto clip boundary and the
+ * canvas transform; the manager positions it under the anchoring funnel button.
  *
  * Each value carries a tri-state checkbox — off (empty gray) → on (green ✓,
  * include) → not (red ✕, exclude) — and any number of values may be on or
@@ -30,8 +30,16 @@ export class FilterPopover extends LitElement {
   static override styles = [
     materialIconStyles,
     css`
+      /* A native popover. The UA's own [popover] rules — centered by
+         inset:0 + margin:auto, its own border, padding and background — are all
+         overridden here; position:fixed stays, because the manager writes
+         viewport pixels to left/top. A closed popover is display:none by UA
+         rule, which is why no [hidden] attribute is needed. */
       :host {
         position: fixed;
+        inset: auto;
+        margin: 0;
+        padding: 0;
         z-index: 150000;
         background: white;
         border: 1px solid #d1d5db;
@@ -46,8 +54,12 @@ export class FilterPopover extends LitElement {
           0.85rem system-ui,
           sans-serif;
         overflow: hidden;
+        color: inherit;
       }
-      :host([hidden]) {
+      /* The UA hides a closed popover with display:none. The :host rule above
+         sets display:flex unconditionally, which would win and leave it on
+         screen, so the closed state has to be restated here. */
+      :host(:not(:popover-open)) {
         display: none;
       }
       header {
@@ -236,6 +248,11 @@ export class FilterPopover extends LitElement {
    */
   @state() private states = new Map<string, { state: ValueState; token: FilterToken }>();
   private resolveFn: ((v: string | null | { clear: true }) => void) | null = null;
+  /**
+   * True while the BROWSER is closing the popover, so `close` does not call
+   * `hidePopover()` re-entrantly from inside the UA's own hide algorithm.
+   */
+  private uaClosing = false;
   private onChange: ((filter: string) => void) | null = null;
   /**
    * Whether a value toggled here composes an EXACT token (`=Sweden`) instead of
@@ -266,6 +283,9 @@ export class FilterPopover extends LitElement {
       onRefresh?: (() => Promise<{ values: Array<{ value: string; count: number }>; blanks: number; note: string }>) | undefined;
     },
   ): Promise<string | null | { clear: true }> {
+    // Settle a previous opening FIRST — `close` clears `onChange`, so it has to
+    // run before this call's state is written, not after.
+    if (this.resolveFn) this.close(null);
     this.values = values;
     this.blanks = blanks;
     this.onChange = onChange ?? null;
@@ -279,13 +299,11 @@ export class FilterPopover extends LitElement {
     this.search = '';
     this.style.top = `${Math.round(anchor.bottom + 4)}px`;
     this.style.left = `${Math.round(anchor.left)}px`;
-    this.removeAttribute('hidden');
+    if (!this.matches(':popover-open')) this.showPopover();
     return new Promise((res) => {
       this.resolveFn = res;
-      // Click outside to dismiss. Deferred a tick so the click that OPENED the
-      // popover is not the click that closes it — a key press has no such race,
-      // so Escape is armed straight away.
-      setTimeout(() => document.addEventListener('mousedown', this.onOutside, true), 0);
+      // No outside-click listener: light dismiss is the browser's, and it
+      // already knows not to count the click that opened the popover.
       document.addEventListener('keydown', this.onKey, true);
     });
   }
@@ -316,22 +334,33 @@ export class FilterPopover extends LitElement {
 
   private close(v: string | null | { clear: true }) {
     this.onChange = null;
-    document.removeEventListener('mousedown', this.onOutside, true);
     document.removeEventListener('keydown', this.onKey, true);
-    this.setAttribute('hidden', '');
+    // Cleared before hiding: hiding fires `beforetoggle` synchronously, and that
+    // handler must see this opening as already settled.
     const fn = this.resolveFn;
     this.resolveFn = null;
+    if (!this.uaClosing && this.matches(':popover-open')) this.hidePopover();
     fn?.(v);
   }
 
-  private onOutside = (e: MouseEvent) => {
-    const path = e.composedPath();
-    if (!path.includes(this)) this.close(null);
+  /**
+   * The browser closed it — a light dismiss (click outside). Replaces the
+   * capture-phase `mousedown` listener this element used to install.
+   */
+  private onBeforeToggle = (e: ToggleEvent) => {
+    if (e.newState !== 'closed') return;
+    this.uaClosing = true;
+    try {
+      this.close(null);
+    } finally {
+      this.uaClosing = false;
+    }
   };
 
   /**
    * Escape dismisses the popover, like every other transient layer (the
-   * `@marccawood/lit-menu` dropdown does the same). Capture phase +
+   * `@marccawood/lit-menu` dropdown does the same). The browser would close a
+   * popover on Escape by itself, but silently; capture phase +
    * `preventDefault` is the app's convention
    * for "I claimed this key": `panel-shell`'s Escape handler checks
    * `defaultPrevented`, so closing the popover cannot also close a window behind
@@ -347,7 +376,11 @@ export class FilterPopover extends LitElement {
   override connectedCallback() {
     super.connectedCallback();
     FilterPopover.instance = this;
-    this.setAttribute('hidden', '');
+    // `auto`: light dismiss and the top layer come free, and the top layer is
+    // what lets this element escape the data-table's overflow clip and the
+    // canvas transform without a z-index high enough to beat both.
+    this.popover = 'auto';
+    this.addEventListener('beforetoggle', this.onBeforeToggle as EventListener);
   }
 
   override disconnectedCallback() {

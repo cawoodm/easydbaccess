@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ Menus and value pickers use the browser's own popovers: always on top, dismissed by a click outside (v0.0.410)
 - ✨ A table of 20,000–50,000 rows is paged like a bigger one, instead of showing the first 20,000 with a note asking you to narrow the filter (v0.0.409)
 - ✨ Charts look better: a colour per category, a grey "Other", rounded bars, separated pie slices, and nothing against the window edge (v0.0.408)
 - ✨ "Which copy do you want to keep?" now says what each copy holds: tables, and for a file its size and when it was last saved (v0.0.407)
@@ -17,6 +18,7 @@
 
 ### Bugs
 
+- 🐛 The column-filter suggestion list sat away from its column once the canvas was zoomed (v0.0.410)
 - 🐛 The folder-sync conflict asked which copy was "the real one" and offered a bare "Overwrite" (v0.0.406)
 - 🐛 Two columns renamed to the same name in different capitalisation saved without a word, and one came back empty (v0.0.403)
 - 🐛 Opening a third or fourth workspace file failed with "No available handles to import to." and showed no tables (v0.0.402)
