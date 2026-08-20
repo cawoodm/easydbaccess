@@ -99,7 +99,11 @@ test('Append adds rows to the chosen table, mapping cells by position', async ({
 
   // The existing schema is untouched by the incoming CSV's different header
   // names, and its cells land in `city`/`pop` by position.
-  await expect.poll(async () => (await rowsOf(page, workspaceId, 'a'))?.values).toEqual(['Bern|133000', 'Chur|37000', 'Zug|30000']);
+  //
+  // Longer than the default 5s poll: the append is a fetch, a dialog answer and
+  // a store write, and on a loaded machine the appended row can land after the
+  // default gives up — which reads as "the row is missing", not "not yet".
+  await expect.poll(async () => (await rowsOf(page, workspaceId, 'a'))?.values, { timeout: 15_000 }).toEqual(['Bern|133000', 'Chur|37000', 'Zug|30000']);
   expect((await rowsOf(page, workspaceId, 'a'))?.fields).toEqual(['city', 'pop']);
   expect(await rowsOf(page, workspaceId, 'b')).toBeNull(); // no second table
 });

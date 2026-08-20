@@ -10,8 +10,9 @@
  *
  * Three cases, in order:
  *
- *  1. **No `query` on the collection** (Dexie, a plugin's own provider) — read
- *     everything and apply the whole request here. Identical to today.
+ *  1. **No `query` on the collection** (a plugin's own provider — a projection,
+ *     a URL source, a Datasette table) — read everything and apply the whole
+ *     request here.
  *  2. **`query` exists and the request is fully pushable** — one narrow read,
  *     and `total` comes back without the rows being fetched.
  *  3. **`query` exists but part of the request is not pushable** — push what is,
@@ -144,14 +145,8 @@ export function applyRowRequest(rows: Row[], req: RowRequest): RowPage {
   return { rows: projectFields(out, req.fields), total };
 }
 
-/**
- * Drop every field the caller did not ask for. A no-op when it asked for all.
- *
- * Exported for the Dexie store, whose windowed read returns rows the reader never
- * sees — the projection has to happen there or `fields` would mean nothing in the
- * browser and something in Electron.
- */
-export function projectFields(rows: Row[], fields: string[] | undefined): Row[] {
+/** Drop every field the caller did not ask for. A no-op when it asked for all. */
+function projectFields(rows: Row[], fields: string[] | undefined): Row[] {
   if (!fields || fields.length === 0) return rows;
   const wanted = new Set(fields);
   return rows.map((r) => ({
@@ -192,9 +187,21 @@ export async function readRows(coll: DataCollection<Row>, req: RowRequest, capWh
   // The slice only travels when everything above it did. Otherwise the backend
   // would count off rows from a set we are about to narrow further.
   const sliceIsSound = pushSearch;
+  /** The cap, and only the cap, is what bounded this read. */
+  let cappedHere = false;
   if (sliceIsSound) {
     if (req.offset != null) q.offset = req.offset;
     if (req.limit != null) q.limit = req.limit;
+    else if (capWhenReadingAll > 0) {
+      // A caller asking for the whole matching set still gets no more than the
+      // cap. Without this the cap applied only where the store could NOT answer
+      // — so a store that could (SQLite) handed back every matching row, and a
+      // filter keeping most of a 600k-row table put all of it in the grid.
+      // `total` still counts every match, because it is a separate `COUNT(*)`
+      // that the LIMIT does not touch.
+      q.limit = capWhenReadingAll;
+      cappedHere = true;
+    }
     // "Skip the count" only makes sense on an answer this module returns as it
     // came. Where the request is finished here, the rows are in hand and counting
     // them costs nothing — so the flag is dropped rather than passed on to a store
@@ -205,8 +212,11 @@ export async function readRows(coll: DataCollection<Row>, req: RowRequest, capWh
   }
 
   const page = await coll.query(q);
-  // Sound and complete: the backend's own answer, `total` included.
-  if (sliceIsSound && !page.partial) return page;
+  // Sound and complete: the backend's own answer, `total` included — plus the
+  // cut this module imposed, which only it can report.
+  if (sliceIsSound && !page.partial) {
+    return cappedHere && page.rows.length >= capWhenReadingAll ? { ...page, truncated: true } : page;
+  }
 
   // A slice off a set that was NOT fully narrowed is unrepairable: the backend
   // counted off rows from a wider set than the caller asked about, and slicing

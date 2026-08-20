@@ -172,7 +172,7 @@ const KIND_WORDS: Record<IssueKind, string> = {
 
 /**
  * The order kinds are named in, and it is fixed rather than the order they were
- * met in. Rows are read in the store's own order — a Dexie key is a random UUID —
+ * met in. Rows are read in the store's own order, which nothing promises,
  * so an encounter order would word the same table's summary differently on every
  * run, and a user comparing two runs would read that as a change in the data.
  */

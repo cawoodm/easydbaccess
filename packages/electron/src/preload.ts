@@ -20,7 +20,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { CurrentDbInfo, DialogResult, CancelledResult } from './db-files';
 import type { DatabaseFileKind, ImportDecision, ImportedTableResult, ImportPreview } from './db-import';
 import type { BrowsableObject, BrowseRow } from './db-browse';
-import type { DistinctPage, RowPage, RowQuery } from '@easydb/shared';
+import type { CloneMode, DistinctPage, RowPage, RowQuery, SqlRunOptions, SqlRunResult, WorkspaceContents } from '@easydb/shared';
 import type { ImportPlan, ImportPlanEntry, ImportProgress } from './db-import';
 
 /** `import:progress` payload — an `ImportProgress` plus which table it is about. */
@@ -31,6 +31,10 @@ const store = {
   countRows: (tableId: string): Promise<number> => ipcRenderer.invoke('store:countRows', tableId),
   queryRows: (tableId: string, q: RowQuery): Promise<RowPage> => ipcRenderer.invoke('store:queryRows', tableId, q),
   distinctValues: (tableId: string, q: { field: string; where?: RowQuery; limit?: number }): Promise<DistinctPage> => ipcRenderer.invoke('store:distinctValues', tableId, q),
+  runSql: (sql: string, opts?: SqlRunOptions): Promise<SqlRunResult> => ipcRenderer.invoke('store:runSql', sql, opts),
+  countWorkspaceContents: (workspaceId: string, opts?: { countRows?: boolean | undefined }): Promise<WorkspaceContents> => ipcRenderer.invoke('store:countWorkspaceContents', workspaceId, opts),
+  deleteWorkspace: (workspaceId: string): Promise<WorkspaceContents> => ipcRenderer.invoke('store:deleteWorkspace', workspaceId),
+  cloneWorkspace: (opts: { from: string; to: string; name: string; mode: CloneMode }): Promise<string> => ipcRenderer.invoke('store:cloneWorkspace', opts),
   findOne: (coll: string, key: string): Promise<unknown | null> => ipcRenderer.invoke('store:findOne', coll, key),
   insert: (coll: string, doc: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('store:insert', coll, doc),
   bulkInsert: (coll: string, docs: Record<string, unknown>[]): Promise<unknown[]> => ipcRenderer.invoke('store:bulkInsert', coll, docs),
@@ -124,6 +128,10 @@ declare global {
       store: {
         find(coll: string, query?: Record<string, unknown>, limit?: number): Promise<unknown[]>;
         countRows(tableId: string): Promise<number>;
+        runSql(sql: string, opts?: SqlRunOptions): Promise<SqlRunResult>;
+        countWorkspaceContents(workspaceId: string, opts?: { countRows?: boolean | undefined }): Promise<WorkspaceContents>;
+        deleteWorkspace(workspaceId: string): Promise<WorkspaceContents>;
+        cloneWorkspace(opts: { from: string; to: string; name: string; mode: CloneMode }): Promise<string>;
         findOne(coll: string, key: string): Promise<unknown | null>;
         insert(coll: string, doc: Record<string, unknown>): Promise<unknown>;
         bulkInsert(coll: string, docs: Record<string, unknown>[]): Promise<unknown[]>;

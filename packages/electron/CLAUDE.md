@@ -2,8 +2,8 @@
 
 Desktop shell **and** desktop storage. A `BrowserWindow` that loads the
 renderer — Vite in dev, the built `frontend/index.html` in production — plus a
-`node:sqlite` store in the main process that the renderer uses instead of
-Dexie/IndexedDB.
+`node:sqlite` store in the main process. The browser build runs the same store
+on sqlite-wasm; this package is the desktop's binding to it.
 
 ## Files
 
@@ -11,7 +11,7 @@ Dexie/IndexedDB.
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/main.ts`                | App entry. Creates the BrowserWindow, picks dev vs prod loader, registers the `store:*` and `db:*` IPC handlers, applies the production CSP, handles `window-all-closed` / `activate`.                                          |
 | `src/sqlite-store.ts`        | The desktop's binding to `EdbStore` (`packages/shared`) plus the connection tuning and file controls. Holds no storage logic — see "Storage layout" below.                                                                      |
-| `src/node-sqlite-driver.ts`  | The `SqlDriver` `EdbStore` runs on, over `node:sqlite`. The browser's file mode binds the same store to sqlite-wasm.                                                                                                            |
+| `src/node-sqlite-driver.ts`  | The `SqlDriver` `EdbStore` runs on, over `node:sqlite`. The browser binds the same store to sqlite-wasm.                                                                                                                        |
 | `src/db-files.ts`            | The store singleton (open / close / switch, remembered path) and the Open / Save As file operations, including the OS dialogs.                                                                                                  |
 | `src/db-import.ts`           | Reads **any** SQLite file's `sqlite_master` and imports its tables and views — a two-phase preview-then-commit so the renderer can resolve name collisions first. Also `probeDatabaseFile`, the guard Open needs.               |
 | `src/db-browse.ts`           | Read-only listing and reading of a file's tables + views, for Browse. Never writes — not even a `-wal`.                                                                                                                         |

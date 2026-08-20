@@ -29,6 +29,7 @@ import * as autoRenderer from '../plugins/auto-renderer.js';
 import * as deleteTable from '../plugins/delete-table.js';
 import * as validate from '../plugins/validate.js';
 import * as tableCopy from '../plugins/table-copy.js';
+import * as sqlConsole from '../plugins/sql-console.js';
 import * as importData from '../plugins/import-data.js';
 import * as autoSync from '../plugins/auto-sync.js';
 import * as views from '../plugins/views.js';
@@ -95,6 +96,7 @@ const modules: PluginModule[] = [
   deleteTable,
   validate,
   tableCopy,
+  sqlConsole,
   importData,
   autoSync,
   views,

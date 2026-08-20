@@ -4,7 +4,7 @@
 // file published somewhere on the web (not a Datasette instance — that has
 // its own dedicated provider in datasette-collection.ts). A Table carrying
 // `source: { type: 'url', config: { url, format } }` routes its rows here
-// instead of Dexie: every render re-fetches (or reuses a cached fetch of)
+// instead of the local database: every render re-fetches (or reuses a cached fetch of)
 // the URL and parses it into rows on the fly.
 //
 // It is read-only and never persisted for the same reason a Datasette

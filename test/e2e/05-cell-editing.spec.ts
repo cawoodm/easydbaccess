@@ -86,8 +86,11 @@ test.describe('cell editing constraints', () => {
     await addRow(page, id, { code: 'A2' });
 
     const panel = page.locator(`#${panelDomId(id)}`);
-    // RxDB query order isn't deterministic across runs; find the input
-    // showing 'A2' specifically and edit IT to collide with the other row.
+    // Both rows on screen first. `.all()` takes a snapshot and does not retry,
+    // so reading it while the grid is still catching up finds one row, or none.
+    await expect(panel.locator('data-table tbody tr:not(.spacer)')).toHaveCount(2);
+    // Row order is not promised by the store; find the input showing 'A2'
+    // specifically and edit IT to collide with the other row.
     const inputs = await panel.locator('data-table tbody tr td input').all();
     let a2Input: (typeof inputs)[number] | null = null;
     for (const inp of inputs) {

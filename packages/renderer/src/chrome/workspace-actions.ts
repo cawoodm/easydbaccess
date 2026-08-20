@@ -7,12 +7,12 @@
 
 import type { Dialogs } from '@easydb/shared';
 import { forgetLastWorkspace, getContext, slugifyWorkspace } from '../app-context.js';
-import { getDb } from '../db/index.js';
+import { workspaceLabel } from '../db/edb/folder-index.js';
+import { storeBridge } from '../db/edb/active-bridge.js';
 import { cloneWorkspace, type CloneMode } from '../db/clone-workspace.js';
-import { countWorkspaceContents, countWorkspaceContentsInStore, deleteWorkspace, deleteWorkspaceFromStore, describeWorkspaceContents } from '../db/delete-workspace.js';
+import { countWorkspaceContents, deleteWorkspace, describeWorkspaceContents } from '../db/delete-workspace.js';
 import { EDB_EXTENSION } from '../db/edb/file-handle.js';
-import { adoptEdbFile, buildEdbFile, chooseEdbTarget } from '../db/edb/new-file.js';
-import { fileOf, forgetWorkspace, knownWorkspaces } from '../db/edb/registry.js';
+import { adoptEdbFile, buildEdbFile, edbTargetNamed } from '../db/edb/new-file.js';
 
 // The three answers of the "what should it start with?" question. Constants
 // because the choice dialog reports back the label the user picked.
@@ -22,7 +22,10 @@ const CLONE_NOTHING = 'Empty workspace';
 
 // Where the new workspace's data lives. Simple is what every workspace has been
 // until now; Advanced puts it in a real SQLite file the user owns.
-const SIMPLE = 'Simple — in this browser (IndexedDB)';
+// "in this browser" is not IndexedDB any more — it is a SQLite database in the
+// OPFS pool, and it survives a reload exactly as a file does. The old label named
+// a storage engine this app stopped using in v0.0.383.
+const SIMPLE = 'Simple — in this browser';
 const ADVANCED = 'Advanced — in a SQLite file you save (.edb)';
 
 /**
@@ -38,9 +41,9 @@ function canUseFileStorage(): boolean {
 
 /**
  * Open a workspace by RELOADING with `?space=<name>`. A reload is the cleanest
- * cut: Dexie collections, panel windows and the plugin host all bind to one
- * workspaceId at boot, so swapping it live would mean tearing down every panel
- * and rebinding every subscription.
+ * cut: the store's collections, panel windows and the plugin host all bind to
+ * one workspaceId at boot, so swapping it live would mean tearing down every
+ * panel and rebinding every subscription.
  */
 export function openWorkspace(name: string): void {
   const sp = new URLSearchParams(location.search);
@@ -59,22 +62,19 @@ function openResolvedWorkspace(): void {
 /** Ask which workspace to switch to, then open it. */
 export async function switchWorkspaceFlow(): Promise<void> {
   const ctx = await getContext();
-  const inStore = await ctx.store.workspaces.find();
-  // The active store holds only the workspaces that live in it, so the rest have
-  // to come from the registry — see `chrome/workspace-selector.ts`.
-  const known = new Set(inStore.map((w) => w.id));
-  const others = [...inStore, ...knownWorkspaces().filter((w) => !known.has(w.id))].filter((w) => w.id !== ctx.workspaceId);
+  const others = (await ctx.store.workspaces.find()).filter((w) => w.id !== ctx.workspaceId);
   if (others.length === 0) {
     ctx.api.ui.dialogs.toast('This is the only workspace.', { kind: 'info', title: 'Workspaces' });
     return;
   }
-  const pick = await ctx.api.ui.dialogs.choice(
-    'Open which workspace?',
-    others.map((w) => w.name),
-    'Switch workspace',
-  );
+  // Titles, like the header selector — the same list of the same things must not
+  // be spelled two ways. The pick comes back as a LABEL, so it is mapped to the
+  // name `?space=` routes on; two workspaces may even carry the same title, and
+  // the first match is as good an answer as a list of identical labels allows.
+  const pick = await ctx.api.ui.dialogs.choice('Open which workspace?', others.map(workspaceLabel), 'Switch workspace');
   if (!pick) return;
-  openWorkspace(pick);
+  const chosen = others.find((w) => workspaceLabel(w) === pick);
+  if (chosen) openWorkspace(chosen.name);
 }
 
 /** Name a new workspace, choose where it is stored and what it inherits, then open it. */
@@ -99,45 +99,36 @@ export async function newWorkspaceFlow(): Promise<void> {
   // What the new workspace inherits. Settings are per-workspace now, so an
   // empty workspace really starts empty — it used to share this one's server
   // URL, tokens and plugin list whether you wanted that or not.
-  //
-  // Cloning reads the workspace on screen out of IndexedDB, so it is only offered
-  // when the workspace on screen is IN IndexedDB. Cloning a file-backed workspace
-  // into browser storage found nothing there and produced a silently empty
-  // "clone" — a copy between stores is the File menu's job (`New .edb file →
-  // Copy this workspace into it`), in the other direction.
-  const fromFile = fileOf(ctx.workspaceId) !== null;
-  let mode: CloneMode = 'empty';
-  if (!fromFile) {
-    const pick = await ctx.api.ui.dialogs.choice(`What should "${name}" start with?`, [CLONE_ALL, CLONE_SETTINGS, CLONE_NOTHING], 'New workspace');
-    if (!pick) return;
-    mode = pick === CLONE_ALL ? 'all' : pick === CLONE_SETTINGS ? 'settings' : 'empty';
-  }
+  const pick = await ctx.api.ui.dialogs.choice(`What should "${name}" start with?`, [CLONE_ALL, CLONE_SETTINGS, CLONE_NOTHING], 'New workspace');
+  if (!pick) return;
+  const mode: CloneMode = pick === CLONE_ALL ? 'all' : pick === CLONE_SETTINGS ? 'settings' : 'empty';
 
   // Create the workspace here rather than letting init() do it on first load:
   // only this side knows what to copy, and the copy must be in place before the
   // new workspace boots.
-  await cloneWorkspace(getDb(), { from: ctx.workspaceId, to: slugifyWorkspace(name), name, mode });
+  await cloneWorkspace(storeBridge(), { from: ctx.workspaceId, to: slugifyWorkspace(name), name, mode });
   openWorkspace(name);
 }
 
 /**
  * Create a workspace that lives in its own `.edb` file, and switch this tab to it.
  *
- * The file starts EMPTY. Cloning an existing workspace into a file is the File
- * menu's "New .edb file → Copy this workspace into it", and having one job in two
- * places would mean two behaviours to keep in step.
+ * The file starts EMPTY, and its name is the workspace's own (`<id>.edb`) — the
+ * same convention Save writes under and Open reads back. To get a COPY of this
+ * workspace in a file, take the Simple path with "Clone everything" and then Save:
+ * that writes the clone into the folder under its own name.
  *
  * The reload at the end is not optional: the store is built once per load, so a
  * tab only changes where it reads from by starting again.
  */
 async function newFileWorkspace(dialogs: Dialogs, name: string): Promise<void> {
   const id = slugifyWorkspace(name);
-  const target = await chooseEdbTarget(dialogs, `${id}${EDB_EXTENSION}`);
+  const target = await edbTargetNamed(dialogs, `${id}${EDB_EXTENSION}`);
   if (!target) return;
   await buildEdbFile(target, id, async (store) => {
     await store.workspaces.insert({ id, name, createdAt: Date.now(), pluginUrls: [] });
   });
-  await adoptEdbFile(target, { id, name });
+  await adoptEdbFile(target);
   await dialogs.alert(`"${name}" now lives in ${target.name}. The page will reload.`, 'New workspace');
   openWorkspace(name);
 }
@@ -158,37 +149,19 @@ async function newFileWorkspace(dialogs: Dialogs, name: string): Promise<void> {
  */
 export async function deleteWorkspaceFlow(): Promise<void> {
   const ctx = await getContext();
-  const inStore = await ctx.store.workspaces.find();
-  const target = inStore.find((w) => w.id === ctx.workspaceId);
+  const all = await ctx.store.workspaces.find();
+  const target = all.find((w) => w.id === ctx.workspaceId);
   if (!target) return;
 
-  // Which store holds it decides which delete runs. Pointed at the wrong one it
-  // reported zero of everything and removed nothing, and the workspace came back
-  // on the next load.
-  const file = fileOf(target.id);
-  const what = describeWorkspaceContents(file ? await countWorkspaceContentsInStore(ctx.store, target.id) : await countWorkspaceContents(getDb(), target.id));
-
-  // Every workspace on this device, not just the ones this store can see.
-  const known = new Set(inStore.map((w) => w.id));
-  const all = [...inStore, ...knownWorkspaces().filter((w) => !known.has(w.id))];
+  const what = describeWorkspaceContents(await countWorkspaceContents(storeBridge(), target.id));
   const isLast = all.length === 1;
   const ok = await ctx.api.ui.dialogs.confirm(
-    `Delete the workspace "${target.name}"?\n\n${what} will be deleted. This cannot be undone.` +
-      (file ? `\n\nThe file "${file}" is left on disk. Only what is inside it goes.` : '') +
-      (isLast ? '\n\nIt is the only workspace, so an empty one will be created in its place.' : ''),
+    `Delete the workspace "${target.name}"?\n\n${what} will be deleted. This cannot be undone.` + (isLast ? '\n\nIt is the only workspace, so an empty one will be created in its place.' : ''),
     'Delete workspace',
   );
   if (!ok) return;
 
-  if (file) {
-    await deleteWorkspaceFromStore(ctx.store, target.id);
-    // The registry entry has to go with it, or the selector keeps offering a
-    // workspace whose record has just been deleted — and opening it would create
-    // an empty one in the file.
-    forgetWorkspace(target.id);
-  } else {
-    await deleteWorkspace(getDb(), target.id);
-  }
+  await deleteWorkspace(storeBridge(), target.id);
   forgetLastWorkspace(target.id);
 
   const survivor = all.find((w) => w.id !== target.id);

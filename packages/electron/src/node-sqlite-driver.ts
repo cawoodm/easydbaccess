@@ -51,6 +51,9 @@ export function nodeSqlDriver(path: string): NodeSqlDriver {
         get: (...p) => stmt.get(...params(p)) as Record<string, unknown> | undefined,
         all: (...p) => stmt.all(...params(p)) as Record<string, unknown>[],
         run: (...p) => void stmt.run(...params(p)),
+        // Lets a caller stop early instead of materialising every row — see
+        // `SqlStatement.iterate`.
+        iterate: (...p) => stmt.iterate(...params(p)) as IterableIterator<Record<string, unknown>>,
       };
     },
     close(): void {

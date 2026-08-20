@@ -205,7 +205,7 @@ export class VizPanel extends LitElement {
       const ctx = await getContext();
       // Bypasses a caching provider where there is one (a live Datasette
       // connection would otherwise hand back the rows it already has). A local
-      // Dexie collection has no `refresh` and is already live, so this is a
+      // collection has no `refresh` and is already live, so this is a
       // deliberate no-op there rather than a missing case.
       await ctx.store
         .rows(tableId)

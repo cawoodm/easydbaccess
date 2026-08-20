@@ -9,24 +9,35 @@ import { bulkAddRows, createTable, panelDomId, readRows, waitForPanel } from './
  * else (`'foo'`) never renders a checkbox at all — it shows as red-bordered
  * raw text with a pencil so the bad value stays visible and fixable instead
  * of being silently coerced to unchecked.
+ *
+ * The column is deliberately UNTYPED with the boolean renderer on it, which is
+ * the only shape all four states can still occur in. A column DECLARED
+ * `type: 'boolean'` is a SQL column of boolean affinity, and
+ * `sql-mapping.ts`'s `encodeValue` reduces whatever is written to it to 1 or 0
+ * — so `'foo'` never survives the round trip there and the invalid state is
+ * unreachable. Untyped means TEXT, which is what a CSV import produces, and
+ * picking the boolean renderer for a text column of `true`/`false` strings is
+ * the ordinary way this cell is met.
  */
 test.describe('cell-boolean four-state rendering', () => {
   test('true/false/empty/invalid render distinctly; empty is clickable; invalid is pencil-fixable', async ({ page }) => {
-    const id = await createTable(page, 'Flags', [{ field: 'flag', type: 'boolean', renderer: 'boolean' }]);
+    const id = await createTable(page, 'Flags', [{ field: 'flag', renderer: 'boolean' }]);
     await waitForPanel(page, id);
 
-    await bulkAddRows(page, id, [{ flag: true }, { flag: false }, { flag: null }, { flag: 'foo' }]);
+    await bulkAddRows(page, id, [{ flag: 'true' }, { flag: 'false' }, { flag: null }, { flag: 'foo' }]);
 
     // Map each stored value to its DOM row index using the SAME query
-    // (`store.rows(tableId).find()`) the component's own live query uses —
-    // Dexie's result order is driven by the underlying index, not insertion
-    // order, so this is how the test learns which <tr> holds which value
-    // rather than assuming an order.
+    // (`store.rows(tableId).find()`) the component's own live query uses,
+    // rather than assuming the rows come back in the order they went in —
+    // `DataCollection.find()` promises no order.
     const rows: Array<{ id: string; data: { flag: unknown } }> = await readRows(page, id);
     const idxOf = (pred: (v: unknown) => boolean) => rows.findIndex((r) => pred(r.data.flag));
-    const trueIdx = idxOf((v) => v === true);
-    const falseIdx = idxOf((v) => v === false);
-    const emptyIdx = idxOf((v) => v === null);
+    const trueIdx = idxOf((v) => v === 'true');
+    const falseIdx = idxOf((v) => v === 'false');
+    // `== null`, not `=== null`: `EdbStore.decodeRow` OMITS a decoded null, so a
+    // cell that holds nothing reads back as an absent key rather than as null —
+    // "a row that stored nothing reads the same as one that never held the key".
+    const emptyIdx = idxOf((v) => v == null);
     const invalidIdx = idxOf((v) => v === 'foo');
     expect([trueIdx, falseIdx, emptyIdx, invalidIdx].every((i) => i >= 0)).toBe(true);
 
@@ -51,6 +62,9 @@ test.describe('cell-boolean four-state rendering', () => {
     await expect(emptyCheckbox).toHaveAttribute('title', /Empty/);
 
     // Clicking the empty checkbox commits true — an empty cell can be filled in.
+    // It arrives at the store as boolean `true` and comes back as the STRING
+    // 'true', because this column is untyped and therefore TEXT: `encodeValue`
+    // stringifies anything it is not told to treat as a boolean or a number.
     await emptyCheckbox.click();
     await expect(emptyCheckbox).toBeChecked();
     const emptyRowId = rows[emptyIdx]!.id;
@@ -59,7 +73,7 @@ test.describe('cell-boolean four-state rendering', () => {
         const fresh = await readRows(page, id);
         return fresh.find((r: { id: string }) => r.id === emptyRowId)?.data.flag;
       })
-      .toBe(true);
+      .toBe('true');
 
     // invalid ('foo') → no checkbox at all; red-bordered raw text + pencil.
     const invalidCell = cellAt(invalidIdx);

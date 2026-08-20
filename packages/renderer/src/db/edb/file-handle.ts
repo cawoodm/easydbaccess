@@ -14,8 +14,11 @@
  * where it could not work, rather than failing on click.
  *
  * A handle survives a reload: it is structured-cloneable, so it goes in
- * IndexedDB and comes back with its permission needing a re-grant (the browser
- * will not carry write permission across a session silently, and should not).
+ * IndexedDB. Its write permission usually does NOT survive with it — the state
+ * reads back as `prompt`, and `requestPermission` needs a user gesture. Chrome
+ * is the exception: a user who chooses "Allow on every visit" makes
+ * `queryPermission` return `granted` on the next load, with no gesture. So
+ * `ensureWritable` READS the state and never assumes either answer.
  */
 
 const DB_NAME = 'easydb-edb-handles';

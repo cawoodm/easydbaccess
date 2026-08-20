@@ -9,6 +9,7 @@
 
 import type { ColumnSpec, ColumnType, PluginRecord, Row, Setting, Table, TableSource, ViewInstance, ViewTemplate, VizAggregate, Workspace } from './types.js';
 import type { DistinctPage, DistinctQuery, QueryPage, RowQuery } from './row-query.js';
+import type { SqlRunner } from './sql-run.js';
 
 // -- Plugin module shape --------------------------------------------------
 
@@ -76,8 +77,9 @@ export interface EventBus {
 
 /**
  * Minimal collection contract the plugin API exposes. Plugins should not
- * depend on the underlying storage (currently Dexie); this interface lets us
- * swap storage adapters without breaking plugins.
+ * depend on the underlying storage (SQLite, over a worker in the browser and
+ * IPC on the desktop); this interface lets us swap storage adapters without
+ * breaking plugins.
  */
 export interface DataCollection<T> {
   find(query?: Partial<T>): Promise<T[]>;
@@ -113,7 +115,7 @@ export interface DataCollection<T> {
   count?(): Promise<number>;
   /**
    * Optional: force a re-read from the backing store and notify subscribers.
-   * Local (Dexie) collections are always live so they don't implement it;
+   * Local collections are always live so they don't implement it;
    * remote-backed collections (e.g. Datasette) that cache reads expose it so a
    * user "Refresh" can bypass the cache. Callers must feature-detect it.
    */
@@ -159,6 +161,17 @@ export interface DataStore {
   viewTemplates: DataCollection<ViewTemplate>;
   /** Per-table view instances rendered read-only in their own windows. */
   viewInstances: DataCollection<ViewInstance>;
+  /**
+   * Raw SQL against the workspace, when the backing store is a real database.
+   *
+   * Optional because not every store is one: a routed collection backed by a
+   * remote source leaves it undefined, so a caller feature-detects rather than
+   * assuming. A store that offers it is a SQLite database — which every
+   * workspace now is, on the desktop and in the browser alike.
+   *
+   * Reads are the default and are enforced by SQLite itself; see `SqlRunOptions`.
+   */
+  sql?: SqlRunner | undefined;
 }
 
 // -- Row-source providers (routing seam) ----------------------------------
@@ -185,7 +198,7 @@ export interface RowSourceCtx {
  * database). Registered via `HostApi.registerRowSource`. When a Table carries
  * a `source` descriptor whose `type` equals this provider's `type`, the store
  * routes `rows(tableId)` to `create(table, ctx)` instead of the default local
- * (Dexie) collection. Tables without a matching `source` are never routed, so
+ * SQLite-backed collection. Tables without a matching `source` are never routed, so
  * registering a provider cannot change how existing local tables behave.
  */
 export interface RowCollectionProvider {
@@ -222,6 +235,16 @@ export interface ButtonSpec {
    * to the far right (used for utility actions like Settings).
    */
   variant?: 'primary' | 'secondary';
+  /**
+   * Draw an attention dot on the button — a small red circle in its corner, the
+   * notification convention.
+   *
+   * For state the user must SEE without opening anything: the File plugin's
+   * unsaved-work marker is the first. Set it on the spec and dispatch
+   * `easydb:refresh-buttons`; a `ButtonSpec` is static and the shell renders from
+   * a snapshot, so nothing re-reads this on its own.
+   */
+  badge?: boolean | undefined;
   /**
    * `ctx.anchor` is the button's own DOM element when the host can supply it
    * (header/footer slot buttons) — use it to anchor a popover/menu under the

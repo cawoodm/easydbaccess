@@ -8,13 +8,18 @@ import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js
  * "non-empty" even with nothing stored.
  */
 test('empty cells go pink and invalid ones get the red outline, whatever the renderer', async ({ page }) => {
-  const id = await createTable(page, 'Mixed', [{ field: 'name' }, { field: 'done', type: 'boolean', renderer: 'boolean' }, { field: 'count', type: 'number' }]);
+  // The invalid case rides on a DATE column rather than a number one. A number
+  // column is REAL affinity and `sql-mapping.ts`'s `encodeValue` turns anything
+  // that will not parse into SQL NULL, so `'12abc'` comes back empty, not
+  // invalid. A date is stored as text verbatim, so a value that does not parse
+  // survives the round trip — which is what the marking is for.
+  const id = await createTable(page, 'Mixed', [{ field: 'name' }, { field: 'done', type: 'boolean', renderer: 'boolean' }, { field: 'due', type: 'date' }]);
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [
-    { name: 'full', done: true, count: 3 },
+    { name: 'full', done: true, due: '2026-01-31' },
     // done is empty although the boolean renderer still draws a checkbox for it;
-    // count holds a value a number column cannot mean.
-    { name: 'gaps', done: null, count: '12abc' },
+    // due holds a value a date column cannot mean.
+    { name: 'gaps', done: null, due: 'next tuesday' },
   ]);
 
   const table = page.locator(`#${panelDomId(id)} data-table`);
@@ -31,8 +36,8 @@ test('empty cells go pink and invalid ones get the red outline, whatever the ren
   await expect(emptyCell).toHaveClass(/t-boolean/);
   await expect(emptyCell.locator('input[type="checkbox"]')).toHaveCount(1);
 
-  // The unparseable number carries the invalid outline, not the pink.
+  // The unparseable date carries the invalid outline, not the pink.
   const badCell = table.locator('td.is-invalid');
-  await expect(badCell).toHaveClass(/t-number/);
+  await expect(badCell).toHaveClass(/t-date/);
   await expect(badCell).not.toHaveClass(/is-null/);
 });

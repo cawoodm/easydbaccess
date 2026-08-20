@@ -3,7 +3,7 @@ import type { DataCollection, DataStore, RowCollectionProvider, RowSourceCtx, Ro
 /**
  * Per-table row-collection routing (Phase 2a of the Datasette live connector).
  *
- * `createDataStore` returns a single Dexie-backed store whose `rows(tableId)`
+ * The base store returns a single local collection whose `rows(tableId)`
  * always yields a local collection. This decorator sits in front of it and,
  * for tables that declare a `source`, delegates `rows(tableId)` to the
  * `RowCollectionProvider` registered for `source.type`. Everything else on the
@@ -16,7 +16,7 @@ import type { DataCollection, DataStore, RowCollectionProvider, RowSourceCtx, Ro
  * local tables read or write.
  */
 export interface RoutedDataStoreDeps {
-  /** The underlying (Dexie) store. */
+  /** The underlying local store. */
   base: DataStore;
   /** Registered providers, keyed by `RowCollectionProvider.type`. */
   providers: Map<string, RowCollectionProvider>;
@@ -34,7 +34,7 @@ export function createRoutedDataStore(deps: RoutedDataStoreDeps): DataStore {
   const { base, providers, tableById, ctx } = deps;
   // Memoise the provider-backed collection per table. `rows(tableId)` is called
   // by every chrome component that touches a table (the grid subscribes AND
-  // finds, the footer counts rows, search reads them). A local Dexie collection
+  // finds, the footer counts rows, search reads them). A local SQL collection
   // is cheap to recreate, but a remote one holds a network-backed cache — giving
   // each caller its own instance would refetch on every call and, worse, fire a
   // burst of identical requests that bot-protection (datasette.io's Cloudflare)

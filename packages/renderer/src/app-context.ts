@@ -1,8 +1,10 @@
 import type { DataStore, EventBus, HostApi, RowSourceCtx, Table } from '@easydb/shared';
-import { createDataStore, createRoutedDataStore, getDb, withUniqueTableNames } from './db/index.js';
+import { createRoutedDataStore, withUniqueTableNames } from './db/index.js';
 import { createIpcDataStore } from './db/data-store-bridge.js';
-import { startEdbSession } from './db/edb/session.js';
-import { adoptLegacyMarker, fileOf, reconcileRoster, rememberWorkspace } from './db/edb/registry.js';
+import { startEdbSession, type EdbSession } from './db/edb/session.js';
+import { adoptFolderFile, adoptLocalDb, planForMissingSpace } from './db/edb/space-adopt.js';
+import { slugifyWorkspace } from './db/edb/space-resolve.js';
+import { showStorageFailure } from './chrome/storage-failure.js';
 import { createEventBus } from './events/bus.js';
 import { createRegistries, type Registries } from './plugin-host/registries.js';
 import { createHostApi } from './plugin-host/api-factory.js';
@@ -21,6 +23,23 @@ export interface AppContext {
 
 let ctxPromise: Promise<AppContext> | null = null;
 
+/**
+ * Start the browser's SQLite session, or put a blocking notice on screen.
+ *
+ * There is no second store to fall back to, so a failure here is fatal by
+ * design. The notice goes up BEFORE the rejection propagates, because the
+ * rejection alone would leave a blank page — `getContext()` is awaited by every
+ * component and nothing else is watching for it.
+ */
+async function startSessionOrExplain(): Promise<EdbSession> {
+  try {
+    return await startEdbSession();
+  } catch (err) {
+    showStorageFailure(err instanceof Error ? err.message : String(err));
+    throw err;
+  }
+}
+
 export function getContext(): Promise<AppContext> {
   if (!ctxPromise) ctxPromise = init();
   return ctxPromise;
@@ -31,33 +50,23 @@ async function init(): Promise<AppContext> {
   // down using this very store — so the store reads the id through this holder,
   // which is filled before any settings access happens.
   let activeWorkspaceId = '';
-  // Electron exposes a `window.easydb.store` bridge to the main-process
-  // SqliteStore (see `db/data-store-bridge.ts`); everywhere else (browser, or
-  // Electron before that bridge lands) keeps using Dexie/IndexedDB. Only
-  // `getDb()` — and the Dexie database it opens — is skipped on the IPC path;
-  // nothing downstream (routing, workspace resolution, plugin host) branches
-  // on which one is active.
-  // A file-backed browser session is the third option, and it reuses the SAME
-  // adapter as Electron: `EdbBridge` implements `EasydbStoreBridge`, so a worker
-  // running sqlite-wasm and a preload talking to the main process are the same
-  // shape to everything downstream. Null here means this load stays on Dexie.
+  // SQLite everywhere, over one adapter. `EdbBridge` implements the same
+  // `EasydbStoreBridge` the Electron preload does, so a worker running
+  // sqlite-wasm and a preload talking to the main process are the same shape to
+  // everything downstream — routing, workspace resolution and the plugin host
+  // all see one store.
   //
-  // WHICH store is a property of the WORKSPACE, so the workspace has to be named
-  // before the store can be built — see `wantedWorkspaceId` for why that is
-  // possible without one. A workspace the registry does not list lives in Dexie,
-  // which is every workspace until the user makes a file.
-  const wanted = wantedWorkspaceId();
-  const edb = window.easydb?.store ? null : await startEdbSession(wanted ? edbFileFor(wanted) : null);
-  const baseStore = window.easydb?.store
-    ? createIpcDataStore(window.easydb.store, () => activeWorkspaceId)
-    : edb
-      ? createIpcDataStore(edb.bridge, () => activeWorkspaceId)
-      : createDataStore(await getDb(), () => activeWorkspaceId);
+  // The two differ only in WHERE the database lives: a file the desktop opened,
+  // or this tab's own SQLite database (`LOCAL_DB_NAME`, or a `.edb` the user
+  // adopted). Persistence is a separate concern from being in SQL mode — the
+  // database is live and queryable whether or not anything has been written to
+  // disk yet.
+  const baseStore = window.easydb?.store ? createIpcDataStore(window.easydb.store, () => activeWorkspaceId) : createIpcDataStore((await startSessionOrExplain()).bridge, () => activeWorkspaceId);
   const events = createEventBus();
   const registries = createRegistries();
 
   // Row-source routing (Phase 2a): tables that declare a `source` are backed
-  // by a registered provider instead of Dexie. `rows(tableId)` needs the
+  // by a registered provider instead of the local database. `rows(tableId)` needs the
   // Table synchronously, so keep a cache primed from a live subscription. A
   // cache miss falls through to the local path, so local tables — and the
   // window before the cache warms — behave exactly as before.
@@ -133,6 +142,15 @@ async function init(): Promise<AppContext> {
     if (hit) {
       workspaceId = hit.id;
     } else {
+      // Not here — but "not in the database this tab happens to have open" is not
+      // the same as "does not exist". `<id>.edb` may be a database this browser
+      // already holds, or a file sitting in the user's workspace folder, and a
+      // link to a workspace has to be able to find it. Anything but `create`
+      // reloads and never comes back. See `db/edb/space-resolve.ts`.
+      const action = await planForMissingSpace(id);
+      if (action === 'adopt-local-db') await adoptLocalDb(id);
+      // These two fall through when what the probe saw has since gone.
+      if (action === 'adopt-folder-file') await adoptFolderFile(id);
       const created = await store.workspaces.insert({
         id,
         name: requested,
@@ -166,25 +184,6 @@ async function init(): Promise<AppContext> {
   // Remember the active workspace so a fresh tab / reload without ?space= comes
   // back to it (see resolution step 2 above).
   persistLastWorkspace(workspaceId);
-
-  // Record which store this workspace turned out to use. The registry is what
-  // lets the selector name a workspace the active store cannot see, in BOTH
-  // directions — a load on a `.edb` never opens IndexedDB, so without this the
-  // browser workspaces would be just as invisible as the file ones used to be.
-  // Written on every boot, so an entry lost with `localStorage` comes back the
-  // next time its workspace is opened, and a rename is picked up.
-  if (!window.easydb?.store) {
-    // Read back rather than taken from `existing`, which was listed before a
-    // `?space=` miss created one — and its name is the typed one, not the slug.
-    const record = await store.workspaces.findOne(workspaceId);
-    const file = edb?.name ?? null;
-    rememberWorkspace({ id: workspaceId, name: record?.name ?? workspaceId, file });
-    // And declare everything else this store holds, so the roster is the union of
-    // both stores after each has been opened once. Without this a user with five
-    // IndexedDB workspaces sees only the ones opened since, and the two stores
-    // list different sets — see `reconcileRoster`.
-    reconcileRoster(record && !existing.some((w) => w.id === record.id) ? [...existing, record] : existing, file);
-  }
 
   const api = createHostApi({
     store,
@@ -263,35 +262,18 @@ async function init(): Promise<AppContext> {
   return { store, events, workspaceId, registries, api };
 }
 
+/**
+ * The workspace the URL asks for.
+ *
+ * `?space=` is the spelling every link in this app writes. `?workspace=` is
+ * accepted because it is what people type from memory, and a parameter that is
+ * silently ignored looks like the workspace itself failed to load.
+ */
 function readWorkspaceFromUrl(): string | null {
   if (typeof location === 'undefined') return null;
   const sp = new URLSearchParams(location.search);
-  const v = sp.get('space');
+  const v = sp.get('space') ?? sp.get('workspace');
   return v && v.trim().length > 0 ? v.trim() : null;
-}
-
-/**
- * Which workspace this load is heading for, decided WITHOUT a store.
- *
- * Needed because the store depends on the answer: a file-backed workspace is
- * served by a sqlite-wasm worker and every other one by Dexie. Both inputs are
- * readable before any store exists — `?space=` is in the URL and the last-opened
- * id is in `localStorage` — which is what makes per-workspace storage possible at
- * all.
- *
- * Null means "no preference", and that resolves to Dexie: a first visit has no
- * file, and the full resolution below (first workspace, or a created `default`)
- * needs a store to run at all.
- */
-function wantedWorkspaceId(): string | null {
-  const requested = readWorkspaceFromUrl();
-  if (requested) return slugifyWorkspace(requested);
-  return readLastWorkspace();
-}
-
-/** The file `workspaceId` lives in, taking over the pre-registry marker once. */
-function edbFileFor(workspaceId: string): string | null {
-  return fileOf(workspaceId) ?? adoptLegacyMarker(workspaceId, readWorkspaceFromUrl() ?? workspaceId);
 }
 
 /** Device-local key holding the id of the workspace last opened on this origin. */
@@ -329,14 +311,7 @@ function persistLastWorkspace(id: string): void {
   }
 }
 
-/** Workspace name → id. Only `a-z0-9_-` survive, so an id never contains the
- *  `::` that separates a setting's workspace from its name (see `settingId`). */
-export function slugifyWorkspace(s: string): string {
-  return (
-    s
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'default'
-  );
-}
+// `slugifyWorkspace` moved to `db/edb/space-resolve.ts`, next to the file-name
+// rules it has to agree with. Re-exported because it is part of this module's
+// published surface — `chrome/` and the plugins import it from here.
+export { slugifyWorkspace } from './db/edb/space-resolve.js';

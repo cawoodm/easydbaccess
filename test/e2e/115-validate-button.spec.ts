@@ -148,8 +148,15 @@ test('renaming the column makes it the user’s own, and the next run makes a ne
   await dialogs(page).getByRole('button', { name: 'Close' }).click();
   await expect(gridRows(page, id)).toHaveCount(3);
 
-  // Rename `_error` → `kept`, as the columns editor does: the field is re-keyed in
-  // every row, so the messages come along as ordinary data.
+  // Rename `_error` → `kept`, as the columns editor does: patch the columns, then
+  // re-key the rows so the messages come along as ordinary data.
+  //
+  // Re-keyed only where the old field is STILL THERE, which is what
+  // `renameRowFields` does and why this has to copy it. The store moves the
+  // values itself — a positional rename becomes `ALTER TABLE … RENAME COLUMN`
+  // (`edb-store.ts`) — so by the time these rows are read the messages are
+  // already under `kept`, and writing `kept: _error ?? ''` over them would empty
+  // the column this test is about.
   await page.evaluate(async (tid) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ctx = (window as any).__easydb;
@@ -158,6 +165,7 @@ test('renaming the column makes it the user’s own, and the next run makes a ne
     await ctx.store.tables.patch(tid, { columns, updatedAt: Date.now() });
     const rows = (await ctx.store.rows(tid).find()) as Array<{ id: string; data: Record<string, unknown> }>;
     for (const r of rows) {
+      if (!Object.prototype.hasOwnProperty.call(r.data, '_error')) continue;
       const { _error, ...rest } = r.data;
       await ctx.store.rows(tid).patch(r.id, { data: { ...rest, kept: _error ?? '' }, updatedAt: Date.now() });
     }

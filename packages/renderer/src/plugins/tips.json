@@ -15,7 +15,7 @@
     },
     {
       "id": "a-workspace-can-live-in-a-real-sqlite-file-you-s",
-      "text": "A workspace can live in a real SQLite file you save — the File button, or pick Advanced when you make one"
+      "text": "A workspace can live in a real SQLite file you save — press Save, or pick Advanced when you make one"
     }
   ]
 }

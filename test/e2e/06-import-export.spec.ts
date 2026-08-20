@@ -170,7 +170,6 @@ test.describe('import / export', () => {
   test('CSV drop onto existing table name opens the import-mode choice dialog', async ({ page }) => {
     // Pre-existing table named "people".
     await createTable(page, 'people', [{ field: 'name' }]);
-    await addRow(page, '', {}); // no-op; just ensures __easydb is ready
 
     const dropPromise = dropFile(page, 'people.csv', 'name\nCarol\nDan', 'text/csv');
     await answerCsvDropPrompt(page);

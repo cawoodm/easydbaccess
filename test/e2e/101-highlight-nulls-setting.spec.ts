@@ -27,12 +27,16 @@ const openSettings = async (page: import('@playwright/test').Page) => {
 const nullSwitch = (dlg: import('@playwright/test').Locator) => dlg.locator('.field', { hasText: 'Highlight empty cells' }).locator('label.scope', { hasText: 'enabled' }).locator('input');
 
 test('the switch turns the pink off and on again while the table stays open', async ({ page }) => {
-  const id = await createTable(page, 'Mixed', [{ field: 'name' }, { field: 'count', type: 'number' }]);
+  // The bad value sits in a DATE column: a number column is REAL affinity, and
+  // `sql-mapping.ts`'s `encodeValue` turns anything that will not parse into SQL
+  // NULL — so `'12abc'` would come back as a second EMPTY cell rather than an
+  // invalid one. A date is stored as text verbatim, so it survives to be marked.
+  const id = await createTable(page, 'Mixed', [{ field: 'name' }, { field: 'due', type: 'date' }]);
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [
-    { name: 'full', count: 3 },
-    { name: 'gaps', count: null },
-    { name: 'bad', count: '12abc' },
+    { name: 'full', due: '2026-01-31' },
+    { name: 'gaps', due: null },
+    { name: 'bad', due: 'next tuesday' },
   ]);
 
   const table = page.locator(`#${panelDomId(id)} data-table`);

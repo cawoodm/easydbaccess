@@ -17,7 +17,6 @@
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "chart.js": "^4.4.7",
     "d3-cloud": "^1.2.7",
-    "dexie": "^4.0.10",
     "leaflet": "^1.9.4",
     "lit": "^3.2.0",
     "material-icons": "^1.13.14"

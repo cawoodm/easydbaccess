@@ -3,7 +3,7 @@
 // Rows in, plottable frame out. The one place that decides what a chart of a
 // table actually MEANS.
 //
-// DOM-free, Dexie-free, no Lit — so vitest exercises it directly, the same way
+// DOM-free, store-free, no Lit — so vitest exercises it directly, the same way
 // `views/view-render.ts` and `plugins/projection-compute.ts` are tested. It sits
 // in the renderer rather than `@easydb/shared` for one reason: a scripted column
 // has no value until `util/column-script.ts` runs it here, so aggregation has to
@@ -345,7 +345,7 @@ export function aggregateRows(rows: readonly Row[], columns: readonly ColumnSpec
    * Tie-break by category label.
    *
    * Load-bearing, not tidiness: buckets are built in the order rows arrive, and
-   * rows arrive in whatever order the store returns them — uuid order for Dexie,
+   * rows arrive in whatever order the store returns them —
    * not insertion order. So two categories with equal measures would swap places
    * between reads, and a chart whose equal bars reshuffle on every reload looks
    * broken. Comparing labels makes the order a function of the data alone.

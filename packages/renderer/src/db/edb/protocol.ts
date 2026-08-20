@@ -1,4 +1,4 @@
-import type { DistinctQuery, RowQuery } from '@easydb/shared';
+import type { CloneMode, DistinctQuery, RowQuery } from '@easydb/shared';
 
 /**
  * The worker protocol.
@@ -12,6 +12,17 @@ import type { DistinctQuery, RowQuery } from '@easydb/shared';
 /** A call the main thread makes into the worker. */
 export type EdbRequest =
   | { id: number; op: 'open'; bytes: Uint8Array | null; name: string }
+  /**
+   * Put a database into the substrate under `name`, WITHOUT switching to it.
+   *
+   * What Open and Convert need. Both produce the bytes of a file this tab is
+   * about to adopt, and adopting is a reload — so the bytes have to be where the
+   * next boot will look before the reload happens. They cannot be placed by a
+   * throwaway worker: the `opfs-sahpool` VFS is exclusive origin-wide, so a
+   * second worker never gets the pool and writes its copy somewhere the boot
+   * does not read.
+   */
+  | { id: number; op: 'importBytes'; name: string; bytes: Uint8Array }
   /** The OPFS mirror's bytes for a workspace, if it has any. Needs no file permission. */
   | { id: number; op: 'restore'; name: string }
   | { id: number; op: 'find'; coll: string; query?: Record<string, unknown> | undefined; limit?: number | undefined }
@@ -26,16 +37,44 @@ export type EdbRequest =
   | { id: number; op: 'countRows'; tableId: string }
   | { id: number; op: 'queryRows'; tableId: string; query: RowQuery }
   | { id: number; op: 'distinctValues'; tableId: string; query: DistinctQuery }
+  /**
+   * One arbitrary SQL statement. Read-only unless `write` is set — the worker
+   * enforces that through SQLite, not by inspecting the statement.
+   */
+  | { id: number; op: 'runSql'; sql: string; params?: unknown[] | undefined; write?: boolean | undefined; maxRows?: number | undefined }
+  /**
+   * Whole-workspace operations, which `DataStore` cannot express: its `settings`
+   * view is scoped to the ACTIVE workspace, so nothing above the store can see
+   * another workspace's settings to copy or delete them.
+   */
+  | { id: number; op: 'countWorkspaceContents'; workspaceId: string; countRows?: boolean | undefined }
+  | { id: number; op: 'deleteWorkspace'; workspaceId: string }
+  | { id: number; op: 'cloneWorkspace'; from: string; to: string; name: string; mode: CloneMode }
   | { id: number; op: 'export' }
   /**
    * Write the OPFS mirror NOW, without waiting for the debounce.
    *
    * What makes Open and Convert work. Both put bytes into a worker and then
    * reload the page, and the boot after that reload reads the mirror — never the
-   * user's file, which would need a permission gesture no boot has. Without a
-   * forced write the reload would find no mirror and start empty.
+   * user's file, which boot does not read (see `session.ts`). Without a forced
+   * write the reload would find no mirror and start empty.
    */
   | { id: number; op: 'flush' }
+  /**
+   * Does this browser already hold a database of this name?
+   *
+   * Asked by `?space=NAME` resolution, which has to tell "a workspace this
+   * browser has under a name the OPEN database does not mention" from "a name
+   * nobody has ever used". Deliberately does NOT open the database: opening
+   * creates the pool file, which would make every answer yes.
+   */
+  | { id: number; op: 'hasDatabase'; name: string }
+  /**
+   * The workspace records inside a `.edb`'s bytes, read in a throwaway in-memory
+   * database. What a folder scan uses to rebuild the workspace list without
+   * importing every file into the pool.
+   */
+  | { id: number; op: 'peekWorkspaces'; bytes: Uint8Array }
   | { id: number; op: 'dbName' };
 
 /** What comes back. A `changed` message is unsolicited and carries no id. */
@@ -56,8 +95,10 @@ export type EdbResponse =
    */
   | { warning: string };
 
-/** Collections whose writes should be announced as row changes scoped to a table. */
-export const ROW_COLLECTION = 'rows';
+/**
+ * `ROW_COLLECTION` used to live here. It is now in `@easydb/shared`
+ * (`change-scope.ts`), beside the rule that reads it, so the two cannot drift.
+ */
 
 /**
  * One request minus the id the bridge assigns.

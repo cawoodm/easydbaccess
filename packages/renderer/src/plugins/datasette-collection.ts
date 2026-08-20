@@ -2,7 +2,7 @@
 //
 // Phase 2c: a live read-write `DataCollection<Row>` backed by a remote Datasette
 // table. Registered as a row-source provider (Phase 2a seam) so a Table whose
-// `source.type === 'datasette'` routes here instead of Dexie. Reads follow the
+// `source.type === 'datasette'` routes here instead of the local database. Reads follow the
 // cursor (datasette-client.fetchRows); writes map straight onto the JSON write
 // API (insert / update-by-pk / delete-by-pk), authenticated with a device-local
 // token. Row identity is the tilde-encoded primary key, so a row's id is exactly

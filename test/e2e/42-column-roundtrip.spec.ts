@@ -64,19 +64,22 @@ test.describe('column round-trip through the editor', () => {
   test('a boolean column with no renderer shows its raw value, not a checkbox', async ({ page }) => {
     const id = await createTable(page, 'Flags', [{ field: 'flag', type: 'boolean' }]);
     await waitForPanel(page, id);
-    await addRow(page, id, { flag: 'maybe' });
+    await addRow(page, id, { flag: false });
 
     const panel = page.locator(`#${panelDomId(id)}`);
     const cellInput = panel.locator('data-table tbody tr td input').first();
     await expect(cellInput).toHaveAttribute('type', 'text');
-    await expect(cellInput).toHaveValue('maybe');
+    await expect(cellInput).toHaveValue('false');
     // No checkbox anywhere in the row — the old fallback rendered one.
     await expect(panel.locator('data-table tbody tr td input[type="checkbox"]')).toHaveCount(0);
 
-    // Typing round-trips exactly like any other string column: the raw text
-    // is stored verbatim, no boolean coercion.
+    // Typing round-trips, but through the column's declared type: a boolean
+    // column is a SQL column of boolean affinity, so what is typed is stored as
+    // a real `true`/`false` rather than kept as the text that was typed. That
+    // is `sql-mapping.ts`'s `encodeValue`, and it is why an arbitrary string
+    // cannot sit in a boolean column at all.
     await cellInput.fill('true');
     await cellInput.dispatchEvent('change');
-    await expect.poll(async () => (await readRows(page, id))[0]?.data.flag).toBe('true');
+    await expect.poll(async () => (await readRows(page, id))[0]?.data.flag).toBe(true);
   });
 });

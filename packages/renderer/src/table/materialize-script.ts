@@ -10,7 +10,7 @@
 // can be exported, synced, filtered and edited like any other column.
 //
 // Store-shaped but not store-bound — it takes the row collection as an argument,
-// so the rules below are unit-testable without Dexie.
+// so the rules below are unit-testable without a store.
 
 import type { DataCollection, Row } from '@easydb/shared';
 import { runColumnScript } from '../util/column-script.js';

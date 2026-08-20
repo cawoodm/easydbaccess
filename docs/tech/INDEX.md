@@ -7,6 +7,7 @@ changing code. For the user guide (how to use the app) see
 - [Technology & Architecture](TECH.md) — start here
 - [Storage](STORAGE.md)
 - [`.edb` files — a workspace in SQLite](EDB.md)
+- [SQL](SQL.md) — running SQL against a workspace, from the console or a plugin
 - [Plugins](PLUGINS.md)
 - [Settings](SETTINGS.md)
 - [Commands](COMMANDS.md)

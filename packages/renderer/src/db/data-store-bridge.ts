@@ -1,4 +1,5 @@
 import type {
+  CloneMode,
   ColumnSpec,
   DataCollection,
   DataStore,
@@ -9,13 +10,16 @@ import type {
   RowPage,
   RowQuery,
   Setting,
+  SqlRunOptions,
+  SqlRunResult,
   Table,
   Unsubscribe,
   ViewInstance,
   ViewTemplate,
   Workspace,
+  WorkspaceContents,
 } from '@easydb/shared';
-import { settingId } from './dexie-db.js';
+import { settingId } from '@easydb/shared';
 
 /**
  * A `DataStore` over an ASYNC MESSAGE BRIDGE — nothing here is Electron-specific.
@@ -48,6 +52,21 @@ export interface EasydbStoreBridge {
    * `queryRows`: an older preload does not have it, and the caller feature-detects.
    */
   distinctValues?(tableId: string, q: DistinctQuery): Promise<DistinctPage>;
+  /**
+   * One arbitrary SQL statement against the workspace. Optional for the same
+   * reason as the two above — and its presence is also what tells the chrome
+   * this store is a real database, so a SQL console can be offered at all.
+   */
+  runSql?(sql: string, opts?: SqlRunOptions): Promise<SqlRunResult>;
+  /**
+   * Whole-workspace operations. `DataStore` cannot express these — its
+   * `settings` view is scoped to the ACTIVE workspace — so they sit on the
+   * bridge rather than on the store the plugins see. Optional for the same
+   * reason as the reads above: an older preload does not have them.
+   */
+  countWorkspaceContents?(workspaceId: string, opts?: { countRows?: boolean | undefined }): Promise<WorkspaceContents>;
+  deleteWorkspace?(workspaceId: string): Promise<WorkspaceContents>;
+  cloneWorkspace?(opts: { from: string; to: string; name: string; mode: CloneMode }): Promise<string>;
   findOne(coll: string, key: string): Promise<unknown | null>;
   insert(coll: string, doc: Record<string, unknown>): Promise<unknown>;
   bulkInsert(coll: string, docs: Record<string, unknown>[]): Promise<unknown[]>;
@@ -218,23 +237,20 @@ declare global {
 }
 
 /**
- * IPC-backed DataStore. Implements `DataCollection<T>` from the plugin API
- * exactly like `data-store-dexie.ts`, but every operation is a round trip to
- * the main-process `SqliteStore` (see `packages/electron/src/sqlite-store.ts`)
- * through `window.easydb.store`. Plugins never see this distinction — they
- * only ever hold a `DataStore`.
+ * The app's ONE `DataStore`. Every operation is a round trip to an `EdbStore`
+ * over a transport: `window.easydb.store` (Electron IPC, main process) or the
+ * SQLite worker's bridge (the browser). Plugins never see which — they only
+ * ever hold a `DataStore`.
  *
- * Subscriptions have no local equivalent of Dexie's `liveQuery`: the bridge
- * only tells us WHICH collection changed (`onChanged`), not what changed, so
- * every notification re-reads the whole collection over IPC — matching
- * Dexie's own "re-run the query on any write" granularity, just coarser (an
- * unrelated table's row write still re-runs a `rows(otherTableId)` view,
- * exactly as an unrelated Dexie write would re-run its `liveQuery`). See
- * `subscribeToCollection` for how a slow re-run is kept from clobbering a
- * faster, newer one.
+ * Subscriptions are re-reads, not deltas: the transport says WHICH collection
+ * changed (`onChanged`) and, for a row write, which TABLE, so a notification
+ * re-runs the whole query for the views that care. Coarse, but never wrong —
+ * and the table scope is what keeps a write to one table from waking every
+ * other open grid. See `subscribeToCollection` for how a slow re-run is kept
+ * from clobbering a faster, newer one.
  */
 
-/** Every collection name the main-process store recognises (mirrors `dexie-db.ts`). */
+/** Every collection name the store recognises (mirrors `edb-store.ts`'s `DOC_COLLECTIONS` plus `tables` and `rows`). */
 type CollName = 'workspaces' | 'tables' | 'rows' | 'settings' | 'plugins' | 'viewTemplates' | 'viewInstances';
 
 /**
@@ -283,9 +299,9 @@ function subscribeToCollection<T>(bridge: EasydbStoreBridge, collName: CollName,
 
 /**
  * Plain (non-scoped, non-view) collection over the bridge. The bridge's own
- * `find` already does the equality filtering `matchesAll` does in the Dexie
- * wrapper (see `sqlite-store.ts`'s `find`), so a query object is passed
- * straight through instead of re-filtering client-side.
+ * `find` already does the equality filtering (see `edb-store.ts`'s `find`), so
+ * a query object is passed straight through instead of re-filtering
+ * client-side.
  */
 function wrapIpc<T>(bridge: EasydbStoreBridge, collName: CollName): DataCollection<T> {
   const queryAll = (query?: Partial<T>): Promise<T[]> => bridge.find(collName, query as Record<string, unknown> | undefined) as Promise<T[]>;
@@ -310,9 +326,8 @@ function wrapIpc<T>(bridge: EasydbStoreBridge, collName: CollName): DataCollecti
     },
     async patch(id, patch) {
       // sqlite-store's patch already merges+persists+returns the full updated
-      // doc (and throws if `id` doesn't exist, propagated over IPC as a
-      // rejected promise) — no separate re-fetch needed, unlike the Dexie
-      // wrapper which has to `update` then `get` as two calls.
+      // doc (and throws if `id` doesn't exist, propagated over the transport as
+      // a rejected promise) — no separate re-fetch needed.
       return (await bridge.patch(collName, id, patch as Record<string, unknown>)) as T;
     },
     async remove(id) {
@@ -329,12 +344,10 @@ function wrapIpc<T>(bridge: EasydbStoreBridge, collName: CollName): DataCollecti
 }
 
 /**
- * `rows(tableId)` returns a view scoped to one logical table, mirroring
- * `data-store-dexie.ts`'s `rowsView`: inserts auto-stamp `tableId`, queries
- * auto-filter by it. There is one logical `rows` collection on the main-
- * process side too (see `sqlite-store.ts`'s `COLLECTIONS.rows`) — `tableId`
- * is a promoted column there, so filtering by it is a real SQL WHERE, not a
- * client-side scan.
+ * `rows(tableId)` returns a view scoped to one logical table: inserts
+ * auto-stamp `tableId`, queries auto-filter by it. On the store's side each
+ * logical table really IS its own SQL table, so `tableId` selects which table
+ * to read rather than filtering a column.
  */
 /**
  * Most rows a single table view will pull over IPC.
@@ -395,11 +408,9 @@ function rowsViewIpc(bridge: EasydbStoreBridge, tableId: string): DataCollection
       await bridge.bulkRemove('rows', ids);
     },
     subscribe(fn): Unsubscribe {
-      // An ordinary write broadcasts 'rows' with no scope, so any write to any
-      // table re-runs this view — coarse but never wrong, matching the Dexie
-      // view's own `liveQuery` granularity. An import scopes its broadcast to
-      // the table it filled, and passing `tableId` here is what lets the other
-      // open tables sit that one out.
+      // A row write broadcasts the table it touched, and passing `tableId`
+      // here is what lets the other open tables sit it out. A broadcast with
+      // no scope wakes every row view — coarse but never wrong.
       return subscribeToCollection(bridge, 'rows', () => fetchAll(), fn, tableId);
     },
     /**
@@ -433,16 +444,14 @@ function rowsViewIpc(bridge: EasydbStoreBridge, tableId: string): DataCollection
 }
 
 /**
- * A view over the settings of ONE workspace — same contract and physical-key
- * scheme as `data-store-dexie.ts`'s `settingsView`. Callers address a setting
- * by its logical `name`; this maps it to the physical `<workspaceId>::<name>`
- * key (`settingId`, shared with the Dexie implementation and with
- * `sqlite-store.ts`'s `settings` collection, whose primary key IS that
- * composite string) so the same name can exist once per workspace.
+ * A view over the settings of ONE workspace. Callers address a setting by its
+ * logical `name`; this maps it to the physical `<workspaceId>::<name>` key
+ * (`settingId`, shared with `edb-store.ts`'s `settings` collection, whose
+ * primary key IS that composite string) so the same name can exist once per
+ * workspace.
  *
  * `workspaceId` is a getter, not a value — see `createIpcDataStore` below.
- * An incoming `key`/`workspaceId` on a write is ignored and re-derived, same
- * as the Dexie version.
+ * An incoming `key`/`workspaceId` on a write is ignored and re-derived.
  */
 function settingsViewIpc(bridge: EasydbStoreBridge, workspaceId: () => string): DataCollection<Setting> {
   const stamp = (doc: Partial<Setting> & { name: string }): Setting => ({
@@ -502,9 +511,8 @@ function settingsViewIpc(bridge: EasydbStoreBridge, workspaceId: () => string): 
 }
 
 /**
- * `workspaceId` is a getter, not a value, for the same reason as the Dexie
- * store: `app-context.ts` builds the store before the active workspace is
- * resolved, so the id isn't known yet here.
+ * `workspaceId` is a getter, not a value: `app-context.ts` builds the store
+ * before the active workspace is resolved, so the id isn't known yet here.
  */
 export function createIpcDataStore(bridge: EasydbStoreBridge, workspaceId: () => string): DataStore {
   return {
@@ -515,5 +523,10 @@ export function createIpcDataStore(bridge: EasydbStoreBridge, workspaceId: () =>
     viewTemplates: wrapIpc<ViewTemplate>(bridge, 'viewTemplates'),
     viewInstances: wrapIpc<ViewInstance>(bridge, 'viewInstances'),
     rows: (tableId: string) => rowsViewIpc(bridge, tableId),
+    // Present only when the transport offers it, so `store.sql` is a truthful
+    // answer to "can this workspace run SQL?" rather than a method that rejects.
+    // `runSql` is read-bound by default in the store itself; nothing is relaxed
+    // by handing the capability over here.
+    sql: bridge.runSql ? { run: (sql, opts) => bridge.runSql!(sql, opts) } : undefined,
   };
 }

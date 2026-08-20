@@ -3,10 +3,10 @@ import type { DataStore, Row, Setting, Table } from '@easydb/shared';
 /**
  * Copy one workspace from one store into another.
  *
- * This is what "Save this workspace as a file" runs. The source is the browser's
- * Dexie store and the target is a fresh `.edb` in the worker, but nothing here
- * knows that. Both sides are plain `DataStore`s, so the same function also copies
- * a file back into browser storage, or one file into another.
+ * This is what "Save this workspace as a file" runs. It is how ONE workspace is
+ * extracted from a database that holds several. Both sides are plain
+ * `DataStore`s, so the same function copies a file into the local database, or
+ * one file into another.
  *
  * The copy is ADDITIVE. It never deletes from the source. A user who converts a
  * workspace and then goes back to browser storage still finds everything there.

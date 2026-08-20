@@ -85,7 +85,7 @@ export function init(api: HostApi): void {
   });
 
   // Tables carrying `source: { type: 'datasette', … }` are backed by a live
-  // read-write collection instead of Dexie. Snapshot imports are unaffected —
+  // read-write collection instead of the local database. Snapshot imports are unaffected —
   // they create plain local tables with no `source`. Guarded so a host without
   // this seam still lists the connector above.
   if (typeof api.registerRowSource === 'function') {

@@ -1,4 +1,4 @@
-import type { DistinctPage, DistinctQuery, RowPage, RowQuery } from '@easydb/shared';
+import type { DistinctPage, DistinctQuery, RowPage, RowQuery, SqlRunResult, WorkspaceContents } from '@easydb/shared';
 import type { EasydbStoreBridge } from '../data-store-bridge.js';
 import type { EdbCall, EdbRequest, EdbResponse } from './protocol.js';
 
@@ -19,10 +19,20 @@ export interface EdbBridge extends EasydbStoreBridge {
   /** Replace the contents — a fresh workspace, or a file the user just opened. */
   open(bytes: Uint8Array | null, name: string): Promise<void>;
   /**
+   * Put a database under `name` where the next boot will find it, without
+   * switching to it.
+   *
+   * Open and Convert both end in a reload, and the bytes have to be in place
+   * first. Only this worker can put them there: the `opfs-sahpool` VFS is
+   * exclusive origin-wide, so the throwaway worker that BUILT them never got the
+   * pool and wrote its copy where no boot looks.
+   */
+  importBytes(name: string, bytes: Uint8Array): Promise<void>;
+  /**
    * The OPFS mirror's bytes for a workspace, or null.
    *
-   * What a reload uses: the mirror needs no file permission, so the workspace
-   * comes back without the user gesture a `FileSystemFileHandle` would demand.
+   * What a reload uses: the mirror needs no file permission at all, so the
+   * workspace comes back whatever state the `FileSystemFileHandle` is in.
    */
   restore(name: string): Promise<Uint8Array | null>;
   /**
@@ -32,6 +42,20 @@ export interface EdbBridge extends EasydbStoreBridge {
    * Convert both do, because the boot reads the mirror and nothing else.
    */
   flush(): Promise<void>;
+  /**
+   * Does this browser already hold a database of that name?
+   *
+   * `?space=NAME` resolution asks before adopting anything, so a link can reach a
+   * workspace this browser has but the OPEN database has never heard of.
+   */
+  hasDatabase(name: string): Promise<boolean>;
+  /**
+   * The workspace records inside a `.edb`'s bytes, without adopting the file.
+   *
+   * A folder scan calls this once per file. Nothing is imported and the live
+   * session is untouched — see the worker's own note.
+   */
+  peekWorkspaces(bytes: Uint8Array): Promise<Record<string, unknown>[]>;
   terminate(): void;
 }
 
@@ -78,7 +102,10 @@ export function createEdbBridge(): EdbBridge {
   return {
     open: (bytes, name) => call<void>({ op: 'open', bytes, name }),
     restore: (name) => call<Uint8Array | null>({ op: 'restore', name }),
+    importBytes: (name, bytes) => call<void>({ op: 'importBytes', name, bytes }),
     flush: () => call<void>({ op: 'flush' }),
+    hasDatabase: (name) => call<boolean>({ op: 'hasDatabase', name }),
+    peekWorkspaces: (bytes) => call<Record<string, unknown>[]>({ op: 'peekWorkspaces', bytes }),
     export: () => call<Uint8Array>({ op: 'export' }),
     find: (coll, query, limit) => call<unknown[]>({ op: 'find', coll, query, limit }),
     findOne: (coll, key) => call<unknown | null>({ op: 'findOne', coll, key }),
@@ -94,6 +121,12 @@ export function createEdbBridge(): EdbBridge {
     // Feature-detected by the caller, so declaring it here is what turns a
     // funnel's value list from a client-side scan into a SQL GROUP BY.
     distinctValues: (tableId, q: DistinctQuery) => call<DistinctPage>({ op: 'distinctValues', tableId, query: q }),
+    // Also feature-detected: its presence is what tells the chrome this
+    // workspace is a real database it can offer a SQL console for.
+    runSql: (sql, opts) => call<SqlRunResult>({ op: 'runSql', sql, params: opts?.params, write: opts?.write, maxRows: opts?.maxRows }),
+    countWorkspaceContents: (workspaceId, opts) => call<WorkspaceContents>({ op: 'countWorkspaceContents', workspaceId, countRows: opts?.countRows }),
+    deleteWorkspace: (workspaceId) => call<WorkspaceContents>({ op: 'deleteWorkspace', workspaceId }),
+    cloneWorkspace: (opts) => call<string>({ op: 'cloneWorkspace', ...opts }),
     dbPath: () => call<string>({ op: 'dbName' }),
     onWarning(cb) {
       warners.add(cb);

@@ -6,7 +6,6 @@ import { defineHostDialogs } from '@marccawood/lit-dialogs';
 import { defineToastHost } from '@marccawood/lit-toast';
 import { getContext } from '../app-context.js';
 import { hasColumnDrag } from '../table/column-drag.js';
-import { RowLimitError } from '../db/row-budget.js';
 import '../dialogs/csv-paste-dialog.js';
 import type { CsvPasteDialog } from '../dialogs/csv-paste-dialog.js';
 import '../dialogs/new-table-dialog.js';
@@ -125,6 +124,26 @@ export class AppShell extends LitElement {
       }
       button.primary:hover {
         background: #2563eb;
+      }
+      /* The attention dot (ButtonSpec.badge) sits in the button's corner, half
+         outside it, the way an unread count does. No backticks in here: this is a
+         tagged template literal and one would end it. */
+      button.primary:has(.badge),
+      button.slot:has(.badge),
+      button.icon-btn:has(.badge) {
+        position: relative;
+      }
+      .badge {
+        position: absolute;
+        top: -3px;
+        right: -3px;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #ef4444;
+        /* A ring in the header's own colour, so the dot reads as a separate mark
+           rather than a smudge on the button's edge. */
+        box-shadow: 0 0 0 2px #1f2937;
       }
       .search-wrap {
         position: relative;
@@ -323,6 +342,7 @@ export class AppShell extends LitElement {
     document.removeEventListener('easydb:open-command-palette', this.onOpenCommandPalette);
     document.removeEventListener('easydb:focus-search', this.openSearch);
     document.removeEventListener('easydb:set-search', this.onSetSearch as EventListener);
+    document.removeEventListener('easydb:refresh-buttons', this.onRefreshButtons);
     document.removeEventListener('keydown', this.onGlobalKeydown);
     this.workspaceUnsub?.();
   }
@@ -432,6 +452,12 @@ export class AppShell extends LitElement {
     // during load(), which runs after init resolves).
     this.snapshotRegistries(ctx);
     ctx.events.on('app:ready', () => this.snapshotRegistries(ctx));
+    // A button whose LABEL changes while the app runs — the File plugin's Save and
+    // its unsaved marker. A `ButtonSpec` is a plain object the plugin owns, so the
+    // plugin edits its own spec and asks for a re-render here; without this the
+    // snapshot array keeps its identity and Lit has no reason to render again.
+    this.refreshButtons = () => this.snapshotRegistries(ctx);
+    document.addEventListener('easydb:refresh-buttons', this.onRefreshButtons);
     // Live-update the header title as the Settings dialog edits it — no reload needed.
     this.workspaceUnsub = ctx.store.workspaces.subscribe((all) => {
       const me = all.find((w) => w.id === ctx.workspaceId);
@@ -444,6 +470,11 @@ export class AppShell extends LitElement {
     this.footerButtons = [...ctx.registries.footerButtons];
     this.headerButtons = [...ctx.registries.headerButtons];
   }
+
+  /** Set once the registries are bound; before that there is nothing to refresh. */
+  private refreshButtons: (() => void) | null = null;
+
+  private onRefreshButtons = () => this.refreshButtons?.();
 
   /**
    * `tablePanelAtNode`, once the window manager has loaded. Null before that, which
@@ -508,13 +539,6 @@ export class AppShell extends LitElement {
         const handled = await fn(e, ctx.api);
         if (handled) return;
       } catch (err) {
-        // The browser store's row limit is a rule, not a fault: say it in the
-        // app's own voice rather than as `[runtime] Plugin: (drop-handler)`. It is
-        // the commonest way to meet the limit — dropping a file that is too big.
-        if (err instanceof RowLimitError) {
-          ctx.api.ui.dialogs.toast(err.message, { kind: 'warning', title: 'Too much data for the browser' });
-          return;
-        }
         ctx.events.emit('plugin:error', {
           url: '(drop-handler)',
           phase: 'runtime',
@@ -540,14 +564,19 @@ export class AppShell extends LitElement {
     // `secondary` renders as a muted icon-only button (no label), used for
     // utility actions like Settings. Otherwise header buttons get the primary
     // treatment; the footer distinguishes primary vs slot.
+    // The badge is markup, not text, so it cannot live in `label` — see
+    // `ButtonSpec.badge`. `aria-hidden` on it: the tooltip already says what the
+    // dot means, and a screen reader reading "•" says nothing.
+    const badge = b.badge === true ? html`<span class="badge" aria-hidden="true"></span>` : '';
     if (b.variant === 'secondary') {
-      return html` <button class="icon-btn" title=${b.tooltip ?? b.label} aria-label=${b.tooltip ?? b.label} @click=${() => this.runSlot(b)}>${renderButtonIcon(b.icon)}</button> `;
+      return html` <button class="icon-btn" title=${b.tooltip ?? b.label} aria-label=${b.tooltip ?? b.label} @click=${() => this.runSlot(b)}>${renderButtonIcon(b.icon)}${badge}</button> `;
     }
     const cls = where === 'header' || b.variant === 'primary' ? 'primary' : 'slot';
     return html`
       <button class=${cls} title=${b.tooltip ?? b.label} @click=${(e: Event) => this.runSlot(b, e)}>
         ${renderButtonIcon(b.icon)}
         <span class="btn-label">${b.label}</span>
+        ${badge}
       </button>
     `;
   }
@@ -558,7 +587,7 @@ export class AppShell extends LitElement {
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
           <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
-            ><span class="version">v0.0.378</span></a
+            ><span class="version">v0.0.398</span></a
           ></strong
         >
         ${this.headerButtons.filter((b) => b.variant !== 'secondary').map((b) => this.renderSlotButton(b, 'header'))}

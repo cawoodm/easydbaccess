@@ -29,11 +29,14 @@
  * future format change has to look at.
  */
 
-import { buildWhere } from './filter-sql.js';
+import { groupColumnFilter, parseColumnFilter } from './column-filter.js';
+import { buildWhere, columnFilterToSql } from './filter-sql.js';
 import type { DistinctPage, DistinctQuery, RowPage, RowQuery } from './row-query.js';
 import type { SqlDriver } from './sql-driver.js';
+import type { SqlRunOptions, SqlRunResult } from './sql-run.js';
 import { decodeValue, encodeValue, quoteIdent, sanitizeTableName, sqlAffinity } from './sql-mapping.js';
-import type { ColumnSpec, Row } from './types.js';
+import type { CloneMode, ColumnSpec, Row, WorkspaceContents } from './types.js';
+import { settingId } from './setting-key.js';
 
 /** What `coll='_meta', key='format'` holds. Read before anything else is trusted. */
 export interface EdbFormat {
@@ -64,6 +67,37 @@ const DOC_COLLECTIONS: Record<string, string> = {
 const SQL_TABLE_KEY = '_sqlTable';
 const ORDINAL_KEY = '_ordinal';
 
+/**
+ * A fresh id for a copied document.
+ *
+ * `crypto.randomUUID` is present in every runtime this package targets (browser,
+ * worker, Node 24, Electron main), but the fallback costs two lines and covers
+ * an insecure context, where `crypto` exists without it.
+ */
+function newId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+/**
+ * The same thing as a SQL expression, evaluated once per row.
+ *
+ * Needed so a table copy can be one `INSERT … SELECT` instead of pulling every
+ * row into JS to re-id it. `randomblob` is non-deterministic, so SQLite calls it
+ * per row rather than folding it to a constant. The shape matches
+ * {@link newId}'s — version 4, variant 8-b — because a store that mixed two id
+ * formats would invite code to start guessing which one it had.
+ */
+function uuidV4Sql(): string {
+  return `lower(
+    substr(hex(randomblob(4)), 1, 8) || '-' ||
+    substr(hex(randomblob(2)), 1, 4) || '-4' ||
+    substr(hex(randomblob(2)), 2, 3) || '-' ||
+    substr('89ab', (random() & 3) + 1, 1) ||
+    substr(hex(randomblob(2)), 2, 3) || '-' ||
+    hex(randomblob(6))
+  )`;
+}
+
 function unknownCollection(coll: string): Error {
   const known = ['tables', 'rows', ...Object.keys(DOC_COLLECTIONS)].join(', ');
   return new Error(`EdbStore: unknown collection "${coll}" (known: ${known})`);
@@ -79,6 +113,59 @@ function docPk(coll: string): string {
 function matchesAll(doc: Record<string, unknown>, entries: Array<[string, unknown]>): boolean {
   for (const [k, v] of entries) if (doc[k] !== v) return false;
   return true;
+}
+
+/** A SQL string literal. Only ever wraps text this module builds, never a bind value. */
+function sqlText(s: string): string {
+  return `'${s.replace(/'/g, "''")}'`;
+}
+
+/**
+ * A JSON path to one member of `_extra`, quoted so any field name works.
+ *
+ * `$."a.b"` and `$."a b"` both resolve — a dump-imported header is arbitrary
+ * text, and the unquoted `$.name` form would read a dot as a step into a nested
+ * object.
+ */
+function extraPath(field: string): string {
+  return sqlText(`$."${field.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
+}
+
+/**
+ * The JSON types whose SQL rendering is EXACTLY what the in-memory matcher sees.
+ *
+ * The matcher reads a cell as `String(value ?? '')` (`column-filter.ts`'s
+ * `matchesText`), so a predicate may only be trusted in SQL where the two agree
+ * character for character:
+ *
+ * | JSON      | matcher            | `json_extract` |
+ * | --------- | ------------------ | -------------- |
+ * | `"x"`     | `x`                | `x` ✓          |
+ * | `3`       | `3`                | `3` ✓          |
+ * | `null`    | empty              | SQL NULL ✓     |
+ * | `true`    | `true`             | `1` ✗          |
+ * | `3.0`     | `3`                | `3.0` ✗        |
+ * | `[1,2]`   | `1,2`              | `[1,2]` ✗      |
+ * | `{"a":1}` | `[object Object]`  | `{"a":1}` ✗    |
+ *
+ * The four mismatches are why the narrowing below KEEPS those rows rather than
+ * judging them. Judging them would make SQL narrower than the matcher, which is
+ * the one failure this whole seam exists to prevent.
+ */
+const EXACT_JSON_TYPES = ['text', 'integer', 'null'];
+
+/**
+ * Could this filter keep a row whose field is ABSENT?
+ *
+ * The matcher reads a missing field as `''`: a positive text term cannot match
+ * it, but a negated one passes and so does `NULL`. That is the difference
+ * between dropping those rows in SQL (sound, and most of the narrowing on a
+ * sparse `_extra`) and having to keep them.
+ */
+function mayMatchAbsent(raw: string): boolean {
+  const groups = groupColumnFilter(parseColumnFilter(raw));
+  if (groups.length === 0) return true;
+  return groups.some((g) => g.some((t) => t.negate || (!t.prefix && !t.exact && (t.term.trim() === '' || t.term.toUpperCase() === 'NULL'))));
 }
 
 /**
@@ -183,14 +270,27 @@ export class EdbStore {
     });
   }
 
-  remove(coll: string, key: string): void {
-    this.tx(() => this.removeNoTx(coll, key));
+  /**
+   * Removes one document. For `rows`, returns the table it came out of.
+   *
+   * The return value exists for the change broadcast, not for the caller's own
+   * use: a `remove` request names a row id and nothing else, so without this the
+   * broadcast has no scope and every open grid re-reads itself.
+   */
+  remove(coll: string, key: string): string | undefined {
+    return this.tx(() => this.removeNoTx(coll, key));
   }
 
-  bulkRemove(coll: string, keys: string[]): void {
-    if (keys.length === 0) return;
-    this.tx(() => {
-      for (const key of keys) this.removeNoTx(coll, key);
+  /** Removes many. For `rows`, returns the distinct tables they came out of. */
+  bulkRemove(coll: string, keys: string[]): string[] {
+    if (keys.length === 0) return [];
+    return this.tx(() => {
+      const touched = new Set<string>();
+      for (const key of keys) {
+        const tableId = this.removeNoTx(coll, key);
+        if (tableId !== undefined) touched.add(tableId);
+      }
+      return [...touched];
     });
   }
 
@@ -229,6 +329,255 @@ export class EdbStore {
     return Number(r?.n ?? 0);
   }
 
+  // -- whole workspaces --------------------------------------------------
+  //
+  // These three exist because `DataStore` cannot express them: its `settings`
+  // view is scoped to the ACTIVE workspace, so nothing above this layer can even
+  // SEE another workspace's settings. Under Dexie that forced the renderer to
+  // reach past the abstraction and walk five collections by hand; here
+  // `_easydb.workspaceId` is an indexed column and each one is a few statements.
+
+  /** The table ids belonging to one workspace. */
+  private tableIdsOf(workspaceId: string): string[] {
+    return this.db
+      .prepare(`SELECT key FROM _easydb WHERE coll = 'tables' AND workspaceId = ?`)
+      .all(workspaceId)
+      .map((r) => String(r.key));
+  }
+
+  private countDocsIn(coll: string, workspaceId: string): number {
+    return Number(this.db.prepare(`SELECT COUNT(*) AS n FROM _easydb WHERE coll = ? AND workspaceId = ?`).get(coll, workspaceId)?.n ?? 0);
+  }
+
+  /**
+   * What a delete would take with it — asked BEFORE the confirm dialog.
+   *
+   * `countRows` survives from the Dexie implementation, where counting the rows
+   * of a workspace holding a 609,283-row table cost 14 seconds and made the
+   * confirm dialog read as a dead button. Here it is a `COUNT(*)` per table, so
+   * the caller can afford to ask; the flag and the `-1` sentinel stay for the
+   * callers and the message formatter that already understand them.
+   */
+  countWorkspaceContents(workspaceId: string, opts: { countRows?: boolean | undefined } = {}): WorkspaceContents {
+    const tableIds = this.tableIdsOf(workspaceId);
+    return {
+      tables: tableIds.length,
+      rows: opts.countRows === true ? tableIds.reduce((n, id) => n + this.countRowsIn(id), 0) : -1,
+      views: this.countDocsIn('viewInstances', workspaceId),
+      templates: this.countDocsIn('viewTemplates', workspaceId),
+      settings: this.countDocsIn('settings', workspaceId),
+    };
+  }
+
+  /**
+   * Remove a workspace and everything scoped to it. Returns what went.
+   *
+   * Dropping a table takes its rows with it — the rows ARE that SQL table — so
+   * the row enumeration the Dexie version needed (read 609k keys, then
+   * `bulkDelete` them) has no equivalent here.
+   *
+   * A leftover settings row would not be inert: workspace ids are slugified
+   * names, so creating "Demo" again re-uses the id `demo` and the new workspace
+   * would inherit the old one's server URL, tokens and view-seed flags.
+   *
+   * The workspace record goes last, which inside a transaction is a matter of
+   * taste rather than safety — but it costs nothing and it keeps the ordering
+   * the Dexie version depended on.
+   */
+  deleteWorkspace(workspaceId: string): WorkspaceContents {
+    return this.tx(() => {
+      const counts = this.countWorkspaceContents(workspaceId, { countRows: true });
+      for (const id of this.tableIdsOf(workspaceId)) this.removeTableNoTx(id);
+      for (const coll of ['viewInstances', 'viewTemplates', 'settings']) {
+        this.db.prepare(`DELETE FROM _easydb WHERE coll = ? AND workspaceId = ?`).run(coll, workspaceId);
+      }
+      // Its own statement: a `workspaces` doc carries no `workspaceId` of its
+      // own, so `putRaw` stored NULL in that column and the deletes above cannot
+      // reach it.
+      this.db.prepare(`DELETE FROM _easydb WHERE coll = 'workspaces' AND key = ?`).run(workspaceId);
+      return counts;
+    });
+  }
+
+  /**
+   * Create workspace `to` and copy the requested slice of `from` into it.
+   *
+   * Every copied record gets a fresh id, because ids are global rather than
+   * per-workspace. Rows and view instances are re-pointed at the new table ids
+   * through maps built while the tables are copied — a copied row still
+   * referencing the source table would show up in BOTH workspaces.
+   *
+   * The copy is ADDITIVE: it never deletes from the source.
+   */
+  cloneWorkspace(opts: { from: string; to: string; name: string; mode: CloneMode }): string {
+    const { from, to, name, mode } = opts;
+    return this.tx(() => {
+      const source = this.getRaw('workspaces', from);
+      this.putRaw('workspaces', to, null, {
+        id: to,
+        name,
+        createdAt: Date.now(),
+        // The plugin list decides which plugins load, so it rides along with the
+        // settings rather than with the data.
+        pluginUrls: mode === 'empty' ? [] : [...((source?.pluginUrls as string[]) ?? [])],
+      });
+      if (mode === 'empty') return to;
+      if (mode === 'all') this.cloneWorkspaceDataNoTx(from, to);
+      this.cloneSettingsNoTx(from, to);
+      return to;
+    });
+  }
+
+  /** Tables, rows, templates and view instances. The `mode: 'all'` half of a clone. */
+  private cloneWorkspaceDataNoTx(from: string, to: string): void {
+    const tableIdMap = new Map<string, string>();
+    for (const stored of this.storedTableDocs()) {
+      if (stored.workspaceId !== from) continue;
+      const oldId = String(stored.id);
+      const tableId = newId();
+      tableIdMap.set(oldId, tableId);
+      // Through `writeTableNoTx` rather than `putRaw`, so the copy gets its own
+      // physical SQL table with reconciled columns and a name uniqued against
+      // everything already in the file.
+      this.writeTableNoTx('insert', { ...this.publicTableDoc(stored), id: tableId, workspaceId: to, updatedAt: Date.now() });
+      const target = this.getRaw('tables', tableId)?.[SQL_TABLE_KEY];
+      // Naming the real fault: without this the miss becomes the string
+      // "undefined" and then a baffling `no such table: undefined`.
+      if (typeof target !== 'string') throw new Error(`EdbStore.cloneWorkspace: the copy of table "${oldId}" has no physical table`);
+      this.copyRowsNoTx(String(stored[SQL_TABLE_KEY]), target);
+    }
+
+    const templateIdMap = new Map<string, string>();
+    for (const vt of this.findDocs('viewTemplates', { workspaceId: from }) as Record<string, unknown>[]) {
+      const templateId = newId();
+      templateIdMap.set(String(vt.id), templateId);
+      this.writeDocNoTx('upsert', 'viewTemplates', { ...vt, id: templateId, workspaceId: to });
+    }
+
+    for (const inst of this.findDocs('viewInstances', { workspaceId: from }) as Record<string, unknown>[]) {
+      // A view whose table did not come along would dangle, so skip it.
+      const tableId = tableIdMap.get(String(inst.tableId));
+      if (tableId === undefined) continue;
+      this.writeDocNoTx('upsert', 'viewInstances', {
+        ...inst,
+        id: newId(),
+        workspaceId: to,
+        tableId,
+        templateId: templateIdMap.get(String(inst.templateId)) ?? inst.templateId,
+      });
+    }
+  }
+
+  /**
+   * Copy every row of one physical table into another, without any of them
+   * crossing into JS.
+   *
+   * Only the columns BOTH tables have are copied. The source may carry columns
+   * the copy does not: reconciliation is additive-only, so a field dropped from
+   * `columns` leaves its SQL column behind, orphaned, and the fresh table is
+   * built from the current spec list.
+   */
+  private copyRowsNoTx(fromSqlTable: string, toSqlTable: string): void {
+    const columnsOf = (t: string) =>
+      this.db
+        .prepare(`PRAGMA table_info(${quoteIdent(t)})`)
+        .all()
+        .map((c) => String(c.name));
+    const target = new Set(columnsOf(toSqlTable));
+    const shared = columnsOf(fromSqlTable).filter((c) => c !== '_id' && target.has(c));
+    const cols = ['_id', ...shared].map(quoteIdent).join(', ');
+    // `_id` is replaced rather than carried: ids are global, and a duplicate
+    // would make the row ambiguous across the two workspaces.
+    const select = [uuidV4Sql(), ...shared.map(quoteIdent)].join(', ');
+    this.db.exec(`INSERT INTO ${quoteIdent(toSqlTable)} (${cols}) SELECT ${select} FROM ${quoteIdent(fromSqlTable)}`);
+  }
+
+  /** Settings, re-keyed to the new workspace. Copied for both `all` and `settings`. */
+  private cloneSettingsNoTx(from: string, to: string): void {
+    for (const s of this.findDocs('settings', { workspaceId: from }) as Record<string, unknown>[]) {
+      const nameOf = String(s.name);
+      this.writeDocNoTx('upsert', 'settings', { ...s, key: settingId(to, nameOf), workspaceId: to, name: nameOf });
+    }
+  }
+
+  // -- raw SQL -----------------------------------------------------------
+
+  /**
+   * Runs ONE arbitrary statement and returns its rows.
+   *
+   * This is the payoff of keeping a workspace in a real database, and it is also
+   * the one entry point that can wreck one — so reads and writes are separated
+   * hard:
+   *
+   * **A read is enforced by SQLite, not guessed at.** `PRAGMA query_only = ON`
+   * makes the connection refuse every write for the duration. Classifying the
+   * statement by its leading keyword instead would pass
+   * `WITH x AS (...) INSERT ...` straight through, and a console is exactly
+   * where somebody types that.
+   *
+   * **A write is the caller's responsibility.** Raw SQL bypasses every rule this
+   * store enforces — the physical table name a `tables` doc points at,
+   * additive-only column reconciliation, `_extra` overflow — so a `DROP TABLE`
+   * here leaves a registered table with nothing behind it. Writes are also NOT
+   * wrapped in a transaction: a console user running `BEGIN` themselves would
+   * otherwise get "cannot start a transaction within a transaction".
+   *
+   * One statement only. `prepare` compiles the first and ignores the rest, so a
+   * caller with a script splits it with `splitStatements` and calls this per
+   * statement.
+   */
+  runSql(sql: string, opts: SqlRunOptions = {}): SqlRunResult {
+    const params = opts.params ?? [];
+    const maxRows = opts.maxRows;
+    const started = Date.now();
+
+    // `query_only` is a connection-level flag, so it MUST come back off however
+    // this exits — a throw that left it on would make every later write fail
+    // with a message pointing nowhere near the cause.
+    if (!opts.write) this.db.exec('PRAGMA query_only = ON');
+    let raw: Record<string, unknown>[];
+    try {
+      const stmt = this.db.prepare(sql);
+      // Stop reading at the cap rather than reading everything and slicing:
+      // `SELECT * FROM` a 609k-row table would otherwise build 609k JS objects
+      // to keep 500. One row past the cap is enough to know it was truncated.
+      if (typeof maxRows === 'number' && stmt.iterate) {
+        raw = [];
+        for (const row of stmt.iterate(...params)) {
+          raw.push(row);
+          if (raw.length > maxRows) break;
+        }
+      } else {
+        raw = stmt.all(...params);
+      }
+    } finally {
+      if (!opts.write) this.db.exec('PRAGMA query_only = OFF');
+    }
+
+    // The read above stops ONE row past the cap, so an over-long result is
+    // recognisable without having fetched the rest of it.
+    const truncated = typeof maxRows === 'number' && raw.length > maxRows;
+    const kept = truncated ? raw.slice(0, maxRows) : raw;
+    // Column order comes from the first row's key order, which both drivers
+    // build from the result's column order. A statement that returned nothing
+    // reports no columns rather than inventing them — the driver seam hands over
+    // rows, not a description of the shape a query would have had.
+    const columns = kept.length > 0 ? Object.keys(kept[0]!) : [];
+    const rows = kept.map((r) => columns.map((c) => r[c]));
+
+    return {
+      columns,
+      rows,
+      // `changes()` reports the most recently COMPLETED write, and a SELECT does
+      // not reset it — so asking after a statement that returned rows would
+      // repeat the previous write's count, and a caller summing a script would
+      // double it. Only a write that produced no result set reports one.
+      changes: opts.write && columns.length === 0 ? Number(this.db.prepare('SELECT changes() AS n').get()?.n ?? 0) : null,
+      truncated,
+      elapsedMs: Date.now() - started,
+    };
+  }
+
   // -- transactions ------------------------------------------------------
 
   private tx<T>(body: () => T): T {
@@ -253,11 +602,16 @@ export class EdbStore {
     return this.writeDocNoTx(mode, coll, doc);
   }
 
-  private removeNoTx(coll: string, key: string): void {
-    if (coll === 'tables') return this.removeTableNoTx(key);
+  /** Returns the table a ROW was removed from, so the caller can scope its broadcast. */
+  private removeNoTx(coll: string, key: string): string | undefined {
+    if (coll === 'tables') {
+      this.removeTableNoTx(key);
+      return undefined;
+    }
     if (coll === 'rows') return this.removeRowNoTx(key);
     docPk(coll);
     this.db.prepare(`DELETE FROM _easydb WHERE coll = ? AND key = ?`).run(coll, key);
+    return undefined;
   }
 
   // -- document collections ----------------------------------------------
@@ -372,7 +726,7 @@ export class EdbStore {
       this.db.exec(`CREATE TABLE ${quoteIdent(sqlTable)} (_id TEXT PRIMARY KEY, _updatedAt INTEGER, _extra TEXT)`);
     }
 
-    this.reconcileColumnsNoTx(sqlTable, columns);
+    this.reconcileColumnsNoTx(sqlTable, columns, existing ? this.columnsOf(existing) : []);
 
     const stored: Record<string, unknown> = { ...doc, [SQL_TABLE_KEY]: sqlTable, [ORDINAL_KEY]: ordinal };
     const workspaceId = typeof doc.workspaceId === 'string' ? doc.workspaceId : null;
@@ -381,23 +735,49 @@ export class EdbStore {
   }
 
   /**
-   * Additive-only column reconciliation: a field with no SQL column gets one.
-   * Never RENAME, never DROP.
+   * Column reconciliation: a field with no SQL column gets one, and a field
+   * that changed its NAME in place takes its column with it. **Never DROP.**
    *
    * `ColumnSpec` has no stable id, so diffing two column lists cannot tell a
    * rename from a drop-plus-add — and dropping on that guess destroyed data
-   * once already (v0.0.218). A column dropped from `columns` just lingers,
-   * orphaned and harmless: the doc, not the DDL, says what is visible. A rename
-   * arrives here as a new column beside the old one, and the renderer re-keys
-   * row `data` on rename, so the value lands in the new column by itself.
+   * once already (v0.0.218). So a column dropped from `columns` just lingers,
+   * orphaned and harmless: the doc, not the DDL, says what is visible.
+   *
+   * A RENAME is a different call, and it used to be got wrong in the other
+   * direction. Adding the new name beside the old one left every value in a
+   * column nothing reads, which is "renaming a column empties it" — the same
+   * data loss, arrived at by being careful. Renaming moves the values and
+   * destroys nothing, so it is safe where a drop is not; the guess it rests on
+   * is guarded below and falls back to the additive behaviour when unsure.
    */
-  private reconcileColumnsNoTx(sqlTable: string, columns: ColumnSpec[]): void {
+  private reconcileColumnsNoTx(sqlTable: string, columns: ColumnSpec[], before: ColumnSpec[] = []): void {
     const existing = new Set(
       this.db
         .prepare(`PRAGMA table_info(${quoteIdent(sqlTable)})`)
         .all()
         .map((c) => String(c.name)),
     );
+    // RENAMES first, or the add loop below would create an empty column under
+    // the new name and strand every value in the old one — a rename in the
+    // columns editor would silently empty the column it renamed.
+    //
+    // A `ColumnSpec` carries no stable identity, so a rename is only knowable
+    // POSITIONALLY: the same slot of the columns array holding a different
+    // field name. The two guards are what keep a delete-plus-add from being
+    // read as one — a name that is still somewhere in the new list has not gone
+    // anywhere, and a name that was already somewhere in the old one is not new.
+    const newFields = new Set(columns.map((c) => c.field));
+    const oldFields = new Set(before.map((c) => c.field));
+    for (let i = 0; i < Math.min(before.length, columns.length); i++) {
+      const was = before[i]?.field;
+      const now = columns[i]?.field;
+      if (!was || !now || was === now) continue;
+      if (!existing.has(was) || existing.has(now)) continue;
+      if (newFields.has(was) || oldFields.has(now)) continue;
+      this.db.exec(`ALTER TABLE ${quoteIdent(sqlTable)} RENAME COLUMN ${quoteIdent(was)} TO ${quoteIdent(now)}`);
+      existing.delete(was);
+      existing.add(now);
+    }
     for (const spec of columns) {
       if (existing.has(spec.field)) continue;
       this.db.exec(`ALTER TABLE ${quoteIdent(sqlTable)} ADD COLUMN ${quoteIdent(spec.field)} ${sqlAffinity(spec.type)}`);
@@ -478,9 +858,34 @@ export class EdbStore {
     const data = (doc.data as Record<string, unknown>) ?? {};
     const updatedAt = typeof doc.updatedAt === 'number' ? doc.updatedAt : 0;
     const { cols, values, extraJson } = this.encodeRowColumns(columns, data);
+    const table = quoteIdent(sqlTable);
+
+    // An UPDATE for a row that is already there, and only then an INSERT.
+    //
+    // `INSERT OR REPLACE` would do both in one statement, and it is what this
+    // used to do — but on a conflict SQLite DELETES the old row and inserts a
+    // new one, which hands it a fresh `rowid`. A table read with no ORDER BY
+    // comes back in rowid order, so editing one cell sent its row to the BOTTOM
+    // of the grid. Under the previous browser store the order came from the row
+    // id and never moved, so this only became visible when SQLite became the
+    // only store.
+    //
+    // Every declared column is written, absent fields as NULL, because a write
+    // here means "this doc is the whole row" — the same thing `INSERT OR
+    // REPLACE` meant. A physical column no longer in `columns` is left alone;
+    // nothing reads it (`decodeRow` walks the doc's columns), and clearing it
+    // would destroy data the doc has merely stopped surfacing.
+    if (mode === 'upsert' && this.db.prepare(`SELECT _id FROM ${table} WHERE _id = ?`).get(id)) {
+      const written = new Map(cols.map((c, i) => [c, values[i]] as const));
+      const setCols = ['_updatedAt', '_extra', ...columns.map((c) => c.field)];
+      const setValues: unknown[] = [updatedAt, extraJson, ...columns.map((c) => (written.has(c.field) ? written.get(c.field) : null))];
+      this.db.prepare(`UPDATE ${table} SET ${setCols.map((c) => `${quoteIdent(c)} = ?`).join(', ')} WHERE _id = ?`).run(...setValues, id);
+      return this.findOneRow(id);
+    }
+
     const allCols = ['_id', '_updatedAt', '_extra', ...cols];
     const placeholders = allCols.map(() => '?').join(', ');
-    this.db.prepare(`INSERT OR REPLACE INTO ${quoteIdent(sqlTable)} (${allCols.map(quoteIdent).join(', ')}) VALUES (${placeholders})`).run(id, updatedAt, extraJson, ...values);
+    this.db.prepare(`INSERT INTO ${table} (${allCols.map(quoteIdent).join(', ')}) VALUES (${placeholders})`).run(id, updatedAt, extraJson, ...values);
     return this.findOneRow(id);
   }
 
@@ -509,15 +914,26 @@ export class EdbStore {
     }
   }
 
-  private removeRowNoTx(id: string): void {
+  /**
+   * Deletes one row, wherever it lives, and reports WHICH table that was.
+   *
+   * The id alone does not say which table holds it, so this scans — see the note
+   * on `findOneRow`. Returning the table it found is what lets a delete broadcast
+   * a scoped change instead of waking every open grid: the request carries only
+   * row ids, so the answer cannot come from anywhere else.
+   *
+   * `undefined` means no table held it, which is a no-op delete, not an error.
+   */
+  private removeRowNoTx(id: string): string | undefined {
     for (const stored of this.storedTableDocs()) {
       const sqlTable = String(stored[SQL_TABLE_KEY]);
       const hit = this.db.prepare(`SELECT _id FROM ${quoteIdent(sqlTable)} WHERE _id = ?`).get(id);
       if (hit) {
         this.db.prepare(`DELETE FROM ${quoteIdent(sqlTable)} WHERE _id = ?`).run(id);
-        return;
+        return String(stored.id);
       }
     }
+    return undefined;
   }
 
   private findOneRow(id: string): unknown | null {
@@ -586,9 +1002,15 @@ export class EdbStore {
     const searchFields = columns.filter((c) => !c.script && c.type !== 'array' && c.filterable !== false).map((c) => c.field);
 
     const where = buildWhere(q.filters, q.search, sqlOf, searchFields);
-    const whereSql = where.sql ? ` WHERE ${where.sql}` : '';
+    // Plus a narrowing pass over `_extra`, which `sqlOf` cannot express.
+    // Optimisation only: `expressible` is already false for those fields, so the
+    // caller re-filters this result whatever it contains.
+    const narrowed = this.narrowByExtra(q.filters, specOf);
+    const whereParts = [where.sql, narrowed.sql].filter((s) => s !== '');
+    const whereSql = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : '';
+    const whereParams = [...where.params, ...narrowed.params];
 
-    const total = Number(this.db.prepare(`SELECT COUNT(*) AS n FROM ${table}${whereSql}`).get(...where.params)?.n ?? 0);
+    const total = Number(this.db.prepare(`SELECT COUNT(*) AS n FROM ${table}${whereSql}`).get(...whereParams)?.n ?? 0);
 
     // Same for the sort: a computed column has nothing to order by, and an array
     // column orders by its MEMBERS as they read, which is not the raw stored text
@@ -614,10 +1036,17 @@ export class EdbStore {
 
     // Only the fields asked for, plus the bookkeeping a Row needs. `_extra` comes
     // along because a requested field may live in it.
+    //
+    // A SCRIPTED column IS selected here, unlike in the WHERE and the ORDER BY
+    // above. What a script COMPUTES has no SQL form, but the value it computes
+    // FROM is ordinary stored data with a real column of its own — that is the
+    // whole of "the pencil edits the stored value, not the computed URL". Leave
+    // it out and every `script` reads `row.<field>` as `undefined`, so the cell
+    // renders the script's answer for nothing.
     const wanted = q.fields && q.fields.length > 0 ? columns.filter((c) => q.fields?.includes(c.field)) : columns;
-    const selected = ['_id', '_updatedAt', '_extra', ...wanted.filter((c) => !c.script).map((c) => quoteIdent(c.field))];
+    const selected = ['_id', '_updatedAt', '_extra', ...wanted.map((c) => quoteIdent(c.field))];
 
-    const raws = this.db.prepare(`SELECT ${selected.join(', ')} FROM ${table}${whereSql}${stableSql}${limitSql}${offsetSql}`).all(...where.params);
+    const raws = this.db.prepare(`SELECT ${selected.join(', ')} FROM ${table}${whereSql}${stableSql}${limitSql}${offsetSql}`).all(...whereParams);
 
     const partial = !where.expressible || sortPartial;
     return {
@@ -625,6 +1054,50 @@ export class EdbStore {
       total,
       ...(partial ? { partial: true } : {}),
     };
+  }
+
+  /**
+   * A WHERE fragment narrowing the rows a filter on an UNDECLARED field can
+   * match — one that lives in `_extra` as JSON rather than in a column.
+   *
+   * Purely an optimisation, and safe because of what it is NOT: `sqlOf` returns
+   * null for these fields, so `expressible` is already false and the caller
+   * re-filters every row this returns. Nothing here decides an answer; it only
+   * decides what crosses the bridge. Before this, a filter on a dump-imported
+   * field shipped the whole table (to the 20 000-row cap) to be narrowed in
+   * memory, and a SLICED request paid a second round trip for the superset.
+   *
+   * **The fragment is a guaranteed SUPERSET of the matcher's answer.** A row is
+   * judged in SQL only where `json_extract` renders exactly what the matcher
+   * reads (see {@link EXACT_JSON_TYPES}); every other row — a boolean, a real,
+   * an object, an array, and a row missing the field entirely — is KEPT for the
+   * caller to judge. Getting that backwards would drop rows the user never
+   * excluded, which is the failure `expressible: false` exists to prevent.
+   *
+   * Deliberately not extended to the ORDER BY: `json_extract` answers in the
+   * JSON's own type, so `'10'` would sort before `'2'`. The sort stays partial
+   * and the caller re-sorts.
+   */
+  private narrowByExtra(filters: Record<string, string> | undefined, specOf: Map<string, ColumnSpec>): { sql: string; params: unknown[] } {
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+    for (const [field, raw] of Object.entries(filters ?? {})) {
+      if (specOf.has(field) || !raw || raw.trim() === '') continue;
+      const path = extraPath(field);
+      const frag = columnFilterToSql(`json_extract("_extra", ${path})`, raw);
+      if (!frag.expressible || frag.sql === '') continue;
+
+      const typeOf = `json_type("_extra", ${path})`;
+      // A row missing the field is only kept where the filter could still WANT
+      // it: `!x` and `NULL` both pass on an absent value, and excluding it would
+      // make this narrower than the matcher. A purely positive filter cannot
+      // match an absent value, so those rows go — which is most of the win on a
+      // sparse `_extra`.
+      const keepAbsent = mayMatchAbsent(raw) ? ` OR ${typeOf} IS NULL` : '';
+      clauses.push(`((${frag.sql}) OR ${typeOf} NOT IN (${EXACT_JSON_TYPES.map(sqlText).join(', ')})${keepAbsent})`);
+      params.push(...frag.params);
+    }
+    return { sql: clauses.join(' AND '), params };
   }
 
   /**

@@ -26,21 +26,21 @@ kind belongs here; anything else does not.
 
 ## Hot rule: lockstep across packages
 
-Adding or changing a field on a domain type touches **three places**, in this
-order. Skip one and either Dexie rejects writes or plugins see a stale shape.
+Adding a FIELD to a domain type touches one place: `src/types.ts`. Documents are
+stored as JSON, so a new field needs no schema change anywhere.
+
+Adding a **collection** touches three, in this order:
 
 1. `packages/shared/src/types.ts` — the TS interface
-2. `packages/renderer/src/db/dexie-db.ts` — Dexie schema string + typed accessor (only if it's a brand-new collection or an indexed field)
-3. `packages/renderer/src/db/data-store-dexie.ts` — the plugin-facing wrapper (only if it's a brand-new collection)
+2. `packages/renderer/src/db/data-store-bridge.ts` — the plugin-facing wrapper
+3. `packages/shared/src/edb-store.ts` — `DOC_COLLECTIONS`. A collection the
+   store does not know about **throws** there; it does not degrade quietly.
 
-Most field additions touch only step 1 — Dexie is schemaless for non-indexed fields.
+## Format versioning
 
-## Schema versioning
-
-Dexie tracks schema versions per-database. Bump `db.version(N).stores({...})`
-in `dexie-db.ts` when adding/removing an **indexed** column. Field additions
-to the JSON-stored payload don't need a version bump. Add an `.upgrade(tx => ...)`
-callback if existing rows need rewriting.
+There is no per-database schema version to bump. The `.edb` file carries a
+format stamp — `EDB_FORMAT_VERSION` in `src/edb-store.ts`, currently 2 — and v2
+is the only format that opens. See `docs/tech/EDB.md`.
 
 ## Plugin contract changes
 
@@ -53,10 +53,11 @@ guards that would block that.
 New events go on the `AppEvents` map, not on a sibling type — `EventBus.on`
 is typed against this map and silently drops unknown keys.
 
-`PluginModule.meta.optional = true` is the user-toggleable flag for built-ins.
-The renderer's Plugin Manager dialog reads this; disabled state is stored
-under the synthetic key `builtin:<name>` in the `plugins` collection. Don't
-repurpose `optional` for other semantics.
+`PluginModule.meta.fixed = true` marks a built-in the user cannot turn off;
+every other built-in is toggleable and defaults to enabled. The renderer's
+Plugin Manager dialog reads this; disabled state is stored under the synthetic
+key `builtin:<name>` in the `plugins` collection. Don't repurpose `fixed` for
+other semantics.
 
 ## Build
 

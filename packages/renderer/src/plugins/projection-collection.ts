@@ -2,7 +2,7 @@
 //
 // The live row collection behind a Projection (a virtual table / view / JOIN).
 // A Table carrying `source: { type: 'projection', config: ProjectionSpec }`
-// routes its rows here instead of Dexie. This factory resolves the spec's
+// routes its rows here instead of the local database. This factory resolves the spec's
 // source tables (by name), reads their rows through the captured store, and
 // runs the pure `computeProjection` pipeline — re-running whenever any source
 // table changes so the projection stays live.

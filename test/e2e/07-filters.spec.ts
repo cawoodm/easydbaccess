@@ -19,6 +19,9 @@ test.describe('filters', () => {
     await addRow(page, id, { species: 'fish' });
 
     const panel = page.locator(`#${panelDomId(id)}`);
+    // The funnel offers the values the GRID is holding, so every row has to be
+    // there before it opens — otherwise the counts are of a shorter table.
+    await expect(panel.locator('data-table tbody tr:not(.spacer)')).toHaveCount(4);
     await panel.locator('data-table thead th button.funnel').first().click();
 
     const popover = page.locator('filter-popover');
@@ -37,6 +40,7 @@ test.describe('filters', () => {
     await addRow(page, id, { name: 'b', done: true });
 
     const panel = page.locator(`#${panelDomId(id)}`);
+    await expect(panel.locator('data-table tbody tr:not(.spacer)')).toHaveCount(2);
     await panel.locator('data-table thead th button.funnel').nth(1).click();
 
     const popover = page.locator('filter-popover');

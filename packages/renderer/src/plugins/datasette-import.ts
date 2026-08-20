@@ -38,7 +38,6 @@ import {
 } from './datasette-client.js';
 import { askViewImportMode, findViews, offerViewImport, runViewImport } from './datasette-views.js';
 import { type DatasetteSettings, getDatasetteSettings, importRowCap, registerDatasetteSettings, resolveChosenTables, uniqueTableName, withDatasetteSourceInfo } from './datasette-common.js';
-import { assertIncomingFits } from '../db/row-budget.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -603,8 +602,6 @@ async function fillImportTable(
 
     const rowColl = api.store.rows(tableId);
     if (overwrite) {
-      // Asked before the wipe: refused after it, the table would be left empty.
-      assertIncomingFits(importRows.length);
       const old = await rowColl.find();
       await rowColl.bulkRemove(old.map((r) => r.id));
     }
@@ -831,8 +828,6 @@ async function refreshSnapshot(api: HostApi, t: Table, settings: DatasetteSettin
       userAddedFields,
       deletedRemoteFields,
     });
-    // Asked before the wipe: refused after it, the table would be left empty.
-    assertIncomingFits(mergedData.length);
     await rowColl.bulkRemove(old.map((r) => r.id));
     await rowColl.bulkInsert(mergedData.map((data) => ({ id: cryptoUUID(), tableId: t.id, data, updatedAt: now })));
     outcome = { rowCount: mergedData.length, hasMore, truncated, error, droppedUserRows };

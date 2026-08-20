@@ -43,7 +43,6 @@ test.describe('auto-sync', () => {
   test('seeds an empty workspace via PUT when the server has nothing', async ({ page, workspaceId }) => {
     await configureServerUrl(page);
     await createTable(page, 'Seed', [{ field: 'a' }]);
-    await addRow(page, '', {}); // no-op; just exercises __easydb readiness
 
     // Server has no record of this workspace yet.
     const before = await fetch(`${SERVER_URL}/sync/${encodeURIComponent(workspaceId)}`);

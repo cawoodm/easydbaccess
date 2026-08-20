@@ -18,6 +18,17 @@ export interface SqlStatement {
   all(...params: unknown[]): Record<string, unknown>[];
   /** Run for effect. */
   run(...params: unknown[]): void;
+  /**
+   * Rows one at a time, so a caller can stop early.
+   *
+   * The reason this exists rather than `all().slice()`: a console running
+   * `SELECT * FROM` a 609k-row table would otherwise materialise all 609k as JS
+   * objects before keeping 500 of them. Stopping at the row you need is the
+   * difference between a capped READ and a capped RENDER.
+   *
+   * Optional so a driver can omit it; callers fall back to `all`.
+   */
+  iterate?(...params: unknown[]): IterableIterator<Record<string, unknown>>;
 }
 
 export interface SqlDriver {

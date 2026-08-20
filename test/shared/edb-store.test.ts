@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ColumnSpec, Table } from '../../packages/shared/src/types.js';
 import { EDB_FORMAT_VERSION, EdbStore } from '../../packages/shared/src/edb-store.js';
 import { nodeSqliteDriver } from './node-sqlite-driver.js';
+import { matchesColumnFilter } from '../../packages/shared/src/column-filter.js';
 
 /**
  * The `.edb` v2 store, exercised against a real SQLite through the driver
@@ -183,6 +184,38 @@ describe('rows', () => {
     expect(store.findOne('rows', 'r1')).toEqual(written);
   });
 
+  it('keeps a row where it was when it is edited, so the grid does not reshuffle', () => {
+    // `INSERT OR REPLACE` used to do both halves of an upsert in one statement,
+    // and on a conflict SQLite deletes the old row and inserts a new one — a
+    // fresh `rowid`, so the edited row moved to the END of a read with no
+    // ORDER BY. On screen that is an edited cell sending its row to the bottom
+    // of the grid.
+    store.insert('rows', row('r1', { name: 'a' }));
+    store.insert('rows', row('r2', { name: 'b' }));
+    store.insert('rows', row('r3', { name: 'c' }));
+
+    store.patch('rows', 'r2', { data: { name: 'b!' } });
+
+    const order = () =>
+      driver
+        .prepare(`SELECT _id FROM "Parts"`)
+        .all()
+        .map((r) => String(r._id));
+    expect(order()).toEqual(['r1', 'r2', 'r3']);
+    // An upsert of an existing row goes the same way.
+    store.upsert('rows', row('r1', { name: 'a!' }));
+    expect(order()).toEqual(['r1', 'r2', 'r3']);
+  });
+
+  it('an upsert still means the WHOLE row — a field left out goes back to empty', () => {
+    // The UPDATE has to clear what it was not given, because that is what
+    // `INSERT OR REPLACE` meant and callers were written against it.
+    store.insert('rows', row('r1', { name: 'bolt', qty: 4, ghost: 'kept' }));
+    store.upsert('rows', row('r1', { name: 'bolt' }));
+    expect((store.findOne('rows', 'r1') as { data: Record<string, unknown> }).data).toEqual({ name: 'bolt' });
+    expect(driver.prepare(`SELECT qty, _extra FROM "Parts" WHERE _id = 'r1'`).get()).toEqual({ qty: null, _extra: null });
+  });
+
   it('stores a value per column, so the file is queryable as SQL', () => {
     store.insert('rows', row('r1', { name: 'bolt', qty: 4, done: true }));
     const raw = driver.prepare(`SELECT name, qty, done FROM "Parts" WHERE _id = 'r1'`).get();
@@ -236,6 +269,53 @@ describe('rows', () => {
     store.insert('rows', row('r1', { name: 'a' }));
     store.remove('rows', 'r1');
     expect(store.findOne('rows', 'r1')).toBeNull();
+  });
+});
+
+/**
+ * A delete names only a row id, so the store is the only thing that can say
+ * which table it emptied. Without that answer the change broadcast goes wide and
+ * every open grid re-reads itself — once per chunk of a chunked delete.
+ */
+describe('a removal reports which table it touched', () => {
+  beforeEach(() => {
+    store.insert('tables', table());
+    store.insert('tables', table({ id: 't2', name: 'Other' }));
+  });
+
+  it('returns the table a removed row came out of', () => {
+    store.insert('rows', row('r1', { name: 'a' }));
+    expect(store.remove('rows', 'r1')).toBe('t1');
+  });
+
+  it('returns the table even when the row is not in the first one searched', () => {
+    store.insert('rows', row('r1', { name: 'a' }, 't2'));
+    expect(store.remove('rows', 'r1')).toBe('t2');
+  });
+
+  it('reports nothing for a row that was not there — a no-op, not an error', () => {
+    expect(store.remove('rows', 'nope')).toBeUndefined();
+  });
+
+  it('reports nothing for a collection whose subscribers are not per-table', () => {
+    store.upsert('viewTemplates', { id: 'v1', workspaceId: 'w1', name: 'V' });
+    expect(store.remove('viewTemplates', 'v1')).toBeUndefined();
+    expect(store.remove('tables', 't2')).toBeUndefined();
+  });
+
+  it('returns the one table a bulk delete emptied', () => {
+    store.bulkInsert('rows', [row('r1', { name: 'a' }), row('r2', { name: 'b' })]);
+    expect(store.bulkRemove('rows', ['r1', 'r2'])).toEqual(['t1']);
+    expect(store.countRowsIn('t1')).toBe(0);
+  });
+
+  it('returns every table a bulk delete spanned, without duplicates', () => {
+    store.bulkInsert('rows', [row('r1', { name: 'a' }), row('r2', { name: 'b' }), row('r3', { name: 'c' }, 't2')]);
+    expect(store.bulkRemove('rows', ['r1', 'r2', 'r3']).sort()).toEqual(['t1', 't2']);
+  });
+
+  it('returns nothing for an empty batch, without opening a transaction', () => {
+    expect(store.bulkRemove('rows', [])).toEqual([]);
   });
 });
 
@@ -327,5 +407,90 @@ describe('distinctValues', () => {
 
   it('is an empty list for a table that does not exist, not a throw', () => {
     expect(store.distinctValues('nope', { field: 'name' })).toEqual({ values: [] });
+  });
+});
+
+describe('narrowing a filter on an undeclared (_extra) field', () => {
+  /**
+   * `_extra` holds every field with no `ColumnSpec` — what a dump import leaves
+   * behind. `sqlOf` has no expression for those, so `expressible` is false and
+   * the caller re-filters whatever comes back. The `json_extract` pass is
+   * therefore an OPTIMISATION, and the only thing that can go wrong with it is
+   * returning too FEW rows.
+   *
+   * Every case below asserts the same two things: the answer still contains
+   * exactly what the in-memory matcher would keep (a superset, never narrower),
+   * and `partial` still says the caller must do the deciding.
+   */
+  const VALUES: Array<[string, unknown]> = [
+    ['r1', 'Hello'],
+    ['r2', 'hello world'],
+    ['r3', 'other'],
+    ['r4', 42],
+    ['r5', true], // JSON true → `json_extract` says 1, the matcher says 'true'
+    ['r6', 3.0], // JSON real → '3.0' in SQL, '3' in JS
+    ['r7', { a: 1 }], // object → '{"a":1}' in SQL, '[object Object]' in JS
+    ['r8', ['x', 'y']], // array → '["x","y"]' in SQL, 'x,y' in JS
+    ['r9', null],
+  ];
+
+  beforeEach(() => {
+    store.insert('tables', table());
+    for (const [id, ghost] of VALUES) store.insert('rows', row(id, { name: id, ghost }));
+    store.insert('rows', row('r10', { name: 'r10' })); // no `ghost` key at all
+  });
+
+  /** Ids the matcher keeps — the specification this must not fall short of. */
+  const expected = (filter: string): string[] => {
+    const all = store.find('rows') as Array<{ id: string; data: Record<string, unknown> }>;
+    return all
+      .filter((r) => matchesColumnFilter(r.data.ghost, filter))
+      .map((r) => r.id)
+      .sort();
+  };
+  const got = (filter: string): { ids: string[]; partial: boolean } => {
+    const page = store.queryRows('t1', { filters: { ghost: filter } });
+    return { ids: page.rows.map((r) => r.id).sort(), partial: page.partial === true };
+  };
+
+  for (const filter of ['hello', 'HELLO', '=hello', '^hell', 'tru', '3', '[object', 'x,y', 'NULL', '!hello', '!NULL', 'hello,other', 'o AND h', 'zzz']) {
+    it(`is a superset of the matcher for \`${filter}\``, () => {
+      const want = expected(filter);
+      const { ids, partial } = got(filter);
+      // Never narrower: everything the matcher keeps survived the SQL pass.
+      expect(want.filter((id) => !ids.includes(id))).toEqual([]);
+      // And still flagged, so the caller finishes the job.
+      expect(partial).toBe(true);
+    });
+  }
+
+  it('actually narrows — a positive filter does not ship the whole table', () => {
+    // The point of the exercise. `r1`/`r2` match; the odd-typed rows ride along
+    // because SQL may not judge them, but the plainly-non-matching text rows go.
+    const { ids } = got('hello');
+    expect(ids).toContain('r1');
+    expect(ids).toContain('r2');
+    expect(ids).not.toContain('r3');
+    expect(ids).not.toContain('r10'); // absent key, and no negation to keep it
+    expect(ids.length).toBeLessThan(10);
+  });
+
+  it('keeps rows with no such field when the filter could want them', () => {
+    // `!hello` passes on an absent value, so dropping those rows would be
+    // narrower than the matcher.
+    expect(got('!hello').ids).toContain('r10');
+    expect(got('NULL').ids).toContain('r10');
+  });
+
+  it('reaches a field whose name would otherwise read as a JSON path', () => {
+    store.insert('rows', row('r11', { name: 'r11', 'a.b': 'deep' }));
+    const page = store.queryRows('t1', { filters: { 'a.b': 'deep' } });
+    expect(page.rows.map((r) => r.id)).toContain('r11');
+  });
+
+  it('leaves the sort alone — json_extract answers in the JSON\u2019s own type', () => {
+    // '10' before '2' if this were pushed down, so it must not be.
+    const page = store.queryRows('t1', { sort: [{ field: 'ghost', asc: true }] });
+    expect(page.partial).toBe(true);
   });
 });

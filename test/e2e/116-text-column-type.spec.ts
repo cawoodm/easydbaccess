@@ -80,6 +80,10 @@ test('a funnel on a text column offers no value list, but still filters by typin
   const panel = page.locator(`#${panelDomId(id)}`);
   const popover = page.locator('filter-popover');
 
+  // Every row on screen before the funnel opens. The funnel offers the values
+  // the grid is holding, so opening it early offers none at all.
+  await expect(panel.locator('data-table tbody tr:not(.spacer)')).toHaveCount(3);
+
   // The short `title` column behaves as before: three values, one per row.
   await panel.locator('data-table thead th button.funnel').first().click();
   await expect(popover).toBeVisible();

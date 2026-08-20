@@ -1,65 +1,14 @@
-import { LitElement, css, html, svg } from 'lit';
+import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
+import { ifDefined } from 'lit/directives/if-defined.js';
 import type { Workspace } from '@easydb/shared';
 import { getContext } from '../app-context.js';
-import { knownWorkspaces } from '../db/edb/registry.js';
+import { mergeWorkspaceList, readFolderIndex, workspaceLabel, type ListEntry } from '../db/edb/folder-index.js';
+import { activeEdbName } from '../db/edb/session.js';
 import { materialIconStyles } from './material-icon-css.js';
 // The flows themselves are shared with the command palette — see
 // `workspace-actions.ts`. This element is only their mouse-driven entry point.
 import { deleteWorkspaceFlow, newWorkspaceFlow, openWorkspace } from './workspace-actions.js';
-
-/**
- * The database cylinder, for the workspace that is open.
- *
- * The same drawing as the `edb-file` and `electron-db` plugins use for their File
- * button, because it is the same idea — this workspace is a database file. Inline
- * SVG rather than a Material Icons ligature: that font has no `database` glyph
- * (`storage` draws stacked bars), which is why the File button borrows `storage`.
- */
-const DATABASE_ICON = svg`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-  <ellipse cx="12" cy="5" rx="8" ry="3" />
-  <path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5" />
-  <path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6" />
-</svg>`;
-
-/**
- * The same mark inside the list, where only text is possible.
- *
- * An `<option>` cannot hold an element, so the cylinder cannot go in the list
- * itself. U+26C1 is the stacked-disc glyph that has meant "database" since long
- * before the icon fonts, it is monochrome so it matches the option text, and it
- * is in the Windows and macOS system fonts.
- */
-const DB_MARK = '⛁';
-
-/** The ids of workspaces kept in a `.edb`, for the marker beside the name. */
-function fileIds(): Set<string> {
-  return new Set(
-    knownWorkspaces()
-      .filter((w) => w.file !== null)
-      .map((w) => w.id),
-  );
-}
-
-/**
- * The active store's workspaces, plus every one it cannot see.
- *
- * Storage is per workspace, so no single store holds the whole list: a load on
- * IndexedDB cannot see what is in a `.edb`, and a load on a `.edb` never opens
- * IndexedDB at all. Listing only the active store is what made every other
- * workspace disappear the moment one was moved into a file.
- *
- * The entries added here are placeholders for the `<option>` only — `createdAt`
- * and `pluginUrls` are never read from them, because selecting one reloads and
- * the real record then comes out of its own store.
- */
-function withKnownWorkspaces(fromStore: Workspace[]): Workspace[] {
-  const seen = new Set(fromStore.map((w) => w.id));
-  const extra = knownWorkspaces()
-    .filter((w) => !seen.has(w.id))
-    .map((w) => ({ id: w.id, name: w.name, createdAt: 0, pluginUrls: [] }));
-  return [...fromStore, ...extra].sort((a, b) => a.name.localeCompare(b.name));
-}
 
 @customElement('workspace-selector')
 export class WorkspaceSelector extends LitElement {
@@ -86,53 +35,76 @@ export class WorkspaceSelector extends LitElement {
       .mi.sm {
         font-size: 1rem;
       }
-      /* The cylinder beside the list, sized to the text it sits with. */
-      .db {
-        display: inline-flex;
-        align-items: center;
-        color: #93c5fd;
-      }
-      .db svg {
-        width: 1rem;
-        height: 1rem;
-      }
     `,
   ];
 
   @state() private workspaces: Workspace[] = [];
   @state() private current = '';
+  /**
+   * The workspaces the connected folder holds in OTHER files, merged in.
+   *
+   * Read from the device-local index rather than any database, because a
+   * workspace list is a table inside one file and this tab holds one file. See
+   * `db/edb/folder-index.ts`.
+   */
+  @state() private entries: ListEntry[] = [];
   private unsubscribe?: () => void;
+  private readonly onIndexChanged = () => this.remerge();
 
   override async connectedCallback() {
     super.connectedCallback();
     const ctx = await getContext();
     this.current = ctx.workspaceId;
-    this.unsubscribe = ctx.store.workspaces.subscribe((ws) => (this.workspaces = withKnownWorkspaces(ws)));
-    this.workspaces = withKnownWorkspaces(await ctx.store.workspaces.find());
+    this.unsubscribe = ctx.store.workspaces.subscribe((ws) => {
+      this.workspaces = ws;
+      this.remerge();
+    });
+    this.workspaces = await ctx.store.workspaces.find();
+    this.remerge();
+    // A folder sync rewrites the index while this element is already mounted, and
+    // the index is not a store nothing can subscribe to.
+    window.addEventListener('easydb:folder-index-changed', this.onIndexChanged);
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
     this.unsubscribe?.();
+    window.removeEventListener('easydb:folder-index-changed', this.onIndexChanged);
   }
 
-  /** The listed name for `id`, for the cylinder's tooltip. */
-  private nameOf(id: string): string {
-    return this.workspaces.find((w) => w.id === id)?.name ?? id;
+  private remerge() {
+    this.entries = mergeWorkspaceList(this.workspaces, readFolderIndex()?.workspaces ?? [], activeEdbName());
   }
 
-  private switchWorkspace(id: string) {
-    const ws = this.workspaces.find((w) => w.id === id);
-    if (ws) openWorkspace(ws.name);
+  /**
+   * Switch by NAME through `?space=`, which is what makes a workspace in another
+   * file reachable: the boot resolution finds that file and adopts it
+   * (`db/edb/space-resolve.ts`). Nothing here has to know where it lives.
+   */
+  private switchWorkspace(value: string) {
+    const entry = this.entries.find((e) => `${e.id}\u0000${e.file ?? ''}` === value);
+    if (entry) openWorkspace(entry.name);
   }
 
+  /**
+   * The TITLE is what a workspace is called, so it is what the list shows
+   * (`workspaceLabel`). The store subscription above re-runs on any write to
+   * `workspaces`, so a title edited in Settings reaches this list with nothing else
+   * to wire up. Each option's VALUE stays keyed on the id — a title is not
+   * routable, and two workspaces may share one.
+   *
+   * The FILE is a tooltip, never part of the text. A list of
+   * "workspace ┈ workspace.edb" is a list of names read twice, and the file name
+   * matters only when the user is asking which of two copies they are about to
+   * open — which is what hovering answers.
+   */
   override render() {
-    const inFile = fileIds();
     return html`
-      <select .value=${this.current} @change=${(e: Event) => this.switchWorkspace((e.target as HTMLSelectElement).value)}>
-        ${this.workspaces.map((w) => html`<option value=${w.id} ?selected=${w.id === this.current}>${inFile.has(w.id) ? `${DB_MARK} ` : ''}${w.name}</option>`)}
+      <select @change=${(e: Event) => this.switchWorkspace((e.target as HTMLSelectElement).value)}>
+        ${this.entries.map(
+          (e) => html`<option value=${`${e.id}\u0000${e.file ?? ''}`} title=${ifDefined(e.file)} ?selected=${e.file === undefined && e.id === this.current}>${workspaceLabel(e)}</option>`,
+        )}
       </select>
-      ${inFile.has(this.current) ? html`<span class="db" title=${`"${this.nameOf(this.current)}" is kept in a .edb file`}>${DATABASE_ICON}</span>` : ''}
       <button @click=${newWorkspaceFlow} title="New workspace">
         <span class="mi sm">add</span>
       </button>

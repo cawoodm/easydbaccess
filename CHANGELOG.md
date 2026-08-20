@@ -1,5 +1,40 @@
 # CHANGELOG
 
+## 20 Aug 2026
+
+### Features
+
+- 🪶 A browser workspace has no row limit: its store is SQLite now, so the 10,000-row refusal it needed is gone (v0.0.398)
+- 🪶 The File menu is gone: Open, autosave and the workspace folder are commands in the palette (v0.0.397)
+- ✨ Unsaved work shows as a red dot on the header Save button (v0.0.397)
+- ✨ Save As, the prompt for a file name and a folder-sync item that did nothing are all gone (v0.0.397)
+
+### Bugs
+
+- 🐛 Connecting the workspace folder asked which copy of a workspace was real about one the URL had just created empty (v0.0.397)
+- 🐛 The File menu offered no way to save a workspace that had never been saved, and Open landed in the wrong workspace (v0.0.397)
+- 🐛 The workspace list showed the technical name, so editing the workspace title looked as if it had not taken (v0.0.397)
+
+## 17 Aug 2026
+
+### Features
+
+- 🪶 Connecting a workspace folder rebuilds the workspace list from every .edb in it, and asks which copy wins where a name is in both (v0.0.393)
+- 🪶 `?space=NAME` now finds a workspace this browser or the workspace folder already holds, instead of creating an empty one (v0.0.388)
+- 🪶 Saving with no file to save to keeps a copy in this browser, and the File menu can restore it — a browser without file access is no longer save-or-lose (v0.0.386)
+- 🪶 Run SQL against a workspace: a SQL button in the footer and `api.store.sql` for plugins. Reads by default, writes behind a checkbox (v0.0.376)
+
+- 🪶 Filtering on a field that came in with a dump — one with no column of its own — is narrowed in SQL instead of pulling the whole table across to be narrowed in memory (v0.0.391)
+
+### Bugs
+
+- 🐛 A workspace file opened while the URL still named another workspace showed a workspace with no tables (v0.0.393)
+- 🐛 Renaming a column keeps its values. In a workspace file the rename added an empty column beside the old one, so the renamed column read as blank and anything reading it — a projection, a join key — stopped resolving (v0.0.385)
+- 🐛 A column with a script gets the stored value its script reads. In a workspace file that value was left out of the read, so every scripted cell rendered from `undefined` (v0.0.385)
+- 🐛 Open and Convert land on the workspace they just built instead of an empty one (v0.0.385)
+- 🐛 A filter matching most of a huge table is cut to the 20,000-row read cap again, and says so, instead of putting every match in the grid (v0.0.385)
+- 🐛 Deleting or editing rows in one table no longer makes every other open grid re-read itself — on the desktop that happened on every write (v0.0.375)
+
 ## 14 Aug 2026
 
 ### Features

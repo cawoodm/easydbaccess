@@ -4,7 +4,7 @@
  * A BrowserWindow that loads the Vite-served renderer in dev (via
  * EASYDB_RENDERER_URL) or the built renderer in production. Unlike the browser
  * build, this renderer stores its data in the main-process SQLite file rather
- * than Dexie/IndexedDB — see `renderer/src/app-context.ts` for where it picks.
+ * than in the renderer — see `renderer/src/app-context.ts` for where it picks.
  *
  * This file wires up the main-process SQLite store's IPC surface: the
  * `store:*` / `db:path` channels (data access, `sqlite-store.ts`) and the
@@ -20,7 +20,7 @@ import { getStore, pickDatabaseToOpen, switchToDatabase, saveDbAs, importDb, imp
 import { prepareImport, probeDatabaseFile, type ImportPlanEntry } from './db-import';
 import { runImport } from './import-runner';
 import { listBrowsable, readBrowseRows } from './db-browse';
-import type { ColumnSpec, RowQuery } from '@easydb/shared';
+import { ALL_COLLECTIONS, changeScopeOf, type CloneMode, type ColumnSpec, type RowQuery, type SqlRunOptions } from '@easydb/shared';
 import type { ImportDecision } from './db-import';
 
 const isDev = !!process.env.EASYDB_RENDERER_URL;
@@ -49,7 +49,7 @@ function toErrorMessage(err: unknown): string {
 }
 
 /**
- * Notifies every window that a collection changed — replaces Dexie's liveQuery.
+ * Notifies every window that a collection changed.
  *
  * `scope` narrows it to ONE table's rows. Without it, every subscribed
  * `rows(tableId)` view re-reads its whole result set, which is quadratic during
@@ -77,12 +77,22 @@ function handle<Args extends unknown[], R>(channel: string, fn: (...args: Args) 
   });
 }
 
-/** Same as `handle`, but also broadcasts `store:changed` for the mutated collection. */
+/**
+ * Same as `handle`, but also broadcasts `store:changed` for the mutated
+ * collection.
+ *
+ * The scope comes from what the store RETURNED, by the same rule the browser
+ * worker uses (`changeScopeOf` in `@easydb/shared`) — the request cannot supply
+ * it for a remove, a bulk remove or a patch. Until this was wired the desktop
+ * broadcast every row write unscoped, which is the quadratic case
+ * `broadcastChanged` describes.
+ */
 function handleMutating<Args extends [string, ...unknown[]], R>(channel: string, fn: (...args: Args) => R): void {
   ipcMain.handle(channel, (_event, ...args: unknown[]) => {
     try {
       const result = fn(...(args as Args));
-      broadcastChanged(args[0] as string);
+      const coll = args[0] as string;
+      broadcastChanged(coll, changeScopeOf(coll, result));
       return result;
     } catch (err) {
       throw new Error(toErrorMessage(err), { cause: err });
@@ -109,6 +119,27 @@ function registerStoreIpc(): void {
   handleMutating('store:patch', (coll: string, key: string, patch: Record<string, unknown>) => getStore().patch(coll, key, patch));
   handleMutating('store:remove', (coll: string, key: string) => getStore().remove(coll, key));
   handleMutating('store:bulkRemove', (coll: string, keys: string[]) => getStore().bulkRemove(coll, keys));
+  // Raw SQL. Not `handleMutating`: that reads args[0] as the collection, which
+  // here is the statement text. A write also cannot say what it touched, so it
+  // announces every collection rather than leaving a stale panel on screen.
+  handle('store:runSql', (sql: string, opts?: SqlRunOptions) => {
+    const result = getStore().runSql(sql, opts);
+    if (opts?.write) for (const coll of ALL_COLLECTIONS) broadcastChanged(coll);
+    return result;
+  });
+  // Whole-workspace operations. Like a raw SQL write, a clone or a delete spans
+  // every collection and cannot say which, so both announce all of them.
+  handle('store:countWorkspaceContents', (workspaceId: string, opts?: { countRows?: boolean }) => getStore().countWorkspaceContents(workspaceId, opts));
+  handle('store:deleteWorkspace', (workspaceId: string) => {
+    const removed = getStore().deleteWorkspace(workspaceId);
+    for (const coll of ALL_COLLECTIONS) broadcastChanged(coll);
+    return removed;
+  });
+  handle('store:cloneWorkspace', (opts: { from: string; to: string; name: string; mode: CloneMode }) => {
+    const id = getStore().cloneWorkspace(opts);
+    for (const coll of ALL_COLLECTIONS) broadcastChanged(coll);
+    return id;
+  });
   handle('store:count', (coll: string) => getStore().count(coll));
   handle('db:path', () => getStore().filePath);
 }

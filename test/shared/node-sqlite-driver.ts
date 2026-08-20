@@ -29,6 +29,7 @@ export function nodeSqliteDriver(path = ':memory:'): SqlDriver & { close(): void
         get: (...params) => stmt.get(...(params as never[])) as Record<string, unknown> | undefined,
         all: (...params) => stmt.all(...(params as never[])) as Record<string, unknown>[],
         run: (...params) => void stmt.run(...(params as never[])),
+        iterate: (...params) => stmt.iterate(...(params as never[])) as IterableIterator<Record<string, unknown>>,
       };
     },
     close(): void {

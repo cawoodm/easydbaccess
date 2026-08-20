@@ -1,9 +1,10 @@
 /// <reference lib="webworker" />
 import sqlite3InitModule, { type Database, type Sqlite3Static } from '@sqlite.org/sqlite-wasm';
-import { EdbStore } from '@easydb/shared';
-import { ROW_COLLECTION, type EdbRequest, type EdbResponse } from './protocol.js';
+import { ALL_COLLECTIONS, EdbStore, changeScopeOf } from '@easydb/shared';
+import { type EdbRequest, type EdbResponse } from './protocol.js';
 import { createAutosavePolicy, type AutosavePolicy } from './dirty.js';
 import { readMirror, writeMirror } from './mirror.js';
+import { ensurePool, openInPool, poolPath, tunePooledDb } from './substrate.js';
 import { wasmDriver } from './wasm-driver.js';
 
 /**
@@ -14,10 +15,20 @@ import { wasmDriver } from './wasm-driver.js';
  * synchronous, so a bulk insert on the main thread would freeze the tab for the
  * length of the import.
  *
- * The database is held IN MEMORY. Nothing touches the user's file until they
- * press Save, which asks for {@link exportBytes} and writes them through a
- * FileSystemAccess handle on the main thread. Between saves the bytes are
- * mirrored to OPFS so a crashed or closed tab loses nothing.
+ * ## Where the data lives
+ *
+ * Normally in the `opfs-sahpool` VFS: the database is a real origin-private
+ * file and SQLite writes its pages incrementally, so **every COMMIT is
+ * durable**. There is nothing to serialise and nothing to flush.
+ *
+ * Where the pool cannot be installed the database falls back to memory, and
+ * whole-database bytes are mirrored out on a debounce. That path loses writes
+ * made in the seconds before a reload, which is why it is the fallback and not
+ * the default — see `substrate.ts`.
+ *
+ * Either way the user's own FILE is untouched until they press Save, which asks
+ * for the bytes and writes them through a FileSystemAccess handle on the main
+ * thread.
  */
 
 let sqlite3: Sqlite3Static | null = null;
@@ -32,6 +43,8 @@ let workspaceKey = 'default';
  * write once) and that code is already tested.
  */
 let mirror: AutosavePolicy | null = null;
+/** Which substrate `open` settled on, so `export` and `flush` know what to do. */
+let pooled: { path: string; exportFile: (p: string) => Promise<Uint8Array> } | null = null;
 
 const post = (msg: EdbResponse) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(msg);
 
@@ -60,23 +73,50 @@ async function open(bytes: Uint8Array | null, name: string): Promise<void> {
   sqlite3 ??= await sqlite3InitModule();
   driver?.close();
   mirror?.dispose();
+  mirror = null;
+  pooled = null;
   dbName = name;
   workspaceKey = name;
-  if (bytes && bytes.byteLength > 0) {
-    // Deserialise the user's file into a fresh in-memory database. `p` hands
-    // SQLite a pointer it then owns, which is why the bytes are copied into WASM
-    // memory first rather than passed by reference.
-    const p = sqlite3.wasm.allocFromTypedArray(bytes);
-    db = new sqlite3.oo1.DB();
-    const rc = sqlite3.capi.sqlite3_deserialize(db.pointer!, 'main', p, bytes.byteLength, bytes.byteLength, sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE | sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE);
+
+  const pool = await ensurePool(sqlite3);
+  if (pool) {
+    // The durable path. The file already holds whatever previous sessions
+    // wrote, so there is nothing to restore and nothing to debounce.
+    db = await openInPool(pool, name, bytes);
+    tunePooledDb(db);
+    pooled = { path: poolPath(name), exportFile: (p) => pool.exportFile(p) };
+  } else {
+    await openInMemory(bytes, name);
+  }
+
+  driver = wasmDriver(sqlite3, require(db, 'database opened'));
+  store = new EdbStore(driver);
+}
+
+/**
+ * The fallback: database in RAM, whole-database bytes mirrored on a debounce.
+ *
+ * Only reached where `opfs-sahpool` cannot be installed. It is NOT equivalent to
+ * the pooled path — a reload within the debounce window loses whatever was
+ * written in it — so it exists to keep such a browser working rather than to be
+ * a second supported way of running.
+ */
+async function openInMemory(bytes: Uint8Array | null, name: string): Promise<void> {
+  const s3 = require(sqlite3, 'sqlite3 used');
+  // With no file to open, the last mirror is the only copy there is.
+  const source = bytes && bytes.byteLength > 0 ? bytes : ((await readMirror(name))?.bytes ?? null);
+  if (source && source.byteLength > 0) {
+    // `p` hands SQLite a pointer it then owns, which is why the bytes are copied
+    // into WASM memory first rather than passed by reference.
+    const p = s3.wasm.allocFromTypedArray(source);
+    db = new s3.oo1.DB();
+    const rc = s3.capi.sqlite3_deserialize(db.pointer!, 'main', p, source.byteLength, source.byteLength, s3.capi.SQLITE_DESERIALIZE_FREEONCLOSE | s3.capi.SQLITE_DESERIALIZE_RESIZEABLE);
     db.checkRc(rc);
   } else {
-    db = new sqlite3.oo1.DB(':memory:');
+    db = new s3.oo1.DB(':memory:');
   }
-  driver = wasmDriver(sqlite3, db);
-  store = new EdbStore(driver);
 
-  const key = workspaceKey;
+  const key = name;
   mirror = createAutosavePolicy({
     debounceMs: 2000,
     save: async () => {
@@ -90,36 +130,69 @@ async function open(bytes: Uint8Array | null, name: string): Promise<void> {
   mirror.setEnabled(true);
 }
 
-/** The mirrored bytes for a workspace, so a reload can restore without a file permission. */
-async function restoreFromMirror(name: string): Promise<Uint8Array | null> {
-  const record = await readMirror(name);
-  return record?.bytes ?? null;
+/**
+ * Place a database under `name`, for the next boot to open.
+ *
+ * The pool is the only place a boot looks, and only this worker can hold it —
+ * hence the op. On the memory fallback the mirror plays the same role, so the
+ * bytes go there instead.
+ *
+ * **Importing over the database this worker has OPEN closes it first**, and the
+ * caller must then reload. An open connection holds cached pages and a journal
+ * for the file it was given; leaving it open means SQLite writing those back
+ * over the bytes just imported, so the import appeared to work and the reload
+ * came up on the OLD database. Restoring a copy of the workspace you are in is
+ * exactly that case, and it is the common one. After this the worker has no
+ * store, so every later call fails loudly rather than answering from a database
+ * that is no longer the one on disk.
+ */
+async function importBytes(name: string, bytes: Uint8Array): Promise<void> {
+  sqlite3 ??= await sqlite3InitModule();
+  if (name === dbName) {
+    driver?.close();
+    mirror?.dispose();
+    driver = null;
+    store = null;
+    db = null;
+    mirror = null;
+    pooled = null;
+  }
+  const pool = await ensurePool(sqlite3);
+  if (pool) {
+    await pool.importDb(poolPath(name), bytes);
+    return;
+  }
+  await writeMirror(name, bytes);
 }
 
 /**
- * Write the mirror at once, ignoring the debounce.
+ * Make everything written so far durable, now.
  *
- * Open and Convert both fill a worker and then reload the page. The boot after
- * that reload reads the mirror, so the bytes have to be there before the reload,
- * not two seconds later.
+ * A near no-op on the pooled path — SQLite already committed it to the file —
+ * and the forced mirror write on the fallback, where Open and Convert need the
+ * bytes on disk before the reload they trigger.
  */
-async function flushMirror(): Promise<void> {
+async function flushNow(): Promise<void> {
+  if (pooled) return;
   await writeMirror(workspaceKey, require(driver, 'flush requested').export());
+}
+
+/**
+ * The database as bytes, for Save.
+ *
+ * `exportFile` reads the pool's own backing file, where
+ * `sqlite3_js_db_export` would allocate the whole database inside the WASM heap
+ * and copy it out — twice its size, in a heap that cannot grow past 4 GB and in
+ * practice gives up long before. This app's stated case is 600k-row tables.
+ */
+async function exportBytes(): Promise<Uint8Array> {
+  if (pooled) return pooled.exportFile(pooled.path);
+  return require(driver, 'export requested').export();
 }
 
 function require<T>(value: T | null, what: string): T {
   if (value === null) throw new Error(`edb worker: ${what} before the database was opened`);
   return value;
-}
-
-/** Which table a row write touched, so the broadcast can be scoped to it. */
-function rowScope(req: EdbRequest): string | undefined {
-  if ('doc' in req && req.doc && typeof req.doc.tableId === 'string') return req.doc.tableId;
-  if ('docs' in req && Array.isArray(req.docs)) {
-    const first = req.docs[0];
-    if (first && typeof first.tableId === 'string') return first.tableId;
-  }
-  return undefined;
 }
 
 function handle(req: EdbRequest): unknown {
@@ -149,13 +222,67 @@ function handle(req: EdbRequest): unknown {
       return s().queryRows(req.tableId, req.query);
     case 'distinctValues':
       return s().distinctValues(req.tableId, req.query);
-    case 'export':
-      return require(driver, 'export requested').export();
+    case 'countWorkspaceContents':
+      return s().countWorkspaceContents(req.workspaceId, { countRows: req.countRows });
+    case 'deleteWorkspace':
+      return s().deleteWorkspace(req.workspaceId);
+    case 'cloneWorkspace':
+      return s().cloneWorkspace({ from: req.from, to: req.to, name: req.name, mode: req.mode });
+    case 'runSql':
+      return s().runSql(req.sql, { params: req.params, write: req.write, maxRows: req.maxRows });
     case 'dbName':
       return dbName;
     default:
       throw new Error(`edb worker: unknown op`);
   }
+}
+
+/**
+ * The workspace records inside a `.edb`'s bytes, without adopting it.
+ *
+ * A folder scan reads every file in the folder to rebuild the workspace list, and
+ * `importDb` would be the wrong way to do it twice over: the pool starts at six
+ * file slots, and each import is a full copy of a database the user may never
+ * open. So the bytes go into a THROWAWAY in-memory database that never touches
+ * the module's `db` / `store` / `driver` — the live session keeps running
+ * underneath, and the scan leaves nothing behind.
+ *
+ * Anything that is not one of our databases answers `[]` rather than throwing:
+ * a folder may hold a `.edb` written by something else, or a truncated one, and
+ * one bad file must not abandon the scan.
+ */
+async function peekWorkspaces(bytes: Uint8Array): Promise<Record<string, unknown>[]> {
+  if (bytes.byteLength === 0) return [];
+  const s3 = (sqlite3 ??= await sqlite3InitModule());
+  let probe: Database | null = null;
+  try {
+    const p = s3.wasm.allocFromTypedArray(bytes);
+    probe = new s3.oo1.DB();
+    probe.checkRc(s3.capi.sqlite3_deserialize(probe.pointer!, 'main', p, bytes.byteLength, bytes.byteLength, s3.capi.SQLITE_DESERIALIZE_FREEONCLOSE));
+    const rows = probe.selectObjects(`SELECT doc FROM _easydb WHERE coll = 'workspaces'`);
+    return rows.map((r) => JSON.parse(String(r.doc)) as Record<string, unknown>);
+  } catch {
+    return []; // not our database, or not a database at all
+  } finally {
+    probe?.close();
+  }
+}
+
+/**
+ * Does this browser already hold a database called `name`?
+ *
+ * Two substrates, two places to look: a pooled database is a file in the pool's
+ * own list, and the memory fallback's only copy is its mirror.
+ *
+ * Nothing is opened. `new OpfsSAHPoolDb(path)` on an unused name CREATES that
+ * file, so probing by opening would answer yes to everything and adopt an empty
+ * database over the one the user asked for.
+ */
+async function hasDatabase(name: string): Promise<boolean> {
+  sqlite3 ??= await sqlite3InitModule();
+  const pool = await ensurePool(sqlite3);
+  if (pool) return pool.getFileNames().includes(poolPath(name));
+  return (await readMirror(name)) !== null;
 }
 
 /** The three operations that touch OPFS, and therefore cannot be synchronous. */
@@ -164,9 +291,20 @@ async function handleAsync(req: EdbRequest): Promise<unknown> {
     case 'open':
       return open(req.bytes, req.name);
     case 'restore':
-      return restoreFromMirror(req.name);
+      // Kept for protocol compatibility only. The pooled database loads itself
+      // and the memory fallback reads its own mirror, so nobody needs bytes
+      // handed back to pass into `open`.
+      return null;
+    case 'importBytes':
+      return importBytes(req.name, req.bytes);
     case 'flush':
-      return flushMirror();
+      return flushNow();
+    case 'export':
+      return exportBytes();
+    case 'hasDatabase':
+      return hasDatabase(req.name);
+    case 'peekWorkspaces':
+      return peekWorkspaces(req.bytes);
     default:
       return handle(req);
   }
@@ -178,8 +316,18 @@ self.onmessage = async (e: MessageEvent<EdbRequest>) => {
     const result = await handleAsync(req);
     post({ id: req.id, ok: true, result });
     if (isMutation(req)) {
-      post({ changed: req.coll, scope: req.coll === ROW_COLLECTION ? rowScope(req) : undefined });
+      // Scoped from the RESULT, not the request: a remove/bulkRemove names row
+      // ids and a patch names only the changed fields, so none of them can say
+      // which table they hit until the store has looked. See `changeScopeOf`.
+      post({ changed: req.coll, scope: changeScopeOf(req.coll, result) });
       // One call per RPC, so a 600k-row bulkInsert marks the mirror dirty once.
+      mirror?.changed();
+    } else if ((req.op === 'runSql' && req.write) || req.op === 'deleteWorkspace' || req.op === 'cloneWorkspace') {
+      // These say nothing about what they touched — raw SQL could have rewritten
+      // the registry itself, and a workspace operation spans every collection —
+      // so all of them are announced. Anything narrower would leave a stale
+      // panel on screen.
+      for (const coll of ALL_COLLECTIONS) post({ changed: coll });
       mirror?.changed();
     }
   } catch (err) {

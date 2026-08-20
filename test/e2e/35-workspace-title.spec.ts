@@ -31,6 +31,47 @@ test.describe('workspace title', () => {
     await expect(page.locator('app-shell header strong')).toContainText('Acme Inventory');
   });
 
+  test('the workspace list shows the title, live, and goes back to the name', async ({ page, workspaceId }) => {
+    // The selector is the OTHER place a workspace is named, and it showed the
+    // technical name — so a title edit looked as if it had not taken.
+    const selected = page.locator('app-shell workspace-selector select option:checked');
+    await expect(selected).toHaveText(workspaceId);
+
+    const header = page.locator('app-shell header');
+    await header.getByTitle('Workspace and plugin settings').click();
+    const dialog = page.locator('settings-dialog');
+    const titleInput = dialog.getByPlaceholder('easyDBAccess');
+
+    // Live: the store subscription drives the list, so no reload and no Done.
+    await titleInput.fill('Acme Inventory');
+    await titleInput.blur();
+    await expect(selected).toHaveText('Acme Inventory');
+
+    // Cleared, and the list falls back to the name rather than going blank.
+    await titleInput.fill('');
+    await titleInput.blur();
+    await expect(selected).toHaveText(workspaceId);
+    await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+  });
+
+  test('a workspace from another file names the file in a tooltip, not in the list', async ({ page, workspaceId }) => {
+    // The index is device-local, so a file entry can be planted without a folder
+    // grant — what is under test is how the list DRAWS one.
+    await page.evaluate(() => {
+      localStorage.setItem('eda:folderIndex', JSON.stringify({ folder: 'demo-folder', at: Date.now(), workspaces: [{ id: 'elsewhere', name: 'elsewhere', file: 'elsewhere.edb' }] }));
+      window.dispatchEvent(new CustomEvent('easydb:folder-index-changed'));
+    });
+
+    const options = page.locator('app-shell workspace-selector select option');
+    const fromFile = options.filter({ hasText: 'elsewhere' });
+    // The text is the workspace, only the workspace.
+    await expect(fromFile).toHaveText('elsewhere');
+    // The file is there to be hovered, not read.
+    await expect(fromFile).toHaveAttribute('title', 'elsewhere.edb');
+    // And this tab's own workspace carries no file tooltip at all.
+    await expect(options.filter({ hasText: workspaceId })).not.toHaveAttribute('title', /.+/);
+  });
+
   test('clearing the title reverts the header to the default', async ({ page }) => {
     const header = page.locator('app-shell header');
     await header.getByTitle('Workspace and plugin settings').click();

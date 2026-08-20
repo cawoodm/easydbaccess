@@ -66,7 +66,10 @@ test('a shipped sample can be deleted and every deletion undone', async ({ page 
   await expect(confirm).toContainText('Delete the sample');
   await confirm.getByRole('button', { name: 'Yes' }).click();
 
-  await expect(dlg.getByTestId('import-sample')).not.toContainText('Northwind');
+  // Longer than the default 5s: the deletion is a workspace-settings write and
+  // the dropdown redraws from the store's answer, so on a loaded machine the
+  // list is still the old one when the default gives up.
+  await expect(dlg.getByTestId('import-sample')).not.toContainText('Northwind', { timeout: 15_000 });
   // The URL it filled in stays in the box — deleting a sample is not undoing a pick.
   await expect(dlg.locator('input[type="text"]').first()).toHaveValue(/northwind/);
 

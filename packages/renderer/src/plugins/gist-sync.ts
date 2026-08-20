@@ -1,7 +1,6 @@
 import type { HostApi, PluginModule, Row, Setting, Table, ViewInstance, ViewTemplate } from '@easydb/shared';
 import { cryptoUUID, slugTable } from '../util/ids.js';
 import { withoutRawSecrets } from '../db/secret-guard.js';
-import { assertIncomingFits } from '../db/row-budget.js';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a
 // custom element on import, which would blow up under Vitest's default
@@ -501,7 +500,6 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
           // big for the browser store is reported as a failure rather than leaving
           // the local copy emptied. The files are fetched one at a time, so the
           // whole pull cannot be judged up front the way an import can.
-          assertIncomingFits((parsed.rows ?? []).length);
 
           let table: Table;
           const existing = byName.get(parsed.name.toLowerCase());
@@ -784,8 +782,6 @@ async function pullTable(api: HostApi, tableId: string): Promise<void> {
   // Local tables replace their rows from the file; a remote table keeps its
   // live-fetched rows — its restored definition reconnects it to the backend.
   if (patched.source == null) {
-    // Asked before the wipe: refused after it, the table would be left empty.
-    assertIncomingFits((parsed.rows ?? []).length);
     const rowColl = api.store.rows(tableId);
     const oldRows = await rowColl.find();
     await rowColl.bulkRemove(oldRows.map((r) => r.id));

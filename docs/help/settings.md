@@ -11,6 +11,9 @@ There's no Save button. Each field saves as soon as you change it.
 ## General tab vs. plugin tabs
 
 - **General** — the workspace title, and the secrets store (see below).
+  The title is what the workspace is called on screen: the header, the browser
+  tab, and the workspace list at the top left. Clear it and all three go back to
+  the workspace's own name.
 - One tab per feature that has settings — for example **Gist Sync**,
   **Server Sync**, or **Datasette**. A feature only gets a tab if it
   registered one; not every feature has settings to show.

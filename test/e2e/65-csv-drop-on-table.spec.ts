@@ -117,9 +117,14 @@ test('a manual remap decides where the values land', async ({ page }) => {
   // "Zug" was in column A, now mapped to `pop`; the number was in B → `city`.
   const added = rows.find((r) => r.data.city === '30000')!;
   expect(added).toBeTruthy();
-  // A non-numeric value in a number column is kept verbatim rather than nulled,
-  // so nothing the file carried is thrown away (see csv-import's `coerce`).
-  expect(added.data.pop).toBe('Zug');
+  // `pop` is a NUMBER column, which is a REAL column in the workspace's SQLite
+  // file, so "Zug" cannot be stored in it: `sql-mapping.ts`'s `encodeValue`
+  // turns what will not parse into SQL NULL. The import still carried the value
+  // as far as it could (see csv-import's `coerce`) — the column's declared type
+  // is what refuses it, and the empty cell is what says so. The key is absent
+  // rather than null: `EdbStore.decodeRow` omits a decoded null so a row that
+  // stored nothing reads the same as one that never held the key.
+  expect(added.data.pop).toBeUndefined();
 });
 
 test('the mapper refuses two columns pointing at one field', async ({ page }) => {
