@@ -128,6 +128,16 @@ instance), you choose:
 Referencing a Datasette **database** or **instance** asks which tables you want,
 the same way a copy does.
 
+## How much can one import bring in?
+
+In a browser tab, **a workspace holds 10,000 rows** — all its tables together. An
+import that would take it past that is refused, whole, and the message says where
+to go instead: **File → New .edb file…** copies the workspace into a SQLite file
+with no limit, and imports about 25 times faster into it. See
+[Database Files](database-files.md).
+
+The desktop app has no limit: its workspaces are SQLite files already.
+
 ## Importing many tables at once
 
 All the windows open together, empty, and then fill one at a time. Each window

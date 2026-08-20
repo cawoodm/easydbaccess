@@ -496,6 +496,10 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
           if (!parsed.name || !Array.isArray(parsed.columns)) {
             throw new Error('unexpected file shape (missing name/columns)');
           }
+          // Asked before this table's existing rows are wiped below, so a table too
+          // big for the browser store is reported as a failure rather than leaving
+          // the local copy emptied. The files are fetched one at a time, so the
+          // whole pull cannot be judged up front the way an import can.
 
           let table: Table;
           const existing = byName.get(parsed.name.toLowerCase());

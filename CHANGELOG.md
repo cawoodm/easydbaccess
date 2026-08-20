@@ -4,6 +4,7 @@
 
 ### Features
 
+- 🪶 A browser workspace has no row limit: its store is SQLite now, so the 10,000-row refusal it needed is gone (v0.0.398)
 - 🪶 The File menu is gone: Open, autosave and the workspace folder are commands in the palette (v0.0.397)
 - ✨ Unsaved work shows as a red dot on the header Save button (v0.0.397)
 - ✨ Save As, the prompt for a file name and a folder-sync item that did nothing are all gone (v0.0.397)
@@ -45,11 +46,27 @@
 - ✨ Dragging a column to build a projection now makes the table you dragged from the base, joined on that column (v0.0.372)
 - ✨ Edit now opens a visualization's definition and Settings opens the view; a docked pane reaches both (v0.0.371)
 - ✨ Every kind of table window is a shade of blue; views and visualizations get their own colours (v0.0.371)
+- ✨ A workspace kept in a `.edb` file is marked with a database icon in the workspace list (v0.0.375)
+
+### Bugs
+
+- 🪲 Maps drew nothing usable: the tiles and markers were built but landed outside the map, unstyled (v0.0.373)
+- 🪲 A map's "Size by" column made no visible difference to the markers (v0.0.373)
+- 🪲 A JSON file this app exported could fail to import: a long decimal was rewritten into invalid JSON (v0.0.374)
+- 🪲 Resizing a grid column redrew every visualization, re-laying-out a word cloud and losing a map's pan (v0.0.376)
+- 🪲 Moving one workspace into a `.edb` file hid every other workspace from the list (v0.0.375)
+- 🪲 The workspace list differed between a file-backed workspace and a browser one (v0.0.375)
+- 🪲 Deleting a workspace kept in a `.edb` file removed nothing, and it came back on the next load (v0.0.375)
+- 🪲 A new browser workspace created while a file was open opened empty, inside the file (v0.0.375)
+- 🪲 The File menu could open partly outside the screen (v0.0.375)
 
 ## 13 Aug 2026
 
 ### Features
 
+- 🪶 A workspace in the browser holds 10,000 rows. Bigger data is refused, and belongs in a `.edb` file, which has no limit (v0.0.372)
+- ✨ Validate marks each cell that broke a rule pink, with the reason on hover, and keeps the row's verdict in a hidden `_error` column (v0.0.371)
+- ✨ Validate reports in a temporary `_error` column, with the grid filtered to those rows, instead of a separate issues table (v0.0.370)
 - 🪶 A ✓ button checks every row against its columns' rules and collects what it finds in an issues table (v0.0.369)
 - 🪶 Drag a column from one table onto another to start a projection joining the two, with that column selected (v0.0.368)
 - 🪶 A new `text` column type for prose: its funnel offers no value list, because every cell is different and too long to browse (v0.0.365)

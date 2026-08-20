@@ -67,15 +67,30 @@ rule its columns carry: Required, Maximum, Unique and your own validation
 scripts.
 
 What you get back is a summary — one line per column, in the order the columns
-appear — and a table of the problems themselves, named `<your table> issues`.
-It holds one row per problem: which row, which column, the value, and what is
-wrong with it. Because it is an ordinary table you can filter it, sort it and
-export it, and its window stays open beside the table you are fixing.
+appear — and **the table itself, narrowed to the rows with something wrong**.
+Every cell that broke a rule is **pink**, and hovering it says why: `Age value 40
+is over the maximum of 20`. Fix it in place.
 
-Fix the rows in the real table, then press ✓ again — the issues table is
-rewritten, so what is left in it is what is still wrong.
+Press ✓ again when you have finished. The rows you repaired drop out, and a run
+that finds nothing leaves the table as it was.
 
-Three things worth knowing:
+### The `_error` column
+
+Each run also writes the whole row's verdict into a column called `_error`,
+created the first time it is needed. It is **hidden**, because the pink cell
+already says it where you are looking — but it is an ordinary column:
+
+- The **columns editor** shows it, so you can unhide it and read the messages in
+  a column of their own. Once you unhide it, it stays unhidden.
+- **Rename it** and it is yours. The messages come with it, the next ✓ leaves it
+  alone, and a fresh `_error` is made for that run. This is how you keep a copy
+  of what a run found.
+- A script can read it as `row._error` like any other field.
+
+Each run rewrites it: messages for the rows that are wrong now, and nothing on
+the rows that are not. So it is never a verdict on data that has since changed.
+
+Three more things worth knowing:
 
 - A table whose columns carry no rules is not read at all. There is nothing to
   check, and the button says so instead of pretending to work.
@@ -83,6 +98,9 @@ Three things worth knowing:
   then reports what it found so far.
 - A column stops listing after 500 problems and counts the rest, so one broken
   rule cannot bury the others.
+
+The pink is a setting — **Highlight cells Validate flagged**, beside the
+empty-cell one in Settings. Turning it off leaves the reason on hover.
 
 ## Renderers — changing how a value is displayed
 

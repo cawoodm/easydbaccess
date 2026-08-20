@@ -162,6 +162,52 @@ Its two siblings (`easydb:visible-count`, `db/settings-events.ts`) are
 A listener that throws is caught and warned about: a broken third-party chart is
 a broken picture, not a broken table.
 
+### Data changes redraw. Optics do not.
+
+Everything above happens in `updated()`, which runs on **every** render — and
+most renders change how the grid looks, not which rows are in it. Resizing a
+column is the extreme case: the width lives in `@state`, so one drag re-renders
+per pointermove and then persists a `width` onto every `ColumnSpec`. Every step
+of that used to reach the pane, and two of the consequences were not merely
+wasted work: the word cloud re-ran a main-thread d3-cloud layout, and the map
+re-fit its bounds — throwing away wherever the user had panned and zoomed to.
+
+Three guards, at three different distances from the cause. All three are cheap
+comparisons standing in front of expensive work, and each catches what the ones
+above it cannot:
+
+1. **The grid does not republish an identical set.**
+   `sameVisibleRows(last, next)` in `table/visible-rows.ts` compares the
+   surrounding facts and then the rows **by reference, one by one**. Reference
+   identity is a sound test here: nothing mutates a `Row` in place, so a
+   re-render's rebuilt array holds the same objects while any store write yields
+   fresh ones. It is O(rows) of pointer equality against the aggregation and
+   redraw it saves.
+2. **`viz-panel` ignores table writes it draws nothing from.** `viz/viz-inputs.ts`
+   keys a table's columns on `field`, `label`, `type` and `script` — deliberately
+   listing what MATTERS rather than what to skip, so a new presentation field
+   defaults to "does not redraw". This is the guard for a WINDOWED visualization,
+   which no grid publishes to but which watches `tables` for renames and scripts.
+3. **The elements compare their own input.** `viz/elements/same-input.ts` —
+   `sameCloudTerms`, `sameMapPoints`, `sameChartData`, `sameVizOptions`,
+   `sameRowRefs`. This one cannot be skipped: `viz-panel.render()` rebuilds
+   `.terms`, `.points` and `.data` every time, so Lit's reference check reports
+   them changed on any re-render whatsoever, whatever its cause. Each element
+   records what it actually drew from — and only at the point a draw really
+   landed, never on entry, or a run abandoned by the generation guard would
+   suppress the run meant to replace it.
+
+The failure directions are asymmetric, and every judgement above leans the safe
+way: comparing too eagerly costs one wasted redraw, while comparing too loosely
+would show a stale picture. `sameVizOptions` is shallow for the same reason — a
+nested value reads as changed.
+
+`test/e2e/119-viz-optics.spec.ts` asserts this through the map, because a
+needless map redraw is the one with an observable symptom: pan the map, resize a
+grid column, and the marker must not move. A word cloud's spurious re-layout is
+deterministic for a given box, so it leaves the words where they were and can
+only be caught from the inside — hence the unit tests.
+
 ## Aggregation
 
 `viz/viz-aggregate.ts` is pure — no DOM, no Dexie, no Lit — and turns rows plus a
@@ -403,9 +449,20 @@ resize or a filter change re-lays out without reshuffling every word.
   `role="img"` summary. That is also what the e2e specs assert against — reading
   pixels would test Chart.js, not this app.
 - **The map renders into the light DOM** (`createRenderRoot` returns `this`).
-  Leaflet styles its panes with a global stylesheet and measures against the
-  document; inside a shadow root it draws a grey box. Every other element keeps
-  its shadow root.
+  Leaflet styles its panes with a global stylesheet; behind a shadow boundary that
+  CSS does not reach it. Every other element keeps its shadow root.
+- **…and having no shadow root of its own was not enough.** Up to v0.0.372 the
+  stylesheet went into `document.head`, and the map is mounted inside
+  `viz-panel`'s shadow root — where document styles do not apply. Every layer was
+  built correctly (tiles and markers were in the DOM, the points were right) and
+  then stacked in normal flow, because `.leaflet-pane { position: absolute }`
+  never landed. Markers ended up outside the map container entirely.
+
+  `adoptLeafletCss(root)` now puts the sheet in whichever root the element is
+  actually in — the document in the light DOM, the host's shadow root otherwise —
+  once per root via `adoptedStyleSheets`, with a `<style>` fallback. The lesson
+  generalises: any third-party library that ships a global stylesheet needs the
+  sheet in the element's own root, not in the document.
 - **Map markers are `circleMarker`, not `marker`.** The default Leaflet marker is
   an image resolved relative to the stylesheet, which is the thing that breaks
   under a bundler. A circle marker is SVG — no assets, and it can carry a

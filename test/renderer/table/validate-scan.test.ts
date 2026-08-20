@@ -136,6 +136,24 @@ describe('scanTable', () => {
     expect(seenProgress.every(([, t]) => t === 0)).toBe(true);
   });
 
+  it('names the rows whose old message is no longer true', async () => {
+    // Only this pass sees every row, so it is the only place that can find a
+    // message an earlier run left on a row that is clean now. The previous run's
+    // own list would not do: it is lost on reload, the text it wrote is not.
+    const all = rows(4, (i) => ({ a: i === 0 ? '' : 'x', _error: i <= 1 ? 'A is empty' : '' }));
+    const { coll } = fakeColl(all);
+    const out = await scanTable(coll, [col({ field: 'a', notnull: true })]);
+    // r0 is still empty, so its message stands. r1 was repaired. r2/r3 never had one.
+    expect(out.stale).toEqual(['r1']);
+    expect(out.issues.map((i) => i.rowId)).toEqual(['r0']);
+  });
+
+  it('reports nothing stale on a table that has never been checked', async () => {
+    const { coll } = fakeColl(rows(3, () => ({ a: '' })));
+    const out = await scanTable(coll, [col({ field: 'a', notnull: true })]);
+    expect(out.stale).toEqual([]);
+  });
+
   it('carries the cap through, so one bad column cannot return a million rows', async () => {
     const { coll } = fakeColl(rows(100, () => ({ a: '' })));
     const out = await scanTable(coll, [col({ field: 'a', label: 'A', notnull: true })], { pageRows: 25, capPerColumn: 10 });

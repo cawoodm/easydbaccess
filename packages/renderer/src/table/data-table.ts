@@ -2,7 +2,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { html as staticHtml, unsafeStatic } from 'lit/static-html.js';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { ColumnSpec, DataCollection, Row, RowPage, RowQuery, SortSpec, Table, ViewInstance } from '@easydb/shared';
-import { readRows, type RowRequest } from '../db/row-reader.js';
+import { applyRowRequest, readRows, type RowRequest } from '../db/row-reader.js';
 import { ROW_FETCH_CAP } from '../db/data-store-bridge.js';
 import { truncationNote } from '../db/truncation-note.js';
 import { isComputedOnly, searchableColumns } from '../search/searchable-columns.js';
@@ -13,7 +13,7 @@ import '../chrome/filter-combobox.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { matchesColumnFilter } from '@easydb/shared';
 import { FACET_MAX_OPTIONS, facetable, facetCounts, facetValues } from '../search/facet-values.js';
-import { GRID_SETTINGS_ID, readHighlightNulls, readSortDescFirst, readWindowRowsFrom, WINDOW_ROWS_FROM_DEFAULT } from './grid-settings.js';
+import { GRID_SETTINGS_ID, readHighlightErrors, readHighlightNulls, readSortDescFirst, readWindowRowsFrom, WINDOW_ROWS_FROM_DEFAULT } from './grid-settings.js';
 import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
 import { readSortSpecs, sortRowsBySpecs } from './row-sort.js';
 import { sameFilterMap } from './filter-map.js';
@@ -24,8 +24,9 @@ import { arrayMembers } from '@easydb/shared';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cachedRowCount, rememberRowCount } from './row-count-cache.js';
 import { rememberRowRequest } from './visible-request.js';
+import { ERROR_FIELD, ERROR_FILTER, problemAt, rowErrorsOf, watchRowErrors, type RowErrors } from './row-errors.js';
 import { TABLE_LOADING_EVENT, tableLoadingState, type TableLoadingDetail } from './table-loading.js';
-import { emitVisibleRows, provideVisibleRows, visibleRowsWanted, type VisibleRowsDetail } from './visible-rows.js';
+import { emitVisibleRows, provideVisibleRows, sameVisibleRows, visibleRowsWanted, type VisibleRowsDetail } from './visible-rows.js';
 import { providePaneActions } from './pane-actions.js';
 import { addPillValue } from '../views/view-render.js';
 import { formatByType, toDateInput, toDatetimeInput } from '../util/local-datetime.js';
@@ -399,6 +400,17 @@ export class DataTable extends LitElement {
       td.is-null input[type='text'] {
         background: transparent;
       }
+      /* A cell the last Validate run flagged. The SAME pink as an empty cell, on
+         purpose: "look here" is one idea and the app should say it one way. What
+         tells them apart is the tooltip, which an empty cell has nothing to put
+         in. (No backticks in here — this is inside a css template literal.) */
+      td.is-problem {
+        background: #fce7f3;
+      }
+      td.is-problem input[type='text'],
+      td.is-problem input[type='number'] {
+        background: transparent;
+      }
       /* Invalid stored value: the app-wide invalid red (see util/cell-validity),
          as an inset outline so the cell keeps its size and the grid lines stay
          put. Renderers additionally mark their own inputs. */
@@ -521,6 +533,12 @@ export class DataTable extends LitElement {
    */
   @state() private highlightNulls = true;
   /**
+   * Does a cell a Validate run flagged get the same pink (`grid:highlightErrors`)?
+   * Read into state for the same reason as the highlight above. The TOOLTIP is not
+   * behind this switch: a reason nobody can read is not a preference, it is a loss.
+   */
+  @state() private highlightErrors = true;
+  /**
    * Row count from which this grid reads one PAGE at a time instead of holding
    * the whole table (`grid:windowRowsFrom`, 0 = never). Kept fresh by the same
    * settings-changed event as the highlight above.
@@ -563,6 +581,17 @@ export class DataTable extends LitElement {
   private viewInst: ViewInstance | null = null;
   private tableColumns: ColumnSpec[] = [];
   private viewSubUnsub?: () => void;
+  /**
+   * What the last Validate run found: row id → the message, and which of that
+   * row's cells is wrong and why.
+   *
+   * The per-CELL part is the half no store can hold — a cell is wrong relative to
+   * a rule, not by its value — so it lives in memory and dies with the session.
+   * The row's whole verdict is in the table's own `_error` column, which the grid
+   * reads like any other. See `row-errors.ts`.
+   */
+  @state() private rowErrors: RowErrors | null = null;
+  private errorsUnsub?: () => void;
 
   private get viewMode(): boolean {
     return !!this.viewInstanceId;
@@ -625,6 +654,7 @@ export class DataTable extends LitElement {
     this.unsubscribe?.();
     this.tableSubUnsub?.();
     this.viewSubUnsub?.();
+    this.errorsUnsub?.();
     // Otherwise a pane that mounts later pulls from a detached grid, which would
     // answer with whatever rows it happened to be holding when it was unmounted.
     this.provideUnsub?.();
@@ -706,6 +736,7 @@ export class DataTable extends LitElement {
     try {
       const ctx = await getContext();
       this.highlightNulls = await readHighlightNulls(ctx.api.settings);
+      this.highlightErrors = await readHighlightErrors(ctx.api.settings);
       const from = await readWindowRowsFrom(ctx.api.settings);
       const changed = from !== this.windowRowsFrom;
       this.windowRowsFrom = from;
@@ -830,24 +861,44 @@ export class DataTable extends LitElement {
   /**
    * Hand the current row set to any docked visualization watching this table.
    *
-   * Unlike `emitCount` there is no change-detection here: comparing row arrays
-   * costs about what re-aggregating them does, and `emitVisibleRows` is already a
-   * no-op when nobody is listening — which is the case for every window that has
-   * no pane docked, i.e. almost all of them.
+   * **Only when the set actually changed.** This runs from `updated()`, so it
+   * fires on every render — and most renders are about how the grid LOOKS, not
+   * about which rows are in it. Resizing a column writes the width to `@state`
+   * per pointermove, and each render republished an identical row set: a docked
+   * word cloud re-ran its layout and a docked map re-fit its bounds (losing the
+   * user's pan) dozens of times during one drag. `sameVisibleRows` is what
+   * separates a data change from an optics one, and costs a pointer comparison
+   * per row against the aggregation and redraw it saves.
+   *
+   * `emitVisibleRows` is additionally a no-op when nobody is listening, which is
+   * the case for every window with no pane docked — i.e. almost all of them.
    */
   private emitRows(): void {
     const key = this.visibleRowsKey;
     const rows = this.renderedRows;
     if (!key || !rows || !visibleRowsWanted(key)) return;
-    emitVisibleRows({
+    const detail: VisibleRowsDetail = {
       key,
       rows,
       // Same windowed caveat as `visibleRowsDetail` — one page is not the answer.
       total: Math.max(this.matchingTotal, this.windowOffset + rows.length),
       truncated: this.truncated || this.windowed,
       searching: this.searchIsActive,
-    });
+    };
+    if (sameVisibleRows(this.lastEmittedRows, detail)) return;
+    this.lastEmittedRows = detail;
+    emitVisibleRows(detail);
   }
+
+  /**
+   * The last payload published, for the comparison above.
+   *
+   * Not cleared when the key changes — the key is part of what is compared, so a
+   * repointed grid's first publish differs and goes out anyway. A pane that
+   * mounts later does not need one either: it PULLS its first value from the
+   * provider (see `visible-rows.ts`).
+   */
+  private lastEmittedRows: VisibleRowsDetail | null = null;
 
   /**
    * Publish what the user is looking at, for the footer's "Delete Visible Data" —
@@ -972,6 +1023,15 @@ export class DataTable extends LitElement {
     this.cellRenderers = new Map(ctx.registries.cellRenderers);
     ctx.events.on('app:ready', () => (this.cellRenderers = new Map(ctx.registries.cellRenderers)));
     this.rowColl = ctx.store.rows(this.tableId);
+    // What a Validate run left for this table, and anything a later run leaves.
+    // Adopted BEFORE the first load, so a grid re-opened while messages are up
+    // reads the narrowed set once instead of reading everything and correcting it.
+    this.adoptRowErrors(rowErrorsOf(this.tableId));
+    this.errorsUnsub?.();
+    this.errorsUnsub = watchRowErrors(this.tableId, (found) => {
+      this.adoptRowErrors(found);
+      this.scheduleReload();
+    });
     // `watch` is the change signal on its own; `subscribe` has to read the whole
     // collection to have something to hand its callback, which is the second
     // full fetch this grid used to pay for on every open. Either way the
@@ -1114,11 +1174,69 @@ export class DataTable extends LitElement {
   private readPage(coll: DataCollection<Row>, req: RowRequest): Promise<RowPage> {
     const key = JSON.stringify(req);
     if (this.inflight?.key === key) return this.inflight.page;
-    const page = readRows(coll, req, ROW_FETCH_CAP).finally(() => {
+    const read = this.errorRowsOnly(req) ? this.readErrorRows(coll, req, this.rowErrors!) : readRows(coll, req, ROW_FETCH_CAP);
+    const page = read.finally(() => {
       if (this.inflight?.key === key) this.inflight = null;
     });
     this.inflight = { key, page };
     return page;
+  }
+
+  /**
+   * Is this read asking only for rows a Validate run flagged?
+   *
+   * A shortcut, not a correction: `_error` is real stored data, so the ordinary
+   * path answers this filter correctly — by reading the table to match it, which on
+   * a big one is the whole-table read the query contract exists to avoid. The run
+   * that set the filter already knows the ids, so while it is on screen the answer
+   * is a few hundred primary-key lookups instead.
+   */
+  private errorRowsOnly(req: RowRequest): boolean {
+    if (!this.rowErrors || this.rowErrors.size === 0) return false;
+    return (req.filters?.[ERROR_FIELD] ?? '').trim() !== '';
+  }
+
+  /**
+   * Read exactly the rows a Validate run flagged, by id.
+   *
+   * The rest of the request is then applied here by the same function the reader
+   * uses, which is what keeps the OTHER filters, the search, the sort and the slice
+   * working while this one is on — including a filter typed into `_error` itself,
+   * which narrows the messages.
+   */
+  /**
+   * Why this cell is wrong, according to the last Validate run — the text its
+   * tooltip shows. Empty when there is nothing wrong with it.
+   *
+   * Beats the value tooltip when both apply. A cell over its maximum length is
+   * showing its value already; what it is not showing is the limit it broke.
+   */
+  private problemOf(row: Row, col: ColumnSpec): string {
+    return problemAt(this.rowErrors, row.id, col.field) ?? '';
+  }
+
+  /**
+   * The state suffix for a `<td>`: a Validate finding first, then the type-based
+   * marking every cell gets.
+   *
+   * A finding wins because it is the more specific answer about the same cell. An
+   * empty cell that broke a Required rule is already pink from `is-null`; saying
+   * `is-problem` instead is what puts a reason in the tooltip and keeps the mark
+   * when the empty-cell highlight is switched off.
+   */
+  private cellClass(row: Row, col: ColumnSpec): string {
+    if (this.problemOf(row, col) !== '') return this.highlightErrors ? ' is-problem' : '';
+    return cellStateClass(row, col, this.highlightNulls);
+  }
+
+  private async readErrorRows(coll: DataCollection<Row>, req: RowRequest, errors: RowErrors): Promise<RowPage> {
+    const found = await Promise.all([...errors.keys()].map((id) => coll.findOne(id)));
+    // A row deleted since the scan is simply gone. Nothing to say about it: the
+    // problem it had went with it.
+    return applyRowRequest(
+      found.filter((r): r is Row => !!r),
+      req,
+    );
   }
 
   /**
@@ -1384,12 +1502,39 @@ export class DataTable extends LitElement {
     // Don't stomp on filters the user is mid-editing (a debounced save is
     // pending) with the older store value — that reverts the just-typed filter.
     if (this.filterSaveTimer == null) {
-      filtersChanged = !sameFilterMap(this.filters, filters);
-      this.filters = filters;
+      // The `_error` filter is deliberately never saved (see `saveFilters`), so a
+      // record arriving from the store cannot speak for that key. Carried across
+      // instead. Any write to the table record lands here — being fronted stamps
+      // the front order — so dropping it would take the Validate filter off the
+      // grid on the next click anywhere in the panel.
+      const kept = this.filters[ERROR_FIELD];
+      const next = kept === undefined ? filters : { ...filters, [ERROR_FIELD]: kept };
+      filtersChanged = !sameFilterMap(this.filters, next);
+      this.filters = next;
     }
     // `rowColl` is null until `bind` has one, which is how the first application
     // of a saved sort avoids scheduling a read that `bind` is about to do anyway.
     if (this.rowColl && (sortChanged || filtersChanged)) this.scheduleReload();
+  }
+
+  /**
+   * Take on what a Validate run found — and put the grid on it.
+   *
+   * The filter is applied here rather than by the plugin because the plugin has no
+   * handle on the grid, and because the two go together: a `_error` filter with no
+   * findings behind it narrows to nothing, and findings nobody filtered on leave
+   * the user hunting for pink cells in a table of four thousand rows. Applied as an
+   * ordinary entry in `this.filters` — it is only the SAVING of it that is special
+   * (see `saveFilters`).
+   */
+  private adoptRowErrors(found: RowErrors | null): void {
+    this.rowErrors = found && found.size > 0 ? found : null;
+    const current = this.filters[ERROR_FIELD];
+    if (this.rowErrors && current === undefined) this.filters = { ...this.filters, [ERROR_FIELD]: ERROR_FILTER };
+    else if (!this.rowErrors && current !== undefined) {
+      const { [ERROR_FIELD]: _gone, ...rest } = this.filters;
+      this.filters = rest;
+    }
   }
 
   /**
@@ -2034,7 +2179,10 @@ export class DataTable extends LitElement {
       e.dataTransfer.setData('text/x-easydb-col', field);
       // The cross-table payload rides along on the same drag — see column-drag.ts.
       const active: Record<string, string> = {};
-      for (const [f, q] of Object.entries(this.filters)) if (q && q.trim() !== '') active[f] = q;
+      // `_error` left out for the same reason `saveFilters` leaves it out: a
+      // projection built from this drag would open filtered by a verdict from a run
+      // the user has probably forgotten.
+      for (const [f, q] of Object.entries(this.filters)) if (f !== ERROR_FIELD && q && q.trim() !== '') active[f] = q;
       writeColumnDrag(e, {
         tableId: this.tableId,
         field,
@@ -2099,9 +2247,13 @@ export class DataTable extends LitElement {
 
   private async saveFilters() {
     const ctx = await getContext();
-    // Strip empty entries so the persisted shape stays tidy.
+    // Strip empty entries so the persisted shape stays tidy — and `_error`, whose
+    // column is hidden. A saved filter on a column with no header has no funnel to
+    // clear it from: the grid would come back from a reload showing three rows of a
+    // table with four thousand, with nothing on screen to explain why. Reloading is
+    // therefore the way out of it, which is why this one is not saved.
     const cleaned: Record<string, string> = {};
-    for (const [k, v] of Object.entries(this.filters)) if (v && v.trim().length > 0) cleaned[k] = v;
+    for (const [k, v] of Object.entries(this.filters)) if (k !== ERROR_FIELD && v && v.trim().length > 0) cleaned[k] = v;
     if (this.viewMode) {
       // A view instance always carries a (possibly empty) filters object.
       await ctx.store.viewInstances.patch(this.viewInstanceId, {
@@ -2316,8 +2468,8 @@ export class DataTable extends LitElement {
                 ${cols.map(
                   (c) =>
                     html`<td
-                      class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}${c.renderer && this.cellRenderers?.get(c.renderer) ? ' has-renderer' : ''}${cellStateClass(r, c, this.highlightNulls)}`}
-                      title=${cellTooltip(r, c)}
+                      class=${`t-${c.type}${c.renderer ? ` r-${c.renderer}` : ''}${c.renderer && this.cellRenderers?.get(c.renderer) ? ' has-renderer' : ''}${this.cellClass(r, c)}`}
+                      title=${this.problemOf(r, c) || cellTooltip(r, c)}
                     >
                       ${this.renderCell(r, c)}
                     </td>`,

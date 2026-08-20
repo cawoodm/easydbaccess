@@ -17,6 +17,7 @@
 
 import type { DataCollection, Row } from '@easydb/shared';
 import { createValidator, type RowIssue, type ValidatorOptions } from './validate-rules.js';
+import { ERROR_FIELD } from './row-errors.js';
 import type { ColumnSpec } from '@easydb/shared';
 
 /** Rows per read. Big enough to be one cheap query, small enough to yield often. */
@@ -40,6 +41,16 @@ export interface ScanResult {
   cancelled: boolean;
   /** No column carries a rule, so nothing was read at all. */
   noRules: boolean;
+  /**
+   * Rows carrying an `_error` from an EARLIER run that this run found nothing
+   * wrong with — the ones whose message has to be cleared.
+   *
+   * Collected here rather than worked out by the caller because only this pass
+   * sees every row. The previous run's own list would not do: it is lost on
+   * reload, while the text it wrote is in the store, so a run after a reload
+   * would leave last week's verdict on rows that are now clean.
+   */
+  stale: string[];
 }
 
 /** Hand the thread back, so a scan of 600,000 rows does not freeze the tab. */
@@ -57,11 +68,12 @@ function breathe(): Promise<void> {
 export async function scanTable(coll: DataCollection<Row>, columns: readonly ColumnSpec[], opts: ScanOptions = {}): Promise<ScanResult> {
   const validator = createValidator(columns, opts);
   if (validator.fields.length === 0) {
-    return { issues: [], scanned: 0, capped: new Map(), cancelled: false, noRules: true };
+    return { issues: [], scanned: 0, capped: new Map(), cancelled: false, noRules: true, stale: [] };
   }
 
   const pageRows = opts.pageRows ?? SCAN_PAGE_ROWS;
   const issues: RowIssue[] = [];
+  const stale: string[] = [];
   let scanned = 0;
   let cancelled = false;
 
@@ -74,7 +86,10 @@ export async function scanTable(coll: DataCollection<Row>, columns: readonly Col
   /** Run the validator over one batch, and report. Returns false to stop. */
   const takeBatch = async (rows: readonly Row[]): Promise<boolean> => {
     for (const row of rows) {
-      issues.push(...validator.check(row, scanned));
+      const found = validator.check(row, scanned);
+      issues.push(...found);
+      // Nothing wrong now, but something was said about it before.
+      if (found.length === 0 && String(row.data[ERROR_FIELD] ?? '').trim() !== '') stale.push(row.id);
       scanned++;
     }
     opts.onProgress?.(scanned, total);
@@ -105,5 +120,5 @@ export async function scanTable(coll: DataCollection<Row>, columns: readonly Col
     }
   }
 
-  return { issues, scanned, capped: validator.capped(), cancelled, noRules: false };
+  return { issues, scanned, capped: validator.capped(), cancelled, noRules: false, stale };
 }

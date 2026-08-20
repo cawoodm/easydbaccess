@@ -47,6 +47,38 @@ export interface VisibleRowsDetail {
 
 export type VisibleRowsListener = (detail: VisibleRowsDetail) => void;
 
+/**
+ * Do two payloads say the same thing? The grid's guard against re-publishing.
+ *
+ * The grid publishes from `updated()`, which runs on every render — and most
+ * renders change how the table LOOKS without changing which rows are in it.
+ * Dragging a column divider is the extreme case: the width is `@state`, so a
+ * render (and a publish) happens per pointermove, and each one made a docked
+ * word cloud re-run its d3-cloud layout and a docked map re-fit its bounds,
+ * throwing away the user's pan. Optics are not data.
+ *
+ * **Rows are compared by REFERENCE, one by one.** They can be: nothing mutates a
+ * `Row` in place — `data-table` only ever assigns `this.rows` from a store read,
+ * and a read after any write hands back fresh objects. So identity changing is a
+ * reliable "something was written", and identity holding is a reliable "these are
+ * the same rows". Filtering and sorting build a new ARRAY of the same objects,
+ * which is why the array itself cannot be the test.
+ *
+ * The comparison is O(rows) of pointer equality, against an aggregation +
+ * re-layout it avoids. Being wrong in the safe direction costs one redraw; the
+ * unsafe direction (a stale picture) is not reachable from here.
+ */
+export function sameVisibleRows(a: VisibleRowsDetail | null | undefined, b: VisibleRowsDetail): boolean {
+  if (!a) return false;
+  if (a.key !== b.key || a.total !== b.total || a.truncated !== b.truncated || a.searching !== b.searching) return false;
+  if (a.rows === b.rows) return true;
+  if (a.rows.length !== b.rows.length) return false;
+  for (let i = 0; i < a.rows.length; i++) {
+    if (a.rows[i] !== b.rows[i]) return false;
+  }
+  return true;
+}
+
 const listeners = new Map<string, Set<VisibleRowsListener>>();
 
 /**

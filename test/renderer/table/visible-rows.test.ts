@@ -5,6 +5,7 @@ import {
   emitVisibleRows,
   provideVisibleRows,
   requestVisibleRows,
+  sameVisibleRows,
   visibleRowsWanted,
   watchVisibleRows,
   type VisibleRowsDetail,
@@ -178,5 +179,62 @@ describe('visible-rows pull path', () => {
     provideVisibleRows('t1', () => detail('t1'));
     __resetVisibleRowsWatchers();
     expect(requestVisibleRows('t1')).toBeNull();
+  });
+});
+
+/**
+ * The grid publishes from `updated()`, so it publishes on renders that changed
+ * only how the table LOOKS. Resizing a column is the one that was reported: a
+ * width write per pointermove, each one re-laying-out a docked word cloud and
+ * re-fitting a docked map away from wherever the user had panned.
+ */
+describe('sameVisibleRows', () => {
+  it('is false against no previous publish, so the first one always goes out', () => {
+    expect(sameVisibleRows(null, detail('t1'))).toBe(false);
+    expect(sameVisibleRows(undefined, detail('t1'))).toBe(false);
+  });
+
+  it('is true for a NEW ARRAY holding the same rows — the resize case', () => {
+    // What a re-render produces: `filteredRows()` / `sortedRows()` build a fresh
+    // array out of the same Row objects, so array identity says "changed" when
+    // nothing did.
+    const again = detail('t1', { rows: [...rows] });
+    expect(again.rows).not.toBe(rows);
+    expect(sameVisibleRows(detail('t1'), again)).toBe(true);
+  });
+
+  it('is false when a row OBJECT was replaced', () => {
+    // Which is what a store write produces: a row is never mutated in place, so a
+    // replaced reference is a reliable "the data changed".
+    const edited: Row[] = [{ id: 'r1', tableId: 't1', data: { a: 2 }, updatedAt: 1 }];
+    expect(sameVisibleRows(detail('t1'), detail('t1', { rows: edited }))).toBe(false);
+  });
+
+  it('is false when rows were added or removed', () => {
+    const more: Row[] = [...rows, { id: 'r2', tableId: 't1', data: { a: 9 }, updatedAt: 0 }];
+    expect(sameVisibleRows(detail('t1'), detail('t1', { rows: more, total: 2 }))).toBe(false);
+    expect(sameVisibleRows(detail('t1', { rows: more, total: 2 }), detail('t1'))).toBe(false);
+  });
+
+  it('is false when the same rows are reordered', () => {
+    const two: Row[] = [...rows, { id: 'r2', tableId: 't1', data: { a: 9 }, updatedAt: 0 }];
+    // A sort is a change to the picture: a bar chart's categories follow row order.
+    expect(sameVisibleRows(detail('t1', { rows: two }), detail('t1', { rows: [...two].reverse() }))).toBe(false);
+  });
+
+  it('is false when only the surrounding facts changed', () => {
+    // `total`, `truncated` and `searching` are what the truncation note is built
+    // from, so the same rows with a different total is a different thing to say.
+    expect(sameVisibleRows(detail('t1'), detail('t1', { total: 500 }))).toBe(false);
+    expect(sameVisibleRows(detail('t1'), detail('t1', { truncated: true }))).toBe(false);
+    expect(sameVisibleRows(detail('t1'), detail('t1', { searching: true }))).toBe(false);
+  });
+
+  it('is false across keys, so a repointed grid always publishes', () => {
+    expect(sameVisibleRows(detail('t1'), detail('t2'))).toBe(false);
+  });
+
+  it('treats two empty sets as the same', () => {
+    expect(sameVisibleRows(detail('t1', { rows: [], total: 0 }), detail('t1', { rows: [], total: 0 }))).toBe(true);
   });
 });

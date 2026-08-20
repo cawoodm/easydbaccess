@@ -1,5 +1,5 @@
 import { test, expect, type Page } from './fixtures.js';
-import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js';
+import { bulkAddRows, createTable, panelDomId, readRows, readTable, waitForPanel } from './helpers.js';
 
 /**
  * The ✓ button in a table's footer: check every row against its columns' rules.
@@ -8,13 +8,17 @@ import { bulkAddRows, createTable, panelDomId, waitForPanel } from './helpers.js
  * a Save pre-flight over the rows already in memory. So a table imported from a
  * file had never been checked at all, and there was no way to ask.
  *
- * The answer is a TABLE of issues, not a list in a dialog: "let me filter and fix
- * these" wants filtering, sorting and exporting, and this app has all three for
- * tables already. The dialog is the summary; the table is what you work from.
+ * A run leaves three things: a mark on every cell that is wrong (with the reason
+ * in its tooltip), the grid narrowed to those rows, and a hidden `_error` column
+ * holding each row's whole verdict. The column is ordinary — the columns editor
+ * shows it, and renaming it makes it the user's own.
  */
 
 const dialogs = (page: Page) => page.locator('host-dialogs');
 const toast = (page: Page) => page.locator('toast-host');
+const gridRows = (page: Page, id: string) => page.locator(`#${panelDomId(id)} data-table tbody tr:not(.spacer):visible`);
+/** Cells the last run flagged. */
+const flagged = (page: Page, id: string) => page.locator(`#${panelDomId(id)} data-table tbody td.is-problem`);
 
 /** Click the footer's ✓ button. */
 async function validate(page: Page, id: string) {
@@ -24,23 +28,30 @@ async function validate(page: Page, id: string) {
     .click();
 }
 
-/** Every row of the issues table, as `column | problem` strings. */
-async function issueRows(page: Page, name: string) {
-  return page.evaluate(async (n) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ctx = (window as any).__easydb;
-    const all = (await ctx.store.tables.find()) as Array<{ id: string; name: string; workspaceId: string }>;
-    const t = all.find((x) => x.name === n && x.workspaceId === ctx.workspaceId);
-    if (!t) return null;
-    const rows = (await ctx.store.rows(t.id).find()) as Array<{ data: Record<string, unknown> }>;
-    // `Row 3` → `Row N`: rows come back in the store's own order (a Dexie key is a
-    // random UUID), so which row is "first" — and therefore which one a duplicate
-    // names — is not fixed. What matters is that the duplicate was found.
-    return rows.map((r) => `${String(r.data.column)} | ${String(r.data.problem)}`.replace(/Row \d+/, 'Row N')).sort();
-  }, name);
+/** Headers the grid is showing. */
+const headers = (page: Page, id: string) => page.locator(`#${panelDomId(id)} data-table thead th`);
+
+/** Every flagged cell's tooltip, sorted — the reasons the user can hover for. */
+async function reasons(page: Page, id: string) {
+  const titles = await flagged(page, id).evaluateAll((tds) => tds.map((td) => td.getAttribute('title') ?? ''));
+  return titles.map((t) => t.replace(/Row \d+/, 'Row N')).sort();
 }
 
-/** A table whose columns carry one of each rule, and rows that break three. */
+/** The `_error` value stored on every row, sorted. */
+async function stored(page: Page, id: string) {
+  const rows = await readRows(page, id);
+  return rows.map((r) => String((r.data as Record<string, unknown>)._error ?? '')).sort();
+}
+
+/**
+ * A table whose columns carry one of each rule, and four rows breaking four.
+ *
+ * The two `Ada`s are BOTH broken by something else as well, on purpose. Rows come
+ * back in the store's own order (a Dexie key is a random UUID), so which of a
+ * duplicate pair is met second — and therefore which one is reported — is not
+ * fixed. With both already flagged, the count is: 4 flagged cells in 3 of 4 rows,
+ * every run.
+ */
 async function pets(page: Page) {
   const id = await createTable(page, 'Pets', [
     { field: 'name', label: 'Name', notnull: true, unique: true },
@@ -49,81 +60,185 @@ async function pets(page: Page) {
   ]);
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [
-    { name: 'Ada', age: 3, email: 'ada@example.test' },
-    { name: '', age: 4, email: 'bo@example.test' }, // Name empty
-    { name: 'Ada', age: 40, email: 'nope' }, // Name duplicated, Age over 20, Email rejected
+    { name: 'Bo', age: 5, email: 'bo@example.test' }, // nothing wrong
+    { name: '', age: 4, email: 'ok@example.test' }, // Name empty
+    { name: 'Ada', age: 40, email: 'ada@example.test' }, // Age over 20
+    { name: 'Ada', age: 6, email: 'nope' }, // Email rejected — one of the two is the duplicate
   ]);
   return id;
 }
 
-test('the summary names every column with a problem, and the issues land in a table', async ({ page }) => {
+test('the cell that is wrong is marked, and its tooltip says why', async ({ page }) => {
   const id = await pets(page);
+  await expect(gridRows(page, id)).toHaveCount(4);
   await validate(page, id);
 
   const d = dialogs(page);
-  await expect(d.getByRole('heading', { name: 'Validate' })).toBeVisible();
-  await expect(d.getByText(/4 issues in 3 rows of "Pets"/)).toBeVisible();
+  await expect(d.getByText(/4 issues in 3 of 4 rows of "Pets"/)).toBeVisible();
   await expect(d.getByText(/Name: 1 empty, 1 duplicated/)).toBeVisible();
   await expect(d.getByText(/Age: 1 over the maximum/)).toBeVisible();
   await expect(d.getByText(/Email: 1 rejected by a script/)).toBeVisible();
+  await d.getByRole('button', { name: 'Close' }).click();
 
-  await expect.poll(() => issueRows(page, 'Pets issues')).toEqual(['Age | value 40 is over the maximum of 20', 'Email | is not an address', 'Name | duplicates Row N', 'Name | is empty']);
+  // The clean row is gone and each remaining row shows which cell is at fault.
+  await expect(gridRows(page, id)).toHaveCount(3);
+  await expect(flagged(page, id)).toHaveCount(4);
+  const said = (await reasons(page, id)).join(' | ');
+  expect(said).toContain('Name is empty');
+  expect(said).toContain('Name duplicates');
+  expect(said).toContain('Age value 40 is over the maximum of 20');
+  expect(said).toContain('Email is not an address');
 });
 
-test('Show me opens the issues table’s window', async ({ page }) => {
+test('the verdict lands in a hidden _error column of the table itself', async ({ page }) => {
   const id = await pets(page);
   await validate(page, id);
-  await dialogs(page).getByRole('button', { name: 'Show me' }).click();
-
-  const issuesId = await page.evaluate(async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ctx = (window as any).__easydb;
-    const all = (await ctx.store.tables.find()) as Array<{ id: string; name: string }>;
-    return all.find((t) => t.name === 'Pets issues')!.id;
-  });
-  await waitForPanel(page, issuesId);
-  // Read-only: every row in it is a copy of a problem, and fixing the copy fixes
-  // nothing. So no Add row button.
-  await expect(page.locator(`#${panelDomId(issuesId)} panel-footer`).getByLabel('Add row')).toHaveCount(0);
-});
-
-test('running it again replaces the issues instead of piling up a second table', async ({ page }) => {
-  const id = await pets(page);
-  await validate(page, id);
-  await expect.poll(async () => (await issueRows(page, 'Pets issues'))?.length).toBe(4);
   await dialogs(page).getByRole('button', { name: 'Close' }).click();
+  await expect(gridRows(page, id)).toHaveCount(3);
 
-  // Fix the empty name, then ask again.
+  // A real column, so the columns editor can show it and a rename can claim it...
+  const table = await readTable(page, id);
+  const col = (table?.columns as Array<Record<string, unknown>>).find((c) => c.field === '_error');
+  expect(col).toMatchObject({ field: '_error', label: 'Problem', type: 'text', hidden: true });
+  // ...but not in the grid, which says it cell by cell instead.
+  await expect(headers(page, id).filter({ hasText: 'Problem' })).toHaveCount(0);
+
+  // One message per flagged row, and nothing on the clean one.
+  const messages = await stored(page, id);
+  expect(messages.filter((m) => m !== '')).toHaveLength(3);
+  expect(messages.filter((m) => m === '')).toHaveLength(1);
+  expect(messages.join(' | ')).toContain('Name is empty');
+});
+
+test('a run clears the messages it no longer stands behind, even after a reload', async ({ page }) => {
+  const id = await pets(page);
+  await validate(page, id);
+  await dialogs(page).getByRole('button', { name: 'Close' }).click();
+  await expect(gridRows(page, id)).toHaveCount(3);
+
+  // Fix the empty name — with a name no other row has, or the repair would only
+  // trade "is empty" for "duplicates".
   await page.evaluate(async (tid) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ctx = (window as any).__easydb;
     const rows = (await ctx.store.rows(tid).find()) as Array<{ id: string; data: Record<string, unknown> }>;
     const blank = rows.find((r) => r.data.name === '')!;
-    await ctx.store.rows(tid).patch(blank.id, { data: { ...blank.data, name: 'Bo' }, updatedAt: Date.now() });
+    await ctx.store.rows(tid).patch(blank.id, { data: { ...blank.data, name: 'Zoe' }, updatedAt: Date.now() });
   }, id);
 
-  // The issues window sits over the Pets footer, so front Pets before reaching for
-  // its buttons again.
-  await page.locator(`#${panelDomId(id)} .jsPanel-hdr`).click();
+  // The reload is the point: the cell marks are gone with the session, and the
+  // only record of the last run is the text in the rows. A run has to correct that.
+  await page.reload();
+  await waitForPanel(page, id);
+  await expect(gridRows(page, id)).toHaveCount(4);
+  await expect(flagged(page, id)).toHaveCount(0);
+
   await validate(page, id);
-  await expect.poll(() => issueRows(page, 'Pets issues')).toEqual(['Age | value 40 is over the maximum of 20', 'Email | is not an address', 'Name | duplicates Row N']);
-  // One issues table, not two: a second run must not become "Pets issues-2".
-  const named = await page.evaluate(async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const all = (await (window as any).__easydb.store.tables.find()) as Array<{ name: string }>;
-    return all.filter((t) => t.name.startsWith('Pets issues')).length;
-  });
-  expect(named).toBe(1);
+  await expect(dialogs(page).getByText(/3 issues in 2 of 4 rows of "Pets"/)).toBeVisible();
+  await dialogs(page).getByRole('button', { name: 'Close' }).click();
+  await expect(gridRows(page, id)).toHaveCount(2);
+  const messages = (await stored(page, id)).filter((m) => m !== '');
+  expect(messages).toHaveLength(2);
+  expect(messages.join(' | ')).not.toContain('is empty');
 });
 
-test('a clean table says so, and writes no table', async ({ page }) => {
+test('renaming the column makes it the user’s own, and the next run makes a new one', async ({ page }) => {
+  const id = await pets(page);
+  await validate(page, id);
+  await dialogs(page).getByRole('button', { name: 'Close' }).click();
+  await expect(gridRows(page, id)).toHaveCount(3);
+
+  // Rename `_error` → `kept`, as the columns editor does: patch the columns, then
+  // re-key the rows so the messages come along as ordinary data.
+  //
+  // Re-keyed only where the old field is STILL THERE, which is what
+  // `renameRowFields` does and why this has to copy it. The store moves the
+  // values itself — a positional rename becomes `ALTER TABLE … RENAME COLUMN`
+  // (`edb-store.ts`) — so by the time these rows are read the messages are
+  // already under `kept`, and writing `kept: _error ?? ''` over them would empty
+  // the column this test is about.
+  await page.evaluate(async (tid) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ctx = (window as any).__easydb;
+    const t = await ctx.store.tables.findOne(tid);
+    const columns = (t.columns as Array<Record<string, unknown>>).map((c) => (c.field === '_error' ? { ...c, field: 'kept', label: 'Kept', hidden: false } : c));
+    await ctx.store.tables.patch(tid, { columns, updatedAt: Date.now() });
+    const rows = (await ctx.store.rows(tid).find()) as Array<{ id: string; data: Record<string, unknown> }>;
+    for (const r of rows) {
+      if (!Object.prototype.hasOwnProperty.call(r.data, '_error')) continue;
+      const { _error, ...rest } = r.data;
+      await ctx.store.rows(tid).patch(r.id, { data: { ...rest, kept: _error ?? '' }, updatedAt: Date.now() });
+    }
+  }, id);
+
+  await validate(page, id);
+  await dialogs(page).getByRole('button', { name: 'Close' }).click();
+
+  const table = await readTable(page, id);
+  const fields = (table?.columns as Array<Record<string, unknown>>).map((c) => c.field);
+  // Their column stayed, and a fresh `_error` was made for this run.
+  expect(fields).toContain('kept');
+  expect(fields).toContain('_error');
+  const rows = await readRows(page, id);
+  const keptText = rows.map((r) => String((r.data as Record<string, unknown>).kept ?? '')).filter(Boolean);
+  expect(keptText).toHaveLength(3);
+});
+
+test('the pink can be switched off without taking the reason with it', async ({ page }) => {
+  // Set before the grid exists: only the Settings dialog announces a change, so a
+  // programmatic write is picked up when a grid next reads its preferences.
+  await page.evaluate(async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (window as any).__easydb.api.settings.set('grid', 'highlightErrors', false);
+  });
+  const id = await pets(page);
+  await validate(page, id);
+  await dialogs(page).getByRole('button', { name: 'Close' }).click();
+  await expect(gridRows(page, id)).toHaveCount(3);
+
+  await expect(flagged(page, id)).toHaveCount(0);
+  // The tooltip is not a preference: a reason nobody can read is a loss, not a taste.
+  const titles = await page.locator(`#${panelDomId(id)} data-table tbody td`).evaluateAll((tds) => tds.map((td) => td.getAttribute('title') ?? ''));
+  expect(titles.join(' | ')).toContain('is over the maximum of 20');
+});
+
+test('Show me brings the table forward, and no second table is made', async ({ page }) => {
+  const id = await pets(page);
+  await validate(page, id);
+  await dialogs(page).getByRole('button', { name: 'Show me' }).click();
+  await waitForPanel(page, id);
+
+  const tables = await page.evaluate(async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const all = (await (window as any).__easydb.store.tables.find()) as Array<{ name: string }>;
+    return all.map((t) => t.name);
+  });
+  expect(tables).toEqual(['Pets']);
+});
+
+test('a clean run takes the marks and the filter back down', async ({ page }) => {
   const id = await createTable(page, 'Clean', [{ field: 'name', label: 'Name', notnull: true, unique: true }]);
   await waitForPanel(page, id);
-  await bulkAddRows(page, id, [{ name: 'Ada' }, { name: 'Bo' }]);
+  await bulkAddRows(page, id, [{ name: '' }, { name: 'Bo' }]);
+
+  await validate(page, id);
+  await dialogs(page).getByRole('button', { name: 'Close' }).click();
+  await expect(gridRows(page, id)).toHaveCount(1);
+
+  await page.evaluate(async (tid) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ctx = (window as any).__easydb;
+    const rows = (await ctx.store.rows(tid).find()) as Array<{ id: string; data: Record<string, unknown> }>;
+    const blank = rows.find((r) => r.data.name === '')!;
+    await ctx.store.rows(tid).patch(blank.id, { data: { ...blank.data, name: 'Ada' }, updatedAt: Date.now() });
+  }, id);
 
   await validate(page, id);
   await expect(toast(page).getByText(/No issues in all 2 rows of "Clean"/)).toBeVisible();
-  expect(await issueRows(page, 'Clean issues')).toBeNull();
+  await expect(gridRows(page, id)).toHaveCount(2);
+  await expect(flagged(page, id)).toHaveCount(0);
+  // And the message that was there is gone, not just unmarked.
+  expect((await stored(page, id)).join('')).toBe('');
 });
 
 test('a table with no rules is not scanned at all', async ({ page }) => {
@@ -135,4 +250,7 @@ test('a table with no rules is not scanned at all', async ({ page }) => {
 
   await validate(page, id);
   await expect(toast(page).getByText(/no column of "Loose" carries a rule/i)).toBeVisible();
+  // Nothing to say, so no column either.
+  const table = await readTable(page, id);
+  expect((table?.columns as Array<Record<string, unknown>>).map((c) => c.field)).not.toContain('_error');
 });

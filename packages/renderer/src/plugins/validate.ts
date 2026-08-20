@@ -1,19 +1,28 @@
-import type { ColumnSpec, HostApi, PluginModule, Row, Table } from '@easydb/shared';
+import type { HostApi, PluginModule, Table } from '@easydb/shared';
 import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
-import { summarizeIssues, type RowIssue } from '../table/validate-rules.js';
+import { summarizeIssues } from '../table/validate-rules.js';
 import { scanTable } from '../table/validate-scan.js';
+import { clearRowErrors, ERROR_FIELD, errorColumnSpec, rowErrorsFrom, setRowErrors, type RowProblems } from '../table/row-errors.js';
 import { focusTableWindow } from '../window-mgr/table-window-manager.js';
-import { slugTable } from '../util/ids.js';
 
 // A ✓ button in each table's footer that checks every row against its columns'
-// rules — `notnull`, `max`, `unique` and a `validate` script — and writes what it
-// finds into a table of its own.
+// rules — `notnull`, `max`, `unique` and a `validate` script — and hands what it
+// finds back to the table's own grid.
 //
-// Why a TABLE of issues and not a list in a dialog: "let me filter and fix these"
-// is a request for filtering, sorting, exporting and clicking through, and this
-// app already has all four — for tables. A dialog would need its own copy of each.
-// The dialog that appears is the summary, one line per column, and the table is
-// what the user works from.
+// A run leaves three things behind:
+//
+//  1. **A mark on every cell that is wrong**, pink like an empty one, with the
+//     reason in its tooltip. This is what the user reads.
+//  2. **The grid narrowed** to the rows with something wrong, so a big table shows
+//     the work and nothing else.
+//  3. **A `_error` column** holding each row's whole verdict as text — created
+//     hidden, because (1) already says it in place. It is an ordinary column: the
+//     columns editor shows it, and renaming it hands the messages over as data.
+//
+// This was a second TABLE of issues at first (`Pets issues`), on the grounds that
+// filtering, sorting and exporting are things this app already does — for tables.
+// It was the wrong place to work: a copy of a problem cannot be repaired, and it
+// is stale the moment the real row is. See `table/row-errors.ts`.
 //
 // The scan is the only thing in the app that runs a column script over more than
 // one row, so it gets a progress bar, it yields between pages, and Esc stops it.
@@ -22,8 +31,8 @@ export const meta: NonNullable<PluginModule['meta']> = {
   id: 'validate',
   name: 'Validate',
   type: 'ui',
-  version: '0.1.0',
-  description: 'Checks every row against its columns’ rules — required, maximum, unique, validation script — and collects what it finds in an issues table.',
+  version: '0.2.0',
+  description: 'Checks every row against its columns’ rules — required, maximum, unique, validation script — and shows what it finds in an _error column.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/validate.ts',
@@ -49,6 +58,10 @@ export function init(api: HostApi): void {
 /** Scan one table, then report. */
 async function validateTable(api: HostApi, table: Table): Promise<void> {
   const coll = api.store.rows(table.id);
+  // Cleared BEFORE the scan, not after it. What is on screen while the scan runs
+  // must not be the last run's verdict on rows the user has edited since — and the
+  // grid takes the `_error` column and its filter down with it.
+  clearRowErrors(table.id);
   let stop = false;
   // Esc cancels. The scan is the one operation here that can run for a minute, and
   // a key the label names is cheaper for everyone than a second progress widget.
@@ -78,98 +91,89 @@ async function validateTable(api: HostApi, table: Table): Promise<void> {
       return;
     }
 
+    const errors = rowErrorsFrom(result.issues);
+    // A run that stopped early, or that hit a per-column cap, did not speak for
+    // every row: a row past the cap is still wrong and this run said nothing about
+    // it. Such a run may add messages but must not take any back, or pressing ✓ on
+    // a table with 600 broken rows would erase the verdict on 100 of them.
+    const spokeForEveryRow = !result.cancelled && result.capped.size === 0;
+    // The messages go into the table's own `_error` column BEFORE anything is
+    // reported — including on a clean run, which has stale messages to clear.
+    await writeMessages(api, table, errors, spokeForEveryRow ? result.stale : []);
+    // Publishing marks the offending cells and narrows the grid to their rows. So
+    // the rows are already waiting behind the dialog, which is why the choice
+    // below only has to bring the window forward.
+    setRowErrors(table.id, errors);
+
     if (result.issues.length === 0) {
       const how = result.cancelled ? `the first ${result.scanned.toLocaleString()} rows` : `all ${result.scanned.toLocaleString()} rows`;
       api.ui.dialogs.toast(`No issues in ${how} of "${table.name}".`, { kind: 'success', title: 'Validate' });
       return;
     }
 
-    const issuesTable = await writeIssuesTable(api, table, result.issues);
     const lines = summarizeIssues(result.issues, result.capped, table.columns);
-    const head = `${result.issues.length.toLocaleString()} issue${result.issues.length === 1 ? '' : 's'} in ${result.scanned.toLocaleString()} row${result.scanned === 1 ? '' : 's'} of "${table.name}"${
+    // Both numbers, because they answer different questions: how much is wrong, and
+    // how much of the table it is wrong in.
+    const head = `${result.issues.length.toLocaleString()} issue${result.issues.length === 1 ? '' : 's'} in ${errors.size.toLocaleString()} of ${result.scanned.toLocaleString()} rows of "${table.name}"${
       result.cancelled ? ', before you stopped it' : ''
     }.`;
     const pick = await api.ui.dialogs.choice(
-      `${head}\n\n${lines.join('\n')}\n\nThe list is in the table "${issuesTable.name}", where it can be filtered, sorted and exported.`,
+      `${head}\n\n${lines.join('\n')}\n\n"${table.name}" now shows those rows only. Each cell that is wrong is marked, with the reason in its tooltip. Fix them, then press ✓ again.`,
       ['Show me', 'Close'],
       'Validate',
     );
-    if (pick === 'Show me') focusTableWindow(issuesTable.id);
+    if (pick === 'Show me') focusTableWindow(table.id);
   } finally {
     document.removeEventListener('keydown', onKey);
     clearAppProgress();
   }
 }
 
-/** The columns of the issues table. `key` is dropped when rows have no name. */
-function issueColumns(named: boolean): ColumnSpec[] {
-  return [
-    { field: 'row', label: 'Row', type: 'number' },
-    ...(named ? [{ field: 'key', label: 'Which row', type: 'string' } satisfies ColumnSpec] : []),
-    { field: 'column', label: 'Column', type: 'string' },
-    { field: 'value', label: 'Value', type: 'string' },
-    { field: 'problem', label: 'Problem', type: 'string' },
-  ];
-}
-
-/** A cell of the issues table: a value the user can read and filter on. */
-function showValue(v: unknown): string {
-  if (v === null || v === undefined) return '';
-  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return String(v);
-  return JSON.stringify(v);
-}
-
 /**
- * Write the issues into `<table> issues`, replacing what a previous run left.
+ * Write each row's verdict into the table's own `_error` column, and clear the
+ * ones a previous run left on rows that are clean now.
  *
- * Replacing rather than adding, and re-using the table by NAME: a second run
- * would otherwise land in `Pets issues-2` (the store uniques a colliding name),
- * and the user would be reading last week's problems in the window they had open.
+ * Why write at all, when the grid could hold the messages in memory: because a
+ * column the columns editor can show has to BE a column, and a column whose cells
+ * are empty in the store is a trap — it exports as blank, and renaming it (which
+ * is how a user keeps a copy — a rename re-keys every row) would hand over
+ * nothing. So `_error` is ordinary data that Validate owns and rewrites.
+ *
+ * Bounded by the rows involved, never the table: the flagged rows plus the ones
+ * carrying a message that is no longer true. A clean 600,000-row table is not
+ * written to at all.
  */
-async function writeIssuesTable(api: HostApi, table: Table, issues: readonly RowIssue[]): Promise<Table> {
-  const name = `${table.name} issues`;
-  // The table being validated is IN a workspace, so this side of the contract's
-  // `string | null` cannot be null by the time a footer button was clicked.
-  const wsId = api.workspaceId() ?? table.workspaceId;
-  const existing = (await api.store.tables.find()).find((t) => t.workspaceId === wsId && t.name === name);
-  const named = !!table.labelColumn;
-  const columns = issueColumns(named);
-  const info = { description: `What Validate found in "${table.name}". Re-run it to refresh this table; fix the rows in "${table.name}" itself.` };
+async function writeMessages(api: HostApi, table: Table, errors: ReadonlyMap<string, RowProblems>, stale: readonly string[]): Promise<void> {
+  // A source-backed table's rows are derived or remote — a projection computes
+  // them, Datasette owns them — and one the user marked read-only must be left
+  // alone. The cell marks and the tooltips still work there; only the column does
+  // not, because there is nowhere to put it.
+  if (table.source || table.readonly) return;
+  const coll = api.store.rows(table.id);
 
-  let target: Table;
-  if (existing) {
-    target = await api.store.tables.patch(existing.id, { columns, info, readonly: true, updatedAt: Date.now() });
-    const old = await api.store.rows(existing.id).find();
-    await api.store.rows(existing.id).bulkRemove(old.map((r) => r.id));
-  } else {
-    target = await api.store.tables.insert({
-      id: crypto.randomUUID(),
-      workspaceId: wsId,
-      name,
-      code: slugTable(name),
-      columns,
-      view: 'table',
-      // Read-only because every row here is derived. Editing a copy of a problem
-      // does not fix the row it came from, and this table is rewritten on the next
-      // run anyway.
-      readonly: true,
-      info,
-      updatedAt: Date.now(),
-    });
+  // Re-read, rather than trusting the record the scan started from: a scan of a big
+  // table runs for a minute, and a columns editor saved during it would be undone
+  // by patching the older array back.
+  const fresh = (await api.store.tables.findOne(table.id)) ?? table;
+  if (errors.size > 0 && !fresh.columns.some((c) => c.field === ERROR_FIELD)) {
+    // Created hidden, once. A later run must not re-hide a column the user chose
+    // to unhide, so an existing one is never patched — and a RENAMED one is not
+    // found here at all, which is what makes it theirs and this a fresh column.
+    await api.store.tables.patch(table.id, { columns: [...fresh.columns, errorColumnSpec()], updatedAt: Date.now() });
   }
 
-  const rows: Row[] = issues.map((i) => ({
-    id: crypto.randomUUID(),
-    tableId: target.id,
-    data: {
-      row: i.row,
-      ...(named ? { key: i.key } : {}),
-      column: i.label,
-      value: showValue(i.value),
-      problem: i.reason,
-    },
-    updatedAt: Date.now(),
-  }));
-  await api.store.rows(target.id).bulkInsert(rows);
-  return target;
+  const writes: Array<[string, string]> = [...[...errors].map(([id, p]) => [id, p.message] as [string, string]), ...stale.map((id) => [id, ''] as [string, string])];
+  let done = 0;
+  for (const [rowId, text] of writes) {
+    const row = await coll.findOne(rowId);
+    // Deleted since the scan read it. The problem went with it.
+    if (row) {
+      // Unchanged rows are left alone: a write would bump `updatedAt` and give
+      // sync a row to carry for no reason.
+      const had = String(row.data[ERROR_FIELD] ?? '');
+      if (had !== text) await coll.patch(rowId, { data: { ...row.data, [ERROR_FIELD]: text }, updatedAt: Date.now() });
+    }
+    done++;
+    if (writes.length > 50) setAppProgress({ label: `Marking rows in ${table.name}`, fraction: done / writes.length, detail: `${done.toLocaleString()} of ${writes.length.toLocaleString()}` });
+  }
 }
