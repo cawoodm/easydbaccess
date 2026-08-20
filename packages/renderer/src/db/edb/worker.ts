@@ -4,7 +4,7 @@ import { ALL_COLLECTIONS, EdbStore, changeScopeOf } from '@easydb/shared';
 import { type EdbRequest, type EdbResponse } from './protocol.js';
 import { createAutosavePolicy, type AutosavePolicy } from './dirty.js';
 import { readMirror, writeMirror } from './mirror.js';
-import { ensurePool, openInPool, poolPath, tunePooledDb } from './substrate.js';
+import { ensurePool, ensureRoomToImport, openInPool, poolPath, tunePooledDb } from './substrate.js';
 import { wasmDriver } from './wasm-driver.js';
 
 /**
@@ -159,7 +159,11 @@ async function importBytes(name: string, bytes: Uint8Array): Promise<void> {
   }
   const pool = await ensurePool(sqlite3);
   if (pool) {
-    await pool.importDb(poolPath(name), bytes);
+    const path = poolPath(name);
+    // A full pool has no handle to import into, and every Open leaves its file
+    // behind — see `ensureRoomToImport`.
+    await ensureRoomToImport(pool, path);
+    await pool.importDb(path, bytes);
     return;
   }
   await writeMirror(name, bytes);

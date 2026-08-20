@@ -33,6 +33,14 @@ const VFS_NAME = 'easydb-sahpool';
 const INITIAL_CAPACITY = 6;
 
 /**
+ * Slots added when the pool runs out of them.
+ *
+ * Two per database — the file and its journal — so four covers two more
+ * workspaces before the next grow.
+ */
+const GROW_BY = 4;
+
+/**
  * Installing can fail transiently right after another tab releases the pool:
  * its sync access handles are closed asynchronously relative to the Web Lock it
  * held, so the first attempt can lose that race.
@@ -93,6 +101,26 @@ export function tunePooledDb(db: Database): void {
 }
 
 /**
+ * Make room for an import, growing the pool if there is none.
+ *
+ * `importDb` needs a FREE file slot unless it is overwriting a path the pool
+ * already holds — with neither it throws "No available handles to import to.",
+ * which is what `?space=NAME` did once a few workspace files had accumulated:
+ * capacity is persistent and every Open leaves its file in the pool, so the six
+ * initial slots (a database and its journal apiece) run out on the third or
+ * fourth file. Nothing was wrong with the file or the workspace.
+ *
+ * Growing is the whole answer because a slot is a FILE, not a quota: the pool
+ * reserves no space, so a bigger pool costs nothing until it is used. Removing
+ * old files instead would mean deciding which of the user's workspaces to drop.
+ */
+export async function ensureRoomToImport(p: SAHPoolUtil, path: string): Promise<void> {
+  if (p.getFileNames().includes(path)) return;
+  if (Number(p.getFileCount()) < Number(p.getCapacity())) return;
+  await p.addCapacity(GROW_BY);
+}
+
+/**
  * Open `name` in the pool, replacing its contents with `bytes` when given.
  *
  * `importDb` validates the SQLite header and page size, so a file that is not a
@@ -102,7 +130,10 @@ export function tunePooledDb(db: Database): void {
  */
 export async function openInPool(p: SAHPoolUtil, name: string, bytes: Uint8Array | null): Promise<Database> {
   const path = poolPath(name);
-  if (bytes && bytes.byteLength > 0) await p.importDb(path, bytes);
+  if (bytes && bytes.byteLength > 0) {
+    await ensureRoomToImport(p, path);
+    await p.importDb(path, bytes);
+  }
   try {
     return new p.OpfsSAHPoolDb(path);
   } catch {
