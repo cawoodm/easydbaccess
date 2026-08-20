@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ Charts look better: a colour per category, a grey "Other", rounded bars, separated pie slices, and nothing against the window edge (v0.0.408)
 - ✨ "Which copy do you want to keep?" now says what each copy holds: tables, and for a file its size and when it was last saved (v0.0.407)
 - 🪶 Two browsers sharing one workspace folder now see each other's saves: a sync, or switching in, reads the file when it is the newer one (v0.0.405)
 - 🪶 Drop a `.edb` file on the window and its workspace becomes one of yours, with a choice if the name is taken (v0.0.404)

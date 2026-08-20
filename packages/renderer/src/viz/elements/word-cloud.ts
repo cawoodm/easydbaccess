@@ -163,7 +163,14 @@ export class VizWordCloud extends LitElement {
     // Includes the centring transform on the <g>, unlike the group's own getBBox.
     const b = svg.getBBox();
     if (b.width < 1 || b.height < 1) return;
-    const m = 2;
+    // The margin scales with the TYPE, not with the box. `getBBox` measures a
+    // text node's layout box and the ink of a 600-weight glyph goes a little past
+    // it, so a box fitted to within 2 units of the outermost word had the top and
+    // side words shaved off against the panel edge — and how far past is a
+    // fraction of the font size, not of the pane. A fraction of the pane would
+    // also fight `113-viz-docking`, which holds this cloud to filling its pane.
+    const biggest = this.placed.reduce((n, p) => Math.max(n, p.size), 0);
+    const m = Math.max(2, Math.round(biggest * 0.12));
     svg.setAttribute('viewBox', `${b.x - m} ${b.y - m} ${b.width + m * 2} ${b.height + m * 2}`);
   }
 

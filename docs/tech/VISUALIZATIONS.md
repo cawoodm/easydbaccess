@@ -374,6 +374,44 @@ decoupling `panel-registry.ts` and `shell-viewport.ts` already exist for. A host
 appearing is not a store change, so the registry notifies too; otherwise a pane
 whose host opened second would never appear.
 
+## How a chart looks is one pure module
+
+`elements/chart-config.ts` builds the whole Chart.js configuration from
+`(kind, data, options, theme)` and does nothing else, so every styling decision
+is testable without a canvas (`test/renderer/viz/chart-config.test.ts`, 26 cases).
+`chart-element.ts` keeps only what needs a DOM: reading the theme off its own
+computed style, the lazy Chart.js import, resize, and the a11y table.
+
+The decisions in there that are not obvious:
+
+- **A single series is coloured per CATEGORY**, in bar, column and pie. One flat
+  blue for eight countries is a chart you have to read off its axis labels, and
+  the pie was already coloured per slice, so the two used to disagree about the
+  same numbers. Two or more series goes back to one colour per series, which is
+  the only thing a legend can mean — and a line is always one colour.
+- **The `topN` tail is grey.** "Other" is not a category the user has, it is
+  everything they did not ask about, and a palette colour let the biggest bar in
+  the picture look like the most interesting one. The element cannot know which
+  label the aggregator folded the tail into, so `viz-panel` passes
+  `mutedCategory` — a plain STRING, because options are compared shallowly to
+  decide on a redraw (`same-input.ts`) and an array rebuilt per render would
+  redraw every chart on every render.
+- **`layout.padding`**, because Chart.js draws to the canvas bounds and the top
+  tick label and the legend sat against the window frame.
+- **Ticks are muted, axis titles are not.** The scale is reference; the units are
+  content.
+- **No gridlines along the categories.** They are labels, not a scale.
+- **Pie slices are separated by `--viz-surface`**, the colour the chart is drawn
+  on, so a gap reads as a gap rather than as an outline around each slice. It is
+  a variable and not `background-color` because the panel is transparent over the
+  window, so its computed background is fully transparent black.
+
+The word cloud's `fitViewBox` margin scales with the largest FONT SIZE, not with
+the pane: `getBBox` measures a text node's layout box and the ink of a 600-weight
+glyph goes a little past it, so a box fitted to within 2 units of the outermost
+word shaved the edge words. A fraction of the pane would also fight
+`113-viz-docking`, which holds a docked cloud to filling its pane.
+
 ## The elements are extraction-ready
 
 Everything under `viz/elements/` is destined for standalone MIT packages

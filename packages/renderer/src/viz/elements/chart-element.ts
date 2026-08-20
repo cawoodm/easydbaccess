@@ -20,27 +20,14 @@
 import { LitElement, css, html, nothing } from 'lit';
 import type { PropertyValues } from 'lit';
 import type { Chart as ChartType, ChartConfiguration } from 'chart.js';
-import { readChartTheme, withAlpha, type ChartData } from './chart-data.js';
+import { readChartTheme, type ChartData } from './chart-data.js';
+import { buildChartConfig, type ChartKind, type ChartOptions } from './chart-config.js';
 import { sameChartData, sameVizOptions } from './same-input.js';
 
-export type ChartKind = 'bar' | 'column' | 'line' | 'pie';
-
-/** Options a chart element understands. Everything is optional. */
-export interface ChartOptions {
-  /** Draw the legend. Default: only with more than one series. */
-  legend?: boolean | undefined;
-  /** Stack bars / areas. */
-  stacked?: boolean | undefined;
-  /** Fill under a line. */
-  area?: boolean | undefined;
-  /** Draw a line curved rather than as straight segments. */
-  smooth?: boolean | undefined;
-  /** Axis titles. */
-  xTitle?: string | undefined;
-  yTitle?: string | undefined;
-  /** Start the value axis at zero even when the data does not. Default true. */
-  beginAtZero?: boolean | undefined;
-}
+// Both re-exported: the kind and the options are this element's public surface,
+// and moving them into `chart-config.ts` (where the styling that reads them
+// lives) must not move where a consumer imports them from.
+export type { ChartKind, ChartOptions };
 
 /** Registered once per page load; Chart.js throws on a duplicate controller id. */
 let chartCtorPromise: Promise<typeof ChartType> | null = null;
@@ -170,84 +157,19 @@ export class VizChartElement extends LitElement {
     return this.data.categories.length > 0 && this.data.series.length > 0;
   }
 
+  /**
+   * The Chart.js configuration for what is on this element right now.
+   *
+   * The theme is read here — off this element's own computed style, which is what
+   * makes it CSS-themable — and the configuration itself is built by the pure
+   * `chart-config.ts`, so the styling can be tested without a canvas.
+   */
   private buildConfig(Ctor: typeof ChartType): ChartConfiguration {
     const theme = readChartTheme(this);
-    const o = this.options;
-    const isPie = this.kind === 'pie';
-    const isLine = this.kind === 'line';
-    const horizontal = this.kind === 'bar';
-    const showLegend = o.legend ?? (isPie ? true : this.data.series.length > 1);
-
     Ctor.defaults.font.family = theme.fontFamily;
     Ctor.defaults.font.size = theme.fontSize;
     Ctor.defaults.color = theme.text;
-
-    const datasets = this.data.series.map((s, i) => {
-      const color = theme.palette[i % theme.palette.length] ?? '#2563eb';
-      if (isPie) {
-        // A pie has one dataset whose SLICES are the categories, so it colours
-        // per point rather than per series.
-        return {
-          label: s.label,
-          data: s.points,
-          backgroundColor: this.data.categories.map((_, ci) => theme.palette[ci % theme.palette.length] ?? color),
-          borderColor: theme.grid,
-          borderWidth: 1,
-        };
-      }
-      return {
-        label: s.label,
-        data: s.points,
-        backgroundColor: isLine ? withAlpha(color, o.area ? 0.25 : 0) : color,
-        borderColor: color,
-        borderWidth: isLine ? 2 : 0,
-        fill: isLine ? (o.area ?? false) : false,
-        tension: isLine && o.smooth ? 0.35 : 0,
-        pointRadius: isLine ? 2 : 0,
-        // A gap is a gap: joining across a null would draw a value that is not
-        // there. `spanGaps: false` is the default but stated here because it is
-        // a correctness choice, not styling.
-        spanGaps: false,
-      };
-    });
-
-    const valueAxis = {
-      beginAtZero: o.beginAtZero ?? true,
-      stacked: o.stacked ?? false,
-      grid: { color: theme.grid },
-      border: { color: theme.grid },
-      ticks: { color: theme.text, callback: (v: unknown) => (typeof v === 'number' ? NUM.format(v) : String(v)) },
-      title: o.yTitle ? { display: true, text: o.yTitle, color: theme.text } : { display: false },
-    };
-    const catAxis = {
-      stacked: o.stacked ?? false,
-      grid: { display: false, color: theme.grid },
-      border: { color: theme.grid },
-      ticks: { color: theme.text, autoSkip: true, maxRotation: 0 },
-      title: o.xTitle ? { display: true, text: o.xTitle, color: theme.text } : { display: false },
-    };
-
-    return {
-      // A horizontal bar is Chart.js's `bar` with `indexAxis: 'y'`; a vertical
-      // one ("column" in every spreadsheet ever) is the same type upright.
-      type: isPie ? 'pie' : isLine ? 'line' : 'bar',
-      data: { labels: this.data.categories, datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        ...(horizontal ? { indexAxis: 'y' as const } : {}),
-        plugins: {
-          legend: { display: showLegend, labels: { color: theme.text } },
-          tooltip: { enabled: true },
-        },
-        ...(isPie
-          ? {}
-          : {
-              scales: horizontal ? { x: valueAxis, y: catAxis } : { x: catAxis, y: valueAxis },
-            }),
-      },
-    } as ChartConfiguration;
+    return buildChartConfig(this.kind, this.data, this.options, theme, (n) => NUM.format(n));
   }
 
   private async draw(): Promise<void> {

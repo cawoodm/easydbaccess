@@ -42,6 +42,17 @@ while the rest keep following the definition. The same is true of the order and
 the group cap. An overridden field is marked, and **Reset** puts it back to
 following.
 
+## What the colours mean
+
+A chart of one thing — trips per country, say — gives **each category its own
+colour**, the same way a pie gives each slice one. A chart of two or more series
+colours by series instead, because that is what its legend is naming.
+
+One colour is reserved: the **"Other" bar or slice is grey**. It is not one of
+your categories, it is the tail the group cap folded together, and it is often
+the biggest thing in the picture. Raise the cap under **Edit** or **Settings** if
+you want to see what is in it.
+
 ## Docked panes
 
 A docked pane shares the grid's window and, importantly, the grid's **filters**:

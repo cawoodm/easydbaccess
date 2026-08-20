@@ -35,7 +35,7 @@ import { runColumnScript } from '../util/column-script.js';
 import { requestVisibleRows, watchVisibleRows, type VisibleRowsDetail } from '../table/visible-rows.js';
 import { paneFilter, paneSort } from '../table/pane-actions.js';
 import { persistPillFilters, withPillValue } from '../views/pill-filters.js';
-import { aggregateRows, type VizFrame } from './viz-aggregate.js';
+import { aggregateRows, OTHER_LABEL, type VizFrame } from './viz-aggregate.js';
 import { parseWordList, resolveStopWords, wordFrequencies } from './word-frequency.js';
 import { effectiveAggregate, effectiveVizOptions } from './viz-options.js';
 import { vizColumnsKey } from './viz-inputs.js';
@@ -68,6 +68,15 @@ export class VizPanel extends LitElement {
       box-sizing: border-box;
       /* The default palette the elements read. Overridable per host. */
       --viz-palette: #2563eb, #0891b2, #7c3aed, #db2777, #ea580c, #16a34a, #ca8a04, #dc2626;
+      /* What a chart is drawn ON. Stated rather than inherited: the panel is
+         transparent over the window's background, so anything reading its
+         computed background-color gets a fully transparent black — and a pie's
+         slice gaps are painted in this colour. (No backticks in here: this is a
+         css tagged template, and one would end it.) */
+      --viz-surface: #fff;
+      /* The tail bucket's colour, and the empty-state text. Grey, so "Other"
+         cannot look like the most interesting category in the chart. */
+      --viz-muted-text: #94a3b8;
       font:
         12px/1.4 system-ui,
         sans-serif;
@@ -96,16 +105,10 @@ export class VizPanel extends LitElement {
       color: #b91c1c;
       background: #fef2f2;
     }
-    @media (prefers-color-scheme: dark) {
-      .note {
-        color: #fcd34d;
-        background: rgba(120, 53, 15, 0.35);
-      }
-      .error {
-        color: #fca5a5;
-        background: rgba(127, 29, 29, 0.35);
-      }
-    }
+    /* No dark-mode branch. This element carried the only one in the app, so on a
+       dark-mode machine these two banners turned brown-on-white inside a window
+       that stayed light — a note about a capped read, in the least readable
+       colours in the app. One theme everywhere until there is a real one. */
     .placeholder {
       flex: 1;
       display: flex;
@@ -113,7 +116,7 @@ export class VizPanel extends LitElement {
       justify-content: center;
       padding: 0.5rem 1rem;
       text-align: center;
-      color: rgba(127, 127, 127, 0.95);
+      color: var(--viz-muted-text, rgba(127, 127, 127, 0.95));
     }
   `;
 
@@ -628,6 +631,13 @@ export class VizPanel extends LitElement {
       o['tileUrl'] = this.tileUrl;
       o['attribution'] = this.tileAttribution;
     }
+    // The `topN` tail is not one of the user's categories — it is everything they
+    // did not ask about — so the chart draws it grey rather than giving the
+    // biggest bar in the picture a palette colour. Told only when a tail was
+    // actually folded, and as a plain STRING: options are compared shallowly to
+    // decide on a redraw (`elements/same-input.ts`), so a fresh array here would
+    // redraw every chart on every render.
+    if (this.frame?.categories.some((c) => c.key === OTHER_LABEL)) o['mutedCategory'] = OTHER_LABEL;
     return o;
   }
 

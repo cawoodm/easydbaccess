@@ -102,6 +102,19 @@ test.describe('the shipped demo workspace', () => {
     expect(docks.every((d) => d.hostIsTrips)).toBe(true);
     expect(docks.map((d) => d.edge).sort()).toEqual(['above', 'below']);
 
+    // The `topN` tail is drawn grey rather than given a palette colour, so
+    // "Other" cannot look like the most interesting category in the chart. The
+    // element cannot know which label the tail was folded into, so the panel has
+    // to tell it — and that wiring is only reachable from here.
+    const muted = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('viz-panel'))
+        .map((vp) => (vp as Element & { shadowRoot?: ShadowRoot | null }).shadowRoot?.querySelector('viz-column-chart, viz-bar-chart, viz-pie-chart'))
+        .filter((el): el is Element => Boolean(el))
+        .map((el) => ((el as Element & { options?: Record<string, unknown> }).options ?? {})['mutedCategory']);
+    });
+    expect(muted.length).toBeGreaterThan(0);
+    expect(muted).toContain('Other');
+
     // Nothing anywhere is reporting a broken chart.
     await expect(page.locator('viz-panel .error')).toHaveCount(0);
   });

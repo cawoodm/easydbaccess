@@ -49,8 +49,16 @@ export interface ChartTheme {
   grid: string;
   /** Labels and legend text. */
   text: string;
-  /** Muted text — the empty-state and note lines. */
+  /** Muted text — the empty-state and note lines, and the `topN` tail's colour. */
   mutedText: string;
+  /**
+   * What the chart is drawn ON.
+   *
+   * Used as the gap between one pie slice and the next: a slice separated by the
+   * panel's own colour reads as a gap, where an outline in any other colour reads
+   * as a border drawn around each slice.
+   */
+  surface: string;
   fontFamily: string;
   fontSize: number;
 }
@@ -83,6 +91,10 @@ export function readChartTheme(el: HTMLElement): ChartTheme {
     grid: cssVar(s, '--viz-grid', 'rgba(127,127,127,0.25)'),
     text: cssVar(s, '--viz-text', s.color || '#111827'),
     mutedText: cssVar(s, '--viz-muted-text', 'rgba(127,127,127,0.9)'),
+    // Not read off `background-color`: the panel is transparent over the window's
+    // own background, so the computed value is `rgba(0,0,0,0)` and a slice gap
+    // painted in it is a black line.
+    surface: cssVar(s, '--viz-surface', '#fff'),
     fontFamily: cssVar(s, '--viz-font-family', s.fontFamily || 'system-ui, sans-serif'),
     fontSize: Number.isFinite(fontSizeRaw) && fontSizeRaw > 0 ? fontSizeRaw : 12,
   };
