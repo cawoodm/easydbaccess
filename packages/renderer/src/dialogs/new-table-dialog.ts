@@ -845,18 +845,25 @@ export class NewTableDialog extends LitElement {
       this.errorMsg = 'At least one column is required.';
       return;
     }
-    const seen = new Set<string>();
+    // Keyed by LOWER CASE, like the table-name check above. A field becomes a real
+    // SQL column and SQLite column names are case-insensitive, so `Name` beside
+    // `name` is one column in the file: the save went through with no complaint and
+    // one of the two columns then read as empty. The first spelling is kept so the
+    // message can name what the clash is with — "duplicate: name" reads like a
+    // false alarm when the other column is spelled `Name`.
+    const seen = new Map<string, string>();
     for (const c of this.columns) {
       const f = c.field.trim();
       if (!f) {
         this.errorMsg = 'Column field names cannot be empty.';
         return;
       }
-      if (seen.has(f)) {
-        this.errorMsg = `Duplicate column field: ${f}`;
+      const first = seen.get(f.toLowerCase());
+      if (first !== undefined) {
+        this.errorMsg = first === f ? `Duplicate column field: ${f}` : `Duplicate column field: "${f}" clashes with "${first}" — column names are not case-sensitive.`;
         return;
       }
-      seen.add(f);
+      seen.set(f.toLowerCase(), f);
     }
 
     const title = this.tableTitle.trim();

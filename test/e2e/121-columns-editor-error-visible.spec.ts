@@ -91,3 +91,57 @@ test('the error goes when the problem does', async ({ page }) => {
   await dialog.getByRole('button', { name: /^Save$/ }).click();
   await expect(dialog).toBeHidden();
 });
+
+/**
+ * The ways two columns can end up sharing a name.
+ *
+ * The duplicate check runs over the field values as typed, so the interesting
+ * cases are the ones where two names are not the same STRING but still collide:
+ * SQLite column names are case-insensitive, so `Name` and `name` are one column
+ * in the file even though the editor sees two.
+ */
+test.describe('two columns with one name', () => {
+  async function editorFor(page: import('@playwright/test').Page, table: string, fields: string[]) {
+    const id = await createTable(
+      page,
+      table,
+      fields.map((field) => ({ field })),
+    );
+    await waitForPanel(page, id);
+    await page
+      .locator(`#${panelDomId(id)}`)
+      .locator('panel-footer')
+      .getByRole('button', { name: /Columns/ })
+      .click();
+    return page.locator('new-table-dialog dialog');
+  }
+
+  test('both renamed to the same new name', async ({ page }) => {
+    const dialog = await editorFor(page, 'BothRenamed', ['a', 'b']);
+    const rows = dialog.locator('.col-row');
+    await rows.nth(0).locator('input[type="text"]').first().fill('x');
+    await rows.nth(1).locator('input[type="text"]').first().fill('x');
+    await dialog.getByRole('button', { name: /^Save$/ }).click();
+    await expect(dialog.locator('[data-testid="editor-error"]')).toBeVisible();
+    await expect(dialog).toBeVisible();
+  });
+
+  test('names that differ only in case', async ({ page }) => {
+    const dialog = await editorFor(page, 'CaseOnly', ['a', 'b']);
+    const rows = dialog.locator('.col-row');
+    await rows.nth(0).locator('input[type="text"]').first().fill('Name');
+    await rows.nth(1).locator('input[type="text"]').first().fill('name');
+    await dialog.getByRole('button', { name: /^Save$/ }).click();
+    await expect(dialog.locator('[data-testid="editor-error"]')).toBeVisible();
+    await expect(dialog).toBeVisible();
+  });
+
+  test('a name that only collides after the whitespace goes', async ({ page }) => {
+    const dialog = await editorFor(page, 'Spaced', ['a', 'b']);
+    const rows = dialog.locator('.col-row');
+    await rows.nth(1).locator('input[type="text"]').first().fill(' a ');
+    await dialog.getByRole('button', { name: /^Save$/ }).click();
+    await expect(dialog.locator('[data-testid="editor-error"]')).toBeVisible();
+    await expect(dialog).toBeVisible();
+  });
+});
