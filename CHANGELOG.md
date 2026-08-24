@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 24 Aug 2026
+
+### Features
+
+- ✨ A chart in its own window has a button to dock it back above its table (v0.0.414)
+
 ## 20 Aug 2026
 
 ### Features

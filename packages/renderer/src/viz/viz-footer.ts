@@ -18,6 +18,8 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViewsDialog } from '../dialogs/views-dialog.js';
+import { focusTableWindow } from '../window-mgr/table-window-manager.js';
+import { dockDescriptor } from './viz-dock.js';
 
 @customElement('viz-footer')
 export class VizFooter extends LitElement {
@@ -147,6 +149,38 @@ export class VizFooter extends LitElement {
     openViewsDialog(this.tableId, { editTemplateId: inst.templateId });
   }
 
+  /**
+   * Pop in: dock this window back above the table it reads — the exact opposite
+   * of the pane strip's `open_in_new`, and the way back that button had no
+   * counterpart for. Without it, re-docking meant remembering that the Shown-as
+   * select in the instance form does it.
+   *
+   * Docked to the TABLE (`inst.tableId`), which covers a projection too — a
+   * projection is a table, so there is no second host to case on.
+   *
+   * The icon is `south_west` — an arrow from the top right to the bottom left,
+   * the mirror of the strip's `open_in_new` (which leaves to the top right). The
+   * two are one gesture and its reverse, so they have to look like it.
+   *
+   * The host window is revealed afterwards because a pane has nowhere to mount
+   * while its host is hidden or minimized (see `panel-stacks.ts`): the chart
+   * would simply disappear, with the store perfectly correct about why.
+   */
+  private async dock(): Promise<void> {
+    const ctx = await getContext();
+    const inst = await ctx.store.viewInstances.findOne(this.viewInstanceId);
+    if (!inst) return;
+    const instances = await ctx.store.viewInstances.find();
+    await ctx.store.viewInstances.patch(inst.id, {
+      dock: dockDescriptor({ instances, selfId: inst.id, tableId: inst.tableId, edge: 'above' }),
+      // The same flag a pane is shown by. The window closing on its way to
+      // becoming a pane must not be read as the user shutting the view.
+      open: true,
+      updatedAt: Date.now(),
+    });
+    focusTableWindow(inst.tableId);
+  }
+
   override render() {
     return html`
       <button @click=${() => void this.edit()} title="Edit the definition: kind, aggregate and the options every view of it shares" aria-label="Edit definition">
@@ -157,6 +191,7 @@ export class VizFooter extends LitElement {
       </button>
       <button @click=${() => void this.refresh()} title="Re-read the data and redraw" aria-label="Refresh"><span class="mi sm">refresh</span></button>
       <button @click=${() => void this.exportCsv()} title="Save the numbers behind this chart as a CSV file" aria-label="Export as CSV"><span class="mi sm">download</span>CSV</button>
+      <button @click=${() => void this.dock()} title="Dock this chart above its table" aria-label="Dock above the table"><span class="mi sm">south_west</span></button>
       <span class="spacer"></span>
       ${this.kindLabel ? html`<span class="kind">${this.kindLabel}</span>` : nothing}
     `;

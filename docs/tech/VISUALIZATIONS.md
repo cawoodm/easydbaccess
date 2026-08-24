@@ -365,6 +365,16 @@ e2e check on a plain table window rather than left to inspection.
   largest — which turned two 300px panes in a 400px window into 48 and 272, a
   deletion rather than a shrink.
 
+**Both directions are one field.** The pane strip's `open_in_new` clears `dock`;
+the footer's `south_west` writes one, so a chart goes out to a window and back
+without the instance form. The placement rule — which host, which edge, what
+height, which slot among the panes already there — is `viz/viz-dock.ts`, shared
+with the Views dialog's Shown-as select so the two cannot drift. The host is
+always `{ kind: 'table', tableId }`, which covers a projection: a projection is
+a table. Popping in also REVEALS that window (`focusTableWindow`), because a
+pane whose host is minimized or hidden is mounted nowhere — correct, per
+`panel-stacks.ts`, but indistinguishable from the chart disappearing.
+
 **One reconciler, not two.** `view-window-manager.ts`'s existing
 `viewInstances.subscribe()` sends `open && !dock` to a window and `open && dock`
 to `reconcileDockedPanes`, so toggling `dock` moves a visualization between the
@@ -440,8 +450,9 @@ itself. There are two, because there are two different objects to edit:
   **Edit** opens the TEMPLATE (`openViewsDialog(tableId, { editTemplateId })`),
   where the kind, the aggregate and the options live and are shared by every
   instance of it; **Settings** opens THIS instance's mapping and overrides
-  (`{ editInstanceId }`). An HTML view window still has no footer: it has
-  nothing per-window to configure.
+  (`{ editInstanceId }`). It also carries the **pop-in** (`south_west`), the
+  mirror of the pane strip's `open_in_new` — see the docking section. An HTML
+  view window still has no footer: it has nothing per-window to configure.
 
   The pair read the other way round until v0.0.370 — "Edit" the instance,
   "Chart" the definition — which put the shared object behind the more specific

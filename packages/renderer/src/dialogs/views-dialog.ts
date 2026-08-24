@@ -4,6 +4,7 @@ import type { ColumnSpec, SettingsFieldSpec, Table, ViewInstance, ViewTemplate, 
 import { getContext } from '../app-context.js';
 import { readCloudDefaults } from '../viz/viz-settings.js';
 import { aggregateFields, aggregateOverrideDelta, effectiveVizOptions, overrideDelta, overriddenAggregateKeys, overriddenKeys } from '../viz/viz-options.js';
+import { dockDescriptor } from '../viz/viz-dock.js';
 import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@marccawood/lit-dialogs';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { extractTokens } from '../views/view-render.js';
@@ -919,21 +920,19 @@ export class ViewsDialog extends LitElement {
   /**
    * The `dock` descriptor for a draft, or `undefined` for a windowed view.
    *
-   * `order` is the count of panes already on that edge, so a second chart lands
-   * beneath the first rather than fighting it for position 0.
+   * The placement rule itself lives in `viz/viz-dock.ts`, because the pop-in
+   * button on a visualization window's footer docks a chart too and the two must
+   * land it in the same place.
    */
   private dockFor(d: InstanceDraft): ViewInstance['dock'] {
     if (d.dock === 'window') return undefined;
-    const onEdge = this.instances.filter((i) => i.id !== d.id && i.dock?.edge === d.dock && i.dock?.host.kind === 'table' && i.dock.host.tableId === this.tableId).length;
-    const existing = d.id ? this.instances.find((i) => i.id === d.id)?.dock : undefined;
-    return {
-      host: { kind: 'table', tableId: this.tableId },
+    return dockDescriptor({
+      instances: this.instances,
+      selfId: d.id ?? undefined,
+      tableId: this.tableId,
       edge: d.dock,
-      // Keep a height the user already dragged to; a fresh pane gets a default
-      // that shows a chart without dominating the grid.
-      size: existing?.size ?? 160,
-      order: existing?.order ?? onEdge,
-    };
+      existing: d.id ? this.instances.find((i) => i.id === d.id)?.dock : undefined,
+    });
   }
 
   // -- render -----------------------------------------------------------------

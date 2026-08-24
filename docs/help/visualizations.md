@@ -76,6 +76,8 @@ costs nothing.
 - **CSV** saves the numbers behind the picture: the word counts, or the totals
   per category. They exist nowhere else, because they are worked out at drawing
   time.
+- **↙** docks the chart back above its table or projection, the way back from the
+  pane strip's **↗**. If that window is minimized or closed, it comes back.
 
 ## Custom HTML
 

@@ -246,6 +246,52 @@ test.describe('visualization docking', () => {
     await expect(page.locator('viz-panel')).toBeVisible();
   });
 
+  test('the pop-in button docks a windowed chart back above its table', async ({ page }) => {
+    // The counterpart of the pane strip's "Open in its own window" — a round trip
+    // out and back with no visit to the instance form.
+    const id = await seed(page);
+    await dockChart(page, id, 'above');
+    const panel = page.locator(`#${panelDomId(id)}`);
+    await panel.locator('viz-pane').getByRole('button', { name: 'Open in its own window' }).click();
+    await expect(page.locator('viz-panel')).toBeVisible();
+
+    const win = page.locator('.jsPanel', { has: page.locator('viz-panel') });
+    await win.locator('viz-footer').getByRole('button', { name: 'Dock above the table' }).click();
+
+    // Back in the host window, above the grid, and the chart still has its data.
+    await expect(panel.locator('.panel-stack-above viz-pane')).toHaveCount(1);
+    await expect(panel.locator('viz-pane viz-bar-chart table.a11y tbody tr')).toHaveCount(3);
+    // No window left behind: a viz window is the only thing with a viz-footer,
+    // and the docked pane's own <viz-panel> lives inside the table's window now.
+    await expect(page.locator('viz-footer')).toHaveCount(0);
+    const state = await page.evaluate(async () => {
+      const w = window as unknown as { __easydb: { store: { viewInstances: { find(): Promise<Array<{ open?: boolean; dock?: { edge: string } }>> } } } };
+      return (await w.__easydb.store.viewInstances.find()).map((v) => ({ open: v.open, edge: v.dock?.edge ?? null }));
+    });
+    expect(state[0]).toEqual({ open: true, edge: 'above' });
+  });
+
+  test('popping a chart in re-opens a table window that was closed', async ({ page }) => {
+    // A pane has nowhere to mount while its host is hidden, so docking into a
+    // closed table window would have made the chart disappear outright.
+    const id = await seed(page);
+    await dockChart(page, id, 'above');
+    const panel = page.locator(`#${panelDomId(id)}`);
+    await panel.locator('viz-pane').getByRole('button', { name: 'Open in its own window' }).click();
+    await expect(page.locator('viz-panel')).toBeVisible();
+
+    // Dispatched rather than clicked: the freshly-opened chart window sits over
+    // the table's titlebar, so a real pointer click lands on the wrong window.
+    await panel.locator('.jsPanel-btn-close').dispatchEvent('click');
+    await expect(panel).toHaveCount(0);
+
+    const win = page.locator('.jsPanel', { has: page.locator('viz-footer') });
+    await win.locator('viz-footer').getByRole('button', { name: 'Dock above the table' }).click();
+
+    await expect(page.locator(`#${panelDomId(id)}`)).toBeVisible();
+    await expect(page.locator(`#${panelDomId(id)} viz-pane`)).toBeVisible();
+  });
+
   test('a docked pane reaches BOTH editors from its strip', async ({ page }) => {
     // A pane has no footer of its own — the host window's footer belongs to the
     // table — so both routes back to the configuration live in the strip. With
