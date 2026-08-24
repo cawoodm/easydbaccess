@@ -216,7 +216,10 @@ async function forget(api: HostApi): Promise<void> {
   }
   const { db, summary } = found;
   db.close();
-  const ok = await api.ui.dialogs.confirm(`Remove the data left by older versions (${describeFound(summary)})?\n\nThis frees the space it uses. It cannot be undone, and anything not copied across is lost.`, FORGET_TITLE);
+  const ok = await api.ui.dialogs.confirm(
+    `Remove the data left by older versions (${describeFound(summary)})?\n\nThis frees the space it uses. It cannot be undone, and anything not copied across is lost.`,
+    FORGET_TITLE,
+  );
   if (!ok) return;
   try {
     await deleteLegacyDb();

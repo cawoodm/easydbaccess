@@ -521,7 +521,13 @@ It pages through the API in fixed-size chunks (cap and page size come from the
 Settings → Datasette tab; default cap 10,000 rows, 0 = unlimited), and if
 paging is interrupted (e.g. rate-limited) the table records a resume cursor
 (`table.importResume`) surfaced as a red "Resume import" button rather than
-silently truncating. Its Refresh re-fetches and merges by primary key, keeping
+silently truncating. The prompt's own "Resume in 60s" waits **visibly**:
+`import/resume-wait.ts` counts the wait down on the app progress bar, naming the
+import and the rows already salvaged. It used to spend that minute silently over
+an empty grid — the rows are not written until the import ends — which was
+reported as "resume after 60s doesn't work" when it had resumed on time. The
+countdown runs off a DEADLINE, not a tick count, because a background tab
+throttles timers to about one a minute. Its Refresh re-fetches and merges by primary key, keeping
 columns the user added and honouring the ones they deleted.
 
 **`datasette-connect`** points a window at somebody else's **live** table. It

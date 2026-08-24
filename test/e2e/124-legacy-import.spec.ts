@@ -171,9 +171,7 @@ test('the offer copies a stranded workspace in, with its rows and its view', asy
   await expect(dialog(page)).toContainText('1 workspace, 2 tables, 3 rows');
   await choice(page, 'Bring it across').click();
 
-  await expect
-    .poll(async () => (await readWorkspace(page, 'legacy-demo')).exists, { timeout: 20_000 })
-    .toBe(true);
+  await expect.poll(async () => (await readWorkspace(page, 'legacy-demo')).exists, { timeout: 20_000 }).toBe(true);
 
   const landed = await readWorkspace(page, 'legacy-demo');
   expect(landed.tableNames).toEqual(['People', 'Pets']);
@@ -224,9 +222,7 @@ test('a name already taken can keep both copies, and the second gets its own tab
   await choice(page, 'Keep both, under a new name').click();
 
   const renamed = `${workspaceId}-2`;
-  await expect
-    .poll(async () => (await readWorkspace(page, renamed)).exists, { timeout: 20_000 })
-    .toBe(true);
+  await expect.poll(async () => (await readWorkspace(page, renamed)).exists, { timeout: 20_000 }).toBe(true);
 
   const copy = await readWorkspace(page, renamed);
   expect(copy.tableNames).toEqual(['People']);
@@ -264,9 +260,7 @@ test('replacing a workspace leaves only what came across', async ({ page, worksp
   // The replace ends in a reload, because the workspace on screen is the one
   // whose contents just went. "Mine" going is the point: a copy is additive, so
   // without the delete both sets of tables would sit in one workspace.
-  await expect
-    .poll(async () => (await readWorkspaceWhenSettled(page, workspaceId))?.tableNames, { timeout: 30_000 })
-    .toEqual(['People']);
+  await expect.poll(async () => (await readWorkspaceWhenSettled(page, workspaceId))?.tableNames, { timeout: 30_000 }).toEqual(['People']);
 });
 
 test('the old copy can be removed once, deliberately', async ({ page, workspaceId }) => {

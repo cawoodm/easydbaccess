@@ -170,3 +170,74 @@ test('the paused prompt\'s "Resume in 60s" waits then continues inline, leaving 
     .toEqual({ rows: 3, resume: null });
   expect(page2Hits).toBe(2); // failed once, succeeded on the auto-resume
 });
+
+/**
+ * The wait SAYS what it is doing.
+ *
+ * It always resumed on time — but for a real 60 seconds it showed one toast that
+ * vanished, an indeterminate bar and an empty grid (the salvaged rows are not
+ * written until the import ends), which is indistinguishable from a hang and was
+ * reported as "resume after 60s doesn't work". The wait is only test-shortened to
+ * 4s here; what matters is that the app bar counts it down.
+ */
+test('the wait counts itself down on the app progress bar', async ({ page, workspaceId }) => {
+  await page.evaluate(() => {
+    (window as unknown as { __eda_resumeDelayMs: number }).__eda_resumeDelayMs = 4_000;
+  });
+
+  let page2Hits = 0;
+  await page.route('https://ppl4.example/**', (route) => {
+    const u = new URL(route.request().url());
+    if (u.pathname === '/-/metadata.json') return route.fulfill(json({}));
+    if (u.pathname === '/energy/plants.json') {
+      const extra = u.searchParams.get('_extra') ?? '';
+      if (extra.includes('count')) return route.fulfill(json({ ok: true, count: 3 }));
+      if (extra) return route.fulfill(json({ ok: true, columns: PAGE1.columns, rows: [] }));
+      if (u.searchParams.get('_next') === 'p2') {
+        page2Hits += 1;
+        return route.fulfill(page2Hits === 1 ? rateLimited() : json(PAGE2));
+      }
+      return route.fulfill(json(PAGE1));
+    }
+    return route.fulfill({ status: 404, body: '{"ok":false}' });
+  });
+
+  await page.getByTitle('Import data from a URL').click();
+  const importDialog = page.locator('import-dialog dialog');
+  await importDialog.locator('input[type="text"]').fill('https://ppl4.example/energy/plants');
+  await importDialog.getByTestId('import-format').selectOption('datasette');
+  await importDialog.getByRole('button', { name: 'Import' }).click();
+
+  const prompt = page.locator('host-dialogs dialog');
+  await expect(prompt).toBeVisible();
+  await prompt.getByRole('button', { name: 'Resume in 60s' }).click();
+
+  // What is paused, and that the rows already fetched are not lost.
+  const bar = page.locator('app-progress');
+  await expect(bar).toContainText('paused — 2 rows kept');
+  // A countdown, not a frozen number: whatever second it is caught on, a later
+  // read must show a smaller one.
+  // Through the element's own `.detail` span: `textContent()` on the host reads
+  // the light DOM, and everything this element draws is in its shadow root.
+  const seconds = async () => Number(/resuming in (\d+)s/.exec((await bar.locator('.detail').textContent()) ?? '')?.[1] ?? -1);
+  const first = await seconds();
+  expect(first).toBeGreaterThan(0);
+  await expect.poll(seconds, { timeout: 6_000, intervals: [250] }).toBeLessThan(first);
+
+  // And it still ends in the resumed rows.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async (ws) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const store = (window as any).__easydb.store;
+          const t = (await store.tables.find()).find((x: { workspaceId: string; name: string }) => x.workspaceId === ws && x.name === 'energy/plants');
+          if (!t) return null;
+          return { rows: (await store.rows(t.id).find()).length, resume: t.importResume ?? null };
+        }, workspaceId),
+      { timeout: 20_000 },
+    )
+    .toEqual({ rows: 3, resume: null });
+  // The bar does not keep the countdown once the wait is over.
+  await expect(bar).not.toContainText('resuming in');
+});

@@ -8,6 +8,7 @@
 
 ### Bugs
 
+- 🪲 An import waiting out a rate limit showed nothing for the whole minute, so resuming looked as if it had failed (v0.0.418)
 - 🪲 A map zoomed all the way out drew the world several times side by side (v0.0.417)
 
 ## 20 Aug 2026

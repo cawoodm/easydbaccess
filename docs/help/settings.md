@@ -87,7 +87,9 @@ If you use the Datasette import or connect features, they share one
 - **Page size** — how many rows are requested per page while paging a table.
 - **Connected table row cap** — the row limit for a live-connected table.
 - **Rate-limit retry wait (seconds)** — how long to wait before retrying
-  after the Datasette instance rate-limits a request.
+  after the Datasette instance rate-limits a request. The wait counts itself
+  down on the bar under the header, and says how many rows are already safe,
+  so a minute of waiting does not look like a hang.
 
 This tab is one example of a settings tab that isn't tied to a single
 feature — it's shared by both the import and connect features, since they

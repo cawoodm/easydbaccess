@@ -103,7 +103,10 @@ export function legacyWorkspaceStore(db: LegacyDb, meta: LegacyWorkspaceMeta, re
     viewInstances: snapshot<ViewInstance>(seen.viewInstances, (v) => v.id),
     rows(tableId) {
       const legacyTableId = legacyIdOf.get(tableId) ?? tableId;
-      return lazy<Row>(async () => (await readLegacyRows(db, legacyTableId)).map((r) => remapRow(r, remap)), (r) => r.id);
+      return lazy<Row>(
+        async () => (await readLegacyRows(db, legacyTableId)).map((r) => remapRow(r, remap)),
+        (r) => r.id,
+      );
     },
   };
 }

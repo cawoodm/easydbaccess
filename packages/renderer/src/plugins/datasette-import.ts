@@ -39,8 +39,7 @@ import {
 import { askViewImportMode, findViews, offerViewImport, runViewImport } from './datasette-views.js';
 import { type DatasetteSettings, getDatasetteSettings, importRowCap, registerDatasetteSettings, resolveChosenTables, uniqueTableName, withDatasetteSourceInfo } from './datasette-common.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
-
-const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+import { countdownWait, resumeWaitLabel } from '../import/resume-wait.js';
 
 /**
  * How long to wait before auto-resuming a rate-limited import — the settings
@@ -520,13 +519,24 @@ async function fillImportTable(
       // below drives the footer's manual resume button.
       if (choice !== `Resume in ${waitLabel}`) break;
 
-      // Indeterminate bar + a heads-up toast during the wait, then resume.
+      // The wait REPORTS ITSELF. It used to be one toast that vanished after a
+      // few seconds, an indeterminate bar and then a silent minute — over an
+      // empty grid, because the salvaged rows are not written until the import
+      // ends. That is indistinguishable from a hang, and was reported as
+      // "resume after 60s doesn't work" when it had in fact resumed on time.
       setTableLoading(tableId, true);
       api.ui.dialogs.toast(`Resuming "${name}" in ${waitLabel}…`, {
         kind: 'info',
         title: 'Import paused',
       });
-      await delay(resumeDelayMs(settings.retryWaitSeconds));
+      await countdownWait(resumeDelayMs(settings.retryWaitSeconds), (tick) => {
+        setAppProgress({ label: resumeWaitLabel(name, rows.length), detail: tick.detail, fraction: tick.fraction });
+      });
+      // Say the wait is over even if the resumed page takes a while, or fails and
+      // asks again: the countdown's own last line said "resuming in 0s", and
+      // leaving that on screen is a second way to look stuck. A batch import's
+      // own label comes back on the first row the resumed page reports.
+      setAppProgress({ label: `Resuming "${name}"…` });
       startUrl = seg.nextUrl;
       error = undefined; // re-set if the resumed segment fails again
       nextUrl = undefined;
