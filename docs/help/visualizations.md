@@ -42,6 +42,17 @@ while the rest keep following the definition. The same is true of the order and
 the group cap. An overridden field is marked, and **Reset** puts it back to
 following.
 
+### Changing the kind keeps your settings
+
+Switch a bar to a column, or a bar to a pie, and everything you chose comes with
+it: the measure, the order, the group cap, and any option the new kind also has
+(a column chart has the same axis titles a bar does; a pie has none, so those go).
+
+What does not come with it is a setting you never touched. A pie shows its 8
+biggest slices and folds the rest into "Other"; turn that pie into a bar and the
+cap is gone, because it was the pie's rule, not your choice. Set the cap yourself
+and it travels like everything else.
+
 ## What the colours mean
 
 A chart of one thing — trips per country, say — gives **each category its own

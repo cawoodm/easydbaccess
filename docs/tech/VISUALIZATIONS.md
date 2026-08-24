@@ -285,6 +285,33 @@ Both editors render from the same `SettingsFieldSpec[]` through one
 `renderVizOptionField`, so a new option declared by a plugin appears in the
 template editor and in every instance's override list at once, with no UI code.
 
+### Changing the KIND keeps what the user chose
+
+`viz/viz-kind-switch.ts` (pure) decides what a bar → column → pie switch carries.
+One rule: **a setting the user changed travels; a setting they left at the old
+kind's default follows the new kind's default.**
+
+The second half is what makes the first half safe. A pie's `defaultAggregate`
+caps itself at `topN: 8`, so carrying that 8 onto a bar chart nobody capped would
+hide data; a line defaults to `sort: 'category'`, so carrying a bar's
+`valueDesc` would draw a trend line in size order. Both values were the KIND
+talking, not the user, and the comparison against `from.defaultAggregate` is how
+they are told apart.
+
+What travels: the measure `fn` (onto every measure, as a per-view `fn` override
+does), `sort`, `topN`, and any option whose key the new kind ALSO declares — two
+kinds that both declare `legend` mean the same thing by it, because one generic
+field renderer builds both from one declaration. Structure (`groupBy`,
+`measures[].channel`, `bin`) travels only when the new kind declares every
+channel it names: bar → line keeps a series split, bar → pie cannot, because a
+pie has no SERIES channel. An option the new kind does not declare is dropped
+rather than left in the stored template with no field to show or clear it — and
+seeds are filtered by the same rule.
+
+Before v0.0.419 the switch took the new kind's defaults wholesale, so bar →
+column — which reads every one of the same settings — lost the measure, the axis
+titles and the cap.
+
 ### The aggregate is layered too
 
 `VizAggregate` — which function over the value column, in what order, how many

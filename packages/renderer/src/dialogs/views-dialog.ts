@@ -5,6 +5,7 @@ import { getContext } from '../app-context.js';
 import { readCloudDefaults } from '../viz/viz-settings.js';
 import { aggregateFields, aggregateOverrideDelta, effectiveVizOptions, overrideDelta, overriddenAggregateKeys, overriddenKeys } from '../viz/viz-options.js';
 import { dockDescriptor } from '../viz/viz-dock.js';
+import { switchVizKind } from '../viz/viz-kind-switch.js';
 import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@marccawood/lit-dialogs';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { extractTokens } from '../views/view-render.js';
@@ -1052,11 +1053,13 @@ export class ViewsDialog extends LitElement {
         <select
           @change=${(e: Event) => {
             const next = this.vizSpecOf((e.target as HTMLSelectElement).value);
-            // Switching kind resets the aggregate to the new kind's default — a
-            // pie's topN or a line's category sort are part of what the kind IS,
-            // and carrying the old one over produced nonsense (a line sorted by
-            // size). Options are reset for the same reason: they are per-kind.
-            if (next) this.setViz({ kind: next.id, aggregate: next.defaultAggregate, options: this.seedOptions(next.id) });
+            // Anything the user CHANGED comes across; anything they left at the
+            // old kind's default follows the new kind's. That is what keeps a
+            // pie's self-imposed cap of 8 off a bar chart nobody capped, and a
+            // bar's "largest first" off a trend line — while the measure, the
+            // axis titles and a cap the user did choose survive the switch. See
+            // `viz/viz-kind-switch.ts`.
+            if (next) this.setViz(switchVizKind(d.viz, spec, next, this.seedOptions(next.id)));
           }}
         >
           ${kinds.map((k) => html`<option value=${k.id} ?selected=${k.id === spec.id}>${k.label}</option>`)}
