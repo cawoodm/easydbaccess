@@ -4,7 +4,7 @@
 
 ### Features
 
-- ✨ A chart in its own window has a button to dock it back above its table (v0.0.414)
+- ✨ A chart in its own window has a button to dock it back above its table (v0.0.415)
 
 ## 20 Aug 2026
 
