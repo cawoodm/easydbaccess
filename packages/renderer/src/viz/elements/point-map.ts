@@ -35,6 +35,7 @@ import { LitElement, html, nothing } from 'lit';
 import type { PropertyValues } from 'lit';
 import type { CircleMarker, Map as LeafletMap, TileLayer } from 'leaflet';
 import { readChartTheme, type MapPoint } from './chart-data.js';
+import { WORLD_BOUNDS, zoomFittingWidth } from './map-zoom.js';
 import { markerRadiusRange, scaleMarkerRadii } from './marker-scale.js';
 import { sameMapPoints, sameVizOptions } from './same-input.js';
 
@@ -154,8 +155,13 @@ export class VizPointMap extends LitElement {
     this.style.height = '100%';
     this.style.minHeight = '120px';
     // Leaflet measures its container on creation; a panel splitter changes that
-    // size without a window resize event, so it has to be told.
-    this.ro = new ResizeObserver(() => this.map?.invalidateSize());
+    // size without a window resize event, so it has to be told. The zoom floor
+    // depends on that measurement, so it is recomputed here too — a pane dragged
+    // wider has room for a second copy of the world at the zoom that just fitted.
+    this.ro = new ResizeObserver(() => {
+      this.map?.invalidateSize();
+      this.floorZoomToWorld();
+    });
     this.ro.observe(this);
   }
 
@@ -179,6 +185,21 @@ export class VizPointMap extends LitElement {
     if ((changed.has('points') || changed.has('options')) && !this.matchesDrawn()) void this.draw();
   }
 
+  /**
+   * Never let the map zoom out past the point where the world fills the pane.
+   *
+   * Without it, zooming all the way out drew the world several times side by side
+   * — Leaflet repeats tiles along the x axis, and a wide pane has room for it. The
+   * floor is where the world is exactly as wide as the pane, so the way out ends
+   * at one world (see `map-zoom.ts`). `setMinZoom` also pulls the current zoom up
+   * when it is already below the new floor, which is what makes a pane dragged
+   * wider correct itself.
+   */
+  private floorZoomToWorld(): void {
+    if (!this.map) return;
+    this.map.setMinZoom(zoomFittingWidth(this.map.getSize().x));
+  }
+
   /** Are the markers on screen already the answer for the current input? */
   private matchesDrawn(): boolean {
     return sameMapPoints(this.drawnPoints, this.points) && sameVizOptions(this.drawnOptions, this.options);
@@ -196,12 +217,19 @@ export class VizPointMap extends LitElement {
 
     const theme = readChartTheme(this);
     if (!this.map) {
-      this.map = L.map(host, { attributionControl: true });
+      // `zoomSnap: 0` so the fitted-to-width minimum below is reachable exactly.
+      // With the default 1 the zoom snaps to whole steps, and the step below the
+      // one that fits is the one that repeats the world.
+      this.map = L.map(host, { attributionControl: true, zoomSnap: 0, maxBounds: WORLD_BOUNDS, maxBoundsViscosity: 1 });
     }
     if (!this.tiles) {
       this.tiles = L.tileLayer(this.options.tileUrl ?? '', {
         attribution: this.options.attribution ?? '',
         maxZoom: 19,
+        // One world, not a row of them. Leaflet repeats tiles along the x axis by
+        // default, so a pane wider than the world at that zoom drew Africa three
+        // times — which reads as data repeating, not as a map.
+        noWrap: true,
       });
       // One flag, not one per failed tile: a map panned offline fires this for
       // every tile in the viewport.
@@ -240,8 +268,14 @@ export class VizPointMap extends LitElement {
     // Fit to the data rather than opening on a world view — a map of three
     // Swiss cities opened at zoom 0 looks like an empty map.
     const bounds = L.latLngBounds(this.points.map((p) => [p.lat, p.lon] as [number, number]));
+    // The floor first: `fitBounds` clamps to it, so a set of points spread across
+    // the world opens at one world rather than at the zoom below that repeats it.
+    this.floorZoomToWorld();
     if (bounds.isValid()) this.map.fitBounds(bounds, { padding: [24, 24], maxZoom: 12 });
     this.map.invalidateSize();
+    // Again after the size settled: the first pass measured a container Leaflet
+    // had only just been given, and the floor is a function of that measurement.
+    this.floorZoomToWorld();
     // Only once the markers are really on screen: a run abandoned above by the
     // generation guard has drawn nothing, and remembering its input would
     // suppress the run meant to replace it.

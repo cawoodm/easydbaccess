@@ -181,6 +181,88 @@ test('the zoom control zooms the map', async ({ page }) => {
   await expect.poll(zoomOf, { timeout: 10_000 }).toBe((before ?? 0) + 1);
 });
 
+/**
+ * What the tiles say about the world: which columns were asked for, and whether
+ * they cover the pane.
+ *
+ * A REPEATED tile is the bug: the same `/{z}/{x}/{y}` drawn twice, side by side,
+ * because Leaflet filled the space beside one world with another copy of it. The
+ * URL alone cannot say so — Leaflet wraps the coordinate back into range before
+ * building it — so what counts is how many times each URL appears in the DOM.
+ *
+ * Coverage is the other half: a map that refuses to repeat but sits in a grey band
+ * has only traded one wrong picture for another.
+ */
+async function tileWorld(page: Page) {
+  return page.evaluate(() => {
+    // Shadow-piercing, like `mapGeometry` above: the map lives inside
+    // `viz-panel`'s shadow root, where a plain querySelector does not reach.
+    const deep = (root: Document | ShadowRoot, sel: string): Element | null => {
+      const hit = root.querySelector(sel);
+      if (hit) return hit;
+      for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) {
+          const inner = deep(el.shadowRoot, sel);
+          if (inner) return inner;
+        }
+      }
+      return null;
+    };
+    const mapEl = deep(document, 'viz-point-map') as HTMLElement | null;
+    const container = mapEl?.querySelector('.leaflet-container') as HTMLElement | null;
+    const tiles = [...(mapEl?.querySelectorAll('img.leaflet-tile') ?? [])] as HTMLImageElement[];
+    if (!container || tiles.length === 0) return null;
+    const box = container.getBoundingClientRect();
+    const onScreen = tiles.filter((t) => {
+      const r = t.getBoundingClientRect();
+      // Leaflet keeps a ring of tiles outside the viewport; only what is over the
+      // pane can be a visible copy of anything.
+      return r.width > 0 && r.right > box.left + 1 && r.left < box.right - 1;
+    });
+    const counts = new Map<string, number>();
+    for (const t of onScreen) {
+      const key = t.src.match(/\/(\d+)\/(-?\d+)\/(-?\d+)\.png/)?.[0] ?? t.src;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const rects = onScreen.map((t) => t.getBoundingClientRect());
+    return {
+      width: Math.round(box.width),
+      z: Number(onScreen[0]?.src.match(/\/(\d+)\/-?\d+\/-?\d+\.png/)?.[1] ?? NaN),
+      /** Tiles drawn more than once over the pane — a repeated world. */
+      repeated: [...counts.values()].filter((n) => n > 1).length,
+      // How much of the pane's width the tiles actually paint.
+      covered: rects.length === 0 ? 0 : Math.round(Math.min(box.right, Math.max(...rects.map((r) => r.right))) - Math.max(box.left, Math.min(...rects.map((r) => r.left)))),
+    };
+  });
+}
+
+test('zoomed all the way out, the world fills the pane once instead of repeating', async ({ page }) => {
+  const id = await seedCities(page);
+  await makeMap(page, id);
+  await expect.poll(async () => (await mapGeometry(page))?.panePosition, { timeout: 15_000 }).toBe('absolute');
+
+  // Out until it stops going out. The floor is computed from the pane's width, so
+  // the test cannot assume how many clicks that is — and Leaflet animates each
+  // one, so it waits for the zoom to settle rather than counting.
+  const out = page.locator('viz-point-map .leaflet-control-zoom-out');
+  for (let i = 0; i < 14; i++) {
+    // Leaflet marks the control `aria-disabled` at the floor, which Playwright
+    // reads as a disabled control and would retry clicking until the test died.
+    if (((await out.getAttribute('class')) ?? '').includes('leaflet-disabled')) break;
+    await out.click();
+    // The zoom animates, and the disabled state lands with it.
+    await page.waitForTimeout(400);
+  }
+  await expect(out).toHaveClass(/leaflet-disabled/);
+
+  const world = await tileWorld(page);
+  expect(world).not.toBeNull();
+  // ONE world: no tile is drawn twice over the pane.
+  expect(world!.repeated).toBe(0);
+  // And it fills the pane, so refusing to repeat did not leave grey beside it.
+  expect(world!.covered).toBeGreaterThanOrEqual(world!.width - 4);
+});
+
 test('dragging pans the map', async ({ page }) => {
   // Its own test rather than a second half of the zoom one: a zoom animation
   // still settling moves the markers, which made a baseline taken right after it

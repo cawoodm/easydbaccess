@@ -137,6 +137,18 @@ its message in the pane rather than leaving it blank.
 > imported can therefore carry a script that runs when you open it. That has
 > always been true of column scripts and view templates; it is worth knowing.
 
+## Map rules
+
+A map opens fitted to your points, not on a world view — three Swiss cities at
+zoom 0 is an empty map. Zooming out stops where the world fills the width, so you
+never see the same continent twice side by side, and panning stays inside the
+world instead of drifting off into grey. A wider pane raises that limit, because
+a wider pane has room for more world.
+
+The tile URL and the credit line beside it are in **Settings → Visualizations**.
+Tiles come from the network; your points do not — when tiles cannot load the
+markers still draw, over a plain background, and the map says so.
+
 ## Word cloud rules
 
 A cloud has three rules worth knowing about, all on the **Edit** form:

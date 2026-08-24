@@ -516,6 +516,17 @@ resize or a filter change re-lays out without reshuffling every word.
   an image resolved relative to the stylesheet, which is the thing that breaks
   under a bundler. A circle marker is SVG — no assets, and it can carry a
   magnitude by radius.
+- **The zoom has a floor, and it is a function of the pane's width.** Leaflet
+  repeats tiles along the x axis, so any pane wider than `256 * 2^zoom` drew the
+  world two or three times side by side — which reads as data repeating. Three
+  things together stop it: `noWrap` on the tile layer, `minZoom` set to
+  `zoomFittingWidth(paneWidth)` (`viz/elements/map-zoom.ts`, pure and unit-tested)
+  and `zoomSnap: 0` so that fractional floor is reachable — with the default snap
+  of 1 the step below the fitting zoom is the one that repeats. Recomputed in the
+  `ResizeObserver`, because a pane dragged wider has room for more world, and
+  applied before `fitBounds` so a global set of points opens at one world.
+  `maxBounds` keeps panning inside the world, since a world that no longer repeats
+  has grey beside it.
 - **A tile failure is not a chart failure.** Tiles need the network; the points do
   not. When tiles fail the markers still draw and the pane says so, because a map
   that renders blank offline is indistinguishable from a map with no data. The

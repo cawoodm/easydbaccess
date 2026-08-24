@@ -6,6 +6,10 @@
 
 - ✨ A chart in its own window has a button to dock it back above its table (v0.0.415)
 
+### Bugs
+
+- 🪲 A map zoomed all the way out drew the world several times side by side (v0.0.417)
+
 ## 20 Aug 2026
 
 ### Features
