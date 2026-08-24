@@ -6,7 +6,8 @@ import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { focusTableWindow } from '../window-mgr/table-window-manager.js';
 import { revealViewWindow } from '../window-mgr/view-window-manager.js';
-import { RECENT_GROUP, RECENT_SETTING, orderByRecent, pruneRecent, pushRecent, readRecent } from './palette-recent.js';
+import { RECENT_SETTING, orderByRecent, pruneRecent, pushRecent, readRecent } from './palette-recent.js';
+import { orderByGroup } from './palette-groups.js';
 
 /** One selectable entry in the palette (flattened from commands/buttons/tables). */
 interface PaletteItem {
@@ -17,19 +18,6 @@ interface PaletteItem {
   /** Lower-cased haystack for search (title + keywords + group). */
   haystack: string;
   run: () => void | Promise<void>;
-}
-
-/** Group display order; unknown groups sort last (alphabetically). */
-const GROUP_RANK: Record<string, number> = {
-  [RECENT_GROUP]: -1,
-  Windows: 0,
-  Actions: 1,
-  App: 2,
-  Tables: 3,
-  Views: 4,
-};
-function groupRank(g: string): number {
-  return GROUP_RANK[g] ?? 3;
 }
 
 function renderIcon(icon: string | undefined) {
@@ -233,10 +221,7 @@ export class CommandPaletteDialog extends LitElement {
     // Stable sort by group rank; within-group insertion order is preserved.
     // The recent commands are moved to the front first, so that order also
     // decides their order inside the "Recent" group (which ranks first).
-    return orderByRecent(items, this.recentIds)
-      .map((it, i) => ({ it, i }))
-      .sort((a, b) => groupRank(a.it.group) - groupRank(b.it.group) || a.i - b.i)
-      .map(({ it }) => it);
+    return orderByGroup(orderByRecent(items, this.recentIds));
   }
 
   private get filtered(): PaletteItem[] {

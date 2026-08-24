@@ -8,6 +8,7 @@
 
 ### Bugs
 
+- 🪲 The command palette headed a group twice: Workspace, Help, Data and Commands each appeared in two places in the list (v0.0.420)
 - 🪲 Changing a chart's kind threw away the measure, the axis titles and the group cap, even where the new kind reads all three (v0.0.419)
 - 🪲 An import waiting out a rate limit showed nothing for the whole minute, so resuming looked as if it had failed (v0.0.418)
 - 🪲 A map zoomed all the way out drew the world several times side by side (v0.0.417)
