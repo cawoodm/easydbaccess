@@ -12,7 +12,7 @@ import { FilterPopover } from '../chrome/filter-popover.js';
 import '../chrome/filter-combobox.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { matchesColumnFilter } from '@easydb/shared';
-import { FACET_MAX_OPTIONS, facetable, facetCounts, facetValues } from '../search/facet-values.js';
+import { FACET_MAX_LEN, FACET_MAX_OPTIONS, facetable, facetCounts, facetValues } from '../search/facet-values.js';
 import { GRID_SETTINGS_ID, readHighlightErrors, readHighlightNulls, readSortDescFirst, readWindowRowsFrom, WINDOW_ROWS_FROM_DEFAULT } from './grid-settings.js';
 import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
 import { readSortSpecs, sortRowsBySpecs } from './row-sort.js';
@@ -783,6 +783,10 @@ export class DataTable extends LitElement {
     this.emitCount();
     this.emitRows();
     this.publishRequest();
+    // A column filtered to its own values needs its list from the store — see
+    // `loadSiblings`. Cheap when there is nothing to do: it is one Map lookup
+    // per visible column unless a filter or a search actually changed.
+    void this.loadSiblings();
   }
 
   /**
@@ -1931,9 +1935,13 @@ export class DataTable extends LitElement {
     // already typed in that column's filter, but other filters do narrow it.
     // The counting rules (blanks, order, the boolean domain) live in
     // `search/facet-values.ts`, which a view window's filter chip shares.
-    const { values, blanks } = facetCounts(this.rowsFacetedFor(field), field, {
-      type: this.columns.find((c) => c.field === field)?.type,
-    });
+    //
+    // A column that filters ITSELF is read from the store instead (see
+    // `pickerValues`), and awaited here when the read has not landed yet: the
+    // funnel is how a user switches from one value to another, so opening it on
+    // the one value already chosen is the case that has to be right, not fast.
+    if (this.needsSiblings(field) && this.siblings.get(field)?.key !== this.siblingKey(field)) await this.loadSiblings();
+    const { values, blanks } = this.pickerValues(field);
     // Toggles apply live while the popover stays open (multi-value tri-state);
     // the promise only reports dismissal or an explicit Clear.
     //
@@ -2024,6 +2032,91 @@ export class DataTable extends LitElement {
     return facetCounts(this.rowsFacetedFor(field), field, { type: this.columns.find((c) => c.field === field)?.type }).values;
   }
 
+  /**
+   * The store's value list for a column that carries its OWN filter, keyed by
+   * the narrowing it was read under.
+   *
+   * A column filtered to `A1` has no `A2` row in memory to build a list from:
+   * the request the grid sends carries EVERY filter, so the store returned the
+   * A1 rows and nothing else. `rowsFacetedFor` drops the column's own filter
+   * before counting, which was the whole answer while the grid held the table
+   * in memory and is a no-op now — it cannot restore rows that never arrived.
+   *
+   * So the siblings are read, once per (column, surrounding narrowing), by the
+   * query that already existed for the funnel's refresh icon.
+   */
+  private siblings = new Map<string, { key: string; values: Array<{ value: string; count: number }>; blanks: number }>();
+
+  /** Reads in flight, so a re-render does not queue the same one again. */
+  private siblingReads = new Set<string>();
+
+  /**
+   * What a column's list depends on besides the column itself: every OTHER
+   * column's filter and the searches. Its own filter is deliberately absent —
+   * that is the one thing the list must NOT follow.
+   */
+  private siblingKey(field: string): string {
+    const others = Object.entries(this.filters)
+      .filter(([f, q]) => f !== field && q && q.trim() !== '')
+      .sort(([a], [b]) => a.localeCompare(b));
+    const search = [this.localQuery.trim(), this.globalQuery.trim()].filter(Boolean).join(' ');
+    return JSON.stringify([others, search]);
+  }
+
+  /** True when this column's list has to come from the store rather than memory. */
+  private needsSiblings(field: string): boolean {
+    const own = this.filters[field];
+    return Boolean(own && own.trim() !== '' && this.rowColl?.distinct);
+  }
+
+  /**
+   * Read the value list for every column that is filtered to some of its own
+   * values, so both pickers can offer the rest.
+   *
+   * Driven from `updated()` rather than from `render()`: a render must not start
+   * work, and this way a filter change, a search and a fresh page of rows all
+   * reach it through the one path Lit already runs.
+   */
+  private async loadSiblings(): Promise<void> {
+    if (!this.rowColl?.distinct) return;
+    for (const c of this.visibleColumns) {
+      if (c.filterable === false || c.type === 'text') continue;
+      if (!this.needsSiblings(c.field)) continue;
+      const key = this.siblingKey(c.field);
+      if (this.siblings.get(c.field)?.key === key) continue;
+      const token = `${c.field} ${key}`;
+      if (this.siblingReads.has(token)) continue;
+      this.siblingReads.add(token);
+      try {
+        const { values, blanks } = await this.readDistinct(c.field);
+        // A new Map because Lit compares by identity, and the list has to reach
+        // the pickers that already rendered without it.
+        this.siblings = new Map(this.siblings).set(c.field, { key, values, blanks });
+        this.requestUpdate();
+      } catch {
+        /* the store could not answer — the in-memory list still shows */
+      } finally {
+        this.siblingReads.delete(token);
+      }
+    }
+  }
+
+  /**
+   * The values a picker should offer for one column: the store's list where the
+   * column filters itself, the in-memory faceted list everywhere else.
+   *
+   * The store's list is length-capped here the way `facetValues` caps the
+   * in-memory one — a column whose values are prose has no picker, and which
+   * side of the wire the list came from must not change that.
+   */
+  private pickerValues(field: string): { values: Array<{ value: string; count: number }>; blanks: number } {
+    const cached = this.siblings.get(field);
+    if (this.needsSiblings(field) && cached?.key === this.siblingKey(field)) {
+      return { values: cached.values.filter((v) => v.value.length < FACET_MAX_LEN), blanks: cached.blanks };
+    }
+    return facetCounts(this.rowsFacetedFor(field), field, { type: this.columns.find((c) => c.field === field)?.type });
+  }
+
   private onFilterInput(field: string, value: string) {
     this.filters = { ...this.filters, [field]: value };
     // Debounce persistence so we don't write to IndexedDB on every keystroke.
@@ -2075,6 +2168,23 @@ export class DataTable extends LitElement {
     const out = new Map<string, string[]>();
     for (const c of this.visibleColumns) {
       if (!facetable(this.rows, c.field, { type: c.type })) continue;
+      // A column filtered to some of its own values has no siblings left in
+      // memory to suggest — those came from the store, if they have arrived.
+      // Sorted, because that is the order this list has always been in;
+      // `pickerValues` returns the picker's commonest-first order.
+      if (this.needsSiblings(c.field)) {
+        const cached = this.siblings.get(c.field);
+        if (cached?.key === this.siblingKey(c.field)) {
+          out.set(
+            c.field,
+            this.pickerValues(c.field)
+              .values.map((v) => v.value)
+              .sort()
+              .slice(0, FACET_MAX_OPTIONS),
+          );
+          continue;
+        }
+      }
       // Faceted source: rows passing every other column's filter. An `array`
       // column suggests its MEMBERS, not the whole comma list.
       out.set(c.field, facetValues(this.rowsFacetedFor(c.field), c.field, { type: c.type }));
