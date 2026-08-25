@@ -33,6 +33,19 @@ Open the **Plugin Manager** (the small icon next to Settings) to:
 Plugin URLs travel with your workspace, so a plugin you add shows up on
 your other synced devices too.
 
+### Being told about a new one
+
+An app update can bring new plugins with it, and the only way to notice used to be
+opening the Plugin Manager and looking. So the app now says so on startup: **"2
+plugins you have never installed are available"**, naming them, with one button
+that opens the manager.
+
+It asks **once for each plugin**, whether you say yes or no. A plugin you install
+and later remove is never offered again either — you have already decided about
+that one. To look on purpose, run **Show available plugins** from the command
+palette (Ctrl+K), which lists everything in your catalogs that is not installed
+here, whether or not you were asked about it before.
+
 Writing your own plugin is a single JavaScript file:
 
 ```js

@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ The app says on startup when your plugin catalog holds a plugin you have never installed, once for each one (v0.0.426)
 - ✨ The pop-in button is now the pop-out icon with its arrow reversed, so the pair reads as one round trip (v0.0.422)
 
 ### Bugs

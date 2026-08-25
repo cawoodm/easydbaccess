@@ -7,6 +7,7 @@ import { SAFE_MODE } from '../plugin-host/safe-mode.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@marccawood/lit-dialogs';
 import { builtinKey, builtinPlugins } from '../plugin-host/loader.js';
+import { CATALOG_URLS_SETTING, defaultCatalogUrl, fetchCatalog, type CatalogResolved } from '../plugin-host/plugin-catalog.js';
 
 /** Small GitHub mark used for the "view source" link on rows with a `repo`. */
 const GITHUB_ICON_SVG =
@@ -14,30 +15,6 @@ const GITHUB_ICON_SVG =
 
 /** Fallback icon (Material Icons "extension") for rows without a `meta.icon`. */
 const FALLBACK_ICON = html`<span class="mi sm">extension</span>`;
-
-/** Settings key persisting the list of catalog source URLs the user has used. */
-const CATALOG_URLS_SETTING = 'plugin:catalogUrls';
-
-function defaultCatalogUrl(): string {
-  return new URL(`${import.meta.env.BASE_URL}plugins/catalog.json`, location.origin).toString();
-}
-
-interface CatalogEntry {
-  id: string;
-  name: string;
-  type?: PluginType;
-  description?: string;
-  author?: string;
-  icon?: string;
-  repo?: string;
-  /** Resolved against the catalog URL — may be relative (./foo.js) or absolute. */
-  url: string;
-}
-
-interface CatalogResolved extends CatalogEntry {
-  /** url resolved to an absolute URL — this is what goes into pluginUrls. */
-  absUrl: string;
-}
 
 type Category = 'built-in' | 'available' | 'installed' | 'fixed';
 /** Tri-state filter: off (ignore) → on (show only these) → not (hide these). */
@@ -521,14 +498,7 @@ export class PluginManagerDialog extends LitElement {
    */
   private async refreshCatalog(catalogUrl: string): Promise<void> {
     try {
-      const res = await fetch(catalogUrl, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as { plugins?: CatalogEntry[] };
-      const entries = Array.isArray(json.plugins) ? json.plugins : [];
-      this.catalog = entries.map((e) => ({
-        ...e,
-        absUrl: new URL(e.url, catalogUrl).toString(),
-      }));
+      this.catalog = await fetchCatalog(catalogUrl);
       this.catalogError = null;
     } catch (err) {
       this.catalog = [];
@@ -554,14 +524,8 @@ export class PluginManagerDialog extends LitElement {
     const base = raw.replace(/\/+$/, '');
     const registryUrl = `${base}/plugins/registry`;
     try {
-      const res = await fetch(registryUrl, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as { plugins?: CatalogEntry[] };
-      const entries = Array.isArray(json.plugins) ? json.plugins : [];
-      this.serverCatalog = entries.map((e) => ({
-        ...e,
-        absUrl: new URL(e.url, registryUrl).toString(),
-      }));
+      // The same shape as a catalog file, so the same reader — see `plugin-catalog.ts`.
+      this.serverCatalog = await fetchCatalog(registryUrl);
       this.serverCatalogError = null;
     } catch (err) {
       this.serverCatalog = [];

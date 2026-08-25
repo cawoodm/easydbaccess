@@ -932,6 +932,35 @@ to a generic "extension" glyph), name, and a GitHub link when `meta.repo` is
 set. (The button used to be the `plugin-manager-button` plugin; it was
 promoted to core chrome.)
 
+### `new-plugins`
+
+Mentions catalog entries the user has never had, once each, and offers to open
+the Plugin Manager. It exists because a catalog gains entries when the app is
+updated and nothing said so — the dialog listed them, but only to whoever
+happened to open it.
+
+The rule is `unmentionedPlugins` (pure, unit-tested): an entry is mentioned only
+when it is not in `pluginUrls`, has **no record in the `plugins` collection** (so
+one installed and later removed stays quiet), and is not in the device-local
+`new-plugins:mentioned` list. That list is written **before** the question, so a
+reload or a closed tab counts as having been told — the alternative is the same
+question every boot.
+
+Keyed on the absolute URL, not the id: two catalogs may each offer a
+`cell-email`, and the URL is what `pluginUrls` and the `plugins` collection are
+keyed by.
+
+Two placement decisions matter. It is **last** in `loader.ts`'s `modules`, because
+`load()` runs them in order and awaits each one — two others already open
+something on boot (`tips`, `legacy-import`), and this is the only one that also
+fetches from the network. And it reads catalogs through
+`plugin-host/plugin-catalog.ts`, the module the Plugin Manager now shares, so the
+catalog shape and the default URL exist once.
+
+Suppressed under `?test=1` like `tips`, with `?plugins=1` to force it back on.
+The palette command **Show available plugins** ignores the mentioned list, the
+same way `tips:show` starts the tour over.
+
 ## Adding a built-in plugin
 
 1. Drop `src/plugins/<name>.ts` exporting `meta` (with `id`/`name`/`type`

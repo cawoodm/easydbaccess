@@ -46,6 +46,7 @@ import * as tips from '../plugins/tips.js';
 import * as edbFile from '../plugins/edb-file.js';
 import * as legacyImport from '../plugins/legacy-import.js';
 import * as commandlets from '../plugins/commandlets.js';
+import * as newPlugins from '../plugins/new-plugins.js';
 
 /** A built-in plugin paired with its id (mirrors `meta.id`, cheaply reachable without importing every module). */
 export interface BuiltinEntry {
@@ -113,6 +114,11 @@ const modules: PluginModule[] = [
   edbFile,
   legacyImport,
   commandlets,
+  // Last on purpose: `load()` runs these in order and awaits each one, and this is
+  // the only entry that both fetches from the network and can open a dialog. Going
+  // last keeps its question off the top of `tips`'s and `legacy-import`'s, and its
+  // fetch out of everyone else's way.
+  newPlugins,
 ];
 
 function requireMeta(p: PluginModule): NonNullable<PluginModule['meta']> {
