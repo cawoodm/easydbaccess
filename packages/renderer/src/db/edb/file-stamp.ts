@@ -96,6 +96,23 @@ export function markLocalChanges(file: string): void {
   writeAll(all);
 }
 
+/**
+ * We have just written our copy over the file, so we know both: what the file
+ * looks like now, and that it is not a copy of this database.
+ *
+ * The honest stamp after an Overwrite. `clearStamp` was used here, which read as
+ * modest — we can no longer describe the relationship — but it BLINDED the tab:
+ * with no stamp every later verdict is `unknown`, so the one machine that had just
+ * pushed its work out could never again be told that another had pushed theirs.
+ * Recording the file's facts with `dirty` keeps the pair comparable, and the next
+ * outside write comes back as `conflict` rather than as silence.
+ */
+export function recordDivergence(file: string, facts: FileFacts): void {
+  const all = readAll();
+  all[file] = { mtime: facts.mtime, size: facts.size, dirty: true };
+  writeAll(all);
+}
+
 /** Forget what we knew, so the next comparison is `unknown` and touches nothing. */
 export function clearStamp(file: string): void {
   const all = readAll();

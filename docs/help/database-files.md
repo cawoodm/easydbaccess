@@ -214,13 +214,25 @@ So a save in one place is not seen in the other until it reads the file again,
 which happens in two moments:
 
 - **Sync workspace folder** — re-reads the folder, and if the file behind the
-  workspace you are looking at has been written since you opened it, loads it and
-  shows what the other one saved.
+  workspace you are looking at has been written since you opened it, offers you
+  what the other one saved.
 - **Switching into the workspace** — from the workspace list, or a `?space=` link.
   The file wins over your copy when it is the newer of the two.
 
-Both stop short of throwing work away. If your copy has changes that were never
-saved AND the file has been written since, the sync asks which copy you want to
+**A sync never loads a file behind your back, and never skips one without saying
+so.** When the file has moved on and you have nothing unsaved, it asks first —
+loading costs you nothing, but it does replace what is on screen:
+
+| Choice                | What happens                                           |
+| --------------------- | ------------------------------------------------------ |
+| **Load disk version** | What the other machine saved appears here.             |
+| **Keep this copy**    | Nothing changes. The file stays where it is.            |
+
+When there is nothing to load, the message after the sync says which: the file is
+up to date, or you have unsaved changes here — a Save is what that wants.
+
+If your copy has changes that were never saved AND the file has been written
+since, either answer costs you something, so the sync asks which copy you want to
 keep:
 
 | Choice                     | What happens                                                                                         |
@@ -245,6 +257,12 @@ sign the other machine added something.
 
 Turn autosave on, or press **Save** before you leave, and the question does not
 come up.
+
+The same two answers appear when this browser cannot compare the two copies at
+all — it has no record of when they last agreed, which is the case after you
+overwrite a file, or in a private window. Neither copy can be called the newer
+one, so the sync asks instead of guessing. Answering makes a record, so it only
+asks once.
 
 One thing does not survive this: a change to **settings alone**. Settings are not
 counted as unsaved work — every command you run stores itself as a recent command,

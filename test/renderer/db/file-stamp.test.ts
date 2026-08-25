@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clearStamp, compareWithFile, markLocalChanges, readStamp, recordAgreement, type FileStamp } from '../../../packages/renderer/src/db/edb/file-stamp.js';
+import { clearStamp, compareWithFile, markLocalChanges, readStamp, recordAgreement, recordDivergence, type FileStamp } from '../../../packages/renderer/src/db/edb/file-stamp.js';
 
 /**
  * What this browser last knew about a `.edb` on disk.
@@ -62,6 +62,27 @@ describe('the stamp store', () => {
     clearStamp('a.edb');
     expect(readStamp('a.edb')).toBeNull();
     expect(readStamp('b.edb')).not.toBeNull();
+  });
+
+  it('records a divergence, so the pair stays comparable after an Overwrite', () => {
+    // The bug: an Overwrite used to CLEAR the stamp, which blinded the tab. Every
+    // later verdict was `unknown`, so the machine that had just pushed its work out
+    // could never be told that another had pushed theirs.
+    recordAgreement('a.edb', { mtime: 10, size: 100 });
+    recordDivergence('a.edb', { mtime: 30, size: 300 });
+
+    expect(readStamp('a.edb')).toEqual({ mtime: 30, size: 300, dirty: true });
+    // The file as it is now, plus "this database is not a copy of it" — so an
+    // outside write comes back as a conflict rather than as silence.
+    expect(compareWithFile(readStamp('a.edb'), { mtime: 30, size: 300 })).toBe('ahead');
+    expect(compareWithFile(readStamp('a.edb'), { mtime: 31, size: 300 })).toBe('conflict');
+  });
+
+  it('records a divergence for a file it has never seen', () => {
+    // Unlike `markLocalChanges`, this one HAS just read the file, so there is
+    // something real to write down.
+    recordDivergence('new.edb', { mtime: 5, size: 50 });
+    expect(readStamp('new.edb')).toEqual({ mtime: 5, size: 50, dirty: true });
   });
 
   it('survives rubbish in the key rather than throwing', () => {

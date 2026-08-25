@@ -11,7 +11,8 @@ import { edbBridge, storeBridge } from './active-bridge.js';
 import { countWorkspaceContents } from '../delete-workspace.js';
 import { fileInFolder, listWorkspaceFiles } from './file-handle.js';
 import { folderConflicts, isEmptyWorkspace, partitionConflicts, writeFolderIndex, type FolderIndex, type FolderWorkspace } from './folder-index.js';
-import { clearStamp, factsOf, factsOfHandle, readStamp, verdictFor } from './file-stamp.js';
+import { factsOf, factsOfHandle, readStamp, recordDivergence, verdictFor } from './file-stamp.js';
+import { decideActiveFileSync, type ActiveFileOutcome } from './active-file-sync.js';
 import { compareCopies, sizeChangeNote, type CopyFacts } from './copy-facts.js';
 import { activeEdbName, adoptedFileName } from './session.js';
 import { adoptFolderFile, reloadActiveFromFile } from './space-adopt.js';
@@ -28,6 +29,15 @@ import { adoptFolderFile, reloadActiveFromFile } from './space-adopt.js';
 const LOAD = 'Load disk version';
 const OVERWRITE = 'Overwrite disk version';
 
+/**
+ * The third answer, for the one question where nothing is at stake.
+ *
+ * `file-newer` means the file moved and this copy holds nothing unsaved, so
+ * declining costs nothing — there is no work here to write out and no reason to
+ * offer Overwrite. "Keep this copy" says what declining does.
+ */
+const KEEP = 'Keep this copy';
+
 export interface SyncReport {
   files: number;
   /** Workspaces found across every file, including this tab's own. */
@@ -36,6 +46,10 @@ export interface SyncReport {
   conflicts: number;
   /** Files that held no readable workspace record. */
   unreadable: string[];
+  /** What happened to the file this tab has open. Never silent — see `active-file-sync.ts`. */
+  active: ActiveFileOutcome;
+  /** The name of that file, for the report to say. Absent on the local database. */
+  activeFile?: string | undefined;
   /**
    * This tab's own file was written by something else and has been re-read.
    *
@@ -226,9 +240,17 @@ export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStor
   // in a database this tab no longer has open, so they clash with nothing.
   for (const empty of adopt) await adoptFolderFile(empty.id);
 
-  const reloadedActive = await refreshActiveFile(dir, dialogs, overwrite, open, index);
+  const active = await refreshActiveFile(dir, dialogs, overwrite, open, index);
 
-  return { files: files.length, found: index.workspaces.length, conflicts: ask.length, unreadable, reloadedActive };
+  return {
+    files: files.length,
+    found: index.workspaces.length,
+    conflicts: ask.length,
+    unreadable,
+    active,
+    ...(adoptedFileName() === null ? {} : { activeFile: adoptedFileName() as string }),
+    reloadedActive: active === 'loaded',
+  };
 }
 
 /**
@@ -245,9 +267,12 @@ export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStor
  * own, so a `local.edb` that happens to be in the folder is not the same object
  * and must not be imported over it.
  *
- * A file we have never agreed with (`unknown`) is left alone: with no stamp there
- * is no way to tell "someone else wrote this" from "we have never read it", and
- * guessing would throw away local work.
+ * **Nothing here happens quietly.** Every state the file can be in ends in a
+ * question the user answers or a word the report says: an outside write is offered
+ * rather than applied, and a pair this browser cannot compare (`unknown`) is asked
+ * about rather than left. `unknown` used to return in silence, which is what a
+ * Sync that appeared to do nothing was — and it is reached by ordinary use, since
+ * an Overwrite once cleared the stamp that makes the comparison possible.
  */
 async function refreshActiveFile(
   dir: FileSystemDirectoryHandle,
@@ -255,34 +280,57 @@ async function refreshActiveFile(
   overwrite: (workspaceId: string, file: string) => Promise<void>,
   open: readonly { id: string }[],
   index: FolderIndex,
-): Promise<boolean> {
+): Promise<ActiveFileOutcome> {
   const file = adoptedFileName();
-  if (!file) return false;
+  if (!file) return 'no-file';
   const handle = await fileInFolder(dir, file, false);
   const verdict = await verdictFor(file, handle);
-  if (verdict === 'file-newer') return reloadActiveFromFile(file);
-  if (verdict !== 'conflict') return false;
+  const plan = decideActiveFileSync(verdict, handle !== null);
+  if (plan === 'nothing') {
+    if (!handle) return 'missing';
+    return verdict === 'ahead' ? 'ours-ahead' : 'in-step';
+  }
 
-  // Both sides moved on. The same answers as a list conflict, about the whole file
-  // this time — every workspace in it came from those bytes.
+  // What each side holds, for a question about the whole FILE rather than one
+  // workspace — every workspace in this database came from those bytes.
   const now = handle ? await factsOfHandle(handle) : null;
   const sides = compareCopies([
     { label: 'Here', facts: await openFileFacts(open) },
     { label: file, facts: { ...fileTotals(index, file), ...(now ?? {}) } },
   ]);
-  const answer = await dialogs.choice(
-    `${file} has been written since this tab read it, and there are unsaved changes here. Which copy do you want to keep?${sides}${sinceWeRead(file, now?.size)}`,
-    [LOAD, OVERWRITE],
-    'Sync workspace folder',
-  );
-  if (answer === LOAD) return reloadActiveFromFile(file);
+  const since = sinceWeRead(file, now?.size);
+
+  // The safe question: the file moved and this copy holds nothing unsaved, so the
+  // only thing at stake is that the screen changes under the user.
+  if (plan === 'ask-load') {
+    const answer = await dialogs.choice(
+      `${file} has been written since this tab last read it. Nothing here is unsaved, so this copy can be replaced by the one on disk.${sides}${since}`,
+      [LOAD, KEEP],
+      'Sync workspace folder',
+    );
+    if (answer !== LOAD) return 'kept';
+    return (await reloadActiveFromFile(file)) ? 'loaded' : 'missing';
+  }
+
+  // Nothing to compare with: no stamp at all, so "the file is newer" and "we have
+  // never read it" look the same. Both answers are on the table, because either
+  // copy may be the real one and only the user knows which.
+  const question =
+    plan === 'ask-unknown'
+      ? `This tab has ${file} open, but this browser has no record of when the two last agreed, so it cannot tell which is newer. Which copy do you want to keep?${sides}`
+      : `${file} has been written since this tab read it, and there are unsaved changes here. Which copy do you want to keep?${sides}${since}`;
+  const answer = await dialogs.choice(question, [LOAD, OVERWRITE], 'Sync workspace folder');
+  if (answer === LOAD) return (await reloadActiveFromFile(file)) ? 'loaded' : 'missing';
   if (answer === OVERWRITE) {
     // Per workspace, not the whole file: the newer copy on disk may hold
     // workspaces this tab has never seen, and they are not ours to drop.
     for (const w of open) await overwrite(w.id, file);
-    // Our copy and the file no longer describe each other in any way we recorded.
-    // `unknown` is the honest answer, and it means the next sync asks nothing.
-    clearStamp(file);
+    // What the file looks like NOW, plus the note that this database is not a copy
+    // of it — the file may hold workspaces we did not write. See `recordDivergence`.
+    const written = handle ? await factsOfHandle(handle) : null;
+    if (written) recordDivergence(file, written);
+    return 'overwritten';
   }
-  return false;
+  // Dismissed. Both copies stay exactly as they are, which is what Cancel meant.
+  return 'kept';
 }

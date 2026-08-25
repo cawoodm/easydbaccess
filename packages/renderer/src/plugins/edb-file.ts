@@ -25,6 +25,7 @@ import { createAutosavePolicy, type AutosavePolicy } from '../db/edb/dirty.js';
 import { edbBridge, edbHandle, setEdbHandle, storeBridge } from '../db/edb/active-bridge.js';
 import { copyWorkspace } from '../db/edb/convert.js';
 import { syncFolder } from '../db/edb/folder-sync.js';
+import { describeActiveOutcome } from '../db/edb/active-file-sync.js';
 import { createEdbBridge } from '../db/edb/worker-bridge.js';
 import type { PeekedWorkspace } from '../db/edb/protocol.js';
 import { compareCopies } from '../db/edb/copy-facts.js';
@@ -621,7 +622,11 @@ export function init(api: HostApi): void {
   async function syncFolderNow(dir: FileSystemDirectoryHandle): Promise<void> {
     const report = await syncFolder(dir, api.store, api.ui.dialogs, (id, file) => overwriteInFile(dir, id, file));
     const skipped = report.unreadable.length > 0 ? ` ${report.unreadable.length} file(s) held no workspace.` : '';
-    api.ui.dialogs.toast(`"${dir.name}": ${report.found} workspace(s) in ${report.files} file(s).${skipped}`, { kind: 'success' });
+    // What happened to THIS tab's file, in the same breath. Without it the toast
+    // read the same whether the sync had loaded the file or decided it could not,
+    // which is what "Sync does nothing" looked like from the outside.
+    const own = describeActiveOutcome(report.active, report.activeFile ?? '');
+    api.ui.dialogs.toast(`"${dir.name}": ${report.found} workspace(s) in ${report.files} file(s).${skipped}${own}`, { kind: 'success' });
     // The selector reads the index once, on connect, so it has to be told.
     window.dispatchEvent(new CustomEvent('easydb:folder-index-changed'));
   }

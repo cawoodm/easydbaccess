@@ -135,12 +135,47 @@ async function tableNames(page: Page): Promise<string[]> {
   }
 }
 
-/** The stamp this browser holds for a file — what says "we and the file agree". */
+/**
+ * The stamp this browser holds for a file — what says "we and the file agree".
+ *
+ * Null rather than thrown while the page is navigating: every caller polls this
+ * across a reload, and `page.evaluate` on a page mid-navigation throws
+ * "Execution context was destroyed" instead of retrying.
+ */
 async function stamp(page: Page, file: string): Promise<{ mtime: number; size: number; dirty?: boolean } | null> {
-  return page.evaluate((f) => {
+  try {
+    return await page.evaluate((f) => {
+      const raw = localStorage.getItem('eda:fileStamps');
+      return raw ? ((JSON.parse(raw) as Record<string, { mtime: number; size: number; dirty?: boolean }>)[f] ?? null) : null;
+    }, file);
+  } catch {
+    return null;
+  }
+}
+
+/** Throw the stamp away — a tab that has the file open and cannot compare the two. */
+async function forgetStamp(page: Page, file: string): Promise<void> {
+  await page.evaluate((f) => {
     const raw = localStorage.getItem('eda:fileStamps');
-    return raw ? ((JSON.parse(raw) as Record<string, { mtime: number; size: number; dirty?: boolean }>)[f] ?? null) : null;
+    const all = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    delete all[f];
+    localStorage.setItem('eda:fileStamps', JSON.stringify(all));
   }, file);
+}
+
+/**
+ * The adopted-file marker, safe to poll across a reload.
+ *
+ * `undefined` — not `null` — while the page is navigating, because `null` is a
+ * real answer here (the tab is on the browser's own database) and a poll waiting
+ * for it must not be satisfied by a read that never happened.
+ */
+async function activeFile(page: Page): Promise<string | null | undefined> {
+  try {
+    return await page.evaluate((k) => localStorage.getItem(k), ACTIVE_KEY);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -228,9 +263,16 @@ test.describe('a file written by another origin', () => {
 
     await runFileCommand(page, 'Sync workspace folder');
 
-    // The sync finds the file newer than this copy and reloads onto it. Polled
-    // rather than waited on: the reload happens inside the sync, so there is no
-    // moment to hold on to between the click and the new page.
+    // The sync finds the file newer than this copy and OFFERS it. Nothing here is
+    // unsaved, so nothing can be lost — but the screen is about to be replaced by
+    // what another machine saved, and the user asked to be told before that.
+    const offer = page.locator('host-dialogs');
+    await expect(offer.getByText(new RegExp(`${file} has been written since this tab last read it`, 'i'))).toBeVisible({ timeout: 20_000 });
+    await offer.getByRole('button', { name: 'Load disk version', exact: true }).click();
+
+    // Then it reloads onto the file. Polled rather than waited on: the reload
+    // happens inside the sync, so there is no moment to hold on to between the
+    // click and the new page.
     await expect.poll(() => tableNames(page), { timeout: 60_000 }).toEqual(['mine', 'theirs']);
     await ready(page);
 
@@ -238,7 +280,12 @@ test.describe('a file written by another origin', () => {
     const after = await stamp(page, file);
     expect(after).not.toEqual(before);
     await runFileCommand(page, 'Sync workspace folder');
-    await expect(page.locator('toast-host')).toContainText(/workspace\(s\) in/i, { timeout: 20_000 });
+    // It says so, rather than reporting only how many workspaces the folder holds
+    // — that sentence read the same whether the file had been loaded or skipped,
+    // which is what "Sync did nothing" looked like. Either wording names the file:
+    // restoring the windows writes geometry, so this copy is often legitimately
+    // ahead of the file a second after a reload.
+    await expect(page.locator('toast-host')).toContainText(new RegExp(`${file} (is up to date|has unsaved changes here)`), { timeout: 20_000 });
     expect(await tableNames(page)).toEqual(['mine', 'theirs']);
   });
 
@@ -281,7 +328,7 @@ test.describe('a file written by another origin', () => {
     // Back to this browser's own database, which has never heard of `ws`.
     await runFileCommand(page, 'Back to browser storage');
     await page.locator('host-dialogs').getByRole('button', { name: 'Yes', exact: true }).click();
-    await expect.poll(() => page.evaluate((k) => localStorage.getItem(k), ACTIVE_KEY), { timeout: 60_000 }).toBeNull();
+    await expect.poll(() => activeFile(page), { timeout: 60_000 }).toBeNull();
     await ready(page);
 
     await otherOriginAddsTable(page, ws, file, 'theirs');
@@ -291,6 +338,48 @@ test.describe('a file written by another origin', () => {
     await expect.poll(() => tableNames(page), { timeout: 60_000 }).toEqual(['mine', 'theirs']);
     await ready(page);
     expect(await page.evaluate((k) => localStorage.getItem(k), ACTIVE_KEY)).toBe(file);
+  });
+
+  /**
+   * The sync used to do nothing, and say nothing, when it could not compare the two
+   * copies at all.
+   *
+   * With no stamp there is no way to tell "another machine wrote this" from "we
+   * have never read it", and the old code took that as a reason to leave both
+   * alone — silently, so a Sync on a folder holding newer data looked broken. It is
+   * not an exotic state either: an Overwrite used to clear the very stamp the
+   * comparison needs.
+   */
+  test('a file it cannot compare is asked about, not skipped in silence', async ({ page }, testInfo) => {
+    const ws = `blind-${testInfo.testId}`.toLowerCase();
+    const file = `${ws}.edb`;
+    test.setTimeout(180_000);
+    await boot(page, ws);
+
+    const mine = await createTable(page, 'mine', [{ field: 'part', type: 'string' }]);
+    await waitForPanel(page, mine);
+    await saveIntoNewFolder(page, file);
+
+    await otherOriginAddsTable(page, ws, file, 'theirs');
+
+    // What an Overwrite left behind: the file is open here and this browser holds
+    // no record of the two ever agreeing.
+    await forgetStamp(page, file);
+    expect(await stamp(page, file)).toBeNull();
+
+    await runFileCommand(page, 'Sync workspace folder');
+
+    const dialog = page.locator('host-dialogs');
+    await expect(dialog.getByText(/no record of when the two last agreed/i)).toBeVisible({ timeout: 20_000 });
+    // Both answers are offered, because either copy may be the real one.
+    await expect(dialog.getByRole('button', { name: 'Overwrite disk version', exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Load disk version', exact: true }).click();
+
+    await expect.poll(() => tableNames(page), { timeout: 60_000 }).toEqual(['mine', 'theirs']);
+    await ready(page);
+    // Answering restores the stamp, so the next sync has something to compare and
+    // does not ask again.
+    expect(await stamp(page, file)).not.toBeNull();
   });
 
   test('unsaved work here is not thrown away — the sync asks first', async ({ page }, testInfo) => {

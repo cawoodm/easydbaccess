@@ -454,10 +454,23 @@ every moment a copy and its file are known to agree (an import, a Save) and a
 `dirty` flag for local changes since, then answers one question: `same`,
 `file-newer`, `conflict`, `ahead` or `unknown`. Two places act on it:
 
-- **Sync workspace folder** (`folder-sync.ts` → `refreshActiveFile`) re-reads this
-  tab's own file on `file-newer`, and asks Load / Overwrite / Cancel on `conflict`.
-  Only for a file this tab ADOPTED — `local.edb` is this browser's own database,
-  not a shared object.
+- **Sync workspace folder** (`folder-sync.ts` → `refreshActiveFile`) acts on this
+  tab's own file. Only for a file this tab ADOPTED — `local.edb` is this browser's
+  own database, not a shared object. The rule is pure and lives in
+  `active-file-sync.ts`:
+
+  | Verdict      | What the sync does                                                 |
+  | ------------ | ------------------------------------------------------------------ |
+  | `file-newer` | Offers it: Load disk version / Keep this copy                      |
+  | `conflict`   | Asks: Load disk version / Overwrite disk version                    |
+  | `unknown`    | Asks the same, because either copy may be the real one              |
+  | `same`       | Nothing. The report says "up to date"                              |
+  | `ahead`      | Nothing. Being ahead wants a Save, not a Sync                       |
+
+  **No outcome is silent.** `file-newer` used to load without asking, and `unknown`
+  used to return without a word — so a Sync run against a folder holding newer data
+  looked broken. Every state now ends in a question or in a clause the toast says
+  (`describeActiveOutcome`).
 - **`?space=` resolution** (`space-resolve.ts` → `fileIsNewer`) lets the file win
   over a local copy, which it otherwise never does.
 
@@ -466,9 +479,16 @@ command through the palette upserts the recent-command list into `settings`, so
 counting it would make every sync a conflict with itself. The cost is that a
 settings-only difference loses to a newer file.
 
-Nothing here is live. Convergence happens when a sync or a switch reads the file,
-which is also why `unknown` — no stamp, or the file is gone — leaves both copies
-exactly as they are.
+Nothing here is live. Convergence happens when a sync or a switch reads the file.
+A file that is not in the folder is the one case with nothing to say: there is
+nothing to compare and nothing to ask about.
+
+An Overwrite records `recordDivergence` — the file's facts as they are now, plus
+`dirty`. It used to `clearStamp`, which read as modest and was in fact blinding:
+with no stamp every later verdict is `unknown`, so the machine that had just
+pushed its work out could never be told that another had pushed theirs. The
+`?space=` path is stricter than the sync and stays that way — it acts on
+`file-newer` alone, because a boot has no user to ask.
 
 ### SQLite's JSON functions, and where they are used
 

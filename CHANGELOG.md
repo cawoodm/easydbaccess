@@ -8,6 +8,7 @@
 
 ### Bugs
 
+- 🪲 A workspace folder sync loaded a newer file without asking, and skipped a file it could not compare without a word (v0.0.424)
 - 🪲 A column filtered to one of its values offered only that value, so there was no way to switch to another without clearing the filter (v0.0.423)
 - 🪲 Zooming a map in with the wheel crawled: one notch moved a fraction of a level instead of a whole one (v0.0.421)
 - 🪲 Filtering the grid threw a map's view back out, so a map could not be used beside a filter being typed (v0.0.421)
