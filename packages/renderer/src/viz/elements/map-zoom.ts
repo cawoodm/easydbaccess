@@ -14,12 +14,7 @@
 export const TILE_SIZE = 256;
 
 /**
- * The zoom at which the whole world is exactly `widthPx` wide.
- *
- * Fractional on purpose: a map that snaps to whole zooms has to choose between
- * one step in (the world overflows the pane, which is fine) and one step out (the
- * world repeats, which is the bug). Leaflet reaches a fractional bound only with
- * `zoomSnap: 0`, which is why the element sets it.
+ * The zoom at which the whole world is exactly `widthPx` wide. Usually fractional.
  *
  * A pane with no width yet — a hidden or unmeasured container — answers 0 rather
  * than `-Infinity`, so a map built before layout still has a usable floor.
@@ -27,6 +22,25 @@ export const TILE_SIZE = 256;
 export function zoomFittingWidth(widthPx: number, tileSize: number = TILE_SIZE): number {
   if (!Number.isFinite(widthPx) || widthPx <= 0) return 0;
   return Math.max(0, Math.log2(widthPx / tileSize));
+}
+
+/**
+ * The same floor, rounded UP to a whole zoom — which is the one the map uses.
+ *
+ * Rounding up keeps the guarantee: at `ceil(fit)` the world is `256 * 2^ceil(fit)`
+ * wide, which is at least the pane, so there is no room beside it for a second
+ * copy. Rounding down would leave exactly that room.
+ *
+ * It is whole because the alternative cost more than it bought. Leaflet only holds
+ * a fractional minimum with `zoomSnap: 0`, and that option does not just relax the
+ * bound — it changes how far one wheel tick moves. With the default snap of 1,
+ * `Math.ceil(d3 / snap) * snap` rounds every tick up to a full level; with 0 the
+ * raw sigmoid gets through, and a trackpad flick that used to move one level moved
+ * about an eighth of one. Zooming in felt broken. So the map snaps to whole zooms
+ * as it always did, and stops one whole step short of repeating the world.
+ */
+export function wholeZoomFittingWidth(widthPx: number, tileSize: number = TILE_SIZE): number {
+  return Math.ceil(zoomFittingWidth(widthPx, tileSize));
 }
 
 /**

@@ -35,7 +35,7 @@ import { LitElement, html, nothing } from 'lit';
 import type { PropertyValues } from 'lit';
 import type { CircleMarker, Map as LeafletMap, TileLayer } from 'leaflet';
 import { readChartTheme, type MapPoint } from './chart-data.js';
-import { WORLD_BOUNDS, zoomFittingWidth } from './map-zoom.js';
+import { WORLD_BOUNDS, wholeZoomFittingWidth } from './map-zoom.js';
 import { markerRadiusRange, scaleMarkerRadii } from './marker-scale.js';
 import { sameMapPoints, sameVizOptions } from './same-input.js';
 
@@ -190,14 +190,39 @@ export class VizPointMap extends LitElement {
    *
    * Without it, zooming all the way out drew the world several times side by side
    * — Leaflet repeats tiles along the x axis, and a wide pane has room for it. The
-   * floor is where the world is exactly as wide as the pane, so the way out ends
-   * at one world (see `map-zoom.ts`). `setMinZoom` also pulls the current zoom up
+   * floor is the first WHOLE zoom at which the world is at least as wide as the
+   * pane, so the way out ends one step before it could repeat (see `map-zoom.ts`
+   * for why whole rather than exact). `setMinZoom` also pulls the current zoom up
    * when it is already below the new floor, which is what makes a pane dragged
    * wider correct itself.
    */
   private floorZoomToWorld(): void {
     if (!this.map) return;
-    this.map.setMinZoom(zoomFittingWidth(this.map.getSize().x));
+    this.map.setMinZoom(wholeZoomFittingWidth(this.map.getSize().x));
+  }
+
+  /** Has this map ever been fitted to data? Set by the first draw that had any. */
+  private fitted = false;
+
+  /**
+   * Should this draw move the map, or leave the view where the user put it?
+   *
+   * Only the FIRST draw fits. After that the view is the user's: they zoomed into
+   * a city, and a filter in the grid above redraws the pane — which used to throw
+   * them back out to the whole of the filtered set every time, so a map was
+   * unusable next to a filter you were still adjusting.
+   *
+   * The one exception is a filter whose points are all off screen. Keeping the view
+   * there would show an empty map, which reads as "the filter matched nothing"
+   * rather than "your matches are elsewhere". So a set with nothing in view is
+   * fitted, and a set with anything in view is left alone.
+   */
+  private shouldFit(bounds: { intersects(other: unknown): boolean }): boolean {
+    if (!this.fitted || !this.map) {
+      this.fitted = true;
+      return true;
+    }
+    return !bounds.intersects(this.map.getBounds());
   }
 
   /** Are the markers on screen already the answer for the current input? */
@@ -217,10 +242,12 @@ export class VizPointMap extends LitElement {
 
     const theme = readChartTheme(this);
     if (!this.map) {
-      // `zoomSnap: 0` so the fitted-to-width minimum below is reachable exactly.
-      // With the default 1 the zoom snaps to whole steps, and the step below the
-      // one that fits is the one that repeats the world.
-      this.map = L.map(host, { attributionControl: true, zoomSnap: 0, maxBounds: WORLD_BOUNDS, maxBoundsViscosity: 1 });
+      // Leaflet's default `zoomSnap: 1` on purpose. Setting it to 0 — which is what
+      // it takes for a FRACTIONAL minimum zoom to be reachable — also changes how
+      // far one wheel tick moves: the snap is what rounds each tick up to a whole
+      // level, and without it a trackpad flick moved about an eighth of one.
+      // Zooming in felt broken, so the floor is a whole zoom instead.
+      this.map = L.map(host, { attributionControl: true, maxBounds: WORLD_BOUNDS, maxBoundsViscosity: 1 });
     }
     if (!this.tiles) {
       this.tiles = L.tileLayer(this.options.tileUrl ?? '', {
@@ -271,7 +298,7 @@ export class VizPointMap extends LitElement {
     // The floor first: `fitBounds` clamps to it, so a set of points spread across
     // the world opens at one world rather than at the zoom below that repeats it.
     this.floorZoomToWorld();
-    if (bounds.isValid()) this.map.fitBounds(bounds, { padding: [24, 24], maxZoom: 12 });
+    if (bounds.isValid() && this.shouldFit(bounds)) this.map.fitBounds(bounds, { padding: [24, 24], maxZoom: 12 });
     this.map.invalidateSize();
     // Again after the size settled: the first pass measured a container Leaflet
     // had only just been given, and the floor is a function of that measurement.

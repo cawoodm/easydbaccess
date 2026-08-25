@@ -182,6 +182,96 @@ test('the zoom control zooms the map', async ({ page }) => {
 });
 
 /**
+ * One wheel tick is one zoom level.
+ *
+ * The floor that stops the world repeating was first built on `zoomSnap: 0`, the
+ * only way Leaflet holds a FRACTIONAL minimum. That option also governs the wheel:
+ * `d4 = snap ? Math.ceil(d3 / snap) * snap : d3` — with the snap gone, a small
+ * trackpad delta gets through raw, and one flick moved about an eighth of a level.
+ * The buttons were unaffected, which is why the earlier test above passed while
+ * zooming in by hand felt broken.
+ */
+test('one wheel notch zooms a whole level, not a fraction of one', async ({ page }) => {
+  const id = await seedCities(page);
+  await makeMap(page, id);
+  await expect.poll(async () => (await mapGeometry(page))?.panePosition, { timeout: 15_000 }).toBe('absolute');
+
+  const zoom = () => page.locator('viz-point-map').evaluate(() => (window as unknown as { __mapZoom?: () => number }).__mapZoom?.() ?? NaN);
+  // Leaflet's own number, not the tile path: a fractional zoom still requests
+  // whole-numbered tiles and scales them, so the URL cannot tell the difference.
+  await page.locator('viz-point-map').evaluate((el) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__mapZoom = () => (el as any).map?.getZoom() ?? NaN;
+  });
+
+  const before = await zoom();
+  expect(Number.isFinite(before)).toBe(true);
+
+  const box = await page.locator('viz-point-map .leaflet-container').boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  // A modest delta, like a trackpad's — a big mouse notch cleared the old bar by
+  // accident, which is why the report was about it feeling slow rather than stuck.
+  await page.mouse.wheel(0, -40);
+
+  // Leaflet debounces the wheel (40 ms) and then animates.
+  await expect.poll(zoom, { timeout: 10_000 }).toBeGreaterThanOrEqual(before + 1);
+  expect(Number.isInteger(await zoom())).toBe(true);
+});
+
+/**
+ * Filtering the grid must not move the map.
+ *
+ * A docked pane is redrawn from the grid's visible rows, and the draw used to
+ * `fitBounds` every time — so zooming into one city and then typing in a column
+ * funnel threw the view back out to the whole filtered set. That made a map
+ * unusable next to a filter still being typed.
+ */
+test('a filter in the grid leaves the map where the user put it', async ({ page }) => {
+  const id = await seedCities(page);
+  await makeMap(page, id, 'below');
+  await expect.poll(async () => (await mapGeometry(page))?.panePosition, { timeout: 15_000 }).toBe('absolute');
+
+  await page.locator('viz-point-map').evaluate((el) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__mapView = () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const m = (el as any).map;
+      const c = m?.getCenter();
+      return m ? { z: m.getZoom(), lat: Math.round(c.lat * 100) / 100, lon: Math.round(c.lng * 100) / 100 } : null;
+    };
+  });
+  const view = () => page.evaluate(() => (window as unknown as { __mapView?: () => unknown }).__mapView?.() ?? null);
+
+  // Zoom in twice, so the view is unmistakably the user's rather than the fit.
+  for (let i = 0; i < 2; i++) await page.locator('viz-point-map .leaflet-control-zoom-in').click();
+  await page.waitForTimeout(600);
+  const chosen = (await view()) as { z: number; lat: number; lon: number };
+  expect(chosen.z).toBeGreaterThan(0);
+
+  // Filter the grid to two of the three cities — both inside the current view, so
+  // there is no reason to move.
+  await page.evaluate(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async ({ id }) => void (await (window as any).__easydb.store.tables.patch(id, { filters: { city: '!Geneva' }, updatedAt: Date.now() })),
+    { id },
+  );
+  // The markers really did change, or this test would prove nothing.
+  await expect.poll(async () => (await mapGeometry(page))?.markers, { timeout: 10_000 }).toBe(2);
+  await page.waitForTimeout(600);
+
+  const after = (await view()) as { z: number; lat: number; lon: number };
+  // The zoom is the assertion — a refit changes it, and that is what the report was
+  // about. The centre is allowed a hair of movement: the redraw calls
+  // `invalidateSize`, which re-centres on a container measured again, and that
+  // landed 0.01° (about one pixel at this zoom) away. A refit of two Swiss cities
+  // from a three-city view moves it by degrees, so the tolerance still catches it.
+  expect(after.z).toBe(chosen.z);
+  expect(Math.abs(after.lat - chosen.lat)).toBeLessThan(0.05);
+  expect(Math.abs(after.lon - chosen.lon)).toBeLessThan(0.05);
+});
+
+/**
  * What the tiles say about the world: which columns were asked for, and whether
  * they cover the pane.
  *

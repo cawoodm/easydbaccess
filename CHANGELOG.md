@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 25 Aug 2026
+
+### Bugs
+
+- 🪲 Zooming a map in with the wheel crawled: one notch moved a fraction of a level instead of a whole one (v0.0.421)
+- 🪲 Filtering the grid threw a map's view back out, so a map could not be used beside a filter being typed (v0.0.421)
+
 ## 24 Aug 2026
 
 ### Features

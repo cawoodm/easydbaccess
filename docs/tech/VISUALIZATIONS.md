@@ -545,15 +545,30 @@ resize or a filter change re-lays out without reshuffling every word.
   magnitude by radius.
 - **The zoom has a floor, and it is a function of the pane's width.** Leaflet
   repeats tiles along the x axis, so any pane wider than `256 * 2^zoom` drew the
-  world two or three times side by side — which reads as data repeating. Three
-  things together stop it: `noWrap` on the tile layer, `minZoom` set to
-  `zoomFittingWidth(paneWidth)` (`viz/elements/map-zoom.ts`, pure and unit-tested)
-  and `zoomSnap: 0` so that fractional floor is reachable — with the default snap
-  of 1 the step below the fitting zoom is the one that repeats. Recomputed in the
+  world two or three times side by side — which reads as data repeating. `noWrap`
+  on the tile layer plus `minZoom = wholeZoomFittingWidth(paneWidth)`
+  (`viz/elements/map-zoom.ts`, pure and unit-tested) stop it. Recomputed in the
   `ResizeObserver`, because a pane dragged wider has room for more world, and
   applied before `fitBounds` so a global set of points opens at one world.
   `maxBounds` keeps panning inside the world, since a world that no longer repeats
   has grey beside it.
+- **The floor is a WHOLE zoom, and `zoomSnap` stays at its default.** The exact
+  fitting zoom is fractional, and Leaflet only holds a fractional minimum with
+  `zoomSnap: 0` — which was the first attempt and cost more than it bought. That
+  option also governs the wheel: `d4 = snap ? Math.ceil(d3 / snap) * snap : d3`, so
+  the snap is what rounds each tick up to a full level. Without it the raw sigmoid
+  gets through and a trackpad flick moved about an eighth of a level. Zooming in
+  felt broken while the zoom BUTTONS still stepped by 1 (`zoomDelta`), which is why
+  the existing control test passed throughout. `Math.ceil` keeps the no-repeat
+  guarantee — at `ceil(fit)` the world is at least as wide as the pane — and costs
+  only the last fraction of a step outwards.
+- **Only the FIRST draw fits the bounds.** A docked pane redraws from the grid's
+  visible rows, so `fitBounds` on every draw threw the view back out each time a
+  column funnel was typed in — a map is unusable beside a filter being adjusted.
+  After the first fit the view belongs to the user. The one exception is a set with
+  nothing in the current view: keeping the view there shows an empty map, which
+  reads as "the filter matched nothing" rather than "your matches are elsewhere",
+  so that case refits (`shouldFit`).
 - **A tile failure is not a chart failure.** Tiles need the network; the points do
   not. When tiles fail the markers still draw and the pane says so, because a map
   that renders blank offline is indistinguishable from a map with no data. The

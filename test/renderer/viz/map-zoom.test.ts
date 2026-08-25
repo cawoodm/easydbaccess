@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TILE_SIZE, WORLD_BOUNDS, zoomFittingWidth } from '../../../packages/renderer/src/viz/elements/map-zoom.js';
+import { TILE_SIZE, WORLD_BOUNDS, wholeZoomFittingWidth, zoomFittingWidth } from '../../../packages/renderer/src/viz/elements/map-zoom.js';
 
 /**
  * The floor that stops a map drawing the world twice.
@@ -43,6 +43,41 @@ describe('zoomFittingWidth', () => {
   it('takes another tile size, for a provider that does not use 256', () => {
     expect(zoomFittingWidth(512, 512)).toBe(0);
     expect(zoomFittingWidth(1024, 512)).toBe(1);
+  });
+});
+
+/**
+ * The floor the map actually uses. Whole, because `zoomSnap: 0` — what it takes to
+ * reach a fractional one — also stops Leaflet rounding a wheel tick up to a full
+ * level, and zooming in then crawls.
+ */
+describe('wholeZoomFittingWidth', () => {
+  it('rounds the fitting zoom UP, never down', () => {
+    // 1.81 → 2: at 2 the world is 1024px against a 900px pane, so it overflows.
+    // Rounding down to 1 would leave 388px beside it for a second copy.
+    expect(wholeZoomFittingWidth(900)).toBe(2);
+    expect(wholeZoomFittingWidth(300)).toBe(1);
+  });
+
+  it('leaves an exact power of two alone', () => {
+    expect(wholeZoomFittingWidth(256)).toBe(0);
+    expect(wholeZoomFittingWidth(512)).toBe(1);
+    expect(wholeZoomFittingWidth(1024)).toBe(2);
+  });
+
+  it('is never below 0, and never fractional', () => {
+    for (const w of [0, 1, 120, 255, 256, 257, 900, 1920, 3840]) {
+      const z = wholeZoomFittingWidth(w);
+      expect(Number.isInteger(z)).toBe(true);
+      expect(z).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('always covers the pane — the property the whole floor exists for', () => {
+    for (const w of [120, 300, 640, 900, 1280, 1440, 1920, 2560, 3840]) {
+      const worldPx = TILE_SIZE * 2 ** wholeZoomFittingWidth(w);
+      expect(worldPx).toBeGreaterThanOrEqual(Math.max(w, TILE_SIZE));
+    }
   });
 });
 

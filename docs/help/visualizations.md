@@ -156,6 +156,11 @@ never see the same continent twice side by side, and panning stays inside the
 world instead of drifting off into grey. A wider pane raises that limit, because
 a wider pane has room for more world.
 
+**Your view stays yours.** Once you have zoomed or panned, filtering the grid
+redraws the markers and leaves the map where you put it. The exception is a filter
+whose points are all off screen — then the map moves to them, because an empty map
+would look like a filter that matched nothing.
+
 The tile URL and the credit line beside it are in **Settings → Visualizations**.
 Tiles come from the network; your points do not — when tiles cannot load the
 markers still draw, over a plain background, and the map says so.
