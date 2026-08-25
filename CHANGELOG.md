@@ -9,6 +9,7 @@
 
 ### Bugs
 
+- 🪲 A markdown column in a view showed its text with the markers stripped instead of rendering (v0.0.428)
 - 🪲 Saving a workspace wrote every other workspace in this browser into its file, so two workspaces shared one (v0.0.427)
 - 🪲 A map could not be zoomed out to show the whole world unless its pane was square, and a padded map wrongly said its tiles had failed (v0.0.425)
 - 🪲 A workspace folder sync loaded a newer file without asking, and skipped a file it could not compare without a word (v0.0.424)

@@ -115,8 +115,55 @@ export class PreviewCell extends HTMLElement {
     return this._readonly;
   }
 
+  /**
+   * Mounted somewhere a value may be more than one line high — a view.
+   *
+   * The one-line cell is a GRID constraint, not what this renderer means: a row
+   * is one line tall and arbitrary markup would have every row set its own
+   * height, so the cell holds text and the popup holds the render. A view is a
+   * page of HTML the template author laid out; nothing there is one line high,
+   * and a `$TOKEN` on a markdown column that showed flattened text looked as if
+   * the renderer had not been applied at all.
+   *
+   * So the same element renders in place when it is told it is not in a grid.
+   * Set by `views/view-window.ts` when it mounts the cell; `data-table` never
+   * sets it, and every other renderer ignores the property.
+   */
+  set expanded(v: boolean) {
+    const next = v === true;
+    if (this._expanded === next) return;
+    this._expanded = next;
+    this.render();
+  }
+  get expanded(): boolean {
+    return this._expanded;
+  }
+  private _expanded = false;
+
   private get title_(): string {
     return this._label ?? this.language;
+  }
+
+  /**
+   * The value as a block: the markup where there is any, else the text verbatim
+   * in a `<pre>`.
+   *
+   * The same two cases `openWindow` draws, and for the same reason — a value that
+   * is NOT markup must not be parsed as markup, and `textContent` both preserves
+   * its newlines and escapes its `<` and `&`.
+   */
+  private renderedBlock(): HTMLElement {
+    const block = document.createElement('div');
+    const html = this.toHtml(this._value);
+    if (html !== null) {
+      block.innerHTML = html;
+      return block;
+    }
+    const pre = document.createElement('pre');
+    pre.style.cssText = 'white-space:pre-wrap;word-break:break-word;margin:0;font-family:ui-monospace, monospace;';
+    pre.textContent = this._value;
+    block.append(pre);
+    return block;
   }
 
   connectedCallback() {
@@ -125,6 +172,12 @@ export class PreviewCell extends HTMLElement {
 
   private render() {
     this.innerHTML = '';
+    // Outside a grid row: draw the value, with no popup icon and nothing to
+    // click. A view is read-only — editing is what `$input.TOKEN` is for.
+    if (this._expanded) {
+      if (this._value) this.append(this.renderedBlock());
+      return;
+    }
     if (!this._value) {
       const empty = document.createElement('span');
       empty.style.cssText = this._readonly ? 'color:#9ca3af' : 'color:#9ca3af;cursor:text';

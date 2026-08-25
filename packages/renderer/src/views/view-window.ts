@@ -448,12 +448,18 @@ export class ViewWindow extends LitElement {
         row?: Record<string, unknown>;
         readonly?: boolean;
         sourceReadonly?: boolean;
+        expanded?: boolean;
       };
       cell.value = tokenValue(row, field, scripts[el.dataset.edaToken ?? '']) ?? '';
       cell.column = spec;
       cell.row = row.data;
       cell.readonly = true;
       cell.sourceReadonly = true;
+      // Not a grid row: a renderer that flattens its value to one line for the
+      // grid (`preview`, `markdown` — see `plugins/preview-cell.ts`) renders it
+      // properly here instead. A markdown column showed its text with the markers
+      // stripped, which reads as the renderer not having been applied.
+      cell.expanded = true;
       el.replaceChildren(cell);
     }
   }
