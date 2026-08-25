@@ -188,8 +188,12 @@ export function adoptLocalDb(workspaceId: string): Promise<never> {
  * Falls back to `'create'` when the file cannot be read after all — a folder
  * listing is a moment old, and the file may have gone.
  */
-export async function adoptFolderFile(workspaceId: string): Promise<SpaceAction> {
-  const file = spaceFileName(workspaceId);
+export async function adoptFolderFile(workspaceId: string, fileName?: string): Promise<SpaceAction> {
+  // The caller may KNOW the file, and knowing beats deriving: a clash is matched
+  // on the workspace name now, so the file holding it need not be named after the
+  // id on this side. `spaceFileName` stays the default for every caller that has
+  // only an id.
+  const file = fileName ?? spaceFileName(workspaceId);
   const dir = await grantedFolder();
   const handle = dir ? await fileInFolder(dir, file, false) : null;
   if (!handle) return 'create';

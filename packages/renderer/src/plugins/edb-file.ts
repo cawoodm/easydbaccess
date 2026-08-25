@@ -30,6 +30,7 @@ import { createEdbBridge } from '../db/edb/worker-bridge.js';
 import type { PeekedWorkspace } from '../db/edb/protocol.js';
 import { compareCopies } from '../db/edb/copy-facts.js';
 import { countWorkspaceContents } from '../db/delete-workspace.js';
+import { isEmptyWorkspace } from '../db/edb/folder-index.js';
 import { createIpcDataStore } from '../db/data-store-bridge.js';
 import { adoptEdbFile, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
 import { adoptFolderFile, clearPendingSpaceRequest, pendingSpaceRequest } from '../db/edb/space-adopt.js';
@@ -286,13 +287,60 @@ export function init(api: HostApi): void {
    * file and nothing else, so there is nowhere to put them. Idempotent, so the
    * second save finds every file already there and writes nothing.
    */
-  async function fileTheStranded(): Promise<string[]> {
+  /**
+   * The ones that hold something the user put there.
+   *
+   * Tables and view instances only — `isEmptyWorkspace`'s rule, so "empty" means
+   * the same thing here as it does at the conflict prompts. Rows are not counted:
+   * a table is enough to make a workspace worth a file.
+   */
+  async function onlyNonEmpty(ids: readonly string[]): Promise<string[]> {
+    const out: string[] = [];
+    for (const id of ids) {
+      // A count that cannot be taken must not silently drop a workspace: without a
+      // number, the safe answer is that it holds something.
+      const counted = await countWorkspaceContents(storeBridge(), id, { countRows: false }).catch(() => null);
+      if (!counted || !isEmptyWorkspace(counted)) out.push(id);
+    }
+    return out;
+  }
+
+  /**
+   * The workspace this tab is LOOKING at, if the folder does not hold it yet.
+   *
+   * `fileTheStranded` deliberately skips the active workspace — on a Save it is
+   * the file being written, so writing it twice would be silly. A sync writes
+   * nobody's file by default, which left the one workspace the user can see as
+   * the only one with no home after "connect the folder and sync everything".
+   *
+   * Goes through the ordinary Save, so the tab ends up ADOPTING the file it just
+   * wrote: the point is that the workspace is file-backed from now on, not that a
+   * copy of it exists somewhere. Skipped when a file already backs this workspace,
+   * when it is empty, and when the folder already holds that name — a name the
+   * folder holds is a clash, and the prompts above have just settled it.
+   */
+  async function fileTheOpenOne(dir: FileSystemDirectoryHandle): Promise<string | null> {
+    const active = api.workspaceId();
+    if (!active || edbHandle()) return null;
+    if ((await onlyNonEmpty([active])).length === 0) return null;
+    const name = spaceFileName(active);
+    if ((await listWorkspaceFiles(dir)).some((f) => f.toLowerCase() === name.toLowerCase())) return null;
+    await saveIntoFolder(dir);
+    return name;
+  }
+
+  async function fileTheStranded(opts: { skipEmpty?: boolean } = {}): Promise<string[]> {
     const dir = await connectedFolder();
     if (!dir) return [];
     const active = api.workspaceId();
     if (!active) return [];
     const ids = (await api.store.workspaces.find()).map((w) => w.id);
-    const missing = withoutTheirOwnFile(ids, active, await listWorkspaceFiles(dir));
+    let missing = withoutTheirOwnFile(ids, active, await listWorkspaceFiles(dir));
+    // A Save writes every stranded workspace, empty or not: the file it is about
+    // to write holds one workspace afterwards, so a passenger with no file of its
+    // own would exist nowhere. A SYNC has no such deadline, and an empty shell —
+    // which `?space=x` makes on every private window — is not worth a file.
+    if (opts.skipEmpty) missing = await onlyNonEmpty(missing);
     const wrote: string[] = [];
     for (const id of missing) {
       const name = spaceFileName(id);
@@ -669,7 +717,7 @@ export function init(api: HostApi): void {
    * worker in this tab cannot install one. `buildEdbFile` relies on the same
    * thing. The scratch name keeps its mirror away from any real database's.
    */
-  async function overwriteInFile(dir: FileSystemDirectoryHandle, workspaceId: string, file: string): Promise<void> {
+  async function overwriteInFile(dir: FileSystemDirectoryHandle, workspaceId: string, file: string, fileWorkspaceId = workspaceId): Promise<void> {
     const handle = await fileInFolder(dir, file, false);
     if (!handle || !(await ensureWritable(handle, true))) {
       await api.ui.dialogs.alert(`easyDBAccess may not write ${file}.`, 'Sync workspace folder');
@@ -678,7 +726,11 @@ export function init(api: HostApi): void {
     const scratch = createEdbBridge();
     try {
       await scratch.open(await readBytes(handle), SYNC_SCRATCH);
-      await scratch.deleteWorkspace?.(workspaceId);
+      // What comes OUT is the file's own copy, which a name-matched clash may hold
+      // under a different id. Deleting the local id instead would leave the file
+      // holding both — the very thing `one-per-file.ts` is there to prevent.
+      await scratch.deleteWorkspace?.(fileWorkspaceId);
+      if (fileWorkspaceId !== workspaceId) await scratch.deleteWorkspace?.(workspaceId);
       await copyWorkspace(
         api.store,
         createIpcDataStore(scratch, () => workspaceId),
@@ -723,13 +775,28 @@ export function init(api: HostApi): void {
   }
 
   async function syncFolderNow(dir: FileSystemDirectoryHandle): Promise<void> {
-    const report = await syncFolder(dir, api.store, api.ui.dialogs, (id, file) => overwriteInFile(dir, id, file));
+    const report = await syncFolder(
+      dir,
+      api.store,
+      api.ui.dialogs,
+      (localId, file, fileId) => overwriteInFile(dir, localId, file, fileId),
+      // The other half of the sync: a workspace this browser holds and the folder
+      // does not gets written out, so connecting a folder leaves nothing behind.
+      // Empty ones are skipped — `?space=x` makes a shell before any folder is
+      // connected, and a folder full of empty files is not a sync, it is litter.
+      async () => {
+        const rest = await fileTheStranded({ skipEmpty: true });
+        const own = await fileTheOpenOne(dir);
+        return own ? [...rest, own] : rest;
+      },
+    );
     const skipped = report.unreadable.length > 0 ? ` ${report.unreadable.length} file(s) held no workspace.` : '';
+    const written = alsoWroteNote(report.wrote);
     // What happened to THIS tab's file, in the same breath. Without it the toast
     // read the same whether the sync had loaded the file or decided it could not,
     // which is what "Sync does nothing" looked like from the outside.
     const own = describeActiveOutcome(report.active, report.activeFile ?? '');
-    api.ui.dialogs.toast(`"${dir.name}": ${report.found} workspace(s) in ${report.files} file(s).${skipped}${own}`, { kind: 'success' });
+    api.ui.dialogs.toast(`"${dir.name}": ${report.found} workspace(s) in ${report.files} file(s).${skipped}${written}${own}`, { kind: 'success' });
     // The selector reads the index once, on connect, so it has to be told.
     window.dispatchEvent(new CustomEvent('easydb:folder-index-changed'));
   }

@@ -10,7 +10,7 @@ import type { DataStore, Dialogs, WorkspaceContents } from '@easydb/shared';
 import { edbBridge, storeBridge } from './active-bridge.js';
 import { countWorkspaceContents } from '../delete-workspace.js';
 import { fileInFolder, listWorkspaceFiles } from './file-handle.js';
-import { folderConflicts, isEmptyWorkspace, partitionConflicts, writeFolderIndex, type FolderIndex, type FolderWorkspace } from './folder-index.js';
+import { folderConflicts, isEmptyWorkspace, overwriteLosesData, partitionConflicts, writeFolderIndex, type FolderClash, type FolderIndex, type FolderWorkspace } from './folder-index.js';
 import { factsOf, factsOfHandle, readStamp, recordDivergence, verdictFor } from './file-stamp.js';
 import { decideActiveFileSync, type ActiveFileOutcome } from './active-file-sync.js';
 import { compareCopies, sizeChangeNote, type CopyFacts } from './copy-facts.js';
@@ -38,6 +38,37 @@ const OVERWRITE = 'Overwrite disk version';
  */
 const KEEP = 'Keep this copy';
 
+/**
+ * Write the workspace `localId` into `file`, replacing the copy `fileId` names.
+ *
+ * Two ids because a clash is matched by NAME: the copy in the file can carry a
+ * different id, and replacing the local id inside that file would leave the
+ * file's own copy sitting beside the new one — two workspaces in a file, which
+ * `one-per-file.ts` exists to prevent.
+ */
+type OverwriteInFile = (localId: string, file: string, fileId: string) => Promise<void>;
+
+/** Give every workspace the folder does not hold a file of its own; names them. */
+type FileTheRest = () => Promise<string[]>;
+
+/**
+ * Ask again when an answer would replace work with nothing.
+ *
+ * On top of the choice, not instead of it: the choice is about which copy is
+ * current, and the user answers it from the counts beside each side. This is the
+ * one case where the answer is almost certainly a mistake — keeping an empty copy
+ * over one holding tables — and it is worth the second question, which the first
+ * one's two buttons cannot carry.
+ *
+ * `overwriteLosesData` is false whenever a count could not be taken, so an index
+ * written by an older version asks nothing extra.
+ */
+function confirmDataLoss(dialogs: Dialogs, name: string, keep: CopyFacts, lose: CopyFacts, losing: string): Promise<boolean> | boolean {
+  if (!overwriteLosesData(keep, lose)) return true;
+  const held = [lose.tables ? `${lose.tables} table${lose.tables === 1 ? '' : 's'}` : '', lose.views ? `${lose.views} view${lose.views === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ');
+  return dialogs.confirm(`The copy you are keeping of "${name}" is empty, and ${losing} holds ${held}. Go ahead and lose it?`, 'Sync workspace folder');
+}
+
 export interface SyncReport {
   files: number;
   /** Workspaces found across every file, including this tab's own. */
@@ -46,6 +77,14 @@ export interface SyncReport {
   conflicts: number;
   /** Files that held no readable workspace record. */
   unreadable: string[];
+  /**
+   * Files the sync WROTE, for workspaces the folder did not hold yet.
+   *
+   * The sync is two-way from v0.0.428: a workspace that lived only in this
+   * browser gets a file, so connecting a folder leaves nothing behind. Named
+   * rather than counted, for the same reason `alsoWroteNote` names them.
+   */
+  wrote: string[];
   /** What happened to the file this tab has open. Never silent — see `active-file-sync.ts`. */
   active: ActiveFileOutcome;
   /** The name of that file, for the report to say. Absent on the local database. */
@@ -115,11 +154,11 @@ export async function scanFolder(dir: FileSystemDirectoryHandle): Promise<{ inde
  * gets its prompt, and the prompt says nothing about this side — the behaviour
  * before either existed.
  */
-async function localContents(clashes: readonly FolderWorkspace[]): Promise<Map<string, WorkspaceContents>> {
+async function localContents(clashes: readonly FolderClash[]): Promise<Map<string, WorkspaceContents>> {
   const counts = new Map<string, WorkspaceContents>();
   try {
     const bridge = storeBridge();
-    for (const clash of clashes) counts.set(clash.id, await countWorkspaceContents(bridge, clash.id, { countRows: false }));
+    for (const clash of clashes) counts.set(clash.localId, await countWorkspaceContents(bridge, clash.localId, { countRows: false }));
   } catch {
     /* no bridge, or a build with no count — every clash gets its prompt */
   }
@@ -184,11 +223,12 @@ function sinceWeRead(file: string, nowSize: number | undefined): string {
 }
 
 /**
- * Scan `dir`, settle any conflicts with the open database, and store the index.
+ * Scan `dir`, settle any conflicts with the open database, write out every
+ * workspace the folder does not hold yet, and store the index.
  *
- * A conflict is one workspace id living both here and in a file. The user answers
- * per workspace, because the right answer is per workspace: a stale copy on disk
- * and a stale copy in the browser can both be in the same folder.
+ * A conflict is one workspace NAME living both here and in a file. The user
+ * answers per workspace, because the right answer is per workspace: a stale copy
+ * on disk and a stale copy in the browser can both be in the same folder.
  *
  * Except when this side is empty. `?space=<name>` creates the workspace it cannot
  * find, and at boot it cannot look inside a folder nobody has connected yet, so
@@ -209,7 +249,7 @@ function sinceWeRead(file: string, nowSize: number | undefined): string {
  * The index is written BEFORE the prompts, so a user who dismisses them still gets
  * the merged list they asked for.
  */
-export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStore, dialogs: Dialogs, overwrite: (workspaceId: string, file: string) => Promise<void>): Promise<SyncReport> {
+export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStore, dialogs: Dialogs, overwrite: OverwriteInFile, fileTheRest: FileTheRest = () => Promise.resolve([])): Promise<SyncReport> {
   const { index, files, unreadable } = await scanFolder(dir);
   writeFolderIndex(index);
 
@@ -219,26 +259,39 @@ export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStor
   const { adopt, ask } = partitionConflicts(clashes, emptyOnes(counted));
 
   for (const clash of ask) {
+    const mine = contentsAsFacts(counted.get(clash.localId));
+    const theirs = fileAsFacts(clash.file);
     const sides = compareCopies([
-      { label: 'In this browser', facts: contentsAsFacts(counted.get(clash.id)) },
-      { label: clash.file, facts: fileAsFacts(clash) },
+      { label: 'In this browser', facts: mine },
+      { label: clash.file.file, facts: theirs },
     ]);
     const answer = await dialogs.choice(
-      `"${clash.name}" is in this browser and in ${clash.file}. The two may differ — which copy do you want to keep?${sides}`,
+      `"${clash.file.name}" is in this browser and in ${clash.file.file}. The two may differ — which copy do you want to keep?${sides}`,
       [LOAD, OVERWRITE],
       'Sync workspace folder',
     );
     // A dismissed dialog keeps both, which is the safe answer and the only one
     // that touches nothing.
-    if (answer === LOAD) await adoptFolderFile(clash.id);
-    else if (answer === OVERWRITE) await overwrite(clash.id, clash.file);
+    if (answer === LOAD) {
+      if (!(await confirmDataLoss(dialogs, clash.file.name, theirs, mine, 'the copy in this browser'))) continue;
+      await adoptFolderFile(clash.localId, clash.file.file);
+    } else if (answer === OVERWRITE) {
+      if (!(await confirmDataLoss(dialogs, clash.file.name, mine, theirs, `the copy in ${clash.file.file}`))) continue;
+      await overwrite(clash.localId, clash.file.file, clash.file.id);
+    }
   }
 
   // Last, because an adopt reloads the tab: doing this first would carry the
   // prompts above away mid-question. Only the first one can take effect for the
   // same reason, and that is enough — after the reload the other empty shells sit
   // in a database this tab no longer has open, so they clash with nothing.
-  for (const empty of adopt) await adoptFolderFile(empty.id);
+  for (const empty of adopt) await adoptFolderFile(empty.localId, empty.file.file);
+
+  // Everything the folder does NOT hold yet goes out to it, so a sync leaves no
+  // workspace living only in this browser. After the prompts: a workspace the
+  // user has just chosen the file copy of must not be written back out of the
+  // browser copy they discarded.
+  const wrote = await fileTheRest();
 
   const active = await refreshActiveFile(dir, dialogs, overwrite, open, index);
 
@@ -247,6 +300,7 @@ export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStor
     found: index.workspaces.length,
     conflicts: ask.length,
     unreadable,
+    wrote,
     active,
     ...(adoptedFileName() === null ? {} : { activeFile: adoptedFileName() as string }),
     reloadedActive: active === 'loaded',
@@ -277,7 +331,7 @@ export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStor
 async function refreshActiveFile(
   dir: FileSystemDirectoryHandle,
   dialogs: Dialogs,
-  overwrite: (workspaceId: string, file: string) => Promise<void>,
+  overwrite: OverwriteInFile,
   open: readonly { id: string }[],
   index: FolderIndex,
 ): Promise<ActiveFileOutcome> {
@@ -324,7 +378,9 @@ async function refreshActiveFile(
   if (answer === OVERWRITE) {
     // Per workspace, not the whole file: the newer copy on disk may hold
     // workspaces this tab has never seen, and they are not ours to drop.
-    for (const w of open) await overwrite(w.id, file);
+    // Same id on both sides here: this is THIS tab's own file, so the copy inside
+    // it is the one this workspace was written from.
+    for (const w of open) await overwrite(w.id, file, w.id);
     // What the file looks like NOW, plus the note that this database is not a copy
     // of it — the file may hold workspaces we did not write. See `recordDivergence`.
     const written = handle ? await factsOfHandle(handle) : null;

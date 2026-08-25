@@ -143,14 +143,69 @@ export function mergeWorkspaceList(open: readonly { id: string; name: string; ti
 }
 
 /**
+ * One workspace that exists on both sides, and the two ids it goes by.
+ *
+ * The ids are kept apart because they need not agree. Matching is on the NAME —
+ * the technical field the user manages — and two workspaces can carry one name
+ * under different ids: `freeWorkspaceId` mints `sales-2` when `sales` is taken,
+ * and a rename moves the name without moving the id. Whoever acts on a clash
+ * needs both: the local id says what to write, the file's id says what to
+ * replace inside that file.
+ */
+export interface FolderClash {
+  /** The copy in the folder, as the scan found it. */
+  file: FolderWorkspace;
+  /** The id of the workspace HERE that carries the same name. */
+  localId: string;
+}
+
+/** The name two copies are matched by. Case-insensitive, like the file names. */
+function nameKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+/**
  * The workspaces a scan found in the folder that the open database ALSO has.
  *
- * This is what gets a prompt, one per workspace: two copies of the same workspace
+ * This is what gets a prompt, one per workspace: two copies of one workspace
  * exist and only the user knows which is the real one.
+ *
+ * Matched on `name`, not on `id`. The id is a slug of the name, so the two agreed
+ * for as long as nothing renamed anything — and then quietly stopped: a renamed
+ * workspace kept an id spelling a name it no longer has, and its copy in the
+ * folder was treated as a different workspace and listed twice. The name is the
+ * field the user manages, so it is the one they mean by "the same workspace".
+ *
+ * The first local workspace of a name wins where several share one. That is a
+ * state the app does not make, and picking one beats asking about each pairing.
  */
-export function folderConflicts(open: readonly { id: string }[], indexed: readonly FolderWorkspace[], activeFile: string): FolderWorkspace[] {
-  const here = new Set(open.map((w) => w.id));
-  return elsewhere([...indexed], activeFile).filter((w) => here.has(w.id));
+export function folderConflicts(open: readonly { id: string; name: string }[], indexed: readonly FolderWorkspace[], activeFile: string): FolderClash[] {
+  const here = new Map<string, string>();
+  for (const w of open) if (!here.has(nameKey(w.name))) here.set(nameKey(w.name), w.id);
+  const out: FolderClash[] = [];
+  for (const w of elsewhere([...indexed], activeFile)) {
+    const localId = here.get(nameKey(w.name));
+    if (localId) out.push({ file: w, localId });
+  }
+  return out;
+}
+
+/**
+ * Would keeping `keep` and dropping `replace` throw away the only copy of some
+ * work?
+ *
+ * True only when one side holds nothing and the other holds something. A count
+ * nobody could take is `undefined` and answers false — an absent count is not a
+ * count of none, the same rule `copy-facts.ts` renders by. So this never invents
+ * a warning out of missing information, which would train the user to click past
+ * the one that matters.
+ */
+export function overwriteLosesData(keep: { tables?: number | undefined; views?: number | undefined }, replace: { tables?: number | undefined; views?: number | undefined }): boolean {
+  const holds = (c: { tables?: number | undefined; views?: number | undefined }): boolean | undefined => {
+    if (c.tables === undefined && c.views === undefined) return undefined;
+    return (c.tables ?? 0) > 0 || (c.views ?? 0) > 0;
+  };
+  return holds(keep) === false && holds(replace) === true;
 }
 
 /**
@@ -182,9 +237,9 @@ export function isEmptyWorkspace(c: WorkspaceContents): boolean {
  * An empty local side has nothing to lose, so the file wins with no question —
  * the same reasoning `decideSpace` applies to `hasLocalDb`.
  */
-export function partitionConflicts(clashes: readonly FolderWorkspace[], emptyLocally: ReadonlySet<string>): { adopt: FolderWorkspace[]; ask: FolderWorkspace[] } {
-  const adopt: FolderWorkspace[] = [];
-  const ask: FolderWorkspace[] = [];
-  for (const w of clashes) (emptyLocally.has(w.id) ? adopt : ask).push(w);
+export function partitionConflicts(clashes: readonly FolderClash[], emptyLocally: ReadonlySet<string>): { adopt: FolderClash[]; ask: FolderClash[] } {
+  const adopt: FolderClash[] = [];
+  const ask: FolderClash[] = [];
+  for (const c of clashes) (emptyLocally.has(c.localId) ? adopt : ask).push(c);
   return { adopt, ask };
 }

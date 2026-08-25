@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { folderConflicts, isEmptyWorkspace, mergeWorkspaceList, partitionConflicts, workspaceLabel, type FolderWorkspace } from '../../../packages/renderer/src/db/edb/folder-index.js';
+import {
+  folderConflicts,
+  isEmptyWorkspace,
+  mergeWorkspaceList,
+  overwriteLosesData,
+  partitionConflicts,
+  workspaceLabel,
+  type FolderClash,
+  type FolderWorkspace,
+} from '../../../packages/renderer/src/db/edb/folder-index.js';
 
 /**
  * Merging the connected folder's workspaces into the list the selector shows.
@@ -109,16 +118,36 @@ describe('workspaceLabel', () => {
 });
 
 describe('folderConflicts', () => {
-  it('names only the workspaces that exist on both sides', () => {
-    expect(folderConflicts(OPEN, FOLDER, 'local.edb')).toEqual([{ id: 'sales', name: 'sales', file: 'sales.edb' }]);
+  it('names only the workspaces that exist on both sides, with both ids', () => {
+    expect(folderConflicts(OPEN, FOLDER, 'local.edb')).toEqual([{ file: { id: 'sales', name: 'sales', file: 'sales.edb' }, localId: 'sales' }]);
   });
 
   it('does not call the open file a conflict with itself', () => {
-    expect(folderConflicts([{ id: 'sales' }], FOLDER, 'sales.edb')).toEqual([]);
+    expect(folderConflicts([{ id: 'sales', name: 'sales' }], FOLDER, 'sales.edb')).toEqual([]);
   });
 
   it('finds nothing when the folder holds different workspaces', () => {
-    expect(folderConflicts([{ id: 'scratch' }], [{ id: 'demo', name: 'demo', file: 'demo.edb' }], 'local.edb')).toEqual([]);
+    expect(folderConflicts([{ id: 'scratch', name: 'scratch' }], [{ id: 'demo', name: 'demo', file: 'demo.edb' }], 'local.edb')).toEqual([]);
+  });
+
+  it('matches on the NAME, so a renamed workspace is still one workspace', () => {
+    // The id is a slug of the name at CREATION and never moves again, so after a
+    // rename the two disagree — and matching on the id listed one workspace twice.
+    const open = [{ id: 'q3-figures', name: 'Sales' }];
+    const folder: FolderWorkspace[] = [{ id: 'sales', name: 'Sales', file: 'sales.edb' }];
+    expect(folderConflicts(open, folder, 'local.edb')).toEqual([{ file: folder[0], localId: 'q3-figures' }]);
+  });
+
+  it('ignores case, as the file names do', () => {
+    const open = [{ id: 'sales', name: 'SALES' }];
+    const folder: FolderWorkspace[] = [{ id: 'sales', name: 'sales', file: 'sales.edb' }];
+    expect(folderConflicts(open, folder, 'local.edb')).toHaveLength(1);
+  });
+
+  it('does not match two workspaces that only share an id spelling', () => {
+    const open = [{ id: 'sales', name: 'Last year' }];
+    const folder: FolderWorkspace[] = [{ id: 'sales', name: 'This year', file: 'sales.edb' }];
+    expect(folderConflicts(open, folder, 'local.edb')).toEqual([]);
   });
 });
 
@@ -162,8 +191,8 @@ describe('isEmptyWorkspace', () => {
  * itself seconds earlier.
  */
 describe('partitionConflicts', () => {
-  const SALES: FolderWorkspace = { id: 'sales', name: 'sales', file: 'sales.edb' };
-  const SIMON: FolderWorkspace = { id: 'simon', name: 'simon', file: 'simon.edb' };
+  const SALES: FolderClash = { file: { id: 'sales', name: 'sales', file: 'sales.edb' }, localId: 'sales' };
+  const SIMON: FolderClash = { file: { id: 'simon', name: 'simon', file: 'simon.edb' }, localId: 'simon' };
 
   it('adopts the file when the local copy is an empty shell', () => {
     expect(partitionConflicts([SIMON], new Set(['simon']))).toEqual({ adopt: [SIMON], ask: [] });
@@ -179,5 +208,35 @@ describe('partitionConflicts', () => {
 
   it('has nothing to do without conflicts', () => {
     expect(partitionConflicts([], new Set(['simon']))).toEqual({ adopt: [], ask: [] });
+  });
+});
+
+/**
+ * The second question, asked on top of the choice: an answer that keeps an empty
+ * copy over one holding work is almost certainly a slip, and the two buttons of
+ * the choice itself cannot say so.
+ */
+describe('overwriteLosesData', () => {
+  it('warns when the copy being kept is empty and the other holds tables', () => {
+    expect(overwriteLosesData({ tables: 0, views: 0 }, { tables: 3, views: 0 })).toBe(true);
+  });
+
+  it('warns on views alone — a workspace of views is work too', () => {
+    expect(overwriteLosesData({ tables: 0, views: 0 }, { tables: 0, views: 2 })).toBe(true);
+  });
+
+  it('says nothing when both hold something', () => {
+    expect(overwriteLosesData({ tables: 1 }, { tables: 3 })).toBe(false);
+  });
+
+  it('says nothing when the copy being dropped is empty too', () => {
+    expect(overwriteLosesData({ tables: 0, views: 0 }, { tables: 0, views: 0 })).toBe(false);
+  });
+
+  it('says nothing when a count could not be taken', () => {
+    // An absent count is not a count of none — the rule `copy-facts.ts` renders
+    // by. Inventing a warning here trains the user to click past the real one.
+    expect(overwriteLosesData({}, { tables: 3 })).toBe(false);
+    expect(overwriteLosesData({ tables: 0, views: 0 }, {})).toBe(false);
   });
 });
