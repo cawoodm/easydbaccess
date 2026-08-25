@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decideSpace, slugifyWorkspace, spaceFileName, workspaceIdFromFileName, type SpaceEvidence } from '../../../packages/renderer/src/db/edb/space-resolve.js';
+import { decideSpace, mayCreateWorkspaceIn, slugifyWorkspace, spaceFileName, workspaceIdFromFileName, type SpaceEvidence } from '../../../packages/renderer/src/db/edb/space-resolve.js';
 
 /**
  * What `?space=NAME` does when the open database has no such workspace.
@@ -109,5 +109,37 @@ describe('decideSpace', () => {
   it('never asks when something was already found', () => {
     expect(decideSpace(evidence({ hasLocalDb: true, canAskForFolder: true }))).toBe('adopt-local-db');
     expect(decideSpace(evidence({ inGrantedFolder: true, canAskForFolder: true }))).toBe('adopt-folder-file');
+  });
+});
+
+/**
+ * WHERE a workspace that exists nowhere may be created.
+ *
+ * `decideSpace` says what to look for; this says where a create may land, and it
+ * is checked at the single line that creates one (`app-context.ts`). Four routes
+ * reach that line and three of them used to create the workspace inside whichever
+ * `.edb` the tab had open — a file named after one workspace, holding two.
+ */
+describe('mayCreateWorkspaceIn', () => {
+  it('lets the project index hold any workspace: that is what it is for', () => {
+    expect(mayCreateWorkspaceIn('index.edp', 'zz')).toBe(true);
+    expect(mayCreateWorkspaceIn('index.edp', 'alpha')).toBe(true);
+  });
+
+  it('lets a .edb hold the workspace its name says, and only that one', () => {
+    // The empty file New workspace → Advanced just wrote, whose workspace record
+    // this boot is about to create.
+    expect(mayCreateWorkspaceIn('alpha.edb', 'alpha')).toBe(true);
+    expect(mayCreateWorkspaceIn('alpha.edb', 'zz')).toBe(false);
+  });
+
+  it('compares by the same slug rule the file name is built from', () => {
+    expect(mayCreateWorkspaceIn('My Data.edb', 'my-data')).toBe(true);
+    expect(mayCreateWorkspaceIn('ALPHA.EDB', 'alpha')).toBe(true);
+  });
+
+  it('does not treat some other extension as a one-workspace file', () => {
+    // Only `.edb` carries the rule. Anything else is this browser's own database.
+    expect(mayCreateWorkspaceIn('whatever.sqlite', 'zz')).toBe(true);
   });
 });

@@ -4,7 +4,7 @@
 //
 // Until now it created one, silently, inside whichever database the tab happened
 // to have open. So `?space=sales`, on a machine where `sales.edb` sits in the
-// user's workspace folder, produced an empty `sales` inside `local.edb` — the
+// user's workspace folder, produced an empty `sales` in the project index — the
 // real file untouched, and `persistLastWorkspace` making the empty one sticky.
 // A link to a workspace has to be able to FIND that workspace.
 //
@@ -39,10 +39,21 @@ export function slugifyWorkspace(s: string): string {
 /**
  * The file name a workspace id maps to.
  *
- * Nothing asks the user to name a file any more (`edbTargetNamed` takes the name),
- * so inside the workspace folder this holds. It is still only a convention: an OS
- * save dialog lets the name be changed, and a file can arrive from anywhere. That
- * is why the caller still checks what is actually inside the file it opens.
+ * **An invariant, not a preference: one `.edb` holds one workspace, and this is
+ * its name.** Everything in the file layer is built on it — Save writes under it,
+ * Open reads the workspace back out of it (`workspaceIdFromFileName`), the folder
+ * index maps between the two, and `?space=` switches workspace by adopting that
+ * workspace's file. Code that writes a `.edb` under any other name, or writes a
+ * second workspace into one, is wrong. See `one-per-file.ts` for the enforcement
+ * and `docs/tech/EDB.md` for the rule.
+ *
+ * (Calling it "only a convention" here is what let Save write the whole database
+ * into one file for four versions. A convention is something code may break.)
+ *
+ * Two holes remain, and neither is a licence to add more. An OS save dialog lets
+ * the user rename the file, because the OS owns that field; and a file can arrive
+ * from anywhere, including a version of this app that had no rule. That is why the
+ * caller still checks what is actually inside a file it opens.
  */
 export function spaceFileName(workspaceId: string): string {
   return `${workspaceId}${EDB_EXTENSION}`;
@@ -109,6 +120,28 @@ export interface SpaceEvidence {
   canAskForFolder: boolean;
 }
 
+/**
+ * May a workspace that exists nowhere be CREATED in the database this tab has open?
+ *
+ * The second half of "a `.edb` holds one workspace", and the half that has nothing
+ * to do with Save. `?space=zz` in a tab that has `alpha.edb` open used to create
+ * `zz` inside `alpha.edb` — a file named after one workspace, holding two. So did
+ * every fall-through on the way to creating one: a folder that had to be asked
+ * for, or an adopt whose target had since gone.
+ *
+ * The rule reads off the EXTENSION, which is what the extensions are for. A `.edb`
+ * may only ever hold the workspace its name says; the project index (`.edp`) holds
+ * any number, which is what makes it the place a homeless workspace goes.
+ *
+ * One rule in one function, called at the one line that creates a workspace at
+ * boot (`app-context.ts`), rather than a case per route — four of those routes
+ * existed and three of them got it wrong.
+ */
+export function mayCreateWorkspaceIn(dbName: string, workspaceId: string): boolean {
+  if (!dbName.toLowerCase().endsWith(EDB_EXTENSION)) return true;
+  return workspaceIdFromFileName(dbName) === workspaceId;
+}
+
 export type SpaceAction =
   /** Use the workspace that is already here. No reload. */
   | 'use-open'
@@ -118,7 +151,14 @@ export type SpaceAction =
   | 'adopt-folder-file'
   /** Nothing found unprompted, but a folder could be granted. Needs a gesture. */
   | 'ask-for-folder'
-  /** Create the workspace, which is what this always used to do. */
+  /**
+   * Create the workspace, which is what this always used to do.
+   *
+   * WHERE it gets created is not this decision's business: see
+   * {@link mayCreateWorkspaceIn}, which the caller checks before creating anything
+   * — a `.edb` may only hold the workspace its name says, so a create can land in
+   * the project index instead, whichever route reached it.
+   */
   | 'create';
 
 /**

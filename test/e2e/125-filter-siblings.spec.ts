@@ -28,9 +28,17 @@ async function seed(page: import('@playwright/test').Page) {
   return id;
 }
 
-const comboInput = (page: import('@playwright/test').Page, id: string) => page.locator(`#${panelDomId(id)} data-table tr.filter-row filter-combobox`).first().locator('input');
+const comboInput = (page: import('@playwright/test').Page, id: string) =>
+  page
+    .locator(`#${panelDomId(id)} data-table tr.filter-row filter-combobox`)
+    .first()
+    .locator('input');
 
-const dropdownItems = (page: import('@playwright/test').Page, id: string) => page.locator(`#${panelDomId(id)} data-table tr.filter-row filter-combobox`).first().locator('ul.dropdown li');
+const dropdownItems = (page: import('@playwright/test').Page, id: string) =>
+  page
+    .locator(`#${panelDomId(id)} data-table tr.filter-row filter-combobox`)
+    .first()
+    .locator('ul.dropdown li');
 
 /**
  * Wait until the STORE has answered the filtered request, not just until the
@@ -42,11 +50,7 @@ const dropdownItems = (page: import('@playwright/test').Page, id: string) => pag
  * of this file pass against the bug it was written for.
  */
 async function narrowed(page: import('@playwright/test').Page, id: string, rows: number) {
-  await expect
-    .poll(() =>
-      page.evaluate((s) => (document.querySelector(s) as unknown as { rows: unknown[] } | null)?.rows.length ?? -1, `#${panelDomId(id)} data-table`),
-    )
-    .toBe(rows);
+  await expect.poll(() => page.evaluate((s) => (document.querySelector(s) as unknown as { rows: unknown[] } | null)?.rows.length ?? -1, `#${panelDomId(id)} data-table`)).toBe(rows);
 }
 
 test.describe('a filtered column still offers its siblings', () => {
@@ -88,7 +92,10 @@ test.describe('a filtered column still offers its siblings', () => {
     await expect(page.locator(`#${panelDomId(id)} data-table tbody tr:not(.spacer):visible`)).toHaveCount(2);
     await narrowed(page, id, 2);
 
-    await page.locator(`#${panelDomId(id)} data-table thead th button.funnel`).first().click();
+    await page
+      .locator(`#${panelDomId(id)} data-table thead th button.funnel`)
+      .first()
+      .click();
     const pop = page.locator('filter-popover');
     await expect(pop).toBeVisible();
     await expect(pop.locator('li')).toHaveText([/A1/, /A2/, /A3/]);

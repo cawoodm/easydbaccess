@@ -70,6 +70,18 @@ export type EdbRequest =
    */
   | { id: number; op: 'hasDatabase'; name: string }
   /**
+   * Rename a database inside the substrate, without opening either name.
+   *
+   * One caller: the boot that moves this browser's own database from the name it
+   * had before v0.0.428 (`local.edb`) to `index.edp`. It has to happen in the
+   * substrate rather than by opening and re-saving, because the pool's files are
+   * exclusive origin-wide and this runs before the session opens anything.
+   *
+   * Answers false — not an error — when there is nothing to move or the new name
+   * is already there. Both are the ordinary case on every boot after the first.
+   */
+  | { id: number; op: 'renameDatabase'; from: string; to: string }
+  /**
    * The workspace records inside a `.edb`'s bytes, read in a throwaway in-memory
    * database. What a folder scan uses to rebuild the workspace list without
    * importing every file into the pool.

@@ -3,8 +3,8 @@ import sqlite3InitModule, { type Database, type Sqlite3Static } from '@sqlite.or
 import { ALL_COLLECTIONS, EdbStore, changeScopeOf } from '@easydb/shared';
 import { type EdbRequest, type EdbResponse, type PeekedWorkspace } from './protocol.js';
 import { createAutosavePolicy, type AutosavePolicy } from './dirty.js';
-import { readMirror, writeMirror } from './mirror.js';
-import { ensurePool, ensureRoomToImport, openInPool, poolPath, tunePooledDb } from './substrate.js';
+import { clearMirror, readMirror, writeMirror } from './mirror.js';
+import { ensurePool, ensureRoomToImport, openInPool, poolPath, renameInPool, tunePooledDb } from './substrate.js';
 import { wasmDriver } from './wasm-driver.js';
 
 /**
@@ -307,6 +307,24 @@ async function hasDatabase(name: string): Promise<boolean> {
   return (await readMirror(name)) !== null;
 }
 
+/**
+ * Move a database from one name to another, opening neither.
+ *
+ * Both substrates, because a browser that could not install the pool still has a
+ * database this browser owns — in its mirror — and it has to move too, or a Safari
+ * user's workspaces would be left behind under the old name.
+ */
+async function renameDatabase(from: string, to: string): Promise<boolean> {
+  sqlite3 ??= await sqlite3InitModule();
+  const pool = await ensurePool(sqlite3);
+  if (pool) return renameInPool(pool, from, to);
+  const old = await readMirror(from);
+  if (!old || (await readMirror(to))) return false;
+  await writeMirror(to, old.bytes);
+  await clearMirror(from);
+  return true;
+}
+
 /** The three operations that touch OPFS, and therefore cannot be synchronous. */
 async function handleAsync(req: EdbRequest): Promise<unknown> {
   switch (req.op) {
@@ -325,6 +343,8 @@ async function handleAsync(req: EdbRequest): Promise<unknown> {
       return exportBytes();
     case 'hasDatabase':
       return hasDatabase(req.name);
+    case 'renameDatabase':
+      return renameDatabase(req.from, req.to);
     case 'peekWorkspaces':
       return peekWorkspaces(req.bytes);
     default:

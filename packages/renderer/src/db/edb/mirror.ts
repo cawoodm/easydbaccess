@@ -18,7 +18,7 @@
 
 const DIR = 'edb-mirror';
 
-/** Everything about one mirrored workspace. `at` is when it was written. */
+/** Everything about one mirrored database. `at` is when it was written. */
 export interface MirrorRecord {
   bytes: Uint8Array;
   at: number;
@@ -29,20 +29,28 @@ async function mirrorDir(): Promise<FileSystemDirectoryHandle> {
   return root.getDirectoryHandle(DIR, { create: true });
 }
 
-/** The mirror file name for a workspace. One file per workspace, so switching keeps both. */
-function fileName(workspaceId: string): string {
-  return `${encodeURIComponent(workspaceId)}.edb`;
+/**
+ * The mirror file name for a DATABASE — `index.edp` or an adopted `<workspace>.edb`.
+ *
+ * One mirror per database, so switching between them keeps both. Every caller
+ * passes `activeEdbName()`; the parameter was called `workspaceId` and the comment
+ * said "one file per workspace", which is the same conflation of database and
+ * workspace that let one `.edb` end up holding several of them. A database may
+ * hold many workspaces (the index does); a mirror belongs to the database.
+ */
+function fileName(dbName: string): string {
+  return `${encodeURIComponent(dbName)}.edb`;
 }
 
 /**
- * Replace the mirror for this workspace.
+ * Replace the mirror for this database.
  *
  * `truncate(0)` first: writing fewer bytes than are already there would otherwise
  * leave the tail of the previous database behind, and the result would not open.
  */
-export async function writeMirror(workspaceId: string, bytes: Uint8Array): Promise<void> {
+export async function writeMirror(dbName: string, bytes: Uint8Array): Promise<void> {
   const dir = await mirrorDir();
-  const handle = await dir.getFileHandle(fileName(workspaceId), { create: true });
+  const handle = await dir.getFileHandle(fileName(dbName), { create: true });
   const sync = await handle.createSyncAccessHandle();
   try {
     sync.truncate(0);
@@ -53,11 +61,11 @@ export async function writeMirror(workspaceId: string, bytes: Uint8Array): Promi
   }
 }
 
-/** The mirrored bytes, or null when this workspace has none. */
-export async function readMirror(workspaceId: string): Promise<MirrorRecord | null> {
+/** The mirrored bytes, or null when this database has none. */
+export async function readMirror(dbName: string): Promise<MirrorRecord | null> {
   try {
     const dir = await mirrorDir();
-    const handle = await dir.getFileHandle(fileName(workspaceId));
+    const handle = await dir.getFileHandle(fileName(dbName));
     const file = await handle.getFile();
     if (file.size === 0) return null;
     return { bytes: new Uint8Array(await file.arrayBuffer()), at: file.lastModified };
@@ -68,11 +76,11 @@ export async function readMirror(workspaceId: string): Promise<MirrorRecord | nu
   }
 }
 
-/** Forget a workspace's mirror — after a successful save, or when it is deleted. */
-export async function clearMirror(workspaceId: string): Promise<void> {
+/** Forget a database's mirror — after a successful save, or when it is replaced. */
+export async function clearMirror(dbName: string): Promise<void> {
   try {
     const dir = await mirrorDir();
-    await dir.removeEntry(fileName(workspaceId));
+    await dir.removeEntry(fileName(dbName));
   } catch {
     /* already gone */
   }

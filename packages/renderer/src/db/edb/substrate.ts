@@ -121,6 +121,32 @@ export async function ensureRoomToImport(p: SAHPoolUtil, path: string): Promise<
 }
 
 /**
+ * Move a pooled database from one name to another.
+ *
+ * `exportFile` + `importDb` + `unlink`, because the pool has no rename: its names
+ * are keys into a set of file handles, not paths. The copy is the whole database,
+ * so this is not free — it runs once, on the boot that moves this browser's own
+ * database to `index.edp`.
+ *
+ * False, not a throw, when `from` is absent or `to` is already there. Both mean
+ * "nothing to do" and both are what every boot after the first sees. `to` winning
+ * a race is also why the order matters: the old name is only unlinked once the new
+ * one holds the bytes, so a failure half-way leaves the database findable under
+ * the name it already had.
+ */
+export async function renameInPool(p: SAHPoolUtil, from: string, to: string): Promise<boolean> {
+  const oldPath = poolPath(from);
+  const newPath = poolPath(to);
+  const names = p.getFileNames();
+  if (!names.includes(oldPath) || names.includes(newPath)) return false;
+  const bytes = await p.exportFile(oldPath);
+  await ensureRoomToImport(p, newPath);
+  await p.importDb(newPath, bytes);
+  p.unlink(oldPath);
+  return true;
+}
+
+/**
  * Open `name` in the pool, replacing its contents with `bytes` when given.
  *
  * `importDb` validates the SQLite header and page size, so a file that is not a

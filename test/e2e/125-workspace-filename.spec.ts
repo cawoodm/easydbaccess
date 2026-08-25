@@ -42,7 +42,7 @@ test('the list says which file the open workspace is in, and Save names it', asy
   const id = await createTable(page, 'parts', [{ field: 'part', type: 'string' }]);
   await waitForPanel(page, id);
 
-  // Nothing adopted yet, so the honest answer is the browser — NOT `local.edb`,
+  // Nothing adopted yet, so the honest answer is the browser — NOT `index.edp`,
   // which would send the user looking for a file they never chose.
   await expect(selectedTooltip(page)).toHaveAttribute('title', 'Stored in this browser');
 

@@ -64,8 +64,14 @@ Opt-in, per tab, and per workspace. "New workspace" asks whether the data goes
 in this browser or in a file; the footer **File** menu opens, saves and converts
 one. `docs/tech/EDB.md` has the format and the reasoning.
 
-Four things are worth knowing here:
+Five things are worth knowing here:
 
+- **A `.edb` holds exactly ONE workspace — the one its name says.** An invariant,
+  not a convention: Save writes under that name and Open reads the workspace back
+  out of it. The one database allowed to hold several is this browser's own, and it
+  is called `index.edp` (the **project index**) precisely so the rule stays true of
+  every `.edb`. `docs/tech/EDB.md` has the enforcement and the four bugs that came
+  of leaving it to prose.
 - **The database lives in a Web Worker.** This app imports 600k-row tables and
   sqlite-wasm is synchronous, so a bulk insert on the main thread would freeze
   the tab for the length of the import.
@@ -455,8 +461,9 @@ every moment a copy and its file are known to agree (an import, a Save) and a
 `file-newer`, `conflict`, `ahead` or `unknown`. Two places act on it:
 
 - **Sync workspace folder** (`folder-sync.ts` → `refreshActiveFile`) acts on this
-  tab's own file. Only for a file this tab ADOPTED — `local.edb` is this browser's
-  own database, not a shared object. The rule is pure and lives in
+  tab's own file. Only for a file this tab ADOPTED — the project index
+  (`index.edp`) is this browser's own database and is not a file on disk at all.
+  The rule is pure and lives in
   `active-file-sync.ts`:
 
   | Verdict      | What the sync does                                                 |

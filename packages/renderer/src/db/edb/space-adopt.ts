@@ -12,7 +12,7 @@
 // throwaway probe worker would take the pool away from the real session.
 
 import { edbBridge } from './active-bridge.js';
-import { activeEdbName, setActiveEdbName } from './session.js';
+import { activeEdbName, reloadWithSpace, setActiveEdbName } from './session.js';
 import { canPickFolder, ensureWritable, fileInFolder, listWorkspaceFiles, readBytes, rememberHandle, rememberedFolder } from './file-handle.js';
 import { factsOfHandle, recordAgreement, verdictFor } from './file-stamp.js';
 import { placeForNextBoot } from './new-file.js';
@@ -125,6 +125,40 @@ export async function planForMissingSpace(workspaceId: string): Promise<SpaceAct
 
   if (action === 'ask-for-folder') pendingFolderRequest = workspaceId;
   return action;
+}
+
+/**
+ * Leave the adopted `.edb` for the project index, then reload to create the
+ * workspace there.
+ *
+ * The answer to `?space=<a workspace nobody has>` in a tab that has a file open.
+ * Creating it where the tab happens to be would put a second workspace inside a
+ * `.edb` named after the first — the duplicate-workspace bug, arrived at by URL
+ * instead of by Save.
+ *
+ * Never resolves, for the same reason as {@link adoptAndReload}: the caller is
+ * mid-boot and the page is about to be replaced.
+ *
+ * `markTried` is keyed on the file being LEFT, so a reload that somehow lands here
+ * again with the same file still open stops instead of bouncing.
+ */
+export async function leaveFileForIndex(workspaceId: string): Promise<void> {
+  const leaving = activeEdbName();
+  // One attempt, for the same reason `alreadyTried` exists: `setActiveEdbName`
+  // swallows a `localStorage` failure (private mode), so the reload would come
+  // back on the same file and decide the same thing forever — a blank page in a
+  // loop, with nothing on screen to interrupt it. A second pass returns instead,
+  // and the caller creates the workspace where it is. That leaves a `.edb` holding
+  // two workspaces, which is the thing this exists to prevent — but only in a
+  // browser that cannot remember anything, and a wrong file beats no app at all.
+  if (alreadyTried(leaving)) return;
+  markTried(leaving);
+  setActiveEdbName(null);
+  reloadWithSpace(workspaceId);
+  // Never resolves on the way out: the page is being replaced and the caller is
+  // mid-boot, so returning would let it finish wiring a store about to be thrown
+  // away.
+  return new Promise<void>(() => {});
 }
 
 /**

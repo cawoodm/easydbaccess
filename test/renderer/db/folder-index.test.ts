@@ -13,7 +13,7 @@ import {
 /**
  * Merging the connected folder's workspaces into the list the selector shows.
  *
- * The scenario throughout: this tab has `local.edb` open holding `scratch` and
+ * The scenario throughout: this tab has the project index open holding `scratch` and
  * `sales`, and the folder also holds `sales.edb` and `demo.edb`. So `sales`
  * exists twice — that is the conflict the user gets prompted about.
  */
@@ -30,7 +30,7 @@ const FOLDER: FolderWorkspace[] = [
 
 describe('mergeWorkspaceList', () => {
   it('lists the open database first, unqualified', () => {
-    const merged = mergeWorkspaceList(OPEN, FOLDER, 'local.edb');
+    const merged = mergeWorkspaceList(OPEN, FOLDER, 'index.edp');
     expect(merged.slice(0, 2)).toEqual([
       { id: 'sales', name: 'sales' },
       { id: 'scratch', name: 'scratch' },
@@ -38,7 +38,7 @@ describe('mergeWorkspaceList', () => {
   });
 
   it('labels a workspace from another file with that file', () => {
-    const merged = mergeWorkspaceList(OPEN, FOLDER, 'local.edb');
+    const merged = mergeWorkspaceList(OPEN, FOLDER, 'index.edp');
     expect(merged.filter((e) => e.file !== undefined)).toEqual([
       { id: 'demo', name: 'demo', file: 'demo.edb' },
       { id: 'sales', name: 'sales', file: 'sales.edb' },
@@ -46,7 +46,7 @@ describe('mergeWorkspaceList', () => {
   });
 
   it('shows a clashing name twice, so Cancel leaves both reachable', () => {
-    const merged = mergeWorkspaceList(OPEN, FOLDER, 'local.edb');
+    const merged = mergeWorkspaceList(OPEN, FOLDER, 'index.edp');
     expect(merged.filter((e) => e.id === 'sales')).toHaveLength(2);
   });
 
@@ -61,19 +61,19 @@ describe('mergeWorkspaceList', () => {
   });
 
   it('survives two scans of the same folder without doubling', () => {
-    const merged = mergeWorkspaceList([], [...FOLDER, ...FOLDER], 'local.edb');
+    const merged = mergeWorkspaceList([], [...FOLDER, ...FOLDER], 'index.edp');
     expect(merged).toHaveLength(2);
   });
 
   it('is just the open database when no folder is connected', () => {
-    expect(mergeWorkspaceList(OPEN, [], 'local.edb')).toEqual([
+    expect(mergeWorkspaceList(OPEN, [], 'index.edp')).toEqual([
       { id: 'sales', name: 'sales' },
       { id: 'scratch', name: 'scratch' },
     ]);
   });
 
   it('carries a title through, from the open database and from a file', () => {
-    const merged = mergeWorkspaceList([{ id: 'sales', name: 'sales', title: 'Sales 2026' }], [{ id: 'demo', name: 'demo', title: 'The Demo', file: 'demo.edb' }], 'local.edb');
+    const merged = mergeWorkspaceList([{ id: 'sales', name: 'sales', title: 'Sales 2026' }], [{ id: 'demo', name: 'demo', title: 'The Demo', file: 'demo.edb' }], 'index.edp');
     expect(merged).toEqual([
       { id: 'sales', name: 'sales', title: 'Sales 2026' },
       { id: 'demo', name: 'demo', title: 'The Demo', file: 'demo.edb' },
@@ -89,7 +89,7 @@ describe('mergeWorkspaceList', () => {
         { id: 'mike', name: 'mike' },
       ],
       [],
-      'local.edb',
+      'index.edp',
     );
     expect(merged.map((e) => e.id)).toEqual(['zulu', 'mike']);
   });
@@ -119,7 +119,7 @@ describe('workspaceLabel', () => {
 
 describe('folderConflicts', () => {
   it('names only the workspaces that exist on both sides, with both ids', () => {
-    expect(folderConflicts(OPEN, FOLDER, 'local.edb')).toEqual([{ file: { id: 'sales', name: 'sales', file: 'sales.edb' }, localId: 'sales' }]);
+    expect(folderConflicts(OPEN, FOLDER, 'index.edp')).toEqual([{ file: { id: 'sales', name: 'sales', file: 'sales.edb' }, localId: 'sales' }]);
   });
 
   it('does not call the open file a conflict with itself', () => {
@@ -127,7 +127,7 @@ describe('folderConflicts', () => {
   });
 
   it('finds nothing when the folder holds different workspaces', () => {
-    expect(folderConflicts([{ id: 'scratch', name: 'scratch' }], [{ id: 'demo', name: 'demo', file: 'demo.edb' }], 'local.edb')).toEqual([]);
+    expect(folderConflicts([{ id: 'scratch', name: 'scratch' }], [{ id: 'demo', name: 'demo', file: 'demo.edb' }], 'index.edp')).toEqual([]);
   });
 
   it('matches on the NAME, so a renamed workspace is still one workspace', () => {
@@ -135,19 +135,19 @@ describe('folderConflicts', () => {
     // rename the two disagree — and matching on the id listed one workspace twice.
     const open = [{ id: 'q3-figures', name: 'Sales' }];
     const folder: FolderWorkspace[] = [{ id: 'sales', name: 'Sales', file: 'sales.edb' }];
-    expect(folderConflicts(open, folder, 'local.edb')).toEqual([{ file: folder[0], localId: 'q3-figures' }]);
+    expect(folderConflicts(open, folder, 'index.edp')).toEqual([{ file: folder[0], localId: 'q3-figures' }]);
   });
 
   it('ignores case, as the file names do', () => {
     const open = [{ id: 'sales', name: 'SALES' }];
     const folder: FolderWorkspace[] = [{ id: 'sales', name: 'sales', file: 'sales.edb' }];
-    expect(folderConflicts(open, folder, 'local.edb')).toHaveLength(1);
+    expect(folderConflicts(open, folder, 'index.edp')).toHaveLength(1);
   });
 
   it('does not match two workspaces that only share an id spelling', () => {
     const open = [{ id: 'sales', name: 'Last year' }];
     const folder: FolderWorkspace[] = [{ id: 'sales', name: 'This year', file: 'sales.edb' }];
-    expect(folderConflicts(open, folder, 'local.edb')).toEqual([]);
+    expect(folderConflicts(open, folder, 'index.edp')).toEqual([]);
   });
 });
 

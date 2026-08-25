@@ -50,6 +50,14 @@ export interface EdbBridge extends EasydbStoreBridge {
    */
   hasDatabase(name: string): Promise<boolean>;
   /**
+   * Move a database from one name to another, opening neither.
+   *
+   * One caller: the boot that renames this browser's own database from `local.edb`
+   * to `index.edp` (see `session.ts`). False means there was nothing to move,
+   * which is every boot after the first.
+   */
+  renameDatabase(from: string, to: string): Promise<boolean>;
+  /**
    * The workspace records inside a `.edb`'s bytes, without adopting the file.
    *
    * A folder scan calls this once per file. Nothing is imported and the live
@@ -108,6 +116,7 @@ export function createEdbBridge(): EdbBridge {
     importBytes: (name, bytes) => call<void>({ op: 'importBytes', name, bytes }),
     flush: () => call<void>({ op: 'flush' }),
     hasDatabase: (name) => call<boolean>({ op: 'hasDatabase', name }),
+    renameDatabase: (from, to) => call<boolean>({ op: 'renameDatabase', from, to }),
     peekWorkspaces: (bytes) => call<PeekedWorkspace[]>({ op: 'peekWorkspaces', bytes }),
     export: () => call<Uint8Array>({ op: 'export' }),
     find: (coll, query, limit) => call<unknown[]>({ op: 'find', coll, query, limit }),

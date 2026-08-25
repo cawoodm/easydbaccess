@@ -45,19 +45,44 @@ export interface EdbSession {
 }
 
 /**
- * The database this tab uses when the user has adopted no file of their own.
+ * The database this tab uses when the user has adopted no file of their own: the
+ * **project index**, which holds the workspace list and every workspace that is
+ * not in a file of its own.
  *
- * Every browser tab is SQLite now, so there is always a database — this is the
- * one that holds all workspaces, in place of the IndexedDB database it replaced.
+ * Every browser tab is SQLite now, so there is always a database. This is the one
+ * that holds several workspaces — and the reason it is `.edp` rather than `.edb`.
+ *
+ * **`.edb` = exactly one workspace. `.edp` = the project index, which holds many.**
+ * The two used to share the `.edb` extension, and that is the root of four
+ * duplicate-workspace bugs: the rule "a `.edb` holds one workspace" was false of
+ * the file the app itself writes most, so no reader could tell whether a `.edb`
+ * with two workspaces in it was a bug or the normal case. Now the name says which.
+ * See `db/edb/one-per-file.ts` and `docs/tech/EDB.md`.
+ *
+ * It is not a file the user ever sees: it lives in the origin-private OPFS pool,
+ * never in the workspace folder. Nothing writes a `.edp` to disk.
  */
-export const LOCAL_DB_NAME = 'local.edb';
+export const INDEX_DB_NAME = 'index.edp';
 
 /**
- * The file name this tab should open. Never null: with no adopted file it is
- * {@link LOCAL_DB_NAME}.
+ * What {@link INDEX_DB_NAME} was called up to v0.0.427.
+ *
+ * Kept only so the boot can move an existing browser's database onto the new name
+ * — see {@link startEdbSession}. A user whose workspaces are in `local.edb` must
+ * not lose them to a rename, and there is no reasonable "you have been upgraded"
+ * dialog for a file they never knew existed.
+ */
+export const LEGACY_LOCAL_DB_NAME = 'local.edb';
+
+/**
+ * The database name this tab should open. Never null: with no adopted file it is
+ * {@link INDEX_DB_NAME}.
+ *
+ * So the answer is either a `.edb` — one workspace, a file the user owns — or the
+ * project index. Nothing else is ever a database name.
  */
 export function activeEdbName(): string {
-  return adoptedFileName() ?? LOCAL_DB_NAME;
+  return adoptedFileName() ?? INDEX_DB_NAME;
 }
 
 /**
@@ -127,6 +152,13 @@ export async function startEdbSession(): Promise<EdbSession> {
   const name = activeEdbName();
   const bridge = createEdbBridge();
   try {
+    // BEFORE the open, because opening `index.edp` would create it empty and there
+    // would then be nothing to move onto. Only for the index: an adopted `.edb`
+    // never had another name. A failure here is not fatal — the rename leaves the
+    // old name in place unless the new one holds the bytes — so a browser that
+    // cannot do it opens an empty index rather than refusing to start, which is
+    // also what a first run looks like.
+    if (name === INDEX_DB_NAME) await bridge.renameDatabase(LEGACY_LOCAL_DB_NAME, INDEX_DB_NAME);
     // No bytes: a pooled database opens its own file, and the memory fallback
     // reads its own mirror. Bytes are only passed when ADOPTING a user's file.
     await bridge.open(null, name);
@@ -172,9 +204,11 @@ export function reloadWithoutSpace(): void {
  * whichever record the file happened to return first, which is how opening
  * `a.edb` could land in a workspace called `default`.
  *
- * A file that holds no workspace of that name gets one created inside it, by the
- * `isActive` short-circuit in `decideSpace` — this tab's database IS that file, so
- * there is nothing left to adopt and nothing to loop on.
+ * A file that holds no workspace of that name does NOT get one created inside it.
+ * It would then hold two workspaces under a name that names one of them, which is
+ * the bug `one-per-file.ts` exists to stop — so `decideSpace` answers
+ * `create-in-index`: leave the file, create the workspace in the project index.
+ * Up to v0.0.427 the `isActive` short-circuit created it in the file instead.
  */
 export function reloadWithSpace(workspaceId: string): void {
   const url = new URL(location.href);

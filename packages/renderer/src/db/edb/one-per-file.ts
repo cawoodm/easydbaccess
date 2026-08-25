@@ -10,12 +10,17 @@
 // and `?space=` switches workspace by adopting that workspace's file.
 //
 // Save broke the rule by writing `bridge.export()` — the whole DATABASE, not the
-// workspace. And the tab's database routinely holds several: `local.edb` holds
-// every workspace this browser has (see `session.ts`), New workspace → Simple
-// inserts into whichever database is open, and a dropped `.edb` copies its
-// workspace in. So the first Save of `alpha` wrote `alpha.edb` holding `alpha`,
-// `beta` and everything else, and a folder scan then truthfully reported two
-// workspaces living in one file.
+// workspace. And the tab's database routinely holds several: the project index
+// (`index.edp`) holds every workspace not in a file of its own (see `session.ts`),
+// New workspace → Simple inserts into whichever database is open, and a dropped
+// `.edb` copies its workspace in. So the first Save of `alpha` wrote `alpha.edb`
+// holding `alpha`, `beta` and everything else, and a folder scan then truthfully
+// reported two workspaces living in one file.
+//
+// The two extensions exist to keep this legible: **`.edb` = one workspace,
+// `.edp` = the project index, which holds many.** While the index was itself
+// called `local.edb`, "a `.edb` holds one workspace" was false of the database the
+// app writes most, so no reader could tell a bug from the normal case.
 //
 // Two consequences beyond the confusing list: a sync asked which copy of the
 // PASSENGER was real, because it existed in two files; and a `.edb` handed to

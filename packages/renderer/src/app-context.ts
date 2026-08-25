@@ -1,9 +1,9 @@
 import type { DataStore, EventBus, HostApi, RowSourceCtx, Table } from '@easydb/shared';
 import { createRoutedDataStore, withUniqueTableNames } from './db/index.js';
 import { createIpcDataStore } from './db/data-store-bridge.js';
-import { startEdbSession, type EdbSession } from './db/edb/session.js';
-import { adoptFolderFile, adoptLocalDb, noteSessionOpened, planForMissingSpace } from './db/edb/space-adopt.js';
-import { slugifyWorkspace } from './db/edb/space-resolve.js';
+import { activeEdbName, startEdbSession, type EdbSession } from './db/edb/session.js';
+import { adoptFolderFile, adoptLocalDb, leaveFileForIndex, noteSessionOpened, planForMissingSpace } from './db/edb/space-adopt.js';
+import { mayCreateWorkspaceIn, slugifyWorkspace } from './db/edb/space-resolve.js';
 import { showStorageFailure } from './chrome/storage-failure.js';
 import { createEventBus } from './events/bus.js';
 import { createRegistries, type Registries } from './plugin-host/registries.js';
@@ -61,7 +61,7 @@ async function init(): Promise<AppContext> {
   // all see one store.
   //
   // The two differ only in WHERE the database lives: a file the desktop opened,
-  // or this tab's own SQLite database (`LOCAL_DB_NAME`, or a `.edb` the user
+  // or this tab's own SQLite database (`INDEX_DB_NAME`, or a `.edb` the user
   // adopted). Persistence is a separate concern from being in SQL mode — the
   // database is live and queryable whether or not anything has been written to
   // disk yet.
@@ -155,6 +155,13 @@ async function init(): Promise<AppContext> {
       if (action === 'adopt-local-db') await adoptLocalDb(id);
       // These two fall through when what the probe saw has since gone.
       if (action === 'adopt-folder-file') await adoptFolderFile(id);
+      // The one line that creates a workspace at boot, so the one place to enforce
+      // that a `.edb` holds only the workspace its name says. Every route above can
+      // arrive here — 'create', a folder that has to be asked for, or an adopt whose
+      // target has since gone — and three of them used to create the workspace
+      // inside whichever file the tab had open. Never returns: it leaves the file
+      // for the project index and reloads, and that boot creates it there.
+      if (!mayCreateWorkspaceIn(activeEdbName(), id)) await leaveFileForIndex(id);
       const created = await store.workspaces.insert({
         id,
         name: requested,

@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { DatabaseSync } from 'node:sqlite';
 import { writeFileSync } from 'node:fs';
 import { addRow, createTable, waitForPanel } from './helpers.js';
+import { workspaceIdFromFileName } from '../../packages/renderer/src/db/edb/space-resolve.js';
 
 /**
  * The browser's file-backed mode: a workspace kept in a real SQLite `.edb`.
@@ -71,6 +72,9 @@ async function opfsEntries(page: Page): Promise<string[]> {
  * IndexedDB and OPFS start empty anyway.
  */
 async function bootFileBacked(page: Page, edbName: string, workspaceId: string): Promise<void> {
+  // A `.edb` holds the workspace its name says, so these two have to agree — a
+  // mismatch now sends the tab to the project index rather than creating a second
+  // workspace inside the file. See `126-one-workspace-per-file.spec.ts`.
   await page.addInitScript(
     ({ key, value }) => {
       localStorage.setItem(key, value);
@@ -194,7 +198,7 @@ async function saveIntoNewFolder(page: Page, workspaceId: string, to?: string): 
 
 test.describe('browser .edb storage', () => {
   test('keeps the workspace in the OPFS pool, and nothing in IndexedDB', async ({ page }, testInfo) => {
-    await bootFileBacked(page, `${testInfo.testId}.edb`, `edb-${testInfo.testId}`);
+    await bootFileBacked(page, `edb-${testInfo.testId}.edb`, `edb-${testInfo.testId}`);
 
     const tableId = await createTable(page, 'parts', [
       { field: 'part', type: 'string', renderer: 'link' },
@@ -220,7 +224,7 @@ test.describe('browser .edb storage', () => {
 
   test('a reload restores the workspace, with nothing saved to a file', async ({ page }, testInfo) => {
     const edbName = `${testInfo.testId}.edb`;
-    await bootFileBacked(page, edbName, `edb-${testInfo.testId}`);
+    await bootFileBacked(page, edbName, workspaceIdFromFileName(edbName));
 
     const tableId = await createTable(page, 'parts', [
       { field: 'part', type: 'string', renderer: 'link' },
@@ -445,7 +449,7 @@ test.describe('browser .edb storage', () => {
     // quietly fall back on any more, so the only honest answer is to say that
     // this browser cannot produce a file, and to say that the workspace is
     // nonetheless still here.
-    await bootFileBacked(page, `${testInfo.testId}.edb`, `edb-${testInfo.testId}`);
+    await bootFileBacked(page, `edb-${testInfo.testId}.edb`, `edb-${testInfo.testId}`);
     const tableId = await createTable(page, 'parts', [{ field: 'part', type: 'string' }]);
     await addRow(page, tableId, { part: 'bolt' });
     await waitForPanel(page, tableId);

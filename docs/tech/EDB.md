@@ -10,6 +10,24 @@ The browser and the Electron desktop write the **same** file. One store body
 [One store, two bindings](#one-store-two-bindings) — so a workspace saved in a
 browser tab opens on the desktop and back again.
 
+## Two extensions, and the difference is the invariant
+
+| Extension | What it is                | Workspaces | Where                                     |
+| --------- | ------------------------- | ---------- | ----------------------------------------- |
+| `.edb`    | A workspace file the user owns | **exactly one**, the one the file name says | the user's workspace folder, or anywhere they put it |
+| `.edp`    | The **project index** — this browser's own database | any number   | the origin-private OPFS pool, never on disk |
+
+Same format, same store, same code: `.edp` is not a second file type, it is the
+one database that is allowed to hold several workspaces. `index.edp` is its only
+name (`INDEX_DB_NAME`), and no user ever sees it.
+
+**The extension is load-bearing.** Up to v0.0.427 the index was called
+`local.edb`, so "a `.edb` holds one workspace" was false of the database the app
+writes most — and nobody reading a `.edb` with two workspaces in it could tell a
+bug from the normal case. Four duplicate-workspace bugs came out of that. The
+boot renames an existing `local.edb` onto the new name once, in the substrate,
+before anything is opened (`renameInPool`, `startEdbSession`).
+
 ## The format (v2)
 
 ### Everything that is not row data: one `_easydb` table
@@ -47,8 +65,18 @@ CREATE TABLE <sqlTableNameFor(name)> (
 `packages/shared/src/sql-mapping.ts` does the naming and the type mapping, and
 it already serves the desktop and the server — one convention across all three.
 
-## Three rules, each of which has already cost a bug
+## Four rules, each of which has already cost a bug
 
+- **A `.edb` holds exactly ONE workspace: the one its name says.** Not a
+  convention — an invariant, and the one this file layer is built on.
+  `spaceFileName` writes the name, `workspaceIdFromFileName` reads it back, the
+  folder index maps between them, and `?space=` switches workspace by adopting
+  that workspace's file. Two things enforce it, because prose did not for four
+  versions: `one-per-file.ts` at every write, and `mayCreateWorkspaceIn` at the
+  one line that creates a workspace at boot. The project index (`.edp`) is the
+  exemption and says so in its name. A file already holding several — written
+  before v0.0.427 — is read, reported and left alone; see
+  [A `.edb` holds ONE workspace](#a-edb-holds-one-workspace).
 - **`_sqlTable` is the table's own name, verbatim** — `Order Details`, not
   `Order_Details`. Every reference quotes it (`quoteIdent`), so nothing has to be
   stripped, and the file reads in DB Browser or Datasette under the names on
@@ -173,9 +201,10 @@ adopting that workspace's file. A file holding two workspaces breaks all four.
 
 Nothing about the FORMAT enforces it — `_easydb.workspaceId` scopes rows, so a
 database can hold any number — and the tab's own database routinely does. That is
-what `local.edb` IS (every workspace this browser has), and New workspace →
-Simple, a dropped `.edb` and the legacy import all add to whichever database is
-open. So the rule is enforced at the one place it can be: **the write.**
+what the project index IS (every workspace with no file of its own), and New
+workspace → Simple, a dropped `.edb` and the legacy import all add to whichever
+database is open. So the rule is enforced where a `.edb` is **written**, and where
+a workspace is **created**.
 
 `persist()` used to write `bridge.export()` — the whole database. The first Save of
 `alpha` out of browser storage therefore wrote every workspace the browser held
@@ -199,11 +228,34 @@ A Save now does two things (`db/edb/one-per-file.ts`, pure and unit-tested):
    step 1 without step 2 would lose it. Idempotent, so only the save that creates
    them pays, and the toast names them.
 
-Two things this deliberately does NOT do. `overwriteInFile` (the sync's *Overwrite
-disk version*) still merges into the file rather than replacing it, because a
-passenger in a file the tab never adopted may have no other copy at all. And the
-producers above still add to a file-backed database — they simply cannot reach
-another workspace's file any more, and get a file of their own on the next save.
+### And where a workspace is created
+
+Save is not the only way a second workspace got into a `.edb`. `?space=zz` in a tab
+that had `alpha.edb` open created `zz` **inside** `alpha.edb` — a file named after
+one workspace, holding two — and so did every fall-through on the way to creating
+one: a folder that had to be asked for, or an adopt whose target had since gone.
+Four routes, three of them wrong.
+
+`mayCreateWorkspaceIn(dbName, workspaceId)` (pure, in `space-resolve.ts`) is the
+whole rule, and `app-context.ts` checks it at the **one line** that creates a
+workspace at boot rather than case-by-case per route. It reads off the extension: a
+`.edb` may only hold the workspace its name says; a `.edp` may hold any. When it
+says no, `leaveFileForIndex` points the tab at the index and reloads, and that boot
+creates the workspace there.
+
+That is also why the empty file New workspace → Advanced writes still works: the
+file is `alpha.edb`, the workspace being created is `alpha`, and the rule allows
+exactly that.
+
+### What this deliberately does NOT do
+
+`overwriteInFile` (the sync's *Overwrite disk version*) still merges into the file
+rather than replacing it, because a passenger in a file the tab never adopted may
+have no other copy at all — damage limitation on a file that is already wrong, not
+an endorsement of it. And the producers above still add to a file-backed
+**database**: they cannot reach another workspace's file any more and get a file of
+their own on the next save, but the in-memory database can still hold two. Nothing
+on disk does.
 
 ## "Which copy do you want to keep?" carries the facts
 

@@ -263,8 +263,8 @@ export function init(api: HostApi): void {
    * through a scratch worker.
    *
    * This is the fix for two workspaces sharing a file. `export()` alone wrote
-   * `local.edb`'s entire workspace list into whichever file the active workspace was
-   * named after. See `db/edb/one-per-file.ts`.
+   * the project index's entire workspace list into whichever file the active
+   * workspace was named after. See `db/edb/one-per-file.ts`.
    */
   async function bytesForFile(bridge: NonNullable<ReturnType<typeof edbBridge>>): Promise<Uint8Array> {
     const ids = (await api.store.workspaces.find()).map((w) => w.id);
@@ -547,10 +547,15 @@ export function init(api: HostApi): void {
    * ordinary workspace of this browser's own — the same end state as New
    * workspace, with data in it.
    *
-   * Which workspace, out of a file that may hold several: the one the FILE NAME
-   * names (`northwind.edb` → `northwind`), because that is the convention Save and
-   * Open already use. Failing that, the only one in the file, and failing that the
-   * user is asked.
+   * A `.edb` holds ONE workspace, so there is normally nothing to choose: the
+   * file's own name says which (`northwind.edb` → `northwind`), and that is the
+   * invariant Save and Open are built on (`spaceFileName`).
+   *
+   * The two fallbacks are for a file that BREAKS the rule, not for a shape this
+   * app produces: one written before v0.0.427, when Save wrote the whole database
+   * into one file, or one whose name the user changed in an OS save dialog. Then
+   * the only workspace in it wins, and failing that the user is asked. Do not read
+   * the picker as permission to write such a file.
    */
   async function importDroppedFile(file: File): Promise<void> {
     const live = edbBridge();
@@ -609,10 +614,16 @@ export function init(api: HostApi): void {
     return inside.find((w) => w.id === named) ?? (inside.length === 1 ? inside[0]! : null);
   }
 
-  /** Several workspaces and no name to choose by, so the user chooses. */
+  /**
+   * A file that holds several workspaces and is not named after any of them.
+   *
+   * Only reachable for a file this app should not have written — see
+   * `importDroppedFile`. The question says so, rather than presenting a broken
+   * file as an ordinary choice.
+   */
   async function askWhichWorkspace(inside: readonly WorkspaceDoc[]): Promise<WorkspaceDoc | null> {
     const pick = await api.ui.dialogs.choice(
-      'Which workspace should come in?',
+      'This file holds more than one workspace, which a workspace file is not supposed to. Which one should come in?',
       inside.map((w) => w.name),
       'Open workspace file',
     );
@@ -707,10 +718,13 @@ export function init(api: HostApi): void {
   /**
    * Write the open workspace out over the file's copy of it.
    *
-   * The file's OTHER workspaces survive. Its bytes go into a throwaway worker,
-   * that worker's copy of the workspace is dropped, the open one is copied in over
-   * the top, and the result is written back. Replacing the whole file would be one
-   * line and would destroy workspaces the user never mentioned.
+   * The file's OTHER workspaces survive — which is DAMAGE LIMITATION on a file
+   * that is already wrong, not the shape a workspace file is meant to have. A
+   * `.edb` holds one workspace (`one-per-file.ts`); one holding several was written
+   * before v0.0.427, and a passenger in a file this tab never adopted may have no
+   * other copy anywhere, so this is not the place to delete it. Its bytes go into a
+   * throwaway worker, that worker's copy of the workspace is dropped, the open one
+   * is copied in over the top, and the result is written back.
    *
    * The throwaway runs on the MEMORY substrate, not the pool: the pool's files are
    * exclusive origin-wide and the live session already holds it, so a second

@@ -83,8 +83,8 @@ export class WorkspaceSelector extends LitElement {
    *
    * An entry from another file carries its own name. Everything else is in the
    * database this tab has open, which is a file too whenever one was adopted —
-   * `local.edb` is not, and calling it by name would send the user looking for a
-   * file they never chose.
+   * the project index (`index.edp`) is not, and calling it by name would send the
+   * user looking for a file they never chose and cannot open.
    */
   private whereItLives(e: ListEntry): string {
     if (e.file) return e.file;

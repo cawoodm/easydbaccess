@@ -317,9 +317,9 @@ export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStor
  * Everything except the folder is origin-scoped, so nothing told a tab that
  * another had written the file.
  *
- * Only for a file this tab ADOPTED. The built-in local database is this browser's
- * own, so a `local.edb` that happens to be in the folder is not the same object
- * and must not be imported over it.
+ * Only for a file this tab ADOPTED. The project index is this browser's own and
+ * is not a file at all, so a tab on `index.edp` has nothing in the folder that
+ * could be a newer copy of it.
  *
  * **Nothing here happens quietly.** Every state the file can be in ends in a
  * question the user answers or a word the report says: an outside write is offered

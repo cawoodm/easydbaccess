@@ -69,7 +69,7 @@ test.describe('workspace title', () => {
     // The file is there to be hovered, not read.
     await expect(fromFile).toHaveAttribute('title', 'elsewhere.edb');
     // This tab's own workspace is hoverable too, and it has no file of its own
-    // yet — so it says where it IS rather than naming `local.edb`, which is not a
+    // yet — so it says where it IS rather than naming `index.edp`, which is not a
     // file the user ever chose.
     await expect(options.filter({ hasText: workspaceId })).toHaveAttribute('title', 'Stored in this browser');
   });
