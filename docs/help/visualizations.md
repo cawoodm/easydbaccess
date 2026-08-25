@@ -87,8 +87,10 @@ costs nothing.
 - **CSV** saves the numbers behind the picture: the word counts, or the totals
   per category. They exist nowhere else, because they are worked out at drawing
   time.
-- **↙** docks the chart back above its table or projection, the way back from the
-  pane strip's **↗**. If that window is minimized or closed, it comes back.
+- **Pop in** docks the chart back above its table or projection. Its icon is the
+  pane strip's **pop out** with the arrow reversed — an arrow leaving the box
+  means "out into its own window", the same arrow coming back into it means
+  "back where it was". If that window is minimized or closed, it comes back.
 
 ## Custom HTML
 

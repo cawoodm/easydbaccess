@@ -2,6 +2,10 @@
 
 ## 25 Aug 2026
 
+### Features
+
+- ✨ The pop-in button is now the pop-out icon with its arrow reversed, so the pair reads as one round trip (v0.0.422)
+
 ### Bugs
 
 - 🪲 Zooming a map in with the wheel crawled: one notch moved a fraction of a level instead of a whole one (v0.0.421)

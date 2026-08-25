@@ -16,6 +16,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViewsDialog } from '../dialogs/views-dialog.js';
+import { dockIconStyles, popOutIcon } from './dock-icons.js';
 import './viz-panel.js';
 
 /** Height the strip alone occupies when the pane is collapsed. */
@@ -25,6 +26,7 @@ export const PANE_HEADER_H = 22;
 export class VizPane extends LitElement {
   static override styles = [
     materialIconStyles,
+    dockIconStyles,
     css`
       :host {
         display: flex;
@@ -79,6 +81,13 @@ export class VizPane extends LitElement {
       button .mi {
         font-size: 14px;
         line-height: 1;
+      }
+      /* The SVG pop-out icon matches the font icons beside it. The shared rule
+         sizes it for the window footer's 1rem row; this strip's icons are 14px.
+         (No backticks in here — they would end the css template.) */
+      button .dock-icon {
+        width: 14px;
+        height: 14px;
       }
       .body {
         flex: 1;
@@ -181,9 +190,7 @@ export class VizPane extends LitElement {
         <button @click=${() => void this.refresh()} title="Re-read the data and redraw" aria-label="Refresh">
           <span class="mi sm">refresh</span>
         </button>
-        <button @click=${this.undock} title="Open in its own window" aria-label="Open in its own window">
-          <span class="mi sm">open_in_new</span>
-        </button>
+        <button @click=${this.undock} title="Open in its own window" aria-label="Open in its own window">${popOutIcon}</button>
         <button @click=${this.close} title="Close" aria-label="Close">
           <span class="mi sm">close</span>
         </button>

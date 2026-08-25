@@ -392,8 +392,8 @@ e2e check on a plain table window rather than left to inspection.
   largest — which turned two 300px panes in a 400px window into 48 and 272, a
   deletion rather than a shrink.
 
-**Both directions are one field.** The pane strip's `open_in_new` clears `dock`;
-the footer's `south_west` writes one, so a chart goes out to a window and back
+**Both directions are one field.** The pane strip's pop-out clears `dock`;
+the footer's pop-in writes one, so a chart goes out to a window and back
 without the instance form. The placement rule — which host, which edge, what
 height, which slot among the panes already there — is `viz/viz-dock.ts`, shared
 with the Views dialog's Shown-as select so the two cannot drift. The host is
@@ -477,9 +477,18 @@ itself. There are two, because there are two different objects to edit:
   **Edit** opens the TEMPLATE (`openViewsDialog(tableId, { editTemplateId })`),
   where the kind, the aggregate and the options live and are shared by every
   instance of it; **Settings** opens THIS instance's mapping and overrides
-  (`{ editInstanceId }`). It also carries the **pop-in** (`south_west`), the
-  mirror of the pane strip's `open_in_new` — see the docking section. An HTML
-  view window still has no footer: it has nothing per-window to configure.
+  (`{ editInstanceId }`). It also carries the **pop-in**, the mirror of the pane
+  strip's pop-out — see the docking section. An HTML view window still has no
+  footer: it has nothing per-window to configure.
+
+  **The two icons are one drawing.** `viz/dock-icons.ts` holds Material's
+  `open_in_new` frame once and the arrow twice: as-drawn, and rotated 180° about
+  the centre of its own bounding box so it comes IN through the frame's open
+  corner. Inline SVG rather than a ligature because the icon font has no mirrored
+  `open_in_new`; pop-in used to borrow `south_west`, a bare arrow with no frame,
+  which did not read as the return trip. Rotating the whole glyph with CSS is not
+  the same thing — it swings the arrow to the solid bottom-left corner, where the
+  head lands on the frame and still points outwards.
 
   The pair read the other way round until v0.0.370 — "Edit" the instance,
   "Chart" the definition — which put the shared object behind the more specific
