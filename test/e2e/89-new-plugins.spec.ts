@@ -75,6 +75,26 @@ test.describe('new plugins', () => {
     await expect(prompt(page)).toHaveCount(0);
   });
 
+  test('a mention survives the device layer being wiped', async ({ page, workspaceId }) => {
+    // The device list is `localStorage`, so it is per ORIGIN: the same workspace on
+    // another dev server, on the published site, or after site data is cleared, had
+    // never been told anything and asked about the same plugin again. So the mention
+    // is written to the workspace's own settings too, and read as a union.
+    await gotoWithPrompt(page, workspaceId);
+    await expect(prompt(page)).toBeVisible({ timeout: 20_000 });
+    await expect.poll(async () => (await readMentioned(page)).length, { timeout: 10_000 }).toBe(3);
+    await page.locator('host-dialogs').getByRole('button', { name: 'No', exact: true }).click();
+
+    // Everything the device knew, gone — which is what another origin looks like
+    // from the workspace's point of view.
+    await page.evaluate(() => localStorage.removeItem('/easydbaccess/settings.json'));
+    expect(await readMentioned(page)).toEqual([]);
+
+    await gotoWithPrompt(page, workspaceId);
+    await page.waitForTimeout(1_000);
+    await expect(prompt(page)).toHaveCount(0);
+  });
+
   test('saying yes opens the Plugin Manager', async ({ page, workspaceId }) => {
     await gotoWithPrompt(page, workspaceId);
     await expect(prompt(page)).toBeVisible({ timeout: 20_000 });

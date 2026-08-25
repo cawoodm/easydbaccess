@@ -941,10 +941,20 @@ happened to open it.
 
 The rule is `unmentionedPlugins` (pure, unit-tested): an entry is mentioned only
 when it is not in `pluginUrls`, has **no record in the `plugins` collection** (so
-one installed and later removed stays quiet), and is not in the device-local
-`new-plugins:mentioned` list. That list is written **before** the question, so a
-reload or a closed tab counts as having been told — the alternative is the same
-question every boot.
+one installed and later removed stays quiet), and has not been mentioned before.
+The mention is written **before** the question, so a reload or a closed tab counts
+as having been told — the alternative is the same question every boot.
+
+**"Mentioned" is written down twice, and read as a union.** The device-local
+`new-plugins:mentioned` list is `localStorage`, therefore per ORIGIN — so the same
+workspace opened on another branch's dev server, on the published site, or after
+site data was cleared had never been told anything and asked about the same plugin
+again. The second copy is the workspace setting `new-plugins:mentioned-here`, which
+travels with the workspace through its `.edb` and through sync. A separate key
+because `settings.set` writes one layer and deletes the key from the other, so one
+name could never hold both. `mergeMentioned` is the union, and either store being
+unwritable leaves the other doing the job: silence about one plugin is answered by
+the palette command, where nagging is answered by nothing.
 
 Keyed on the absolute URL, not the id: two catalogs may each offer a
 `cell-email`, and the URL is what `pluginUrls` and the `plugins` collection are

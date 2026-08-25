@@ -16,9 +16,15 @@ import { CATALOG_URLS_SETTING, defaultCatalogUrl, fetchCatalog, type CatalogReso
  *     one the user installed and later removed stays quiet,
  *  3. it has not been mentioned before.
  *
- * The third is what makes it once-only: the list of mentioned URLs is written
- * BEFORE the question is asked, so declining, closing the tab or reloading all
- * count as having been told.
+ * The third is what makes it once-only, and it is written down twice on purpose.
+ * The list of mentioned URLs goes to the device layer AND to the workspace's own
+ * settings, because the device layer is `localStorage` and therefore per ORIGIN —
+ * the same workspace opened on another dev server, on the published site, or after
+ * site data was cleared, asked about the same plugin a second time. See
+ * {@link MENTIONED_SETTING}.
+ *
+ * Either way it is written BEFORE the question is asked, so declining, closing the
+ * tab or reloading all count as having been told.
  */
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'new-plugins',
@@ -33,6 +39,26 @@ export const meta: NonNullable<PluginModule['meta']> = {
 
 /** Device-local list of catalog URLs already mentioned. */
 const MENTIONED_KEY = 'mentioned';
+
+/**
+ * The same list again, in the WORKSPACE's own settings.
+ *
+ * Two stores for one fact, because neither covers the case on its own. The device
+ * layer is `localStorage`, so it is per ORIGIN: the same workspace opened on
+ * another branch's dev server, on the published site, or after site data is
+ * cleared, had never been told anything and asked again — "notified twice about
+ * the same plugin", which is the whole thing this plugin exists to avoid. The
+ * workspace layer travels with the workspace, through its `.edb` and through sync.
+ *
+ * A separate KEY rather than the same one in the other layer: `settings.set`
+ * writes one layer and deletes the key from the other, so one name could never
+ * hold both.
+ *
+ * Read as a UNION, written to both. The failure mode of a stale entry is silence
+ * about one plugin, which the "Show available plugins" command answers; the
+ * failure mode of a lost entry is nagging, which nothing answers.
+ */
+const MENTIONED_SETTING = 'new-plugins:mentioned-here';
 
 /**
  * Which catalog entries are worth mentioning.
@@ -77,9 +103,20 @@ function suppressed(): boolean {
   return sp.get('test') === '1';
 }
 
-async function readMentioned(api: HostApi): Promise<string[]> {
-  const stored = await api.settings.get<unknown>(meta.id, MENTIONED_KEY);
+/** The strings in a stored value that could be a list of URLs, or anything at all. */
+export function urlList(stored: unknown): string[] {
   return Array.isArray(stored) ? stored.filter((u): u is string => typeof u === 'string') : [];
+}
+
+/** Every URL either store has been told about, once each and in a stable order. */
+export function mergeMentioned(device: readonly string[], workspace: readonly string[]): string[] {
+  return [...new Set([...device, ...workspace])];
+}
+
+async function readMentioned(api: HostApi): Promise<string[]> {
+  const device = urlList(await api.settings.get<unknown>(meta.id, MENTIONED_KEY));
+  const workspace = urlList((await api.store.settings.findOne(MENTIONED_SETTING))?.value);
+  return mergeMentioned(device, workspace);
 }
 
 /** The catalog sources the user actually uses — the same setting the Plugin Manager keeps. */
@@ -132,9 +169,21 @@ async function findNew(api: HostApi, mention: boolean): Promise<CatalogResolved[
   return unmentionedPlugins(catalog, installed, known, mentioned);
 }
 
+/**
+ * Write the mention to both stores.
+ *
+ * Both, and neither failure is fatal: a device layer that cannot be written
+ * (private mode) still leaves the workspace copy, and a workspace that cannot be
+ * written still leaves the device copy. Silence about a plugin is the safe
+ * direction — see {@link MENTIONED_SETTING}.
+ */
 async function markMentioned(api: HostApi, entries: readonly CatalogResolved[]): Promise<void> {
-  const mentioned = await readMentioned(api);
-  await api.settings.set(meta.id, MENTIONED_KEY, [...new Set([...mentioned, ...entries.map((e) => e.absUrl)])], 'user');
+  const next = mergeMentioned(
+    await readMentioned(api),
+    entries.map((e) => e.absUrl),
+  );
+  await api.settings.set(meta.id, MENTIONED_KEY, next, 'user').catch(() => undefined);
+  await api.store.settings.upsert({ name: MENTIONED_SETTING, value: next }).catch(() => undefined);
 }
 
 function sentence(entries: readonly CatalogResolved[]): string {

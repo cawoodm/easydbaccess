@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nameList, unmentionedPlugins } from '../../../packages/renderer/src/plugins/new-plugins.js';
+import { mergeMentioned, nameList, unmentionedPlugins, urlList } from '../../../packages/renderer/src/plugins/new-plugins.js';
 import type { CatalogResolved } from '../../../packages/renderer/src/plugin-host/plugin-catalog.js';
 
 /**
@@ -76,5 +76,42 @@ describe('nameList', () => {
 
   it('is empty for nothing, so no caller prints a stray comma', () => {
     expect(nameList([])).toBe('');
+  });
+});
+
+/**
+ * "Already mentioned" is stored twice — the device layer and the workspace's own
+ * settings — because the device layer is `localStorage` and therefore per ORIGIN.
+ * The same workspace opened on another dev server or on the published site had
+ * never been told anything, and asked about the same plugin a second time.
+ */
+describe('mergeMentioned', () => {
+  it('is the union, so a mention in either store counts', () => {
+    expect(mergeMentioned(['a'], ['b'])).toEqual(['a', 'b']);
+  });
+
+  it('counts a URL both stores hold once', () => {
+    expect(mergeMentioned(['a', 'b'], ['b', 'c'])).toEqual(['a', 'b', 'c']);
+  });
+
+  it('survives either store being empty — one written layer is enough', () => {
+    expect(mergeMentioned([], ['a'])).toEqual(['a']);
+    expect(mergeMentioned(['a'], [])).toEqual(['a']);
+    expect(mergeMentioned([], [])).toEqual([]);
+  });
+});
+
+describe('urlList', () => {
+  it('takes the strings out of a stored value', () => {
+    expect(urlList(['a', 'b'])).toEqual(['a', 'b']);
+  });
+
+  it('ignores anything that is not a list of strings, rather than throwing', () => {
+    // The value comes out of settings, which anything may have written.
+    expect(urlList(undefined)).toEqual([]);
+    expect(urlList(null)).toEqual([]);
+    expect(urlList('a')).toEqual([]);
+    expect(urlList({ a: 1 })).toEqual([]);
+    expect(urlList(['a', 7, null, 'b'])).toEqual(['a', 'b']);
   });
 });

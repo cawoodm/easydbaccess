@@ -9,6 +9,7 @@
 
 ### Bugs
 
+- 🪲 The same new plugin was announced again on another dev server, on the published site, or after site data was cleared (v0.0.432)
 - 🪲 A URL naming a workspace you did not have created it inside the workspace file you had open, so that file held two (v0.0.431)
 - 🪲 Connecting a workspace folder only ever read it, so a workspace with no file stayed in this browser alone (v0.0.429)
 - 🪲 A markdown column in a view showed its text with the markers stripped instead of rendering (v0.0.428)
