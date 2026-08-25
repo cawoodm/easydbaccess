@@ -153,10 +153,14 @@ its message in the pane rather than leaving it blank.
 ## Map rules
 
 A map opens fitted to your points, not on a world view — three Swiss cities at
-zoom 0 is an empty map. Zooming out stops where the world fills the width, so you
-never see the same continent twice side by side, and panning stays inside the
-world instead of drifting off into grey. A wider pane raises that limit, because
-a wider pane has room for more world.
+zoom 0 is an empty map.
+
+Zooming out stops when **the whole world is in view**. A pane is rarely as tall as
+it is wide, and the world is square, so whichever side has room to spare gets
+background above and below, or to the left and right. Nothing is cropped and no
+continent appears twice. Panning stays inside the world rather than drifting off
+into the background, and re-shaping the pane changes where the limit falls —
+a taller pane holds a bigger world.
 
 **Your view stays yours.** Once you have zoomed or panned, filtering the grid
 redraws the markers and leaves the map where you put it. The exception is a filter

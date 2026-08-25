@@ -35,7 +35,7 @@ import { LitElement, html, nothing } from 'lit';
 import type { PropertyValues } from 'lit';
 import type { CircleMarker, Map as LeafletMap, TileLayer } from 'leaflet';
 import { readChartTheme, type MapPoint } from './chart-data.js';
-import { WORLD_BOUNDS, wholeZoomFittingWidth } from './map-zoom.js';
+import { MIN_WORLD_ZOOM, WORLD_BOUNDS, wholeZoomShowingWorld } from './map-zoom.js';
 import { markerRadiusRange, scaleMarkerRadii } from './marker-scale.js';
 import { sameMapPoints, sameVizOptions } from './same-input.js';
 
@@ -155,9 +155,9 @@ export class VizPointMap extends LitElement {
     this.style.height = '100%';
     this.style.minHeight = '120px';
     // Leaflet measures its container on creation; a panel splitter changes that
-    // size without a window resize event, so it has to be told. The zoom floor
-    // depends on that measurement, so it is recomputed here too — a pane dragged
-    // wider has room for a second copy of the world at the zoom that just fitted.
+    // size without a window resize event, so it has to be told. The zoom floor is a
+    // function of that measurement, so it is recomputed here too — a pane dragged
+    // to a new shape holds the whole world at a different zoom.
     this.ro = new ResizeObserver(() => {
       this.map?.invalidateSize();
       this.floorZoomToWorld();
@@ -186,19 +186,24 @@ export class VizPointMap extends LitElement {
   }
 
   /**
-   * Never let the map zoom out past the point where the world fills the pane.
+   * Let the map zoom out until the whole world is in view, and no further.
    *
-   * Without it, zooming all the way out drew the world several times side by side
-   * — Leaflet repeats tiles along the x axis, and a wide pane has room for it. The
-   * floor is the first WHOLE zoom at which the world is at least as wide as the
-   * pane, so the way out ends one step before it could repeat (see `map-zoom.ts`
-   * for why whole rather than exact). `setMinZoom` also pulls the current zoom up
-   * when it is already below the new floor, which is what makes a pane dragged
-   * wider correct itself.
+   * The world is square and a pane is not, so the limit comes from the pane's
+   * SHORTER side; the longer side gets padding, which `maxBounds` centres. Anything
+   * below that floor only shrinks a world the pane already held whole.
+   *
+   * Both dimensions, not just the width. Until v0.0.425 the floor stopped where the
+   * world was as WIDE as the pane, which cannot show the world whole in anything but
+   * a square: a short docked pane lost the poles, and a tall one the edges.
+   *
+   * `setMinZoom` also pulls the current zoom up when it sits below the new floor,
+   * which is what makes a pane dragged TALLER correct itself — a taller pane holds a
+   * bigger world, so the floor rises with it.
    */
   private floorZoomToWorld(): void {
     if (!this.map) return;
-    this.map.setMinZoom(wholeZoomFittingWidth(this.map.getSize().x));
+    const size = this.map.getSize();
+    this.map.setMinZoom(wholeZoomShowingWorld(size.x, size.y));
   }
 
   /** Has this map ever been fitted to data? Set by the first draw that had any. */
@@ -255,8 +260,24 @@ export class VizPointMap extends LitElement {
         maxZoom: 19,
         // One world, not a row of them. Leaflet repeats tiles along the x axis by
         // default, so a pane wider than the world at that zoom drew Africa three
-        // times — which reads as data repeating, not as a map.
+        // times — which reads as data repeating, not as a map. This is what makes
+        // zooming out safe at ANY zoom, so the floor below is free to be a fit
+        // rather than a fill.
         noWrap: true,
+        // `noWrap` is not enough on its own, and this is not obvious: Leaflet skips
+        // its out-of-bounds check whenever the CRS wraps longitude, which EPSG3857
+        // does whatever the layer says. So the ring of tiles it keeps around the
+        // viewport still held `/{z}/-1/{y}.png`, which every provider answers 404 —
+        // wasted requests, and worse, a `tileerror` that put "Map tiles could not be
+        // loaded" over a map whose tiles were all fine. `bounds` is the check that
+        // does run: a tile that does not overlap the world is never created.
+        bounds: WORLD_BOUNDS,
+        // A pane shorter than one tile holds the whole world only below zoom 0, so
+        // the map's floor can be negative — and a tile layer draws NOTHING below its
+        // own `minZoom`, which defaults to 0. `minNativeZoom` is the other half: the
+        // provider has no z-1 tiles, so Leaflet keeps asking for z0 and scales them.
+        minZoom: MIN_WORLD_ZOOM,
+        minNativeZoom: 0,
       });
       // One flag, not one per failed tile: a map panned offline fires this for
       // every tile in the viewport.
@@ -296,7 +317,7 @@ export class VizPointMap extends LitElement {
     // Swiss cities opened at zoom 0 looks like an empty map.
     const bounds = L.latLngBounds(this.points.map((p) => [p.lat, p.lon] as [number, number]));
     // The floor first: `fitBounds` clamps to it, so a set of points spread across
-    // the world opens at one world rather than at the zoom below that repeats it.
+    // the world opens no further out than the whole world.
     this.floorZoomToWorld();
     if (bounds.isValid() && this.shouldFit(bounds)) this.map.fitBounds(bounds, { padding: [24, 24], maxZoom: 12 });
     this.map.invalidateSize();

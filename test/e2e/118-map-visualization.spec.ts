@@ -315,27 +315,69 @@ async function tileWorld(page: Page) {
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     const rects = onScreen.map((t) => t.getBoundingClientRect());
+    const span = (lo: number, hi: number) => (rects.length === 0 ? 0 : Math.round(hi - lo));
+    // Tiles Leaflet asked for that are not part of the world at that zoom — `x`
+    // outside `[0, 2^z)`. Every provider answers those 404.
+    let outsideWorld = 0;
+    for (const t of onScreen) {
+      const m = t.src.match(/\/(\d+)\/(-?\d+)\/(-?\d+)\.png/);
+      if (!m) continue;
+      const span1 = 2 ** Number(m[1]);
+      const x = Number(m[2]);
+      const y = Number(m[3]);
+      if (x < 0 || x >= span1 || y < 0 || y >= span1) outsideWorld++;
+    }
     return {
       width: Math.round(box.width),
+      height: Math.round(box.height),
       z: Number(onScreen[0]?.src.match(/\/(\d+)\/-?\d+\/-?\d+\.png/)?.[1] ?? NaN),
       /** Tiles drawn more than once over the pane — a repeated world. */
       repeated: [...counts.values()].filter((n) => n > 1).length,
+      outsideWorld,
       // How much of the pane's width the tiles actually paint.
-      covered: rects.length === 0 ? 0 : Math.round(Math.min(box.right, Math.max(...rects.map((r) => r.right))) - Math.max(box.left, Math.min(...rects.map((r) => r.left)))),
+      covered: span(Math.max(box.left, Math.min(...rects.map((r) => r.left))), Math.min(box.right, Math.max(...rects.map((r) => r.right)))),
+      /** How wide and tall the drawn world is, PANE OR NO PANE — it may be smaller. */
+      worldWidth: span(Math.min(...rects.map((r) => r.left)), Math.max(...rects.map((r) => r.right))),
+      worldHeight: span(Math.min(...rects.map((r) => r.top)), Math.max(...rects.map((r) => r.bottom))),
     };
   });
 }
 
-test('zoomed all the way out, the world fills the pane once instead of repeating', async ({ page }) => {
+/**
+ * Zoomed all the way out, the WHOLE world is on screen — padded, never repeated.
+ *
+ * The floor used to stop where the world was as WIDE as the pane, which cannot show
+ * the world whole in anything but a square: a pane wider than it is tall lost the
+ * poles. It now stops where the world fits the pane's SHORTER side, so the longer
+ * side carries background instead. Nothing repeats, because `noWrap` is what
+ * prevents that and it holds at every zoom.
+ */
+test('zoomed all the way out, the whole world is in view, padded rather than cropped', async ({ page }) => {
   const id = await seedCities(page);
   await makeMap(page, id);
   await expect.poll(async () => (await mapGeometry(page))?.panePosition, { timeout: 15_000 }).toBe('absolute');
 
-  // Out until it stops going out. The floor is computed from the pane's width, so
+  // Leaflet's own view, because the claim is geographic: the pane's edges have to
+  // sit OUTSIDE the world for all of it to be visible, and the tile rectangles
+  // cannot say that as plainly.
+  await page.locator('viz-point-map').evaluate((el) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__mapWorld = () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const m = (el as any).map;
+      if (!m) return null;
+      const b = m.getBounds();
+      const size = m.getSize();
+      return { z: m.getZoom(), min: m.getMinZoom(), n: b.getNorth(), s: b.getSouth(), w: b.getWest(), e: b.getEast(), width: size.x, height: size.y };
+    };
+  });
+  const world = () => page.evaluate(() => (window as unknown as { __mapWorld?: () => Record<string, number> | null }).__mapWorld?.() ?? null);
+
+  // Out until it stops going out. The floor is computed from the pane's size, so
   // the test cannot assume how many clicks that is — and Leaflet animates each
   // one, so it waits for the zoom to settle rather than counting.
   const out = page.locator('viz-point-map .leaflet-control-zoom-out');
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 16; i++) {
     // Leaflet marks the control `aria-disabled` at the floor, which Playwright
     // reads as a disabled control and would retry clicking until the test died.
     if (((await out.getAttribute('class')) ?? '').includes('leaflet-disabled')) break;
@@ -345,12 +387,38 @@ test('zoomed all the way out, the world fills the pane once instead of repeating
   }
   await expect(out).toHaveClass(/leaflet-disabled/);
 
-  const world = await tileWorld(page);
-  expect(world).not.toBeNull();
-  // ONE world: no tile is drawn twice over the pane.
-  expect(world!.repeated).toBe(0);
-  // And it fills the pane, so refusing to repeat did not leave grey beside it.
-  expect(world!.covered).toBeGreaterThanOrEqual(world!.width - 4);
+  const view = await world();
+  expect(view).not.toBeNull();
+  // Every edge of the world is inside the pane. Web mercator ends at ±85.0511°, so
+  // a view reaching past it is a view with the poles on screen.
+  expect(view!['n']).toBeGreaterThanOrEqual(85.05);
+  expect(view!['s']).toBeLessThanOrEqual(-85.05);
+  expect(view!['w']).toBeLessThanOrEqual(-180);
+  expect(view!['e']).toBeGreaterThanOrEqual(180);
+
+  const tiles = await tileWorld(page);
+  expect(tiles).not.toBeNull();
+  // The tiles really are there — a map floor below the tile layer's own `minZoom`
+  // draws nothing at all, which is the trap a negative floor walks into.
+  expect(tiles!.covered).toBeGreaterThan(0);
+  // Still ONE world: no tile drawn twice over the pane. Going further out than the
+  // old floor must not bring the repeat back.
+  expect(tiles!.repeated).toBe(0);
+
+  // The drawn world sits INSIDE the pane on both axes, which is the padding: the
+  // leftover room is background, not another continent and not a cropped pole.
+  // Whichever side is longer gets more of it, so this holds for any proportion.
+  expect(tiles!.worldWidth).toBeLessThanOrEqual(tiles!.width);
+  expect(tiles!.worldHeight).toBeLessThanOrEqual(tiles!.height);
+  expect(Math.max(tiles!.width - tiles!.worldWidth, tiles!.height - tiles!.worldHeight)).toBeGreaterThan(0);
+
+  // Nothing was requested from beside the world. `noWrap` alone does not stop that
+  // — Leaflet skips its bounds check whenever the CRS wraps longitude — so the ring
+  // of tiles around the viewport asked for `/{z}/-1/{y}.png`, got 404s, and raised
+  // a `tileerror` that put "tiles could not be loaded" over a working map. Padding
+  // is exactly the state that surrounds the world with that ring.
+  expect(tiles!.outsideWorld).toBe(0);
+  await expect(page.locator('viz-point-map [role="status"]')).toHaveCount(0);
 });
 
 test('dragging pans the map', async ({ page }) => {

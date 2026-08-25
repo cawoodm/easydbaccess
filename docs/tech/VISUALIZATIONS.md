@@ -552,15 +552,35 @@ resize or a filter change re-lays out without reshuffling every word.
   an image resolved relative to the stylesheet, which is the thing that breaks
   under a bundler. A circle marker is SVG — no assets, and it can carry a
   magnitude by radius.
-- **The zoom has a floor, and it is a function of the pane's width.** Leaflet
-  repeats tiles along the x axis, so any pane wider than `256 * 2^zoom` drew the
-  world two or three times side by side — which reads as data repeating. `noWrap`
-  on the tile layer plus `minZoom = wholeZoomFittingWidth(paneWidth)`
-  (`viz/elements/map-zoom.ts`, pure and unit-tested) stop it. Recomputed in the
-  `ResizeObserver`, because a pane dragged wider has room for more world, and
-  applied before `fitBounds` so a global set of points opens at one world.
-  `maxBounds` keeps panning inside the world, since a world that no longer repeats
-  has grey beside it.
+- **`noWrap` is what stops the world repeating — the zoom floor is not.** Leaflet
+  repeats tiles along the x axis, so a pane wider than `256 * 2^zoom` drew the world
+  two or three times side by side, which reads as data repeating. `noWrap` on the
+  tile layer ends that at every zoom, which is what leaves the floor free to be
+  chosen for a different reason.
+- **`noWrap` alone still asks for tiles beside the world**, and this one is not
+  obvious: `GridLayer._isValidTile` skips its bounds check whenever the CRS wraps
+  longitude, which EPSG3857 does whatever the layer option says. So the ring of
+  tiles Leaflet keeps around the viewport held `/{z}/-1/{y}.png` — 404 at every
+  provider, and a `tileerror` that put "Map tiles could not be loaded" over a map
+  whose real tiles were fine. `bounds: WORLD_BOUNDS` on the layer is the check that
+  does run. Padding is exactly the state that surrounds the world with that ring,
+  so this had to be fixed in the same change.
+- **The floor is where the whole world fits the pane's SHORTER side**:
+  `minZoom = wholeZoomShowingWorld(paneWidth, paneHeight)`
+  (`viz/elements/map-zoom.ts`, pure and unit-tested). The world is a square and a
+  pane is not, so the longer side is left with padding, which `maxBounds` centres.
+  Until v0.0.425 the floor stopped where the world was as WIDE as the pane, and that
+  cannot show the world whole in anything but a square pane — a short docked pane
+  lost the poles and a tall one lost the edges. Recomputed in the `ResizeObserver`,
+  since a pane dragged to a new shape holds the whole world at a different zoom, and
+  applied before `fitBounds` so a global set of points opens no further out than one
+  world.
+- **The floor can be NEGATIVE, and two tile-layer options are needed for that.** A
+  pane shorter than 256px holds the whole world only below zoom 0. A tile layer
+  draws nothing below its own `minZoom` (default 0), so that is set to
+  `MIN_WORLD_ZOOM`; and the provider has no `z-1` tiles, so `minNativeZoom: 0` keeps
+  Leaflet asking for `z0` and scaling them down. `MIN_WORLD_ZOOM = -4` is a guard
+  against a pane measured mid-layout, not a design limit.
 - **The floor is a WHOLE zoom, and `zoomSnap` stays at its default.** The exact
   fitting zoom is fractional, and Leaflet only holds a fractional minimum with
   `zoomSnap: 0` — which was the first attempt and cost more than it bought. That
@@ -568,9 +588,8 @@ resize or a filter change re-lays out without reshuffling every word.
   the snap is what rounds each tick up to a full level. Without it the raw sigmoid
   gets through and a trackpad flick moved about an eighth of a level. Zooming in
   felt broken while the zoom BUTTONS still stepped by 1 (`zoomDelta`), which is why
-  the existing control test passed throughout. `Math.ceil` keeps the no-repeat
-  guarantee — at `ceil(fit)` the world is at least as wide as the pane — and costs
-  only the last fraction of a step outwards.
+  the existing control test passed throughout. The rounding is `Math.floor` now, not
+  `Math.ceil`: rounding up is the one direction that crops the world.
 - **Only the FIRST draw fits the bounds.** A docked pane redraws from the grid's
   visible rows, so `fitBounds` on every draw threw the view back out each time a
   column funnel was typed in — a map is unusable beside a filter being adjusted.

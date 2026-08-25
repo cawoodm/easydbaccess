@@ -1,82 +1,118 @@
 import { describe, expect, it } from 'vitest';
-import { TILE_SIZE, WORLD_BOUNDS, wholeZoomFittingWidth, zoomFittingWidth } from '../../../packages/renderer/src/viz/elements/map-zoom.js';
+import { MIN_WORLD_ZOOM, TILE_SIZE, WORLD_BOUNDS, wholeZoomShowingWorld, zoomShowingWorld } from '../../../packages/renderer/src/viz/elements/map-zoom.js';
 
 /**
- * The floor that stops a map drawing the world twice.
+ * The floor that decides how far out a map may go.
  *
- * A web-mercator world is `256 * 2^zoom` pixels wide, so the zoom that fits a
- * pane exactly is `log2(width / 256)`. Below it there is room for a second copy,
- * and Leaflet fills that room by repeating the tiles.
+ * The world is a SQUARE of `256 * 2^zoom` pixels and a pane is not, so the whole
+ * world is in view only when it fits the pane's SHORTER side. The longer side is
+ * padded. Fitting the WIDTH — the rule until v0.0.425 — can never show the world
+ * whole in anything but a square pane.
  */
 
-describe('zoomFittingWidth', () => {
-  it('is 0 when the pane is exactly one tile wide — the whole world in 256px', () => {
-    expect(zoomFittingWidth(TILE_SIZE)).toBe(0);
+/** The world's edge in pixels at a zoom, which is what every claim here is about. */
+const worldPx = (zoom: number, tile = TILE_SIZE) => tile * 2 ** zoom;
+
+describe('zoomShowingWorld', () => {
+  it('is 0 when the shorter side is exactly one tile', () => {
+    expect(zoomShowingWorld(TILE_SIZE, TILE_SIZE)).toBe(0);
+    // A wide pane is still decided by its height.
+    expect(zoomShowingWorld(4096, TILE_SIZE)).toBe(0);
   });
 
-  it('rises one zoom per doubling of the pane', () => {
-    expect(zoomFittingWidth(512)).toBe(1);
-    expect(zoomFittingWidth(1024)).toBe(2);
-    expect(zoomFittingWidth(4096)).toBe(4);
+  it('rises one zoom per doubling of the shorter side', () => {
+    expect(zoomShowingWorld(512, 512)).toBe(1);
+    expect(zoomShowingWorld(4096, 1024)).toBe(2);
   });
 
-  it('is fractional in between, which is the point of asking', () => {
-    // A 900px pane fits the world at 1.81; the whole zooms either side of that are
-    // "world overflows the pane" (fine) and "world repeats" (the bug).
-    expect(zoomFittingWidth(900)).toBeCloseTo(1.8138, 3);
+  it('reads the shorter side whichever one it is', () => {
+    // A tall narrow pane and a short wide one of the same measure answer the same.
+    expect(zoomShowingWorld(300, 1200)).toBeCloseTo(zoomShowingWorld(1200, 300), 10);
   });
 
-  it('never goes below 0, however narrow the pane', () => {
-    // Zoom 0 is already the whole world in one tile; there is nothing further out.
-    expect(zoomFittingWidth(120)).toBe(0);
-    expect(zoomFittingWidth(1)).toBe(0);
+  it('goes NEGATIVE for a pane shorter than one tile', () => {
+    // The case the old width-only rule could not express: 200px cannot hold a
+    // 256px world, so the whole world is only in view below zoom 0.
+    expect(zoomShowingWorld(900, 128)).toBe(-1);
+    expect(zoomShowingWorld(900, 200)).toBeCloseTo(-0.3561, 3);
   });
 
   it('answers 0 for a pane that has not been measured yet', () => {
     // A hidden or freshly created container. `-Infinity` would be the arithmetic
     // answer and an unusable minimum zoom.
-    expect(zoomFittingWidth(0)).toBe(0);
-    expect(zoomFittingWidth(Number.NaN)).toBe(0);
-    expect(zoomFittingWidth(-10)).toBe(0);
+    expect(zoomShowingWorld(0, 600)).toBe(0);
+    expect(zoomShowingWorld(900, 0)).toBe(0);
+    expect(zoomShowingWorld(Number.NaN, 600)).toBe(0);
+    expect(zoomShowingWorld(-10, -10)).toBe(0);
   });
 
   it('takes another tile size, for a provider that does not use 256', () => {
-    expect(zoomFittingWidth(512, 512)).toBe(0);
-    expect(zoomFittingWidth(1024, 512)).toBe(1);
+    expect(zoomShowingWorld(512, 512, 512)).toBe(0);
+    expect(zoomShowingWorld(2048, 1024, 512)).toBe(1);
   });
 });
 
-/**
- * The floor the map actually uses. Whole, because `zoomSnap: 0` — what it takes to
- * reach a fractional one — also stops Leaflet rounding a wheel tick up to a full
- * level, and zooming in then crawls.
- */
-describe('wholeZoomFittingWidth', () => {
-  it('rounds the fitting zoom UP, never down', () => {
-    // 1.81 → 2: at 2 the world is 1024px against a 900px pane, so it overflows.
-    // Rounding down to 1 would leave 388px beside it for a second copy.
-    expect(wholeZoomFittingWidth(900)).toBe(2);
-    expect(wholeZoomFittingWidth(300)).toBe(1);
+describe('wholeZoomShowingWorld', () => {
+  it('rounds DOWN, so the world still fits', () => {
+    // 900x600 fits the world at 1.23. At 2 the world is 1024px against 600px of
+    // height — the poles would be off screen.
+    expect(wholeZoomShowingWorld(900, 600)).toBe(1);
+    expect(wholeZoomShowingWorld(900, 200)).toBe(-1);
   });
 
   it('leaves an exact power of two alone', () => {
-    expect(wholeZoomFittingWidth(256)).toBe(0);
-    expect(wholeZoomFittingWidth(512)).toBe(1);
-    expect(wholeZoomFittingWidth(1024)).toBe(2);
+    expect(wholeZoomShowingWorld(256, 256)).toBe(0);
+    expect(wholeZoomShowingWorld(1024, 512)).toBe(1);
   });
 
-  it('is never below 0, and never fractional', () => {
-    for (const w of [0, 1, 120, 255, 256, 257, 900, 1920, 3840]) {
-      const z = wholeZoomFittingWidth(w);
-      expect(Number.isInteger(z)).toBe(true);
-      expect(z).toBeGreaterThanOrEqual(0);
+  it('holds the promise: the whole world fits at the floor', () => {
+    for (const [w, h] of [
+      [120, 900],
+      [300, 300],
+      [640, 200],
+      [900, 600],
+      [1280, 150],
+      [1920, 1080],
+      [3840, 2160],
+    ] as const) {
+      expect(worldPx(wholeZoomShowingWorld(w, h))).toBeLessThanOrEqual(Math.min(w, h));
     }
   });
 
-  it('always covers the pane — the property the whole floor exists for', () => {
-    for (const w of [120, 300, 640, 900, 1280, 1440, 1920, 2560, 3840]) {
-      const worldPx = TILE_SIZE * 2 ** wholeZoomFittingWidth(w);
-      expect(worldPx).toBeGreaterThanOrEqual(Math.max(w, TILE_SIZE));
+  it('is the LARGEST such zoom — one step up and the world overflows', () => {
+    // Without this the floor could be any small number and the test above would
+    // still pass. This is what makes it the right one: it stops exactly where the
+    // world stops fitting, so nothing below it is worth reaching.
+    for (const [w, h] of [
+      [300, 300],
+      [640, 200],
+      [900, 600],
+      [1920, 1080],
+    ] as const) {
+      expect(worldPx(wholeZoomShowingWorld(w, h) + 1)).toBeGreaterThan(Math.min(w, h));
+    }
+  });
+
+  it('pads the longer side rather than cropping the world', () => {
+    // The point of the change, in one number: a 900px-wide pane 600 high shows a
+    // 512px world, so there are 388px of background across it — and all of it.
+    const z = wholeZoomShowingWorld(900, 600);
+    expect(worldPx(z)).toBe(512);
+    expect(900 - worldPx(z)).toBe(388);
+  });
+
+  it('never fractional, and never below the guard', () => {
+    for (const [w, h] of [
+      [0, 0],
+      [1, 1],
+      [8, 4000],
+      [120, 120],
+      [255, 257],
+      [3840, 2160],
+    ] as const) {
+      const z = wholeZoomShowingWorld(w, h);
+      expect(Number.isInteger(z)).toBe(true);
+      expect(z).toBeGreaterThanOrEqual(MIN_WORLD_ZOOM);
     }
   });
 });
