@@ -9,6 +9,7 @@
 
 ### Bugs
 
+- 🪲 Saving a workspace wrote every other workspace in this browser into its file, so two workspaces shared one (v0.0.427)
 - 🪲 A map could not be zoomed out to show the whole world unless its pane was square, and a padded map wrongly said its tiles had failed (v0.0.425)
 - 🪲 A workspace folder sync loaded a newer file without asking, and skipped a file it could not compare without a word (v0.0.424)
 - 🪲 A column filtered to one of its values offered only that value, so there was no way to switch to another without clearing the filter (v0.0.423)

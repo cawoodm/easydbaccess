@@ -137,8 +137,7 @@ The first time a workspace goes into a file, the app asks for a **folder**
 - **Save** — writes `<workspaceId>.edb` into the folder, no dialog at all. The id
   and the file name are one convention (`spaceFileName`), so there is nothing to
   ask. A name already in the folder is the one exception: it is confirmed, because
-  a Save writes the WHOLE open database over that file, which may hold work from
-  another machine.
+  the Save writes over that file, which may hold work from another machine.
 - **Open** — pick from the `.edb` files listed in the folder. No OS dialog. The
   file decides the workspace: `a.edb` reloads as `?space=a`
   (`workspaceIdFromFileName` → `reloadWithSpace`), and a file holding no `a` gets
@@ -164,6 +163,47 @@ A browser with no directory picker (Firefox, Safari) can open a file and work on
 it, but cannot write one: Save says so (`NO_FILE_ACCESS`) and the workspace stays
 in the pool. There is no download fallback — that went with the IndexedDB dump in
 v0.0.396, because "saved" must not mean two different things.
+
+## A `.edb` holds ONE workspace
+
+The rule the whole file layer already assumed, and did not enforce until v0.0.427.
+Save names the file after the workspace, Open reads the workspace back out of the
+name, the folder index maps one to the other, and `?space=` switches workspace by
+adopting that workspace's file. A file holding two workspaces breaks all four.
+
+Nothing about the FORMAT enforces it — `_easydb.workspaceId` scopes rows, so a
+database can hold any number — and the tab's own database routinely does. That is
+what `local.edb` IS (every workspace this browser has), and New workspace →
+Simple, a dropped `.edb` and the legacy import all add to whichever database is
+open. So the rule is enforced at the one place it can be: **the write.**
+
+`persist()` used to write `bridge.export()` — the whole database. The first Save of
+`alpha` out of browser storage therefore wrote every workspace the browser held
+into `alpha.edb`, and a folder scan then truthfully reported several workspaces
+living in one file. Three symptoms, of which the last is the worst: the workspace
+list labelled two workspaces with the same file; every sync asked which copy of the
+passenger was real, because it existed in two files; and a `.edb` handed to
+somebody carried workspaces its name denies.
+
+A Save now does two things (`db/edb/one-per-file.ts`, pure and unit-tested):
+
+1. **The active workspace, alone, into its own file.** `export()` is still the fast
+   path and is what a database holding one workspace takes — such a database
+   already IS its file. Only a database holding several pays for a copy through a
+   throwaway worker (`workspaceOnlyBytes`, the same scratch arrangement as
+   `overwriteInFile` and `buildEdbFile`).
+2. **A file of its own for every other workspace in that database**, where the
+   folder does not already hold one. This is not tidiness: before this, a
+   passenger's only copy on disk was its seat inside the active workspace's file,
+   and `reloadActiveFromFile` replaces the database with the file's contents — so
+   step 1 without step 2 would lose it. Idempotent, so only the save that creates
+   them pays, and the toast names them.
+
+Two things this deliberately does NOT do. `overwriteInFile` (the sync's *Overwrite
+disk version*) still merges into the file rather than replacing it, because a
+passenger in a file the tab never adopted may have no other copy at all. And the
+producers above still add to a file-backed database — they simply cannot reach
+another workspace's file any more, and get a file of their own on the next save.
 
 ## "Which copy do you want to keep?" carries the facts
 

@@ -33,6 +33,7 @@ import { countWorkspaceContents } from '../db/delete-workspace.js';
 import { createIpcDataStore } from '../db/data-store-bridge.js';
 import { adoptEdbFile, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
 import { adoptFolderFile, clearPendingSpaceRequest, pendingSpaceRequest } from '../db/edb/space-adopt.js';
+import { alsoWroteNote, withoutTheirOwnFile, writableWholesale } from '../db/edb/one-per-file.js';
 import { freeWorkspaceId, spaceFileName, workspaceIdFromFileName } from '../db/edb/space-resolve.js';
 
 /**
@@ -116,6 +117,13 @@ const BROWSE = 'Another file…';
 
 /** The name the throwaway worker opens a DROPPED file under. Never a real file. */
 const DROP_SCRATCH = '__edb-drop-scratch.edb';
+
+/**
+ * The name the throwaway worker builds a single-workspace database under, when a
+ * Save has to strip a database of several down to the one its file is named for.
+ * Never a real file, for the same reason as the two above.
+ */
+const SPLIT_SCRATCH = '__edb-split-scratch.edb';
 
 /** The two ways a dropped file can meet a workspace of the same name. */
 const OVERWRITE_LOCAL = 'Replace the one here';
@@ -209,8 +217,97 @@ export function init(api: HostApi): void {
    */
   type SaveTarget = 'file' | 'no-handle' | 'none';
 
+  /** Where a save landed, and any file it wrote besides the one it was asked to. */
+  interface SaveResult {
+    where: SaveTarget;
+    /** Files given to workspaces that had none — see {@link fileTheStranded}. */
+    alsoWrote: string[];
+  }
+
   /**
-   * Write the database to the user's file.
+   * A database holding just `workspaceId`, as bytes.
+   *
+   * Built in a THROWAWAY worker on the memory substrate, because the pool is
+   * exclusive origin-wide and the live session holds it — the same arrangement
+   * `overwriteInFile`, `bringWorkspaceIn` and `buildEdbFile` all rely on. The live
+   * database is never touched: this reads out of it and writes into the scratch.
+   *
+   * The source store is scoped explicitly rather than taken as `api.store`, so the
+   * same function serves the ACTIVE workspace and a passenger the tab is not
+   * looking at.
+   */
+  async function workspaceOnlyBytes(workspaceId: string, label: string): Promise<Uint8Array> {
+    const scratch = createEdbBridge();
+    try {
+      await scratch.open(null, SPLIT_SCRATCH);
+      await copyWorkspace(
+        createIpcDataStore(storeBridge(), () => workspaceId),
+        createIpcDataStore(scratch, () => workspaceId),
+        workspaceId,
+        (p) => setAppProgress({ label, detail: p.label }),
+      );
+      return await scratch.export();
+    } finally {
+      clearAppProgress();
+      scratch.terminate();
+    }
+  }
+
+  /**
+   * The bytes this workspace's file should hold: this workspace, and nothing else.
+   *
+   * `export()` — the whole database — is still the fast path, and the one every
+   * correct workspace file takes, because a database holding one workspace already
+   * IS that file. A database holding several has to be filtered, which costs a copy
+   * through a scratch worker.
+   *
+   * This is the fix for two workspaces sharing a file. `export()` alone wrote
+   * `local.edb`'s entire workspace list into whichever file the active workspace was
+   * named after. See `db/edb/one-per-file.ts`.
+   */
+  async function bytesForFile(bridge: NonNullable<ReturnType<typeof edbBridge>>): Promise<Uint8Array> {
+    const ids = (await api.store.workspaces.find()).map((w) => w.id);
+    const active = api.workspaceId();
+    if (!active || writableWholesale(ids)) return bridge.export();
+    return workspaceOnlyBytes(active, `Saving ${spaceFileName(active)}`);
+  }
+
+  /**
+   * Give every other workspace in this database a file of its own.
+   *
+   * Not tidiness — it is what stops the filtered write above losing data. A
+   * workspace that arrived in this database from New workspace, a dropped `.edb` or
+   * the legacy import has never had a file; its only copy on disk used to be the
+   * passenger seat inside the active workspace's file. Now that file holds one
+   * workspace, so without this the passenger would exist nowhere but this browser —
+   * and `reloadActiveFromFile` replaces the database with the file's contents.
+   *
+   * Only in a connected FOLDER: a lone file handle is permission to write that one
+   * file and nothing else, so there is nowhere to put them. Idempotent, so the
+   * second save finds every file already there and writes nothing.
+   */
+  async function fileTheStranded(): Promise<string[]> {
+    const dir = await connectedFolder();
+    if (!dir) return [];
+    const active = api.workspaceId();
+    if (!active) return [];
+    const ids = (await api.store.workspaces.find()).map((w) => w.id);
+    const missing = withoutTheirOwnFile(ids, active, await listWorkspaceFiles(dir));
+    const wrote: string[] = [];
+    for (const id of missing) {
+      const name = spaceFileName(id);
+      const handle = await fileInFolder(dir, name, true);
+      if (!handle) continue;
+      await writeBytes(handle, await workspaceOnlyBytes(id, `Giving ${name} its own file`));
+      const facts = await factsOfHandle(handle);
+      if (facts) recordAgreement(name, facts);
+      wrote.push(name);
+    }
+    return wrote;
+  }
+
+  /**
+   * Write the workspace to the user's file.
    *
    * The ONLY durable copy this makes outside the browser. There is no
    * second, IndexedDB-held copy any more: the OPFS pool already survives a
@@ -220,22 +317,24 @@ export function init(api: HostApi): void {
    * Save does not hand over a download either. A save is about the workspace
    * surviving; producing a copy to give away is what Export is for.
    */
-  async function persist(): Promise<SaveTarget> {
+  async function persist(): Promise<SaveResult> {
     const bridge = edbBridge();
-    if (!bridge) return 'none';
+    if (!bridge) return { where: 'none', alsoWrote: [] };
     const handle = edbHandle();
-    if (!handle) return 'no-handle';
+    if (!handle) return { where: 'no-handle', alsoWrote: [] };
     if (!(await ensureWritable(handle, true))) {
       await api.ui.dialogs.alert('easyDBAccess is not allowed to write that file. Run the "Connect workspace folder" command to grant it again.', 'Save');
-      return 'none';
+      return { where: 'none', alsoWrote: [] };
     }
-    await writeBytes(handle, await bridge.export());
-    // The file now IS this database, so record what it looks like. That is what
+    await writeBytes(handle, await bytesForFile(bridge));
+    // The file now holds this workspace, so record what it looks like. That is what
     // lets a later sync tell "someone else wrote this file" from "we wrote it
     // ourselves" — see `file-stamp.ts`.
     const facts = await factsOfHandle(handle);
     if (facts) recordAgreement(activeEdbName(), facts);
-    return 'file';
+    // After the file the user asked for, never before: a failure here must not cost
+    // them the save they came for.
+    return { where: 'file', alsoWrote: await fileTheStranded() };
   }
 
   /**
@@ -259,7 +358,7 @@ export function init(api: HostApi): void {
 
   const autosave = createAutosavePolicy({
     save: async () => {
-      if ((await persist()) !== 'no-handle') return;
+      if ((await persist()).where !== 'no-handle') return;
       // Same rule as a manual Save: a connected folder needs no question. The
       // folder's grant covers creating the file, so this works from a timer,
       // which has no user gesture of its own.
@@ -526,9 +625,9 @@ export function init(api: HostApi): void {
   });
 
   async function save(): Promise<void> {
-    let where: SaveTarget;
+    let result: SaveResult;
     try {
-      where = await persist();
+      result = await persist();
     } catch (err) {
       // Not a toast: a message about a save that did not happen must not vanish
       // after seven seconds. Everything saved before this is still intact — the
@@ -536,7 +635,7 @@ export function init(api: HostApi): void {
       await api.ui.dialogs.alert(`The workspace could not be saved: ${err instanceof Error ? err.message : String(err)}`, 'Save');
       return;
     }
-    if (where === 'no-handle') {
+    if (result.where === 'no-handle') {
       // A connected folder is already an answer to "where does this go?", so the
       // first Save after connecting one asks nothing.
       const dir = await connectedFolder();
@@ -544,13 +643,17 @@ export function init(api: HostApi): void {
       else await askForSaveTarget();
       return;
     }
-    if (where === 'none') return;
+    if (result.where === 'none') return;
     autosave.markClean();
     // Names the file. "Workspace saved" left the one question a save raises
     // unanswered — saved WHERE — and with a workspace folder in play the answer is
     // not obvious: the file is named after the workspace, not after what the user
     // last picked in a dialog.
-    api.ui.dialogs.toast(`Workspace saved to ${activeEdbName()}`, { kind: 'success' });
+    //
+    // Any file written for a workspace that had none is named too. A Save that
+    // quietly produced four files nobody asked for would be the more surprising of
+    // the two, and the note only appears on the save that produces them.
+    api.ui.dialogs.toast(`Workspace saved to ${activeEdbName()}.${alsoWroteNote(result.alsoWrote)}`, { kind: 'success' });
   }
 
   /**

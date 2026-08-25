@@ -183,6 +183,14 @@ So there is nothing to switch off. To leave a file, pick another workspace from
 the list. To go back to it, pick it again — the app remembers which file each
 workspace belongs to.
 
+Until v0.0.427 that promise was only half kept: Save wrote every workspace in this
+browser into the file, so `sales.edb` held `sales` **and** everything else you had.
+Two workspaces then shared one file, the list showed both under that name, and a
+file you sent someone carried workspaces its name denied. Now a Save writes one
+workspace, and any workspace that had no file of its own is given one in the same
+folder — the message names them. It happens once; after that each workspace has its
+file and Save writes only yours.
+
 **Hover an entry to see which file it is in.** The list shows names only — a list
 of "workspace ┈ workspace.edb" reads every name twice — so the file name is a
 tooltip, on every entry including the one you are in. A workspace that has never
