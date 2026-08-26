@@ -7,6 +7,7 @@ import { defineToastHost } from '@marccawood/lit-toast';
 import { getContext } from '../app-context.js';
 import { hasColumnDrag } from '../table/column-drag.js';
 import { CHROME_SETTINGS_ID, CHROME_SETTINGS_NAME, chromeSettingsFields, readButtonText, readHiddenButtons } from './chrome-settings.js';
+import { TITLEBAR_BUTTONS } from '../window-mgr/titlebar-buttons.js';
 import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
 import '../dialogs/csv-paste-dialog.js';
 import type { CsvPasteDialog } from '../dialogs/csv-paste-dialog.js';
@@ -490,7 +491,7 @@ export class AppShell extends LitElement {
    * own button, which needs its own switch without a reload.
    */
   private async syncChromeSettings(api: HostApi) {
-    api.ui.registerSettings(CHROME_SETTINGS_ID, CHROME_SETTINGS_NAME, chromeSettingsFields(this.headerButtons, this.footerButtons));
+    api.ui.registerSettings(CHROME_SETTINGS_ID, CHROME_SETTINGS_NAME, chromeSettingsFields(this.headerButtons, this.footerButtons, TITLEBAR_BUTTONS));
     await this.readChromeSettings(api);
   }
 
@@ -641,7 +642,7 @@ export class AppShell extends LitElement {
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
           <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
-            ><span class="version">v0.0.446</span></a
+            ><span class="version">v0.0.447</span></a
           ></strong
         >
         ${this.shownButtons('header')

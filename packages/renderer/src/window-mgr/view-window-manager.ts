@@ -53,6 +53,7 @@ import type { VizPanel } from '../viz/viz-panel.js';
 // Core header search box — the same component the table windows use.
 import '../chrome/panel-search.js';
 import { createColorButton } from './color-button.js';
+import { titlebarButtonHidden } from './titlebar-settings.js';
 import { readWindowColor, writeWindowColor } from './window-color.js';
 
 /**
@@ -625,16 +626,20 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
   // box: this is a setting, not the control the window is used through.
   let colorOverride: string | null = null;
   const kindColor = isViz ? VIZ_PANEL_COLOR : VIEW_PANEL_COLOR;
-  controlbar?.prepend(
-    createColorButton({
-      current: () => colorOverride,
-      onPick: async (color: string | null) => {
-        colorOverride = color;
-        panel.setHeaderColor(color ?? kindColor);
-        await writeWindowColor(ctx.store, inst.id, color);
-      },
-    }),
-  );
+  const colorBtn = createColorButton({
+    current: () => colorOverride,
+    onPick: async (color: string | null) => {
+      colorOverride = color;
+      panel.setHeaderColor(color ?? kindColor);
+      await writeWindowColor(ctx.store, inst.id, color);
+    },
+  });
+  controlbar?.prepend(colorBtn);
+  // The same Settings switch a table window honours — one answer for every
+  // titlebar, or the setting would mean "some windows".
+  void titlebarButtonHidden(ctx.api.settings, 'window-color').then((off) => {
+    if (off) colorBtn.remove();
+  });
   void readWindowColor(ctx.store, inst.id).then((color: string | null) => {
     if (!color) return;
     colorOverride = color;

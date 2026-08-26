@@ -605,6 +605,16 @@ export class DataTable extends LitElement {
   /** The table itself is read-only (a reference, or the user marked it so). */
   @state() private tableReadonly = false;
   /**
+   * Draw the filter row — the boxes under the column headers? Toggled from the
+   * window's titlebar and stored on the table (`Table.filterRow`).
+   *
+   * Hiding it does not clear anything: the filters keep narrowing the grid and
+   * the header funnel still marks the columns carrying one, so a table can come
+   * back with rows missing and the reason still on screen. That is deliberate —
+   * a toggle that silently widened the result would be a different feature.
+   */
+  @state() private filterRowShown = true;
+  /**
    * No editing at all, from either source. A reference table used to render
    * editors it could never honour: typing in a cell threw
    * `ReadOnlyReferenceError` only AFTER the user had committed the edit.
@@ -1472,6 +1482,8 @@ export class DataTable extends LitElement {
   }
 
   private applyTable(table: Table) {
+    // Absent means shown: every table that predates the toggle keeps its boxes.
+    this.filterRowShown = table.filterRow !== false;
     // Don't stomp on columns while a resize is live (same precedent as the
     // filter guard below): `onResizeStart` (see freezeColumnWidths) snapshots
     // every visible column's width into `this.columns` so the grid can switch
@@ -2556,24 +2568,26 @@ export class DataTable extends LitElement {
             })}
             <th style="width:${ACTION_COL_W}px"></th>
           </tr>
-          <tr class="filter-row">
-            ${cols.map((c) => {
-              if (c.filterable === false) return html`<th></th>`;
-              const opts = suggestions.get(c.field) ?? [];
-              return html`
-                <th>
-                  <filter-combobox
-                    .value=${this.filters[c.field] ?? ''}
-                    .options=${opts}
-                    placeholder="filter…"
-                    title="Filter: text = contains, ^text = starts with, !text = does not contain, NULL = empty, !NULL = has a value. Comma-separate for several values (a,b = a OR b; !a,!b excludes both); quote a value containing a comma."
-                    @filter-change=${(e: Event) => this.onFilterInput(c.field, (e as CustomEvent<{ value: string }>).detail.value)}
-                  ></filter-combobox>
-                </th>
-              `;
-            })}
-            <th></th>
-          </tr>
+          ${this.filterRowShown
+            ? html`<tr class="filter-row">
+                ${cols.map((c) => {
+                  if (c.filterable === false) return html`<th></th>`;
+                  const opts = suggestions.get(c.field) ?? [];
+                  return html`
+                    <th>
+                      <filter-combobox
+                        .value=${this.filters[c.field] ?? ''}
+                        .options=${opts}
+                        placeholder="filter…"
+                        title="Filter: text = contains, ^text = starts with, !text = does not contain, NULL = empty, !NULL = has a value. Comma-separate for several values (a,b = a OR b; !a,!b excludes both); quote a value containing a comma."
+                        @filter-change=${(e: Event) => this.onFilterInput(c.field, (e as CustomEvent<{ value: string }>).detail.value)}
+                      ></filter-combobox>
+                    </th>
+                  `;
+                })}
+                <th></th>
+              </tr>`
+            : nothing}
         </thead>
         <tbody>
           ${topPad > 0

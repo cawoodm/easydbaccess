@@ -31,6 +31,8 @@ import { forgetRowRequest } from '../table/visible-request.js';
 import { sanitizeGeometry, byAscendingZ } from './geometry.js';
 import { tableKind, panelColor, TABLE_KIND_ICONS } from './table-kind.js';
 import { createColorButton } from './color-button.js';
+import { createFilterRowButton } from './filter-row-button.js';
+import { titlebarButtonHidden } from './titlebar-settings.js';
 import { readWindowColor, writeWindowColor } from './window-color.js';
 import { nextFrontZ } from './front-order.js';
 import { registerPanel, unregisterPanel } from './panel-registry.js';
@@ -434,16 +436,40 @@ function openPanel(t: Table, ctx: AppContext): void {
   const paintChrome = (): void => {
     panel.setHeaderColor(colorOverride ?? panelColor(curTable ?? t));
   };
-  controlbar?.prepend(
-    createColorButton({
-      current: () => colorOverride,
-      onPick: async (color: string | null) => {
-        colorOverride = color;
-        paintChrome();
-        await writeWindowColor(ctx.store, t.id, color);
-      },
-    }),
-  );
+  const colorBtn = createColorButton({
+    current: () => colorOverride,
+    onPick: async (color: string | null) => {
+      colorOverride = color;
+      paintChrome();
+      await writeWindowColor(ctx.store, t.id, color);
+    },
+  });
+  controlbar?.prepend(colorBtn);
+  // Settings can take either titlebar button away. Read after the window is on
+  // screen, like the colour: `openPanel` is synchronous by design, so a button
+  // the user switched off is removed a beat later rather than never appearing.
+  // Removing beats not-adding — the read is async and the controlbar's order
+  // would otherwise depend on which read finished first.
+  void titlebarButtonHidden(ctx.api.settings, 'window-color').then((off) => {
+    if (off) colorBtn.remove();
+  });
+
+  // The funnel: show or hide the filter row for THIS table. Kept on the table
+  // record, so it survives a reload and travels with the workspace.
+  const filterBtn = createFilterRowButton({
+    shown: () => (curTable ?? t).filterRow !== false,
+    onToggle: async (next: boolean) => {
+      // Written straight to the store rather than to a local flag first: the
+      // grid reads the same record through its own subscription, so one write is
+      // what moves both. `undefined` for the default, so a table that never
+      // touched the toggle carries no field at all.
+      await ctx.store.tables.patch(t.id, { filterRow: next ? undefined : false, updatedAt: Date.now() });
+    },
+  });
+  controlbar?.prepend(filterBtn.el);
+  void titlebarButtonHidden(ctx.api.settings, 'filter-row').then((off) => {
+    if (off) filterBtn.el.remove();
+  });
   void readWindowColor(ctx.store, t.id).then((color: string | null) => {
     if (!color) return;
     colorOverride = color;
@@ -462,6 +488,8 @@ function openPanel(t: Table, ctx: AppContext): void {
     const cur = all.find((x) => x.id === t.id);
     if (!cur) return;
     updateInfoBtn(cur);
+    // `updateInfoBtn` has just set `curTable`, which is what the funnel reads.
+    filterBtn.refresh();
     if (displayName(cur) !== lastTitle) {
       lastTitle = displayName(cur);
       renderTitle();
