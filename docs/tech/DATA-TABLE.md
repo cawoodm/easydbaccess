@@ -24,12 +24,25 @@ fallback — see `PLUGINS.md`'s Views section). Whichever is set changes what
 - **View-bound mode** (`viewInstanceId` set) — column **definitions** still
   come from the underlying `Table` (kept live via a `tables.subscribe()`, so
   a column rename/type-change flows through), but **presentation** — which
-  columns show, their order, their widths, sort, and filters — is read from
-  and written back to the bound `ViewInstance` instead (`applyView()`).
-  `ViewInstance.visibleColumns` (an ordered field list) resolved against the
-  table's column defs, with any `columnWidths` overlaid, is what actually
-  renders; a column the user removed from the underlying table is silently
-  skipped.
+  columns show, their order, their widths, their RENDERER, sort, and filters —
+  is read from and written back to the bound `ViewInstance` instead
+  (`applyView()`).
+
+  The resolution is `viewColumnSpecs` in **`views/view-columns.ts`** (pure,
+  unit-tested), and `view-window.ts` builds its `$TOKEN` columns from the same
+  function — so a view cannot draw one way as a grid and another through its
+  template. `visibleColumns` (an ordered field list) selects and orders,
+  `columnWidths` and `columnRenderers` overlay, and a column the user removed
+  from the underlying table is silently skipped rather than faked. Only `width`
+  and `renderer` are ever replaced: a view must not be able to change what a
+  column IS, because grid mode writes THROUGH the view and the type and the
+  constraints are what keep that write honest (`commitCell`).
+
+  Its editor is `dialogs/view-columns-dialog.ts`, reached from the view footer's
+  **Columns** button in both modes. Until v0.0.434 that button was a checkbox
+  popover offering visibility only, in grid mode only — so the only way to change
+  a renderer for one view was to change the TABLE's column, which every other
+  view and the grid then followed.
 
 Both `bind()` paths subscribe to their respective collection so external
 edits — the column editor, another device's sync pull, a script renderer

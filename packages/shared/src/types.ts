@@ -545,6 +545,20 @@ export interface ViewInstance {
   pillFilters?: Record<string, string> | undefined;
   /** Column fields to show, in order (snapshotted from the table). */
   visibleColumns: string[];
+  /**
+   * Column field → the renderer THIS view draws it with, overriding the table's
+   * `ColumnSpec.renderer`.
+   *
+   * The view owns how a column looks; the table owns what it is. A markdown column
+   * is a one-line preview in the grid you edit in and full prose in the view you
+   * read it in, and before this the only way to say so was to change the table's
+   * column — which every other view and the grid itself then followed.
+   *
+   * Absent for a column ⇒ the table's renderer. Absence rather than `''`, so a
+   * view holding no opinion can be told from one that holds several. The rule is
+   * `views/view-columns.ts`, shared by the grid and the template path.
+   */
+  columnRenderers?: Record<string, string> | undefined;
   /** Template token (without the leading `$`) → column field. */
   mapping: Record<string, string>;
   /**

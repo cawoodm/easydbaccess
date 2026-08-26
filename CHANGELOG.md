@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ A view has its own column list: which columns show, and what draws each one — the table and every other view keep theirs (v0.0.435)
 - ✨ Two more ways to arrange the windows: one column each at full height, or one row each at full width (v0.0.432)
 
 ### Bugs

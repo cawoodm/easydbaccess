@@ -11,6 +11,7 @@ import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
 import '../chrome/filter-combobox.js';
 import { searchRowsByField } from '../search/text-search.js';
+import { viewColumnSpecs } from '../views/view-columns.js';
 import { matchesColumnFilter } from '@easydb/shared';
 import { FACET_MAX_LEN, FACET_MAX_OPTIONS, facetable, facetCounts, facetValues } from '../search/facet-values.js';
 import { GRID_SETTINGS_ID, readHighlightErrors, readHighlightNulls, readSortDescFirst, readWindowRowsFrom, WINDOW_ROWS_FROM_DEFAULT } from './grid-settings.js';
@@ -1550,15 +1551,13 @@ export class DataTable extends LitElement {
   private applyView() {
     const inst = this.viewInst;
     if (!inst) return;
-    const byField = new Map(this.tableColumns.map((c) => [c.field, c]));
-    const widths = inst.columnWidths ?? {};
-    this.columns = inst.visibleColumns
-      .map((f) => byField.get(f))
-      .filter((c): c is ColumnSpec => !!c)
-      .map((c) => {
-        const w = widths[c.field];
-        return typeof w === 'number' ? { ...c, width: w } : c;
-      });
+    // The table says what a column IS, the view says how it LOOKS — width and
+    // renderer. One rule, shared with the template path in `view-window.ts`, so a
+    // view cannot look one way as a grid and another through its template.
+    this.columns = viewColumnSpecs(this.tableColumns, inst.visibleColumns, {
+      widths: inst.columnWidths,
+      renderers: inst.columnRenderers,
+    });
     this.adoptQueryState(readSortSpecs(inst), { ...(inst.filters ?? {}) });
   }
 

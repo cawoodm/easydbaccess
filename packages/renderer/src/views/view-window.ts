@@ -5,8 +5,10 @@ import type { ColumnSpec, DataCollection, Row, ViewInstance, ViewTemplate } from
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViewsDialog } from '../dialogs/views-dialog.js';
+import { openViewColumnsDialog } from '../dialogs/view-columns-dialog.js';
 import { CELL_SLOT_CLASS, cyclePillValue, evaluateRows, extractFilterTokens, hasRowHtml, removePillValue, substituteRow, tokenValue, viewRows } from './view-render.js';
 import { persistPillFilters, withPillValue } from './pill-filters.js';
+import { viewColumnSpecs } from './view-columns.js';
 import { parseColumnFilter } from '@easydb/shared';
 import { facetable, facetCounts } from '../search/facet-values.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
@@ -300,35 +302,6 @@ export class ViewWindow extends LitElement {
       .vw-footer .mi {
         font-size: 1.05rem;
       }
-      .cols-menu {
-        position: absolute;
-        right: 0.4rem;
-        bottom: 100%;
-        margin-bottom: 0.25rem;
-        max-height: 40vh;
-        overflow: auto;
-        background: white;
-        border: 1px solid #d1d5db;
-        border-radius: 0.35rem;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
-        padding: 0.3rem;
-        z-index: 5;
-        min-width: 10rem;
-      }
-      .cols-menu label {
-        display: flex;
-        align-items: center;
-        gap: 0.4rem;
-        padding: 0.2rem 0.3rem;
-        font-size: 0.82rem;
-        color: #374151;
-        white-space: nowrap;
-        cursor: pointer;
-      }
-      .cols-menu label:hover {
-        background: #f3f4f6;
-        border-radius: 0.2rem;
-      }
     `,
   ];
 
@@ -341,7 +314,6 @@ export class ViewWindow extends LitElement {
   /** The underlying table's full column list — powers the show/hide menu. */
   @state() private tableColumns: ColumnSpec[] = [];
   @state() private rows: Row[] = [];
-  @state() private showColsMenu = false;
   private allRows: Row[] = [];
   private rowColl: DataCollection<Row> | null = null;
   /** Monotonic id per read, so a slow one cannot deliver over a fresher one. */
@@ -498,8 +470,9 @@ export class ViewWindow extends LitElement {
     if (table && inst.tableName !== table.name) {
       void ctx.store.viewInstances.patch(inst.id, { tableName: table.name });
     }
-    const byField = new Map(this.tableColumns.map((c) => [c.field, c]));
-    this.columns = inst.visibleColumns.map((f) => byField.get(f) ?? { field: f, label: f, type: 'string' as const });
+    // The same rule the grid uses (`data-table`'s `applyView`), so a per-view
+    // renderer applies to a `$TOKEN` exactly as it does to a cell.
+    this.columns = viewColumnSpecs(this.tableColumns, inst.visibleColumns, { renderers: inst.columnRenderers });
     // Track instance changes so filters / sort the grid persists (template-off
     // mode) flow straight into the template render — toggling back shows the
     // same rows the user just filtered.
@@ -802,7 +775,6 @@ export class ViewWindow extends LitElement {
       updatedAt: Date.now(),
     });
     this.instance = { ...this.instance, templateEnabled: next };
-    this.showColsMenu = false;
   }
 
   /** Open the Views manager straight into this view's template editor. */
@@ -829,19 +801,16 @@ export class ViewWindow extends LitElement {
     await ctx.store.viewInstances.remove(this.instance.id);
   }
 
-  /** Show/hide a column in template-off mode (persisted on the instance). */
-  private async toggleColumn(field: string) {
+  /**
+   * This view's own column editor: visibility and renderer, per column.
+   *
+   * Offered in BOTH modes, unlike the checkbox popover it replaces. Visibility is
+   * what the grid shows, and the renderer is what a `$TOKEN` goes through too — so
+   * a template view has the same reason to reach it. See `view-columns-dialog.ts`.
+   */
+  private editColumns() {
     if (!this.instance) return;
-    const cur = this.instance.visibleColumns;
-    const has = cur.includes(field);
-    const next = has ? cur.filter((f) => f !== field) : [...cur, field];
-    if (next.length === 0) return; // keep at least one column visible
-    const ctx = await getContext();
-    await ctx.store.viewInstances.patch(this.instance.id, {
-      visibleColumns: next,
-      updatedAt: Date.now(),
-    });
-    this.instance = { ...this.instance, visibleColumns: next };
+    openViewColumnsDialog(this.instance.id);
   }
 
   // -- render -----------------------------------------------------------------
@@ -1025,18 +994,10 @@ export class ViewWindow extends LitElement {
   private renderFooter() {
     if (!this.instance) return nothing;
     const on = this.templateOn;
-    const visible = new Set(this.instance.visibleColumns);
     return html`<div class="vw-footer">
-      ${!on && this.showColsMenu
-        ? html`<div class="cols-menu">
-            ${this.tableColumns.map((c) => html`<label><input type="checkbox" .checked=${visible.has(c.field)} @change=${() => void this.toggleColumn(c.field)} />${c.label || c.field}</label>`)}
-          </div>`
-        : nothing}
-      ${!on
-        ? html`<button title="Show / hide columns" aria-label="Columns" @click=${() => (this.showColsMenu = !this.showColsMenu)}>
-            <span class="mi">view_column</span>
-          </button>`
-        : nothing}
+      <button title="Columns in this view: which ones show, and what draws them" aria-label="Columns" @click=${() => this.editColumns()}>
+        <span class="mi">view_column</span>
+      </button>
       <button aria-label="Edit view" title="Edit this view (rename, re-map columns)" @click=${() => this.editView()}>
         <span class="mi">edit</span>
       </button>

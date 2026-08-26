@@ -58,5 +58,25 @@ A view can also be marked **read-only**, which shows dates and checkboxes as
 plain text instead of editable controls — useful when the view is meant
 purely for display.
 
+## A view has its own columns
+
+The **Columns** button in a view's footer opens that view's own column list. Two
+things per column, and both belong to **this view only**:
+
+- **Show** — whether the view includes the column at all. Hide one and show it
+  again and it goes back where the table has it, not to the far right.
+- **Renderer** — what draws it. Leave it on _From the table_ (which names the
+  renderer it would inherit) or pick another.
+
+That second one is the useful one. A markdown column can be a one-line preview in
+the grid you edit in and full prose in the view you read it in; a URL can be a
+link in one place and plain text in another. The table keeps its own columns, and
+so does every other view of it.
+
+What a column IS — its type, whether it must have a value, whether it must be
+unique — is the table's, and is edited with **Edit columns** on the table itself.
+A view cannot change it, because you can still type into a view showing the plain
+grid, and those rules are what check what you type.
+
 If you delete and recreate a table under the same name, any view that was
 pointed at it reconnects automatically.

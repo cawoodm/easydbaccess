@@ -12,7 +12,7 @@ import { renameRowFields, type FieldRename } from '../table/column-merge.js';
 import { remapFilterFields, sameFilterMap } from '../table/filter-map.js';
 import { createValidator, issueMessages } from '../table/validate-rules.js';
 import { readRows } from '../db/row-reader.js';
-import { LEGACY_CELL_RENDERERS } from '../plugin-host/registries.js';
+import { offerableRenderers, rendererOptionsFor } from '../table/renderer-options.js';
 import {
   describeReferences,
   findTableReferences,
@@ -32,20 +32,6 @@ const TYPE_OPTIONS: ColumnType[] = ['string', 'text', 'number', 'boolean', 'date
  * rows of it is what left the editor with an empty preview on a big table.
  */
 const PREVIEW_ROWS = 100;
-
-/** Registered renderer names worth offering, sorted; legacy aliases dropped. */
-function offerableRenderers(registered: ReadonlyMap<string, string>): string[] {
-  return [...registered.keys()].filter((name) => !LEGACY_CELL_RENDERERS.has(name)).sort();
-}
-
-/**
- * The names to list for ONE column: the offerable ones, plus whatever the column
- * already carries. Without that last part a column saved under a renamed
- * renderer would show "— none —" while still having one.
- */
-function rendererOptionsFor(offered: readonly string[], current: string | undefined): string[] {
-  return current && !offered.includes(current) ? [...offered, current] : [...offered];
-}
 
 /**
  * Warn before a rename that will move name-based references with it.

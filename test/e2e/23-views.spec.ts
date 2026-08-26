@@ -462,9 +462,14 @@ test.describe('views', () => {
     }, id);
     expect(tableSort).toBeNull(); // the underlying table's sort is untouched
 
-    // Hide a column via the footer columns menu → persisted on the instance.
+    // Hide a column via the view's own column editor → persisted on the instance.
+    // (Was a checkbox popover in the footer until v0.0.434; the editor also owns
+    // the per-view renderer — see `129-view-columns-editor.spec.ts`.)
     await vw.getByRole('button', { name: 'Columns' }).click();
-    await vw.locator('.cols-menu label', { hasText: 'description' }).locator('input').uncheck();
+    const colsEditor = page.locator('view-columns-dialog dialog');
+    await expect(colsEditor).toBeVisible({ timeout: 10_000 });
+    await colsEditor.getByLabel('Show description', { exact: false }).uncheck();
+    await colsEditor.getByRole('button', { name: 'Done' }).click();
     // Data-column headers carry a title attribute; the trailing action th does
     // not. Started with 4 columns → 3 after hiding "description".
     await expect(grid.locator('thead tr').first().locator('th[title]')).toHaveCount(3);
