@@ -6,7 +6,6 @@
 // shows them with — are testable without a dialog, a store or a grid.
 
 import type { ColumnSpec } from '@easydb/shared';
-import { activeColumnScript } from '@easydb/shared';
 
 /**
  * The value a column starts a new record with.
@@ -40,14 +39,19 @@ export function blankRecord(columns: readonly ColumnSpec[]): Record<string, unkn
 }
 
 /**
- * A column the user cannot be asked for.
+ * A column the user cannot be asked for: one with no write target at all.
  *
- * A scripted column is DERIVED — its value comes from `render(row)` every time
- * it is shown, so there is nowhere to put an answer. Same reasoning as the grid,
- * which makes those cells read-only.
+ * That is `readonly` — a Projection's computed and secondary-source columns,
+ * which have nowhere to put an answer.
+ *
+ * A SCRIPTED column is not one of these, though it used to be treated as one. Its
+ * script may read the column's own stored cell, and the grid now shows that cell
+ * whenever the script declines (see `scriptDeclined`) — so the stored value is
+ * real, editable data, and a new record that could never be given one started
+ * life with the script's input missing.
  */
 export function isDerived(c: ColumnSpec): boolean {
-  return activeColumnScript(c) !== undefined;
+  return c.readonly === true;
 }
 
 /**

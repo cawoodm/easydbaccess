@@ -7,7 +7,7 @@
 // and the snapshotted filter/sort a view instance applies.
 
 import type { ColumnSpec, Row, ViewInstance } from '@easydb/shared';
-import { activeColumnScript, arrayMembers, composeColumnFilter, matchesColumnFilter, parseColumnFilter, type FilterToken } from '@easydb/shared';
+import { activeColumnScript, arrayMembers, composeColumnFilter, matchesColumnFilter, parseColumnFilter, scriptDeclined, type FilterToken } from '@easydb/shared';
 import { runColumnScript } from '../util/column-script.js';
 import { formatByType } from '../util/local-datetime.js';
 
@@ -289,6 +289,10 @@ export function evaluateRow(row: Row, columns: readonly ColumnSpec[]): Row {
     const src = activeColumnScript(c);
     if (src === undefined) continue;
     const run = runColumnScript(src, row.data);
+    // A script that DECLINED (null/undefined) leaves the stored value alone, so
+    // the view filters, sorts and searches the same value the grid shows — see
+    // `scriptDeclined`.
+    if (run.ok && scriptDeclined(run.value)) continue;
     data ??= { ...row.data };
     data[c.field] = run.ok ? run.value : `⚠ ${run.label}`;
   }

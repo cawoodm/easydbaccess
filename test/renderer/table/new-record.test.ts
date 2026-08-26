@@ -47,28 +47,35 @@ describe('blankRecord', () => {
 });
 
 describe('isDerived', () => {
-  it('is true only for a column with a real script', () => {
+  it('is true only for a column with no write target — `readonly`', () => {
     expect(isDerived(col('a'))).toBe(false);
-    expect(isDerived(col('a', { script: '   ' }))).toBe(false);
-    expect(isDerived(col('a', { script: 'function render(row){return 1}' }))).toBe(true);
+    expect(isDerived(col('a', { readonly: true }))).toBe(true);
+  });
+
+  it('is FALSE for a scripted column, which has a stored cell underneath', () => {
+    // A script may read its own column's stored value, and the grid shows that
+    // value whenever the script declines. So there is somewhere to put an answer,
+    // and a new record has to be able to carry one.
+    expect(isDerived(col('a', { script: 'function render(row){return 1}' }))).toBe(false);
   });
 });
 
 describe('recordFields', () => {
-  const columns = [col('name'), col('secret', { hidden: true }), col('total', { script: 'function render(row){return 1}' }), col('note')];
+  const columns = [col('name'), col('secret', { hidden: true }), col('total', { script: 'function render(row){return 1}' }), col('computed', { readonly: true }), col('note')];
 
   it('asks for the visible, writable fields in column order', () => {
-    expect(recordFields(columns, false).map((c) => c.field)).toEqual(['name', 'note']);
+    // `total` is scripted and IS asked for: its script reads the stored cell.
+    expect(recordFields(columns, false).map((c) => c.field)).toEqual(['name', 'total', 'note']);
   });
 
   it('reveals hidden fields when asked, still leaving derived ones out', () => {
-    // A scripted column has nowhere to put an answer, so "all fields" does not
+    // A `readonly` column has nowhere to put an answer, so "all fields" does not
     // mean it either.
-    expect(recordFields(columns, true).map((c) => c.field)).toEqual(['name', 'secret', 'note']);
+    expect(recordFields(columns, true).map((c) => c.field)).toEqual(['name', 'secret', 'total', 'note']);
   });
 
   it('is empty for a table whose every column is derived', () => {
-    expect(recordFields([col('a', { script: 'function render(row){return 1}' })], true)).toEqual([]);
+    expect(recordFields([col('a', { readonly: true })], true)).toEqual([]);
   });
 });
 
@@ -77,7 +84,9 @@ describe('hasMoreFields', () => {
     expect(hasMoreFields([col('a'), col('b', { hidden: true })])).toBe(true);
     expect(hasMoreFields([col('a'), col('b')])).toBe(false);
     // A hidden DERIVED column is not revealable, so it is not "more fields".
-    expect(hasMoreFields([col('a'), col('b', { hidden: true, script: 'function render(row){return 1}' })])).toBe(false);
+    expect(hasMoreFields([col('a'), col('b', { hidden: true, readonly: true })])).toBe(false);
+    // A hidden SCRIPTED one is revealable — it has a stored cell to fill in.
+    expect(hasMoreFields([col('a'), col('b', { hidden: true, script: 'function render(row){return 1}' })])).toBe(true);
   });
 });
 

@@ -41,6 +41,24 @@ export function activeValidateScript(col: Pick<ColumnSpec, 'validate' | 'validat
 }
 
 /**
+ * Did the script decline to answer?
+ *
+ * `render(row)` returning `null` — or falling off the end, which returns
+ * `undefined` — means "I have nothing to say about this row", and the column
+ * shows its STORED value instead. That is what makes a scripted column editable:
+ * a script that decorates only the rows it recognises leaves the others as
+ * ordinary cells, which the user can type into, and the script can then read what
+ * they typed on the next render.
+ *
+ * An empty string is NOT a decline. `return ''` is an answer — "show nothing
+ * here" — and a script that computes a label for some rows and deliberately
+ * blanks it for others has to be able to say so.
+ */
+export function scriptDeclined(value: unknown): boolean {
+  return value === null || value === undefined;
+}
+
+/**
  * The three states the column editor's two script buttons paint, and the only
  * place the vocabulary is defined.
  *

@@ -22,7 +22,7 @@ import { writeColumnDrag } from './column-drag.js';
 import { nextSortSpecs } from './sort-cycle.js';
 import { runColumnScript } from '../util/column-script.js';
 import { validateValue } from './validate-value.js';
-import { activeColumnScript, arrayMembers } from '@easydb/shared';
+import { activeColumnScript, arrayMembers, scriptDeclined } from '@easydb/shared';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cachedRowCount, rememberRowCount } from './row-count-cache.js';
 import { rememberRowRequest } from './visible-request.js';
@@ -1677,22 +1677,26 @@ export class DataTable extends LitElement {
    * handler at all. Renderers that honour `readonly` (boolean, date, datetime)
    * are unaffected and stay display-only.
    *
-   * A scripted column with no renderer stays plain read-only text: there is no
-   * editor to point at the stored value.
+   * Returns `null` when the script DECLINED — `render(row)` gave back `null` or
+   * `undefined`. The caller then draws the column's ordinary cell over the stored
+   * value, editor and all, which is the only way the raw content a script reads
+   * can be typed in the first place. See `scriptDeclined`.
    */
   private renderScriptedCell(row: Row, col: ColumnSpec) {
     const run = runColumnScript(activeColumnScript(col), row.data);
     if (!run.ok) {
       return html`<span class="script-err" title=${run.message}>⚠ ${run.label}</span>`;
     }
+    // Nothing to say about this row: hand the cell back to its stored value.
+    if (scriptDeclined(run.value)) return null;
     const customTag = col.renderer ? this.cellRenderers?.get(col.renderer) : undefined;
     if (!customTag) {
       // No renderer (or an unknown name): show the computed value as text.
-      return html`${run.value == null ? '' : String(run.value)}`;
+      return html`${String(run.value)}`;
     }
     const tag = unsafeStatic(customTag);
     return staticHtml`<${tag}
-      .value=${run.value ?? ''}
+      .value=${run.value}
       .rawValue=${row.data[col.field] ?? ''}
       .column=${col}
       .row=${row.data}
@@ -1712,7 +1716,12 @@ export class DataTable extends LitElement {
     // it duplicated this generic path and was removed, so a scripted column
     // always takes this branch now regardless of `col.renderer`.
     if (activeColumnScript(col) !== undefined) {
-      return this.renderScriptedCell(row, col);
+      const computed = this.renderScriptedCell(row, col);
+      // `null` is the script declining this row (see `renderScriptedCell`). The
+      // column then falls through and draws itself like any other — which is what
+      // makes a scripted column editable at all, since the stored value is what
+      // the script reads.
+      if (computed !== null) return computed;
     }
     // A cell is non-editable when the whole table/view is read-only OR the
     // column itself is flagged `readonly` (e.g. a Projection's computed and

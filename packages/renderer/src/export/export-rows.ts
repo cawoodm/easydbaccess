@@ -12,7 +12,7 @@
  */
 
 import type { ColumnSpec, DataCollection, ExportOptions, Row, Table } from '@easydb/shared';
-import { activeColumnScript, arrayMembers } from '@easydb/shared';
+import { activeColumnScript, arrayMembers, scriptDeclined } from '@easydb/shared';
 import { readRows } from '../db/row-reader.js';
 import { ROW_FETCH_CAP } from '../db/data-store-bridge.js';
 import { filterRows } from '../views/view-render.js';
@@ -106,7 +106,9 @@ function withScriptValues(rows: Row[], columns: readonly ColumnSpec[]): Row[] {
     for (const col of scripted) {
       if (data[col.field] != null && data[col.field] !== '') continue;
       const run = runColumnScript(activeColumnScript(col), r.data);
-      if (run.ok) data[col.field] = run.value as never;
+      // A declined script leaves the (empty) stored cell as it is — writing its
+      // `null` in would export the word "null" for a blank.
+      if (run.ok && !scriptDeclined(run.value)) data[col.field] = run.value as never;
     }
     return { ...r, data };
   });

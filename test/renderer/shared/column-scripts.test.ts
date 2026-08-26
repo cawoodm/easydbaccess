@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeColumnScript, activeValidateScript, scriptState } from '../../../packages/shared/src/column-scripts.js';
+import { activeColumnScript, activeValidateScript, scriptDeclined, scriptState } from '../../../packages/shared/src/column-scripts.js';
 import type { ColumnSpec } from '../../../packages/shared/src/types.js';
 
 /**
@@ -88,5 +88,31 @@ describe('scriptState', () => {
 
   it('is off only for a script explicitly switched off', () => {
     expect(scriptState('return 1;', false)).toBe('off');
+  });
+});
+
+describe('scriptDeclined', () => {
+  it('is true for null and undefined — "nothing to say about this row"', () => {
+    expect(scriptDeclined(null)).toBe(true);
+    // A script that falls off the end returns undefined, which means the same.
+    expect(scriptDeclined(undefined)).toBe(true);
+  });
+
+  it('is FALSE for an empty string, which is an answer', () => {
+    // `return ''` is "show nothing here". A script that computes a label for some
+    // rows and deliberately blanks it for others has to be able to say so, and
+    // folding that into "decline" would show the stored value instead.
+    expect(scriptDeclined('')).toBe(false);
+  });
+
+  it('is false for the other falsy values, which are all real answers', () => {
+    expect(scriptDeclined(0)).toBe(false);
+    expect(scriptDeclined(false)).toBe(false);
+    expect(scriptDeclined(NaN)).toBe(false);
+  });
+
+  it('is false for ordinary values', () => {
+    expect(scriptDeclined('text')).toBe(false);
+    expect(scriptDeclined({})).toBe(false);
   });
 });

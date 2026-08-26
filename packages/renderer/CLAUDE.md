@@ -198,3 +198,12 @@ suite's first click; `?tips=1` forces it back on.
   resolve all `import()` expressions otherwise.
 - Dev port is **5190** (not the default 5173) to avoid colliding with the
   legacy `minniDBMax`.
+- **`EASYDB_HMR=auto|ask|off`** picks what a source change does in dev, default
+  `auto`. Nothing in this app calls `import.meta.hot.accept`, so `auto` always
+  means a full page reload — and a reload here is not free: boot WRITES to the
+  database (the workspace record, the seeded view templates), which the store's
+  change broadcast turns into "unsaved changes", so the page comes back with a
+  red dot on Save, no open dialogs and no window layout. `ask` keeps the
+  watcher but sends the page a note instead of an update, and
+  `src/dev/hmr-prompt.ts` offers a Reload button. `off` disconnects the dev
+  client entirely. See the `hmr-ask-first` plugin in `vite.config.ts`.
