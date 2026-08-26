@@ -1,4 +1,5 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
+import { detectLink, linkTitle } from './link-detect.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'cell-link',
@@ -6,7 +7,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   type: 'cell-renderer',
   version: '0.2.0',
   description:
-    'Renderer for URL/email/phone cells. Inside a single cell, http(s) URLs render as <a target=_blank>, email addresses as <a href=mailto:>, phone-like values as <a href=tel:>, anything else falls back to a text input. A pencil toggles to edit mode.',
+    'Renderer for URL/email/phone cells. Inside a single cell, a URL of any scheme (http, https, file, and app schemes) renders as an anchor, email addresses as <a href=mailto:>, phone-like values as <a href=tel:>, anything else falls back to a text input. A pencil toggles to edit mode.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/cell-link.ts',
@@ -86,11 +87,12 @@ class CellLink extends HTMLElement {
     // Any editor from a previous paint is dead the moment we wipe the DOM.
     this._editor = null;
     const v = this._value;
-    // Priority: URL → email → phone. Email and URL never collide (no '@' in
-    // an http URL host that's also bare), but URLs are still checked first
-    // because http(s)://… is the unambiguous winner. Phone last because its
-    // shape (digits + separators) overlaps least with the other two.
-    const url = !this._editing ? detectUrl(v) : null;
+    // Priority: URL → email → phone. A URL is checked first because a scheme is
+    // the unambiguous winner — and it is what lets `mailto:a@b.com` be read as
+    // the URL it is rather than as an email address needing one prefixed. Phone
+    // last because its shape (digits + separators) overlaps least with the other
+    // two. See `link-detect.ts` for which schemes count.
+    const url = !this._editing ? detectLink(v) : null;
     const email = !this._editing && !url ? detectEmail(v) : null;
     const tel = !this._editing && !url && !email ? detectPhone(v) : null;
 
@@ -98,8 +100,10 @@ class CellLink extends HTMLElement {
       const wrap = document.createElement('span');
       wrap.style.cssText = 'display:flex;align-items:center;gap:0.25rem;width:100%;min-width:0;max-width:100%';
       const a = document.createElement('a');
-      a.href = url ? v : email ? `mailto:${v.trim()}` : `tel:${v.replace(/[^\d+]/g, '')}`;
-      if (url) {
+      a.href = url ? url.href : email ? `mailto:${v.trim()}` : `tel:${v.replace(/[^\d+]/g, '')}`;
+      // A new tab only for a `scheme://…` URL. `mailto:`/`tel:` hand off to
+      // another app, and a blank tab left behind is all the browser does with them.
+      if (url?.newTab) {
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
       }
@@ -110,7 +114,7 @@ class CellLink extends HTMLElement {
       // purely in CSS, and it re-flows live as the column is resized. The full
       // value stays in the title tooltip.
       a.style.cssText = 'flex:1 1 auto;min-width:0;display:block;color:#2563eb;text-decoration:underline;' + 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-      a.title = url ? `Open ${v}` : email ? `Email ${v}` : `Call ${v}`;
+      a.title = url ? linkTitle(url, location.protocol) : email ? `Email ${v}` : `Call ${v}`;
 
       const edit = document.createElement('button');
       edit.type = 'button';
@@ -184,12 +188,6 @@ class CellLink extends HTMLElement {
     if (!changed) return;
     this.dispatchEvent(new CustomEvent('change', { detail: { value: v }, bubbles: true, composed: true }));
   }
-}
-
-function detectUrl(s: string): string | null {
-  const t = s.trim();
-  if (/^https?:\/\/\S+$/i.test(t)) return t;
-  return null;
 }
 
 /**

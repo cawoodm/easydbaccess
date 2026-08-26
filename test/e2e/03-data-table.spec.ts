@@ -560,4 +560,47 @@ test.describe('data-table rendering', () => {
     await expect(panel.locator('cell-link input[type="text"]')).toHaveCount(1);
     await expect(panel.locator('cell-link input').nth(0)).toHaveValue('not a link at all');
   });
+
+  /**
+   * Any scheme, not just http(s) — `file:///` above all, which is what a table of
+   * local documents needs. The refusals matter as much as the links: a cell value
+   * arrives from an import or a workspace someone sent, so a `javascript:` value
+   * would be somebody else's script waiting for a click.
+   */
+  test('cell-link renders any scheme, and refuses the ones that run code', async ({ page }) => {
+    const id = await createTable(page, 'Docs', [{ field: 'target', renderer: 'link' }]);
+    await waitForPanel(page, id);
+    await addRow(page, id, { target: 'file:///C:/reports/june.pdf' });
+    await addRow(page, id, { target: 'file:///C:/My Documents/June Report.pdf' });
+    await addRow(page, id, { target: 'obsidian://open?vault=notes' });
+    await addRow(page, id, { target: 'javascript:alert(1)' });
+    await addRow(page, id, { target: 'TODO:fix the header' });
+
+    const panel = page.locator(`#${panelDomId(id)}`);
+    await expect(panel.locator('data-table tbody tr:not(.spacer)')).toHaveCount(5);
+
+    const fileLink = panel.locator('cell-link a[href="file:///C:/reports/june.pdf"]');
+    await expect(fileLink).toHaveCount(1);
+    expect(await fileLink.getAttribute('target')).toBe('_blank');
+    // A browser tab refuses the navigation silently, so the tooltip says so
+    // rather than letting the user find out by clicking into nothing.
+    expect(await fileLink.getAttribute('title')).toContain('cannot open a local file');
+
+    // A local path routinely has spaces: encoded in the href, left alone in the
+    // text the cell shows.
+    const spaced = panel.locator('cell-link a[href="file:///C:/My%20Documents/June%20Report.pdf"]');
+    await expect(spaced).toHaveCount(1);
+    await expect(spaced).toHaveText('file:///C:/My Documents/June Report.pdf');
+
+    await expect(panel.locator('cell-link a[href="obsidian://open?vault=notes"]')).toHaveCount(1);
+
+    // The two refusals fall back to a text input, like any other non-link value.
+    await expect(panel.locator('cell-link a')).toHaveCount(3);
+    const inputs = panel.locator('cell-link input[type="text"]');
+    await expect(inputs).toHaveCount(2);
+    // Row order. The value is set as a property, not an attribute, so it has to
+    // be read with `toHaveValue` rather than matched in the selector.
+    await expect(inputs.nth(0)).toHaveValue('javascript:alert(1)');
+    await expect(inputs.nth(1)).toHaveValue('TODO:fix the header');
+  });
 });

@@ -116,7 +116,7 @@ defaults to enabled but **can** be turned off by the user.
 | `cell-image`        | cell-renderer |       | `image` renderer: thumbnail + upload button; stores images as `data:` URIs.                                                                                                                                                                                                                                                                                                                                                                                      | `registerCellRenderer`                                             |
 | `cell-tags`         | cell-renderer |       | `tags` renderer for `array` columns: one pill per value of the list, with a pencil to edit the raw list. Set automatically on an `array` column at import time.                                                                                                                                                                                                                                                                                                  | `registerCellRenderer`                                             |
 | `cell-markdown`     | cell-renderer |       | `markdown` renderer for a column written in Markdown: one line of flattened plain text in the cell, the formatted value in the popup, clicking the text edits the source. Shares its cell with `preview` (`preview-cell.ts`) but never guesses the language.                                                                                                                                                                                                     | `registerCellRenderer`                                             |
-| `cell-link`         | cell-renderer |       | `link` renderer: detects http(s) URLs, email addresses, and phone numbers per-value and renders the matching `<a>` (target `_blank`/`mailto:`/`tel:`), with a pencil to switch to raw-text edit mode.                                                                                                                                                                                                                                                            | `registerCellRenderer`                                             |
+| `cell-link`         | cell-renderer |       | `link` renderer: detects a URL of ANY scheme (`file:///` included, script schemes refused), email addresses, and phone numbers per-value and renders the matching `<a>` (target `_blank`/`mailto:`/`tel:`), with a pencil to switch to raw-text edit mode.                                                                                                                                                                                                                                                            | `registerCellRenderer`                                             |
 | `import-data`       | importer      |       | Header "Import" button — a URL/file dialog with curated sample sources (Northwind JSON, a public CSV, Datasette examples) that runs `csv-import` and `json-import` through the import kernel and still routes Datasette to `datasette-import`; recognises a native `.db.json` dump and offers to restore the workspace instead of importing its tables; adds a per-table Refresh button for CSV/JSON snapshot origins.                                           | `registerHeaderButton`, `registerTableButton`                      |
 | `auto-sync`         | sync          |       | Background timer (1 min) that silently pushes local changes to the configured sync server and prompts to pull when the server has diverged. Shares its config with `server-sync` via `api.settings`.                                                                                                                                                                                                                                                             | `load()` (timer)                                                   |
 | `views`             | ui            |       | The View system: workspace-global HTML templates (header/row/footer with `$TOKEN` substitution) rendered read-only per table in their own windows, with auto-mapped tokens and an optional row limit; seeds a default "RSS Feed" template. Footer "Views" button opens the manager dialog; window lifecycle itself is core, not plugin, code.                                                                                                                    | `registerTableButton`, `load()` (template seeding)                 |
@@ -408,14 +408,36 @@ the table.
 ### cell-link
 
 Registers `link`. Per-value (not per-column) detection, in priority order:
-http(s) URL → email → phone-shaped string; the matching case renders an
-`<a>` (`target=_blank` for URLs, `mailto:` for emails, `tel:` for phone
-numbers), ellipsized to the current column width via CSS. A pencil icon
+URL → email → phone-shaped string; the matching case renders an
+`<a>` (`target=_blank` for a `scheme://…` URL, `mailto:` for emails, `tel:` for
+phone numbers), ellipsized to the current column width via CSS. A pencil icon
 toggles into a plain text `<input>` for editing (Enter commits, Escape
-cancels back to link view). Detection is heuristic — see
-`detectUrl`/`detectEmail`/`detectPhone` in `cell-link.ts` for the exact
-regexes and their false-positive guards (e.g. dates and multi-digit IDs are
-deliberately excluded from the phone match).
+cancels back to link view). The email and phone guards are heuristic — see
+`detectEmail`/`detectPhone` in `cell-link.ts` for the regexes and their
+false-positive guards (e.g. dates and multi-digit IDs are deliberately
+excluded from the phone match).
+
+**Any scheme counts as of v0.0.438** — `file:///`, `ftp://`, `obsidian://`,
+`vscode://` — where before it was `http(s)` only. The rule is `detectLink` in the
+pure `plugins/link-detect.ts`, shared with `auto-renderer` so the renderer and
+the column guess cannot disagree about what a URL is. Three parts of it are
+load-bearing:
+
+- **`javascript:`, `vbscript:` and `data:` are refused.** This is why "any scheme"
+  needs a rule at all: a cell value arrives from an import, a sync pull or a
+  workspace someone sent, so a `javascript:` value is somebody else's script
+  waiting for a click. Refused values fall back to the text input.
+- **A scheme with no `//` must be on a short allow-list** (`mailto`, `tel`, `sms`,
+  `geo`, `urn`, `magnet`, …). Otherwise `TODO:fix this` is a URI, and linking
+  prose is worse than missing an exotic scheme.
+- **`file:` may contain spaces**, because local paths do. They are percent-encoded
+  in the `href` and left as typed in the label.
+
+A browser tab refuses to navigate from `http(s)` to `file:` and says so only in
+the console, so `linkTitle` puts it in the tooltip instead. The packaged desktop
+app loads the renderer from `file:` itself, so there the link opens. Routing a
+`file:` click through Electron's `shell.openPath` would make it work in dev too,
+and is not wired.
 
 ## Importers
 

@@ -7,6 +7,21 @@ describe('inferRenderer', () => {
     expect(inferRenderer('string', ['https://example.com/a', 'http://example.com/b'])).toBe('link');
   });
 
+  it('picks link for any scheme, not only http(s)', () => {
+    // A column of local documents or app links is a column of links. Same rule
+    // the renderer uses — see `plugins/link-detect.ts`.
+    expect(inferRenderer('string', ['file:///C:/a.pdf', 'file:///C:/My Docs/b.pdf'])).toBe('link');
+    expect(inferRenderer('string', ['obsidian://open?vault=notes', 'obsidian://open?vault=work'])).toBe('link');
+    // And still not prose that happens to hold a colon.
+    expect(inferRenderer('string', ['TODO:one', 'TODO:two'])).toBeUndefined();
+  });
+
+  it('does not guess IMAGE for a local file, however it is named', () => {
+    // A browser tab will not load `file:///photo.png` into an <img> any more than
+    // it will navigate to it, so a grid of broken pictures is the wrong guess.
+    expect(inferRenderer('string', ['file:///C:/photos/a.png', 'file:///C:/photos/b.png'])).toBe('link');
+  });
+
   it('picks image for image URLs and data: URIs, in preference to link', () => {
     expect(inferRenderer('string', ['https://x.test/a.png', 'https://x.test/b.JPG?v=2'])).toBe('image');
     expect(inferRenderer('string', ['data:image/png;base64,AAAA'])).toBe('image');

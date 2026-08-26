@@ -15,6 +15,7 @@
 import type { ColumnSpec, ColumnType, HostApi, PluginModule } from '@easydb/shared';
 import { readRows } from '../db/row-reader.js';
 import { looksLikeImage } from '../util/image-source.js';
+import { isLinkValue } from './link-detect.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'auto-renderer',
@@ -45,6 +46,12 @@ const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?|#|$)/i;
 /** `<a>`, `<p class=…>`, `<br/>` — a real tag, not a bare `<` or "3 < 4". */
 const HTML_TAG = /<[a-z][a-z0-9-]*(\s[^<>]*)?\/?>/i;
 
+/**
+ * An http(s) URL, which is the only kind the IMAGE guess can use: a browser tab
+ * will not load `file:///photo.png` into an `<img>` any more than it will
+ * navigate to it, so guessing `image` for such a column would produce a grid of
+ * broken pictures. The LINK guess is wider — see `isLinkValue`.
+ */
 function isHttpUrl(s: string): boolean {
   return /^https?:\/\/\S+$/i.test(s);
 }
@@ -91,7 +98,9 @@ export function inferRenderer(type: ColumnType, samples: readonly unknown[]): st
   if (values.length === 0) return undefined;
 
   if (values.every(isImageValue)) return 'image';
-  if (values.every(isHttpUrl)) return 'link';
+  // Any scheme, so a column of `file:///…` paths or `obsidian://…` links is
+  // guessed as a link rather than left as text. Same rule the renderer uses.
+  if (values.every(isLinkValue)) return 'link';
   if (values.some((s) => HTML_TAG.test(s))) return 'preview';
   const avg = values.reduce((sum, s) => sum + s.length, 0) / values.length;
   if (avg > LONG_TEXT_CHARS) return 'preview';

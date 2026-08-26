@@ -202,12 +202,35 @@ rows to write to yet.
 
 | Renderer           | What it shows                                                                                                                                |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Link**           | Detects URLs, email addresses, and phone numbers and turns them into clickable links. A pencil icon lets you switch to editing the raw text. |
+| **Link**           | Detects URLs, email addresses, and phone numbers and turns them into clickable links. A pencil icon lets you switch to editing the raw text. See below for which URLs count. |
 | **Color**          | A color swatch and picker for hex color values.                                                                                              |
 | **Image**          | A thumbnail with an upload button; images are stored directly in the cell.                                                                   |
 | **HTML (preview)** | Shows the plain text of an HTML value, trimmed to a short length, with a popup icon to view the full rendered HTML.                          |
 | **HTML (render)**  | Renders the HTML directly in the cell, and lets you edit it inline.                                                                          |
 | **Script**         | Runs a small script you write to build the cell's HTML from the whole row — for fully custom layouts.                                        |
+
+#### What the Link renderer treats as a link
+
+**Any scheme**, not just the web: `https://…`, `file:///C:/reports/june.pdf`,
+`ftp://…`, and app links such as `obsidian://` or `vscode://`. A bare email
+address becomes a `mailto:` link and a phone-shaped value a `tel:` one.
+
+The whole cell has to be the link — a sentence with a URL in the middle of it
+stays text. The exception is a `file:` path, which may contain spaces, because
+local paths do.
+
+Two things are deliberately **not** linked:
+
+- `javascript:`, `vbscript:` and `data:` values. Following one runs it, and a cell
+  can arrive from an import, a sync or a workspace someone sent you. They show as
+  plain text.
+- Text that merely contains a colon, like `TODO:fix this`. A scheme with no `//`
+  only counts if it is one of the known ones (`mailto:`, `tel:`, `geo:`,
+  `magnet:` and a few more).
+
+**A `file:///` link opens in the desktop app, not in a browser tab.** A browser
+refuses to open a local file from a web page, and does it silently — hover the
+link and the tooltip says so. The text is still there to copy.
 
 ## Joining two tables by dragging a column
 
