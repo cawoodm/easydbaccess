@@ -9,18 +9,20 @@ import { deleteWorkspaceFlow, newWorkspaceFlow, switchWorkspaceFlow } from '../c
  * plugins add their own commands via `api.ui.registerCommand`.
  */
 export function registerCoreCommands(api: HostApi): void {
-  const windowCommands: Array<{ id: string; title: string; icon: string; run: () => void }> = [
+  const windowCommands: Array<{ id: string; title: string; icon: string; keywords?: string[]; run: () => void }> = [
     { id: 'windows:minimize-all', title: 'Minimize all windows', icon: 'remove', run: minimizeAllWindows },
     { id: 'windows:restore-all', title: 'Restore all windows', icon: 'crop_square', run: restoreAllWindows },
     { id: 'windows:maximize-all', title: 'Maximize all windows', icon: 'fullscreen', run: maximizeAllWindows },
     { id: 'windows:cascade', title: 'Cascade windows', icon: 'view_agenda', run: cascadeAllWindows },
     { id: 'windows:tile', title: 'Tile windows', icon: 'grid_view', run: tileAllWindows },
-    { id: 'windows:columns', title: 'Arrange windows in columns', icon: 'view_column', run: arrangeInColumns },
-    { id: 'windows:rows', title: 'Arrange windows in rows', icon: 'table_rows', run: arrangeInRows },
+    // "tile" and "arrange" both find all three: a user who wants windows side by
+    // side does not know which of the words this app chose.
+    { id: 'windows:columns', title: 'Arrange in columns', icon: 'view_column', keywords: ['tile', 'side by side', 'vertical', 'split', 'compare'], run: arrangeInColumns },
+    { id: 'windows:rows', title: 'Arrange in rows', icon: 'view_stream', keywords: ['tile', 'stacked', 'horizontal', 'split'], run: arrangeInRows },
     { id: 'windows:close-all', title: 'Close all windows', icon: 'close', run: closeAllWindows },
   ];
   for (const c of windowCommands) {
-    api.ui.registerCommand({ id: c.id, title: c.title, group: 'Windows', icon: c.icon, run: c.run });
+    api.ui.registerCommand({ id: c.id, title: c.title, group: 'Windows', icon: c.icon, ...(c.keywords ? { keywords: c.keywords } : {}), run: c.run });
   }
 
   // Workspace commands. The header selector drives the same flows with a mouse;

@@ -17,6 +17,30 @@ these windows freely.
   the tab and reopen it, and your windows come back exactly as you left
   them, including which one was on top.
 
+## Arranging every window at once
+
+Press **Ctrl+K** and type `arrange` or `tile`. Four commands lay out every window
+that is not minimized, inside the part of the canvas you are looking at:
+
+| Command                | What you get                                            |
+| ---------------------- | ------------------------------------------------------- |
+| **Tile windows**       | A grid, as square as the number of windows allows.       |
+| **Arrange in columns** | One column each, side by side, every one full height.    |
+| **Arrange in rows**    | One row each, stacked, every one full width.             |
+| **Cascade windows**    | Staggered down and right, each title bar still visible.  |
+
+Columns are for reading the same rows across several tables: a grid puts the
+third table on a second row, where its rows line up with nothing. Rows are the
+same idea the other way round — good for wide tables.
+
+A **minimized** window is left alone. You parked it deliberately, so it stays
+parked and takes no space in the layout. The result is remembered, so a reload
+brings your arrangement back.
+
+With a lot of windows the slices get thin, and past about a dozen they start to
+overlap rather than shrink to nothing. Minimize what you are not reading, or use
+**Tile windows** instead.
+
 ## Panning and zooming your workspace
 
 If you have many windows, or one has drifted off-screen, the whole canvas
