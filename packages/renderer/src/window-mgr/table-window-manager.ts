@@ -30,6 +30,8 @@ import { forgetRowCount } from '../table/row-count-cache.js';
 import { forgetRowRequest } from '../table/visible-request.js';
 import { sanitizeGeometry, byAscendingZ } from './geometry.js';
 import { tableKind, panelColor, TABLE_KIND_ICONS } from './table-kind.js';
+import { createColorButton } from './color-button.js';
+import { readWindowColor, writeWindowColor } from './window-color.js';
 import { nextFrontZ } from './front-order.js';
 import { registerPanel, unregisterPanel } from './panel-registry.js';
 import { initRestack } from './restack.js';
@@ -424,6 +426,30 @@ function openPanel(t: Table, ctx: AppContext): void {
   };
   updateInfoBtn(t);
 
+  // The user's own titlebar colour, overriding the one this table's KIND gives
+  // it. Read after the window is on screen rather than before: `openPanel` is
+  // synchronous by design (a window must not wait on a store read to appear), so
+  // a chosen colour lands a beat after the default one. See `window-color.ts`.
+  let colorOverride: string | null = null;
+  const paintChrome = (): void => {
+    panel.setHeaderColor(colorOverride ?? panelColor(curTable ?? t));
+  };
+  controlbar?.prepend(
+    createColorButton({
+      current: () => colorOverride,
+      onPick: async (color: string | null) => {
+        colorOverride = color;
+        paintChrome();
+        await writeWindowColor(ctx.store, t.id, color);
+      },
+    }),
+  );
+  void readWindowColor(ctx.store, t.id).then((color: string | null) => {
+    if (!color) return;
+    colorOverride = color;
+    paintChrome();
+  });
+
   // A table's kind (normal/imported/referenced/connected) can change at
   // runtime — e.g. a plain table gains an `origin` after an import, or a
   // `source` after a live connect — so the titlebar icon and refreshable
@@ -444,7 +470,9 @@ function openPanel(t: Table, ctx: AppContext): void {
     if (kind !== lastKind) {
       lastKind = kind;
       panel.setHeaderLogo(TABLE_KIND_ICONS[kind]);
-      panel.setHeaderColor(panelColor(cur));
+      // Through `paintChrome`, so a live connect changing the kind does not
+      // repaint over a colour the user chose.
+      paintChrome();
     }
   });
 }

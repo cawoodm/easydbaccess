@@ -293,6 +293,33 @@ restoring it from the dock lands back on maximized, not merely normalized.
 `persistFlags()` keeps `maximized: true` in that case too, so the same
 behavior survives a reload (pinned by the `08-window-manager` e2e spec).
 
+## The titlebar colour, and overriding it
+
+A panel's colour is computed from what the window IS: `panelColor(table)` gives
+every table a shade of blue by kind (`table-kind.ts`), a view is teal and a
+visualization violet (`view-window-manager.ts`). The shell paints the window AND
+its minimized dock bar from the one `--eda-panel-color` value, so a docked window
+keeps its colour.
+
+On top of that, each window can carry a colour the USER picked, from the palette
+button both managers prepend to `.jsPanel-controlbar`
+(`color-button.ts` builds it, `window-color.ts` holds the list and the storage).
+Three things worth knowing:
+
+- **The override wins, and clearing it restores the KIND colour** — not a stored
+  "normal". So a table that gains a `source` while its window is open still takes
+  its new kind colour, unless the user has chosen one. Both managers repaint
+  through one function (`paintChrome` in the table manager) for that reason.
+- **It is a `settings` key, `window-color:<id>`, not a field on the record.** It
+  needs no change to the stored shape of a table, and a settings key is reachable
+  by a plugin — which the titlebar is not, since there is no registry for a
+  titlebar button. Keyed by TABLE id for a table window and by VIEW INSTANCE id
+  for a view, so two views of one table colour independently.
+- **The picker is a hand-rolled popover, not `AnchoredMenu`.** The shared menu
+  renders its `icon` as a Material ligature in one colour, so a swatch handed to
+  it comes out as literal `<svg …>` text. It is still a native `popover="auto"`,
+  so the browser owns the top layer and the light dismiss.
+
 ## Practical implications
 
 - **A panel's on-screen position is not its "real" position while minimized

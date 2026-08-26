@@ -51,6 +51,17 @@ can be panned and zoomed:
 - **On a desktop:** hold the right mouse button and drag anywhere on the
   empty background to pan.
 
+## Giving a window its own colour
+
+Every window is coloured by what it holds: tables are blue, a view is teal, a
+visualization violet. Once a workspace has a dozen tables that stops helping, so
+the **palette** button in a window's title bar lets you pick a colour for that one
+window. Pick **Kind** to put it back to the colour its type gives it.
+
+The colour is saved with the workspace, so it is there on the next visit and on
+any other machine the workspace reaches. Each window has its own — two views of
+the same table can be different colours.
+
 ## Closing vs. deleting a table
 
 Closing a table's window only **hides** it — your data is untouched, and you

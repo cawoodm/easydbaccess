@@ -52,6 +52,8 @@ import '../viz/viz-panel.js';
 import type { VizPanel } from '../viz/viz-panel.js';
 // Core header search box — the same component the table windows use.
 import '../chrome/panel-search.js';
+import { createColorButton } from './color-button.js';
+import { readWindowColor, writeWindowColor } from './window-color.js';
 
 /**
  * A view window's chrome — teal, ~6.6:1 against the white titlebar text.
@@ -614,7 +616,30 @@ function openPanel(inst: ViewInstance, ctx: AppContext): void {
   // corner is the easiest target to hit.
   const search = document.createElement('panel-search');
   (search as HTMLElement & { tableId: string }).tableId = inst.id;
-  panelEl?.querySelector('.jsPanel-controlbar')?.append(search);
+  const controlbar = panelEl?.querySelector('.jsPanel-controlbar');
+  controlbar?.append(search);
+
+  // The user's own titlebar colour. Same control and same store key as a table
+  // window's (`window-color.ts`), keyed by the view INSTANCE — two views of one
+  // table are two windows and colour independently. Prepended, unlike the search
+  // box: this is a setting, not the control the window is used through.
+  let colorOverride: string | null = null;
+  const kindColor = isViz ? VIZ_PANEL_COLOR : VIEW_PANEL_COLOR;
+  controlbar?.prepend(
+    createColorButton({
+      current: () => colorOverride,
+      onPick: async (color: string | null) => {
+        colorOverride = color;
+        panel.setHeaderColor(color ?? kindColor);
+        await writeWindowColor(ctx.store, inst.id, color);
+      },
+    }),
+  );
+  void readWindowColor(ctx.store, inst.id).then((color: string | null) => {
+    if (!color) return;
+    colorOverride = color;
+    panel.setHeaderColor(color);
+  });
 
   drainReveal(inst.id);
 }
