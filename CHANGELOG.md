@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 26 Aug 2026
+
+### Bugs
+
+- 🪲 Connecting a workspace folder could leave the app with no tables until the file was dragged back in (v0.0.431)
+
 ## 25 Aug 2026
 
 ### Features
