@@ -82,11 +82,15 @@ type RenameInFile = (file: string, from: string, to: string) => Promise<boolean>
  *
  * `overwriteLosesData` is false whenever a count could not be taken, so an index
  * written by an older version asks nothing extra.
+ *
+ * `title` is the dialog's own heading, because the same guard now sits behind two
+ * different questions — a folder sync and a Save over an existing file. A second
+ * dialog headed with the wrong one of those reads as a stray prompt.
  */
-function confirmDataLoss(dialogs: Dialogs, name: string, keep: CopyFacts, lose: CopyFacts, losing: string): Promise<boolean> | boolean {
+export function confirmDataLoss(dialogs: Dialogs, name: string, keep: CopyFacts, lose: CopyFacts, losing: string, title = 'Sync workspace folder'): Promise<boolean> | boolean {
   if (!overwriteLosesData(keep, lose)) return true;
   const held = [lose.tables ? `${lose.tables} table${lose.tables === 1 ? '' : 's'}` : '', lose.views ? `${lose.views} view${lose.views === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ');
-  return dialogs.confirm(`The copy you are keeping of "${name}" is empty, and ${losing} holds ${held}. Go ahead and lose it?`, 'Sync workspace folder');
+  return dialogs.confirm(`The copy you are keeping of "${name}" is empty, and ${losing} holds ${held}. Go ahead and lose it?`, title);
 }
 
 export interface SyncReport {

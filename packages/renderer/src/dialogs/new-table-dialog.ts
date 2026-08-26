@@ -1027,13 +1027,7 @@ export class NewTableDialog extends LitElement {
     const rows = renames.length > 0 ? this.previewRows.map((r) => ({ ...r, data: renameRowFields(r.data, renames) ?? r.data })) : this.previewRows;
     // Mirror the real grid: hidden columns are excluded from the preview.
     const columns = this.columns.filter((c) => !c.hidden).map(buildColumnSpec);
-    return html`<column-preview-table
-      .columns=${columns}
-      .rows=${rows}
-      .state=${this.previewState}
-      .error=${this.previewError}
-      note="Your column changes still save."
-    ></column-preview-table>`;
+    return html`<column-preview-table .columns=${columns} .rows=${rows} .state=${this.previewState} .error=${this.previewError} note="Your column changes still save."></column-preview-table>`;
   }
 
   /**
@@ -1116,165 +1110,165 @@ export class NewTableDialog extends LitElement {
           <div class="dialog-body">
             ${this.errorMsg ? html`<div class="error" role="alert" data-testid="editor-error">${this.errorMsg}</div>` : ''} ${this.noticeMsg ? html`<div class="notice">${this.noticeMsg}</div>` : ''}
             <div class="editor-pane">
-            <label>
-              Name
-              <input type="text" autofocus .value=${this.name} @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)} />
-            </label>
-            <label>
-              Title <span style="color:#9ca3af">(optional — shown in the window title)</span>
-              <input type="text" .value=${this.tableTitle} @input=${(e: Event) => (this.tableTitle = (e.target as HTMLInputElement).value)} />
-            </label>
-            <label class="inline">
-              <input type="checkbox" data-testid="table-readonly" .checked=${this.tableReadonly} @change=${(e: Event) => (this.tableReadonly = (e.target as HTMLInputElement).checked)} />
-              Read-only
-              <span style="color:#9ca3af">(show values, no editing or add/delete row)</span>
-            </label>
+              <label>
+                Name
+                <input type="text" autofocus .value=${this.name} @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)} />
+              </label>
+              <label>
+                Title <span style="color:#9ca3af">(optional — shown in the window title)</span>
+                <input type="text" .value=${this.tableTitle} @input=${(e: Event) => (this.tableTitle = (e.target as HTMLInputElement).value)} />
+              </label>
+              <label class="inline">
+                <input type="checkbox" data-testid="table-readonly" .checked=${this.tableReadonly} @change=${(e: Event) => (this.tableReadonly = (e.target as HTMLInputElement).checked)} />
+                Read-only
+                <span style="color:#9ca3af">(show values, no editing or add/delete row)</span>
+              </label>
 
-            <div class="columns">
-              <div class="col-header">
-                <span></span>
-                ${this.renderFlagHead('visible', '👁', 'Visible')}
-                <span>Field</span>
-                <span>Label</span>
-                <span>Type</span>
-                <span>Renderer</span>
-                <span class="flag-label" title="Script — render(row) computes what the column displays"><span class="mi sm">edit</span></span>
-                <span class="flag-label">Max</span>
-                <span class="flag-label" title="Validation — validate(value, row) throws to reject a manual cell edit"><span class="mi sm">rule</span></span>
-                ${this.renderFlagHead('unique', 'U', 'Unique')} ${this.renderFlagHead('notnull', '!', 'Not null')} ${this.renderFlagHead('sortable', '⇅', 'Sortable')}
-                ${this.renderFlagHead('filterable', '⚲', 'Filterable (includes search)')}
-                <span class="flag-label filter-head" title="Shows a funnel on every column that has a filter. Click one to switch that filter off."><span class="mi sm">filter_alt</span></span>
-                <span></span>
-                <span></span>
-                <span></span>
+              <div class="columns">
+                <div class="col-header">
+                  <span></span>
+                  ${this.renderFlagHead('visible', '👁', 'Visible')}
+                  <span>Field</span>
+                  <span>Label</span>
+                  <span>Type</span>
+                  <span>Renderer</span>
+                  <span class="flag-label" title="Script — render(row) computes what the column displays"><span class="mi sm">edit</span></span>
+                  <span class="flag-label">Max</span>
+                  <span class="flag-label" title="Validation — validate(value, row) throws to reject a manual cell edit"><span class="mi sm">rule</span></span>
+                  ${this.renderFlagHead('unique', 'U', 'Unique')} ${this.renderFlagHead('notnull', '!', 'Not null')} ${this.renderFlagHead('sortable', '⇅', 'Sortable')}
+                  ${this.renderFlagHead('filterable', '⚲', 'Filterable (includes search)')}
+                  <span class="flag-label filter-head" title="Shows a funnel on every column that has a filter. Click one to switch that filter off."><span class="mi sm">filter_alt</span></span>
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+                ${this.columns.map((c, i) => {
+                  const isSrc = this.dragSrcIdx === i;
+                  const isTgt = this.dropTargetIdx === i;
+                  const edgeClass = isTgt && this.dropEdge === 'before' ? ' drop-before' : isTgt && this.dropEdge === 'after' ? ' drop-after' : '';
+                  return html`
+                    <div
+                      class=${`col-row${isSrc ? ' drag-source' : ''}${edgeClass}`}
+                      @dragover=${(e: DragEvent) => this.onRowDragOver(e, i, e.currentTarget as HTMLElement)}
+                      @dragleave=${() => this.onRowDragLeave(i)}
+                      @drop=${(e: DragEvent) => this.onRowDrop(e, i)}
+                    >
+                      <span class="drag-handle" title="Drag to reorder" draggable="true" @dragstart=${(e: DragEvent) => this.onRowDragStart(e, i)} @dragend=${() => this.onRowDragEnd()}>
+                        <span class="mi sm">drag_indicator</span>
+                      </span>
+                      <span class="flag">
+                        <input
+                          type="checkbox"
+                          title="Visible — uncheck to hide the column without losing its data"
+                          .checked=${!c.hidden}
+                          @change=${(e: Event) => this.patchColumn(i, { hidden: !(e.target as HTMLInputElement).checked })}
+                        />
+                      </span>
+                      <input
+                        type="text"
+                        title="Field — the key this column is stored under in each row"
+                        .value=${c.field}
+                        @input=${(e: Event) => this.patchColumn(i, { field: (e.target as HTMLInputElement).value })}
+                      />
+                      <input
+                        type="text"
+                        title="Label — the heading shown above the column"
+                        .value=${c.label}
+                        @input=${(e: Event) => this.patchColumn(i, { label: (e.target as HTMLInputElement).value })}
+                      />
+                      <select
+                        .value=${c.type}
+                        @change=${(e: Event) =>
+                          this.patchColumn(i, {
+                            type: (e.target as HTMLSelectElement).value as ColumnType,
+                          })}
+                      >
+                        ${TYPE_OPTIONS.map((t) => html`<option value=${t} ?selected=${t === c.type}>${t}</option>`)}
+                      </select>
+                      <select
+                        title="Renderer — how cells in this column display. Read-only HTML-encoded text when blank."
+                        .value=${c.renderer ?? ''}
+                        @change=${(e: Event) => {
+                          const v = (e.target as HTMLSelectElement).value;
+                          this.patchColumn(i, { renderer: v || undefined });
+                        }}
+                      >
+                        <option value="" ?selected=${!c.renderer}>— none —</option>
+                        ${rendererOptionsFor(this.rendererOptions, c.renderer).map((r) => html`<option value=${r} ?selected=${r === c.renderer}>${r}</option>`)}
+                      </select>
+                      <button
+                        type="button"
+                        class=${`icon-btn script-btn is-${scriptState(c.script, c.scriptActive)}`}
+                        title=${SCRIPT_TITLE[scriptState(c.script, c.scriptActive)]}
+                        @click=${() => this.editScript(i)}
+                      >
+                        <span class="mi sm">edit</span>
+                      </button>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="—"
+                        title="Max length (strings) or max value (numbers)"
+                        .value=${c.max == null ? '' : String(c.max)}
+                        @input=${(e: Event) => {
+                          const v = (e.target as HTMLInputElement).value;
+                          this.patchColumn(i, { max: v === '' ? undefined : Number(v) });
+                        }}
+                      />
+                      <button
+                        type="button"
+                        class=${`icon-btn validate-btn is-${scriptState(c.validate, c.validateActive)}`}
+                        title=${VALIDATE_TITLE[scriptState(c.validate, c.validateActive)]}
+                        @click=${() => this.editValidate(i)}
+                      >
+                        <span class="mi sm">rule</span>
+                      </button>
+                      <span class="flag">
+                        <input type="checkbox" title="Unique" .checked=${!!c.unique} @change=${(e: Event) => this.patchColumn(i, { unique: (e.target as HTMLInputElement).checked })} />
+                      </span>
+                      <span class="flag">
+                        <input type="checkbox" title="Not null" .checked=${!!c.notnull} @change=${(e: Event) => this.patchColumn(i, { notnull: (e.target as HTMLInputElement).checked })} />
+                      </span>
+                      <span class="flag">
+                        <input
+                          type="checkbox"
+                          title="Sortable — uncheck to disable sorting on this column"
+                          .checked=${c.sortable !== false}
+                          @change=${(e: Event) =>
+                            this.patchColumn(i, {
+                              sortable: (e.target as HTMLInputElement).checked ? undefined : false,
+                            })}
+                        />
+                      </span>
+                      <span class="flag">
+                        <input
+                          type="checkbox"
+                          title="Filterable — uncheck to disable filtering and search on this column"
+                          .checked=${c.filterable !== false}
+                          @change=${(e: Event) =>
+                            this.patchColumn(i, {
+                              filterable: (e.target as HTMLInputElement).checked ? undefined : false,
+                            })}
+                        />
+                      </span>
+                      ${this.renderFilterState(c)}
+                      <button type="button" class="icon-btn" title="Move up" ?disabled=${i === 0} @click=${() => this.moveColumn(i, -1)}>
+                        <span class="mi sm">arrow_upward</span>
+                      </button>
+                      <button type="button" class="icon-btn" title="Move down" ?disabled=${i === this.columns.length - 1} @click=${() => this.moveColumn(i, 1)}>
+                        <span class="mi sm">arrow_downward</span>
+                      </button>
+                      <button type="button" class="icon-btn row-del" title="Remove column" @click=${() => this.removeColumn(i)}>
+                        <span class="mi sm">delete</span>
+                      </button>
+                    </div>
+                  `;
+                })}
               </div>
-              ${this.columns.map((c, i) => {
-                const isSrc = this.dragSrcIdx === i;
-                const isTgt = this.dropTargetIdx === i;
-                const edgeClass = isTgt && this.dropEdge === 'before' ? ' drop-before' : isTgt && this.dropEdge === 'after' ? ' drop-after' : '';
-                return html`
-                  <div
-                    class=${`col-row${isSrc ? ' drag-source' : ''}${edgeClass}`}
-                    @dragover=${(e: DragEvent) => this.onRowDragOver(e, i, e.currentTarget as HTMLElement)}
-                    @dragleave=${() => this.onRowDragLeave(i)}
-                    @drop=${(e: DragEvent) => this.onRowDrop(e, i)}
-                  >
-                    <span class="drag-handle" title="Drag to reorder" draggable="true" @dragstart=${(e: DragEvent) => this.onRowDragStart(e, i)} @dragend=${() => this.onRowDragEnd()}>
-                      <span class="mi sm">drag_indicator</span>
-                    </span>
-                    <span class="flag">
-                      <input
-                        type="checkbox"
-                        title="Visible — uncheck to hide the column without losing its data"
-                        .checked=${!c.hidden}
-                        @change=${(e: Event) => this.patchColumn(i, { hidden: !(e.target as HTMLInputElement).checked })}
-                      />
-                    </span>
-                    <input
-                      type="text"
-                      title="Field — the key this column is stored under in each row"
-                      .value=${c.field}
-                      @input=${(e: Event) => this.patchColumn(i, { field: (e.target as HTMLInputElement).value })}
-                    />
-                    <input
-                      type="text"
-                      title="Label — the heading shown above the column"
-                      .value=${c.label}
-                      @input=${(e: Event) => this.patchColumn(i, { label: (e.target as HTMLInputElement).value })}
-                    />
-                    <select
-                      .value=${c.type}
-                      @change=${(e: Event) =>
-                        this.patchColumn(i, {
-                          type: (e.target as HTMLSelectElement).value as ColumnType,
-                        })}
-                    >
-                      ${TYPE_OPTIONS.map((t) => html`<option value=${t} ?selected=${t === c.type}>${t}</option>`)}
-                    </select>
-                    <select
-                      title="Renderer — how cells in this column display. Read-only HTML-encoded text when blank."
-                      .value=${c.renderer ?? ''}
-                      @change=${(e: Event) => {
-                        const v = (e.target as HTMLSelectElement).value;
-                        this.patchColumn(i, { renderer: v || undefined });
-                      }}
-                    >
-                      <option value="" ?selected=${!c.renderer}>— none —</option>
-                      ${rendererOptionsFor(this.rendererOptions, c.renderer).map((r) => html`<option value=${r} ?selected=${r === c.renderer}>${r}</option>`)}
-                    </select>
-                    <button
-                      type="button"
-                      class=${`icon-btn script-btn is-${scriptState(c.script, c.scriptActive)}`}
-                      title=${SCRIPT_TITLE[scriptState(c.script, c.scriptActive)]}
-                      @click=${() => this.editScript(i)}
-                    >
-                      <span class="mi sm">edit</span>
-                    </button>
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="—"
-                      title="Max length (strings) or max value (numbers)"
-                      .value=${c.max == null ? '' : String(c.max)}
-                      @input=${(e: Event) => {
-                        const v = (e.target as HTMLInputElement).value;
-                        this.patchColumn(i, { max: v === '' ? undefined : Number(v) });
-                      }}
-                    />
-                    <button
-                      type="button"
-                      class=${`icon-btn validate-btn is-${scriptState(c.validate, c.validateActive)}`}
-                      title=${VALIDATE_TITLE[scriptState(c.validate, c.validateActive)]}
-                      @click=${() => this.editValidate(i)}
-                    >
-                      <span class="mi sm">rule</span>
-                    </button>
-                    <span class="flag">
-                      <input type="checkbox" title="Unique" .checked=${!!c.unique} @change=${(e: Event) => this.patchColumn(i, { unique: (e.target as HTMLInputElement).checked })} />
-                    </span>
-                    <span class="flag">
-                      <input type="checkbox" title="Not null" .checked=${!!c.notnull} @change=${(e: Event) => this.patchColumn(i, { notnull: (e.target as HTMLInputElement).checked })} />
-                    </span>
-                    <span class="flag">
-                      <input
-                        type="checkbox"
-                        title="Sortable — uncheck to disable sorting on this column"
-                        .checked=${c.sortable !== false}
-                        @change=${(e: Event) =>
-                          this.patchColumn(i, {
-                            sortable: (e.target as HTMLInputElement).checked ? undefined : false,
-                          })}
-                      />
-                    </span>
-                    <span class="flag">
-                      <input
-                        type="checkbox"
-                        title="Filterable — uncheck to disable filtering and search on this column"
-                        .checked=${c.filterable !== false}
-                        @change=${(e: Event) =>
-                          this.patchColumn(i, {
-                            filterable: (e.target as HTMLInputElement).checked ? undefined : false,
-                          })}
-                      />
-                    </span>
-                    ${this.renderFilterState(c)}
-                    <button type="button" class="icon-btn" title="Move up" ?disabled=${i === 0} @click=${() => this.moveColumn(i, -1)}>
-                      <span class="mi sm">arrow_upward</span>
-                    </button>
-                    <button type="button" class="icon-btn" title="Move down" ?disabled=${i === this.columns.length - 1} @click=${() => this.moveColumn(i, 1)}>
-                      <span class="mi sm">arrow_downward</span>
-                    </button>
-                    <button type="button" class="icon-btn row-del" title="Remove column" @click=${() => this.removeColumn(i)}>
-                      <span class="mi sm">delete</span>
-                    </button>
-                  </div>
-                `;
-              })}
-            </div>
 
-            <button type="button" class="add" @click=${this.addColumn}>+ Add column</button>
-            ${this.columnActions.map((a) => html`<button type="button" class="add" title=${a.tooltip ?? a.label} @click=${() => void this.runColumnAction(a)}>${a.label}</button>`)}
-            ${this.renderDeleted()} ${this.renameDetected() ? html`<div class="hint">Existing rows are re-keyed on save, so renamed fields keep their data.</div>` : ''}
+              <button type="button" class="add" @click=${this.addColumn}>+ Add column</button>
+              ${this.columnActions.map((a) => html`<button type="button" class="add" title=${a.tooltip ?? a.label} @click=${() => void this.runColumnAction(a)}>${a.label}</button>`)}
+              ${this.renderDeleted()} ${this.renameDetected() ? html`<div class="hint">Existing rows are re-keyed on save, so renamed fields keep their data.</div>` : ''}
             </div>
             ${this.mode === 'edit' ? this.renderPreview() : ''}
           </div>

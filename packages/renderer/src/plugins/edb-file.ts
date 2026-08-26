@@ -24,11 +24,11 @@ import { deleteWorkspace } from '../db/delete-workspace.js';
 import { createAutosavePolicy, type AutosavePolicy } from '../db/edb/dirty.js';
 import { edbBridge, edbHandle, setEdbHandle, storeBridge } from '../db/edb/active-bridge.js';
 import { copyWorkspace } from '../db/edb/convert.js';
-import { syncFolder } from '../db/edb/folder-sync.js';
+import { confirmDataLoss, syncFolder } from '../db/edb/folder-sync.js';
 import { describeActiveOutcome } from '../db/edb/active-file-sync.js';
 import { createEdbBridge } from '../db/edb/worker-bridge.js';
 import type { PeekedWorkspace } from '../db/edb/protocol.js';
-import { compareCopies } from '../db/edb/copy-facts.js';
+import { compareCopies, type CopyFacts } from '../db/edb/copy-facts.js';
 import { countWorkspaceContents } from '../db/delete-workspace.js';
 import { isEmptyWorkspace } from '../db/edb/folder-index.js';
 import { createIpcDataStore } from '../db/data-store-bridge.js';
@@ -431,20 +431,94 @@ export function init(api: HostApi): void {
    * written is what decides it**: a file written an hour ago by another machine is
    * not the same proposition as one this tab wrote this morning.
    */
-  async function sidesAgainstFile(dir: FileSystemDirectoryHandle, file: string, workspaceId: string): Promise<string> {
+  /**
+   * The two answers to "this file already holds this workspace".
+   *
+   * Each names the copy that SURVIVES, not the mechanism. "Replace it?" made the
+   * reader work out which side "it" was, and "Overwrite" never said what was being
+   * overwritten. The pair here can be read in either order and still means one
+   * thing. (The folder sync asks the same question with its own older pair,
+   * "Load disk version" / "Overwrite disk version" — see `folder-sync.ts`.)
+   */
+  const USE_DISK = 'Use disk version';
+  const USE_LOCAL = 'Use local version';
+
+  /**
+   * How many tables and views the FILE holds for this workspace.
+   *
+   * Size and date alone made a lopsided question: the browser's side was counted
+   * in tables and the file's in kilobytes, so the two sides could not be compared
+   * at all — and the guard against keeping an empty copy over a full one cannot
+   * fire on a count it does not have.
+   *
+   * The whole file is read and opened in a throwaway database, which is what
+   * `peekWorkspaces` costs. That is affordable exactly here: once, on a click,
+   * behind a question the user has to stop and answer. The drop-a-file path pays
+   * the same price for the same reason.
+   *
+   * Empty when the file cannot be read or holds no record for this workspace — a
+   * conflict prompt is not the place to fail, and size and date still say
+   * something.
+   */
+  async function countsInFile(handle: FileSystemFileHandle, workspaceId: string): Promise<CopyFacts> {
+    const live = edbBridge();
+    if (!live) return {};
+    try {
+      const bytes = new Uint8Array(await (await handle.getFile()).arrayBuffer());
+      const mine = workspaceDocs(await live.peekWorkspaces(bytes)).find((w) => w.id === workspaceId);
+      return mine ? { tables: mine.tables, views: mine.views } : {};
+    } catch {
+      return {};
+    }
+  }
+
+  async function sidesAgainstFile(dir: FileSystemDirectoryHandle, file: string, workspaceId: string): Promise<{ text: string; here: CopyFacts; there: CopyFacts }> {
     const handle = await fileInFolder(dir, file, false);
-    const facts = handle ? await factsOfHandle(handle) : null;
-    let here = {};
+    let here: CopyFacts = {};
     try {
       const c = await countWorkspaceContents(storeBridge(), workspaceId, { countRows: false });
       here = { tables: c.tables, views: c.views };
     } catch {
       /* a build that cannot count — the file's own side is the half that matters */
     }
-    return compareCopies([
-      { label: 'In this browser', facts: here },
-      { label: file, facts: facts ?? {} },
-    ]);
+    const there: CopyFacts = { ...((handle ? await factsOfHandle(handle) : null) ?? {}), ...(handle ? await countsInFile(handle, workspaceId) : {}) };
+    return {
+      text: compareCopies([
+        { label: 'In this browser', facts: here },
+        { label: file, facts: there },
+      ]),
+      here,
+      there,
+    };
+  }
+
+  /**
+   * Save found a file already carrying this workspace. Which copy wins?
+   *
+   * It used to be a yes/no — "Replace it with the workspace open here?" — and the
+   * two answers were not the two outcomes. Yes overwrote the file; No did NOT keep
+   * the file's copy, it simply abandoned the Save, so the one thing a reader most
+   * likely wanted ("the disk has the newer copy, take that") was not on offer at
+   * all and the question read as if it were.
+   *
+   * Both outcomes are named now, and each says which copy SURVIVES rather than
+   * what happens mechanically. Dismissing still does nothing, which is what the
+   * old No actually did.
+   *
+   * Returns true when the caller should go on and write the file.
+   */
+  async function settleSaveClash(dir: FileSystemDirectoryHandle, name: string, workspaceId: string): Promise<boolean> {
+    const sides = await sidesAgainstFile(dir, name, workspaceId);
+    const answer = await api.ui.dialogs.choice(`"${name}" is already in "${dir.name}". The two copies may differ — which one do you want to keep?${sides.text}`, [USE_DISK, USE_LOCAL], 'Save');
+    if (answer === USE_DISK) {
+      // Adopting IS the save: the tab switches to that database, so there is
+      // nothing left to write out. The same branch the folder sync takes.
+      if (!(await confirmDataLoss(api.ui.dialogs, name, sides.there, sides.here, 'the copy in this browser', 'Save'))) return false;
+      await adoptFolderFile(workspaceId, name);
+      return false;
+    }
+    if (answer !== USE_LOCAL) return false; // dismissed: neither copy is touched
+    return (await confirmDataLoss(api.ui.dialogs, name, sides.here, sides.there, `the copy in ${name}`, 'Save')) === true;
   }
 
   async function saveIntoFolder(dir: FileSystemDirectoryHandle): Promise<void> {
@@ -454,7 +528,7 @@ export function init(api: HostApi): void {
     if (!workspaceId) return;
     const name = spaceFileName(workspaceId);
     const taken = (await listWorkspaceFiles(dir)).includes(name);
-    if (taken && !(await api.ui.dialogs.confirm(`"${name}" is already in "${dir.name}". Replace it with the workspace open here?${await sidesAgainstFile(dir, name, workspaceId)}`, 'Save'))) return;
+    if (taken && !(await settleSaveClash(dir, name, workspaceId))) return;
     const target = await fresh(dir, name);
     if (!target?.handle) return;
     setEdbHandle(target.handle);

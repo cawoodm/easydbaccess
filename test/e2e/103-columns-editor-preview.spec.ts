@@ -57,7 +57,10 @@ test('cells are DRAWN by their renderer, not printed as text', async ({ page }) 
 });
 
 test('a scripted column previews what the script computes, not the empty cell behind it', async ({ page }) => {
-  const id = await createTable(page, 'Computed', [{ field: 'n', type: 'number' }, { field: 'double', type: 'number', script: 'function render(row) { return row.n * 2; }' }]);
+  const id = await createTable(page, 'Computed', [
+    { field: 'n', type: 'number' },
+    { field: 'double', type: 'number', script: 'function render(row) { return row.n * 2; }' },
+  ]);
   await waitForPanel(page, id);
   await addRow(page, id, { n: 21 });
 

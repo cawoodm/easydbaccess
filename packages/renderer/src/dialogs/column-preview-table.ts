@@ -255,7 +255,12 @@ export class ColumnPreviewTable extends LitElement {
             </tr>
           </thead>
           <tbody>
-            ${this.rows.map((row, i) => html`<tr>${this.columns.map((c, j) => this.renderCell(row, c, cells[i]?.[j]))}</tr>`)}
+            ${this.rows.map(
+              (row, i) =>
+                html`<tr>
+                  ${this.columns.map((c, j) => this.renderCell(row, c, cells[i]?.[j]))}
+                </tr>`,
+            )}
           </tbody>
         </table>
       </div>
