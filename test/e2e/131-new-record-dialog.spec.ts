@@ -49,21 +49,30 @@ test.describe('the new-record form', () => {
   });
 
   test('shows the visible fields, and the rest only when asked', async ({ page }) => {
-    const id = await createTable(page, 'Staff', [{ field: 'name' }, { field: 'internal', hidden: true }, { field: 'total', script: 'function render(row) { return 1; }' }]);
+    const id = await createTable(page, 'Staff', [
+      { field: 'name' },
+      { field: 'internal', hidden: true },
+      { field: 'total', script: 'function render(row) { return 1; }' },
+      { field: 'joined', readonly: true },
+    ]);
     await waitForPanel(page, id);
     await addButton(page, id).click();
     await expect(form(page)).toBeVisible();
 
+    // `total` is scripted and IS asked for: a script may read its own column's
+    // stored cell, so a new record has to be able to carry one. `joined` is
+    // `readonly` — no write target at all — and never appears.
     const fields = form(page).locator('label.field');
-    await expect(fields).toHaveCount(1);
+    await expect(fields).toHaveCount(2);
     await expect(fields.first()).toContainText('name');
 
     await form(page).locator('label.toggle input').check();
-    // The hidden column appears; the scripted one never does — it is derived, so
-    // there is nowhere to put an answer.
-    await expect(fields).toHaveCount(2);
+    // The hidden column appears; the `readonly` one never does — it is derived,
+    // so there is nowhere to put an answer.
+    await expect(fields).toHaveCount(3);
     await expect(form(page)).toContainText('internal');
-    await expect(form(page)).not.toContainText('total');
+    await expect(form(page)).toContainText('total');
+    await expect(form(page)).not.toContainText('joined');
   });
 
   test('a column default is already in the box, and is written for hidden fields too', async ({ page }) => {

@@ -174,6 +174,32 @@ value, so `link` can point at a computed URL and `html` can show text you
 built. A computed cell is read-only, because there is nowhere to write an edit
 back to.
 
+### Returning nothing hands the cell back
+
+`return null` — or simply not returning — means *"nothing to say about this
+row"*. The cell then shows what is **stored** in it, and behaves like any other
+cell: you can type into it.
+
+That is what lets a script read its own column. A script that decorates only the
+rows it recognises leaves the rest editable, and picks up what you typed the
+next time the cell is drawn:
+
+```js
+function render(row) {
+  if (!row.code) return null; // nothing typed yet — let me type it
+  return 'ref:' + row.code;
+}
+```
+
+`return ''` is **not** the same thing. That is an answer — "show nothing here" —
+and the cell stays computed and read-only. A script that throws is not the same
+either: you get the error chip, so a broken script never hides your data by
+looking like it declined.
+
+Because the stored value is real data, a scripted column also appears on the
+**+** form when you add a record — otherwise there would be no way to give a new
+row the value its script reads.
+
 This editor has its own **Start from a sample** dropdown, with ten scripts
 covering what people actually ask a column for:
 

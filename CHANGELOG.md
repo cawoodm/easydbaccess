@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ A column script that returns `null` hands the cell back to its stored value, so a scripted column can be typed into (v0.0.443)
 - ✨ `preview/table/key` opens one record's field in a window, without filtering or moving anything (v0.0.440)
 - ✨ A column's script and its validation rule can be switched off and kept; the editor's two buttons say which of the three states each is in (v0.0.439)
 - ✨ A link cell now links any scheme — `file:///`, `ftp://`, app links — where before only http(s) counted. Script schemes stay text (v0.0.438)
