@@ -184,7 +184,7 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
   `import-data`, `auto-sync`, `views`, `settings`, `url-source`,
   `datasette-import` (+ `datasette-views`), `datasette-connect`, `connect-menu`,
   `projection`, `command-palette-button`, `electron-db`, `sqlitefile-source`,
-  `tips`, `commandlets`, `edb-file`, `legacy-import`, `validate`, `viz-charts`,
+  `tips`, `new-plugins`, `commandlets`, `edb-file`, `legacy-import`, `validate`, `viz-charts`,
   `viz-map`, `viz-wordcloud`, `viz-custom`.
   Don't add a feature to
   the core if it can be a plugin. (Exception: the Plugin Manager button is core
