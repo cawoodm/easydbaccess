@@ -72,12 +72,42 @@ rather than guessing one and quietly filtering something you are not looking at.
 | `view/Reading plan?Book==Matthew`       | that view, narrowed to Matthew         |
 | `view?Book==Matthew`                    | the view you are already in, narrowed  |
 | `cmd/windows:tile`                      | any action from the palette, by its id |
+| `preview/notes/n-17`                    | one record's text, in a small window   |
 | `goto/bible?Book=Mark;cmd/windows:tile` | both, in order — `;` joins them        |
 
 A `view/…` narrows the view the way `goto/…` narrows a table, and what it adds
 shows up as a chip in the view's toolbar — so you can click it off again, and the
 filters you gave the view when you made it are left alone. Leave the name out
 (`view?Book==Matthew`) inside a view template and it means *this* view.
+
+## Showing one record without going to it
+
+`preview/…` is the odd one out: it opens a small window with one cell in it and
+changes nothing else. Nothing is filtered, nothing is focused — so a link in a
+view can show you a related record without disturbing what you were reading.
+
+| Type this                          | And you get                                    |
+| ---------------------------------- | ---------------------------------------------- |
+| `preview/notes/Body?Title==Berlin` | the Body of the note titled Berlin             |
+| `preview/notes/n-17`               | record `n-17` — the field is picked for you    |
+| `preview/notes/Body/n-17`          | the Body of record `n-17`                      |
+
+The middle form is the short one. A key is matched against the table's **first
+column**, which is assumed to be the id, and the field shown is the first one
+that looks like prose: a column set to the **markdown** or **preview** renderer,
+then a **text** column, then simply the second column.
+
+The second thing you type is read as a **column name** if the table has one by
+that name, and as a **key** otherwise. So when a record id happens to be spelled
+like one of your columns, use the three-part form, which never guesses.
+
+If the filter matches more than one row you get the first one and a warning
+saying how many there were. If it matches none, you get a message rather than an
+empty window.
+
+Markdown and preview columns are shown formatted, as if you had clicked the
+popup icon in the cell. Every other column is shown as plain text — a preview is
+for reading, so it never offers an editor onto a record you may not have open.
 
 ## Links
 

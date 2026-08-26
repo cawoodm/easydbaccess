@@ -31,7 +31,7 @@ stay filterable.
 | `search`               | `<query>`         | sets the global search box                          |
 | `view`                 | `<name>`?         | reveals a view window and applies the filters        |
 | `cmd`                  | `<commandId>`     | runs any registered command                         |
-| `preview`              | `<table>/<field>` | not wired up yet                                    |
+| `preview`              | see below         | opens ONE cell in the preview window                |
 | `ui`                   | `hide` / `show`   | not wired up yet                                    |
 
 Options: `@search=`, `@sort=` (`-Field` for descending, comma-separated for
@@ -203,6 +203,60 @@ its table, column and value, and that is what the placeholders resolve against.
 Going through the hash would throw the context away — and would do nothing at all
 on a second click of the same link, since an unchanged hash fires no
 `hashchange`.
+
+## `preview` — the verb that does not navigate
+
+Three shapes, all resolving to one cell:
+
+```
+preview/<table>/<field>?<filters>   field named, row chosen by the filters
+preview/<table>/<key>               row by key, field chosen by the rules below
+preview/<table>/<field>/<key>       both named — never ambiguous
+```
+
+Nothing is filtered, focused or written. That is the point: a link in a view can
+show a related record without disturbing what the reader is looking at, which a
+`goto` narrowing a grid to one row cannot do.
+
+**Field or key?** The two-target forms are the same shape, so only the table's
+columns can tell them apart: a second target that names a column (by field or by
+label, case-insensitively) is a FIELD, anything else is a KEY. The three-target
+form exists for the case that rule gets wrong — a record id spelled like one of
+your columns.
+
+**The key column is the first one**, assumed to be the primary key. The app has
+no concept of one — there is no `ColumnSpec.primary` and no uniqueness
+requirement beyond the optional `unique` box — so this is a convention, the same
+one a person makes reading a table left to right. Where it is wrong, the filter
+form names the column explicitly. A key is matched with a leading `=` so it
+matches EXACTLY: a bare value means "contains" to `column-filter.ts`, and a key
+that is a prefix of another key would otherwise take whichever row came back
+first.
+
+**Which field a key-only preview shows**, in order: a column whose renderer is
+`markdown` or `preview` (someone has already declared it too long for its cell),
+then a `text` column (prose by the type system's own definition), then the first
+column that is not the key, then the key itself. The key column is skipped in
+the first two rounds as well — previewing the key you just typed tells you
+nothing. Rules in `plugins/commandlet-preview.ts`, which is pure and unit-tested.
+
+**Several matches** show the first plus a warning naming the count. Refusing
+would be worse: the usual way here is a link built from a nearly-unique value,
+and a window with a plausible record and a count is more use than an error with
+nothing in it. **No match** is an error — an empty window explains nothing.
+
+**Scripted columns are computed first** (`evaluateRow`), as the grid and a view
+compute them. The stored cell behind a script is empty, so reading it would show
+an empty window for a column plainly full of text on screen.
+
+**What the window contains** is decided by `plugins/preview-popup.ts`, which is
+also what a `preview` / `markdown` CELL's popup icon opens — deliberately the
+same window, so a link and a click land in the same place. The column's own
+renderer is mounted only when it defines `expanded`, the property by which a
+renderer says it can leave a grid row. Everything else falls back to text: a grid
+renderer is built for a one-line row, and several of them draw an EDITOR (`link`
+renders a bare value as an `<input>`), which has no business in a read-only
+window onto a record that may not be open.
 
 ## Encoding in a hash
 

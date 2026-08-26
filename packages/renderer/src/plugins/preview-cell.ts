@@ -10,11 +10,9 @@
 // popup holds the render. That is the whole difference from `html-render.ts`,
 // which puts the markup straight in the cell.
 
-import { createPanel } from '../window-mgr/panel-shell/panel-shell.js';
-import { shellViewport } from '../window-mgr/shell-viewport.js';
 import { htmlToPreviewText } from '../util/html-text.js';
-import { isMobileViewport } from '../util/viewport.js';
-import { iconButton, openHtmlEditor, popupContainer, POPOUT_SVG } from './html-cell-editor.js';
+import { iconButton, openHtmlEditor, POPOUT_SVG } from './html-cell-editor.js';
+import { openPreviewPopup, preformatted, previewFrame } from './preview-popup.js';
 
 /** The safety cap on cell text — long enough that the column width, not this
  *  number, is what cuts the line on any realistic column. */
@@ -41,8 +39,6 @@ let maxChars = DEFAULT_MAX_CHARS;
 export function setPreviewMaxChars(v: unknown): void {
   maxChars = typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : DEFAULT_MAX_CHARS;
 }
-
-let popupSeq = 0;
 
 /**
  * Cell renderer for long values: shows the value's PLAIN TEXT (markup stripped,
@@ -230,41 +226,11 @@ export class PreviewCell extends HTMLElement {
   }
 
   private openWindow() {
-    const content = document.createElement('div');
-    content.style.cssText = 'padding:0.75rem;overflow:auto;height:100%;box-sizing:border-box';
+    const content = previewFrame();
     const html = this.toHtml(this._value);
-    if (html !== null) {
-      content.innerHTML = html;
-    } else {
-      // Plain text: render inside a <pre> using textContent — this preserves
-      // newlines/indentation and safely escapes any `<`/`&` in the value,
-      // instead of letting innerHTML collapse whitespace and parse them as
-      // markup.
-      const pre = document.createElement('pre');
-      pre.style.cssText = 'white-space:pre-wrap;word-break:break-word;margin:0;font-family:ui-monospace, monospace;';
-      pre.textContent = this._value;
-      content.append(pre);
-    }
-    createPanel({
-      id: `easydb-preview-popup-${++popupSeq}`,
-      container: popupContainer(),
-      title: this.title_,
-      color: '#7c3aed',
-      content,
-      // 520×400 is wider than a phone, so on mobile the popup opened partly
-      // off-screen and had to be panned to be read. The rendered value is the
-      // one thing you open this window to LOOK at, so on a narrow viewport it
-      // starts maximized and fills the canvas. The 520×400 rect is still what
-      // Restore returns to, so nothing is lost — it is the opening state that
-      // changes, not the window.
-      contentSize: { w: 520, h: 400 },
-      position: { centerTopOffset: 60 },
-      boot: { maximized: isMobileViewport() },
-      // Read-and-dismiss, like a dialog: Escape closes it.
-      closeOnEscape: true,
-      minimizeTo: '#easydb-minimized-dock',
-      viewport: shellViewport(),
-    });
+    if (html !== null) content.innerHTML = html;
+    else content.append(preformatted(this._value));
+    openPreviewPopup(this.title_, content);
   }
 
   /**

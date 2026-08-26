@@ -8,11 +8,15 @@
 //   - search rides the `easydb:table-search` / `easydb:set-search` events,
 //   - `cmd/` looks up the id in `registries.commands`.
 
-import type { CommandSpec, SortSpec, Table, ViewInstance } from '@easydb/shared';
+import type { ColumnSpec, CommandSpec, SortSpec, Table, ViewInstance } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { focusTableWindow } from '../window-mgr/table-window-manager.js';
 import { revealViewWindow } from '../window-mgr/view-window-manager.js';
 import { CommandletError, parseCommandlets, substituteCommandlet, type Commandlet } from './commandlet-lang.js';
+import { planPreview } from './commandlet-preview.js';
+import { openPreviewPopup, previewFrame, renderValue } from './preview-popup.js';
+import { readRows } from '../db/row-reader.js';
+import { evaluateRow } from '../views/view-render.js';
 
 /**
  * Where a commandlet was invoked from, when that is known. A link clicked inside
@@ -97,7 +101,14 @@ async function describe(cmd: Commandlet, ctx: CommandletContext = {}): Promise<s
     }
     case 'cmd':
       return `run "${(await findCommandById(cmd.targets[0] ?? '')).title}"`;
-    case 'preview':
+    case 'preview': {
+      const table = await resolveTable(cmd, ctx);
+      const plan = planPreview(table, cmd.targets.slice(1));
+      if ('error' in plan) throw new CommandletError(plan.error);
+      const fields = Object.keys(cmd.filters).map((k) => resolveField(table, k));
+      const where = [...Object.keys(plan.keyFilter), ...fields];
+      return `preview ${table.name}.${plan.field.label || plan.field.field}${where.length > 0 ? ` where ${where.join(' + ')}` : ''}`;
+    }
     case 'ui':
       throw new CommandletError(`"${cmd.verb}" is not wired up yet.`);
   }
@@ -127,6 +138,7 @@ async function runOne(cmd: Commandlet, ctx: CommandletContext = {}): Promise<voi
     case 'cmd':
       return runCommandId(cmd);
     case 'preview':
+      return runPreview(cmd, ctx);
     case 'ui':
       throw new CommandletError(`"${cmd.verb}" is not wired up yet.`);
   }
@@ -227,6 +239,76 @@ function resolveField(table: Table, key: string): string {
     throw new CommandletError(`"${table.name}" has no column "${key}"${known ? ` — it has ${known}` : ''}.`);
   }
   return real;
+}
+
+// -- preview ------------------------------------------------------------------
+
+/**
+ * Show ONE cell in the preview window: `preview/<table>/<field>?<filters>`,
+ * `preview/<table>/<key>`, or `preview/<table>/<field>/<key>`.
+ *
+ * Unlike every other verb this one does not navigate. Nothing is filtered,
+ * focused or written — a link in a view can show a related record's notes
+ * without disturbing what the reader is looking at, which is the whole reason to
+ * have it rather than a `goto` that narrows a grid to one row.
+ *
+ * A filter matching SEVERAL rows shows the first and says so. Refusing would be
+ * worse: the commonest way to get here is a link built from a value that is
+ * nearly unique, and a window with the wrong-but-plausible record in it plus a
+ * warning is more use than an error with nothing in it. The count is in the
+ * warning so "nearly" can be seen to be wrong.
+ */
+async function runPreview(cmd: Commandlet, ctx: CommandletContext): Promise<void> {
+  const app = await getContext();
+  const table = await resolveTable(cmd, ctx);
+  const plan = planPreview(table, cmd.targets.slice(1));
+  if ('error' in plan) throw new CommandletError(plan.error);
+
+  // The commandlet's own filters are resolved by name or label, exactly as
+  // `goto` resolves them, so `?Title==Berlin` works against a column labelled
+  // "Title" whose field is `title`. The key filter is already a real field name.
+  const filters: Record<string, string> = { ...plan.keyFilter };
+  for (const [key, expr] of Object.entries(cmd.filters)) {
+    if (expr === '') continue;
+    filters[resolveField(table, key)] = expr;
+  }
+  if (Object.keys(filters).length === 0) {
+    throw new CommandletError('"preview" needs a key or a filter — without one there is no record to show.');
+  }
+
+  // Two rows are enough to know the answer is not unique; `total` still counts
+  // every match, so the warning can say how many were passed over.
+  const page = await readRows(app.store.rows(table.id), { columns: table.columns, filters, limit: 2 });
+  const row = page.rows[0];
+  if (!row) {
+    throw new CommandletError(`No row in "${table.name}" matches ${describeFilters(filters)}.`);
+  }
+
+  const matches = page.total ?? page.rows.length;
+  if (matches > 1) {
+    app.api.ui.dialogs.toast(`${matches.toLocaleString()} rows match ${describeFilters(filters)} — showing the first.`, { kind: 'warning', title: 'Preview' });
+  }
+
+  // Scripted columns are computed first, exactly as the grid and a view compute
+  // them. The stored cell behind a script is empty, so previewing one without
+  // this showed an empty window for a column plainly full of text on screen.
+  const data = evaluateRow(row, table.columns).data;
+  const label = plan.field.label || plan.field.field;
+  openPreviewPopup(`${table.name} — ${label}`, previewBody(data[plan.field.field], plan.field, app.registries.cellRenderers));
+}
+
+/** The content element: the value drawn by its own column's renderer. */
+function previewBody(value: unknown, column: ColumnSpec, renderers: Map<string, string>): HTMLElement {
+  const frame = previewFrame();
+  frame.append(renderValue(value, column, renderers));
+  return frame;
+}
+
+/** `Title==Berlin + Year==2026`, for a message a person has to act on. */
+function describeFilters(filters: Record<string, string>): string {
+  return Object.entries(filters)
+    .map(([field, expr]) => `${field}${expr}`)
+    .join(' + ');
 }
 
 // -- search / view / cmd ------------------------------------------------------
