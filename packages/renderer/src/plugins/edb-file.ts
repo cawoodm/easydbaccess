@@ -421,6 +421,32 @@ export function init(api: HostApi): void {
    * the WHOLE open database over it. Offering another NAME instead — which is what
    * this did — only moved the workspace into a file whose name denies it.
    */
+  /**
+   * The workspace here against the file about to be replaced, one line each.
+   *
+   * A Save that has to overwrite a file is a conflict, and it was asked about with
+   * a file NAME alone. The name is the one thing the two copies always share — the
+   * file is named after the workspace — so it told the reader nothing, and the
+   * answer throws away whichever copy is not kept. **The date the file was last
+   * written is what decides it**: a file written an hour ago by another machine is
+   * not the same proposition as one this tab wrote this morning.
+   */
+  async function sidesAgainstFile(dir: FileSystemDirectoryHandle, file: string, workspaceId: string): Promise<string> {
+    const handle = await fileInFolder(dir, file, false);
+    const facts = handle ? await factsOfHandle(handle) : null;
+    let here = {};
+    try {
+      const c = await countWorkspaceContents(storeBridge(), workspaceId, { countRows: false });
+      here = { tables: c.tables, views: c.views };
+    } catch {
+      /* a build that cannot count — the file's own side is the half that matters */
+    }
+    return compareCopies([
+      { label: 'In this browser', facts: here },
+      { label: file, facts: facts ?? {} },
+    ]);
+  }
+
   async function saveIntoFolder(dir: FileSystemDirectoryHandle): Promise<void> {
     const workspaceId = api.workspaceId();
     // Unreachable from the menu or the timer — boot resolves a workspace before
@@ -428,7 +454,7 @@ export function init(api: HostApi): void {
     if (!workspaceId) return;
     const name = spaceFileName(workspaceId);
     const taken = (await listWorkspaceFiles(dir)).includes(name);
-    if (taken && !(await api.ui.dialogs.confirm(`"${name}" is already in "${dir.name}". Replace it with the workspace open here?`, 'Save'))) return;
+    if (taken && !(await api.ui.dialogs.confirm(`"${name}" is already in "${dir.name}". Replace it with the workspace open here?${await sidesAgainstFile(dir, name, workspaceId)}`, 'Save'))) return;
     const target = await fresh(dir, name);
     if (!target?.handle) return;
     setEdbHandle(target.handle);
@@ -742,6 +768,49 @@ export function init(api: HostApi): void {
   }
 
   /**
+   * Rename the workspace inside somebody else's file, so its id matches the name.
+   *
+   * The repair for `b.edb` holding the workspace `a` — see `db/edb/file-identity.ts`
+   * for why that file is otherwise unreachable. Same throwaway-worker arrangement as
+   * `overwriteInFile`: the pool is exclusive origin-wide, so a second worker in this
+   * tab lands on the memory substrate, which is what makes reading and rewriting a
+   * foreign file possible at all.
+   *
+   * `cloneWorkspace` then a delete, rather than an id edit, because there is no such
+   * edit: the id keys every table, view, template and setting in the file. The clone
+   * carries all of it across and re-mints the ids of the copies, which is harmless —
+   * those ids are private to this file.
+   *
+   * The `title` is carried over by hand. A clone writes a fresh workspace record
+   * from `from`'s plugin list alone, so the display name a user chose would be lost
+   * — and this is a rename, not a new workspace.
+   */
+  async function renameInFile(dir: FileSystemDirectoryHandle, file: string, from: string, to: string): Promise<boolean> {
+    const handle = await fileInFolder(dir, file, false);
+    if (!handle || !(await ensureWritable(handle, true))) {
+      await api.ui.dialogs.alert(`easyDBAccess may not write ${file}, so the workspace in it cannot be renamed.`, 'Sync workspace folder');
+      return false;
+    }
+    const scratch = createEdbBridge();
+    try {
+      await scratch.open(await readBytes(handle), SYNC_SCRATCH);
+      const before = (await scratch.findOne('workspaces', from)) as { title?: unknown } | null;
+      const title = typeof before?.title === 'string' ? before.title : '';
+      await cloneWorkspace(scratch, { from, to, name: to, mode: 'all' });
+      if (title) await scratch.patch('workspaces', to, { title });
+      await scratch.deleteWorkspace?.(from);
+      await writeBytes(handle, await scratch.export());
+      api.ui.dialogs.toast(`The workspace in ${file} is now "${to}".`, { kind: 'success' });
+      return true;
+    } catch (err) {
+      await api.ui.dialogs.alert(`The workspace in ${file} could not be renamed: ${err instanceof Error ? err.message : String(err)}`, 'Sync workspace folder');
+      return false;
+    } finally {
+      scratch.terminate();
+    }
+  }
+
+  /**
    * Connect a folder and rebuild the workspace list from every `.edb` in it.
    *
    * Connecting IS the sync — a folder the app knows about but has not read is a
@@ -786,14 +855,21 @@ export function init(api: HostApi): void {
       // it as the only workspace with no file is the opposite of what they asked
       // for. Written, not adopted — see the note in `fileTheStranded`.
       () => fileTheStranded({ skipEmpty: true, includeActive: true }),
+      (file, from, to) => renameInFile(dir, file, from, to),
     );
     const skipped = report.unreadable.length > 0 ? ` ${report.unreadable.length} file(s) held no workspace.` : '';
     const written = alsoWroteNote(report.wrote);
+    // A file whose name denies the workspace inside it has already had its own
+    // dialog, so this only counts them — but it must count them, because a sync
+    // that quietly listed fewer workspaces than the folder holds is the report
+    // that sent us looking in the first place.
+    const misfiled = report.ignored.length > 0 ? ` ${report.ignored.join(', ')} left out: the name does not match the workspace inside.` : '';
+    const fixed = report.renamed.length > 0 ? ` Renamed the workspace in ${report.renamed.join(', ')}.` : '';
     // What happened to THIS tab's file, in the same breath. Without it the toast
     // read the same whether the sync had loaded the file or decided it could not,
     // which is what "Sync does nothing" looked like from the outside.
     const own = describeActiveOutcome(report.active, report.activeFile ?? '');
-    api.ui.dialogs.toast(`"${dir.name}": ${report.found} workspace(s) in ${report.files} file(s).${skipped}${written}${own}`, { kind: 'success' });
+    api.ui.dialogs.toast(`"${dir.name}": ${report.found} workspace(s) in ${report.files} file(s).${skipped}${fixed}${misfiled}${written}${own}`, { kind: 'success' });
     // The selector reads the index once, on connect, so it has to be told.
     window.dispatchEvent(new CustomEvent('easydb:folder-index-changed'));
   }
@@ -814,6 +890,33 @@ export function init(api: HostApi): void {
     await adoptEdbFile(target);
     await api.ui.dialogs.alert(message, 'Workspace file');
     reloadWithSpace(workspaceIdFromFileName(target.name));
+  }
+
+  /**
+   * Refuse a file whose one workspace is not the one its name says.
+   *
+   * Open reads the workspace out of the FILE NAME and reloads asking for it, so
+   * `beta.edb` holding `alpha` used to open, find no `beta`, and create an empty one
+   * inside the file — leaving `beta.edb` holding two workspaces and the data the
+   * user came for out of sight. The same bug as two files sharing an id, reached
+   * through a different door, so it gets the same answer: do not open it.
+   *
+   * Only for a file holding exactly ONE workspace. A file holding several is the
+   * pre-v0.0.427 shape, which Open already copes with by name, and an unreadable
+   * file has its own message further down.
+   */
+  async function nameDeniesContents(name: string, bytes: Uint8Array): Promise<boolean> {
+    const live = edbBridge();
+    if (!live) return false;
+    const inside = workspaceDocs(await live.peekWorkspaces(bytes));
+    const only = inside.length === 1 ? inside[0]! : null;
+    const wanted = workspaceIdFromFileName(name);
+    if (!only || only.id === wanted) return false;
+    await api.ui.dialogs.alert(
+      `"${name}" holds the workspace "${only.id}", not "${wanted}". Opening it would make an empty "${wanted}" beside it. Run "Sync workspace folder" to rename the workspace inside the file, or rename the file itself.`,
+      'Open workspace',
+    );
+    return true;
   }
 
   /**
@@ -839,6 +942,7 @@ export function init(api: HostApi): void {
     }
     picked ??= await pickFileToOpen();
     if (!picked) return;
+    if (await nameDeniesContents(picked.name, picked.bytes)) return;
     // The boot never reads the user's file (see `session.ts`), so the bytes go
     // into this tab's own substrate first, and the reload finds them there.
     await placeForNextBoot(picked.name, picked.bytes);

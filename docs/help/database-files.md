@@ -272,6 +272,27 @@ overwrite a file, or in a private window. Neither copy can be called the newer
 one, so the sync asks instead of guessing. Answering makes a record, so it only
 asks once.
 
+### A file whose name is not its workspace
+
+Each file is named after the workspace inside it, and the app opens a workspace by
+its file name. So a file where the two disagree cannot be opened at all — copy
+`sales.edb` to `sales copy.edb` in a file manager and the second file holds `sales`
+under a name that says `sales-copy`.
+
+The next **Sync workspace folder** says so and offers two answers:
+
+| Choice                          | What happens                                                                                    |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **Rename it to "sales-copy"**   | The workspace inside the file is renamed to match. The data stays, and you have two workspaces. |
+| **Leave it out**                | The file is left off the workspace list. Nothing is written to it and nothing is deleted.       |
+
+Left out is not deleted: the file stays on disk exactly as it is, and the next sync
+asks again. It is the answer for a file you want to look at yourself first — delete
+it, or rename the file so its name and its workspace agree.
+
+The question names the file and says when it was last written, so you can tell a
+copy from the original.
+
 One thing does not survive this: a change to **settings alone**. Settings are not
 counted as unsaved work — every command you run stores itself as a recent command,
 so they change constantly — which means a newer file replaces them.

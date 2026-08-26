@@ -4,8 +4,8 @@
 
 ### Features
 
-- ✨ A column editor's preview draws each cell with its renderer and runs the scripts, flagging every cell that breaks a rule (v0.0.442)
-- ✨ Drag the bar above a column editor's preview to give it more or less room (v0.0.442)
+- ✨ A column editor's preview draws each cell with its renderer and runs the scripts, flagging every cell that breaks a rule (v0.0.443)
+- ✨ Drag the bar above a column editor's preview to give it more or less room (v0.0.443)
 - ✨ `preview/table/key` opens one record's field in a window, without filtering or moving anything (v0.0.440)
 - ✨ A column's script and its validation rule can be switched off and kept; the editor's two buttons say which of the three states each is in (v0.0.439)
 - ✨ A link cell now links any scheme — `file:///`, `ftp://`, app links — where before only http(s) counted. Script schemes stay text (v0.0.438)
@@ -15,6 +15,7 @@
 
 ### Bugs
 
+- 🪲 Two files in the workspace folder holding one workspace listed it twice, and both entries opened the same file (v0.0.442)
 - 🪲 Losing the browser’s permission to the workspace folder is now said out loud, with a button to reconnect, instead of the workspace coming up empty (v0.0.435)
 - 🪲 Connecting a workspace folder could leave the app with no tables until the file was dragged back in (v0.0.431)
 - 🪲 The same new plugin was announced again on another dev server, on the published site, or after site data was cleared (v0.0.433)

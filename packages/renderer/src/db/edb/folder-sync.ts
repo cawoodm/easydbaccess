@@ -11,6 +11,7 @@ import { edbBridge, storeBridge } from './active-bridge.js';
 import { countWorkspaceContents } from '../delete-workspace.js';
 import { fileInFolder, listWorkspaceFiles } from './file-handle.js';
 import { folderConflicts, isEmptyWorkspace, overwriteLosesData, partitionConflicts, writeFolderIndex, type FolderClash, type FolderIndex, type FolderWorkspace } from './folder-index.js';
+import { afterRename, misfiledFiles, withoutFiles, type FileIdentity } from './file-identity.js';
 import { factsOf, factsOfHandle, readStamp, recordDivergence, verdictFor } from './file-stamp.js';
 import { decideActiveFileSync, type ActiveFileOutcome } from './active-file-sync.js';
 import { compareCopies, sizeChangeNote, type CopyFacts } from './copy-facts.js';
@@ -39,6 +40,16 @@ const OVERWRITE = 'Overwrite disk version';
 const KEEP = 'Keep this copy';
 
 /**
+ * The two answers to a file whose name and contents disagree.
+ *
+ * "Leave it out" is not a repair and does not pretend to be one: the file stays on
+ * disk exactly as it is, and the next sync asks again. It is the answer for a file
+ * the user wants to look at themselves first.
+ */
+const renameTo = (id: string) => `Rename it to "${id}"`;
+const LEAVE_OUT = 'Leave it out';
+
+/**
  * Write the workspace `localId` into `file`, replacing the copy `fileId` names.
  *
  * Two ids because a clash is matched by NAME: the copy in the file can carry a
@@ -50,6 +61,15 @@ type OverwriteInFile = (localId: string, file: string, fileId: string) => Promis
 
 /** Give every workspace the folder does not hold a file of its own; names them. */
 type FileTheRest = () => Promise<string[]>;
+
+/**
+ * Rename the workspace inside `file` from `from` to `to`, in the file itself.
+ *
+ * Answers false when the file could not be written, which is the ordinary case for
+ * a folder whose permission has lapsed. The caller then leaves the file out, since
+ * a file it cannot repair is one it must not act on either.
+ */
+type RenameInFile = (file: string, from: string, to: string) => Promise<boolean>;
 
 /**
  * Ask again when an answer would replace work with nothing.
@@ -85,6 +105,21 @@ export interface SyncReport {
    * rather than counted, for the same reason `alsoWroteNote` names them.
    */
   wrote: string[];
+  /**
+   * Files whose workspace was renamed to match the file name, at the user's word.
+   *
+   * See `file-identity.ts`. Named rather than counted, like `wrote`: the sync has
+   * changed what is inside somebody's file, and the toast has to say which.
+   */
+  renamed: string[];
+  /**
+   * Files left out of the workspace list because their name denies what is inside.
+   *
+   * Nothing was written to them and nothing was deleted. They are simply not acted
+   * on, so the selector cannot offer a workspace this app would open the wrong file
+   * for.
+   */
+  ignored: string[];
   /** What happened to the file this tab has open. Never silent — see `active-file-sync.ts`. */
   active: ActiveFileOutcome;
   /** The name of that file, for the report to say. Absent on the local database. */
@@ -138,6 +173,71 @@ export async function scanFolder(dir: FileSystemDirectoryHandle): Promise<{ inde
   }
 
   return { index: { folder: dir.name, at: Date.now(), workspaces }, files, unreadable };
+}
+
+/** One file, as a question about it should describe it. Always by name. */
+function identityFacts(i: FileIdentity): string {
+  return compareCopies([{ label: i.file, facts: { ...(i.size === undefined ? {} : { size: i.size }), ...(i.mtime === undefined ? {} : { mtime: i.mtime }) } }]);
+}
+
+/**
+ * Settle every file in the folder whose name denies the workspace inside it.
+ *
+ * Runs on the scan result BEFORE the index is written and before any clash is
+ * computed, because everything downstream reads a workspace id and a file name as
+ * a matched pair. See `file-identity.ts` for what goes wrong when they are not.
+ *
+ * A rename is offered only where it would work, and a file the user does not repair
+ * is dropped from the list rather than shown. Dropping is also what a failed write
+ * comes to: a file this app cannot repair is one it must not act on either.
+ *
+ * The file this tab has OPEN is never touched. Its workspace is live — the store,
+ * the panels and every plugin are bound to that id — so renaming it inside the file
+ * would leave the tab saving under an id the file no longer holds. A tab looking at
+ * a misfiled file is a state to leave alone until it looks somewhere else.
+ */
+async function settleIdentities(
+  found: readonly FolderWorkspace[],
+  activeFile: string,
+  dialogs: Dialogs,
+  rename: RenameInFile,
+): Promise<{ workspaces: FolderWorkspace[]; renamed: string[]; ignored: string[] }> {
+  let workspaces = [...found];
+  const renamed: string[] = [];
+  const ignored: string[] = [];
+
+  for (const bad of misfiledFiles(found)) {
+    if (bad.file.toLowerCase() === activeFile.toLowerCase()) continue;
+
+    if (bad.fix === 'ambiguous') {
+      // Nothing to choose: the file name already claims the id it would be renamed
+      // to, and so does another file. Only a rename on disk settles it.
+      await dialogs.alert(
+        `${bad.file} and ${bad.rivals.join(', ')} all stand for the workspace "${bad.claimed}". Only one file can. ${bad.file} is left out of the workspace list until you rename it on disk.${identityFacts(bad)}`,
+        'Sync workspace folder',
+      );
+      ignored.push(bad.file);
+      workspaces = withoutFiles(workspaces, [bad.file]);
+      continue;
+    }
+
+    const answer = await dialogs.choice(
+      `${bad.file} holds the workspace "${bad.id}". A workspace file must hold the workspace its own name says, so this copy cannot be opened. Rename the workspace inside it to "${bad.claimed}", or leave the file out of the list.${identityFacts(bad)}`,
+      [renameTo(bad.claimed), LEAVE_OUT],
+      'Sync workspace folder',
+    );
+    // A dismissed dialog leaves the file out, like the explicit answer: the app has
+    // no safe use for it either way, and dropping it writes nothing.
+    if (answer === renameTo(bad.claimed) && (await rename(bad.file, bad.id, bad.claimed))) {
+      renamed.push(bad.file);
+      workspaces = afterRename(workspaces, bad.file, bad.claimed);
+    } else {
+      ignored.push(bad.file);
+      workspaces = withoutFiles(workspaces, [bad.file]);
+    }
+  }
+
+  return { workspaces, renamed, ignored };
 }
 
 /**
@@ -248,6 +348,11 @@ function sinceWeRead(file: string, nowSize: number | undefined): string {
  *
  * The index is written BEFORE the prompts, so a user who dismisses them still gets
  * the merged list they asked for.
+ *
+ * Ahead of all of it, a file whose name denies the workspace inside it is settled
+ * or set aside (`settleIdentities`). That has to come first: a clash, an adopt and
+ * a switch all read an id and a file name as one pair, so a file where the two
+ * disagree makes every later step answer about the wrong copy.
  */
 export async function syncFolder(
   dir: FileSystemDirectoryHandle,
@@ -255,8 +360,14 @@ export async function syncFolder(
   dialogs: Dialogs,
   overwrite: OverwriteInFile,
   fileTheRest: FileTheRest = () => Promise.resolve([]),
+  rename: RenameInFile = () => Promise.resolve(false),
 ): Promise<SyncReport> {
   const { index, files, unreadable } = await scanFolder(dir);
+
+  // First, because everything below reads an id and a file name as a matched pair.
+  const identity = await settleIdentities(index.workspaces, activeEdbName(), dialogs, rename);
+  index.workspaces = identity.workspaces;
+
   writeFolderIndex(index);
 
   const open = await store.workspaces.find();
@@ -307,6 +418,8 @@ export async function syncFolder(
     conflicts: ask.length,
     unreadable,
     wrote,
+    renamed: identity.renamed,
+    ignored: identity.ignored,
     active,
     ...(adoptedFileName() === null ? {} : { activeFile: adoptedFileName() as string }),
     reloadedActive: active === 'loaded',
