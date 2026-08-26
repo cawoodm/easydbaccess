@@ -18,6 +18,7 @@
 
 ### Bugs
 
+- 🪲 The first Save into a workspace folder came back from the next refresh with no tables, while the file on disk held them all (v0.0.449)
 - 🪲 A saved workspace came back from a browser refresh saying it had unsaved changes (v0.0.447)
 - 🪲 Saving over a file that already holds this workspace asks which copy to keep, naming both, instead of a yes/no about replacing (v0.0.446)
 

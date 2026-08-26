@@ -534,7 +534,18 @@ export function init(api: HostApi): void {
     setEdbHandle(target.handle);
     await rememberHandle(target.handle);
     setActiveEdbName(target.name);
-    await save();
+    if (!(await save())) return;
+    // The marker now names a file this browser's POOL has never heard of, and boot
+    // reads the pool — never the user's file (see `session.ts`). So without this the
+    // next load opened a database that did not exist, the pool obligingly made it
+    // empty, and the workspace came up with no tables: safe in the 48 KB file on
+    // disk, gone from the screen, and the boot then re-created the workspace record
+    // on top. Every other adopt already does this (`adoptFolderFile`, `open`); this
+    // was the one route that changed the name without placing the bytes.
+    //
+    // Read back from the file rather than exported again, so the pool's copy is the
+    // bytes that are actually on disk.
+    await placeForNextBoot(target.name, await readBytes(target.handle));
   }
 
   /**
@@ -767,7 +778,14 @@ export function init(api: HostApi): void {
     return true;
   });
 
-  async function save(): Promise<void> {
+  /**
+   * Write the workspace to its file.
+   *
+   * Answers whether it actually wrote, which one caller needs: the Save that has
+   * just pointed this tab at a NEW file has to put those bytes in the pool too,
+   * and must not do it for a save that failed. See {@link saveIntoFolder}.
+   */
+  async function save(): Promise<boolean> {
     let result: SaveResult;
     try {
       result = await persist();
@@ -776,17 +794,18 @@ export function init(api: HostApi): void {
       // after seven seconds. Everything saved before this is still intact — the
       // workspace itself is in SQLite and was never in the way.
       await api.ui.dialogs.alert(`The workspace could not be saved: ${err instanceof Error ? err.message : String(err)}`, 'Save');
-      return;
+      return false;
     }
     if (result.where === 'no-handle') {
       // A connected folder is already an answer to "where does this go?", so the
-      // first Save after connecting one asks nothing.
+      // first Save after connecting one asks nothing. Either route ends in
+      // `saveIntoFolder`, which reports its own result — this call did not write.
       const dir = await connectedFolder();
       if (dir) await saveIntoFolder(dir);
       else await askForSaveTarget();
-      return;
+      return false;
     }
-    if (result.where === 'none') return;
+    if (result.where === 'none') return false;
     autosave.markClean();
     // Names the file. "Workspace saved" left the one question a save raises
     // unanswered — saved WHERE — and with a workspace folder in play the answer is
@@ -797,6 +816,7 @@ export function init(api: HostApi): void {
     // quietly produced four files nobody asked for would be the more surprising of
     // the two, and the note only appears on the save that produces them.
     api.ui.dialogs.toast(`Workspace saved to ${activeEdbName()}.${alsoWroteNote(result.alsoWrote)}`, { kind: 'success' });
+    return true;
   }
 
   /**
@@ -1056,7 +1076,7 @@ export function init(api: HostApi): void {
     icon: 'save',
     tooltip: 'Save this workspace to its file',
     variant: 'primary',
-    onClick: () => save(),
+    onClick: () => void save(),
   };
 
   function refreshSaveButton(): void {
@@ -1135,7 +1155,7 @@ export function init(api: HostApi): void {
       group: FILE_GROUP,
       icon: 'save',
       keywords: ['write', 'disk', 'edb'],
-      run: () => save(),
+      run: () => void save(),
     });
   }
 

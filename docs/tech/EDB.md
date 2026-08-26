@@ -159,6 +159,25 @@ install the pool. It is the old behaviour, debounce window and all, and it
 exists to keep such a browser working — not as a second supported way of
 running.
 
+### Boot reads the POOL, never the user's file
+
+`session.ts` opens the database named by the adopted-file marker, and it looks for
+it in the pool. It never reads the `FileSystemFileHandle` — a boot has no user
+gesture, so a permission that has lapsed would leave the app with nothing.
+
+**So changing the marker means placing the bytes.** Every route that repoints the
+tab at another file — `adoptFolderFile`, `open`, Convert, a `?space=` switch — calls
+`placeForNextBoot(name, bytes)` (`bridge.importBytes`) BEFORE the reload, and only
+the live worker can: the pool is exclusive origin-wide, so a throwaway worker's
+copy lands where no boot looks.
+
+The first Save into a folder was the one route that changed the marker and wrote
+only the USER's file. The next load then asked the pool for a database it had never
+heard of, the pool made it empty, and the workspace came up with no tables — all of
+it safe in the file on disk, none of it on screen, and the boot re-creating the
+workspace record on top. Fixed in v0.0.449;
+`138-first-save-survives-reload.spec.ts` holds it, rows included.
+
 ## A folder, not a file
 
 The first time a workspace goes into a file, the app asks for a **folder**

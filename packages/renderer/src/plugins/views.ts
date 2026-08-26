@@ -58,4 +58,3 @@ export function init(api: HostApi): void {
 export async function load(api: HostApi): Promise<void> {
   await seedDefaults(api);
 }
-
