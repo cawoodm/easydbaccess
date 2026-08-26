@@ -198,8 +198,8 @@ test.describe('the column editor', () => {
     await editor.locator('select#sample').selectOption({ label: 'One of a fixed list of values' });
     await editor.getByRole('button', { name: 'Save' }).click();
 
-    // The pencil now shows the column carries a rule, before anything is saved.
-    await expect(dlg.locator('button.validate-btn').first()).toHaveClass(/has-validate/);
+    // The button now shows the column carries a rule, before anything is saved.
+    await expect(dlg.locator('button.validate-btn').first()).toHaveClass(/is-on/);
     await dlg.getByRole('button', { name: /Save|Create/ }).click();
     await expect(dlg).toBeHidden();
 
@@ -221,13 +221,13 @@ test.describe('the column editor', () => {
     await waitForPanel(page, id);
     const dlg = await openColumns(page, id);
 
-    const pencil = dlg.locator('button.validate-btn').first();
-    await expect(pencil).toHaveClass(/has-validate/);
-    await pencil.click();
+    const ruleBtn = dlg.locator('button.validate-btn').first();
+    await expect(ruleBtn).toHaveClass(/is-on/);
+    await ruleBtn.click();
     const editor = page.locator('script-editor-dialog dialog');
     await editor.locator('textarea').fill('');
     await editor.getByRole('button', { name: 'Save' }).click();
-    await expect(pencil).not.toHaveClass(/has-validate/);
+    await expect(ruleBtn).toHaveClass(/is-none/);
 
     await dlg.getByRole('button', { name: /Save|Create/ }).click();
     await expect(dlg).toBeHidden();

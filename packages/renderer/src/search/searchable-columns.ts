@@ -19,6 +19,7 @@
 // explicit `filterable: false` still wins, because that is the user's own answer.
 
 import type { ColumnSpec, Row } from '@easydb/shared';
+import { activeColumnScript } from '@easydb/shared';
 
 /** Does any row hold a non-empty value for `field`? */
 export function hasStoredData(rows: readonly Row[], field: string): boolean {
@@ -35,9 +36,12 @@ export function hasStoredData(rows: readonly Row[], field: string): boolean {
  * With NO rows to look at the answer is `false`: an empty table (or a read that
  * has not landed yet) is not evidence that the column is empty, and quietly
  * dropping a column from search on no evidence is the worse mistake.
+ *
+ * A script the user has switched OFF computes nothing, so the column is back to
+ * being an ordinary empty one — searchable, like any other column with no data.
  */
 export function isComputedOnly(col: ColumnSpec, rows: readonly Row[]): boolean {
-  if (!col.script?.trim()) return false;
+  if (activeColumnScript(col) === undefined) return false;
   if (rows.length === 0) return false;
   return !hasStoredData(rows, col.field);
 }

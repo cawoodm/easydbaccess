@@ -7,7 +7,7 @@
 // and the snapshotted filter/sort a view instance applies.
 
 import type { ColumnSpec, Row, ViewInstance } from '@easydb/shared';
-import { arrayMembers, composeColumnFilter, matchesColumnFilter, parseColumnFilter, type FilterToken } from '@easydb/shared';
+import { activeColumnScript, arrayMembers, composeColumnFilter, matchesColumnFilter, parseColumnFilter, scriptDeclined, type FilterToken } from '@easydb/shared';
 import { runColumnScript } from '../util/column-script.js';
 import { formatByType } from '../util/local-datetime.js';
 
@@ -253,7 +253,7 @@ export function substituteRow(
     // A scripted column is computed from the rest of the row, so there is
     // nowhere to write an edit back to — the grid treats such a cell as
     // read-only, and so does an `$input.TOKEN` bound to one.
-    const readonly = opts.readonly === true || !!spec?.script?.trim();
+    const readonly = opts.readonly === true || activeColumnScript(spec) !== undefined;
     return renderInput(field, v, row.id, spec, readonly);
   });
 }
@@ -286,8 +286,13 @@ function isEmpty(v: unknown): boolean {
 export function evaluateRow(row: Row, columns: readonly ColumnSpec[]): Row {
   let data: Record<string, unknown> | null = null;
   for (const c of columns) {
-    if (!c.script?.trim()) continue;
-    const run = runColumnScript(c.script, row.data);
+    const src = activeColumnScript(c);
+    if (src === undefined) continue;
+    const run = runColumnScript(src, row.data);
+    // A script that DECLINED (null/undefined) leaves the stored value alone, so
+    // the view filters, sorts and searches the same value the grid shows — see
+    // `scriptDeclined`.
+    if (run.ok && scriptDeclined(run.value)) continue;
     data ??= { ...row.data };
     data[c.field] = run.ok ? run.value : `⚠ ${run.label}`;
   }
@@ -300,7 +305,7 @@ export function evaluateRow(row: Row, columns: readonly ColumnSpec[]): Row {
  * recompute, exactly as the grid re-runs them on every render.
  */
 export function evaluateRows(rows: Row[], columns: readonly ColumnSpec[]): Row[] {
-  if (!columns.some((c) => c.script?.trim())) return rows;
+  if (!columns.some((c) => activeColumnScript(c) !== undefined)) return rows;
   return rows.map((r) => evaluateRow(r, columns));
 }
 

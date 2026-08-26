@@ -37,6 +37,7 @@ import type { SqlRunOptions, SqlRunResult } from './sql-run.js';
 import { decodeValue, encodeValue, quoteIdent, sqlAffinity, sqlTableNameFor } from './sql-mapping.js';
 import type { CloneMode, ColumnSpec, Row, WorkspaceContents } from './types.js';
 import { settingId } from './setting-key.js';
+import { activeColumnScript } from './column-scripts.js';
 
 /** What `coll='_meta', key='format'` holds. Read before anything else is trusted. */
 export interface EdbFormat {
@@ -1035,10 +1036,10 @@ export class EdbStore {
     const specOf = new Map(columns.map((c) => [c.field, c] as const));
     const sqlOf = (field: string): string | null => {
       const spec = specOf.get(field);
-      if (!spec || spec.script || spec.type === 'array') return null;
+      if (!spec || activeColumnScript(spec) !== undefined || spec.type === 'array') return null;
       return quoteIdent(spec.field);
     };
-    const searchFields = columns.filter((c) => !c.script && c.type !== 'array' && c.filterable !== false).map((c) => c.field);
+    const searchFields = columns.filter((c) => activeColumnScript(c) === undefined && c.type !== 'array' && c.filterable !== false).map((c) => c.field);
 
     const where = buildWhere(q.filters, q.search, sqlOf, searchFields);
     // Plus a narrowing pass over `_extra`, which `sqlOf` cannot express.
@@ -1156,16 +1157,16 @@ export class EdbStore {
     const columns = this.columnsOf(stored);
     const spec = columns.find((c) => c.field === q.field);
     // No SQL form for the field itself: the caller has to do the whole job.
-    if (!spec || spec.script) return { values: [], partial: true };
+    if (!spec || activeColumnScript(spec) !== undefined) return { values: [], partial: true };
 
     const table = quoteIdent(String(stored[SQL_TABLE_KEY]));
     const specOf = new Map(columns.map((c) => [c.field, c] as const));
     const sqlOf = (field: string): string | null => {
       const s = specOf.get(field);
-      if (!s || s.script || s.type === 'array') return null;
+      if (!s || activeColumnScript(s) !== undefined || s.type === 'array') return null;
       return quoteIdent(s.field);
     };
-    const searchFields = columns.filter((c) => !c.script && c.type !== 'array' && c.filterable !== false).map((c) => c.field);
+    const searchFields = columns.filter((c) => activeColumnScript(c) === undefined && c.type !== 'array' && c.filterable !== false).map((c) => c.field);
     const where = buildWhere(q.where?.filters, q.where?.search, sqlOf, searchFields);
 
     const col = quoteIdent(spec.field);

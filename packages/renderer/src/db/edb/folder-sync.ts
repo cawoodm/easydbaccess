@@ -249,7 +249,13 @@ function sinceWeRead(file: string, nowSize: number | undefined): string {
  * The index is written BEFORE the prompts, so a user who dismisses them still gets
  * the merged list they asked for.
  */
-export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStore, dialogs: Dialogs, overwrite: OverwriteInFile, fileTheRest: FileTheRest = () => Promise.resolve([])): Promise<SyncReport> {
+export async function syncFolder(
+  dir: FileSystemDirectoryHandle,
+  store: DataStore,
+  dialogs: Dialogs,
+  overwrite: OverwriteInFile,
+  fileTheRest: FileTheRest = () => Promise.resolve([]),
+): Promise<SyncReport> {
   const { index, files, unreadable } = await scanFolder(dir);
   writeFolderIndex(index);
 
@@ -328,13 +334,7 @@ export async function syncFolder(dir: FileSystemDirectoryHandle, store: DataStor
  * Sync that appeared to do nothing was — and it is reached by ordinary use, since
  * an Overwrite once cleared the stamp that makes the comparison possible.
  */
-async function refreshActiveFile(
-  dir: FileSystemDirectoryHandle,
-  dialogs: Dialogs,
-  overwrite: OverwriteInFile,
-  open: readonly { id: string }[],
-  index: FolderIndex,
-): Promise<ActiveFileOutcome> {
+async function refreshActiveFile(dir: FileSystemDirectoryHandle, dialogs: Dialogs, overwrite: OverwriteInFile, open: readonly { id: string }[], index: FolderIndex): Promise<ActiveFileOutcome> {
   const file = adoptedFileName();
   if (!file) return 'no-file';
   const handle = await fileInFolder(dir, file, false);

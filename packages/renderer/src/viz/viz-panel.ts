@@ -26,6 +26,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { html as staticHtml, unsafeStatic } from 'lit/static-html.js';
 import type { ColumnSpec, DataCollection, Row, Table, ViewInstance, ViewTemplate, VisualizationSpec, VizAggregate } from '@easydb/shared';
+import { activeColumnScript, scriptDeclined } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { readRows, type RowRequest } from '../db/row-reader.js';
 import { ROW_FETCH_CAP } from '../db/data-store-bridge.js';
@@ -453,12 +454,15 @@ export class VizPanel extends LitElement {
    * charting a computed column silently yields nothing.
    */
   private evaluatedRows(): Row[] {
-    const scripted = this.columns.filter((c) => typeof c.script === 'string' && c.script.trim() !== '');
+    const scripted = this.columns.filter((c) => activeColumnScript(c) !== undefined);
     if (scripted.length === 0) return this.rows;
     return this.rows.map((r) => {
       const data = { ...r.data };
       for (const c of scripted) {
-        const run = runColumnScript(c.script, r.data);
+        const run = runColumnScript(activeColumnScript(c), r.data);
+        // A script that declined leaves the stored cell in place, so a chart
+        // aggregates what the grid shows.
+        if (run.ok && scriptDeclined(run.value)) continue;
         // A broken script is one empty column, not a broken chart — the column
         // editor is where that error belongs, and it already reports it there.
         data[c.field] = run.ok ? run.value : null;

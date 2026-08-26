@@ -3,6 +3,15 @@ import './chrome/app-shell.js';
 import './chrome/filter-popover.js';
 import { getContext } from './app-context.js';
 
+// The dev "source changed — reload?" bar, for `EASYDB_HMR=ask` (see
+// `vite.config.ts`). Loaded whenever a dev server is behind the page; under the
+// default `EASYDB_HMR=auto` the server never sends the event, so the bar is
+// installed and silent. `import.meta.hot` is `undefined` in a production build,
+// which makes this branch statically dead and drops the module from the bundle.
+if (import.meta.hot) {
+  void import('./dev/hmr-prompt.js').then((m) => m.install());
+}
+
 // E2E test hook: when the URL contains `?test=1`, expose the live AppContext
 // on `window.__easydb` so Playwright tests can drive the renderer through the
 // real HostApi without simulating clicks for every dialog/import/sync action.

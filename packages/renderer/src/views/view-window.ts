@@ -9,7 +9,7 @@ import { openViewColumnsDialog } from '../dialogs/view-columns-dialog.js';
 import { CELL_SLOT_CLASS, cyclePillValue, evaluateRows, extractFilterTokens, hasRowHtml, removePillValue, substituteRow, tokenValue, viewRows } from './view-render.js';
 import { persistPillFilters, withPillValue } from './pill-filters.js';
 import { viewColumnSpecs } from './view-columns.js';
-import { parseColumnFilter } from '@easydb/shared';
+import { activeColumnScript, parseColumnFilter } from '@easydb/shared';
 import { facetable, facetCounts } from '../search/facet-values.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
 import { searchRowsByField } from '../search/text-search.js';
@@ -550,7 +550,7 @@ export class ViewWindow extends LitElement {
     // the stored cell behind a script is empty — so handing it such a predicate
     // (or letting `readRows` re-apply it here over un-evaluated rows) drops every
     // row. Those fields stay entirely with the view.
-    const scripted = new Set(this.tableColumns.filter((c) => c.script).map((c) => c.field));
+    const scripted = new Set(this.tableColumns.filter((c) => activeColumnScript(c) !== undefined).map((c) => c.field));
     const filters = Object.fromEntries(Object.entries(inst.filters ?? {}).filter(([f]) => !scripted.has(f)));
     const sortKeys = inst.sortBy?.length ? inst.sortBy : inst.sortColumn ? [{ field: inst.sortColumn, asc: inst.sortAsc !== false }] : [];
     const sort = sortKeys.filter((k) => !scripted.has(k.field));

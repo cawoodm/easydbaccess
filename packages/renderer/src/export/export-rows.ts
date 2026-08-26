@@ -12,7 +12,7 @@
  */
 
 import type { ColumnSpec, DataCollection, ExportOptions, Row, Table } from '@easydb/shared';
-import { arrayMembers } from '@easydb/shared';
+import { activeColumnScript, arrayMembers, scriptDeclined } from '@easydb/shared';
 import { readRows } from '../db/row-reader.js';
 import { ROW_FETCH_CAP } from '../db/data-store-bridge.js';
 import { filterRows } from '../views/view-render.js';
@@ -99,14 +99,16 @@ async function readForExport(coll: DataCollection<Row>, options: ExportOptions, 
  * with an error string in one cell is worse than the value being absent.
  */
 function withScriptValues(rows: Row[], columns: readonly ColumnSpec[]): Row[] {
-  const scripted = columns.filter((c) => c.script?.trim());
+  const scripted = columns.filter((c) => activeColumnScript(c) !== undefined);
   if (scripted.length === 0) return rows;
   return rows.map((r) => {
     const data = { ...r.data };
     for (const col of scripted) {
       if (data[col.field] != null && data[col.field] !== '') continue;
-      const run = runColumnScript(col.script, r.data);
-      if (run.ok) data[col.field] = run.value as never;
+      const run = runColumnScript(activeColumnScript(col), r.data);
+      // A declined script leaves the (empty) stored cell as it is — writing its
+      // `null` in would export the word "null" for a blank.
+      if (run.ok && !scriptDeclined(run.value)) data[col.field] = run.value as never;
     }
     return { ...r, data };
   });

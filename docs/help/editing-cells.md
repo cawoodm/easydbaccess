@@ -43,8 +43,8 @@ explaining why, rather than silently discarded:
 
 When the tick-boxes can't say it, a column can carry a small piece of
 JavaScript that decides for itself. Open the column editor (the **Columns**
-button in the window footer) and click the **pencil to the right of the Max
-box**:
+button in the window footer) and click the **rule button to the right of the Max
+box** (the one with the ✓/✗ list on it, not the pencil):
 
 ```js
 function validate(value, row) {
@@ -76,9 +76,29 @@ not edits, so a rule can't stop a table from loading — it tells you about the
 next value someone types. To check the rows you already have, use Validate,
 below.
 
-Validation is separate from the _other_ pencil (the one left of Max), which
-computes what a column **displays** — see
-[Computing what a column shows](#computing-what-a-column-shows) below.
+Validation is separate from the **pencil left of Max**, which computes what a
+column **displays** — see
+[Computing what a column shows](#computing-what-a-column-shows) below. The two
+used to be the same pencil side by side; they carry different icons now.
+
+### Switching a rule off without losing it
+
+A rule you are debugging, or one that has to stand aside while a batch of
+awkward data is loaded, does not have to be deleted. Untick **Enforce** at the
+top of the editor and save: the rule stays on the column, and stops running.
+
+The button in the column editor tells you which of the three states a column is
+in at a glance:
+
+| Colour   | Meaning                                    |
+| -------- | ------------------------------------------ |
+| **Gray** | no rule on this column                     |
+| **Blue** | a rule, and it runs                        |
+| **Red**  | a rule that is there but switched **off**  |
+
+Tick the box again to switch it back on. Clearing the body instead deletes the
+rule outright — and clears the switch with it, so a rule you write later starts
+switched on.
 
 ## Checking every row: the ✓ button
 
@@ -175,6 +195,11 @@ for you, it's the column's own Renderer box.
 The **+** works here too, and this list is shared with views: a script
 you save on a column is offered when you script a view's `$TOKEN`, and one you
 save there is offered on your columns. Validation rules stay in their own list.
+
+A display script has the same switch as a validation rule — untick **Run** at
+the top of the editor and the column shows its stored value again, with the
+script kept. Its button follows the same gray / blue / red as the rule button
+beside it.
 
 #### Turning a computed column into data
 

@@ -17,11 +17,15 @@ export interface ColumnRow {
    * way into whatever `renderer` this column has (or shows as text with none).
    */
   script?: string | undefined;
+  /** False parks `script`: kept, not run. Absent/true ⇒ it runs. */
+  scriptActive?: boolean | undefined;
   /**
    * JS body whose `validate(value, row)` throws to reject a manual cell edit.
    * The column's other script — see ColumnSpec.validate.
    */
   validate?: string | undefined;
+  /** False parks `validate` the same way. */
+  validateActive?: boolean | undefined;
   max?: number | undefined;
   unique?: boolean | undefined;
   notnull?: boolean | undefined;
@@ -52,7 +56,8 @@ export interface ColumnRow {
  * field the editor doesn't own rides through unchanged. `field`/`label`/
  * `type` are always overwritten from the draft.
  *
- * Every OTHER editor-owned optional field (`renderer`, `script`, `validate`,
+ * Every OTHER editor-owned optional field (`renderer`, `script`, `scriptActive`,
+ * `validate`, `validateActive`,
  * `max`, `unique`, `notnull`, `hidden`, `sortable`, `filterable`) is explicitly set
  * OR deleted based on the current draft state — never left to a bare
  * `if (truthy) spec.x = ...`, because with a spread base that pattern would
@@ -75,8 +80,15 @@ export function buildColumnSpec(row: ColumnRow): ColumnSpec {
   else delete spec.renderer;
   if (row.script) spec.script = row.script;
   else delete spec.script;
+  // The switch is only meaningful with a script behind it: clearing the body
+  // clears the switch too, so a column that gets a NEW script later starts by
+  // running it rather than inheriting "off" from one deleted months ago.
+  if (row.script && row.scriptActive === false) spec.scriptActive = false;
+  else delete spec.scriptActive;
   if (row.validate) spec.validate = row.validate;
   else delete spec.validate;
+  if (row.validate && row.validateActive === false) spec.validateActive = false;
+  else delete spec.validateActive;
   if (row.max != null && row.max > 0) spec.max = row.max;
   else delete spec.max;
   if (row.unique) spec.unique = true;

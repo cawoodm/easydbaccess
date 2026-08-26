@@ -14,6 +14,7 @@
 // row: a duplicate is only visible in the light of every row already seen.
 
 import type { ColumnSpec, Row } from '@easydb/shared';
+import { activeValidateScript } from '@easydb/shared';
 import { runValidateScript } from '../util/column-script.js';
 
 export type IssueKind = 'notnull' | 'max' | 'unique' | 'script';
@@ -71,7 +72,7 @@ function isBlank(v: unknown): boolean {
 
 /** Does this column carry any rule worth a pass over the rows? */
 function hasRule(c: ColumnSpec, runScripts: boolean): boolean {
-  return c.notnull === true || (c.max != null && c.max > 0) || c.unique === true || (runScripts && !!c.validate?.trim());
+  return c.notnull === true || (c.max != null && c.max > 0) || c.unique === true || (runScripts && activeValidateScript(c) !== undefined);
 }
 
 /**
@@ -92,7 +93,7 @@ export function createValidator(columns: readonly ColumnSpec[], opts: ValidatorO
 
   return {
     fields: rules.map((c) => c.field),
-    needsScripts: runScripts && rules.some((c) => !!c.validate?.trim()),
+    needsScripts: runScripts && rules.some((c) => activeValidateScript(c) !== undefined),
     capped: () => new Map(dropped),
     check(row: Row, index: number): RowIssue[] {
       const out: RowIssue[] = [];
@@ -134,10 +135,11 @@ export function createValidator(columns: readonly ColumnSpec[], opts: ValidatorO
           }
         }
 
-        if (runScripts && c.validate?.trim()) {
+        const rule = runScripts ? activeValidateScript(c) : undefined;
+        if (rule !== undefined) {
           // Fed the row itself: `runValidateScript` takes the value and the row,
           // and a scan of an unedited row is the row as stored.
-          const verdict = runValidateScript(c.validate, v, row.data);
+          const verdict = runValidateScript(rule, v, row.data);
           if (!verdict.ok) add(c, 'script', verdict.message ?? 'rejected by this column’s validation script', v);
         }
       }
