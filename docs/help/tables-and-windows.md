@@ -91,13 +91,26 @@ close.
 
 ## The preview in the column editor
 
-The column editor shows the first 100 rows below the columns. Each cell is
-checked against the settings you have typed, and a cell that breaks one is
-marked red.
+The column editor shows the first 100 rows below the columns, drawn the way the
+settings you have typed say they should be drawn — a column set to **Link** shows
+a link, one set to **Markdown** shows its text, and a column with a **script**
+shows what the script computes. So you can see what a setting does before you
+save it.
+
+Each cell is also checked, and one that fails is marked red with the reason in its
+tooltip: a value the type cannot hold, an empty cell in a **Not null** column, a
+value over the **Max**, a duplicate in a **Unique** column, or a value your
+**validation script** rejects. A script that fails says so in the cell it belongs
+to, and leaves the rest of the row readable.
+
+Drag the bar above the preview to give it more or less room; the size is
+remembered. Nothing in the preview can be clicked or typed into — it is a look at
+your data, not a second grid.
 
 Only 100 rows are read, so the editor opens as quickly for a table of a million
 rows as for a small one. The preview fills a moment after the editor appears. If
-the rows cannot be read, the preview tells you — your column changes still save.
+the rows cannot be read, the preview says so and why — your column changes still
+save.
 
 ## Getting a deleted column back
 

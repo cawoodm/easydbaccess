@@ -369,7 +369,38 @@ The shape to copy (`new-table-dialog.ts`'s `loadPreview`):
 - keep a token that a reopen increments, and drop an answer whose token is
   stale — a slow read outliving its dialog is exactly the case here;
 - give the empty state three readings — reading, nothing there, could not be
-  read. One message for all three is a bug report waiting to happen.
+  read. One message for all three is a bug report waiting to happen. Say WHY on
+  the third: "could not be read" with no reason leaves the user nothing to act
+  on.
+
+## One live preview, two column editors
+
+`dialogs/column-preview-table.ts` is the preview element and
+`table/column-preview.ts` the rule it draws. The table's columns editor and a
+view's own editor both mount it; the only thing that differs is the `ColumnSpec[]`
+they pass, which is the whole difference between a table and a view of it.
+
+What the preview owes the user is that it shows what the GRID will show, so:
+
+- cells go through the **cell-renderer registry**, like `data-table`. A preview
+  that printed every value as text made the renderer picker directly above it the
+  one setting whose effect it could not show.
+- the column **`script`** runs, and its result is what the renderer receives. A
+  scripted column's stored cell is usually empty, so reading the stored value
+  previewed a blank column.
+- the rules run over the **computed** rows, and `validate` scripts run too
+  (`createValidator(..., { runScripts: true })` — the one place that is on, and
+  for the same reason the Save pre-flight leaves it off: a hundred rows is a
+  sample, every row is not).
+- the table is **`inert`**. Renderers are plugins and may ignore `readonly` —
+  `cell-link` shows its pencil regardless — and with no `change` handler wired an
+  edit made in the preview would be silently discarded.
+
+The grip above it resizes the pane, and the height is device-local
+(`column-preview:height`). That is why both dialogs override `.dialog-body` to
+`overflow: hidden` and put their own content in a scrolling pane: the body has to
+be the FRAME around two panes, or the grip would only make the dialog longer
+instead of trading height with the column list.
 
 ## Practical implications
 

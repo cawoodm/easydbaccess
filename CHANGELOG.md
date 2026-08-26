@@ -4,6 +4,8 @@
 
 ### Features
 
+- ✨ A column editor's preview draws each cell with its renderer and runs the scripts, flagging every cell that breaks a rule (v0.0.439)
+- ✨ Drag the bar above a column editor's preview to give it more or less room (v0.0.439)
 - ✨ A link cell now links any scheme — `file:///`, `ftp://`, app links — where before only http(s) counted. Script schemes stay text (v0.0.438)
 - 🪶 The + button asks for the new record in a form, with defaults filled in and the rules shown but never blocking the save (v0.0.437)
 - ✨ A view has its own column list: which columns show, and what draws each one — the table and every other view keep theirs (v0.0.436)

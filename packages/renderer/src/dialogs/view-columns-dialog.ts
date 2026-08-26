@@ -1,11 +1,16 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import type { ColumnSpec, ViewInstance } from '@easydb/shared';
+import type { ColumnSpec, Row, ViewInstance } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { dialogChromeStyles, ctrlEnterSubmits, makeDialogDraggable } from '@marccawood/lit-dialogs';
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { offerableRenderers, rendererOptionsFor } from '../table/renderer-options.js';
-import { setViewRenderer, toggleViewColumn, viewRenderer } from '../views/view-columns.js';
+import { setViewRenderer, toggleViewColumn, viewColumnSpecs, viewRenderer } from '../views/view-columns.js';
+import { readRows } from '../db/row-reader.js';
+import { readSortSpecs } from '../table/row-sort.js';
+import { PREVIEW_ROWS } from '../table/column-preview.js';
+import './column-preview-table.js';
+import type { PreviewState } from './column-preview-table.js';
 
 /**
  * A view's OWN column editor: which columns it shows, and what draws them.
@@ -22,9 +27,14 @@ import { setViewRenderer, toggleViewColumn, viewRenderer } from '../views/view-c
  * changing the TABLE's column, which every other view and the grid then followed.
  *
  * Saved per row as it is edited rather than behind an OK button. There is no
- * partial state to validate — a checkbox and a picker are each complete on their
- * own — and the view redraws under the dialog, which is the answer to "what will
- * this look like?" that no preview pane in here could give.
+ * partial state to validate — a checkbox and a picker are each complete on its
+ * own — and the change is on screen before the mouse has moved.
+ *
+ * It carries the same live preview the table's editor has, over this view's own
+ * columns. The view does redraw underneath, but a modal dims it, a template view
+ * shows no grid at all, and neither tells you what a renderer you have not picked
+ * yet would look like. The preview is the only place where the answer to "what
+ * does this column look like as a link?" arrives before the change is made.
  */
 export function openViewColumnsDialog(viewInstanceId: string): void {
   const dlg = ViewColumnsDialog.instance ?? mount();
@@ -48,13 +58,30 @@ export class ViewColumnsDialog extends LitElement {
     dialogChromeStyles,
     css`
       dialog {
-        width: 560px;
-        max-width: 92vw;
+        /* Wider than the column list needs, because the preview under it is
+           showing real rows of real data. */
+        width: 720px;
+        max-width: 94vw;
       }
       p.hint {
         margin: 0;
         color: #6b7280;
         font-size: 0.85rem;
+      }
+      /* Two panes, and the body is the frame around them rather than the thing
+         that scrolls: that is what lets the preview's grip TRADE height with the
+         column list instead of just making the dialog longer. */
+      .dialog-body {
+        overflow: hidden;
+        min-height: 0;
+      }
+      .cols-pane {
+        flex: 1 1 auto;
+        min-height: 4rem;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
       }
       table {
         width: 100%;
@@ -96,8 +123,14 @@ export class ViewColumnsDialog extends LitElement {
   @state() private instance: ViewInstance | null = null;
   @state() private tableColumns: ColumnSpec[] = [];
   @state() private rendererOptions: string[] = [];
+  /** First {@link PREVIEW_ROWS} rows the view itself would show. */
+  @state() private previewRows: Row[] = [];
+  @state() private previewState: PreviewState = 'none';
+  @state() private previewError: string | null = null;
   private dialogEl: HTMLDialogElement | null = null;
   private rendererSubUnsub?: (() => void) | undefined;
+  /** An answer arriving for a view the dialog has since been reopened on is dropped. */
+  private previewToken = 0;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -131,8 +164,51 @@ export class ViewColumnsDialog extends LitElement {
     this.rendererSubUnsub = ctx.events.on('app:ready', () => {
       this.rendererOptions = offerableRenderers(ctx.registries.cellRenderers);
     });
+    // After the dialog is on screen, never before it: the editor is usable
+    // without its preview, and a read of a big table is not worth waiting on to
+    // tick a checkbox. Same order the table's columns editor settled on.
+    void this.loadPreview(inst);
     await this.updateComplete;
     this.dialogEl?.showModal();
+  }
+
+  /**
+   * The rows the VIEW shows, not the table's first rows.
+   *
+   * Its filters and its sort go down with the request, because a preview of rows
+   * the view excludes is a preview of somebody else's data — and a view is very
+   * often a filter over one table. The row cap still applies on top: `limit` here
+   * is the smaller of the view's own and what a preview is worth reading.
+   */
+  private async loadPreview(inst: ViewInstance): Promise<void> {
+    const token = ++this.previewToken;
+    this.previewRows = [];
+    this.previewState = 'loading';
+    this.previewError = null;
+    try {
+      const ctx = await getContext();
+      const sort = readSortSpecs(inst);
+      const page = await readRows(
+        ctx.store.rows(inst.tableId),
+        {
+          columns: this.tableColumns,
+          filters: inst.filters,
+          ...(sort.length > 0 ? { sort } : {}),
+          limit: inst.limit && inst.limit > 0 ? Math.min(inst.limit, PREVIEW_ROWS) : PREVIEW_ROWS,
+        },
+        PREVIEW_ROWS,
+      );
+      if (token !== this.previewToken) return;
+      this.previewRows = page.rows;
+      this.previewState = 'ready';
+    } catch (err) {
+      if (token !== this.previewToken) return;
+      this.previewRows = [];
+      this.previewState = 'error';
+      this.previewError = err instanceof Error ? err.message : String(err);
+      // eslint-disable-next-line no-console
+      console.warn('[view-columns] the preview rows could not be read', err);
+    }
   }
 
   private close() {
@@ -219,22 +295,32 @@ export class ViewColumnsDialog extends LitElement {
           </div>
         </div>
         <div class="dialog-body">
-          <p class="hint">This view only. The table keeps its own columns, and so does every other view of it.</p>
-          ${this.tableColumns.length === 0
-            ? html`<p class="hint">This view's table has no columns.</p>`
-            : html`<table>
-                <thead>
-                  <tr>
-                    <th class="show">Show</th>
-                    <th>Column</th>
-                    <th>Field</th>
-                    <th>Renderer</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${this.tableColumns.map((c) => this.renderRow(c, showing.has(c.field)))}
-                </tbody>
-              </table>`}
+          <div class="cols-pane">
+            <p class="hint">This view only. The table keeps its own columns, and so does every other view of it.</p>
+            ${this.tableColumns.length === 0
+              ? html`<p class="hint">This view's table has no columns.</p>`
+              : html`<table>
+                  <thead>
+                    <tr>
+                      <th class="show">Show</th>
+                      <th>Column</th>
+                      <th>Field</th>
+                      <th>Renderer</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${this.tableColumns.map((c) => this.renderRow(c, showing.has(c.field)))}
+                  </tbody>
+                </table>`}
+          </div>
+          ${inst
+            ? html`<column-preview-table
+                .columns=${viewColumnSpecs(this.tableColumns, inst.visibleColumns, { renderers: inst.columnRenderers })}
+                .rows=${this.previewRows}
+                .state=${this.previewState}
+                .error=${this.previewError}
+              ></column-preview-table>`
+            : nothing}
         </div>
       </dialog>
     `;

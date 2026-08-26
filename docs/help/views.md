@@ -73,6 +73,11 @@ the grid you edit in and full prose in the view you read it in; a URL can be a
 link in one place and plain text in another. The table keeps its own columns, and
 so does every other view of it.
 
+Under the list is a **live preview** of this view's first rows, drawn the way the
+columns above say they should be — so you can see what a renderer does before you
+keep it. Drag the bar above the preview to give it more or less room. Cells that
+break one of the table's rules are shown in red, with the reason in the tooltip.
+
 What a column IS — its type, whether it must have a value, whether it must be
 unique — is the table's, and is edited with **Edit columns** on the table itself.
 A view cannot change it, because you can still type into a view showing the plain

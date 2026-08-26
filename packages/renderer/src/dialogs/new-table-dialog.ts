@@ -13,6 +13,9 @@ import { remapFilterFields, sameFilterMap } from '../table/filter-map.js';
 import { createValidator, issueMessages } from '../table/validate-rules.js';
 import { readRows } from '../db/row-reader.js';
 import { offerableRenderers, rendererOptionsFor } from '../table/renderer-options.js';
+import { PREVIEW_ROWS } from '../table/column-preview.js';
+import './column-preview-table.js';
+import type { PreviewState } from './column-preview-table.js';
 import {
   describeReferences,
   findTableReferences,
@@ -25,13 +28,6 @@ import {
 } from '../table/table-references.js';
 
 const TYPE_OPTIONS: ColumnType[] = ['string', 'text', 'number', 'boolean', 'date', 'datetime', 'array'];
-
-/**
- * Rows the live preview reads. Enough to judge the column specs against real
- * values, and small enough to ASK for: reading a whole table to show a hundred
- * rows of it is what left the editor with an empty preview on a big table.
- */
-const PREVIEW_ROWS = 100;
 
 /**
  * Warn before a rename that will move name-based references with it.
@@ -344,56 +340,27 @@ export class NewTableDialog extends LitElement {
         color: #6b7280;
         font-size: 0.78rem;
       }
+      /* Two panes with a draggable edge between them. The BODY used to be the
+         scroller, which meant the preview could only ever be as tall as its own
+         max-height and dragging its grip would have made the dialog longer
+         instead of giving the preview more of it. Now the body is the frame: the
+         column list takes what the preview does not. The error banner stays
+         outside the pane, pinned — it is the one message that must not scroll
+         away. No backticks in this comment: it sits in a tagged template. */
+      .dialog-body {
+        overflow: hidden;
+        min-height: 0;
+      }
+      .editor-pane {
+        flex: 1 1 auto;
+        min-height: 5rem;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
       .mi.sm {
         font-size: 0.95rem;
-      }
-      /* Live preview table: shows the first 100 rows so the user can see
-       which cells would fail validation under the edited column specs. */
-      .preview {
-        border-top: 1px solid #e5e7eb;
-        margin-top: 0.5rem;
-        max-height: 36vh;
-        overflow: auto;
-      }
-      .preview h3 {
-        margin: 0;
-        padding: 0.6rem 0.4rem 0.4rem;
-        font-size: 0.85rem;
-        color: #6b7280;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .preview table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.8rem;
-      }
-      .preview th,
-      .preview td {
-        border: 1px solid #e5e7eb;
-        padding: 0.2rem 0.4rem;
-        text-align: left;
-        vertical-align: top;
-        white-space: nowrap;
-        max-width: 18rem;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .preview th {
-        background: #f9fafb;
-        position: sticky;
-        top: 0;
-        z-index: 1;
-      }
-      .preview td.violation {
-        background: #fee2e2;
-        color: #991b1b;
-      }
-      .preview .empty {
-        padding: 0.75rem 0.4rem;
-        color: #9ca3af;
-        font-style: italic;
       }
     `,
   ];
@@ -440,7 +407,13 @@ export class NewTableDialog extends LitElement {
    * table that is genuinely empty all showed the same "No rows to preview" —
    * which reads as "this table has no data", the one thing it did not mean.
    */
-  @state() private previewState: 'none' | 'loading' | 'ready' | 'error' = 'none';
+  @state() private previewState: PreviewState = 'none';
+  /**
+   * What the failed read said. Shown with the failure: "could not be read" on its
+   * own leaves the user with nothing to act on, and the reason is usually the
+   * whole story (a permission gone, a source offline).
+   */
+  @state() private previewError: string | null = null;
   /**
    * Answers arriving for a table the dialog has since been reopened on are
    * dropped. A slow read outliving its dialog is exactly the case here.
@@ -560,6 +533,7 @@ export class NewTableDialog extends LitElement {
     const token = ++this.previewToken;
     this.previewRows = [];
     this.previewState = 'loading';
+    this.previewError = null;
     try {
       const ctx = await getContext();
       const page = await readRows(ctx.store.rows(tableId), { columns, limit: PREVIEW_ROWS }, PREVIEW_ROWS);
@@ -570,6 +544,7 @@ export class NewTableDialog extends LitElement {
       if (token !== this.previewToken) return;
       this.previewRows = [];
       this.previewState = 'error';
+      this.previewError = err instanceof Error ? err.message : String(err);
       // eslint-disable-next-line no-console
       console.warn('[columns-editor] the preview rows could not be read', err);
     }
@@ -1002,63 +977,30 @@ export class NewTableDialog extends LitElement {
     </button>`;
   }
 
+  /**
+   * The live preview, over the columns as they stand in the editor RIGHT NOW —
+   * every keystroke, every renderer pick, every script edit.
+   *
+   * The draft rows are mapped through `buildColumnSpec`, the same function Save
+   * uses, so the preview cannot show something a save would not produce. That is
+   * also what carries `script`, `validate` and `renderer` down to it.
+   */
   private renderPreview() {
-    if (this.previewRows.length === 0) {
-      const msg =
-        this.previewState === 'loading'
-          ? 'Reading rows for the preview…'
-          : this.previewState === 'error'
-            ? 'The rows could not be read, so there is no preview. Your column changes still save.'
-            : 'No rows to preview.';
-      return html`<div class="preview"><div class="empty" data-testid="preview-empty">${msg}</div></div>`;
-    }
     // The preview rows are keyed by the field names as SAVED, but the columns
     // below read the names the user has typed. Re-key a copy exactly the way
     // `submit` will on save, so a pending rename previews its real values
     // instead of an empty column (and its constraints are checked against them).
     const renames = this.fieldRenames();
-    const previewRows = renames.length > 0 ? this.previewRows.map((r) => ({ ...r, data: renameRowFields(r.data, renames) ?? r.data })) : this.previewRows;
-    // Precompute duplicate maps for any unique column so per-row checks are O(1).
-    const duplicateSets = new Map<string, Set<unknown>>();
-    for (const c of this.columns) {
-      if (!c.unique) continue;
-      const seen = new Set<unknown>();
-      const dups = new Set<unknown>();
-      for (const r of previewRows) {
-        const v = r.data[c.field];
-        if (v == null || v === '') continue;
-        if (seen.has(v)) dups.add(v);
-        seen.add(v);
-      }
-      duplicateSets.set(c.field, dups);
-    }
+    const rows = renames.length > 0 ? this.previewRows.map((r) => ({ ...r, data: renameRowFields(r.data, renames) ?? r.data })) : this.previewRows;
     // Mirror the real grid: hidden columns are excluded from the preview.
-    const visible = this.columns.filter((c) => !c.hidden);
-    return html`
-      <div class="preview">
-        <h3>Live preview — first ${this.previewRows.length} row${this.previewRows.length === 1 ? '' : 's'}</h3>
-        <table>
-          <thead>
-            <tr>
-              ${visible.map((c) => html`<th title=${c.field}>${c.label || c.field}</th>`)}
-            </tr>
-          </thead>
-          <tbody>
-            ${previewRows.map(
-              (r) => html`
-                <tr>
-                  ${visible.map((c) => {
-                    const v = r.data[c.field];
-                    const reason = validateAgainstSpec(c, v, duplicateSets.get(c.field));
-                    return html`<td class=${reason ? 'violation' : ''} title=${reason ?? ''}>${formatPreview(v)}</td>`;
-                  })}
-                </tr>
-              `,
-            )}
-          </tbody>
-        </table>
-      </div>
-    `;
+    const columns = this.columns.filter((c) => !c.hidden).map(buildColumnSpec);
+    return html`<column-preview-table
+      .columns=${columns}
+      .rows=${rows}
+      .state=${this.previewState}
+      .error=${this.previewError}
+      note="Your column changes still save."
+    ></column-preview-table>`;
   }
 
   /**
@@ -1112,14 +1054,14 @@ export class NewTableDialog extends LitElement {
   /**
    * Bring a new error message into view.
    *
-   * The banner is at the top of the body and the body SCROLLS, so a user who was
-   * looking at the twentieth column would be told about the first one off screen.
-   * Only on the transition to a message — re-scrolling on every render would fight
-   * whoever is scrolling.
+   * The banner is pinned above the scrolling pane, so this is now only about the
+   * pane's own scroll position — a user who was looking at the twentieth column
+   * still gets shown the first one the message is about. Only on the transition to
+   * a message: re-scrolling on every render would fight whoever is scrolling.
    */
   override updated(changed: Map<string, unknown>): void {
     if (!changed.has('errorMsg') || !this.errorMsg) return;
-    this.renderRoot.querySelector('.dialog-body')?.scrollTo({ top: 0 });
+    this.renderRoot.querySelector('.editor-pane')?.scrollTo({ top: 0 });
   }
 
   override render() {
@@ -1140,6 +1082,7 @@ export class NewTableDialog extends LitElement {
           </div>
           <div class="dialog-body">
             ${this.errorMsg ? html`<div class="error" role="alert" data-testid="editor-error">${this.errorMsg}</div>` : ''} ${this.noticeMsg ? html`<div class="notice">${this.noticeMsg}</div>` : ''}
+            <div class="editor-pane">
             <label>
               Name
               <input type="text" autofocus .value=${this.name} @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)} />
@@ -1301,48 +1244,13 @@ export class NewTableDialog extends LitElement {
             <button type="button" class="add" @click=${this.addColumn}>+ Add column</button>
             ${this.columnActions.map((a) => html`<button type="button" class="add" title=${a.tooltip ?? a.label} @click=${() => void this.runColumnAction(a)}>${a.label}</button>`)}
             ${this.renderDeleted()} ${this.renameDetected() ? html`<div class="hint">Existing rows are re-keyed on save, so renamed fields keep their data.</div>` : ''}
+            </div>
             ${this.mode === 'edit' ? this.renderPreview() : ''}
           </div>
         </form>
       </dialog>
     `;
   }
-}
-
-function formatPreview(v: unknown): string {
-  if (v === null || v === undefined) return '';
-  if (typeof v === 'string') return v;
-  if (typeof v === 'boolean') return v ? 'true' : 'false';
-  return String(v);
-}
-
-/**
- * Inline cell validation against a single (in-progress) ColumnRow spec.
- * Powers the live preview: returns a short human reason when the cell
- * would fail, or null when it's fine. `dupSet` is the set of values seen
- * more than once across the preview slice for unique columns.
- */
-function validateAgainstSpec(c: ColumnRow, v: unknown, dupSet: Set<unknown> | undefined): string | null {
-  const empty = v === null || v === undefined || (typeof v === 'string' && v.trim() === '');
-  if (c.notnull && empty) return `${c.label}: empty`;
-  if (empty) return null;
-  if (c.type === 'number' && typeof v !== 'number') {
-    const n = Number(v);
-    if (!Number.isFinite(n)) return `${c.label}: not a number`;
-  }
-  if (c.type === 'boolean' && typeof v !== 'boolean') {
-    if (!/^(true|false|yes|no|0|1)$/i.test(String(v))) return `${c.label}: not boolean`;
-  }
-  if ((c.type === 'date' || c.type === 'datetime') && !empty) {
-    const d = new Date(String(v));
-    if (Number.isNaN(d.getTime())) return `${c.label}: not a date`;
-  }
-  if (c.max != null && c.max > 0) {
-    if (typeof v === 'string' && v.length > c.max) return `${c.label}: length > ${c.max}`;
-    if (typeof v === 'number' && v > c.max) return `${c.label}: > ${c.max}`;
-  }
-  if (c.unique && dupSet?.has(v)) return `${c.label}: duplicate`;
-  return null;
 }
 
 /**

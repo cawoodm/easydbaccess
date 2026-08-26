@@ -130,6 +130,29 @@ test.describe('a view´s column editor', () => {
     await expect.poll(async () => (await instance(page)).visibleColumns, { timeout: 10_000 }).toEqual(['title', 'body', 'url']);
   });
 
+  test('previews the rows THIS view shows, and follows the renderer as it is picked', async ({ page }) => {
+    const tableId = await createTable(page, 'Notes', [{ field: 'title' }, { field: 'body', renderer: 'markdown' }, { field: 'spare' }]);
+    await waitForPanel(page, tableId);
+    await bulkAddRows(page, tableId, [{ title: 'One', body: MD, spare: 'ignored' }]);
+    // `spare` is the table's, not this view's — a preview that showed it would be
+    // a preview of the table.
+    await makeView(page, tableId, ['title', 'body']);
+
+    await openEditor(page);
+    const preview = editor(page).locator('.preview');
+    await expect(preview.locator('thead th')).toHaveText(['title', 'body']);
+    // The renderer is in play, and shows what the GRID shows: markdown's one-line
+    // form, with the markers converted rather than printed. The card layout is the
+    // template's business, not a column's.
+    await expect(preview.locator('tbody markdown-cell')).toBeVisible();
+    await expect(preview.locator('tbody markdown-cell')).not.toContainText('**');
+
+    // Pick another renderer and the preview follows it, before the change has to
+    // be judged from the view behind a modal.
+    await editor(page).getByLabel('Renderer for body', { exact: false }).selectOption('preview');
+    await expect(preview.locator('tbody preview-cell')).toBeVisible();
+  });
+
   test('the last visible column cannot be hidden', async ({ page }) => {
     const tableId = await createTable(page, 'Notes', [{ field: 'title' }, { field: 'body' }]);
     await waitForPanel(page, tableId);
