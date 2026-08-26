@@ -51,6 +51,19 @@ can be panned and zoomed:
 - **On a desktop:** hold the right mouse button and drag anywhere on the
   empty background to pan.
 
+## Showing and hiding the filter row
+
+The boxes under a table's column headers are the **filter row**. The **funnel**
+in that window's title bar hides them and brings them back, one window at a
+time — a lookup table of twelve rows never needs them, while the big table
+beside it always does.
+
+Hiding the row does **not** clear your filters. The rows stay narrowed and the
+small funnel on each filtered column's header stays lit, so you can always see
+why some rows are missing and click the funnel to change it.
+
+The choice is saved with the table, so it is there on the next visit.
+
 ## Giving a window its own colour
 
 Every window is coloured by what it holds: tables are blue, a view is teal, a
@@ -61,6 +74,9 @@ window. Pick **Kind** to put it back to the colour its type gives it.
 The colour is saved with the workspace, so it is there on the next visit and on
 any other machine the workspace reaches. Each window has its own — two views of
 the same table can be different colours.
+
+Both title-bar buttons can be switched off in **Settings → Buttons**, alongside
+the header and footer ones, if you would rather have the plain title bar back.
 
 ## Closing vs. deleting a table
 

@@ -320,6 +320,43 @@ Three things worth knowing:
   it comes out as literal `<svg …>` text. It is still a native `popover="auto"`,
   so the browser owns the top layer and the light dismiss.
 
+## Titlebar buttons, and switching them off
+
+A titlebar carries buttons no plugin registered: the (i) info button, the colour
+palette, and a table window's filter-row funnel. Window management is core and
+plugins do not touch it, so there is no registry — but Settings still has to be
+able to name each one to offer a switch for it. `titlebar-buttons.ts` is that
+list, and `titlebar-settings.ts` reads the answer.
+
+The storage is deliberately the header and footer bars' own: `show:<slot>:<id>`
+in the `chrome` settings namespace, with `titlebar` as a third slot beside
+`header` and `footer` (`chrome/chrome-settings.ts`). One vocabulary for "this
+button is off", whichever bar it is in, and one Settings tab that answers "which
+buttons do I see".
+
+Two details that are not free choices:
+
+- **The button is REMOVED after the read, not skipped before it.** `openPanel` is
+  synchronous by design — a window must not wait on a store read to appear — so
+  the settings answer lands a beat later. Not-adding would make the controlbar's
+  left-to-right order depend on which async read finished first.
+- **Hiding a button hides the CONTROL, never the thing it controls.** A table
+  whose filter row is on keeps it when the funnel goes away. The setting is about
+  the titlebar.
+
+### The filter-row funnel (`filter-row-button.ts`)
+
+Per TABLE, stored as `Table.filterRow` (absent ⇒ shown), because it is a property
+of what you are looking at rather than of the app. The button writes straight to
+the record; `<data-table>` reads the same record through its own subscription, so
+one write moves both and there is no local flag to keep in step. Toggling back on
+writes `undefined` rather than `true`, so a table that has been toggled twice is
+byte-identical to one that was never touched.
+
+Hiding the row does not clear the filters — they keep narrowing the grid and the
+header funnels stay lit. A toggle that silently widened the result would be a
+different and more dangerous feature: rows would come back with no visible cause.
+
 ## Practical implications
 
 - **A panel's on-screen position is not its "real" position while minimized

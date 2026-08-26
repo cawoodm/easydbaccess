@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ A funnel in a table window's title bar shows and hides its filter row; both title-bar buttons can be switched off in Settings (v0.0.447)
 - ✨ A palette button in a window's title bar gives that one window a colour of your own, saved with the workspace (v0.0.445)
 - ✨ A column editor's preview draws each cell with its renderer and runs the scripts, flagging every cell that breaks a rule (v0.0.444)
 - ✨ Drag the bar above a column editor's preview to give it more or less room (v0.0.444)

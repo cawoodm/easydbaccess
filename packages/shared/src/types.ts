@@ -295,6 +295,18 @@ export interface Table {
   view: string;
   windowGeometry?: WindowGeometry | undefined;
   /**
+   * When explicitly false, the grid's filter row — the boxes under the column
+   * headers — is not drawn for this table. Absent ⇒ drawn, which is what every
+   * table did before the toggle existed.
+   *
+   * Per table rather than per app, because it is a property of what you are
+   * looking at: a lookup table of twelve rows never needs the boxes, and the
+   * 600,000-row table beside it always does. Hiding them does NOT clear the
+   * filters — they keep narrowing the grid, and the header funnel still shows
+   * which columns carry one.
+   */
+  filterRow?: boolean | undefined;
+  /**
    * Primary sort, kept for everything that reads a single sort (view windows,
    * exports, older workspaces). Always mirrors `sortBy[0]` when that is set.
    */

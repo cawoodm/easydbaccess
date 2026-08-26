@@ -17,7 +17,7 @@ import type { ButtonSpec, SettingsFieldSpec } from '@easydb/shared';
 export const CHROME_SETTINGS_ID = 'chrome';
 export const CHROME_SETTINGS_NAME = 'Buttons';
 
-export type ButtonSlot = 'header' | 'footer';
+export type ButtonSlot = 'header' | 'footer' | 'titlebar';
 
 /** Key for "show button text" in one bar. */
 export function buttonTextKey(where: ButtonSlot): string {
@@ -60,8 +60,15 @@ export async function readHiddenButtons(settings: SettingsReader, where: ButtonS
   return hidden;
 }
 
-/** One `show:<slot>:<id>` field per registered button, plus the two text switches. */
-export function chromeSettingsFields(header: readonly ButtonSpec[], footer: readonly ButtonSpec[]): SettingsFieldSpec[] {
+/**
+ * One `show:<slot>:<id>` field per button, plus the two text switches.
+ *
+ * `titlebar` is a fixed list rather than a registry (see
+ * `window-mgr/titlebar-buttons.ts`) — window management is core — but it is
+ * offered here so the user has ONE place that answers "which buttons do I see",
+ * instead of a separate tab for the bar that happens not to be a plugin slot.
+ */
+export function chromeSettingsFields(header: readonly ButtonSpec[], footer: readonly ButtonSpec[], titlebar: readonly NamedButton[] = []): SettingsFieldSpec[] {
   return [
     {
       key: buttonTextKey('header'),
@@ -81,13 +88,25 @@ export function chromeSettingsFields(header: readonly ButtonSpec[], footer: read
     },
     ...header.map((b) => buttonField('header', b)),
     ...footer.map((b) => buttonField('footer', b)),
+    ...titlebar.map((b) => buttonField('titlebar', b)),
   ];
 }
 
-function buttonField(where: ButtonSlot, b: ButtonSpec): SettingsFieldSpec {
+/**
+ * The part of a button this module actually reads. Widened from `ButtonSpec` so
+ * a titlebar button — which has no `onClick` of the plugin kind — can be
+ * described without inventing one.
+ */
+export interface NamedButton {
+  id: string;
+  label: string;
+  tooltip?: string | undefined;
+}
+
+function buttonField(where: ButtonSlot, b: NamedButton): SettingsFieldSpec {
   return {
     key: buttonShownKey(where, b.id),
-    label: `Show “${b.label}” in the ${where}`,
+    label: where === 'titlebar' ? `Show “${b.label}” in window titlebars` : `Show “${b.label}” in the ${where}`,
     type: 'boolean',
     default: true,
     scope: 'workspace',
