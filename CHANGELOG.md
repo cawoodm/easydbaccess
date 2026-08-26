@@ -2,6 +2,10 @@
 
 ## 26 Aug 2026
 
+### Features
+
+- ✨ Two more ways to arrange the windows: one column each at full height, or one row each at full width (v0.0.432)
+
 ### Bugs
 
 - 🪲 Connecting a workspace folder could leave the app with no tables until the file was dragged back in (v0.0.431)
@@ -11,7 +15,6 @@
 ### Features
 
 - ✨ The app says on startup when your plugin catalog holds a plugin you have never installed, once for each one (v0.0.426)
-- ✨ The pop-in button is now the pop-out icon with its arrow reversed, so the pair reads as one round trip (v0.0.422)
 
 ### Bugs
 
@@ -58,14 +61,14 @@
 
 ### Bugs
 
-- 🐛 The column-filter suggestion list sat away from its column once the canvas was zoomed (v0.0.410)
-- 🐛 The folder-sync conflict asked which copy was "the real one" and offered a bare "Overwrite" (v0.0.406)
-- 🐛 Two columns renamed to the same name in different capitalisation saved without a word, and one came back empty (v0.0.403)
-- 🐛 Opening a third or fourth workspace file failed with "No available handles to import to." and showed no tables (v0.0.402)
-- 🐛 A columns-editor error appeared below the fold on a wide table, so Save looked as if it had done nothing (v0.0.401)
-- 🐛 Connecting the workspace folder asked which copy of a workspace was real about one the URL had just created empty (v0.0.397)
-- 🐛 The File menu offered no way to save a workspace that had never been saved, and Open landed in the wrong workspace (v0.0.397)
-- 🐛 The workspace list showed the technical name, so editing the workspace title looked as if it had not taken (v0.0.397)
+- 🪲 The column-filter suggestion list sat away from its column once the canvas was zoomed (v0.0.410)
+- 🪲 The folder-sync conflict asked which copy was "the real one" and offered a bare "Overwrite" (v0.0.406)
+- 🪲 Two columns renamed to the same name in different capitalisation saved without a word, and one came back empty (v0.0.403)
+- 🪲 Opening a third or fourth workspace file failed with "No available handles to import to." and showed no tables (v0.0.402)
+- 🪲 A columns-editor error appeared below the fold on a wide table, so Save looked as if it had done nothing (v0.0.401)
+- 🪲 Connecting the workspace folder asked which copy of a workspace was real about one the URL had just created empty (v0.0.397)
+- 🪲 The File menu offered no way to save a workspace that had never been saved, and Open landed in the wrong workspace (v0.0.397)
+- 🪲 The workspace list showed the technical name, so editing the workspace title looked as if it had not taken (v0.0.397)
 
 ## 17 Aug 2026
 
@@ -80,12 +83,12 @@
 
 ### Bugs
 
-- 🐛 A workspace file opened while the URL still named another workspace showed a workspace with no tables (v0.0.393)
-- 🐛 Renaming a column keeps its values. In a workspace file the rename added an empty column beside the old one, so the renamed column read as blank and anything reading it — a projection, a join key — stopped resolving (v0.0.385)
-- 🐛 A column with a script gets the stored value its script reads. In a workspace file that value was left out of the read, so every scripted cell rendered from `undefined` (v0.0.385)
-- 🐛 Open and Convert land on the workspace they just built instead of an empty one (v0.0.385)
-- 🐛 A filter matching most of a huge table is cut to the 20,000-row read cap again, and says so, instead of putting every match in the grid (v0.0.385)
-- 🐛 Deleting or editing rows in one table no longer makes every other open grid re-read itself — on the desktop that happened on every write (v0.0.375)
+- 🪲 A workspace file opened while the URL still named another workspace showed a workspace with no tables (v0.0.393)
+- 🪲 Renaming a column keeps its values. In a workspace file the rename added an empty column beside the old one, so the renamed column read as blank and anything reading it — a projection, a join key — stopped resolving (v0.0.385)
+- 🪲 A column with a script gets the stored value its script reads. In a workspace file that value was left out of the read, so every scripted cell rendered from `undefined` (v0.0.385)
+- 🪲 Open and Convert land on the workspace they just built instead of an empty one (v0.0.385)
+- 🪲 A filter matching most of a huge table is cut to the 20,000-row read cap again, and says so, instead of putting every match in the grid (v0.0.385)
+- 🪲 Deleting or editing rows in one table no longer makes every other open grid re-read itself — on the desktop that happened on every write (v0.0.375)
 
 ## 14 Aug 2026
 

@@ -1,5 +1,5 @@
 import type { HostApi } from '@easydb/shared';
-import { cascadeAllWindows, closeAllWindows, maximizeAllWindows, minimizeAllWindows, restoreAllWindows, tileAllWindows } from '../window-mgr/window-commands.js';
+import { arrangeInColumns, arrangeInRows, cascadeAllWindows, closeAllWindows, maximizeAllWindows, minimizeAllWindows, restoreAllWindows, tileAllWindows } from '../window-mgr/window-commands.js';
 import { deleteWorkspaceFlow, newWorkspaceFlow, switchWorkspaceFlow } from '../chrome/workspace-actions.js';
 
 /**
@@ -15,6 +15,8 @@ export function registerCoreCommands(api: HostApi): void {
     { id: 'windows:maximize-all', title: 'Maximize all windows', icon: 'fullscreen', run: maximizeAllWindows },
     { id: 'windows:cascade', title: 'Cascade windows', icon: 'view_agenda', run: cascadeAllWindows },
     { id: 'windows:tile', title: 'Tile windows', icon: 'grid_view', run: tileAllWindows },
+    { id: 'windows:columns', title: 'Arrange windows in columns', icon: 'view_column', run: arrangeInColumns },
+    { id: 'windows:rows', title: 'Arrange windows in rows', icon: 'table_rows', run: arrangeInRows },
     { id: 'windows:close-all', title: 'Close all windows', icon: 'close', run: closeAllWindows },
   ];
   for (const c of windowCommands) {

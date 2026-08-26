@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { eligibleForArrange, tileSlots, type Rect } from '../../../packages/renderer/src/window-mgr/tile-layout.js';
+import { columnSlots, eligibleForArrange, gridSlots, rowSlots, tileSlots, type Rect } from '../../../packages/renderer/src/window-mgr/tile-layout.js';
 
 describe('eligibleForArrange', () => {
   it('excludes minimized panels', () => {
@@ -87,5 +87,87 @@ describe('tileSlots', () => {
     expect(slots).toHaveLength(2);
     const cellW = (rect.w - gap * 3) / 2;
     expect(slots[1]).toEqual({ x: gap + cellW + gap, y: gap, w: cellW, h: rect.h - gap * 2 });
+  });
+});
+
+/**
+ * "Tile" squares the grid up, which is right for a lot of windows and wrong for
+ * three tables you are reading across. Those want columns — or rows.
+ */
+const AREA: Rect = { x: 0, y: 0, w: 1000, h: 600 };
+const GAP = 10;
+
+describe('columnSlots', () => {
+  it('puts every window side by side, all the same width', () => {
+    const slots = columnSlots(3, AREA, GAP);
+    expect(slots).toHaveLength(3);
+    expect(new Set(slots.map((s) => s.w)).size).toBe(1);
+    expect(slots.map((s) => s.x)).toEqual([...slots.map((s) => s.x)].sort((a, b) => a - b));
+  });
+
+  it('gives each the full height of the area, gaps aside', () => {
+    for (const s of columnSlots(4, AREA, GAP)) {
+      expect(s.y).toBe(GAP);
+      expect(s.h).toBe(AREA.h - GAP * 2);
+    }
+  });
+
+  it('leaves the same gap between columns as around them', () => {
+    const [a, b] = columnSlots(2, AREA, GAP);
+    expect(a!.x).toBe(GAP);
+    expect(b!.x - (a!.x + a!.w)).toBeCloseTo(GAP);
+    expect(AREA.w - (b!.x + b!.w)).toBeCloseTo(GAP);
+  });
+
+  it('is one full-area window when there is only one', () => {
+    expect(columnSlots(1, AREA, GAP)).toEqual([{ x: GAP, y: GAP, w: AREA.w - GAP * 2, h: AREA.h - GAP * 2 }]);
+  });
+
+  it('has nothing to lay out for no windows', () => {
+    expect(columnSlots(0, AREA, GAP)).toEqual([]);
+  });
+});
+
+describe('rowSlots', () => {
+  it('stacks every window, all the same height', () => {
+    const slots = rowSlots(3, AREA, GAP);
+    expect(slots).toHaveLength(3);
+    expect(new Set(slots.map((s) => s.h)).size).toBe(1);
+    expect(slots.map((s) => s.y)).toEqual([...slots.map((s) => s.y)].sort((a, b) => a - b));
+  });
+
+  it('gives each the full width of the area, gaps aside', () => {
+    for (const s of rowSlots(4, AREA, GAP)) {
+      expect(s.x).toBe(GAP);
+      expect(s.w).toBe(AREA.w - GAP * 2);
+    }
+  });
+
+  it('is the mirror of columnSlots', () => {
+    const cols = columnSlots(3, { x: 0, y: 0, w: 600, h: 600 }, GAP);
+    const rows = rowSlots(3, { x: 0, y: 0, w: 600, h: 600 }, GAP);
+    expect(rows.map((r) => ({ x: r.y, y: r.x, w: r.h, h: r.w }))).toEqual(cols);
+  });
+});
+
+describe('gridSlots', () => {
+  it('is what all three arrangements are made of', () => {
+    expect(gridSlots(4, AREA, GAP, 4)).toEqual(columnSlots(4, AREA, GAP));
+    expect(gridSlots(4, AREA, GAP, 1)).toEqual(rowSlots(4, AREA, GAP));
+    expect(gridSlots(4, AREA, GAP, 2)).toEqual(tileSlots(4, AREA, GAP));
+  });
+
+  it('clamps a column count that would put slots outside the area', () => {
+    // Nothing passes these, and a slot outside the visible region is a window
+    // the user cannot see — worth being unable to ask for.
+    expect(gridSlots(3, AREA, GAP, 99)).toEqual(columnSlots(3, AREA, GAP));
+    expect(gridSlots(3, AREA, GAP, 0)).toEqual(rowSlots(3, AREA, GAP));
+    expect(gridSlots(3, AREA, GAP, -2)).toEqual(rowSlots(3, AREA, GAP));
+  });
+
+  it('fills the last row short rather than stretching it', () => {
+    const slots = gridSlots(5, AREA, GAP, 2);
+    expect(slots).toHaveLength(5);
+    expect(slots[4]!.w).toBe(slots[0]!.w);
   });
 });

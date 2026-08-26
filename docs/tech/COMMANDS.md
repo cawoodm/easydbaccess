@@ -61,6 +61,8 @@ shell's global `getPanels()` registry:
 | Maximize all windows | Maximize every panel. |
 | Cascade windows | Normalize + stagger each window down-right. |
 | Tile windows | Normalize + arrange in a grid. |
+| Arrange windows in columns | Normalize + one column each, full height. |
+| Arrange windows in rows | Normalize + one row each, full width. |
 | Close all windows | Close every panel. |
 
 The **Workspace** group holds the three things you can do to a workspace. The
