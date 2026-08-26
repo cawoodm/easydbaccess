@@ -24,6 +24,9 @@ export interface TestColumn {
    * renderer).
    */
   script?: string;
+  /** No write target at all — a Projection's computed columns. Not the same as
+   *  `script`, which has a stored cell underneath it. */
+  readonly?: boolean;
   /**
    * JS body defining `function validate(value, row) {…}` — throwing rejects a
    * manual cell edit. Only manual edits run it, so helpers that write rows
@@ -64,6 +67,7 @@ export async function createTable(page: Page, name: string, columns: TestColumn[
             unique?: boolean;
             max?: number;
             hidden?: boolean;
+            readonly?: boolean;
             default?: unknown;
           } = {
             field: c.field,
@@ -77,6 +81,7 @@ export async function createTable(page: Page, name: string, columns: TestColumn[
           if (c.unique) col.unique = true;
           if (c.max != null) col.max = c.max;
           if (c.hidden) col.hidden = true;
+          if (c.readonly) col.readonly = true;
           if (c.default !== undefined) col.default = c.default;
           return col;
         }),

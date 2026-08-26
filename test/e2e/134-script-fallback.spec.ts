@@ -92,10 +92,14 @@ test('rows decline independently — one cell computed, its neighbour editable',
 test('an empty string is an answer, not a decline', async ({ page }) => {
   // `return ''` means "show nothing here". Reading it as a decline would show the
   // stored value instead — the opposite of what the script asked for.
-  const id = await seed(page, [{ name: 'x', code: 'A1' }], [
-    { field: 'name', renderer: 'link' },
-    { field: 'code', script: 'function render(row) {\n  return "";\n}' },
-  ]);
+  const id = await seed(
+    page,
+    [{ name: 'x', code: 'A1' }],
+    [
+      { field: 'name', renderer: 'link' },
+      { field: 'code', script: 'function render(row) {\n  return "";\n}' },
+    ],
+  );
 
   await expect(cell(page, id, 1)).toHaveText('');
   await expect(cell(page, id, 1).locator('input')).toHaveCount(0);
@@ -104,10 +108,14 @@ test('an empty string is an answer, not a decline', async ({ page }) => {
 test('a script that returns nothing at all declines', async ({ page }) => {
   // Falling off the end returns undefined, which means the same as null — a
   // half-written script leaves the data reachable rather than hiding it.
-  const id = await seed(page, [{ name: 'x', code: 'A1' }], [
-    { field: 'name', renderer: 'link' },
-    { field: 'code', script: 'function render(row) {\n  // nothing yet\n}' },
-  ]);
+  const id = await seed(
+    page,
+    [{ name: 'x', code: 'A1' }],
+    [
+      { field: 'name', renderer: 'link' },
+      { field: 'code', script: 'function render(row) {\n  // nothing yet\n}' },
+    ],
+  );
 
   await expect(cell(page, id, 1).locator('input')).toHaveValue('A1');
 });
@@ -115,10 +123,14 @@ test('a script that returns nothing at all declines', async ({ page }) => {
 test('a broken script still shows its error, not the stored value', async ({ page }) => {
   // A throw is not a decline. Silently showing the raw value would hide the fault
   // and leave the author wondering why the script does nothing.
-  const id = await seed(page, [{ name: 'x', code: 'A1' }], [
-    { field: 'name', renderer: 'link' },
-    { field: 'code', script: 'function render(row) {\n  throw new Error("nope");\n}' },
-  ]);
+  const id = await seed(
+    page,
+    [{ name: 'x', code: 'A1' }],
+    [
+      { field: 'name', renderer: 'link' },
+      { field: 'code', script: 'function render(row) {\n  throw new Error("nope");\n}' },
+    ],
+  );
 
   await expect(cell(page, id, 1)).toContainText('runtime error');
 });
@@ -129,12 +141,11 @@ test('the new-record form asks for a scripted column', async ({ page }) => {
   const id = await seed(page, [{ name: 'x', code: 'A1' }]);
 
   await page
-    .locator(`#${panelDomId(id)}`)
-    .locator('panel-footer')
-    .getByRole('button', { name: '+', exact: true })
+    .locator(`#${panelDomId(id)} panel-footer`)
+    .getByRole('button', { name: /Add row/ })
     .click();
 
   const dialog = page.locator('new-record-dialog dialog');
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator('[data-field="code"]')).toHaveCount(1);
+  await expect(dialog.locator('label.field', { hasText: 'code' })).toHaveCount(1);
 });
