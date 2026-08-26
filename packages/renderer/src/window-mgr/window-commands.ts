@@ -18,7 +18,7 @@ import { persistTablePanelGeometry } from './table-window-manager.js';
 import { currentPanZoom } from './shell-viewport.js';
 import { persistViewWindowGeometry } from './view-window-manager.js';
 import { getPanels, type PanelShellEl } from './panel-shell/panel-shell.js';
-import { eligibleForArrange, tileSlots } from './tile-layout.js';
+import { columnSlots, eligibleForArrange, rowSlots, tileSlots, type Rect } from './tile-layout.js';
 
 /** Every open panel, newest-on-top first. */
 function allPanels(): PanelShellEl[] {
@@ -88,20 +88,41 @@ function persistArrangement(): void {
   void persistViewWindowGeometry();
 }
 
-export function tileAllWindows(): void {
-  // Minimized panels are excluded from BOTH the layout and the count driving
-  // the grid maths — otherwise a minimized window would get un-minimized by
-  // tiling, and would still leave an empty hole in the grid (see
-  // `eligibleForArrange`).
+/**
+ * Lay every window out into the slots `plan` returns, in the order they are
+ * stacked bottom-first.
+ *
+ * The body of "Tile", "Arrange in columns" and "Arrange in rows", which differ
+ * only in the shape of the grid they ask for. Minimized panels are excluded from
+ * BOTH the layout and the count driving the maths — otherwise a minimized window
+ * would be un-minimized by arranging, and would still leave an empty hole in the
+ * grid (see `eligibleForArrange`).
+ */
+function arrangeInto(plan: (count: number, rect: Rect, gap: number) => Rect[]): void {
   const panels = eligibleForArrange(allPanels()).reverse();
   if (panels.length === 0) return;
   const gap = 8;
-  const slots = tileSlots(panels.length, visibleRect(), gap);
+  const slots = plan(panels.length, visibleRect(), gap);
   panels.forEach((p, i) => {
-    p.normalize?.(); // un-maximizes so the panel can take its tile slot.
+    p.normalize?.(); // un-maximizes so the panel can take its slot.
     const slot = slots[i];
     if (!slot) return; // unreachable — slots has exactly panels.length entries.
     setGeom(p, slot.x, slot.y, slot.w, slot.h);
   });
   persistArrangement();
+}
+
+/** Every window side by side, each the full height of the visible area. */
+export function arrangeInColumns(): void {
+  arrangeInto(columnSlots);
+}
+
+/** Every window stacked, each the full width of the visible area. */
+export function arrangeInRows(): void {
+  arrangeInto(rowSlots);
+}
+
+/** Every window in a squared-up grid. */
+export function tileAllWindows(): void {
+  arrangeInto(tileSlots);
 }

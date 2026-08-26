@@ -305,37 +305,21 @@ export function init(api: HostApi): void {
     return out;
   }
 
-  /**
-   * The workspace this tab is LOOKING at, if the folder does not hold it yet.
-   *
-   * `fileTheStranded` deliberately skips the active workspace — on a Save it is
-   * the file being written, so writing it twice would be silly. A sync writes
-   * nobody's file by default, which left the one workspace the user can see as
-   * the only one with no home after "connect the folder and sync everything".
-   *
-   * Goes through the ordinary Save, so the tab ends up ADOPTING the file it just
-   * wrote: the point is that the workspace is file-backed from now on, not that a
-   * copy of it exists somewhere. Skipped when a file already backs this workspace,
-   * when it is empty, and when the folder already holds that name — a name the
-   * folder holds is a clash, and the prompts above have just settled it.
-   */
-  async function fileTheOpenOne(dir: FileSystemDirectoryHandle): Promise<string | null> {
-    const active = api.workspaceId();
-    if (!active || edbHandle()) return null;
-    if ((await onlyNonEmpty([active])).length === 0) return null;
-    const name = spaceFileName(active);
-    if ((await listWorkspaceFiles(dir)).some((f) => f.toLowerCase() === name.toLowerCase())) return null;
-    await saveIntoFolder(dir);
-    return name;
-  }
-
-  async function fileTheStranded(opts: { skipEmpty?: boolean } = {}): Promise<string[]> {
+  async function fileTheStranded(opts: { skipEmpty?: boolean; includeActive?: boolean } = {}): Promise<string[]> {
     const dir = await connectedFolder();
     if (!dir) return [];
     const active = api.workspaceId();
     if (!active) return [];
     const ids = (await api.store.workspaces.find()).map((w) => w.id);
-    let missing = withoutTheirOwnFile(ids, active, await listWorkspaceFiles(dir));
+    // A Save excludes the active workspace because the Save itself is writing
+    // that file. A SYNC writes nobody's file otherwise, so the one workspace the
+    // user is looking at would be the only one left without a home. Passing no
+    // active id includes it in the same loop, which is the whole difference —
+    // and, unlike routing it through Save, it does NOT make the tab adopt the
+    // file. That mattered: a file holds one workspace since v0.0.427, so a tab
+    // that adopted its own file came back from the next load with every OTHER
+    // workspace gone from the UI.
+    let missing = withoutTheirOwnFile(ids, opts.includeActive ? '' : active, await listWorkspaceFiles(dir));
     // A Save writes every stranded workspace, empty or not: the file it is about
     // to write holds one workspace afterwards, so a passenger with no file of its
     // own would exist nowhere. A SYNC has no such deadline, and an empty shell —
@@ -798,11 +782,10 @@ export function init(api: HostApi): void {
       // does not gets written out, so connecting a folder leaves nothing behind.
       // Empty ones are skipped — `?space=x` makes a shell before any folder is
       // connected, and a folder full of empty files is not a sync, it is litter.
-      async () => {
-        const rest = await fileTheStranded({ skipEmpty: true });
-        const own = await fileTheOpenOne(dir);
-        return own ? [...rest, own] : rest;
-      },
+      // The open workspace included: it is the one the user can see, so leaving
+      // it as the only workspace with no file is the opposite of what they asked
+      // for. Written, not adopted — see the note in `fileTheStranded`.
+      () => fileTheStranded({ skipEmpty: true, includeActive: true }),
     );
     const skipped = report.unreadable.length > 0 ? ` ${report.unreadable.length} file(s) held no workspace.` : '';
     const written = alsoWroteNote(report.wrote);

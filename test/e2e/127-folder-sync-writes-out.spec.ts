@@ -127,3 +127,28 @@ test('the tables are still there after the folder is connected', async ({ page }
   expect(tables).toContain('kanban/tasks');
   await expect(page.locator(`#${panelDomId(id)} data-table`)).toBeVisible({ timeout: 20_000 });
 });
+
+test('the other workspaces survive the reload after a connect', async ({ page }) => {
+  // The regression: connecting a folder ends with the OPEN workspace adopting a
+  // file of its own, and since v0.0.427 a file holds exactly one workspace. So
+  // the next load opens a database with one workspace in it and every other one
+  // leaves the UI — data safe in the files, invisible in the app, which is what
+  // "my tables disappeared" was.
+  await boot(page, 'kanban');
+  const id = await createTable(page, 'tasks', [{ field: 'name' }]);
+  await waitForPanel(page, id);
+  await addWorkspace(page, 'notes', true);
+
+  await connectFolder(page);
+  await expect.poll(() => folderHas(page, 'kanban.edb'), { timeout: 30_000 }).toBe(true);
+  await expect.poll(() => folderHas(page, 'notes.edb'), { timeout: 30_000 }).toBe(true);
+
+  await page.reload();
+  await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
+
+  const workspaces = await page.evaluate(async () => {
+    const ctx = (window as unknown as { __easydb: { store: { workspaces: { find(): Promise<Array<{ id: string }>> } } } }).__easydb;
+    return (await ctx.store.workspaces.find()).map((w) => w.id).sort();
+  });
+  expect(workspaces).toEqual(['kanban', 'notes']);
+});
