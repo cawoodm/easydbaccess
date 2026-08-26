@@ -17,6 +17,7 @@
 // Pure, so it is unit-testable — the DataStore is not.
 
 import type { ColumnSpec } from '@easydb/shared';
+import { activeColumnScript } from '@easydb/shared';
 
 /**
  * The ColumnSpec fields that change what is DRAWN. Everything else on a
@@ -38,7 +39,10 @@ import type { ColumnSpec } from '@easydb/shared';
 function columnKey(c: ColumnSpec): string {
   // `label` is in because a chart's axis and legend are labelled with it, and
   // `type` because it decides how a cell is read as a number or a date.
-  return JSON.stringify([c.field, c.label, c.type, c.script ?? '']);
+  // The script comes in as what would actually RUN, so switching it off redraws
+  // the chart with the stored (empty) column, exactly as switching it on redraws
+  // with the computed one.
+  return JSON.stringify([c.field, c.label, c.type, activeColumnScript(c) ?? '']);
 }
 
 /**

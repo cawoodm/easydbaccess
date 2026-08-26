@@ -37,6 +37,20 @@ import { materializeColumnScript, materializeSummary } from '../table/materializ
 export type ScriptKind = 'render' | 'validate' | 'token' | 'viz-html' | 'viz-script';
 
 /**
+ * What Save hands back: the source, and whether the caller should RUN it.
+ *
+ * `active` only ever varies for a caller that asked for the switch (see
+ * `open`'s `active` option) — everyone else is handed `true` and can ignore it.
+ * It rides on the result rather than living in a `lastActive` getter beside the
+ * promise, because a second read of a resolved dialog is exactly the kind of
+ * state that goes stale the moment two editors are opened in a row.
+ */
+export interface ScriptEdit {
+  text: string;
+  active: boolean;
+}
+
+/**
  * The saved column a `render` script belongs to, which is what Run needs to
  * write to. Absent while a table is still being created — there are no rows to
  * write yet — and Run is hidden then.
@@ -200,6 +214,27 @@ export class ScriptEditorDialog extends LitElement {
         opacity: 0.4;
         cursor: default;
       }
+      /* The switch that parks a script without deleting it. Red while it is off,
+         because "this rule exists and is doing nothing" is a state the author has
+         to see from across the dialog — the same red the column editor's button
+         goes, so the two obviously say the same thing. */
+      label.run-switch {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        font-size: 0.85rem;
+        color: #374151;
+        cursor: pointer;
+        user-select: none;
+      }
+      label.run-switch.off {
+        color: #dc2626;
+        font-weight: 600;
+      }
+      label.run-switch input {
+        margin: 0;
+        cursor: pointer;
+      }
       textarea {
         font:
           0.85rem ui-monospace,
@@ -237,8 +272,14 @@ export class ScriptEditorDialog extends LitElement {
   @state() private target: ScriptTarget | null = null;
   /** A run is in flight; Run and Save are held so neither can race the writes. */
   @state() private running = false;
+  /**
+   * The "Run this script" box. `null` means this caller did not ask for the
+   * switch, and the box is not drawn at all — a view token and a visualization
+   * have nothing to switch off.
+   */
+  @state() private active: boolean | null = null;
   private dialogEl: HTMLDialogElement | null = null;
-  private resolver: ((v: string | null) => void) | null = null;
+  private resolver: ((v: ScriptEdit | null) => void) | null = null;
 
   override connectedCallback() {
     super.connectedCallback();
@@ -266,7 +307,12 @@ export class ScriptEditorDialog extends LitElement {
    * `opts.field` is the column a `token` script's token maps to; it only seeds
    * the boilerplate.
    */
-  async open(initial: string, columnLabel: string, kind: ScriptKind = 'render', opts?: { field?: string; target?: ScriptTarget | undefined }): Promise<string | null> {
+  async open(
+    initial: string,
+    columnLabel: string,
+    kind: ScriptKind = 'render',
+    opts?: { field?: string; target?: ScriptTarget | undefined; active?: boolean | undefined },
+  ): Promise<ScriptEdit | null> {
     if (this.resolver) {
       // Caller opened a new editor before resolving the previous one —
       // treat the old promise as cancelled so it doesn't hang.
@@ -280,6 +326,8 @@ export class ScriptEditorDialog extends LitElement {
     // Only a column's render script has cells to write; a validation rule
     // returns nothing and a view token never touches the stored value.
     this.target = kind === 'render' ? (opts?.target ?? null) : null;
+    // Only a column offers the switch. Passing it is what draws the box.
+    this.active = opts?.active === undefined ? null : opts.active;
     // Pre-fill with boilerplate so users opening a fresh column-script see
     // the expected shape instead of an intimidating empty textarea. An
     // existing script wins — we never overwrite the user's source.
@@ -307,7 +355,7 @@ export class ScriptEditorDialog extends LitElement {
     return BOILERPLATE;
   }
 
-  private resolve(value: string | null) {
+  private resolve(value: ScriptEdit | null) {
     const r = this.resolver;
     this.resolver = null;
     this.dialogEl?.close();
@@ -318,7 +366,7 @@ export class ScriptEditorDialog extends LitElement {
 
   private onSubmit = (e: Event) => {
     e.preventDefault();
-    this.resolve(this.text);
+    this.resolve({ text: this.text, active: this.active !== false });
   };
 
   /**
@@ -472,7 +520,7 @@ export class ScriptEditorDialog extends LitElement {
       clearAppProgress();
       ctx.api.ui.dialogs.toast(materializeSummary(result, target.field), { kind: result.failed > 0 ? 'error' : 'success', title: 'Run script' });
       // Resolving closes the editor: the run IS the decision about this script.
-      this.resolve(answer === clear ? '' : this.text);
+      this.resolve({ text: answer === clear ? '' : this.text, active: this.active !== false });
     } catch (err) {
       clearAppProgress();
       await dialogs.alert(`Could not run the script: ${err instanceof Error ? err.message : String(err)}`, 'Run script');
@@ -566,6 +614,15 @@ export class ScriptEditorDialog extends LitElement {
                     Run…
                   </button>`
                 : null}
+              ${this.active === null
+                ? null
+                : html`<label
+                    class=${`run-switch${this.active ? '' : ' off'}`}
+                    title=${this.active ? 'Untick to keep this script but stop running it' : 'This script is switched off — it is kept with the column but does nothing until you tick this'}
+                  >
+                    <input type="checkbox" data-testid="script-active" .checked=${this.active} @change=${(e: Event) => (this.active = (e.target as HTMLInputElement).checked)} />
+                    ${validating ? 'Enforce' : 'Run'}
+                  </label>`}
               <button type="button" class="ghost" @click=${this.onCancel}>Cancel</button>
               <button type="submit" class="primary" ?disabled=${this.running}>Save</button>
             </div>

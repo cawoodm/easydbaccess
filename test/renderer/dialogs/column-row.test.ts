@@ -16,6 +16,42 @@ const row = (extra: Partial<ColumnRow> = {}): ColumnRow => ({
   ...extra,
 });
 
+describe('buildColumnSpec — the script switches', () => {
+  it('writes the switch only when it is off', () => {
+    // Absent means ON, so the common case stores nothing at all.
+    expect(buildColumnSpec(row({ script: 'return 1;' })).scriptActive).toBeUndefined();
+    expect(buildColumnSpec(row({ script: 'return 1;', scriptActive: true })).scriptActive).toBeUndefined();
+    expect(buildColumnSpec(row({ script: 'return 1;', scriptActive: false })).scriptActive).toBe(false);
+  });
+
+  it('clears a stale off-switch left on a spec whose script was deleted', () => {
+    // The spread base is what makes this necessary: `orig` still carries the
+    // old `scriptActive: false`, and a column that later gets a NEW script must
+    // start by running it rather than inheriting "off" from a deleted one.
+    const base = orig({ script: 'return 1;', scriptActive: false });
+    const cleared = buildColumnSpec(row({ orig: base, script: undefined, scriptActive: false }));
+    expect(cleared.script).toBeUndefined();
+    expect(cleared.scriptActive).toBeUndefined();
+  });
+
+  it('drops the off-switch when the user ticks the box back on', () => {
+    const base = orig({ script: 'return 1;', scriptActive: false });
+    const back = buildColumnSpec(row({ orig: base, script: 'return 1;', scriptActive: true }));
+    expect(back.script).toBe('return 1;');
+    expect(back.scriptActive).toBeUndefined();
+  });
+
+  it('does the same for the validation rule, independently', () => {
+    const both = buildColumnSpec(row({ script: 'return 1;', scriptActive: false, validate: 'throw 1;' }));
+    expect(both.scriptActive).toBe(false);
+    expect(both.validateActive).toBeUndefined();
+
+    const cleared = buildColumnSpec(row({ orig: orig({ validate: 'throw 1;', validateActive: false }), validate: undefined }));
+    expect(cleared.validate).toBeUndefined();
+    expect(cleared.validateActive).toBeUndefined();
+  });
+});
+
 describe('buildColumnSpec', () => {
   it('carries width/description/units/default through unchanged', () => {
     const base = orig({

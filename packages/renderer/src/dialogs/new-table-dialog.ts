@@ -1,6 +1,7 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import type { ColumnEditorActionSpec, ColumnSpec, ColumnType, ProjectionSpec, Row, Table } from '@easydb/shared';
+import type { ColumnEditorActionSpec, ColumnSpec, ColumnType, ProjectionSpec, Row, ScriptState, Table } from '@easydb/shared';
+import { scriptState } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
@@ -25,6 +26,25 @@ import {
 } from '../table/table-references.js';
 
 const TYPE_OPTIONS: ColumnType[] = ['string', 'text', 'number', 'boolean', 'date', 'datetime', 'array'];
+
+/**
+ * What each of the two script buttons says in each of its three states.
+ *
+ * The `off` wording names the consequence rather than the setting — "kept but
+ * not run" is the thing a user hovering a red button needs to know, and it is
+ * the answer to the question the red is provoking.
+ */
+const SCRIPT_TITLE: Record<ScriptState, string> = {
+  none: 'Add a script: render(row) computes what this column displays',
+  on: 'Edit the script — its render(row) output is what this column displays',
+  off: 'This column’s script is switched off — kept, but not run. Click to edit or switch it back on',
+};
+
+const VALIDATE_TITLE: Record<ScriptState, string> = {
+  none: 'Add validation: validate(value, row) throws to reject a manual cell edit',
+  on: 'Edit the validation — validate(value, row) throws to reject a manual cell edit',
+  off: 'This column’s validation is switched off — kept, but not enforced. Click to edit or switch it back on',
+};
 
 /**
  * Rows the live preview reads. Enough to judge the column specs against real
@@ -251,26 +271,33 @@ export class NewTableDialog extends LitElement {
         color: #d1d5db;
         cursor: not-allowed;
       }
-      /* A column that already carries a script — blue so it is obvious which
-       columns are computed without opening each editor. The glyph itself
-       never changes (always the pencil); colour alone carries the state. */
-      button.icon-btn.has-script {
+      /* Both script buttons are TRI-STATE, and both use the same three colours,
+       because they answer the same question about two different scripts:
+
+         gray (the default .icon-btn colour) — no script on this column
+         blue                                — a script that runs
+         red                                 — a script that is KEPT but parked
+
+       The two used to be the same pencil in adjacent columns, told apart only by
+       blue-vs-amber, which read as one wide control; the validation button now
+       carries its own glyph (the "rule" icon) so the colours are free to mean state and
+       nothing else. Red is the load-bearing one: a rule that exists and is doing
+       nothing is invisible in every other part of the app, and the alternative to
+       showing it here is a user writing the same rule a second time. */
+      button.icon-btn.is-on {
         color: #2563eb;
       }
-      /* Without this, the plain :hover rule above (color: #111827) would win
-       and a script-set pencil would go near-black on hover, losing the blue
-       state cue. A darker blue keeps hover feedback without discarding it. */
-      button.icon-btn.has-script:hover:not(:disabled) {
+      /* Without this, the plain :hover rule above (color: #111827) would win and
+       a set script's button would go near-black on hover, losing the state cue.
+       A darker shade keeps hover feedback without discarding it. */
+      button.icon-btn.is-on:hover:not(:disabled) {
         color: #1d4ed8;
       }
-      /* The validation pencil is the same glyph in the next column along, so
-       its "set" state needs a colour of its OWN — two blue pencils would read
-       as one wide control. Amber says "this column polices its edits". */
-      button.icon-btn.has-validate {
-        color: #d97706;
+      button.icon-btn.is-off {
+        color: #dc2626;
       }
-      button.icon-btn.has-validate:hover:not(:disabled) {
-        color: #b45309;
+      button.icon-btn.is-off:hover:not(:disabled) {
+        color: #b91c1c;
       }
       /* The funnel that says this column carries a filter. Blue while the filter
        is on, faded once it is switched off — the glyph changes too, because the
@@ -506,7 +533,9 @@ export class NewTableDialog extends LitElement {
         type: c.type,
         renderer: c.renderer,
         script: c.script,
+        scriptActive: c.scriptActive,
         validate: c.validate,
+        validateActive: c.validateActive,
         max: c.max,
         unique: c.unique,
         notnull: c.notnull,
@@ -745,7 +774,9 @@ export class NewTableDialog extends LitElement {
           type: spec.type ?? row.type,
           renderer: spec.renderer,
           script: spec.script,
+          scriptActive: spec.scriptActive,
           validate: spec.validate,
+          validateActive: spec.validateActive,
         };
       });
       this.touchDirty();
@@ -774,9 +805,11 @@ export class NewTableDialog extends LitElement {
     // rename in this editor has not moved yet — the save re-keys them after.
     // Absent in "new table" mode, where there is nothing to write to.
     const saved = this.editTableId && c.origField ? { tableId: this.editTableId, field: c.origField } : undefined;
-    const next = await dlg.open(c.script ?? '', c.label || c.field, 'render', { target: saved });
+    const next = await dlg.open(c.script ?? '', c.label || c.field, 'render', { target: saved, active: c.scriptActive !== false });
     if (next === null) return;
-    this.patchColumn(idx, { script: next.trim() ? next : undefined });
+    // Both halves come back together, so ticking the box IS a save — there is no
+    // state where the editor says "off" and the column still runs.
+    this.patchColumn(idx, { script: next.text.trim() ? next.text : undefined, scriptActive: next.active ? undefined : false });
   }
 
   /**
@@ -788,9 +821,9 @@ export class NewTableDialog extends LitElement {
     if (!dlg) return;
     const c = this.columns[idx];
     if (!c) return;
-    const next = await dlg.open(c.validate ?? '', c.label || c.field, 'validate');
+    const next = await dlg.open(c.validate ?? '', c.label || c.field, 'validate', { active: c.validateActive !== false });
     if (next === null) return;
-    this.patchColumn(idx, { validate: next.trim() ? next : undefined });
+    this.patchColumn(idx, { validate: next.text.trim() ? next.text : undefined, validateActive: next.active ? undefined : false });
   }
 
   /**
@@ -1162,9 +1195,9 @@ export class NewTableDialog extends LitElement {
                 <span>Label</span>
                 <span>Type</span>
                 <span>Renderer</span>
-                <span></span>
+                <span class="flag-label" title="Script — render(row) computes what the column displays"><span class="mi sm">edit</span></span>
                 <span class="flag-label">Max</span>
-                <span></span>
+                <span class="flag-label" title="Validation — validate(value, row) throws to reject a manual cell edit"><span class="mi sm">rule</span></span>
                 ${this.renderFlagHead('unique', 'U', 'Unique')} ${this.renderFlagHead('notnull', '!', 'Not null')} ${this.renderFlagHead('sortable', '⇅', 'Sortable')}
                 ${this.renderFlagHead('filterable', '⚲', 'Filterable (includes search)')}
                 <span class="flag-label filter-head" title="Shows a funnel on every column that has a filter. Click one to switch that filter off."><span class="mi sm">filter_alt</span></span>
@@ -1228,8 +1261,8 @@ export class NewTableDialog extends LitElement {
                     </select>
                     <button
                       type="button"
-                      class=${`icon-btn script-btn${c.script?.trim() ? ' has-script' : ''}`}
-                      title=${c.script?.trim() ? 'Edit the script — its render(row) output is what this column displays' : 'Add a script: render(row) computes what this column displays'}
+                      class=${`icon-btn script-btn is-${scriptState(c.script, c.scriptActive)}`}
+                      title=${SCRIPT_TITLE[scriptState(c.script, c.scriptActive)]}
                       @click=${() => this.editScript(i)}
                     >
                       <span class="mi sm">edit</span>
@@ -1247,13 +1280,11 @@ export class NewTableDialog extends LitElement {
                     />
                     <button
                       type="button"
-                      class=${`icon-btn validate-btn${c.validate?.trim() ? ' has-validate' : ''}`}
-                      title=${c.validate?.trim()
-                        ? 'Edit the validation — validate(value, row) throws to reject a manual cell edit'
-                        : 'Add validation: validate(value, row) throws to reject a manual cell edit'}
+                      class=${`icon-btn validate-btn is-${scriptState(c.validate, c.validateActive)}`}
+                      title=${VALIDATE_TITLE[scriptState(c.validate, c.validateActive)]}
                       @click=${() => this.editValidate(i)}
                     >
-                      <span class="mi sm">edit</span>
+                      <span class="mi sm">rule</span>
                     </button>
                     <span class="flag">
                       <input type="checkbox" title="Unique" .checked=${!!c.unique} @change=${(e: Event) => this.patchColumn(i, { unique: (e.target as HTMLInputElement).checked })} />

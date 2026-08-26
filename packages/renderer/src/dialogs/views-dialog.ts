@@ -812,7 +812,7 @@ export class ViewsDialog extends LitElement {
     const next = await dlg.open(d.tokenScripts[tok] ?? '', `$${tok}`, 'token', { field: d.mapping[tok] ?? '' });
     if (next === null) return;
     const tokenScripts = { ...d.tokenScripts };
-    if (next.trim()) tokenScripts[tok] = next;
+    if (next.text.trim()) tokenScripts[tok] = next.text;
     else delete tokenScripts[tok];
     this.iDraft = { ...d, tokenScripts };
   }
@@ -1193,7 +1193,7 @@ export class ViewsDialog extends LitElement {
     if (!dlg) return;
     const next = await dlg.open(cur == null ? '' : String(cur), f.label, f.code === 'html' ? 'viz-html' : 'viz-script');
     if (next === null) return;
-    set(next);
+    set(next.text);
   }
 
   private renderInstance() {

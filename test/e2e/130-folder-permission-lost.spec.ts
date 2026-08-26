@@ -51,7 +51,10 @@ async function connectFolder(page: Page): Promise<void> {
     .click();
   const palette = page.locator('command-palette-dialog dialog');
   await palette.locator('input').fill('workspace folder');
-  await palette.locator('.item', { hasText: /Connect workspace folder/ }).first().click();
+  await palette
+    .locator('.item', { hasText: /Connect workspace folder/ })
+    .first()
+    .click();
 }
 
 test('a lapsed folder permission is reported, not swallowed', async ({ page }) => {

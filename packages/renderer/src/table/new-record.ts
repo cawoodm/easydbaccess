@@ -6,6 +6,7 @@
 // shows them with — are testable without a dialog, a store or a grid.
 
 import type { ColumnSpec } from '@easydb/shared';
+import { activeColumnScript } from '@easydb/shared';
 
 /**
  * The value a column starts a new record with.
@@ -46,7 +47,7 @@ export function blankRecord(columns: readonly ColumnSpec[]): Record<string, unkn
  * which makes those cells read-only.
  */
 export function isDerived(c: ColumnSpec): boolean {
-  return !!c.script?.trim();
+  return activeColumnScript(c) !== undefined;
 }
 
 /**

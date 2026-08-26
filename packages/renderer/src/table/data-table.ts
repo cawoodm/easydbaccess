@@ -22,7 +22,7 @@ import { writeColumnDrag } from './column-drag.js';
 import { nextSortSpecs } from './sort-cycle.js';
 import { runColumnScript } from '../util/column-script.js';
 import { validateValue } from './validate-value.js';
-import { arrayMembers } from '@easydb/shared';
+import { activeColumnScript, arrayMembers } from '@easydb/shared';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cachedRowCount, rememberRowCount } from './row-count-cache.js';
 import { rememberRowRequest } from './visible-request.js';
@@ -1681,7 +1681,7 @@ export class DataTable extends LitElement {
    * editor to point at the stored value.
    */
   private renderScriptedCell(row: Row, col: ColumnSpec) {
-    const run = runColumnScript(col.script, row.data);
+    const run = runColumnScript(activeColumnScript(col), row.data);
     if (!run.ok) {
       return html`<span class="script-err" title=${run.message}>⚠ ${run.label}</span>`;
     }
@@ -1711,7 +1711,7 @@ export class DataTable extends LitElement {
     // ran the same script a second time and injected the result as raw HTML;
     // it duplicated this generic path and was removed, so a scripted column
     // always takes this branch now regardless of `col.renderer`.
-    if (col.script?.trim()) {
+    if (activeColumnScript(col) !== undefined) {
       return this.renderScriptedCell(row, col);
     }
     // A cell is non-editable when the whole table/view is read-only OR the
@@ -2629,7 +2629,7 @@ const MAX_TOOLTIP_CHARS = 500;
  * would explain nothing. An empty cell gets no tooltip.
  */
 function cellTooltip(row: Row, col: ColumnSpec): string {
-  if (col.script) return '';
+  if (activeColumnScript(col) !== undefined) return '';
   const v = row.data[col.field];
   if (v == null) return '';
   // Nothing to explain about a cell that shows nothing.
@@ -2645,7 +2645,7 @@ function sameSort(a: readonly SortSpec[], b: readonly SortSpec[]): boolean {
 }
 
 function cellStateClass(row: Row, col: ColumnSpec, highlightNulls = true): string {
-  if (col.script) return '';
+  if (activeColumnScript(col) !== undefined) return '';
   const state = cellState(row.data[col.field], col.type);
   // The empty highlight is a setting; the invalid one is not. "Nothing here" is
   // normal and can be turned off as noise, while "this does not fit the type" is

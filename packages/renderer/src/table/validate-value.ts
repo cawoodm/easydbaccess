@@ -14,6 +14,7 @@
 // over.
 
 import type { ColumnSpec, Row } from '@easydb/shared';
+import { activeValidateScript } from '@easydb/shared';
 import { runValidateScript } from '../util/column-script.js';
 
 /**
@@ -48,12 +49,13 @@ export function validateValue(col: ColumnSpec, value: unknown, allRows: readonly
     const dup = allRows.find((r) => r.id !== rowId && r.data[col.field] === value);
     if (dup) return `${col.label} must be unique. Another row already has "${String(value)}".`;
   }
-  if (col.validate?.trim()) {
+  const rule = activeValidateScript(col);
+  if (rule !== undefined) {
     // The script sees the row AS IT WOULD BE — a rule comparing this cell to a
     // sibling field must read the pending edit, not the value on disk, or a
     // two-field rule contradicts itself depending on which cell you touch last.
     const proposed = { ...row.data, [col.field]: value };
-    const run = runValidateScript(col.validate, value, proposed);
+    const run = runValidateScript(rule, value, proposed);
     if (!run.ok) return run.message;
   }
   return null;

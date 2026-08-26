@@ -268,7 +268,6 @@ export class PanelFooter extends LitElement {
   }
 }
 
-
 declare global {
   interface HTMLElementTagNameMap {
     'panel-footer': PanelFooter;

@@ -17,10 +17,7 @@ import { bulkAddRows, createTable, waitForPanel } from './helpers.js';
 const MD = '# Heading\n\nSome **bold** text.';
 
 test('a markdown column renders as markdown in a view, not as flattened text', async ({ page }) => {
-  const tableId = await createTable(page, 'Notes', [
-    { field: 'title' },
-    { field: 'body', renderer: 'markdown' },
-  ]);
+  const tableId = await createTable(page, 'Notes', [{ field: 'title' }, { field: 'body', renderer: 'markdown' }]);
   await waitForPanel(page, tableId);
   await bulkAddRows(page, tableId, [{ title: 'One', body: MD }]);
 

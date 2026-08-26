@@ -946,7 +946,9 @@ function normalizeColumn(c: unknown): ColumnSpec {
   };
   if (renderer) spec.renderer = renderer;
   if (typeof o.script === 'string') spec.script = o.script;
+  if (o.scriptActive === false) spec.scriptActive = false;
   if (typeof o.validate === 'string') spec.validate = o.validate;
+  if (o.validateActive === false) spec.validateActive = false;
   if (o.default !== undefined) spec.default = o.default;
   if (typeof o.max === 'number') spec.max = o.max;
   if (typeof o.width === 'number') spec.width = o.width;

@@ -38,6 +38,17 @@ export interface ColumnSpec {
    */
   script?: string;
   /**
+   * When explicitly false, `script` is kept but NOT run — the column behaves as
+   * if it had no script at all, and the editor's script button turns red.
+   *
+   * A rule you are debugging is worth more parked than deleted, and the only
+   * way to park one used to be to cut the body into a scratch file. Absent ⇒
+   * the script runs, so every column written before this existed is unchanged.
+   *
+   * Read it through `activeColumnScript()` — never `col.script` directly.
+   */
+  scriptActive?: boolean;
+  /**
    * A JavaScript body that must define `function validate(value, row) { … }`,
    * edited via the column editor's second pencil (right of `max`). Run on a
    * MANUAL cell edit only, after the declarative constraints below have
@@ -52,6 +63,12 @@ export interface ColumnSpec {
    * Not part of the CSV mini-language.
    */
   validate?: string;
+  /**
+   * The same switch for `validate`: explicitly false keeps the rule but stops
+   * running it, so an edit the rule would have rejected goes through. Absent ⇒
+   * the rule runs. Read it through `activeValidateScript()`.
+   */
+  validateActive?: boolean;
   default?: unknown;
   max?: number;
   unique?: boolean;
