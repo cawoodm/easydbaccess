@@ -8,6 +8,7 @@
 
 ### Bugs
 
+- 🪲 Losing the browser’s permission to the workspace folder is now said out loud, with a button to reconnect, instead of the workspace coming up empty (v0.0.435)
 - 🪲 Connecting a workspace folder could leave the app with no tables until the file was dragged back in (v0.0.431)
 - 🪲 The same new plugin was announced again on another dev server, on the published site, or after site data was cleared (v0.0.433)
 - 🪲 A URL naming a workspace you did not have created it inside the workspace file you had open, so that file held two (v0.0.433)

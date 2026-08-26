@@ -33,7 +33,7 @@ import { countWorkspaceContents } from '../db/delete-workspace.js';
 import { isEmptyWorkspace } from '../db/edb/folder-index.js';
 import { createIpcDataStore } from '../db/data-store-bridge.js';
 import { adoptEdbFile, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
-import { adoptFolderFile, clearPendingSpaceRequest, pendingSpaceRequest } from '../db/edb/space-adopt.js';
+import { adoptFolderFile, clearPendingSpaceRequest, pendingSpaceRequest, reloadActiveFromFile } from '../db/edb/space-adopt.js';
 import { alsoWroteNote, withoutTheirOwnFile, writableWholesale } from '../db/edb/one-per-file.js';
 import { freeWorkspaceId, spaceFileName, workspaceIdFromFileName } from '../db/edb/space-resolve.js';
 
@@ -1023,6 +1023,58 @@ async function offerSpaceFolder(api: HostApi): Promise<void> {
   await adoptFolderFile(requested);
 }
 
+/** Nothing the user put here: no tables and no views — `isEmptyWorkspace`'s rule. */
+async function openWorkspaceIsEmpty(api: HostApi): Promise<boolean> {
+  const workspaceId = api.workspaceId();
+  if (!workspaceId) return false;
+  const counted = await countWorkspaceContents(storeBridge(), workspaceId, { countRows: false }).catch(() => null);
+  // A count that could not be taken is not a count of none: say it holds
+  // something, so an unreadable store asks nothing rather than crying wolf.
+  return counted !== null && isEmptyWorkspace(counted);
+}
+
+/**
+ * Say so when the browser has taken the folder grant away, and offer it back.
+ *
+ * A permission does not always survive a restart: Chrome drops it unless the user
+ * chose "Allow on every visit", and clearing site data drops it always. The tab
+ * then boots on whatever the pool holds — for a workspace whose data lives in a
+ * file, that is NOTHING — and every check here read the permission and threw the
+ * answer away, so the app came up empty without a word. The data was never gone;
+ * it was in a file the app was no longer allowed to open.
+ *
+ * Asking needs a user gesture, which a boot has not got. So this is a dialog: its
+ * button IS the gesture, and `workspaceFolder()` re-requests the remembered handle
+ * before falling back to the picker.
+ *
+ * A workspace that never had a file asks nothing — there is nothing it is missing.
+ */
+async function offerReconnect(api: HostApi, folderName: string | null, file: string | null): Promise<void> {
+  const what = folderName ? `the workspace folder "${folderName}"` : `${file}`;
+  const ok = await api.ui.dialogs.confirm(
+    `easyDBAccess may no longer open ${what}, so this workspace is showing only what is stored in this browser. Your data is still in the file. Reconnect now?`,
+    'Workspace folder',
+  );
+  if (!ok) return;
+  const dir = await workspaceFolder();
+  if (!dir) {
+    api.ui.dialogs.toast('Still not connected. Run "Connect workspace folder" when you are ready.', { kind: 'info' });
+    return;
+  }
+  api.ui.dialogs.toast(`Reconnected to "${dir.name}".`, { kind: 'success' });
+
+  // Re-read the file ONLY when there is nothing here to lose. The grant is back,
+  // so the file can be opened again — but replacing the open database with it is
+  // exactly the wrong move if the user has since typed something into the empty
+  // shell they were given. Sync is the deliberate way to do it in that case, and
+  // it asks which copy wins.
+  const active = adoptedFileName();
+  if (!active) return;
+  const workspaceId = api.workspaceId();
+  const counted = workspaceId ? await countWorkspaceContents(storeBridge(), workspaceId, { countRows: false }).catch(() => null) : null;
+  if (counted && isEmptyWorkspace(counted)) await reloadActiveFromFile(active);
+}
+
 export async function load(api: HostApi): Promise<void> {
   if (!supported()) return;
   await offerSpaceFolder(api);
@@ -1033,21 +1085,46 @@ export async function load(api: HostApi): Promise<void> {
   session?.refreshSaveButton();
 
   // The file half. A workspace with no file needs no handle and no permission, but
-  // everything below the `if` is about a file this tab has already adopted.
+  // everything below is about a file or a folder this browser has already been
+  // given — and about noticing when it no longer has it.
+  //
+  // Re-check the folder before the file. A folder the user has allowed on every
+  // visit covers everything in it, so Save then needs no prompt at all — and
+  // asking about the folder once beats asking about each file.
+  const folder = await rememberedFolder();
+  // Permission is READ, not asked for: asking needs a gesture, and the workspace
+  // has already loaded from the pool. A Chrome user with a persisted grant reads
+  // back `granted` and saves silently.
+  const folderOk = folder ? await ensureWritable(folder, false) : false;
+  let fileOk = false;
   if (adoptedFileName() !== null) {
-    // Re-check the folder before the file. A folder the user has allowed on every
-    // visit covers everything in it, so Save then needs no prompt at all — and
-    // asking about the folder once beats asking about each file.
-    const folder = await rememberedFolder();
-    if (folder) await ensureWritable(folder, false);
-    // The handle from the last session. Permission is READ, not asked for: asking
-    // needs a gesture, and the workspace already loaded from the pool. A Chrome
-    // user with a persisted grant reads back `granted` and saves silently.
     const remembered = await rememberedHandle();
     if (remembered) {
       setEdbHandle(remembered);
-      await ensureWritable(remembered, false);
+      fileOk = await ensureWritable(remembered, false);
     }
+  }
+  // This tab is looking at a FILE it can no longer open. The permission answers
+  // were read and dropped on the floor until v0.0.434, which is how a workspace
+  // whose data is in a file came up empty and silent after a restart.
+  //
+  // Two ways to be in trouble, and nothing else asks. A workspace with rows on
+  // screen in a browser that merely forgot a folder is missing nothing, and a
+  // question about it on every boot would be noise:
+  //
+  //  - this tab is looking at a FILE it can no longer open, or
+  //  - the folder is unreachable AND the workspace is empty, which is the shape
+  //    of the report: the data is in the folder and the app came up blank.
+  //
+  // Only where there is something to offer. Firefox and Safari have no directory
+  // picker at all, so a file-backed workspace there is permanently in the `lostFile`
+  // state by construction — and "reconnect?" would be a question with no button
+  // behind it, asked on every single boot. Save already says what that browser can
+  // and cannot do.
+  const lostFile = adoptedFileName() !== null && !fileOk && !folderOk;
+  const blankWithFolder = folder !== null && !folderOk && (await openWorkspaceIsEmpty(api));
+  if (canPickFolder() && (lostFile || blankWithFolder)) {
+    await offerReconnect(api, folder?.name ?? null, adoptedFileName());
   }
 
   // Autosave last, and for a workspace with or without a file: the timer must not
