@@ -17,6 +17,7 @@
 
 ### Bugs
 
+- 🪲 A saved workspace came back from a browser refresh saying it had unsaved changes (v0.0.447)
 - 🪲 Saving over a file that already holds this workspace asks which copy to keep, naming both, instead of a yes/no about replacing (v0.0.446)
 
 - 🪲 Two files in the workspace folder holding one workspace listed it twice, and both entries opened the same file (v0.0.442)
