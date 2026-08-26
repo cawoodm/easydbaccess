@@ -74,7 +74,11 @@ titlebar/search shortcuts.
 
 ## Writing a cell — validated, not just saved
 
-`commitCell()` runs the column's constraints before writing:
+`commitCell()` calls `validateValue()` (`table/validate-value.ts`) before
+writing. That function was private to this file until v0.0.437, when the
+new-record form needed the same verdict in the same words — a rule that reads one
+way in the grid and another in a form is two rules. It runs the column's
+constraints:
 
 - `notnull` — rejects `null`/`undefined`/whitespace-only strings.
 - `max` — a string longer than `max` chars, or a number greater than `max`.
@@ -87,6 +91,30 @@ write that fails after passing validation (a live/remote-backed table
 rejecting it — read-only source, expired auth, a server error) surfaces the
 same way instead of leaving an unhandled promise rejection and a
 stale-looking cell.
+
+### The new-record form uses the same rules, as advice
+
+The footer's **+** opens `dialogs/new-record-dialog.ts` rather than inserting a
+blank row. It calls `validateRecord()` — `validateValue()` over every field it
+shows — on each keystroke, so the whole record is re-judged (a `validate` script
+may compare two fields, so editing one can fix or break the other).
+
+Two differences from a cell edit, both deliberate:
+
+- **A broken rule does not block the write.** The Save button becomes
+  "Save anyway" on the first press, so the wording is read before it happens, and
+  the toast says how many problems went in with the record. A record half-known is
+  worth keeping, and the grid marks what is wrong.
+- **`unique` is not checked.** It needs the other rows, and the form has none — it
+  passes an empty `allRows`, which `validateValue` documents as the honest answer
+  for a record that does not exist yet. The next cell edit and the Validate button
+  both have the rows and catch it.
+
+Which fields appear is `table/new-record.ts` (pure): visible, non-derived columns,
+plus the hidden ones behind "Show all fields". A scripted column never appears —
+it is derived, so there is nowhere to put an answer. Every column still gets its
+`default` written, shown or not, so the row has the same shape whichever path made
+it.
 
 ## Sort
 

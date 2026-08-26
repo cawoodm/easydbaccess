@@ -20,7 +20,8 @@ import { readSortSpecs, sortRowsBySpecs } from './row-sort.js';
 import { sameFilterMap } from './filter-map.js';
 import { writeColumnDrag } from './column-drag.js';
 import { nextSortSpecs } from './sort-cycle.js';
-import { runColumnScript, runValidateScript } from '../util/column-script.js';
+import { runColumnScript } from '../util/column-script.js';
+import { validateValue } from './validate-value.js';
 import { arrayMembers } from '@easydb/shared';
 import { emitVisibleCount } from '../window-mgr/panel-title.js';
 import { cachedRowCount, rememberRowCount } from './row-count-cache.js';
@@ -1585,7 +1586,7 @@ export class DataTable extends LitElement {
       return;
     }
     if (col) {
-      const reason = validate(col, value, this.rows, row.id, row);
+      const reason = validateValue(col, value, this.rows, row.id, row);
       if (reason) {
         await ctx.api.ui.dialogs.alert(reason, `Cannot save ${col.label}`);
         // Force re-render so the input snaps back to the stored value.
@@ -2651,44 +2652,6 @@ function cellStateClass(row: Row, col: ColumnSpec, highlightNulls = true): strin
   // a fault the user has to be able to see.
   if (state === 'empty') return highlightNulls ? ' is-null' : '';
   return state === 'invalid' ? ' is-invalid' : '';
-}
-
-/**
- * Returns a human-readable rejection reason, or null if value is acceptable.
- *
- * The declarative constraints run first and the column's `validate` script
- * last: the boxes are cheap and predictable, and a script author writing
- * "must be a valid IBAN" shouldn't have to re-check emptiness that the
- * Not-null box already covers.
- */
-function validate(col: ColumnSpec, value: unknown, allRows: Row[], rowId: string, row: Row): string | null {
-  if (col.notnull) {
-    if (value === null || value === undefined) return `${col.label} cannot be empty.`;
-    if (typeof value === 'string' && value.trim().length === 0) {
-      return `${col.label} cannot be empty.`;
-    }
-  }
-  if (col.max != null && col.max > 0) {
-    if (typeof value === 'string' && value.length > col.max) {
-      return `${col.label} must be at most ${col.max} characters (got ${value.length}).`;
-    }
-    if (typeof value === 'number' && value > col.max) {
-      return `${col.label} must be at most ${col.max} (got ${value}).`;
-    }
-  }
-  if (col.unique && value !== null && value !== undefined && value !== '') {
-    const dup = allRows.find((r) => r.id !== rowId && r.data[col.field] === value);
-    if (dup) return `${col.label} must be unique. Another row already has "${String(value)}".`;
-  }
-  if (col.validate?.trim()) {
-    // The script sees the row AS IT WOULD BE — a rule comparing this cell to a
-    // sibling field must read the pending edit, not the value on disk, or a
-    // two-field rule contradicts itself depending on which cell you touch last.
-    const proposed = { ...row.data, [col.field]: value };
-    const run = runValidateScript(col.validate, value, proposed);
-    if (!run.ok) return run.message;
-  }
-  return null;
 }
 
 /**

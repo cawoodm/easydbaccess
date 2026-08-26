@@ -4,6 +4,7 @@
 
 ### Features
 
+- 🪶 The + button asks for the new record in a form, with defaults filled in and the rules shown but never blocking the save (v0.0.437)
 - ✨ A view has its own column list: which columns show, and what draws each one — the table and every other view keep theirs (v0.0.436)
 - ✨ Two more ways to arrange the windows: one column each at full height, or one row each at full width (v0.0.432)
 

@@ -132,6 +132,13 @@ test.describe('cell editing constraints', () => {
       .getByRole('button', { name: /Add row/ })
       .click();
 
+    // The default arrives PRE-FILLED in the new-record form, and Save is what
+    // writes it — the button used to insert the row itself. See
+    // `131-new-record-dialog.spec.ts`.
+    const form = page.locator('new-record-dialog dialog');
+    await expect(form.locator('label.field input')).toHaveValue('pending');
+    await form.getByRole('button', { name: 'Save', exact: true }).click();
+
     await expect.poll(async () => (await readRows(page, id))[0]?.data.status).toBe('pending');
   });
 

@@ -1,5 +1,26 @@
 # Editing Cells & Renderers
 
+## Adding a record
+
+The **+** in a table's footer opens a small form: one box per field, with any
+defaults the columns carry already filled in. Press **Save** and the record is
+added.
+
+The form shows the fields the table **shows**. Tick **Show all fields** for the
+hidden ones — they are saved either way, with their defaults, so a hidden column
+never ends up empty just because you did not see it. A computed column is never
+asked for, because its value comes from its script.
+
+Rules are checked as you type and the reason appears under the field. **They do
+not stop you saving.** The button reads **Save anyway** on the first press, so you
+know the record goes in with the problem, and the message afterwards says how many
+went with it. A half-known record is usually worth keeping — the grid marks what
+is wrong, and the ✓ button lists it later.
+
+One rule cannot be checked here: **Unique**. It needs the other rows, and a record
+that does not exist yet has nothing to be a duplicate of. Editing the cell
+afterwards, or pressing ✓, catches it.
+
 ## Editing a cell
 
 Click any cell to edit it. Checkboxes for booleans, date pickers for dates,

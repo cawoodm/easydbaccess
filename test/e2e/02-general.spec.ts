@@ -201,9 +201,13 @@ test.describe('general', () => {
     const addText = await footer.getByRole('button', { name: /Add row/ }).innerText();
     expect(addText.toLowerCase()).not.toContain('row');
 
-    // Row count starts at 0 → "0 rows", then "Add row" makes it 1.
+    // Row count starts at 0 → "0 rows". "Add row" opens the new-record form now
+    // (see `131-new-record-dialog.spec.ts`), so the count moves on its Save.
     await expect(footer).toContainText('0 rows');
     await footer.getByRole('button', { name: /Add row/ }).click();
+    const form = page.locator('new-record-dialog dialog');
+    await expect(form).toBeVisible();
+    await form.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(footer).toContainText('1 row');
   });
 });

@@ -34,6 +34,10 @@ export interface TestColumn {
   notnull?: boolean;
   unique?: boolean;
   max?: number;
+  /** Kept out of the grid. The new-record form only asks for it on request. */
+  hidden?: boolean;
+  /** Pre-filled value for a new record. */
+  default?: unknown;
 }
 
 /** Creates a table via the data-store. Returns the new table id. */
@@ -59,6 +63,8 @@ export async function createTable(page: Page, name: string, columns: TestColumn[
             notnull?: boolean;
             unique?: boolean;
             max?: number;
+            hidden?: boolean;
+            default?: unknown;
           } = {
             field: c.field,
             label: c.label ?? c.field,
@@ -70,6 +76,8 @@ export async function createTable(page: Page, name: string, columns: TestColumn[
           if (c.notnull) col.notnull = true;
           if (c.unique) col.unique = true;
           if (c.max != null) col.max = c.max;
+          if (c.hidden) col.hidden = true;
+          if (c.default !== undefined) col.default = c.default;
           return col;
         }),
         view: 'table',

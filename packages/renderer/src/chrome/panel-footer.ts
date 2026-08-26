@@ -1,10 +1,12 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeSVG } from 'lit/directives/unsafe-svg.js';
-import type { ColumnSpec, Table, TableButtonSpec } from '@easydb/shared';
+import type { Table, TableButtonSpec } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { VISIBLE_COUNT_EVENT, visibleCountOf, type VisibleCountDetail } from '../window-mgr/panel-title.js';
 import { materialIconStyles } from './material-icon-css.js';
+import { blankRecord, recordFields } from '../table/new-record.js';
+import { openNewRecordDialog } from '../dialogs/new-record-dialog.js';
 
 /**
  * Permanent action bar that lives in a panel window's footer toolbar. Stays visible
@@ -173,16 +175,30 @@ export class PanelFooter extends LitElement {
     document.removeEventListener(VISIBLE_COUNT_EVENT, this.onVisibleCount as EventListener);
   }
 
+  /**
+   * Ask for the record, rather than inserting a blank row and leaving the user to
+   * find it.
+   *
+   * A blank row lands wherever the current sort puts it, which on a big table is
+   * "somewhere in 600,000 rows". The form fills the fields in one place, with the
+   * columns' own defaults already in the boxes — see `new-record-dialog.ts`.
+   *
+   * A table with nothing to fill in keeps the old behaviour: no columns means no
+   * form, and a dialog with one sentence and a Save button is a worse way to add
+   * an empty row than the button that was already pressed.
+   */
   private async addRow() {
     const ctx = await getContext();
     const t = await ctx.store.tables.findOne(this.tableId);
     if (!t) return;
-    const blank: Record<string, unknown> = {};
-    for (const c of t.columns) blank[c.field] = defaultFor(c);
+    if (recordFields(t.columns, true).length > 0) {
+      await openNewRecordDialog(this.tableId);
+      return;
+    }
     await ctx.store.rows(this.tableId).insert({
       id: crypto.randomUUID(),
       tableId: this.tableId,
-      data: blank,
+      data: blankRecord(t.columns),
       updatedAt: Date.now(),
     });
   }
@@ -223,7 +239,7 @@ export class PanelFooter extends LitElement {
     return html`
       ${this.table?.readonly
         ? nothing
-        : html`<button title="Add a blank row" aria-label="Add row" @click=${this.addRow}>
+        : html`<button title="Add a record" aria-label="Add row" @click=${this.addRow}>
             <span class="mi sm">add</span>
           </button>`}
       ${this.schemaEditable
@@ -252,17 +268,6 @@ export class PanelFooter extends LitElement {
   }
 }
 
-function defaultFor(c: ColumnSpec): unknown {
-  if (c.default !== undefined) return c.default;
-  switch (c.type) {
-    case 'boolean':
-      return false;
-    case 'number':
-      return null;
-    default:
-      return '';
-  }
-}
 
 declare global {
   interface HTMLElementTagNameMap {
