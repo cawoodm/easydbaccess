@@ -75,7 +75,9 @@ it already serves the desktop and the server — one convention across all three
   versions: `one-per-file.ts` at every write, and `mayCreateWorkspaceIn` at the
   one line that creates a workspace at boot. The project index (`.edp`) is the
   exemption and says so in its name. A file already holding several — written
-  before v0.0.427 — is read, reported and left alone; see
+  before v0.0.427 — is read, reported and left alone. A file whose ONE workspace is
+  not the one its name says is asked about on the next sync (`file-identity.ts`):
+  rename the workspace inside it, or leave the file out of the list. See
   [A `.edb` holds ONE workspace](#a-edb-holds-one-workspace).
 - **`_sqlTable` is the table's own name, verbatim** — `Order Details`, not
   `Order_Details`. Every reference quotes it (`quoteIdent`), so nothing has to be
@@ -247,6 +249,47 @@ That is also why the empty file New workspace → Advanced writes still works: t
 file is `alpha.edb`, the workspace being created is `alpha`, and the rule allows
 exactly that.
 
+### And the workspace inside must be the one the name says
+
+Both halves above are about what this app WRITES. A folder also holds files it did
+not write: a user duplicates `alpha.edb` in a file manager, a sync tool leaves a
+second copy beside it, or an OS save dialog renamed one. Then the folder holds
+`alpha.edb` and `beta.edb` and both hold the workspace `alpha`, and every one of
+the four things the rule underpins breaks (`db/edb/file-identity.ts`):
+
+- the workspace list holds `alpha` twice, told apart only by the file name;
+- picking either entry goes through `?space=alpha`, which resolves the file from
+  the id — so both entries open `alpha.edb`;
+- a clash is matched on the workspace NAME, so one local `alpha` clashes with two
+  files and asks the same question twice;
+- Save writes `alpha.edb`, so the copy in `beta.edb` is never written again and
+  comes back at every sync as a workspace that will not go away.
+
+There is no repair the app can pick on its own: either file may hold the work the
+user wants, and the id inside a file keys every table, view and setting in it. So a
+sync **settles it before anything else** (`settleIdentities`, ahead of the index
+write and every clash), and offers the two answers that exist:
+
+- **Rename it to "beta"** rewrites the workspace inside the file to the id its name
+  claims (`renameInFile`: clone in a scratch worker, carry the `title` across by
+  hand — a clone does not — drop the old id, write the bytes back). The file keeps
+  its data and the pair agree afterwards.
+- **Leave it out** drops the file from the index, so the selector cannot offer a
+  workspace the app would open the wrong file for. Nothing is written, moved or
+  deleted, and the next sync finds the file and asks again. A dismissed dialog and
+  a failed write both come to the same thing: a file this app cannot repair is one
+  it must not act on either.
+
+Two cases are deliberately not repaired. A file holding SEVERAL workspaces is left
+alone — that is the pre-v0.0.427 shape above, and no rename makes it right. And two
+names that slugify to one id (`My Data.edb` beside `my-data.edb`) cannot be told
+apart by any rename, so the file carrying the name Save would have written wins and
+the other is set aside until the user renames it on disk.
+
+The file this tab has OPEN is never touched. Its workspace is live — the store, the
+panels and every plugin are bound to that id — so a rename inside the file would
+leave the tab saving under an id the file no longer holds.
+
 ### What this deliberately does NOT do
 
 `overwriteInFile` (the sync's *Overwrite disk version*) still merges into the file
@@ -259,11 +302,18 @@ on disk does.
 
 ## "Which copy do you want to keep?" carries the facts
 
-Three prompts ask the user to choose between two copies of one workspace — a
+Four prompts ask the user to choose between two copies of one workspace — a
 folder sync finding the same id here and in a file, this tab's own file having been
-written by something else, a dropped file whose workspace name is already here —
-and each of them has an answer that destroys work. They used to ask it on a NAME,
-and both copies have the same name, so the answer was a guess.
+written by something else, a dropped file whose workspace name is already here, and
+a Save about to overwrite a file already in the folder — and each of them has an
+answer that destroys work. They used to ask it on a NAME, and both copies have the
+same name, so the answer was a guess.
+
+The Save prompt was the last one still asking on a name alone
+(`sidesAgainstFile`). **The date the file was last written is what decides it**: a
+file written an hour ago by another machine is not the same proposition as one this
+tab wrote this morning, and the name cannot tell them apart because a file is named
+after its workspace.
 
 `db/edb/copy-facts.ts` is the one builder for what they now show: tables, views,
 the file's size, when the file was last written, and — for this tab's own file —
