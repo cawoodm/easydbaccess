@@ -88,21 +88,20 @@ function persistArrangement(): void {
   void persistViewWindowGeometry();
 }
 
+/** The gap between arranged windows, and around the outside of the layout. */
+const GAP = 8;
+
 /**
- * Lay every window out into the slots `plan` returns, in the order they are
- * stacked bottom-first.
+ * Lay every eligible panel into the slots `slotsFor` computes.
  *
- * The body of "Tile", "Arrange in columns" and "Arrange in rows", which differ
- * only in the shape of the grid they ask for. Minimized panels are excluded from
- * BOTH the layout and the count driving the maths — otherwise a minimized window
- * would be un-minimized by arranging, and would still leave an empty hole in the
- * grid (see `eligibleForArrange`).
+ * Minimized panels are excluded from BOTH the layout and the count driving the
+ * maths — otherwise a minimized window would get un-minimized by arranging, and
+ * would still leave an empty hole in the layout (see `eligibleForArrange`).
  */
-function arrangeInto(plan: (count: number, rect: Rect, gap: number) => Rect[]): void {
+function arrange(slotsFor: (count: number, rect: Rect, gap: number) => Rect[]): void {
   const panels = eligibleForArrange(allPanels()).reverse();
   if (panels.length === 0) return;
-  const gap = 8;
-  const slots = plan(panels.length, visibleRect(), gap);
+  const slots = slotsFor(panels.length, visibleRect(), GAP);
   panels.forEach((p, i) => {
     p.normalize?.(); // un-maximizes so the panel can take its slot.
     const slot = slots[i];
@@ -112,17 +111,23 @@ function arrangeInto(plan: (count: number, rect: Rect, gap: number) => Rect[]): 
   persistArrangement();
 }
 
-/** Every window side by side, each the full height of the visible area. */
-export function arrangeInColumns(): void {
-  arrangeInto(columnSlots);
-}
-
-/** Every window stacked, each the full width of the visible area. */
-export function arrangeInRows(): void {
-  arrangeInto(rowSlots);
-}
-
-/** Every window in a squared-up grid. */
+/** A square-ish grid over the visible canvas. */
 export function tileAllWindows(): void {
-  arrangeInto(tileSlots);
+  arrange(tileSlots);
+}
+
+/**
+ * One column per window, side by side, every one full height.
+ *
+ * What a tile cannot do: three tables tiled put one of them on a second row, so
+ * the rows of the third do not line up with the other two. Full-height columns
+ * are for reading the same rows across several tables at once.
+ */
+export function arrangeInColumns(): void {
+  arrange(columnSlots);
+}
+
+/** One row per window, stacked down the canvas, every one full width. */
+export function arrangeInRows(): void {
+  arrange(rowSlots);
 }

@@ -60,10 +60,23 @@ shell's global `getPanels()` registry:
 | Restore all windows | Normalize every panel (undo minimize/maximize). |
 | Maximize all windows | Maximize every panel. |
 | Cascade windows | Normalize + stagger each window down-right. |
-| Tile windows | Normalize + arrange in a grid. |
-| Arrange windows in columns | Normalize + one column each, full height. |
-| Arrange windows in rows | Normalize + one row each, full width. |
+| Tile windows | Normalize + arrange in a square-ish grid. |
+| Arrange in columns | Normalize + one full-height column per window, side by side. |
+| Arrange in rows | Normalize + one full-width row per window, stacked. |
 | Close all windows | Close every panel. |
+
+The three arrangements share one implementation, `gridSlots` in
+`window-mgr/tile-layout.ts` (pure, unit-tested): a tile is `ceil(sqrt(n))`
+columns, a column arrangement is `n × 1`, a row arrangement is `1 × n`. Columns
+and rows exist because a grid cannot line rows up across windows — three tables
+tiled put one on a second row, where its rows match nothing beside them.
+
+`MIN_CELL` (80px) is the floor. Past the point where the visible canvas can hold
+`n` cells the arithmetic goes negative, and a negative width is not a small
+window but an invalid style the browser drops, so the cells overlap instead.
+Every arrangement excludes minimized panels from both the layout and the count
+(`eligibleForArrange`) and persists through the owning window manager, so it
+survives a reload.
 
 The **Workspace** group holds the three things you can do to a workspace. The
 flows themselves are in `chrome/workspace-actions.ts`, shared with the header's

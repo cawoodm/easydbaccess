@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { columnSlots, eligibleForArrange, gridSlots, rowSlots, tileSlots, type Rect } from '../../../packages/renderer/src/window-mgr/tile-layout.js';
+import { MIN_CELL, columnSlots, eligibleForArrange, rowSlots, tileSlots, type Rect } from '../../../packages/renderer/src/window-mgr/tile-layout.js';
 
 describe('eligibleForArrange', () => {
   it('excludes minimized panels', () => {
@@ -91,83 +91,89 @@ describe('tileSlots', () => {
 });
 
 /**
- * "Tile" squares the grid up, which is right for a lot of windows and wrong for
- * three tables you are reading across. Those want columns — or rows.
+ * Columns and rows are the two arrangements a square grid cannot express: every
+ * window full height side by side, or every window full width stacked. Three
+ * tables tiled put one on a second row, where its rows line up with nothing.
  */
-const AREA: Rect = { x: 0, y: 0, w: 1000, h: 600 };
-const GAP = 10;
-
 describe('columnSlots', () => {
-  it('puts every window side by side, all the same width', () => {
-    const slots = columnSlots(3, AREA, GAP);
-    expect(slots).toHaveLength(3);
-    expect(new Set(slots.map((s) => s.w)).size).toBe(1);
-    expect(slots.map((s) => s.x)).toEqual([...slots.map((s) => s.x)].sort((a, b) => a - b));
+  const rect: Rect = { x: 0, y: 0, w: 1000, h: 800 };
+  const gap = 8;
+
+  it('returns an empty array for a zero count', () => {
+    expect(columnSlots(0, rect, gap)).toEqual([]);
   });
 
-  it('gives each the full height of the area, gaps aside', () => {
-    for (const s of columnSlots(4, AREA, GAP)) {
-      expect(s.y).toBe(GAP);
-      expect(s.h).toBe(AREA.h - GAP * 2);
+  it('gives one window the whole rect, same as a tile of one', () => {
+    expect(columnSlots(1, rect, gap)).toEqual(tileSlots(1, rect, gap));
+  });
+
+  it('gives every window the FULL height, however many there are', () => {
+    for (const count of [2, 3, 5, 8]) {
+      const full = rect.h - gap * 2;
+      for (const slot of columnSlots(count, rect, gap)) {
+        expect(slot.h).toBe(full);
+        expect(slot.y).toBe(gap);
+      }
     }
   });
 
-  it('leaves the same gap between columns as around them', () => {
-    const [a, b] = columnSlots(2, AREA, GAP);
-    expect(a!.x).toBe(GAP);
-    expect(b!.x - (a!.x + a!.w)).toBeCloseTo(GAP);
-    expect(AREA.w - (b!.x + b!.w)).toBeCloseTo(GAP);
+  it('splits the width evenly and leaves no gap unaccounted for', () => {
+    const slots = columnSlots(4, rect, gap);
+    const cellW = (rect.w - gap * 5) / 4;
+    expect(slots.map((s) => s.w)).toEqual([cellW, cellW, cellW, cellW]);
+    expect(slots.map((s) => s.x)).toEqual([gap, gap + cellW + gap, gap + 2 * (cellW + gap), gap + 3 * (cellW + gap)]);
+    // The last column's right edge lands one gap short of the rect's, so the
+    // outer margin matches the inner ones.
+    const last = slots[3]!;
+    expect(last.x + last.w).toBe(rect.w - gap);
   });
 
-  it('is one full-area window when there is only one', () => {
-    expect(columnSlots(1, AREA, GAP)).toEqual([{ x: GAP, y: GAP, w: AREA.w - GAP * 2, h: AREA.h - GAP * 2 }]);
+  it('differs from a tile as soon as a tile would need two rows', () => {
+    // 3 windows tile as 2x2. In columns they are 3x1 — the whole point.
+    expect(columnSlots(3, rect, gap)).not.toEqual(tileSlots(3, rect, gap));
+    expect(new Set(columnSlots(3, rect, gap).map((s) => s.y)).size).toBe(1);
+    expect(new Set(tileSlots(3, rect, gap).map((s) => s.y)).size).toBe(2);
   });
 
-  it('has nothing to lay out for no windows', () => {
-    expect(columnSlots(0, AREA, GAP)).toEqual([]);
+  it('stops shrinking at MIN_CELL rather than going negative', () => {
+    // 40 windows on a laptop screen: the arithmetic alone gives a negative width,
+    // which is not a small window but an invalid style the browser drops. They
+    // overlap instead, which is at least usable.
+    const slots = columnSlots(40, { x: 0, y: 0, w: 1200, h: 800 }, gap);
+    for (const slot of slots) expect(slot.w).toBe(MIN_CELL);
+    expect(slots[0]!.x).toBeLessThan(slots[39]!.x);
   });
 });
 
 describe('rowSlots', () => {
-  it('stacks every window, all the same height', () => {
-    const slots = rowSlots(3, AREA, GAP);
-    expect(slots).toHaveLength(3);
-    expect(new Set(slots.map((s) => s.h)).size).toBe(1);
-    expect(slots.map((s) => s.y)).toEqual([...slots.map((s) => s.y)].sort((a, b) => a - b));
-  });
+  const rect: Rect = { x: 0, y: 0, w: 1000, h: 800 };
+  const gap = 8;
 
-  it('gives each the full width of the area, gaps aside', () => {
-    for (const s of rowSlots(4, AREA, GAP)) {
-      expect(s.x).toBe(GAP);
-      expect(s.w).toBe(AREA.w - GAP * 2);
+  it('gives every window the FULL width, one per row', () => {
+    const slots = rowSlots(4, rect, gap);
+    const cellH = (rect.h - gap * 5) / 4;
+    for (const slot of slots) {
+      expect(slot.w).toBe(rect.w - gap * 2);
+      expect(slot.x).toBe(gap);
+      expect(slot.h).toBe(cellH);
     }
+    expect(slots.map((s) => s.y)).toEqual([gap, gap + cellH + gap, gap + 2 * (cellH + gap), gap + 3 * (cellH + gap)]);
   });
 
-  it('is the mirror of columnSlots', () => {
-    const cols = columnSlots(3, { x: 0, y: 0, w: 600, h: 600 }, GAP);
-    const rows = rowSlots(3, { x: 0, y: 0, w: 600, h: 600 }, GAP);
-    expect(rows.map((r) => ({ x: r.y, y: r.x, w: r.h, h: r.w }))).toEqual(cols);
-  });
-});
-
-describe('gridSlots', () => {
-  it('is what all three arrangements are made of', () => {
-    expect(gridSlots(4, AREA, GAP, 4)).toEqual(columnSlots(4, AREA, GAP));
-    expect(gridSlots(4, AREA, GAP, 1)).toEqual(rowSlots(4, AREA, GAP));
-    expect(gridSlots(4, AREA, GAP, 2)).toEqual(tileSlots(4, AREA, GAP));
+  it('is the transpose of columnSlots on a square rect', () => {
+    const square: Rect = { x: 0, y: 0, w: 900, h: 900 };
+    const cols = columnSlots(3, square, gap);
+    const rows = rowSlots(3, square, gap);
+    expect(rows.map((s) => ({ x: s.y, y: s.x, w: s.h, h: s.w }))).toEqual(cols);
   });
 
-  it('clamps a column count that would put slots outside the area', () => {
-    // Nothing passes these, and a slot outside the visible region is a window
-    // the user cannot see — worth being unable to ask for.
-    expect(gridSlots(3, AREA, GAP, 99)).toEqual(columnSlots(3, AREA, GAP));
-    expect(gridSlots(3, AREA, GAP, 0)).toEqual(rowSlots(3, AREA, GAP));
-    expect(gridSlots(3, AREA, GAP, -2)).toEqual(rowSlots(3, AREA, GAP));
+  it('honours the rect offset, so an arrangement lands where the user is looking', () => {
+    // The visible rect is in canvas coordinates and moves with the pan.
+    const panned: Rect = { x: 500, y: 250, w: 1000, h: 800 };
+    expect(rowSlots(2, panned, gap)[0]).toEqual({ x: 508, y: 258, w: 984, h: (800 - gap * 3) / 2 });
   });
 
-  it('fills the last row short rather than stretching it', () => {
-    const slots = gridSlots(5, AREA, GAP, 2);
-    expect(slots).toHaveLength(5);
-    expect(slots[4]!.w).toBe(slots[0]!.w);
+  it('stops shrinking at MIN_CELL rather than going negative', () => {
+    for (const slot of rowSlots(40, { x: 0, y: 0, w: 1200, h: 800 }, gap)) expect(slot.h).toBe(MIN_CELL);
   });
 });

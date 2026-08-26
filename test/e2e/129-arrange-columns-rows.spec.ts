@@ -2,11 +2,12 @@ import { test, expect, type Page } from './fixtures.js';
 import { createTable, panelDomId, waitForPanel } from './helpers.js';
 
 /**
- * "Arrange windows in columns" and "…in rows", beside the existing Tile.
+ * "Arrange in columns" and "Arrange in rows" — the two layouts a square tile
+ * cannot express.
  *
- * Tile squares the grid up, which is what you want for a lot of windows and not
- * what you want for two or three tables you are reading across: those want one
- * column each, full height. Rows are the same thing on its side.
+ * Three tables tiled become a 2x2 grid with one window on a second row, where its
+ * rows line up with nothing. Columns give every window the full height side by
+ * side, which is what reading the same rows across several tables needs.
  */
 
 async function runCommand(page: Page, query: string): Promise<void> {
@@ -18,85 +19,143 @@ async function runCommand(page: Page, query: string): Promise<void> {
   await expect(palette).toBeHidden();
 }
 
+/** The live rect of a panel, as the DOM reports it. */
 const rectOf = (page: Page, domId: string) =>
   page.evaluate((d) => {
     const el = document.getElementById(d) as HTMLElement;
     return { x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight };
   }, domId);
 
-async function twoTables(page: Page): Promise<[string, string]> {
-  await page.setViewportSize({ width: 1200, height: 800 });
-  const a = await createTable(page, 'ArrangeA', [{ field: 'x' }]);
-  const b = await createTable(page, 'ArrangeB', [{ field: 'x' }]);
-  await waitForPanel(page, a);
-  await waitForPanel(page, b);
-  return [a, b];
+/** A panel's own status — `normalized`, `minimized`, and so on. */
+const statusOf = (page: Page, domId: string) => page.evaluate((id) => (document.getElementById(id) as HTMLElement & { status: string }).status, domId);
+
+/** The canvas the windows are arranged inside. */
+const canvasSize = (page: Page) =>
+  page.evaluate(() => {
+    const el = document.getElementById('easydb-panels');
+    return { w: el?.clientWidth ?? 0, h: el?.clientHeight ?? 0 };
+  });
+
+/** Three tables, three windows, front-to-back order settled. */
+async function threeWindows(page: Page): Promise<string[]> {
+  const ids: string[] = [];
+  for (const name of ['ArrA', 'ArrB', 'ArrC']) {
+    const id = await createTable(page, name, [{ field: 'x' }]);
+    await waitForPanel(page, id);
+    ids.push(id);
+  }
+  return ids;
 }
 
-test('columns put the windows side by side at the same height', async ({ page }) => {
-  const [a, b] = await twoTables(page);
-  await runCommand(page, 'arrange windows in columns');
+test.describe('arranging windows', () => {
+  // Three tables to create, plus a palette command per assertion.
+  test.describe.configure({ timeout: 120_000 });
 
-  const ra = await rectOf(page, panelDomId(a));
-  const rb = await rectOf(page, panelDomId(b));
-  // Side by side: different x, same y, same size.
-  expect(ra.x).not.toBe(rb.x);
-  expect(ra.y).toBe(rb.y);
-  expect(ra.h).toBe(rb.h);
-  expect(Math.abs(ra.w - rb.w)).toBeLessThanOrEqual(1);
-  // Full height: taller than either is wide, on a 1200×800 viewport with two
-  // windows — the point of the arrangement.
-  expect(ra.h).toBeGreaterThan(ra.w);
-});
+  test('in columns: every window is full height, side by side, none overlapping', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const ids = await threeWindows(page);
 
-test('rows stack the windows at the same width', async ({ page }) => {
-  const [a, b] = await twoTables(page);
-  await runCommand(page, 'arrange windows in rows');
+    await runCommand(page, 'Arrange in columns');
+    const rects = await Promise.all(ids.map((id) => rectOf(page, panelDomId(id))));
+    const canvas = await canvasSize(page);
 
-  const ra = await rectOf(page, panelDomId(a));
-  const rb = await rectOf(page, panelDomId(b));
-  expect(ra.y).not.toBe(rb.y);
-  expect(ra.x).toBe(rb.x);
-  expect(ra.w).toBe(rb.w);
-  expect(Math.abs(ra.h - rb.h)).toBeLessThanOrEqual(1);
-  expect(ra.w).toBeGreaterThan(ra.h);
-});
+    // Full height: one gap top and bottom, and nothing else vertical.
+    for (const r of rects) {
+      expect(r.h).toBeGreaterThan(canvas.h - 20);
+      expect(r.y).toBeLessThanOrEqual(8);
+    }
+    // Equal widths — a third of the canvas each, not a 2x2 grid's half.
+    const widths = rects.map((r) => r.w);
+    expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1);
+    for (const w of widths) expect(w).toBeLessThan(canvas.w / 2);
 
-test('an arrangement survives a reload, like Tile does', async ({ page }) => {
-  const [a, b] = await twoTables(page);
-  await runCommand(page, 'arrange windows in columns');
-  const before = await rectOf(page, panelDomId(a));
+    // Side by side and clear of each other: sorted by x, each starts after the
+    // one before it ends.
+    const byX = [...rects].sort((a, b) => a.x - b.x);
+    expect(new Set(byX.map((r) => r.y)).size).toBe(1);
+    for (let i = 1; i < byX.length; i++) expect(byX[i]!.x).toBeGreaterThanOrEqual(byX[i - 1]!.x + byX[i - 1]!.w);
+  });
 
-  await expect
-    .poll(() =>
-      page.evaluate(async (id) => {
-        const t = await (window as unknown as { __easydb: { store: { tables: { findOne(i: string): Promise<{ windowGeometry?: { x: number; y: number; w: number; h: number } } | null> } } } }).__easydb.store.tables.findOne(id);
-        const g = t?.windowGeometry;
-        return g ? { x: g.x, y: g.y, w: g.w, h: g.h } : null;
-      }, a),
-    )
-    .toEqual(before);
+  test('in rows: every window is full width, stacked, none overlapping', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const ids = await threeWindows(page);
 
-  await page.reload();
-  await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb));
-  await waitForPanel(page, a);
-  await waitForPanel(page, b);
+    await runCommand(page, 'Arrange in rows');
+    const rects = await Promise.all(ids.map((id) => rectOf(page, panelDomId(id))));
+    const canvas = await canvasSize(page);
 
-  const after = await rectOf(page, panelDomId(a));
-  expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1);
-  expect(Math.abs(after.w - before.w)).toBeLessThanOrEqual(1);
-  expect(Math.abs(after.h - before.h)).toBeLessThanOrEqual(1);
-});
+    for (const r of rects) {
+      expect(r.w).toBeGreaterThan(canvas.w - 20);
+      expect(r.x).toBeLessThanOrEqual(8);
+    }
+    const heights = rects.map((r) => r.h);
+    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
 
-test('a minimized window keeps out of the arrangement', async ({ page }) => {
-  // The same rule Tile follows: a minimized panel is parked on purpose, so it
-  // must not be un-minimized, nor take a slot and leave a hole.
-  const [a, b] = await twoTables(page);
-  await page.locator(`#${panelDomId(b)} .jsPanel-btn-minimize`).click();
-  await runCommand(page, 'arrange windows in columns');
+    const byY = [...rects].sort((a, b) => a.y - b.y);
+    expect(new Set(byY.map((r) => r.x)).size).toBe(1);
+    for (let i = 1; i < byY.length; i++) expect(byY[i]!.y).toBeGreaterThanOrEqual(byY[i - 1]!.y + byY[i - 1]!.h);
+  });
 
-  const ra = await rectOf(page, panelDomId(a));
-  // One eligible window takes the whole area, so it is far wider than half.
-  expect(ra.w).toBeGreaterThan(700);
-  await expect(page.locator(`#${panelDomId(b)}`)).toHaveAttribute('data-status', 'minimized');
+  test('columns and rows are different layouts, and Tile is neither', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const ids = await threeWindows(page);
+    const domIds = ids.map(panelDomId);
+
+    await runCommand(page, 'Arrange in columns');
+    const columns = await Promise.all(domIds.map((d) => rectOf(page, d)));
+    await runCommand(page, 'Arrange in rows');
+    const rows = await Promise.all(domIds.map((d) => rectOf(page, d)));
+    await runCommand(page, 'Tile windows');
+    const tiled = await Promise.all(domIds.map((d) => rectOf(page, d)));
+
+    // Guards against any two of the three commands being wired to one another.
+    expect(columns).not.toEqual(rows);
+    expect(columns).not.toEqual(tiled);
+    expect(rows).not.toEqual(tiled);
+    // Three windows tiled need two rows; in columns they need one. That is the
+    // difference the feature exists for.
+    expect(new Set(tiled.map((r) => r.y)).size).toBe(2);
+    expect(new Set(columns.map((r) => r.y)).size).toBe(1);
+  });
+
+  test('a minimized window keeps out of the layout and stays minimized', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const ids = await threeWindows(page);
+
+    // Minimizing is deliberate — arranging must not undo it, nor leave a hole
+    // where the minimized window would have been (see `eligibleForArrange`).
+    const parked = panelDomId(ids[2]!);
+    await page.evaluate((d) => (document.getElementById(d) as HTMLElement & { minimize(): void }).minimize(), parked);
+    await expect.poll(() => statusOf(page, parked)).toBe('minimized');
+
+    await runCommand(page, 'Arrange in columns');
+
+    const rects = await Promise.all([ids[0]!, ids[1]!].map((id) => rectOf(page, panelDomId(id))));
+    const canvas = await canvasSize(page);
+    // Two windows, so half the canvas each — not a third with a gap.
+    for (const r of rects) expect(r.w).toBeGreaterThan(canvas.w / 2 - 20);
+    expect(await statusOf(page, parked)).toBe('minimized');
+  });
+
+  test('an arrangement survives a reload', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const ids = await threeWindows(page);
+
+    await runCommand(page, 'Arrange in columns');
+    const before = await rectOf(page, panelDomId(ids[0]!));
+
+    await page.reload();
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => Boolean((window as any).__easydb),
+    );
+    for (const id of ids) await waitForPanel(page, id);
+
+    // Same rect, ±1px for rounding on restore. Tile and Cascade had this bug
+    // (v0.0.52 spec); a new arrangement must not reintroduce it.
+    const after = await rectOf(page, panelDomId(ids[0]!));
+    expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(after.w - before.w)).toBeLessThanOrEqual(1);
+    expect(Math.abs(after.h - before.h)).toBeLessThanOrEqual(1);
+  });
 });
