@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MIN_CELL, columnSlots, eligibleForArrange, rowSlots, tileSlots, type Rect } from '../../../packages/renderer/src/window-mgr/tile-layout.js';
+import { MIN_CELL, columnSlots, eligibleForArrange, nearestSlots, rowSlots, tileSlots, type Rect } from '../../../packages/renderer/src/window-mgr/tile-layout.js';
 
 describe('eligibleForArrange', () => {
   it('excludes minimized panels', () => {
@@ -142,6 +142,87 @@ describe('columnSlots', () => {
     const slots = columnSlots(40, { x: 0, y: 0, w: 1200, h: 800 }, gap);
     for (const slot of slots) expect(slot.w).toBe(MIN_CELL);
     expect(slots[0]!.x).toBeLessThan(slots[39]!.x);
+  });
+});
+
+/**
+ * The slots come out in reading order. Which WINDOW takes which slot is a
+ * separate question, and the answer is "the nearest one" — a user who lines
+ * windows up by hand and then tiles them must not have the layout shuffled.
+ */
+describe('nearestSlots', () => {
+  const rect: Rect = { x: 0, y: 0, w: 1000, h: 800 };
+  const gap = 8;
+  /** Total squared travel of an assignment. Lower is better. */
+  const travel = (current: Rect[], slots: Rect[], pick: number[]): number =>
+    pick.reduce((sum, j, i) => {
+      const a = current[i]!;
+      const b = slots[j]!;
+      return sum + (a.x + a.w / 2 - (b.x + b.w / 2)) ** 2 + (a.y + a.h / 2 - (b.y + b.h / 2)) ** 2;
+    }, 0);
+
+  it('returns an empty array when there are no windows', () => {
+    expect(nearestSlots([], tileSlots(0, rect, gap))).toEqual([]);
+  });
+
+  it('leaves a window where it is when it already sits in its slot', () => {
+    const slots = tileSlots(4, rect, gap);
+    expect(nearestSlots(slots, slots)).toEqual([0, 1, 2, 3]);
+    expect(travel(slots, slots, nearestSlots(slots, slots))).toBe(0);
+  });
+
+  it('keeps a hand-built grid in place, whatever order the panels arrive in', () => {
+    // The bug: the panels arrive in stacking order, so the window the user
+    // touched last took the top-left slot and the grid was shuffled.
+    const slots = tileSlots(4, rect, gap);
+    const shuffled = [slots[2]!, slots[0]!, slots[3]!, slots[1]!];
+    expect(nearestSlots(shuffled, slots)).toEqual([2, 0, 3, 1]);
+    expect(travel(shuffled, slots, nearestSlots(shuffled, slots))).toBe(0);
+  });
+
+  it('sends the left window left and the right window right', () => {
+    const slots = columnSlots(2, rect, gap);
+    const current: Rect[] = [
+      { x: 700, y: 100, w: 200, h: 200 }, // on the right
+      { x: 40, y: 300, w: 200, h: 200 }, // on the left
+    ];
+    expect(nearestSlots(current, slots)).toEqual([1, 0]);
+  });
+
+  it('never moves more than the reading-order assignment would', () => {
+    const slots = tileSlots(6, rect, gap);
+    const current: Rect[] = [
+      { x: 520, y: 420, w: 300, h: 300 },
+      { x: 20, y: 20, w: 300, h: 300 },
+      { x: 660, y: 30, w: 300, h: 300 },
+      { x: 30, y: 430, w: 300, h: 300 },
+      { x: 340, y: 25, w: 300, h: 300 },
+      { x: 330, y: 415, w: 300, h: 300 },
+    ];
+    const readingOrder = slots.map((_, i) => i);
+    expect(travel(current, slots, nearestSlots(current, slots))).toBeLessThan(travel(current, slots, readingOrder));
+  });
+
+  it('gives every window its own slot — no two windows land on top of each other', () => {
+    const slots = tileSlots(5, rect, gap);
+    // Every window in the same place: the costs are all equal, which is the
+    // case a naive "closest slot each" would collapse into one slot.
+    const current: Rect[] = Array.from({ length: 5 }, () => ({ x: 400, y: 300, w: 200, h: 200 }));
+    const pick = nearestSlots(current, slots);
+    expect(new Set(pick).size).toBe(5);
+    expect([...pick].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('is stable: the same input gives the same answer', () => {
+    const slots = tileSlots(4, rect, gap);
+    const current: Rect[] = Array.from({ length: 4 }, () => ({ x: 100, y: 100, w: 200, h: 200 }));
+    expect(nearestSlots(current, slots)).toEqual(nearestSlots(current, slots));
+  });
+
+  it('marks a window with no slot rather than moving it somewhere wrong', () => {
+    const slots = tileSlots(1, rect, gap);
+    const pick = nearestSlots([slots[0]!, { x: 500, y: 500, w: 100, h: 100 }], slots);
+    expect(pick).toEqual([0, -1]);
   });
 });
 

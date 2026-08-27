@@ -2,6 +2,10 @@
 
 ## 27 Aug 2026
 
+### Features
+
+- ✨ Tile, columns and rows now give each window the slot nearest to where it already is, instead of shuffling a layout you built (v0.0.451)
+
 ### Bugs
 
 - 🪲 A Markdown or HTML cell showed a `file:///` or `ftp://` link as plain text, while the same value in a Link column was a link (v0.0.450)

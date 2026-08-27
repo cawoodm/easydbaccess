@@ -24,14 +24,20 @@ that is not minimized, inside the part of the canvas you are looking at:
 
 | Command                | What you get                                            |
 | ---------------------- | ------------------------------------------------------- |
-| **Tile windows**       | A grid, as square as the number of windows allows.       |
-| **Arrange in columns** | One column each, side by side, every one full height.    |
-| **Arrange in rows**    | One row each, stacked, every one full width.             |
-| **Cascade windows**    | Staggered down and right, each title bar still visible.  |
+| **Tile windows**       | A grid, as square as the number of windows allows.      |
+| **Arrange in columns** | One column each, side by side, every one full height.   |
+| **Arrange in rows**    | One row each, stacked, every one full width.            |
+| **Cascade windows**    | Staggered down and right, each title bar still visible. |
 
 Columns are for reading the same rows across several tables: a grid puts the
 third table on a second row, where its rows line up with nothing. Rows are the
 same idea the other way round — good for wide tables.
+
+The three grid commands move each window as little as they can: every window
+takes the slot nearest to where it already is. Line four tables up roughly by
+hand, run **Tile windows**, and each one snaps to the corner you put it in
+instead of jumping somewhere else. **Cascade windows** is the exception — a
+cascade is a stack, so it follows which window is on top.
 
 A **minimized** window is left alone. You parked it deliberately, so it stays
 parked and takes no space in the layout. The result is remembered, so a reload

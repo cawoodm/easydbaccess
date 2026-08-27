@@ -13,12 +13,17 @@
  * user is actually looking. They write inline geometry, which no jsPanel
  * callback reports, and then ask both window managers to persist the result —
  * an arranged layout used to be lost on the next reload.
+ *
+ * Tile/columns/rows also hand each panel the slot NEAREST to where it already
+ * is, so arranging tidies a layout the user built rather than shuffling it. The
+ * choice is pure and lives in `nearestSlots`. Cascade is the exception: a
+ * cascade is a stack, so it stays ordered by z.
  */
 import { persistTablePanelGeometry } from './table-window-manager.js';
 import { currentPanZoom } from './shell-viewport.js';
 import { persistViewWindowGeometry } from './view-window-manager.js';
 import { getPanels, type PanelShellEl } from './panel-shell/panel-shell.js';
-import { columnSlots, eligibleForArrange, rowSlots, tileSlots, type Rect } from './tile-layout.js';
+import { columnSlots, eligibleForArrange, nearestSlots, rowSlots, tileSlots, type Rect } from './tile-layout.js';
 
 /** Every open panel, newest-on-top first. */
 function allPanels(): PanelShellEl[] {
@@ -51,6 +56,11 @@ function visibleRect(): { x: number; y: number; w: number; h: number } {
   const tx = pz?.x ?? 0;
   const ty = pz?.y ?? 0;
   return { x: -tx / scale, y: -ty / scale, w: cw / scale, h: ch / scale };
+}
+
+/** Where a panel is right now, in the same canvas coordinates the slots use. */
+function panelRect(p: PanelShellEl): Rect {
+  return { x: p.offsetLeft, y: p.offsetTop, w: p.offsetWidth, h: p.offsetHeight };
 }
 
 function setGeom(p: PanelShellEl, x: number, y: number, w: number, h: number): void {
@@ -99,13 +109,19 @@ const GAP = 8;
  * would still leave an empty hole in the layout (see `eligibleForArrange`).
  */
 function arrange(slotsFor: (count: number, rect: Rect, gap: number) => Rect[]): void {
-  const panels = eligibleForArrange(allPanels()).reverse();
+  const panels = eligibleForArrange(allPanels());
   if (panels.length === 0) return;
+  // Normalize FIRST, in its own pass. A maximized panel sits at 0,0 under a
+  // counter-transform, so its live rect says nothing about where the user put
+  // it; `normalize` puts the remembered rect back, synchronously.
+  for (const p of panels) p.normalize?.();
   const slots = slotsFor(panels.length, visibleRect(), GAP);
+  // Each panel takes the slot nearest to where it already is, so an arrangement
+  // tidies the layout instead of shuffling it (see `nearestSlots`).
+  const chosen = nearestSlots(panels.map(panelRect), slots);
   panels.forEach((p, i) => {
-    p.normalize?.(); // un-maximizes so the panel can take its slot.
-    const slot = slots[i];
-    if (!slot) return; // unreachable — slots has exactly panels.length entries.
+    const slot = slots[chosen[i] ?? -1];
+    if (!slot) return; // unreachable — every panel gets a slot.
     setGeom(p, slot.x, slot.y, slot.w, slot.h);
   });
   persistArrangement();
