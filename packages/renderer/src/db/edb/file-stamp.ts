@@ -148,6 +148,38 @@ export function compareWithFile(stamp: FileStamp | null, current: FileFacts | nu
   return moved ? 'file-newer' : 'same';
 }
 
+/**
+ * Files the user has been asked about before a write, and told to leave alone.
+ *
+ * Keyed by the facts they answered ABOUT, so the answer stops applying the moment
+ * the file changes again. Without this an autosave timer asks the same question
+ * every tick: the verdict does not improve by being declined, and a modal every
+ * thirty seconds is worse than the problem it reports.
+ *
+ * In memory, not `localStorage`, and deliberately: this is a decision about the
+ * session in front of you. A reload is a fresh look at the file, and being asked
+ * once more after one is cheap; silently carrying "leave it" across a restart is
+ * not.
+ */
+const declined = new Map<string, string>();
+
+const factsKey = (f: FileFacts): string => `${f.mtime}:${f.size}`;
+
+/** The user chose not to write over the file as it stands. */
+export function markWriteDeclined(file: string, facts: FileFacts): void {
+  declined.set(file, factsKey(facts));
+}
+
+/** Have we already asked about this file in exactly this state? */
+export function writeDeclined(file: string, facts: FileFacts): boolean {
+  return declined.get(file) === factsKey(facts);
+}
+
+/** Forget a decline — the file is ours again after a write or a load. */
+export function clearWriteDeclined(file: string): void {
+  declined.delete(file);
+}
+
 /** Convenience for the two callers that only ask about one file by name. */
 export async function verdictFor(file: string, handle: FileSystemFileHandle | null): Promise<FileVerdict> {
   return compareWithFile(readStamp(file), handle ? await factsOfHandle(handle) : null);

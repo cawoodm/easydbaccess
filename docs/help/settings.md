@@ -10,20 +10,18 @@ There's no Save button. Each field saves as soon as you change it.
 
 ## Finding a setting
 
-The box above the tab list searches **every tab at once**, so you do not have to
-know which tab a setting is in. The dialog opens with the box focused — start
-typing.
+The box above the tabs searches **every tab at once**, so you don't have to know
+which one a setting is on. Type what you remember — `pink`, `clipboard`,
+`secrets`, `one page at a time` — and the matches appear under the name of the
+tab each one lives on.
 
-Each result is headed by the tab it came from, and the tab list shows how many
-matches each tab holds. The controls in the results are the real ones: change the
-setting where you found it.
+It searches each setting's name, its description and its longer (i) help, plus
+the tab's own name: `windows` brings up that whole tab. Every word you type has
+to match, so a second word narrows the list rather than widening it.
 
-- The search covers a setting's name, its description, its help text and its
-  technical key — so "pink" finds the two highlight settings by their description
-  alone.
-- Two words mean both: `map tile` finds "Map tile URL template".
-- Click the tab name above a result to leave the search and open that tab.
-- **Esc** clears the search. A second **Esc** closes the dialog.
+The controls in the results are the real ones — change a setting there and it
+saves, exactly as it would on its tab. Clear the box with the ✕, or click any
+tab, to go back to browsing.
 
 ## General tab vs. plugin tabs
 

@@ -4,13 +4,16 @@
 
 ### Features
 
-- ✨ Settings has a search box: it looks in every tab at once and says which tab each match is in (v0.0.455)
+- ✨ The header search box stays open while it holds a query, instead of collapsing to an icon that could not say what was being filtered (v0.0.457)
+- ✨ One box above the Settings tabs searches every tab at once, showing each match under the tab it lives on (v0.0.456)
 - ✨ A preview window has a header naming what it shows, with an Edit button that opens the value's source (v0.0.454)
 - ✨ Settings → Windows names the colours a window's palette button offers: hex values or HTML colour names (v0.0.453)
 - ✨ Tile, columns and rows now give each window the slot nearest to where it already is, instead of shuffling a layout you built (v0.0.451)
 - ✨ Settings → Links names the protocols that may be links: a list allows only those, a list behind `!` refuses only those (v0.0.452)
 
 ### Bugs
+
+- 🪲 A save could replace a `.edb` that another tab, browser or machine had written since, without asking (v0.0.455)
 
 - 🪲 Clicking a `file:///` link opened a blank tab saying nothing, because a browser will not open a local file from a web page (v0.0.452)
 - 🪲 A Markdown or HTML cell showed a `file:///` or `ftp://` link as plain text, while the same value in a Link column was a link (v0.0.450)

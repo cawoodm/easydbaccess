@@ -1,135 +1,105 @@
 import { describe, expect, it } from 'vitest';
-import { fieldMatches, hitCount, hitsByTab, searchSettings, searchTerms, type SearchableTab } from '../../../packages/renderer/src/dialogs/settings-search.js';
+import type { SettingsFieldSpec } from '../../../packages/shared/src/plugin-api.js';
+import { countFields, fieldHaystack, fieldMatches, matchSettings, searchTerms, type SearchTab } from '../../../packages/renderer/src/dialogs/settings-search.js';
 
 /**
- * Finding a setting by name, across every tab.
- *
- * Which tab a setting lives in is an implementation fact — so the search covers
- * all of them at once and the answer names the tab it found each field in.
+ * Finding a setting without knowing its tab. The dialog has one tab per feature
+ * and a user knows the words, not the tab.
  */
 
-const TABS: SearchableTab[] = [
-  {
-    id: '__general__',
-    name: 'General',
-    fields: [
-      { key: 'workspaceTitle', label: 'Workspace title', description: 'Shown in the header instead of "easyDBAccess".' },
-      { key: 'secrets', label: 'Secrets', description: 'One name: value per line. Tokens, passwords, API keys.' },
-    ],
-  },
+const field = (over: Partial<SettingsFieldSpec> & { key: string; label: string }): SettingsFieldSpec => ({ type: 'string', ...over });
+
+const TABS: SearchTab[] = [
   {
     id: 'grid',
     name: 'Table grid',
     fields: [
-      { key: 'sortDescFirst', label: 'Sort descending first', description: 'Clicking a column header sorts descending, then ascending, then off.' },
-      { key: 'highlightNulls', label: 'Highlight empty cells', description: 'An empty cell gets a pink background.' },
+      field({ key: 'highlightNulls', label: 'Highlight empty cells', description: 'An empty cell gets a pink background.' }),
+      field({ key: 'windowRowsFrom', label: 'Read big tables one page at a time (rows)', type: 'number' }),
     ],
   },
   {
-    id: 'windows',
-    name: 'Windows',
-    fields: [{ key: 'colors', label: 'Colours a window can be painted', description: 'Hex values or HTML colour names.', help: 'The title text is white.' }],
+    id: 'links',
+    name: 'Links',
+    fields: [field({ key: 'protocols', label: 'Protocols that may be links', description: 'A list of protocols means those are the only links.', help: 'Leave it empty for the default.' })],
   },
-  { id: 'empty', name: 'Nothing', fields: [] },
+  {
+    id: 'viz',
+    name: 'Visualizations',
+    fields: [field({ key: 'tileUrl', label: 'Map tile URL template', description: 'Where map visualizations fetch their background tiles.' })],
+  },
 ];
 
 describe('searchTerms', () => {
-  it('splits on whitespace and lowercases', () => {
-    expect(searchTerms(' Map  TILE ')).toEqual(['map', 'tile']);
+  it('lower-cases, splits on whitespace and drops repeats', () => {
+    expect(searchTerms('  Map   TILE map ')).toEqual(['map', 'tile']);
   });
 
-  it('is empty for an empty or blank query', () => {
+  it('is empty for an empty query, which is what "not searching" means', () => {
     expect(searchTerms('')).toEqual([]);
     expect(searchTerms('   ')).toEqual([]);
   });
 });
 
+describe('fieldHaystack', () => {
+  it('covers the tab name, label, key, description, help and options', () => {
+    const hay = fieldHaystack('Table grid', field({ key: 'sortDescFirst', label: 'Sort descending first', description: 'Dates read high to low.', help: 'Two clicks otherwise.', options: ['Asc'] }));
+    for (const word of ['table grid', 'sort descending', 'sortdescfirst', 'high to low', 'two clicks', 'asc']) {
+      expect(hay, word).toContain(word);
+    }
+  });
+});
+
 describe('fieldMatches', () => {
-  const field = TABS[2]!.fields[0]!;
+  const f = TABS[0]!.fields[0]!;
 
-  it('matches a word from the label, whatever the case', () => {
-    expect(fieldMatches(field, 'Windows', ['COLOURS'])).toBe(true);
+  it('matches on the label, on the prose, and case-blind', () => {
+    expect(fieldMatches('Table grid', f, ['empty'])).toBe(true);
+    expect(fieldMatches('Table grid', f, ['PINK'])).toBe(true);
   });
 
-  it('matches a substring, not only a prefix', () => {
-    // "colour" has to find "Colours a window can be painted".
-    expect(fieldMatches(field, 'Windows', ['colour'])).toBe(true);
-    expect(fieldMatches(field, 'Windows', ['paint'])).toBe(true);
+  it('matches on the tab name, which a field label rarely repeats', () => {
+    expect(fieldMatches('Table grid', f, ['grid'])).toBe(true);
   });
 
-  it('matches the description and the help text', () => {
-    expect(fieldMatches(field, 'Windows', ['hex'])).toBe(true);
-    expect(fieldMatches(field, 'Windows', ['white'])).toBe(true);
-  });
-
-  it('matches the KEY, which is what the docs call the setting', () => {
-    expect(fieldMatches(field, 'Windows', ['colors'])).toBe(true);
-  });
-
-  it('matches the tab name, so a tab can be searched for by name', () => {
-    expect(fieldMatches(field, 'Windows', ['windows'])).toBe(true);
-  });
-
-  it('needs EVERY word: adding one narrows the search', () => {
-    expect(fieldMatches(field, 'Windows', ['window', 'hex'])).toBe(true);
-    expect(fieldMatches(field, 'Windows', ['window', 'ftp'])).toBe(false);
-  });
-
-  it('matches everything when there is nothing to look for', () => {
-    expect(fieldMatches(field, 'Windows', [])).toBe(true);
+  it('needs EVERY word, so a second word narrows', () => {
+    expect(fieldMatches('Table grid', f, ['pink', 'background'])).toBe(true);
+    expect(fieldMatches('Table grid', f, ['pink', 'protocol'])).toBe(false);
   });
 });
 
-describe('searchSettings', () => {
-  it('answers nothing for an empty query, rather than everything', () => {
-    // The dialog shows its tabs in that case — a result list of every setting
-    // in the app would be a worse version of the tabs.
-    expect(searchSettings(TABS, '')).toEqual([]);
-    expect(searchSettings(TABS, '  ')).toEqual([]);
+describe('matchSettings', () => {
+  it('groups the matches under their own tabs, in tab order', () => {
+    const groups = matchSettings(TABS, 'map');
+    expect(groups.map((g) => g.name)).toEqual(['Visualizations']);
+    expect(groups[0]!.fields.map((f) => f.key)).toEqual(['tileUrl']);
   });
 
-  it('groups the matches by tab, in registered order', () => {
-    const hits = searchSettings(TABS, 'colour');
-    expect(hits).toEqual([{ tabId: 'windows', tabName: 'Windows', keys: ['colors'] }]);
+  it('reaches across tabs — the whole point of searching', () => {
+    // "links" is the Links tab's name and a word in the grid tab's prose? No:
+    // it is only in Links, so a cross-tab query needs a word that really spans.
+    const groups = matchSettings(TABS, 'a');
+    expect(groups.length).toBeGreaterThan(1);
   });
 
-  it('reaches across tabs for one query', () => {
-    // "cell" is in the grid tab's label and nowhere else; "colour" only in
-    // Windows. One query, two tabs.
-    const hits = searchSettings(TABS, 'c');
-    expect(hits.map((h) => h.tabId)).toContain('grid');
-    expect(hits.map((h) => h.tabId)).toContain('windows');
+  it('leaves a tab out entirely when nothing in it matches', () => {
+    expect(matchSettings(TABS, 'protocols').map((g) => g.id)).toEqual(['links']);
   });
 
-  it('finds the General tab’s own fields, which are not registered specs', () => {
-    expect(searchSettings(TABS, 'password')).toEqual([{ tabId: '__general__', tabName: 'General', keys: ['secrets'] }]);
+  it('takes a whole tab when the tab name is the query', () => {
+    expect(matchSettings(TABS, 'table grid').map((g) => g.fields.length)).toEqual([2]);
   });
 
-  it('leaves out a tab with no match, and a tab with no fields', () => {
-    const hits = searchSettings(TABS, 'descending');
-    expect(hits).toHaveLength(1);
-    expect(hits[0]?.keys).toEqual(['sortDescFirst']);
-  });
-
-  it('keeps a tab’s own field order', () => {
-    const hits = searchSettings(TABS, 'grid');
-    expect(hits[0]?.keys).toEqual(['sortDescFirst', 'highlightNulls']);
-  });
-
-  it('answers an empty list for a query nothing matches', () => {
-    expect(searchSettings(TABS, 'zzzz')).toEqual([]);
+  it('is empty for no match, and for no query — not everything', () => {
+    expect(matchSettings(TABS, 'zzz')).toEqual([]);
+    expect(matchSettings(TABS, '')).toEqual([]);
+    expect(matchSettings(TABS, '   ')).toEqual([]);
   });
 });
 
-describe('hitCount and hitsByTab', () => {
-  it('counts every matching field, not the tabs', () => {
-    const hits = searchSettings(TABS, 'grid');
-    expect(hitCount(hits)).toBe(2);
-    expect(hitsByTab(hits)).toEqual({ grid: 2 });
-  });
-
-  it('is zero and empty for no hits', () => {
-    expect(hitCount([])).toBe(0);
-    expect(hitsByTab([])).toEqual({});
+describe('countFields', () => {
+  it('counts the fields, not the tabs', () => {
+    expect(countFields(matchSettings(TABS, 'table grid'))).toBe(2);
+    expect(countFields([])).toBe(0);
   });
 });

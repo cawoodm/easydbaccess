@@ -1,95 +1,83 @@
 // packages/renderer/src/dialogs/settings-search.ts
 //
-// Finding a setting by name, across every tab.
+// Finding a setting without knowing which tab it is on.
 //
-// The dialog has grown past a dozen tabs, and the tab a setting lives in is an
-// implementation fact — "which colours can a window be" is under Windows, but
-// somebody looking for it may well try Table grid first. So the search is over
-// ALL tabs at once and the answer names the tab it found each field in, rather
-// than filtering the tab the user happens to be on.
+// The dialog has a tab per feature and the list keeps growing — Table grid,
+// Links, Windows, Visualizations, Buttons, plus one for every plugin that
+// registers fields. A user looking for "the thing that stops the pink cells"
+// knows the words, not the tab, and the only way to find it was to open each tab
+// and read. So a query searches every field of every tab at once, and the panel
+// shows what matched with the tab it came from as its heading.
 //
-// Pure, and unit-tested without the dialog: the matching rule is the whole of
-// the feature, and the rest is rendering.
+// Pure, so the rule can be pinned by unit tests: the dialog is a Lit element and
+// the unit suite has no DOM.
 
-/** The searchable text of one field. A subset of `SettingsFieldSpec`. */
-export interface SearchableField {
-  key: string;
-  label: string;
-  description?: string | undefined;
-  help?: string | undefined;
-}
+import type { SettingsFieldSpec } from '@easydb/shared';
 
-export interface SearchableTab {
+export interface SearchTab {
   id: string;
   name: string;
-  fields: readonly SearchableField[];
+  fields: readonly SettingsFieldSpec[];
 }
 
-/** One tab's matches, in the order the tab lists its fields. */
-export interface SettingsHit {
-  tabId: string;
-  tabName: string;
-  keys: string[];
+export interface SearchGroup {
+  id: string;
+  name: string;
+  fields: SettingsFieldSpec[];
 }
 
 /**
- * The words a query is looking for.
- *
- * Split on whitespace, so `map tile` finds "Map tile URL template" without the
- * user having to reproduce the label. Every term must match (AND), because
- * adding a word to a search means narrowing it.
+ * The words a query is made of, lower-cased. Every one has to match (AND), which
+ * is what makes a second word narrow rather than widen — "map tile" should find
+ * the tile URL and not every field with a map in its description.
  */
 export function searchTerms(query: string): string[] {
-  return query
-    .toLowerCase()
-    .split(/\s+/)
-    .map((t) => t.trim())
-    .filter(Boolean);
+  return [...new Set(query.toLowerCase().split(/\s+/).filter(Boolean))];
 }
 
 /**
- * Does this field answer the query?
+ * The text one field is searched through.
  *
- * The haystack is everything the user can see or reasonably guess: the label,
- * the description, the help text, the tab's name — and the KEY, which is what a
- * doc page or a CHANGELOG entry calls the setting (`links:protocols`). Substring,
- * not prefix: a search for "colour" has to find "Colours a window can be
- * painted".
+ * The TAB NAME is part of it on purpose: "windows" finds that tab's fields whole,
+ * and a field's own label rarely repeats the feature it belongs to. So is the
+ * `key`, which is what a plugin's docs and this repo's code call the setting, and
+ * the `description` / `help` prose, which is where the words a user actually
+ * remembers live — "pink", "clipboard", "one page at a time".
  */
-export function fieldMatches(field: SearchableField, tabName: string, terms: readonly string[]): boolean {
+export function fieldHaystack(tabName: string, f: SettingsFieldSpec): string {
+  return [tabName, f.label, f.key, f.description ?? '', f.help ?? '', ...(f.options ?? [])].join(' ').toLowerCase();
+}
+
+/**
+ * `terms` normally arrives from {@link searchTerms} and is already lower-cased;
+ * it is lower-cased again here so a caller passing raw words cannot silently get
+ * "no matches" out of a search that plainly should match.
+ */
+export function fieldMatches(tabName: string, f: SettingsFieldSpec, terms: readonly string[]): boolean {
   if (terms.length === 0) return true;
-  const haystack = [tabName, field.key, field.label, field.description ?? '', field.help ?? ''].join('\n').toLowerCase();
-  // The terms are lowercased again here, not only in `searchTerms`: a function
-  // that silently matches nothing when handed `COLOURS` is a trap for the next
-  // caller, and one `toLowerCase` per term costs nothing.
-  return terms.every((t) => haystack.includes(t.toLowerCase()));
+  const hay = fieldHaystack(tabName, f);
+  return terms.every((t) => hay.includes(t.toLowerCase()));
 }
 
 /**
- * Every match, grouped by tab, tabs in their registered order.
+ * Every field that matches, grouped by the tab it belongs to and in tab order.
+ * A tab with no match is left out entirely rather than shown empty.
  *
- * A tab with no match is left out entirely rather than listed empty — the result
- * list is meant to be short, and an empty group says nothing.
+ * An empty query returns nothing, not everything — the caller shows the active
+ * tab in that case, which is the dialog as it always was.
  */
-export function searchSettings(tabs: readonly SearchableTab[], query: string): SettingsHit[] {
+export function matchSettings(tabs: readonly SearchTab[], query: string): SearchGroup[] {
   const terms = searchTerms(query);
   if (terms.length === 0) return [];
-  const hits: SettingsHit[] = [];
+  const out: SearchGroup[] = [];
   for (const tab of tabs) {
-    const keys = tab.fields.filter((f) => fieldMatches(f, tab.name, terms)).map((f) => f.key);
-    if (keys.length > 0) hits.push({ tabId: tab.id, tabName: tab.name, keys });
+    const fields = tab.fields.filter((f) => fieldMatches(tab.name, f, terms));
+    if (fields.length > 0) out.push({ id: tab.id, name: tab.name, fields });
   }
-  return hits;
-}
-
-/** How many fields matched in total — what the header reports. */
-export function hitCount(hits: readonly SettingsHit[]): number {
-  return hits.reduce((n, h) => n + h.keys.length, 0);
-}
-
-/** Matches per tab id, for the count beside each tab in the nav. */
-export function hitsByTab(hits: readonly SettingsHit[]): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const h of hits) out[h.tabId] = h.keys.length;
   return out;
+}
+
+/** How many fields matched, for a "3 settings" line above the results. */
+export function countFields(groups: readonly SearchGroup[]): number {
+  return groups.reduce((n, g) => n + g.fields.length, 0);
 }
