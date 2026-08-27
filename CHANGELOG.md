@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ Editing a list cell suggests the values that column already holds, so a tag vocabulary stops drifting by typing (v0.0.458)
 - ✨ The header search box stays open while it holds a query, instead of collapsing to an icon that could not say what was being filtered (v0.0.457)
 - ✨ One box above the Settings tabs searches every tab at once, showing each match under the tab it lives on (v0.0.456)
 - ✨ A preview window has a header naming what it shows, with an Edit button that opens the value's source (v0.0.454)

@@ -645,7 +645,7 @@ export class AppShell extends LitElement {
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
           <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
-            ><span class="version">v0.0.457</span></a
+            ><span class="version">v0.0.458</span></a
           ></strong
         >
         ${this.shownButtons('header')

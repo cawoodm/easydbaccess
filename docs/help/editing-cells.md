@@ -90,11 +90,11 @@ top of the editor and save: the rule stays on the column, and stops running.
 The button in the column editor tells you which of the three states a column is
 in at a glance:
 
-| Colour   | Meaning                                    |
-| -------- | ------------------------------------------ |
-| **Gray** | no rule on this column                     |
-| **Blue** | a rule, and it runs                        |
-| **Red**  | a rule that is there but switched **off**  |
+| Colour   | Meaning                                   |
+| -------- | ----------------------------------------- |
+| **Gray** | no rule on this column                    |
+| **Blue** | a rule, and it runs                       |
+| **Red**  | a rule that is there but switched **off** |
 
 Tick the box again to switch it back on. Clearing the body instead deletes the
 rule outright — and clears the switch with it, so a rule you write later starts
@@ -176,8 +176,8 @@ back to.
 
 ### Returning nothing hands the cell back
 
-`return null` — or simply not returning — means *"nothing to say about this
-row"*. The cell then shows what is **stored** in it, and behaves like any other
+`return null` — or simply not returning — means _"nothing to say about this
+row"_. The cell then shows what is **stored** in it, and behaves like any other
 cell: you can type into it.
 
 That is what lets a script read its own column. A script that decorates only the
@@ -251,14 +251,33 @@ rows to write to yet.
 
 ### Built-in renderers
 
-| Renderer           | What it shows                                                                                                                                |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Renderer           | What it shows                                                                                                                                                                |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Link**           | Detects URLs, email addresses, and phone numbers and turns them into clickable links. A pencil icon lets you switch to editing the raw text. See below for which URLs count. |
-| **Color**          | A color swatch and picker for hex color values.                                                                                              |
-| **Image**          | A thumbnail with an upload button; images are stored directly in the cell.                                                                   |
-| **HTML (preview)** | Shows the plain text of an HTML value, trimmed to a short length, with a popup icon to view the full rendered HTML.                          |
-| **HTML (render)**  | Renders the HTML directly in the cell, and lets you edit it inline.                                                                          |
-| **Script**         | Runs a small script you write to build the cell's HTML from the whole row — for fully custom layouts.                                        |
+| **Color**          | A color swatch and picker for hex color values.                                                                                                                              |
+| **Image**          | A thumbnail with an upload button; images are stored directly in the cell.                                                                                                   |
+| **HTML (preview)** | Shows the plain text of an HTML value, trimmed to a short length, with a popup icon to view the full rendered HTML.                                                          |
+| **HTML (render)**  | Renders the HTML directly in the cell, and lets you edit it inline.                                                                                                          |
+| **Script**         | Runs a small script you write to build the cell's HTML from the whole row — for fully custom layouts.                                                                        |
+| **Tags**           | One pill per value of a list column. The pencil edits the raw list, and offers the values the column already holds — see below.                                              |
+
+#### Tags: reusing what the column already says
+
+Editing a list cell (the **Tags** renderer, or any `array` column) offers the
+values that column already holds. Click the pencil and the list appears at once,
+showing everything this cell does not already carry; type and it narrows, with
+whole-word matches first.
+
+Pick one with the mouse or with ↓ and Enter, and the next tag can be typed
+straight away. Enter with nothing highlighted saves the cell, so a brand-new tag
+never needs the mouse either. Escape closes the list; Escape again cancels the
+edit.
+
+This is what keeps a vocabulary from drifting: without it `Bug`, `bug` and `bugs`
+quietly become three different tags, and nothing ever tells you. The suggestions
+are the column's own values — there is no list to maintain — and they include
+values on rows the current filter is hiding, because those are still the tags to
+reuse.
 
 #### The preview window
 
