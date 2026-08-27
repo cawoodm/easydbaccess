@@ -1,6 +1,8 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { parseSecrets, readSecretsText, writeSecretsText } from '../db/user-settings.js';
 import { GRID_SETTINGS_ID, WINDOW_ROWS_FROM_DEFAULT } from '../table/grid-settings.js';
+import { LINK_PROTOCOLS_KEY, LINK_SETTINGS_ID } from '../util/link-settings.js';
+import { DEFAULT_PROTOCOLS } from '../util/url-schemes.js';
 import { DEFAULT_TILE_ATTRIBUTION, DEFAULT_TILE_URL, VIZ_SETTINGS_ID } from '../viz/viz-settings.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
@@ -54,6 +56,23 @@ export function init(api: HostApi): void {
       scope: 'workspace',
       description:
         'A table with at least this many rows is read one page at a time as you scroll, instead of being held in memory whole. Filtering, searching and sorting still cover every row, because the store does that work. Set 0 to always read the whole table — which stops at 20,000 rows and says so, so the default is 20,000: from there up, scrolling reaches every row instead.',
+    },
+  ]);
+
+  api.ui.registerSettings(LINK_SETTINGS_ID, 'Links', [
+    {
+      key: LINK_PROTOCOLS_KEY,
+      label: 'Protocols that may be links',
+      type: 'string',
+      default: DEFAULT_PROTOCOLS,
+      // Device-local, and deliberately so: which protocols this machine is willing
+      // to put behind a click is a decision about the machine, not about the data.
+      // On the workspace layer it would travel inside a shared `.edb`, and opening
+      // someone's workspace could widen your own rules.
+      scope: 'user',
+      description:
+        'A list of protocols means those are the only links — e.g. "http,https,ftp,file". Start the list with ! and it says what to refuse instead, allowing everything else: the default "!javascript,vbscript,data" is the three that run code rather than going anywhere. Applies everywhere a link is drawn: Link columns, Markdown, HTML and view templates.',
+      help: 'Leave it empty to go back to the default. Removing javascript, vbscript or data from the refused list lets a value someone else wrote — from an import, a sync pull, a workspace you were sent — run code in your session when you click it. Anything with no protocol at all, like /a/b or #section, is unaffected either way.',
     },
   ]);
 

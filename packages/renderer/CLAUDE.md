@@ -74,6 +74,36 @@ If you add something that runs at load: read before you write, and re-write only
 what actually changed. `test/renderer/plugins/views-seed.test.ts` holds that rule
 down for the seeder by counting writes.
 
+## Which protocols may be links: one rule, three readers
+
+`util/url-schemes.ts` is the only answer to "may this be a link". Three places
+ask it and none may hold its own copy: `safeUrl` in `util/sanitize-html.ts`
+(markdown, HTML cells, view templates), `detectLink` in `plugins/link-detect.ts`
+(the Link renderer and `auto-renderer`'s column guess), and the bare-URL pass in
+`util/markdown.ts`. They disagreed once — the sanitizer kept an allow-list of
+http/https/mailto/tel while the Link renderer allowed any scheme that does not
+execute — and the visible bug was a `file:///` path that was a link in one column
+and plain text in another.
+
+Since v0.0.452 the rule is a SETTING, `links:protocols`: a list is an
+allow-list, the same list behind `!` is a deny-list, default
+`!javascript,vbscript,data`. Two consequences worth knowing before touching it:
+
+- **The policy is module state, set once at boot.** Every reader is a sync pure
+  function called mid-paint, and `api.settings.get` is async. `util/link-settings.ts`
+  resolves it and re-resolves on `easydb:settings-changed`; a test that changes it
+  must put it back (`setProtocolPolicy(null)`).
+- **It is device-local (`scope: 'user'`), not workspace.** On the workspace layer
+  it would travel inside a shared `.edb`, so opening someone else's workspace
+  could widen your own rules.
+
+A `file:///` link is refused by the BROWSER, not by us, and it answers by opening
+a blank tab (`about:blank#blocked`) with no explanation. `util/file-link-guard.ts`
+is one capture-phase listener on `document` that catches the click first and puts
+the path on the clipboard. It covers all four renderers at once because
+`composedPath()` reaches into their shadow roots, and it stands aside in the
+desktop build, whose own page is `file:`.
+
 ## Storage is hidden from plugins
 
 Plugins receive `DataStore` from `@easydb/shared` and never a transport. When

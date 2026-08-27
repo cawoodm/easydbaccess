@@ -1,5 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import { DANGEROUS_SCHEMES, isBareLink, NO_AUTHORITY_SCHEMES, runsScript, schemeOf } from '../../../packages/renderer/src/util/url-schemes.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  DANGEROUS_SCHEMES,
+  DEFAULT_PROTOCOLS,
+  isBareLink,
+  NO_AUTHORITY_SCHEMES,
+  parseProtocolPolicy,
+  schemeAllowed,
+  schemeOf,
+  setProtocolPolicy,
+  urlAllowed,
+} from '../../../packages/renderer/src/util/url-schemes.js';
 import { safeUrl } from '../../../packages/renderer/src/util/sanitize-html.js';
 import { detectLink } from '../../../packages/renderer/src/plugins/link-detect.js';
 
@@ -27,21 +37,107 @@ describe('schemeOf', () => {
   });
 });
 
-describe('runsScript', () => {
-  it('names the three that execute', () => {
-    expect(runsScript('javascript:alert(1)')).toBe(true);
-    expect(runsScript('vbscript:msgbox')).toBe(true);
-    expect(runsScript('data:text/html;base64,PHN2Zz4=')).toBe(true);
+describe('urlAllowed, with the shipped default policy', () => {
+  it('refuses the three that execute', () => {
+    expect(urlAllowed('javascript:alert(1)')).toBe(false);
+    expect(urlAllowed('vbscript:msgbox')).toBe(false);
+    expect(urlAllowed('data:text/html;base64,PHN2Zz4=')).toBe(false);
   });
 
   it('is case- and space-blind, because the browser is', () => {
-    expect(runsScript('  JavaScript:alert(1)')).toBe(true);
+    expect(urlAllowed('  JavaScript:alert(1)')).toBe(false);
   });
 
   it('lets every other scheme through', () => {
     for (const url of ['https://x.dev', 'file:///c:/x.html', 'ftp://host/f', 'mailto:a@b.dev', 'obsidian://open?vault=v', 'ms-excel:ofe|u|https://x.dev/b.xlsx']) {
-      expect(runsScript(url), url).toBe(false);
+      expect(urlAllowed(url), url).toBe(true);
     }
+  });
+});
+
+/**
+ * The list is a SETTING (`links:protocols`). A plain list is exhaustive; the same
+ * list behind `!` says what to refuse and allows the rest.
+ */
+describe('parseProtocolPolicy', () => {
+  it('reads a list as an allow-list', () => {
+    const p = parseProtocolPolicy('http,https,ftp,file');
+    expect(p.deny).toBe(false);
+    expect([...p.schemes].sort()).toEqual(['file', 'ftp', 'http', 'https']);
+  });
+
+  it('reads a leading ! as a deny-list', () => {
+    const p = parseProtocolPolicy('!javascript,vbscript');
+    expect(p.deny).toBe(true);
+    expect([...p.schemes].sort()).toEqual(['javascript', 'vbscript']);
+  });
+
+  it('takes the field however it was typed', () => {
+    // Commas, spaces, semicolons and pipes all separate; a scheme may arrive
+    // spelled as a URL prefix; case is not significant.
+    const p = parseProtocolPolicy(' HTTP://  https: ; ftp | file ');
+    expect([...p.schemes].sort()).toEqual(['file', 'ftp', 'http', 'https']);
+  });
+
+  it('drops what is not a scheme rather than failing the line', () => {
+    expect([...parseProtocolPolicy('http, 3, ??, https').schemes].sort()).toEqual(['http', 'https']);
+  });
+
+  it('falls back to the default for an empty field', () => {
+    for (const text of ['', '   ', null, undefined]) {
+      expect(parseProtocolPolicy(text)).toEqual(parseProtocolPolicy(DEFAULT_PROTOCOLS));
+    }
+  });
+
+  it('falls back for an allow-list of nothing — a typo must not silence every link', () => {
+    expect(parseProtocolPolicy(',,').deny).toBe(true);
+    expect(parseProtocolPolicy('://').deny).toBe(true);
+  });
+
+  it('keeps a deny-list of nothing, which is a real answer: refuse nothing', () => {
+    const p = parseProtocolPolicy('!');
+    expect(p.deny).toBe(true);
+    expect(p.schemes.size).toBe(0);
+    expect(schemeAllowed('javascript', p)).toBe(true);
+  });
+});
+
+describe('the policy in force', () => {
+  afterEach(() => setProtocolPolicy(null));
+
+  it('an allow-list refuses everything it does not name', () => {
+    setProtocolPolicy(parseProtocolPolicy('http,https,ftp,file'));
+    expect(safeUrl('file:///C:/x.html')).toBe('file:///C:/x.html');
+    expect(safeUrl('ftp://host/f')).toBe('ftp://host/f');
+    // Allowed by the default policy, and not on this list.
+    expect(safeUrl('obsidian://open?vault=v')).toBeNull();
+    expect(safeUrl('mailto:a@b.dev')).toBeNull();
+  });
+
+  it('reaches the Link renderer and the bare-URL rule too, not just the sanitizer', () => {
+    setProtocolPolicy(parseProtocolPolicy('http,https'));
+    expect(detectLink('file:///C:/x.html')).toBeNull();
+    expect(isBareLink('file:///C:/x.html')).toBe(false);
+    expect(detectLink('https://x.dev')).not.toBeNull();
+  });
+
+  it('honours a deny-list that no longer names data:', () => {
+    // The user's call, and the field says what it costs.
+    setProtocolPolicy(parseProtocolPolicy('!javascript,vbscript'));
+    expect(safeUrl('data:text/html,x')).toBe('data:text/html,x');
+    expect(safeUrl('javascript:alert(1)')).toBeNull();
+  });
+
+  it('leaves URLs with no scheme alone whatever the list says', () => {
+    setProtocolPolicy(parseProtocolPolicy('mailto'));
+    expect(safeUrl('/a/b')).toBe('/a/b');
+    expect(safeUrl('#section')).toBe('#section');
+  });
+
+  it('setProtocolPolicy(null) is back to the default', () => {
+    setProtocolPolicy(parseProtocolPolicy('mailto'));
+    setProtocolPolicy(null);
+    expect(safeUrl('file:///C:/x.html')).toBe('file:///C:/x.html');
   });
 });
 

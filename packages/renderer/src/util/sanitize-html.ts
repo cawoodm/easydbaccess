@@ -26,7 +26,7 @@
 
 /** HTML-escape text so it can never become markup. */
 
-import { runsScript, SCHEME_RE } from './url-schemes.js';
+import { SCHEME_RE, urlAllowed } from './url-schemes.js';
 export function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -61,19 +61,20 @@ export function decodeEntities(s: string): string {
 /**
  * A URL safe to put in `href`/`src`.
  *
- * Any scheme EXCEPT the ones that run something — see `util/url-schemes.ts` for
- * why that is a deny-list and not an allow-list. It used to allow http, https,
- * mailto and tel only, which meant a `file:///C:/…` path in a markdown cell or a
- * view template came out as plain text while the very same path in a Link column
- * rendered as a link.
+ * Whatever the `links:protocols` setting allows — by default any scheme except
+ * the ones that run something. See `util/url-schemes.ts` for why the default is a
+ * deny-list. This allowed http, https, mailto and tel only until v0.0.450, which
+ * meant a `file:///C:/…` path in a markdown cell or a view template came out as
+ * plain text while the very same path in a Link column rendered as a link.
  */
 export function safeUrl(raw: string): string | null {
   const url = raw.trim();
   if (url === '') return null;
   // A scheme-relative or absolute path, or anything with no scheme at all, is
-  // fine — there is nothing executable about it.
+  // fine — there is nothing executable about it, and no protocol setting is
+  // about it either.
   if (!SCHEME_RE.test(url)) return url;
-  return runsScript(url) ? null : url;
+  return urlAllowed(url) ? url : null;
 }
 
 /**

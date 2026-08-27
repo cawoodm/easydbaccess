@@ -280,16 +280,46 @@ Two things are deliberately **not** linked:
   `magnet:` and a few more).
 
 **A `file:///` link opens in the desktop app, not in a browser tab.** A browser
-refuses to open a local file from a web page, and does it silently — hover the
-link and the tooltip says so. The text is still there to copy.
+refuses to open a local file from a web page. Clicking one here puts the path on
+your clipboard and says so, so you can paste it into a new tab — otherwise the
+browser answers by opening a blank tab and explaining nothing.
+
+#### Choosing which protocols may be links
+
+**Settings → Links → "Protocols that may be links"** decides, everywhere: Link
+columns, Markdown, HTML and view templates.
+
+Write a list and those are the only links:
+
+```
+http,https,ftp,file
+```
+
+Start the list with `!` and it says what to **refuse** instead, allowing
+everything else. That is how it ships:
+
+```
+!javascript,vbscript,data
+```
+
+Commas, spaces and semicolons all separate, and `http`, `HTTP:` and `http://` all
+mean the same thing. Empty the field to go back to the default.
+
+The setting is stored **on this device**, not in the workspace — which protocols
+you are willing to click is your decision, and one that should not travel inside
+a workspace someone sends you. Values with no protocol at all, like `/reports/x`
+or `#section`, are never affected.
+
+Taking `javascript`, `vbscript` or `data` off the refused list lets a value
+somebody else wrote run code in your session when you click it. It is allowed,
+because it is your call, but that is what it costs.
 
 #### Links inside Markdown, HTML and view templates
 
-The same schemes work in a **Markdown** cell, a hand-written **HTML** cell and a
+The same protocols work in a **Markdown** cell, a hand-written **HTML** cell and a
 view template — `[the report](file:///C:/reports/june.pdf)` is a link, and so is
-a bare `file:///C:/reports/june.pdf` written on its own. `javascript:`,
-`vbscript:` and `data:` are refused there too, and prose with a colon in it
-(`TODO:fix this`) is left alone.
+a bare `file:///C:/reports/june.pdf` written on its own. The Links setting above
+governs these too, and prose with a colon in it (`TODO:fix this`) is left alone.
 
 A bare URL is linked only where the author clearly meant one: written
 `scheme://…`, or with one of the few schemes that are real without it. Sentence

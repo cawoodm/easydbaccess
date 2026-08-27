@@ -12,6 +12,8 @@ import { loadBuiltinPlugins } from './plugin-host/loader.js';
 import { registerCoreCommands } from './plugin-host/core-commands.js';
 import { loadUrlPlugins } from './plugin-host/url-loader.js';
 import { SAFE_MODE } from './plugin-host/safe-mode.js';
+import { startFileLinkGuard } from './util/file-link-guard.js';
+import { startLinkPolicy } from './util/link-settings.js';
 
 export interface AppContext {
   store: DataStore;
@@ -207,6 +209,16 @@ async function init(): Promise<AppContext> {
   // Core (non-plugin) commands for the Ctrl+K palette — registered before
   // plugins so the window-management commands are always present.
   registerCoreCommands(api);
+
+  // Which protocols may be links is a setting, and every renderer that draws one
+  // reads it while painting — so it is resolved here, once, and re-resolved when
+  // it changes. See `util/link-settings.ts`.
+  startLinkPolicy(api.settings);
+
+  // A `file:///` link cannot be opened by a browser tab, and the browser says so
+  // by opening a blank one. Catch the click and put the path on the clipboard
+  // instead. Stands aside in the desktop build, whose page IS `file:`.
+  startFileLinkGuard((message) => api.ui.dialogs.toast(message, { kind: 'info', title: 'Local file' }));
 
   // Centralized import-status toasts so every importer (csv, json, gist pull,
   // future ones) gets consistent UX without duplicating the toast call.

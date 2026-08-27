@@ -5,9 +5,11 @@
 ### Features
 
 - ✨ Tile, columns and rows now give each window the slot nearest to where it already is, instead of shuffling a layout you built (v0.0.451)
+- ✨ Settings → Links names the protocols that may be links: a list allows only those, a list behind `!` refuses only those (v0.0.452)
 
 ### Bugs
 
+- 🪲 Clicking a `file:///` link opened a blank tab saying nothing, because a browser will not open a local file from a web page (v0.0.452)
 - 🪲 A Markdown or HTML cell showed a `file:///` or `ftp://` link as plain text, while the same value in a Link column was a link (v0.0.450)
 
 ## 26 Aug 2026

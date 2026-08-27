@@ -46,6 +46,19 @@ Preferences for how every grid behaves:
 
 They apply at once to the tables you already have open.
 
+### The Links tab
+
+**Protocols that may be links** — one field that decides which protocols are
+clickable anywhere in the app: Link columns, Markdown, HTML and view templates.
+
+A plain list is the whole allow-list (`http,https,ftp,file`). The same list behind
+a leading `!` says what to refuse and allows everything else, which is how it
+ships: `!javascript,vbscript,data` — the three that run code rather than going
+somewhere. Empty the field to go back to that.
+
+It is stored on this device, not in the workspace. See
+[Links in Editing cells](editing-cells.md#choosing-which-protocols-may-be-links).
+
 ### The Buttons tab
 
 The header and footer bars:

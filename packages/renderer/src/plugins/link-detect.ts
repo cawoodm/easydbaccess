@@ -8,10 +8,10 @@
 // what a URL is.
 //
 // The renderer accepted `http://` and `https://` and nothing else until v0.0.438.
-// Any scheme works now, `file:///` included, which is what a table of local
-// documents needs.
+// Any scheme the `links:protocols` setting allows works now, `file:///` included,
+// which is what a table of local documents needs.
 
-import { DANGEROUS_SCHEMES, NO_AUTHORITY_SCHEMES } from '../util/url-schemes.js';
+import { NO_AUTHORITY_SCHEMES, schemeAllowed } from '../util/url-schemes.js';
 
 /** RFC 3986: scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ). */
 const SCHEME = /^([a-z][a-z0-9+.-]*):(\/\/)?/i;
@@ -47,7 +47,7 @@ export function detectLink(s: string): DetectedLink | null {
   if (!m) return null;
   const scheme = (m[1] ?? '').toLowerCase();
   const authority = m[2] === '//';
-  if (DANGEROUS_SCHEMES.has(scheme)) return null;
+  if (!schemeAllowed(scheme)) return null;
   if (!authority && !NO_AUTHORITY_SCHEMES.has(scheme)) return null;
   // Nothing after the scheme is not a link — `http://` on its own goes nowhere.
   if (t.length === m[0].length) return null;
