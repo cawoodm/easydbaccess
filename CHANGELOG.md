@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ Settings has a search box: it looks in every tab at once and says which tab each match is in (v0.0.455)
 - ✨ A preview window has a header naming what it shows, with an Edit button that opens the value's source (v0.0.454)
 - ✨ Settings → Windows names the colours a window's palette button offers: hex values or HTML colour names (v0.0.453)
 - ✨ Tile, columns and rows now give each window the slot nearest to where it already is, instead of shuffling a layout you built (v0.0.451)

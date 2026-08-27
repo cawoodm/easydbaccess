@@ -7,6 +7,7 @@ import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@marc
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { parseSecrets, readSecretsText, readUserSetting, writeSecretsText } from '../db/user-settings.js';
 import { emitSettingsChanged } from '../db/settings-events.js';
+import { hitsByTab, hitCount, searchSettings, type SettingsHit } from './settings-search.js';
 
 const GENERAL = '__general__';
 
@@ -15,6 +16,26 @@ interface Tab {
   name: string;
   fields: SettingsFieldSpec[];
 }
+
+/**
+ * The General tab's two fields, so a search can find them like any other. They
+ * are hand-rolled controls rather than registered specs — a workspace title is
+ * not a plugin setting, and the secrets box is a store of its own — but "search
+ * inside settings" has to mean all of them, or the first thing a user searches
+ * for that it cannot find teaches them not to search again.
+ */
+const GENERAL_FIELDS = [
+  {
+    key: 'workspaceTitle',
+    label: 'Workspace title',
+    description: 'Shown in the header instead of "easyDBAccess". Leave blank to use the default.',
+  },
+  {
+    key: 'secrets',
+    label: 'Secrets',
+    description: 'Cross-workspace, device-local. One name: value per line. Reference a secret from any field with ${secret:name}. Tokens, passwords, API keys.',
+  },
+] as const;
 
 /**
  * Tabbed Settings dialog. The General tab holds the cross-workspace secrets
@@ -63,6 +84,59 @@ export class SettingsDialog extends LitElement {
         background: #eff6ff;
         color: #1d4ed8;
         font-weight: 600;
+      }
+      .tabs input.search {
+        font: inherit;
+        font-size: 0.85rem;
+        padding: 0.35rem 0.5rem;
+        margin-bottom: 0.35rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.3rem;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      /* While searching, the tab list says WHERE the matches are. */
+      .tabs button.has-hits {
+        color: #1d4ed8;
+      }
+      .tabs button.no-hits {
+        color: #9ca3af;
+      }
+      .tabs button .count {
+        float: right;
+        background: #dbeafe;
+        color: #1d4ed8;
+        border-radius: 0.6rem;
+        padding: 0 0.35rem;
+        font-size: 0.72rem;
+        line-height: 1.4;
+      }
+      /* One search-result group: the tab it came from, then its fields. */
+      .group {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        border-left: 2px solid #e5e7eb;
+        padding-left: 0.7rem;
+      }
+      .group-head {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.15rem;
+        align-self: flex-start;
+        background: transparent;
+        border: 0;
+        padding: 0;
+        font: inherit;
+        font-size: 0.78rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: #6b7280;
+        cursor: pointer;
+      }
+      .group-head:hover {
+        color: #1d4ed8;
       }
       .panel {
         display: flex;
@@ -247,6 +321,8 @@ export class SettingsDialog extends LitElement {
    * so a tab of fields with help does not turn into a wall of text.
    */
   @state() private openHelp = '';
+  /** The search box. While it holds anything, it replaces the tab selection. */
+  @state() private query = '';
   private dialogEl: HTMLDialogElement | null = null;
 
   override firstUpdated() {
@@ -287,9 +363,52 @@ export class SettingsDialog extends LitElement {
     this.placements = placements;
     this.secretsText = readSecretsText();
     this.active = GENERAL;
+    // A search is about this visit, not a preference — every open starts clean.
+    this.query = '';
 
     await this.updateComplete;
     this.dialogEl?.showModal();
+    // The dialog opens on the search box: the reason to open Settings is usually
+    // one particular setting, and by the time you have read the tab names you
+    // could have typed its name.
+    this.searchEl()?.focus();
+  }
+
+  private searchEl(): HTMLInputElement | null {
+    return this.shadowRoot?.querySelector('input.search') ?? null;
+  }
+
+  /** Every tab the search covers: General first, then the registered ones. */
+  private searchableTabs() {
+    return [{ id: GENERAL, name: 'General', fields: GENERAL_FIELDS }, ...this.tabs];
+  }
+
+  private hits(): SettingsHit[] {
+    return searchSettings(this.searchableTabs(), this.query);
+  }
+
+  private onSearch = (e: Event): void => {
+    this.query = (e.target as HTMLInputElement).value;
+  };
+
+  /**
+   * Escape clears the search before it closes the dialog.
+   *
+   * Without this the first Escape throws away the whole dialog, which is the
+   * usual reflex for "undo what I just typed" and here costs the user their
+   * place. A second Escape still closes, because the box is empty by then.
+   */
+  private onSearchKeydown = (e: KeyboardEvent): void => {
+    if (e.key !== 'Escape' || this.query === '') return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.query = '';
+  };
+
+  /** Leaving the search behind is what picking a tab means. */
+  private goToTab(id: string): void {
+    this.query = '';
+    this.active = id;
   }
 
   /** A secret value that is neither empty nor a `${secret:name}` reference —
@@ -547,6 +666,35 @@ export class SettingsDialog extends LitElement {
     </div>`;
   }
 
+  private renderWorkspaceTitleField() {
+    return html`<div class="field">
+      <div class="field-head"><label>Workspace title</label></div>
+      <p class="desc">Shown in the header instead of "easyDBAccess". Leave blank to use the default.</p>
+      <input type="text" placeholder="easyDBAccess" .value=${this.workspaceTitle} @change=${(e: Event) => this.setWorkspaceTitle((e.target as HTMLInputElement).value)} />
+    </div>`;
+  }
+
+  private renderSecretsField() {
+    return html`<div class="field">
+      <div class="field-head"><label>Secrets</label></div>
+      <p class="desc">
+        Cross-workspace, device-local. One <code>name: value</code> per line. Reference a secret from any field with <code>\${secret:name}</code>. Drag a <code>secrets.txt</code> onto the app to
+        re-import.
+      </p>
+      <textarea placeholder="githubPAT: ghp_…" .value=${this.secretsText} @input=${this.onSecretsInput}></textarea>
+      <div class="secrets-actions">
+        <button type="button" class="ghost" ?disabled=${this.secretsText.trim().length === 0} @click=${this.downloadSecrets}><span class="mi sm">download</span> Download secrets.txt</button>
+      </div>
+    </div>`;
+  }
+
+  /** One General field by key — the two hand-rolled controls, shared with search. */
+  private renderGeneralField(key: string) {
+    if (key === 'workspaceTitle') return this.renderWorkspaceTitleField();
+    if (key === 'secrets') return this.renderSecretsField();
+    return nothing;
+  }
+
   private renderGeneral() {
     return html`
       <h3>General</h3>
@@ -554,26 +702,65 @@ export class SettingsDialog extends LitElement {
         Workspace settings sync with this workspace; values marked
         <em>user</em> stay on this device only.
       </p>
-      <div class="field">
-        <div class="field-head"><label>Workspace title</label></div>
-        <p class="desc">Shown in the header instead of "easyDBAccess". Leave blank to use the default.</p>
-        <input type="text" placeholder="easyDBAccess" .value=${this.workspaceTitle} @change=${(e: Event) => this.setWorkspaceTitle((e.target as HTMLInputElement).value)} />
-      </div>
-      <div class="field">
-        <div class="field-head"><label>Secrets</label></div>
-        <p class="desc">
-          Cross-workspace, device-local. One <code>name: value</code> per line. Reference a secret from any field with <code>\${secret:name}</code>. Drag a <code>secrets.txt</code> onto the app to
-          re-import.
-        </p>
-        <textarea placeholder="githubPAT: ghp_…" .value=${this.secretsText} @input=${this.onSecretsInput}></textarea>
-        <div class="secrets-actions">
-          <button type="button" class="ghost" ?disabled=${this.secretsText.trim().length === 0} @click=${this.downloadSecrets}><span class="mi sm">download</span> Download secrets.txt</button>
-        </div>
-      </div>
+      ${this.renderWorkspaceTitleField()} ${this.renderSecretsField()}
     `;
   }
 
+  /**
+   * The search result: every matching field, under the name of the tab it lives
+   * in. Grouped rather than flat, because a label alone ("Colours a window can
+   * be painted") does not say where to go back to next time.
+   *
+   * The controls are the REAL ones, not a preview — a setting found here is
+   * changed here, which is the whole point of searching for it.
+   */
+  private renderResults() {
+    const hits = this.hits();
+    const total = hitCount(hits);
+    if (total === 0) {
+      return html`<h3>No matches</h3>
+        <p class="empty">Nothing in Settings matches “${this.query}”. Try one word, or a word from the setting's own description.</p>`;
+    }
+    return html`
+      <h3>${total} ${total === 1 ? 'setting' : 'settings'} matching “${this.query}”</h3>
+      ${hits.map(
+        (hit) =>
+          html`<div class="group">
+            <button type="button" class="group-head" title=${`Go to ${hit.tabName}`} @click=${() => this.goToTab(hit.tabId)}>${hit.tabName} <span class="mi sm">chevron_right</span></button>
+            ${hit.tabId === GENERAL
+              ? hit.keys.map((k) => this.renderGeneralField(k))
+              : (() => {
+                  const tab = this.tabs.find((t) => t.id === hit.tabId);
+                  return tab ? hit.keys.map((k) => this.renderFieldByKey(tab, k)) : nothing;
+                })()}
+          </div>`,
+      )}
+    `;
+  }
+
+  /**
+   * The tab list. While a search is running each tab carries how many of its
+   * fields matched, and a tab with none is dimmed — so the list doubles as a map
+   * of where the answer is, instead of going quiet while the results are shown.
+   */
+  private renderTabButtons() {
+    const searching = this.query.trim() !== '';
+    const counts = searching ? hitsByTab(this.hits()) : {};
+    const button = (id: string, name: string) => {
+      const n = counts[id] ?? 0;
+      const classes = [searching ? (n > 0 ? 'has-hits' : 'no-hits') : this.active === id ? 'active' : ''].filter(Boolean).join(' ');
+      return html`<button type="button" class=${classes} @click=${() => this.goToTab(id)}>${name}${searching && n > 0 ? html`<span class="count">${n}</span>` : nothing}</button>`;
+    };
+    return html`${button(GENERAL, 'General')}${this.tabs.map((t) => button(t.id, t.name))}`;
+  }
+
+  private renderFieldByKey(tab: Tab, key: string) {
+    const field = tab.fields.find((f) => f.key === key);
+    return field ? this.renderField(tab, field) : nothing;
+  }
+
   private renderPanel() {
+    if (this.query.trim() !== '') return this.renderResults();
     if (this.active === GENERAL) return this.renderGeneral();
     const tab = this.tabs.find((t) => t.id === this.active);
     if (!tab) return nothing;
@@ -600,8 +787,8 @@ export class SettingsDialog extends LitElement {
           <div class="dialog-body">
             <div class="layout">
               <nav class="tabs">
-                <button type="button" class=${this.active === GENERAL ? 'active' : ''} @click=${() => (this.active = GENERAL)}>General</button>
-                ${this.tabs.map((t) => html`<button type="button" class=${this.active === t.id ? 'active' : ''} @click=${() => (this.active = t.id)}>${t.name}</button>`)}
+                <input class="search" type="search" placeholder="Search settings…" aria-label="Search settings" .value=${this.query} @input=${this.onSearch} @keydown=${this.onSearchKeydown} />
+                ${this.renderTabButtons()}
               </nav>
               <section class="panel">${this.renderPanel()}</section>
             </div>

@@ -8,6 +8,23 @@ Click the gear icon in the header. This opens a tabbed dialog.
 
 There's no Save button. Each field saves as soon as you change it.
 
+## Finding a setting
+
+The box above the tab list searches **every tab at once**, so you do not have to
+know which tab a setting is in. The dialog opens with the box focused — start
+typing.
+
+Each result is headed by the tab it came from, and the tab list shows how many
+matches each tab holds. The controls in the results are the real ones: change the
+setting where you found it.
+
+- The search covers a setting's name, its description, its help text and its
+  technical key — so "pink" finds the two highlight settings by their description
+  alone.
+- Two words mean both: `map tile` finds "Map tile URL template".
+- Click the tab name above a result to leave the search and open that tab.
+- **Esc** clears the search. A second **Esc** closes the dialog.
+
 ## General tab vs. plugin tabs
 
 - **General** — the workspace title, and the secrets store (see below).
