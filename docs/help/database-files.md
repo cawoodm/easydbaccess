@@ -239,6 +239,33 @@ loading costs you nothing, but it does replace what is on screen:
 When there is nothing to load, the message after the sync says which: the file is
 up to date, or you have unsaved changes here — a Save is what that wants.
 
+### Save will not write over someone else's work
+
+The other half of the same problem. Reading the file is something you ask for;
+**writing** it is something Save and autosave do on their own, and until v0.0.455
+they did it without looking.
+
+Now every write checks the file first. The app remembers the exact date and size
+of the file the moment it last wrote it, so if either has changed, something else
+wrote it — and it stops and asks rather than replacing that work:
+
+| Choice                | What happens                                                     |
+| --------------------- | ---------------------------------------------------------------- |
+| **Use disk version**  | Nothing is written. The other machine's file stays as it is.      |
+| **Use local version** | Your copy is written over it.                                     |
+| Closing the dialog    | The same as Use disk version — nothing is written.                |
+
+Keeping the disk version does not lose your work: it is still here, and still
+unsaved. **Sync workspace folder** is how you read the file in when you are ready.
+
+Two things you will not see:
+
+- **Nothing on an ordinary save.** The check is silent unless the file has really
+  moved, and the very first save into a new file asks nothing at all — there is
+  no earlier version of it to disagree with.
+- **No repeat every few seconds.** If autosave hits this and you say leave it, it
+  will not ask again until the file changes again.
+
 If your copy has changes that were never saved AND the file has been written
 since, either answer costs you something, so the sync asks which copy you want to
 keep:

@@ -69,9 +69,7 @@ describe('markdownToHtml: inline', () => {
 
   it('links a bare URL in running text, whatever its protocol', () => {
     // A cell whose whole value IS the URL has no `[…](…)` to write.
-    expect(markdownToHtml('file:///C:/projects/file.html')).toBe(
-      '<p><a href="file:///C:/projects/file.html" target="_blank" rel="noopener noreferrer">file:///C:/projects/file.html</a></p>',
-    );
+    expect(markdownToHtml('file:///C:/projects/file.html')).toBe('<p><a href="file:///C:/projects/file.html" target="_blank" rel="noopener noreferrer">file:///C:/projects/file.html</a></p>');
     expect(markdownToHtml('see https://x.dev here')).toContain('<a href="https://x.dev"');
   });
 

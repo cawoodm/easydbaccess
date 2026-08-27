@@ -11,6 +11,8 @@
 
 ### Bugs
 
+- 🪲 A save could replace a `.edb` that another tab, browser or machine had written since, without asking (v0.0.455)
+
 - 🪲 Clicking a `file:///` link opened a blank tab saying nothing, because a browser will not open a local file from a web page (v0.0.452)
 - 🪲 A Markdown or HTML cell showed a `file:///` or `ftp://` link as plain text, while the same value in a Link column was a link (v0.0.450)
 

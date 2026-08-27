@@ -425,6 +425,41 @@ One trap this cost: `sql-import` claimed the drop first, because its MIME test w
 `type.includes('sql')` and the type this app puts on its own database files is
 `application/x-sqlite3`. It now matches only a type ENDING in `sql`.
 
+## No write goes out over a file that has moved
+
+`file-stamp.ts` records a file's exact `mtime` and `size` at every moment our
+copy and it agreed — the import, and every write we made. If the file no longer
+matches that stamp, **something else wrote it**: another origin (`:5190` and
+`:5191` are different origins and share nothing but the folder), another browser
+profile, or another machine through a synced folder.
+
+Until v0.0.455 only the SYNC command read the stamp. `persist()` wrote
+unconditionally, so an autosave tick would replace that work with no question
+asked — the one loss the app cannot undo, since the bytes it overwrote were the
+only copy. Every write now compares first (`mayOverwriteFile`), and a difference
+puts the same two-sided question in front of the user that a Save-over-a-file
+clash does: **Use disk version** (write nothing) or **Use local version**.
+
+Four details, each of which is the reason something is quiet:
+
+- **Only a positive difference stops a write.** No stamp answers `unknown` —
+  which is every first save into a new file — and there is nothing to be alarmed
+  about in a difference nobody can measure. `ahead` is the ordinary Save: our
+  copy has changes and the file has not moved.
+- **The autosave timer asks once per state of the file.** A decline is remembered
+  against the facts it answered about (`markWriteDeclined`), so the question
+  returns only when the file changes again. The verdict does not improve by being
+  declined, and a modal every thirty seconds is worse than the problem it reports.
+  A MANUAL Save always asks — the user just asked for something.
+- **The decline is in memory, not `localStorage`.** It is a decision about the
+  session in front of you; a reload is a fresh look at the file.
+- **A successful write clears it** (`clearWriteDeclined`) and records a fresh
+  stamp, so the file is ours again and the next save is silent.
+
+What this does NOT do is notice the outside write on its own. The File System
+Access API has no change events, so that would be a poll, and nothing polls: the
+tab finds out when it next tries to write, or when the user runs Sync.
+
 ## Two things deliberately absent
 
 - **New .edb file** — New workspace → Advanced already creates a workspace in its

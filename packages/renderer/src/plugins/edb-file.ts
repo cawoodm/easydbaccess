@@ -17,7 +17,7 @@ import {
   writeBytes,
 } from '../db/edb/file-handle.js';
 import { activeEdbName, adoptedFileName, reloadWithoutSpace, reloadWithSpace, setActiveEdbName } from '../db/edb/session.js';
-import { factsOfHandle, markLocalChanges, recordAgreement } from '../db/edb/file-stamp.js';
+import { clearWriteDeclined, compareWithFile, factsOfHandle, markWriteDeclined, markLocalChanges, readStamp, recordAgreement, writeDeclined } from '../db/edb/file-stamp.js';
 import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
 import { cloneWorkspace } from '../db/clone-workspace.js';
 import { deleteWorkspace } from '../db/delete-workspace.js';
@@ -338,6 +338,87 @@ export function init(api: HostApi): void {
     return wrote;
   }
 
+  const KEEP_FILE = 'Use disk version';
+  const OVERWRITE_FILE = 'Use local version';
+
+  /**
+   * May we write over this file?
+   *
+   * The file's timestamp and size are recorded at every moment our copy and it
+   * agreed — the import, and every write we made (`recordAgreement`). If the file
+   * no longer matches that stamp, SOMETHING ELSE WROTE IT: another origin, another
+   * profile, another machine through a synced folder. Writing anyway destroys that
+   * work, and it is the one loss the app cannot undo.
+   *
+   * Only a positive difference stops the write. No stamp at all answers `unknown`
+   * — a file we have never agreed with, which is every first save into a new file
+   * — and there is nothing to be alarmed about in a difference nobody can measure.
+   * `ahead` is the ordinary Save: our copy has changes, the file has not moved.
+   *
+   * `auto` is the autosave timer. It gets the same question but asks it once per
+   * state of the file: the verdict does not improve by being declined, and a modal
+   * every thirty seconds is worse than the problem it reports. A manual Save always
+   * asks, because the user just asked for something and deserves an answer.
+   */
+  async function mayOverwriteFile(handle: FileSystemFileHandle, auto: boolean): Promise<boolean> {
+    const file = activeEdbName();
+    const now = await factsOfHandle(handle);
+    // Unreadable is not "changed": the permission check above already passed, so
+    // this is a transient failure and the write is the user's own instruction.
+    if (!now) return true;
+    const verdict = compareWithFile(readStamp(file), now);
+    if (verdict !== 'file-newer' && verdict !== 'conflict') return true;
+    if (auto && writeDeclined(file, now)) return false;
+
+    const sides = compareCopies([
+      { label: 'In this browser', facts: await openContentsFacts() },
+      { label: file, facts: { ...(await countsInFileHandle(handle)), ...now } },
+    ]);
+    const answer = await api.ui.dialogs.choice(
+      `${file} has been written since this tab last saved it — by another tab, another browser or another machine. Saving now would replace that work.${sides}`,
+      [KEEP_FILE, OVERWRITE_FILE],
+      'Save',
+    );
+    if (answer === OVERWRITE_FILE) return true;
+    // Dismissing means the same as keeping the file: the safe answer, and the only
+    // one that touches nothing. Loading it is a Sync, which is one command away and
+    // says what it will cost before it does it.
+    markWriteDeclined(file, now);
+    if (answer === KEEP_FILE) {
+      api.ui.dialogs.toast(`Left ${file} as it is. Run "Sync workspace folder" to read it in.`, { kind: 'info', title: 'Save' });
+    }
+    return false;
+  }
+
+  /** What the OPEN database holds, for the side-by-side. Best effort. */
+  async function openContentsFacts(): Promise<CopyFacts> {
+    const workspaceId = api.workspaceId();
+    if (!workspaceId) return {};
+    try {
+      const c = await countWorkspaceContents(storeBridge(), workspaceId, { countRows: false });
+      return { tables: c.tables, views: c.views };
+    } catch {
+      return {};
+    }
+  }
+
+  /** Tables and views inside a file, totalled across every workspace it holds. */
+  async function countsInFileHandle(handle: FileSystemFileHandle): Promise<CopyFacts> {
+    const live = edbBridge();
+    if (!live) return {};
+    try {
+      const bytes = new Uint8Array(await (await handle.getFile()).arrayBuffer());
+      const inside = workspaceDocs(await live.peekWorkspaces(bytes));
+      if (inside.length === 0) return {};
+      return {
+        tables: inside.reduce((n, w) => n + w.tables, 0),
+        views: inside.reduce((n, w) => n + w.views, 0),
+      };
+    } catch {
+      return {};
+    }
+  }
+
   /**
    * Write the workspace to the user's file.
    *
@@ -348,8 +429,11 @@ export function init(api: HostApi): void {
    *
    * Save does not hand over a download either. A save is about the workspace
    * surviving; producing a copy to give away is what Export is for.
+   *
+   * `auto` marks the autosave timer's call — see `mayOverwriteFile`, the one
+   * place the two differ.
    */
-  async function persist(): Promise<SaveResult> {
+  async function persist(opts: { auto?: boolean } = {}): Promise<SaveResult> {
     const bridge = edbBridge();
     if (!bridge) return { where: 'none', alsoWrote: [] };
     const handle = edbHandle();
@@ -358,7 +442,12 @@ export function init(api: HostApi): void {
       await api.ui.dialogs.alert('easyDBAccess is not allowed to write that file. Run the "Connect workspace folder" command to grant it again.', 'Save');
       return { where: 'none', alsoWrote: [] };
     }
+    // Before the bytes go out, not after: this is the only check standing between
+    // an autosave tick and somebody else's afternoon.
+    if (!(await mayOverwriteFile(handle, opts.auto === true))) return { where: 'none', alsoWrote: [] };
     await writeBytes(handle, await bytesForFile(bridge));
+    // The file is ours again, so an earlier "leave it alone" no longer applies.
+    clearWriteDeclined(activeEdbName());
     // The file now holds this workspace, so record what it looks like. That is what
     // lets a later sync tell "someone else wrote this file" from "we wrote it
     // ourselves" — see `file-stamp.ts`.
@@ -390,7 +479,7 @@ export function init(api: HostApi): void {
 
   const autosave = createAutosavePolicy({
     save: async () => {
-      if ((await persist()).where !== 'no-handle') return;
+      if ((await persist({ auto: true })).where !== 'no-handle') return;
       // Same rule as a manual Save: a connected folder needs no question. The
       // folder's grant covers creating the file, so this works from a timer,
       // which has no user gesture of its own.
