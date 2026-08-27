@@ -106,8 +106,13 @@ saying how many there were. If it matches none, you get a message rather than an
 empty window.
 
 Markdown and preview columns are shown formatted, as if you had clicked the
-popup icon in the cell. Every other column is shown as plain text — a preview is
-for reading, so it never offers an editor onto a record you may not have open.
+popup icon in the cell. Every other column is shown as plain text — the value is
+never mounted as a live editor onto a record you may not have open.
+
+The window's header says which column and which record you are looking at, and
+its **Edit** button opens the value's source in a textarea. Saving writes that
+one field of that one record, with the same rules the grid applies — a read-only
+table or column says **View source** instead and has nothing to save.
 
 ## Links
 

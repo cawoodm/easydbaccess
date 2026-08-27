@@ -260,6 +260,18 @@ rows to write to yet.
 | **HTML (render)**  | Renders the HTML directly in the cell, and lets you edit it inline.                                                                          |
 | **Script**         | Runs a small script you write to build the cell's HTML from the whole row — for fully custom layouts.                                        |
 
+#### The preview window
+
+The popup icon on a **HTML (preview)** or **Markdown** cell opens the value in
+its own window. Above it sits a header naming the column, with an **Edit**
+button: it opens the same source textarea that clicking the cell's text opens, so
+a typo you notice while reading can be fixed where you noticed it. Save and the
+window shows the new value straight away.
+
+On a read-only table or column the button says **View source** and the textarea
+cannot be typed into. On a **scripted** column Edit opens the stored value the
+script reads — never the output on screen, which saving would overwrite.
+
 #### What the Link renderer treats as a link
 
 **Any scheme**, not just the web: `https://…`, `file:///C:/reports/june.pdf`,

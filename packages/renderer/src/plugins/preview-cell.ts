@@ -227,18 +227,33 @@ export class PreviewCell extends HTMLElement {
 
   private openWindow() {
     const content = previewFrame();
-    const html = this.toHtml(this._value);
-    if (html !== null) content.innerHTML = html;
-    else content.append(preformatted(this._value));
-    openPreviewPopup(this.title_, content);
+    const fill = () => {
+      content.innerHTML = '';
+      const html = this.toHtml(this._value);
+      if (html !== null) content.innerHTML = html;
+      else content.append(preformatted(this._value));
+    };
+    fill();
+    // The window's own header carries the way in to the editor, so a typo spotted
+    // in the value can be fixed from where it was spotted. `fill` runs again after
+    // a save, because the reader is looking at the value they just changed.
+    openPreviewPopup(this.title_, content, {
+      label: this.title_,
+      editLabel: this._readonly ? 'View source' : 'Edit',
+      onEdit: () => this.openEditor(fill),
+    });
   }
 
   /**
    * Edit the SOURCE in a textarea panel. On a scripted column that is the
    * stored cell (`rawValue`), not the script output shown in the popup —
    * saving the output would overwrite the Markdown or HTML the script reads.
+   *
+   * `after` repaints an open preview window. Only for the unscripted case: a
+   * script's output is recomputed by whatever reads the row next, and this element
+   * cannot run the script to find out what it now says.
    */
-  private openEditor() {
+  private openEditor(after?: () => void) {
     const scripted = this._source !== undefined;
     const source = scripted ? this._source! : this._value;
     // Read-only: the same panel, opened to READ. Nothing here can save, and the
@@ -253,6 +268,7 @@ export class PreviewCell extends HTMLElement {
       } else {
         this._value = next;
         this.render();
+        after?.();
       }
       this.dispatchEvent(new CustomEvent('change', { detail: { value: next }, bubbles: true, composed: true }));
     });

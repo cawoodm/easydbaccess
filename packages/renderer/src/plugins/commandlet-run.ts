@@ -8,13 +8,15 @@
 //   - search rides the `easydb:table-search` / `easydb:set-search` events,
 //   - `cmd/` looks up the id in `registries.commands`.
 
-import type { ColumnSpec, CommandSpec, SortSpec, Table, ViewInstance } from '@easydb/shared';
+import type { ColumnSpec, CommandSpec, Row, SortSpec, Table, ViewInstance } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { focusTableWindow } from '../window-mgr/table-window-manager.js';
 import { revealViewWindow } from '../window-mgr/view-window-manager.js';
 import { CommandletError, parseCommandlets, substituteCommandlet, type Commandlet } from './commandlet-lang.js';
-import { planPreview } from './commandlet-preview.js';
+import { keyColumnOf, planPreview } from './commandlet-preview.js';
+import { openHtmlEditor } from './html-cell-editor.js';
 import { openPreviewPopup, previewFrame, renderValue } from './preview-popup.js';
+import { validateValue } from '../table/validate-value.js';
 import { readRows } from '../db/row-reader.js';
 import { evaluateRow } from '../views/view-render.js';
 
@@ -292,16 +294,64 @@ async function runPreview(cmd: Commandlet, ctx: CommandletContext): Promise<void
   // Scripted columns are computed first, exactly as the grid and a view compute
   // them. The stored cell behind a script is empty, so previewing one without
   // this showed an empty window for a column plainly full of text on screen.
-  const data = evaluateRow(row, table.columns).data;
-  const label = plan.field.label || plan.field.field;
-  openPreviewPopup(`${table.name} — ${label}`, previewBody(data[plan.field.field], plan.field, app.registries.cellRenderers));
+  const field = plan.field;
+  const label = field.label || field.field;
+  const frame = previewFrame();
+  const draw = (r: Row) => {
+    frame.innerHTML = '';
+    frame.append(renderValue(evaluateRow(r, table.columns).data[field.field], field, app.registries.cellRenderers));
+  };
+  draw(row);
+
+  // A `preview/…` window is often opened from a link, with the row it shows not on
+  // screen at all — so the header names the record, and its button is the only way
+  // to correct the value without hunting for the table first.
+  //
+  // The write is the grid's write: same validation, same `patch`, same refusal on
+  // a read-only table or column. What it cannot check is `unique`, which needs
+  // every row of the table; the next edit in the grid, or Validate, catches that.
+  const key = keyColumnOf(table);
+  const keyValue = key ? String(row.data[key.field] ?? '') : '';
+  const writable = table.readonly !== true && field.readonly !== true;
+  let current = row;
+
+  openPreviewPopup(`${table.name} — ${label}`, frame, {
+    label,
+    note: keyValue || undefined,
+    editLabel: writable ? 'Edit' : 'View source',
+    onEdit: () => {
+      // The STORED cell, not the computed one: saving a script's output over the
+      // value the script reads would destroy it.
+      const source = current.data[field.field];
+      const text = source == null ? '' : String(source);
+      if (!writable) {
+        openHtmlEditor(`View ${label}`, text, () => undefined, { readonly: true });
+        return;
+      }
+      openHtmlEditor(`Edit ${label}`, text, (next) => void saveField(current, field, next, table, draw, (r) => (current = r)));
+    },
+  });
 }
 
-/** The content element: the value drawn by its own column's renderer. */
-function previewBody(value: unknown, column: ColumnSpec, renderers: Map<string, string>): HTMLElement {
-  const frame = previewFrame();
-  frame.append(renderValue(value, column, renderers));
-  return frame;
+/** The one write a preview window can make. Mirrors `data-table`'s `commitCell`. */
+async function saveField(row: Row, field: ColumnSpec, next: string, table: Table, draw: (r: Row) => void, keep: (r: Row) => void): Promise<void> {
+  const app = await getContext();
+  const reason = validateValue(field, next, [], row.id, row);
+  if (reason) {
+    await app.api.ui.dialogs.alert(reason, `Cannot save ${field.label || field.field}`);
+    return;
+  }
+  try {
+    const saved = await app.store.rows(table.id).patch(row.id, {
+      data: { ...row.data, [field.field]: next },
+      updatedAt: Date.now(),
+    });
+    keep(saved);
+    draw(saved);
+  } catch (err) {
+    // A remote row source can refuse the write — read-only table, expired token.
+    await app.api.ui.dialogs.alert((err as Error)?.message ?? 'Could not save the change.', 'Save failed');
+  }
 }
 
 /** `Title==Berlin + Year==2026`, for a message a person has to act on. */
