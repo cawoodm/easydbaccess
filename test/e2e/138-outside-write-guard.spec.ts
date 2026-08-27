@@ -37,6 +37,9 @@ async function boot(page: Page, workspaceId: string): Promise<void> {
 }
 
 const saveButton = (page: Page) => page.locator('app-shell').getByRole('button', { name: /Save/ });
+/** The two blunt answers, as the buttons word them. */
+const PUSH = 'Push — overwrite the file from here';
+const PULL = 'Pull — overwrite this copy from the file';
 const dialog = (page: Page) => page.locator('host-dialogs');
 
 /** Size and mtime of a file in the stub folder. */
@@ -107,25 +110,16 @@ test('a file written by something else stops the save and says so', async ({ pag
   await saveButton(page).click();
 
   await expect(dialog(page).getByText(/has been written since this tab last saved it/)).toBeVisible({ timeout: 20_000 });
-  await expect(dialog(page).getByRole('button', { name: 'Use disk version', exact: true })).toBeVisible();
-  await expect(dialog(page).getByRole('button', { name: 'Use local version', exact: true })).toBeVisible();
+  // Four answers since v0.0.4xx, not two: the blunt pair is still here, with the
+  // two that settle the copies table by table in front of them. See
+  // `139-replication-merge.spec.ts` for what those do.
+  await expect(dialog(page).getByRole('button', { name: 'Take newest', exact: true })).toBeVisible();
+  await expect(dialog(page).getByRole('button', { name: 'Compare tables…', exact: true })).toBeVisible();
+  await expect(dialog(page).getByRole('button', { name: PUSH })).toBeVisible();
+  await expect(dialog(page).getByRole('button', { name: PULL })).toBeVisible();
 
   // Nothing written while the question is open.
   expect(await statFile(page, 'guarded.edb')).toEqual(before);
-});
-
-test('keeping the disk version leaves the file untouched and says what to do next', async ({ page }) => {
-  await savedIntoFolder(page, 'kept');
-  await outsideWrite(page, 'kept.edb');
-  const before = await statFile(page, 'kept.edb');
-
-  await saveButton(page).click();
-  await expect(dialog(page).getByText(/has been written since this tab last saved it/)).toBeVisible({ timeout: 20_000 });
-  await dialog(page).getByRole('button', { name: 'Use disk version', exact: true }).click();
-
-  expect(await statFile(page, 'kept.edb')).toEqual(before);
-  // Not a dead end: the way to read the file in is named.
-  await expect(page.locator('toast-host')).toContainText('Sync workspace folder');
 });
 
 test('choosing the local version goes ahead and writes', async ({ page }) => {
@@ -135,7 +129,7 @@ test('choosing the local version goes ahead and writes', async ({ page }) => {
 
   await saveButton(page).click();
   await expect(dialog(page).getByText(/has been written since this tab last saved it/)).toBeVisible({ timeout: 20_000 });
-  await dialog(page).getByRole('button', { name: 'Use local version', exact: true }).click();
+  await dialog(page).getByRole('button', { name: PUSH }).click();
 
   await expect(page.locator('toast-host')).toContainText('forced.edb', { timeout: 30_000 });
   await expect.poll(async () => (await statFile(page, 'forced.edb')).size).not.toBe(before.size);
@@ -147,7 +141,7 @@ test('once written, the file is ours again and the next save is quiet', async ({
 
   await saveButton(page).click();
   await expect(dialog(page).getByText(/has been written since this tab last saved it/)).toBeVisible({ timeout: 20_000 });
-  await dialog(page).getByRole('button', { name: 'Use local version', exact: true }).click();
+  await dialog(page).getByRole('button', { name: PUSH }).click();
   await expect(page.locator('toast-host')).toContainText('again.edb', { timeout: 30_000 });
 
   // The write recorded a fresh stamp, so the file matches us once more.
@@ -165,10 +159,13 @@ test('dismissing the question writes nothing', async ({ page }) => {
   await expect(dialog(page).getByText(/has been written since this tab last saved it/)).toBeVisible({ timeout: 20_000 });
   await page.keyboard.press('Escape');
 
-  // Dismissing means the same as keeping the file — the safe answer, and the
-  // only one that touches nothing.
+  // None of the four answers is "leave both alone" — dismissing is, as it is for
+  // every other `choice` in this app, and it is the only one that touches
+  // nothing.
   await expect(dialog(page).getByText(/has been written since/)).toBeHidden();
   expect(await statFile(page, 'dismissed.edb')).toEqual(before);
+  // Not a dead end: the way to read the file in is named.
+  await expect(page.locator('toast-host')).toContainText('Sync workspace folder');
 });
 
 test('the question shows both sides', async ({ page }) => {

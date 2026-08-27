@@ -36,6 +36,7 @@ import type { SqlDriver } from './sql-driver.js';
 import type { SqlRunOptions, SqlRunResult } from './sql-run.js';
 import { decodeValue, encodeValue, quoteIdent, sqlAffinity, sqlTableNameFor } from './sql-mapping.js';
 import type { CloneMode, ColumnSpec, Row, WorkspaceContents } from './types.js';
+import type { RowStamp, TableStamp } from './replicate.js';
 import { settingId } from './setting-key.js';
 import { activeColumnScript } from './column-scripts.js';
 
@@ -328,6 +329,68 @@ export class EdbStore {
     if (sqlTable === null) return 0;
     const r = this.db.prepare(`SELECT COUNT(*) AS n FROM ${quoteIdent(sqlTable)}`).get();
     return Number(r?.n ?? 0);
+  }
+
+  // -- comparing two copies ----------------------------------------------
+  //
+  // What `replicate.ts` needs to tell two copies of a workspace apart, gathered
+  // WITHOUT reading a row. Both live here rather than in the caller because both
+  // need the physical table name, which is storage's own business.
+
+  /**
+   * One stamp per table of a workspace: the doc's own, plus the newest row in it.
+   *
+   * Two aggregates per table and nothing else, so this is affordable on a folder
+   * of large workspaces — which is the point, since it runs before the user has
+   * asked for anything more than "is this file different".
+   *
+   * A doc whose physical table has gone (raw SQL can do that) counts as empty
+   * rather than throwing: this answers a question about what is there, and a
+   * table nobody can read is a difference to show, not an error to raise.
+   */
+  tableStamps(workspaceId: string): TableStamp[] {
+    const out: TableStamp[] = [];
+    for (const stored of this.storedTableDocs()) {
+      if (stored.workspaceId !== workspaceId) continue;
+      const sqlTable = String(stored[SQL_TABLE_KEY]);
+      let rows = 0;
+      let lastRowAt = 0;
+      try {
+        const r = this.db.prepare(`SELECT COUNT(*) AS n, MAX(_updatedAt) AS last FROM ${quoteIdent(sqlTable)}`).get();
+        rows = Number(r?.n ?? 0);
+        lastRowAt = Number(r?.last ?? 0);
+      } catch {
+        /* no such table — reported as an empty one */
+      }
+      out.push({
+        id: String(stored.id),
+        name: typeof stored.name === 'string' ? stored.name : String(stored.id),
+        updatedAt: Number(stored.updatedAt ?? 0),
+        rows,
+        lastRowAt,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Every row of one table as an id and a timestamp.
+   *
+   * Only asked for a table the user has opened the record comparison on, so it is
+   * bounded by that one table — and by two numbers per row rather than the row,
+   * which is what keeps a big table comparable at all.
+   */
+  rowStamps(tableId: string): RowStamp[] {
+    const stored = this.getRaw('tables', tableId);
+    if (!stored) return [];
+    try {
+      return this.db
+        .prepare(`SELECT _id, _updatedAt FROM ${quoteIdent(String(stored[SQL_TABLE_KEY]))}`)
+        .all()
+        .map((r) => ({ id: String(r._id), updatedAt: Number(r._updatedAt ?? 0) }));
+    } catch {
+      return [];
+    }
   }
 
   // -- whole workspaces --------------------------------------------------

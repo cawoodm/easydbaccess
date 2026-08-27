@@ -22,6 +22,7 @@ kind belongs here; anything else does not.
 | `src/array-cell.ts`    | How an `array` cell's members are read out of its three spellings (comma list, JSON-array text, real array). Here because `column-filter.ts` needs it — a filter token matches any one member.       |
 | `src/filter-sql.ts`    | The same tokens as a SQL `WHERE` fragment. Cross-tested against the matcher.                                                                                                                         |
 | `src/sql-mapping.ts`   | SQL type ↔ `ColumnType` mapping, shared by import and export.                                                                                                                                        |
+| `src/replicate.ts`     | Comparing two copies of ONE workspace: pair the tables up, pair the rows up, decide a winner. Pure. `newest` never deletes — see the note in the file.                                               |
 | `src/index.ts`         | Just barrel re-exports.                                                                                                                                                                              |
 
 ## Hot rule: lockstep across packages

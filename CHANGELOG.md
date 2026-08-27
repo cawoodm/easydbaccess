@@ -4,6 +4,7 @@
 
 ### Features
 
+- 🪶 A `.edb` that another machine wrote is settled table by table and row by row: Take newest, Compare tables, Push or Pull (v0.0.459)
 - ✨ Editing a list cell suggests the values that column already holds, so a tag vocabulary stops drifting by typing (v0.0.458)
 - ✨ The header search box stays open while it holds a query, instead of collapsing to an icon that could not say what was being filtered (v0.0.457)
 - ✨ One box above the Settings tabs searches every tab at once, showing each match under the tab it lives on (v0.0.456)

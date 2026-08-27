@@ -69,7 +69,7 @@ function isMutation(req: EdbRequest): req is Extract<EdbRequest, { coll: string 
   }
 }
 
-async function open(bytes: Uint8Array | null, name: string): Promise<void> {
+async function open(bytes: Uint8Array | null, name: string, scratch = false): Promise<void> {
   sqlite3 ??= await sqlite3InitModule();
   driver?.close();
   mirror?.dispose();
@@ -78,7 +78,11 @@ async function open(bytes: Uint8Array | null, name: string): Promise<void> {
   dbName = name;
   workspaceKey = name;
 
-  const pool = await ensurePool(sqlite3);
+  // A throwaway copy never asks for the pool. It is exclusive origin-wide and the
+  // LIVE worker holds it, so a second worker asking makes the browser refuse the
+  // access handles that worker is already using — which is a real error in the
+  // session the user is looking at, caused by a database nobody will keep.
+  const pool = scratch ? null : await ensurePool(sqlite3);
   if (pool) {
     // The durable path. The file already holds whatever previous sessions
     // wrote, so there is nothing to restore and nothing to debounce.
@@ -86,7 +90,7 @@ async function open(bytes: Uint8Array | null, name: string): Promise<void> {
     tunePooledDb(db);
     pooled = { path: poolPath(name), exportFile: (p) => pool.exportFile(p) };
   } else {
-    await openInMemory(bytes, name);
+    await openInMemory(bytes, name, scratch);
   }
 
   driver = wasmDriver(sqlite3, require(db, 'database opened'));
@@ -101,10 +105,12 @@ async function open(bytes: Uint8Array | null, name: string): Promise<void> {
  * written in it — so it exists to keep such a browser working rather than to be
  * a second supported way of running.
  */
-async function openInMemory(bytes: Uint8Array | null, name: string): Promise<void> {
+async function openInMemory(bytes: Uint8Array | null, name: string, scratch = false): Promise<void> {
   const s3 = require(sqlite3, 'sqlite3 used');
-  // With no file to open, the last mirror is the only copy there is.
-  const source = bytes && bytes.byteLength > 0 ? bytes : ((await readMirror(name))?.bytes ?? null);
+  // With no file to open, the last mirror is the only copy there is — except for
+  // a scratch database, which is a copy of bytes the caller already has and has
+  // no history worth looking for.
+  const source = bytes && bytes.byteLength > 0 ? bytes : scratch ? null : ((await readMirror(name))?.bytes ?? null);
   if (source && source.byteLength > 0) {
     // `p` hands SQLite a pointer it then owns, which is why the bytes are copied
     // into WASM memory first rather than passed by reference.
@@ -115,6 +121,11 @@ async function openInMemory(bytes: Uint8Array | null, name: string): Promise<voi
   } else {
     db = new s3.oo1.DB(':memory:');
   }
+
+  // Nothing to mirror for a throwaway: the mirror is crash recovery for the
+  // user's workspace, and writing one here would leave a file behind and add a
+  // second writer to an OPFS the live worker is already using.
+  if (scratch) return;
 
   const key = name;
   mirror = createAutosavePolicy({
@@ -234,6 +245,10 @@ function handle(req: EdbRequest): unknown {
       return s().cloneWorkspace({ from: req.from, to: req.to, name: req.name, mode: req.mode });
     case 'runSql':
       return s().runSql(req.sql, { params: req.params, write: req.write, maxRows: req.maxRows });
+    case 'tableStamps':
+      return s().tableStamps(req.workspaceId);
+    case 'rowStamps':
+      return s().rowStamps(req.tableId);
     case 'dbName':
       return dbName;
     default:
@@ -329,7 +344,7 @@ async function renameDatabase(from: string, to: string): Promise<boolean> {
 async function handleAsync(req: EdbRequest): Promise<unknown> {
   switch (req.op) {
     case 'open':
-      return open(req.bytes, req.name);
+      return open(req.bytes, req.name, req.scratch === true);
     case 'restore':
       // Kept for protocol compatibility only. The pooled database loads itself
       // and the memory fallback reads its own mirror, so nobody needs bytes

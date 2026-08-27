@@ -15,6 +15,7 @@ import { afterRename, misfiledFiles, withoutFiles, type FileIdentity } from './f
 import { factsOf, factsOfHandle, readStamp, recordDivergence, verdictFor } from './file-stamp.js';
 import { decideActiveFileSync, type ActiveFileOutcome } from './active-file-sync.js';
 import { compareCopies, sizeChangeNote, type CopyFacts } from './copy-facts.js';
+import { COMPARE, NEWEST } from './merge-answers.js';
 import { activeEdbName, adoptedFileName } from './session.js';
 import { adoptFolderFile, reloadActiveFromFile } from './space-adopt.js';
 
@@ -61,6 +62,19 @@ type OverwriteInFile = (localId: string, file: string, fileId: string) => Promis
 
 /** Give every workspace the folder does not hold a file of its own; names them. */
 type FileTheRest = () => Promise<string[]>;
+
+/**
+ * Settle this tab's own file table by table, instead of picking one whole copy.
+ *
+ * Passed in rather than called directly, because it needs the worker bridge and
+ * the workspace id — neither of which this module has, and both of which the
+ * `edb-file` plugin already holds. Answers true when a merge actually ran; false
+ * when the user backed out of it, which leaves both copies untouched.
+ *
+ * Absent by default, and then only Load and Overwrite are offered — which is what
+ * every caller outside the browser build has.
+ */
+type MergeActiveFile = (handle: FileSystemFileHandle, mode: 'newest' | 'compare') => Promise<boolean>;
 
 /**
  * Rename the workspace inside `file` from `from` to `to`, in the file itself.
@@ -365,6 +379,7 @@ export async function syncFolder(
   overwrite: OverwriteInFile,
   fileTheRest: FileTheRest = () => Promise.resolve([]),
   rename: RenameInFile = () => Promise.resolve(false),
+  merge: MergeActiveFile | null = null,
 ): Promise<SyncReport> {
   const { index, files, unreadable } = await scanFolder(dir);
 
@@ -414,7 +429,7 @@ export async function syncFolder(
   // browser copy they discarded.
   const wrote = await fileTheRest();
 
-  const active = await refreshActiveFile(dir, dialogs, overwrite, open, index);
+  const active = await refreshActiveFile(dir, dialogs, overwrite, open, index, merge);
 
   return {
     files: files.length,
@@ -451,7 +466,14 @@ export async function syncFolder(
  * Sync that appeared to do nothing was — and it is reached by ordinary use, since
  * an Overwrite once cleared the stamp that makes the comparison possible.
  */
-async function refreshActiveFile(dir: FileSystemDirectoryHandle, dialogs: Dialogs, overwrite: OverwriteInFile, open: readonly { id: string }[], index: FolderIndex): Promise<ActiveFileOutcome> {
+async function refreshActiveFile(
+  dir: FileSystemDirectoryHandle,
+  dialogs: Dialogs,
+  overwrite: OverwriteInFile,
+  open: readonly { id: string }[],
+  index: FolderIndex,
+  merge: MergeActiveFile | null,
+): Promise<ActiveFileOutcome> {
   const file = adoptedFileName();
   if (!file) return 'no-file';
   const handle = await fileInFolder(dir, file, false);
@@ -488,22 +510,42 @@ async function refreshActiveFile(dir: FileSystemDirectoryHandle, dialogs: Dialog
   // copy may be the real one and only the user knows which.
   const question =
     plan === 'ask-unknown'
-      ? `This tab has ${file} open, but this browser has no record of when the two last agreed, so it cannot tell which is newer. Which copy do you want to keep?${sides}`
-      : `${file} has been written since this tab read it, and there are unsaved changes here. Which copy do you want to keep?${sides}${since}`;
-  const answer = await dialogs.choice(question, [LOAD, OVERWRITE], 'Sync workspace folder');
-  if (answer === LOAD) return (await reloadActiveFromFile(file)) ? 'loaded' : 'missing';
-  if (answer === OVERWRITE) {
-    // Per workspace, not the whole file: the newer copy on disk may hold
-    // workspaces this tab has never seen, and they are not ours to drop.
-    // Same id on both sides here: this is THIS tab's own file, so the copy inside
-    // it is the one this workspace was written from.
-    for (const w of open) await overwrite(w.id, file, w.id);
-    // What the file looks like NOW, plus the note that this database is not a copy
-    // of it — the file may hold workspaces we did not write. See `recordDivergence`.
-    const written = handle ? await factsOfHandle(handle) : null;
-    if (written) recordDivergence(file, written);
-    return 'overwritten';
+      ? `This tab has ${file} open, but this browser has no record of when the two last agreed, so it cannot tell which is newer.${sides}`
+      : `${file} has been written since this tab read it, and there are unsaved changes here.${sides}${since}`;
+
+  // The four-answer question, where there is something to compare WITH. Both of
+  // these states mean both copies may hold work, so "which one do you want to
+  // keep" was always the wrong question — it just used to be the only one this
+  // layer could act on.
+  if (merge && handle) {
+    const answer = await dialogs.choice(`${question}`, [NEWEST, COMPARE, OVERWRITE, LOAD], 'Sync workspace folder');
+    if (answer === NEWEST || answer === COMPARE) return (await merge(handle, answer === NEWEST ? 'newest' : 'compare')) ? 'merged' : 'kept';
+    if (answer === LOAD) return (await reloadActiveFromFile(file)) ? 'loaded' : 'missing';
+    if (answer !== OVERWRITE) return 'kept';
+    return overwriteWholeFile(file, handle, open, overwrite);
   }
+
+  const answer = await dialogs.choice(`${question} Which copy do you want to keep?`, [LOAD, OVERWRITE], 'Sync workspace folder');
+  if (answer === LOAD) return (await reloadActiveFromFile(file)) ? 'loaded' : 'missing';
+  if (answer === OVERWRITE) return overwriteWholeFile(file, handle, open, overwrite);
   // Dismissed. Both copies stay exactly as they are, which is what Cancel meant.
   return 'kept';
+}
+
+/**
+ * Write this tab's copy over the file — the blunt answer, kept for the two
+ * callers above.
+ *
+ * Per workspace, not the whole file: the newer copy on disk may hold workspaces
+ * this tab has never seen, and they are not ours to drop. Same id on both sides,
+ * because this is THIS tab's own file and the copy inside it is the one this
+ * workspace was written from.
+ */
+async function overwriteWholeFile(file: string, handle: FileSystemFileHandle | null, open: readonly { id: string }[], overwrite: OverwriteInFile): Promise<ActiveFileOutcome> {
+  for (const w of open) await overwrite(w.id, file, w.id);
+  // What the file looks like NOW, plus the note that this database is not a copy
+  // of it — the file may hold workspaces we did not write. See `recordDivergence`.
+  const written = handle ? await factsOfHandle(handle) : null;
+  if (written) recordDivergence(file, written);
+  return 'overwritten';
 }

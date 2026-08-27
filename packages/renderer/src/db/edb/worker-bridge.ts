@@ -1,4 +1,4 @@
-import type { DistinctPage, DistinctQuery, RowPage, RowQuery, SqlRunResult, WorkspaceContents } from '@easydb/shared';
+import type { DistinctPage, DistinctQuery, RowPage, RowQuery, RowStamp, SqlRunResult, TableStamp, WorkspaceContents } from '@easydb/shared';
 import type { EasydbStoreBridge } from '../data-store-bridge.js';
 import type { EdbCall, EdbRequest, EdbResponse, PeekedWorkspace } from './protocol.js';
 
@@ -16,8 +16,15 @@ export interface EdbBridge extends EasydbStoreBridge {
   onWarning(cb: (message: string) => void): () => void;
   /** The database as bytes, for Save to write to the user's file. */
   export(): Promise<Uint8Array>;
-  /** Replace the contents — a fresh workspace, or a file the user just opened. */
-  open(bytes: Uint8Array | null, name: string): Promise<void>;
+  /**
+   * Replace the contents — a fresh workspace, or a file the user just opened.
+   *
+   * `scratch` is for a THROWAWAY worker holding a copy nobody will keep: it stays
+   * off the `opfs-sahpool` VFS and writes no mirror. Both matter, because the
+   * pool is exclusive origin-wide — a second worker asking for it makes the
+   * browser refuse the live session's own access handles.
+   */
+  open(bytes: Uint8Array | null, name: string, opts?: { scratch?: boolean }): Promise<void>;
   /**
    * Put a database under `name` where the next boot will find it, without
    * switching to it.
@@ -67,6 +74,13 @@ export interface EdbBridge extends EasydbStoreBridge {
    * prompt say how the copy in a file differs from the copy in this browser.
    */
   peekWorkspaces(bytes: Uint8Array): Promise<PeekedWorkspace[]>;
+  /**
+   * One stamp per table of a workspace, for comparing this database with another
+   * copy of it. Cheap by design — two aggregates per table, no rows.
+   */
+  tableStamps(workspaceId: string): Promise<TableStamp[]>;
+  /** Every row of one table as an id and a timestamp. */
+  rowStamps(tableId: string): Promise<RowStamp[]>;
   terminate(): void;
 }
 
@@ -111,13 +125,15 @@ export function createEdbBridge(): EdbBridge {
   }
 
   return {
-    open: (bytes, name) => call<void>({ op: 'open', bytes, name }),
+    open: (bytes, name, opts) => call<void>({ op: 'open', bytes, name, scratch: opts?.scratch }),
     restore: (name) => call<Uint8Array | null>({ op: 'restore', name }),
     importBytes: (name, bytes) => call<void>({ op: 'importBytes', name, bytes }),
     flush: () => call<void>({ op: 'flush' }),
     hasDatabase: (name) => call<boolean>({ op: 'hasDatabase', name }),
     renameDatabase: (from, to) => call<boolean>({ op: 'renameDatabase', from, to }),
     peekWorkspaces: (bytes) => call<PeekedWorkspace[]>({ op: 'peekWorkspaces', bytes }),
+    tableStamps: (workspaceId) => call<TableStamp[]>({ op: 'tableStamps', workspaceId }),
+    rowStamps: (tableId) => call<RowStamp[]>({ op: 'rowStamps', tableId }),
     export: () => call<Uint8Array>({ op: 'export' }),
     find: (coll, query, limit) => call<unknown[]>({ op: 'find', coll, query, limit }),
     findOne: (coll, key) => call<unknown | null>({ op: 'findOne', coll, key }),

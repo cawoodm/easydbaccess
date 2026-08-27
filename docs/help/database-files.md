@@ -247,16 +247,8 @@ they did it without looking.
 
 Now every write checks the file first. The app remembers the exact date and size
 of the file the moment it last wrote it, so if either has changed, something else
-wrote it — and it stops and asks rather than replacing that work:
-
-| Choice                | What happens                                                     |
-| --------------------- | ---------------------------------------------------------------- |
-| **Use disk version**  | Nothing is written. The other machine's file stays as it is.      |
-| **Use local version** | Your copy is written over it.                                     |
-| Closing the dialog    | The same as Use disk version — nothing is written.                |
-
-Keeping the disk version does not lose your work: it is still here, and still
-unsaved. **Sync workspace folder** is how you read the file in when you are ready.
+wrote it — and it stops and asks rather than replacing that work. What it asks is
+in the next section.
 
 Two things you will not see:
 
@@ -267,12 +259,15 @@ Two things you will not see:
   will not ask again until the file changes again.
 
 If your copy has changes that were never saved AND the file has been written
-since, either answer costs you something, so the sync asks which copy you want to
-keep:
+since, either whole-copy answer costs you something — so the sync offers the same
+four as a Save does, with **Take newest** and **Compare tables…** in front of
+them. See [When both copies have work in them](#when-both-copies-have-work-in-them).
 
 | Choice                     | What happens                                                                                         |
 | -------------------------- | ---------------------------------------------------------------------------------------------------- |
-| **Load disk version**      | The file wins. What is here is replaced by what the other machine saved.                             |
+| **Take newest**            | Settles it table by table, by the clock. Nothing that only one side has is lost.                     |
+| **Compare tables…**        | Decide table by table, and record by record.                                                          |
+| **Load disk version**      | The file wins, whole. What is here is replaced by what the other machine saved.                      |
 | **Overwrite disk version** | Your copy wins, written over the file's copy of that workspace. Its other workspaces are left alone. |
 | Closing the dialog         | Neither. Both copies stay as they are.                                                               |
 
@@ -293,11 +288,71 @@ sign the other machine added something.
 Turn autosave on, or press **Save** before you leave, and the question does not
 come up.
 
-The same two answers appear when this browser cannot compare the two copies at
+The same answers appear when this browser cannot compare the two copies at
 all — it has no record of when they last agreed, which is the case after you
 overwrite a file, or in a private window. Neither copy can be called the newer
 one, so the sync asks instead of guessing. Answering makes a record, so it only
 asks once.
+
+### When both copies have work in them
+
+Two machines, one shared folder, and both of you did something. The old question
+— keep the file, or keep yours — has no good answer here: whichever you pick, the
+other person's afternoon goes. So the app compares the two copies **table by
+table** instead, and offers four answers:
+
+| Answer             | What happens                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------ |
+| **Take newest**    | Settles every table by the clock, without asking anything else. Usually what you want. |
+| **Compare tables…** | Opens the list, so you can decide table by table — and record by record.             |
+| **Push**           | Your copy wins, whole. The file is overwritten.                                       |
+| **Pull**           | The file wins, whole. Your copy is replaced by it.                                    |
+| Closing the dialog | Neither. Both copies stay as they are.                                                |
+
+**Take newest never loses anything.** A table only you have and a table only the
+file has are BOTH kept — one is written out, the other is read in. Only where the
+two copies hold the same table differently does anything have to lose, and there
+the one written last wins.
+
+That is worth being clear about, because it is the one thing this cannot work
+out for itself: a table you deleted and a table the other machine has just added
+look exactly the same from here. Take newest keeps both rather than guessing, and
+you delete the one you did not want. **Push** and **Pull** are how you ask for a
+deletion, and they do exactly what they say.
+
+#### Compare tables
+
+The list names every table, what each side holds, and how they stand:
+
+```
+Alpha    Here: 12 rows, 3 Sep 2026, 14:02   File: 12 rows, 3 Sep 2026, 14:02   IN STEP
+Prices   Here: 40 rows, 3 Sep 2026, 16:20   File: 41 rows, 3 Sep 2026, 15:04   DIFFERS   [Newest ▾] [Compare records]
+Notes    Here: 8 rows,  3 Sep 2026, 11:00   File: —                            ONLY HERE [Newest ▾]
+```
+
+The side that was written last is picked out in green. Every table starts on
+**Newest**; change any of them to Push, Pull or Skip, and press **Merge**.
+Nothing is written on either side until you do — Cancel leaves both copies
+exactly as they were.
+
+#### Compare records
+
+For a table that differs, **Compare records** goes one level in and lists the
+rows that disagree — named by their first column, with the fields that changed
+and when each side was written. Each row takes the same four answers.
+
+Long lists are capped at 200 rows on screen; the "Set all" answer above the list
+covers the rest, and the dialog says how many that is.
+
+#### What a merge leaves alone
+
+A merge settles **tables and the rows in them**. Views, view templates and
+settings stay as each side has them. Afterwards your workspace still counts as
+unsaved — press **Save** to write the whole of it back out.
+
+You do not have to wait for a clash to do any of this: the command palette has
+**Compare workspace with its file**, which asks the same question at a moment of
+your choosing. If the two copies match, it says so and stops.
 
 ### A file whose name is not its workspace
 

@@ -13,3 +13,4 @@ export * from './edb-store.js';
 export * from './array-cell.js';
 export * from './text-column.js';
 export * from './column-scripts.js';
+export * from './replicate.js';

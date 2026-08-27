@@ -11,7 +11,17 @@ import type { CloneMode, DistinctQuery, RowQuery } from '@easydb/shared';
 
 /** A call the main thread makes into the worker. */
 export type EdbRequest =
-  | { id: number; op: 'open'; bytes: Uint8Array | null; name: string }
+  /**
+   * Open a database in this worker.
+   *
+   * `scratch` marks a THROWAWAY one — a copy opened to be read or filtered and
+   * then discarded. It changes two things, and both are about not fighting the
+   * live session: the `opfs-sahpool` VFS is not touched (it is exclusive
+   * origin-wide, so a second worker asking for it makes the browser refuse
+   * access handles the live worker already holds), and no OPFS mirror is
+   * written, because there is nothing here worth recovering after a crash.
+   */
+  | { id: number; op: 'open'; bytes: Uint8Array | null; name: string; scratch?: boolean | undefined }
   /**
    * Put a database into the substrate under `name`, WITHOUT switching to it.
    *
@@ -87,6 +97,17 @@ export type EdbRequest =
    * importing every file into the pool.
    */
   | { id: number; op: 'peekWorkspaces'; bytes: Uint8Array }
+  /**
+   * One stamp per table of a workspace — what tells two copies of it apart
+   * without reading a row. See `@easydb/shared`'s `replicate.ts`.
+   *
+   * Its own op rather than a `find('tables')` plus a count per table, because
+   * the row count and the newest row in each table are aggregates the store can
+   * answer in one statement and the caller cannot ask for at all.
+   */
+  | { id: number; op: 'tableStamps'; workspaceId: string }
+  /** Every row of one table as `{id, updatedAt}` — the record-level comparison. */
+  | { id: number; op: 'rowStamps'; tableId: string }
   | { id: number; op: 'dbName' };
 
 /**
