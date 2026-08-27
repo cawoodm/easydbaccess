@@ -283,6 +283,18 @@ Two things are deliberately **not** linked:
 refuses to open a local file from a web page, and does it silently — hover the
 link and the tooltip says so. The text is still there to copy.
 
+#### Links inside Markdown, HTML and view templates
+
+The same schemes work in a **Markdown** cell, a hand-written **HTML** cell and a
+view template — `[the report](file:///C:/reports/june.pdf)` is a link, and so is
+a bare `file:///C:/reports/june.pdf` written on its own. `javascript:`,
+`vbscript:` and `data:` are refused there too, and prose with a colon in it
+(`TODO:fix this`) is left alone.
+
+A bare URL is linked only where the author clearly meant one: written
+`scheme://…`, or with one of the few schemes that are real without it. Sentence
+punctuation stays out of the link, so `see https://x.dev.` keeps its full stop.
+
 ## Joining two tables by dragging a column
 
 Drag a column's grip out of one table's header and drop it on **another**

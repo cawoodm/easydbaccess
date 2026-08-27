@@ -58,6 +58,60 @@ describe('markdownToHtml: inline', () => {
     expect(markdownToHtml('<https://x.dev>')).toContain('<a href="https://x.dev"');
   });
 
+  it('links any protocol, not only http and mailto', () => {
+    // The renderer used to allow http, https, mailto and tel, so a table of
+    // local documents came out as plain text where a Link column linked it.
+    expect(markdownToHtml('[doc](file:///C:/projects/file.html)')).toContain('href="file:///C:/projects/file.html"');
+    expect(markdownToHtml('<file:///C:/notes.html>')).toContain('href="file:///C:/notes.html"');
+    expect(markdownToHtml('[f](ftp://host/f)')).toContain('href="ftp://host/f"');
+    expect(markdownToHtml('[v](obsidian://open?vault=v)')).toContain('href="obsidian://open?vault=v"');
+  });
+
+  it('links a bare URL in running text, whatever its protocol', () => {
+    // A cell whose whole value IS the URL has no `[…](…)` to write.
+    expect(markdownToHtml('file:///C:/projects/file.html')).toBe(
+      '<p><a href="file:///C:/projects/file.html" target="_blank" rel="noopener noreferrer">file:///C:/projects/file.html</a></p>',
+    );
+    expect(markdownToHtml('see https://x.dev here')).toContain('<a href="https://x.dev"');
+  });
+
+  it('leaves the sentence’s punctuation out of a bare link', () => {
+    expect(markdownToHtml('go to https://x.dev.')).toContain('>https://x.dev</a>.');
+    expect(markdownToHtml('(see https://x.dev)')).toContain('>https://x.dev</a>)');
+    // A closing bracket that BELONGS to the URL stays in it.
+    expect(markdownToHtml('https://en.wikipedia.org/wiki/Foo_(bar)')).toContain('href="https://en.wikipedia.org/wiki/Foo_(bar)"');
+  });
+
+  it('does not turn prose into a link', () => {
+    for (const text of ['TODO:fix this', 'Note:call back', 'ratio 3:4 and time 10:30']) {
+      expect(markdownToHtml(text), text).not.toContain('<a ');
+    }
+  });
+
+  it('does not link a bare javascript: or data: value', () => {
+    expect(markdownToHtml('javascript:alert(1)')).not.toContain('<a ');
+    expect(markdownToHtml('data:text/html;base64,PHN2Zz4=')).not.toContain('<a ');
+  });
+
+  it('does not re-link the URL of a link it just wrote', () => {
+    // The bare-URL pass runs after the `[…](…)` pass, so the href it finds in
+    // its own output would nest one anchor inside another.
+    const html = markdownToHtml('[t](https://x.dev)');
+    expect(html.match(/<a /g)).toHaveLength(1);
+    expect(html).toBe('<p><a href="https://x.dev" target="_blank" rel="noopener noreferrer">t</a></p>');
+  });
+
+  it('still reads emphasis in a link’s TEXT, and never in its URL', () => {
+    expect(markdownToHtml('[**bold**](https://x.dev)')).toContain('<strong>bold</strong>');
+    // `__` inside a URL is part of the URL, not a bold marker.
+    expect(markdownToHtml('https://x.dev/a__b')).toContain('href="https://x.dev/a__b"');
+    expect(markdownToHtml('https://x.dev/a__b')).not.toContain('<strong>');
+  });
+
+  it('leaves a URL inside a code span as code', () => {
+    expect(markdownToHtml('`https://x.dev`')).toBe('<p><code>https://x.dev</code></p>');
+  });
+
   it('turns two trailing spaces into a hard break', () => {
     expect(markdownToHtml('a  \nb')).toBe('<p>a<br>\nb</p>');
   });

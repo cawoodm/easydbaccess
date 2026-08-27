@@ -31,6 +31,7 @@
 
 import { esc, escEntityAware, safeUrl, sanitizeHtml, sanitizeTagOrText, stripUnsafe, TAG_RE } from './sanitize-html.js';
 import { looksLikeHtml } from './html-text.js';
+import { isBareLink } from './url-schemes.js';
 
 /**
  * Placeholder wrapper for an extracted code span. A private-use code point, so
@@ -92,6 +93,36 @@ function opensBlock(line: string): boolean {
   return FENCE_RE.test(line) || HEADING_RE.test(line) || HR_RE.test(line) || QUOTE_RE.test(line) || LIST_RE.test(line) || HTML_BLOCK_RE.test(line);
 }
 
+/**
+ * Split a bare URL from the punctuation that ends the SENTENCE, not the URL.
+ *
+ * `see https://x.dev.` ends in a full stop belonging to the prose, and a link
+ * that swallows it points somewhere that does not exist. A closing bracket is
+ * the one that needs counting rather than assuming: it is inside the URL in
+ * `https://en.wikipedia.org/wiki/Foo_(bar)` and outside it in `(see https://x.dev)`.
+ */
+function splitTrailing(token: string): { url: string; trail: string } {
+  let end = token.length;
+  while (end > 0) {
+    const ch = token[end - 1] ?? '';
+    if ('.,;:!?'.includes(ch)) {
+      end--;
+      continue;
+    }
+    if (ch === ')') {
+      const head = token.slice(0, end);
+      const opens = (head.match(/\(/g) ?? []).length;
+      const closes = (head.match(/\)/g) ?? []).length;
+      if (closes > opens) {
+        end--;
+        continue;
+      }
+    }
+    break;
+  }
+  return { url: token.slice(0, end), trail: token.slice(end) };
+}
+
 /** Inline spans: code first (its contents are literal), then the rest. */
 function inline(src: string): string {
   // `code` wins over every other marker, so it is extracted before anything
@@ -116,19 +147,49 @@ function inline(src: string): string {
 
   s = escEntityAware(s);
 
+  /**
+   * Park an ATTRIBUTE VALUE in the placeholder list, so no later rule can see
+   * inside it.
+   *
+   * The bare-URL autolinker below would otherwise find the `href` of a link this
+   * pass has just written and link it again, nesting anchors — and an emphasis
+   * marker inside a URL (`…/a__b`) would come out as `<strong>`. Only the value
+   * is hidden, never the whole anchor: the link TEXT of `[**bold**](url)` still
+   * has to reach the emphasis rules.
+   */
+  const hide = (value: string): string => {
+    spans.push(value);
+    return `${SENTINEL}${spans.length - 1}${SENTINEL}`;
+  };
+
   // Images before links — `![a](b)` shares the link shape.
   s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g, (m, alt: string, url: string, title?: string) => {
     const href = safeUrl(url);
-    return href === null ? m : `<img src="${href}" alt="${alt}"${title ? ` title="${title}"` : ''}>`;
+    return href === null ? m : `<img src="${hide(href)}" alt="${hide(alt)}"${title ? ` title="${hide(title)}"` : ''}>`;
   });
   s = s.replace(/\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g, (m, text: string, url: string, title?: string) => {
     const href = safeUrl(url);
-    return href === null ? m : `<a href="${href}"${title ? ` title="${title}"` : ''}${newTabAttrs(href)}>${text}</a>`;
+    return href === null ? m : `<a href="${hide(href)}"${title ? ` title="${hide(title)}"` : ''}${newTabAttrs(href)}>${text}</a>`;
   });
-  // Autolink: <https://…>, already escaped to &lt;…&gt;.
-  s = s.replace(/&lt;((?:https?|mailto):[^\s&]+)&gt;/g, (m, url: string) => {
+  // Autolink: <https://…>, <file:///…>, already escaped to &lt;…&gt;. Any scheme,
+  // with `safeUrl` as the only gate — the same rule the Link renderer uses.
+  s = s.replace(/&lt;([a-zA-Z][a-zA-Z0-9+.-]*:[^\s&]+)&gt;/g, (m, url: string) => {
     const href = safeUrl(url);
-    return href === null ? m : `<a href="${href}"${newTabAttrs(href)}>${href}</a>`;
+    return href === null ? m : `<a href="${hide(href)}"${newTabAttrs(href)}>${hide(href)}</a>`;
+  });
+  // A bare URL in running text, the way every other markdown renderer does it —
+  // and the way a cell holding nothing but `file:///C:/notes.html` needs, since
+  // there is no `[…](…)` to write in a value that IS the URL.
+  //
+  // `isBareLink` is what decides, so this cannot disagree with the Link cell
+  // renderer about what a URL is: a scheme with `//`, or one of the few that are
+  // real without it. That is what keeps `TODO:fix this` out of an anchor.
+  s = s.replace(/(^|[\s(])([a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>&"'\]]+)/g, (m, before: string, token: string) => {
+    const { url, trail } = splitTrailing(token);
+    if (!isBareLink(url)) return m;
+    const href = safeUrl(url);
+    if (href === null) return m;
+    return `${before}<a href="${hide(href)}"${newTabAttrs(href)}>${hide(url)}</a>${trail}`;
   });
 
   s = s.replace(/~~([\s\S]+?)~~/g, '<del>$1</del>');

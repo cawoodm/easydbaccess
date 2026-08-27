@@ -55,6 +55,28 @@ test('the popup icon opens the formatted Markdown', async ({ page }) => {
   await expect(popup.locator('.jsPanel-content pre')).toHaveCount(0);
 });
 
+test('a link of any protocol is a link in the popup', async ({ page }) => {
+  // The renderer allowed http, https, mailto and tel and nothing else, so a note
+  // pointing at a local document came out as plain text — while the very same
+  // path in a Link column rendered as a link.
+  const id = await mdTable(page, 'mdprotocols', 'See [the doc](file:///C:/projects/file.html) and file:///C:/notes.html');
+  await cellOf(page, id).locator('button').click();
+
+  const popup = popupOf(page);
+  await expect(popup.locator('.jsPanel-content a').first()).toHaveAttribute('href', 'file:///C:/projects/file.html');
+  // The bare one too: a cell whose value IS the URL has no `[…](…)` to write.
+  await expect(popup.locator('.jsPanel-content a').nth(1)).toHaveAttribute('href', 'file:///C:/notes.html');
+});
+
+test('a javascript: link is still refused', async ({ page }) => {
+  const id = await mdTable(page, 'mdnojs', 'Do not [click](javascript:alert(1)) this');
+  await cellOf(page, id).locator('button').click();
+
+  const popup = popupOf(page);
+  await expect(popup.locator('.jsPanel-content a')).toHaveCount(0);
+  await expect(popup.locator('.jsPanel-content')).toContainText('javascript:alert(1)');
+});
+
 test('clicking the text edits the Markdown source', async ({ page }) => {
   const id = await mdTable(page, 'mdedit');
   const cell = cellOf(page, id);

@@ -11,25 +11,7 @@
 // Any scheme works now, `file:///` included, which is what a table of local
 // documents needs.
 
-/**
- * Schemes that RUN something when followed. Never linkable, whatever the value
- * says.
- *
- * This is the reason "any scheme" needs a rule at all. Cell values arrive from
- * an import, a sync pull or a workspace someone sent, so a `javascript:` value
- * in a table is a script somebody else wrote waiting for a click. `data:` is the
- * same trick with a payload attached.
- */
-const DANGEROUS = new Set(['javascript', 'vbscript', 'data']);
-
-/**
- * Schemes that are real links without a `//` authority.
- *
- * Everything else must be written `scheme://…` to count, because a bare
- * `word:something` is far more often prose — `TODO:fix this`, `Note:call back` —
- * than a URI, and turning that into a link is worse than missing an exotic one.
- */
-const NO_AUTHORITY = new Set(['mailto', 'tel', 'sms', 'callto', 'geo', 'urn', 'magnet', 'bitcoin']);
+import { DANGEROUS_SCHEMES, NO_AUTHORITY_SCHEMES } from '../util/url-schemes.js';
 
 /** RFC 3986: scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ). */
 const SCHEME = /^([a-z][a-z0-9+.-]*):(\/\/)?/i;
@@ -65,8 +47,8 @@ export function detectLink(s: string): DetectedLink | null {
   if (!m) return null;
   const scheme = (m[1] ?? '').toLowerCase();
   const authority = m[2] === '//';
-  if (DANGEROUS.has(scheme)) return null;
-  if (!authority && !NO_AUTHORITY.has(scheme)) return null;
+  if (DANGEROUS_SCHEMES.has(scheme)) return null;
+  if (!authority && !NO_AUTHORITY_SCHEMES.has(scheme)) return null;
   // Nothing after the scheme is not a link — `http://` on its own goes nowhere.
   if (t.length === m[0].length) return null;
   const spaced = /\s/.test(t);

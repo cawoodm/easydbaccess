@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 27 Aug 2026
+
+### Bugs
+
+- 🪲 A Markdown or HTML cell showed a `file:///` or `ftp://` link as plain text, while the same value in a Link column was a link (v0.0.450)
+
 ## 26 Aug 2026
 
 ### Features
