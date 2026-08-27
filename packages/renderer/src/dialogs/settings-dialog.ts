@@ -7,6 +7,7 @@ import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@marc
 import { watchDialogDirty } from '../chrome/dirty-guard.js';
 import { parseSecrets, readSecretsText, readUserSetting, writeSecretsText } from '../db/user-settings.js';
 import { emitSettingsChanged } from '../db/settings-events.js';
+import { countFields, matchSettings, type SearchTab } from './settings-search.js';
 
 const GENERAL = '__general__';
 
@@ -15,6 +16,31 @@ interface Tab {
   name: string;
   fields: SettingsFieldSpec[];
 }
+
+/**
+ * The General tab's two boxes, as field specs — for SEARCH only.
+ *
+ * They are not registered settings: the workspace title is a `Workspace` column
+ * and the secrets store is a device-local text file, so each has its own control
+ * written into `renderGeneral`. But "secrets" is one of the first things anyone
+ * types into a settings search, and a search that could not find the only page
+ * holding them would read as broken. `renderGeneralField` maps a key back to its
+ * control.
+ */
+const GENERAL_FIELDS: SettingsFieldSpec[] = [
+  {
+    key: 'workspaceTitle',
+    label: 'Workspace title',
+    type: 'string',
+    description: 'Shown in the header instead of "easyDBAccess". Leave blank to use the default.',
+  },
+  {
+    key: 'secrets',
+    label: 'Secrets',
+    type: 'text',
+    description: 'Cross-workspace, device-local. One name: value per line. Reference a secret from any field with ${secret:name}. Tokens, passwords, API keys.',
+  },
+];
 
 /**
  * Tabbed Settings dialog. The General tab holds the cross-workspace secrets
@@ -38,6 +64,37 @@ export class SettingsDialog extends LitElement {
         grid-template-columns: 180px 1fr;
         gap: 1rem;
         min-height: 340px;
+      }
+      /* Above the tabs, not inside the panel: it searches every tab. */
+      .search {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        margin-bottom: 0.75rem;
+        padding: 0.25rem 0.5rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.35rem;
+        color: #6b7280;
+      }
+      .search:focus-within {
+        border-color: #1d4ed8;
+      }
+      .search input {
+        flex: 1 1 auto;
+        min-width: 0;
+        border: 0;
+        padding: 0.2rem 0;
+        font: inherit;
+        color: #111827;
+        background: transparent;
+      }
+      .search input:focus {
+        outline: none;
+      }
+      .search button {
+        flex: none;
+        padding: 0;
+        line-height: 1;
       }
       .tabs {
         display: flex;
@@ -247,6 +304,8 @@ export class SettingsDialog extends LitElement {
    * so a tab of fields with help does not turn into a wall of text.
    */
   @state() private openHelp = '';
+  /** The search box. Empty ⇒ the dialog behaves exactly as it always did. */
+  @state() private query = '';
   private dialogEl: HTMLDialogElement | null = null;
 
   override firstUpdated() {
@@ -287,6 +346,9 @@ export class SettingsDialog extends LitElement {
     this.placements = placements;
     this.secretsText = readSecretsText();
     this.active = GENERAL;
+    // Every open starts on a clean search. A stale query would hide the tab the
+    // user came for behind results they had forgotten they asked for.
+    this.query = '';
 
     await this.updateComplete;
     this.dialogEl?.showModal();
@@ -350,7 +412,7 @@ export class SettingsDialog extends LitElement {
       // On the native `cancel` (Esc) event, preventDefault keeps the dialog open.
       e?.preventDefault();
       const first = bad[0]!;
-      this.active = first.tab.id;
+      this.showField(first.tab.id);
       this.secretError =
         `“${first.field.label}” must be empty or a \${secret:name} reference. ` +
         `Move the value into the secrets store (General tab) and reference it, ` +
@@ -361,7 +423,7 @@ export class SettingsDialog extends LitElement {
     if (dangling.length > 0) {
       e?.preventDefault();
       const first = dangling[0]!;
-      this.active = first.tab.id;
+      this.showField(first.tab.id);
       const names = first.names.map((n) => `“${n}”`).join(', ');
       this.secretError =
         `“${first.field.label}” references ${names}, which the secrets store does not have. ` +
@@ -547,19 +609,10 @@ export class SettingsDialog extends LitElement {
     </div>`;
   }
 
-  private renderGeneral() {
-    return html`
-      <h3>General</h3>
-      <p class="blurb">
-        Workspace settings sync with this workspace; values marked
-        <em>user</em> stay on this device only.
-      </p>
-      <div class="field">
-        <div class="field-head"><label>Workspace title</label></div>
-        <p class="desc">Shown in the header instead of "easyDBAccess". Leave blank to use the default.</p>
-        <input type="text" placeholder="easyDBAccess" .value=${this.workspaceTitle} @change=${(e: Event) => this.setWorkspaceTitle((e.target as HTMLInputElement).value)} />
-      </div>
-      <div class="field">
+  /** One of the General tab's two hand-written controls, by its search key. */
+  private renderGeneralField(key: string) {
+    if (key === 'secrets') {
+      return html`<div class="field">
         <div class="field-head"><label>Secrets</label></div>
         <p class="desc">
           Cross-workspace, device-local. One <code>name: value</code> per line. Reference a secret from any field with <code>\${secret:name}</code>. Drag a <code>secrets.txt</code> onto the app to
@@ -569,11 +622,56 @@ export class SettingsDialog extends LitElement {
         <div class="secrets-actions">
           <button type="button" class="ghost" ?disabled=${this.secretsText.trim().length === 0} @click=${this.downloadSecrets}><span class="mi sm">download</span> Download secrets.txt</button>
         </div>
-      </div>
+      </div>`;
+    }
+    return html`<div class="field">
+      <div class="field-head"><label>Workspace title</label></div>
+      <p class="desc">Shown in the header instead of "easyDBAccess". Leave blank to use the default.</p>
+      <input type="text" placeholder="easyDBAccess" .value=${this.workspaceTitle} @change=${(e: Event) => this.setWorkspaceTitle((e.target as HTMLInputElement).value)} />
+    </div>`;
+  }
+
+  private renderGeneral() {
+    return html`
+      <h3>General</h3>
+      <p class="blurb">
+        Workspace settings sync with this workspace; values marked
+        <em>user</em> stay on this device only.
+      </p>
+      ${GENERAL_FIELDS.map((f) => this.renderGeneralField(f.key))}
+    `;
+  }
+
+  /** Every tab a search covers — the real ones plus General's two boxes. */
+  private searchTabs(): SearchTab[] {
+    return [{ id: GENERAL, name: 'General', fields: GENERAL_FIELDS }, ...this.tabs];
+  }
+
+  /**
+   * What matched, grouped under the tab each field lives on — so the answer says
+   * where the setting is, and the field itself is right there to change. Every
+   * control is the real one, not a copy: it is `renderField`, so the (i) help, the
+   * `user` checkbox and the auto-save all work from the results.
+   */
+  private renderResults() {
+    const groups = matchSettings(this.searchTabs(), this.query);
+    if (groups.length === 0) {
+      return html`<p class="empty">No setting matches “${this.query}”.</p>`;
+    }
+    const n = countFields(groups);
+    return html`
+      <p class="blurb">${n} setting${n === 1 ? '' : 's'} match “${this.query}”.</p>
+      ${groups.map(
+        (g) => html`
+          <h3>${g.name}</h3>
+          ${g.id === GENERAL ? g.fields.map((f) => this.renderGeneralField(f.key)) : g.fields.map((f) => this.renderField({ id: g.id, name: g.name, fields: g.fields }, f))}
+        `,
+      )}
     `;
   }
 
   private renderPanel() {
+    if (this.query.trim() !== '') return this.renderResults();
     if (this.active === GENERAL) return this.renderGeneral();
     const tab = this.tabs.find((t) => t.id === this.active);
     if (!tab) return nothing;
@@ -581,6 +679,21 @@ export class SettingsDialog extends LitElement {
       <h3>${tab.name}</h3>
       ${tab.fields.length === 0 ? html`<p class="empty">This plugin registered no settings.</p>` : tab.fields.map((f) => this.renderField(tab, f))}
     `;
+  }
+
+  /**
+   * Put a named tab on screen, whatever the search box says. A blocked close
+   * points at the field that blocked it, and a live query could be hiding it.
+   */
+  private showField(tabId: string): void {
+    this.query = '';
+    this.active = tabId;
+  }
+
+  /** Picking a tab ends the search — the tab IS the answer to "where is it". */
+  private pickTab(id: string) {
+    this.query = '';
+    this.active = id;
   }
 
   override render() {
@@ -598,10 +711,24 @@ export class SettingsDialog extends LitElement {
           </div>
           ${this.secretError ? html`<div class="secret-error" role="alert">${this.secretError}</div>` : nothing}
           <div class="dialog-body">
+            <div class="search">
+              <span class="mi sm" aria-hidden="true">search</span>
+              <input
+                type="search"
+                aria-label="Search settings"
+                placeholder="Search all settings…"
+                autofocus
+                .value=${this.query}
+                @input=${(e: Event) => (this.query = (e.target as HTMLInputElement).value)}
+              />
+              ${this.query
+                ? html`<button type="button" class="ghost" title="Clear the search" aria-label="Clear the search" @click=${() => (this.query = '')}><span class="mi sm">close</span></button>`
+                : nothing}
+            </div>
             <div class="layout">
               <nav class="tabs">
-                <button type="button" class=${this.active === GENERAL ? 'active' : ''} @click=${() => (this.active = GENERAL)}>General</button>
-                ${this.tabs.map((t) => html`<button type="button" class=${this.active === t.id ? 'active' : ''} @click=${() => (this.active = t.id)}>${t.name}</button>`)}
+                <button type="button" class=${this.active === GENERAL && !this.query ? 'active' : ''} @click=${() => this.pickTab(GENERAL)}>General</button>
+                ${this.tabs.map((t) => html`<button type="button" class=${this.active === t.id && !this.query ? 'active' : ''} @click=${() => this.pickTab(t.id)}>${t.name}</button>`)}
               </nav>
               <section class="panel">${this.renderPanel()}</section>
             </div>
