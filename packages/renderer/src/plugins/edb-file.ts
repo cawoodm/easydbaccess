@@ -14,7 +14,6 @@ import {
   rememberHandle,
   rememberedFolder,
   rememberedHandle,
-  writeBytes,
 } from '../db/edb/file-handle.js';
 import { activeEdbName, adoptedFileName, reloadWithoutSpace, reloadWithSpace, setActiveEdbName } from '../db/edb/session.js';
 import { factsOfHandle, markLocalChanges, recordAgreement } from '../db/edb/file-stamp.js';
@@ -35,6 +34,9 @@ import { createIpcDataStore } from '../db/data-store-bridge.js';
 import { adoptEdbFile, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
 import { adoptFolderFile, clearPendingSpaceRequest, pendingSpaceRequest, reloadActiveFromFile } from '../db/edb/space-adopt.js';
 import { alsoWroteNote, withoutTheirOwnFile, writableWholesale } from '../db/edb/one-per-file.js';
+import { installWriteGuard, writeUserBytes, type WriteGuardDeps } from '../db/edb/guarded-write.js';
+import { describeHolding, firstWarning, refusedNote, secondWarning, type Holding } from '../db/edb/empty-write.js';
+import { dangerConfirm } from '../dialogs/danger-confirm.js';
 import { freeWorkspaceId, spaceFileName, workspaceIdFromFileName } from '../db/edb/space-resolve.js';
 
 /**
@@ -305,6 +307,48 @@ export function init(api: HostApi): void {
     return out;
   }
 
+  /**
+   * Every write to a file the user owns goes through here.
+   *
+   * The rule itself is in `db/edb/empty-write.ts` and the door in
+   * `db/edb/guarded-write.ts`; this is only the wiring — which bridge peeks the
+   * bytes, which dialog asks, what the user is told when a write is stopped.
+   *
+   * Answers whether the bytes were written. Every caller must treat `false` as
+   * "nothing happened": no stamp recorded, no "saved" toast, and above all no
+   * `markClean`, which would turn a write the user STOPPED into the same data loss
+   * on the next reload.
+   */
+  function writeGuardDeps(): WriteGuardDeps {
+    return {
+      // A missing bridge means nothing can be measured. Answering with a holding
+      // that looks USED keeps today's behaviour — the write goes ahead — rather
+      // than making an unmeasurable moment look like the dangerous one.
+      peek: async (b) => {
+        const live = edbBridge();
+        return live ? await live.peekWorkspaces(b) : [{ tables: 1, views: 0 }];
+      },
+      confirm: (f, onDisk: Holding, writing: Holding) =>
+        dangerConfirm({
+          title: 'This save would empty the file',
+          message: firstWarning(f, onDisk, writing),
+          secondMessage: secondWarning(f, onDisk),
+          confirmLabel: 'Replace the file anyway',
+          secondConfirmLabel: `Delete ${describeHolding(onDisk)}`,
+        }),
+      onRefused: (f) => api.ui.dialogs.toast(refusedNote(f), { kind: 'info', title: 'Save stopped' }),
+    };
+  }
+
+  async function writeUserFile(handle: FileSystemFileHandle, bytes: Uint8Array, file: string, reason: string): Promise<boolean> {
+    return writeUserBytes(handle, bytes, { file, reason }, writeGuardDeps());
+  }
+
+  // Every OTHER writer of a user's file — `new-file.ts` building one from a
+  // picker — reaches the same guard through this, because it cannot reach the
+  // dialog or the live worker itself.
+  installWriteGuard(writeGuardDeps());
+
   async function fileTheStranded(opts: { skipEmpty?: boolean; includeActive?: boolean } = {}): Promise<string[]> {
     const dir = await connectedFolder();
     if (!dir) return [];
@@ -330,7 +374,7 @@ export function init(api: HostApi): void {
       const name = spaceFileName(id);
       const handle = await fileInFolder(dir, name, true);
       if (!handle) continue;
-      await writeBytes(handle, await workspaceOnlyBytes(id, `Giving ${name} its own file`));
+      if (!(await writeUserFile(handle, await workspaceOnlyBytes(id, `Giving ${name} its own file`), name, 'Giving a workspace its own file'))) continue;
       const facts = await factsOfHandle(handle);
       if (facts) recordAgreement(name, facts);
       wrote.push(name);
@@ -358,7 +402,10 @@ export function init(api: HostApi): void {
       await api.ui.dialogs.alert('easyDBAccess is not allowed to write that file. Run the "Connect workspace folder" command to grant it again.', 'Save');
       return { where: 'none', alsoWrote: [] };
     }
-    await writeBytes(handle, await bytesForFile(bridge));
+    // A refusal is not a failure: the user was asked whether to replace the file
+    // with an empty workspace and said no. `where: 'none'` is what `save()` reads
+    // as "nothing happened", so the workspace is NOT marked clean.
+    if (!(await writeUserFile(handle, await bytesForFile(bridge), activeEdbName(), 'Save'))) return { where: 'none', alsoWrote: [] };
     // The file now holds this workspace, so record what it looks like. That is what
     // lets a later sync tell "someone else wrote this file" from "we wrote it
     // ourselves" — see `file-stamp.ts`.
@@ -854,7 +901,7 @@ export function init(api: HostApi): void {
         createIpcDataStore(scratch, () => workspaceId),
         workspaceId,
       );
-      await writeBytes(handle, await scratch.export());
+      if (!(await writeUserFile(handle, await scratch.export(), file, 'Overwrite the copy in a file'))) return;
       api.ui.dialogs.toast(`Wrote this workspace over the copy in ${file}.`, { kind: 'success' });
     } finally {
       scratch.terminate();
@@ -893,7 +940,7 @@ export function init(api: HostApi): void {
       await cloneWorkspace(scratch, { from, to, name: to, mode: 'all' });
       if (title) await scratch.patch('workspaces', to, { title });
       await scratch.deleteWorkspace?.(from);
-      await writeBytes(handle, await scratch.export());
+      if (!(await writeUserFile(handle, await scratch.export(), file, 'Rename the workspace in a file'))) return false;
       api.ui.dialogs.toast(`The workspace in ${file} is now "${to}".`, { kind: 'success' });
       return true;
     } catch (err) {
