@@ -12,10 +12,10 @@ browser tab opens on the desktop and back again.
 
 ## Two extensions, and the difference is the invariant
 
-| Extension | What it is                | Workspaces | Where                                     |
-| --------- | ------------------------- | ---------- | ----------------------------------------- |
-| `.edb`    | A workspace file the user owns | **exactly one**, the one the file name says | the user's workspace folder, or anywhere they put it |
-| `.edp`    | The **project index** — this browser's own database | any number   | the origin-private OPFS pool, never on disk |
+| Extension | What it is                                          | Workspaces                                  | Where                                                |
+| --------- | --------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------- |
+| `.edb`    | A workspace file the user owns                      | **exactly one**, the one the file name says | the user's workspace folder, or anywhere they put it |
+| `.edp`    | The **project index** — this browser's own database | any number                                  | the origin-private OPFS pool, never on disk          |
 
 Same format, same store, same code: `.edp` is not a second file type, it is the
 one database that is allowed to hold several workspaces. `index.edp` is its only
@@ -311,7 +311,7 @@ leave the tab saving under an id the file no longer holds.
 
 ### What this deliberately does NOT do
 
-`overwriteInFile` (the sync's *Overwrite disk version*) still merges into the file
+`overwriteInFile` (the sync's _Overwrite disk version_) still merges into the file
 rather than replacing it, because a passenger in a file the tab never adopted may
 have no other copy at all — damage limitation on a file that is already wrong, not
 an endorsement of it. And the producers above still add to a file-backed
@@ -459,6 +459,55 @@ Four details, each of which is the reason something is quiet:
 What this does NOT do is notice the outside write on its own. The File System
 Access API has no change events, so that would be a poll, and nothing polls: the
 tab finds out when it next tries to write, or when the user runs Sync.
+
+## One door in front of every write
+
+`writeBytes` is the primitive that opens a writable and closes it. Since v0.0.458
+nothing calls it directly except the door in front of it, `writeUserBytes` in
+`db/edb/guarded-write.ts`, and the rule that door enforces is in the pure
+`db/edb/empty-write.ts`: **an empty database must not land on top of a full one
+without being confirmed twice.**
+
+Why a second guard, when `mayOverwriteFile` already stands in the same place:
+
+- `mayOverwriteFile` asks _"did somebody else write this file since we last agreed
+  with it?"_ — and it answers from the STAMP. So does the folder sync's
+  `overwriteLosesData`, and so does Save's `sidesAgainstFile`, from the store's own
+  counts.
+- This one asks _"does what we are about to write hold anything at all?"_ and reads
+  **only the two sets of bytes**, measured the same way by `peekWorkspaces`.
+
+That difference is the point. Every other guard reads the bookkeeping, so a bug in
+the bookkeeping makes them all agree with it — which is what a save that empties a
+file looks like from the inside: nothing objected, because nothing knew. A guard
+that shares no state with what it guards cannot be fooled the same way.
+
+Four properties hold it in place:
+
+- **The cost is paid only in the dangerous case.** The outgoing bytes are already
+  in memory, so measuring them is free; the file is read and deserialized only
+  when those bytes turn out to hold nothing.
+- **A total wipe only, never a shrink.** `wouldWipe` is false when the bytes hold
+  one table and the file holds six. Deleting a table is ordinary work, and a red
+  alarm on every such save is one that gets clicked through.
+- **`false` means nothing happened, and every caller must treat it that way** — no
+  stamp, no toast, and above all no `markClean`, which would turn a write the user
+  STOPPED into the same loss one reload later. `persist` returns `where: 'none'`
+  for exactly this reason.
+- **Unmeasurable is not dangerous.** A file that cannot be read, and a session with
+  no worker to peek with, both go ahead: that is the first-save case and the
+  desktop build, and a guard that blocked what it could not reason about would be
+  switched off within an hour.
+
+The dialog is `dialogs/danger-confirm.ts` — its own element, not
+`api.ui.dialogs.confirm`, because the shared confirm is the one users answer
+without reading. Red chrome via the `--dlg-*` tokens, the safe button focused on
+both steps, and the second question worded as the loss ("Delete 6 tables") rather
+than the action.
+
+`new-file.ts` cannot reach the dialog or the live worker, so `edb-file.ts`
+installs the dependencies once at `init` (`installWriteGuard`) and every other
+writer picks them up from there.
 
 ## Two things deliberately absent
 

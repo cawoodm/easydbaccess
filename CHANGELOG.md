@@ -13,6 +13,7 @@
 
 ### Bugs
 
+- 🪲 A save could write an empty workspace over a file that held work, losing all of it without a word (v0.0.459)
 - 🪲 A save could replace a `.edb` that another tab, browser or machine had written since, without asking (v0.0.455)
 
 - 🪲 Clicking a `file:///` link opened a blank tab saying nothing, because a browser will not open a local file from a web page (v0.0.452)
