@@ -24,7 +24,7 @@
 // Everything a plugin WOULD need is already separated out — the colour list and
 // the two store calls are in `window-color.ts`.
 
-import { choiceForColor, PALETTE_ICON, WINDOW_COLORS } from './window-color.js';
+import { choiceForColor, PALETTE_ICON, windowColors, type WindowColorChoice } from './window-color.js';
 
 export interface ColorButtonOptions {
   /** The override in force now, or null while the window follows its kind. */
@@ -59,6 +59,11 @@ export function createColorButton(opts: ColorButtonOptions): HTMLButtonElement {
 
 function openPicker(btn: HTMLButtonElement, opts: ColorButtonOptions): void {
   const chosen = choiceForColor(opts.current());
+  const choices = windowColors();
+  // Three columns suit the shipped nine. A longer list the user configured would
+  // grow into a tall thin strip, so the grid widens with it — squarish, and
+  // capped so it cannot become a band wider than the window it belongs to.
+  const cols = Math.min(6, Math.max(3, Math.ceil(Math.sqrt(choices.length))));
   const pop = document.createElement('div');
   pop.className = 'eda-color-pop';
   pop.setAttribute('popover', 'auto');
@@ -68,11 +73,13 @@ function openPicker(btn: HTMLButtonElement, opts: ColorButtonOptions): void {
     'position:fixed;margin:0;padding:0.4rem;inset:auto',
     'border:1px solid #d1d5db;border-radius:0.4rem;background:#fff',
     'box-shadow:0 8px 24px rgb(0 0 0 / 18%)',
-    'display:grid;grid-template-columns:repeat(3, auto);gap:0.25rem',
+    `display:grid;grid-template-columns:repeat(${cols}, auto);gap:0.25rem`,
     'font:13px/1.2 system-ui, sans-serif;color:#111827',
   ].join(';');
 
-  for (const c of WINDOW_COLORS) {
+  // The list is read on every open, not captured once: it is a setting, and a
+  // colour added in the Settings dialog must be offered without a reload.
+  for (const c of choices) {
     pop.append(swatchButton(c, c.id === chosen, pop, opts));
   }
 
@@ -91,7 +98,7 @@ function openPicker(btn: HTMLButtonElement, opts: ColorButtonOptions): void {
  * so the control is usable by someone who cannot see the colour, and testable
  * without reading pixels.
  */
-function swatchButton(c: (typeof WINDOW_COLORS)[number], isCurrent: boolean, pop: HTMLElement, opts: ColorButtonOptions): HTMLButtonElement {
+function swatchButton(c: WindowColorChoice, isCurrent: boolean, pop: HTMLElement, opts: ColorButtonOptions): HTMLButtonElement {
   const b = document.createElement('button');
   b.type = 'button';
   b.setAttribute('role', 'menuitemradio');

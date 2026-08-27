@@ -26,7 +26,7 @@ old DOM shape and class names on purpose (`.jsPanel`, `.jsPanel-hdr`,
 `.jsPanel-headerlogo`, `.jsPanel-replacement`, …) so the existing CSS in
 `index.html` and the existing e2e specs did not need to change; a panel
 element also still doubles as its own handle (`document.getElementById(id).minimize()`
-works), matching jsPanel's API shape. Everything about *how* a panel behaves —
+works), matching jsPanel's API shape. Everything about _how_ a panel behaves —
 minimize, maximize, smallify, drag, resize, close, front — is now first-party
 code, not a vendored library.
 
@@ -221,7 +221,7 @@ inspection.
 Three consequences for this file's concerns:
 
 - **Minimize still drops everything.** `mountContent` / `unmountContent` build and
-  tear down the *stack*, so a minimized window holds neither its grid nor any
+  tear down the _stack_, so a minimized window holds neither its grid nor any
   pane, and neither holds a subscription.
 - **Maximize needs no new code.** The stack is `flex-direction: column` with the
   primary at `flex: 1`, so a maximized panel just gives the primary more room;
@@ -319,6 +319,32 @@ Three things worth knowing:
   renders its `icon` as a Material ligature in one colour, so a swatch handed to
   it comes out as literal `<svg …>` text. It is still a native `popover="auto"`,
   so the browser owns the top layer and the light dismiss.
+
+### The list is a setting
+
+`windows:colors` (Settings → Windows) is the list the picker offers: hex values
+or CSS colour names, comma-separated. `parseWindowColors` turns the text into
+choices and `windowColors()` is what `color-button.ts` reads — on every open, so
+a change lands without a reload. Four rules hold it together:
+
+- **An entry that is not a colour is dropped, not refused.** The field is one line
+  of text, and a typo in the middle of it must not cost the user the other eight
+  colours.
+- **An empty list, or one with nothing usable in it, gives `WINDOW_COLORS` back.**
+  There is no way to reach a picker offering only "Kind".
+- **A shipped colour keeps its shipped id and name wherever it appears.** So
+  `#15803d` is still `green`/"Green", and a window already painted with it still
+  shows as the current one.
+- **The CSS colour names are spelled out in `window-color.ts`, not asked of
+  `CSS.supports`.** The module is pure and unit-tested under Node, where `CSS`
+  does not exist, and a rule that answered differently in a test than in the app
+  would be worse than the 148 names it saves.
+
+Workspace-scoped, unlike `links:protocols`: the colour each window is painted is
+stored with the workspace, so the palette it came from belongs there too.
+`window-color-settings.ts` is the bridge — resolve at boot, re-resolve on
+`easydb:settings-changed` — because the picker is built inside a click handler and
+`settings.get` is async. Same shape as `util/link-settings.ts`.
 
 ## Titlebar buttons, and switching them off
 

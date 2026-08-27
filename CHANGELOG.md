@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ Settings → Windows names the colours a window's palette button offers: hex values or HTML colour names (v0.0.453)
 - ✨ Tile, columns and rows now give each window the slot nearest to where it already is, instead of shuffling a layout you built (v0.0.451)
 - ✨ Settings → Links names the protocols that may be links: a list allows only those, a list behind `!` refuses only those (v0.0.452)
 

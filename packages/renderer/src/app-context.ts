@@ -14,6 +14,7 @@ import { loadUrlPlugins } from './plugin-host/url-loader.js';
 import { SAFE_MODE } from './plugin-host/safe-mode.js';
 import { startFileLinkGuard } from './util/file-link-guard.js';
 import { startLinkPolicy } from './util/link-settings.js';
+import { startWindowColors } from './window-mgr/window-color-settings.js';
 
 export interface AppContext {
   store: DataStore;
@@ -214,6 +215,11 @@ async function init(): Promise<AppContext> {
   // reads it while painting — so it is resolved here, once, and re-resolved when
   // it changes. See `util/link-settings.ts`.
   startLinkPolicy(api.settings);
+
+  // Which colours a window's palette button offers is a setting too, and the
+  // picker is built inside a click handler. Same shape, same reason — see
+  // `window-mgr/window-color-settings.ts`.
+  startWindowColors(api.settings);
 
   // A `file:///` link cannot be opened by a browser tab, and the browser says so
   // by opening a blank one. Catch the click and put the path on the clipboard

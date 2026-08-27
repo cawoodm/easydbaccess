@@ -4,6 +4,8 @@ import { GRID_SETTINGS_ID, WINDOW_ROWS_FROM_DEFAULT } from '../table/grid-settin
 import { LINK_PROTOCOLS_KEY, LINK_SETTINGS_ID } from '../util/link-settings.js';
 import { DEFAULT_PROTOCOLS } from '../util/url-schemes.js';
 import { DEFAULT_TILE_ATTRIBUTION, DEFAULT_TILE_URL, VIZ_SETTINGS_ID } from '../viz/viz-settings.js';
+import { WINDOW_COLORS_KEY, WINDOWS_SETTINGS_ID } from '../window-mgr/window-color-settings.js';
+import { DEFAULT_WINDOW_COLOR_LIST } from '../window-mgr/window-color.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'settings',
@@ -73,6 +75,23 @@ export function init(api: HostApi): void {
       description:
         'A list of protocols means those are the only links — e.g. "http,https,ftp,file". Start the list with ! and it says what to refuse instead, allowing everything else: the default "!javascript,vbscript,data" is the three that run code rather than going anywhere. Applies everywhere a link is drawn: Link columns, Markdown, HTML and view templates.',
       help: 'Leave it empty to go back to the default. Removing javascript, vbscript or data from the refused list lets a value someone else wrote — from an import, a sync pull, a workspace you were sent — run code in your session when you click it. Anything with no protocol at all, like /a/b or #section, is unaffected either way.',
+    },
+  ]);
+
+  api.ui.registerSettings(WINDOWS_SETTINGS_ID, 'Windows', [
+    {
+      key: WINDOW_COLORS_KEY,
+      label: 'Colours a window can be painted',
+      type: 'string',
+      default: DEFAULT_WINDOW_COLOR_LIST,
+      // Workspace-scoped, unlike the Links list: the colour each window is
+      // painted is stored with the workspace, so the palette it was picked from
+      // belongs there too. A workspace opened on another machine then offers the
+      // same choices its windows already use.
+      scope: 'workspace',
+      description:
+        'What the palette button in a window\'s title bar offers. Hex values or HTML colour names, separated by commas — e.g. "#FF00DD,red,blue". Anything that is not a colour is ignored, so one typo costs only its own entry. Empty goes back to the nine shipped colours.',
+      help: 'The title text is white, so a light colour is hard to read — the shipped nine are all dark enough. A colour you remove is still shown by any window already painted with it; the list says what can be chosen from now on.',
     },
   ]);
 

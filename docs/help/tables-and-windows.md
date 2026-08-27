@@ -81,6 +81,23 @@ The colour is saved with the workspace, so it is there on the next visit and on
 any other machine the workspace reaches. Each window has its own — two views of
 the same table can be different colours.
 
+### Choosing which colours are offered
+
+The nine colours in the palette are a starting point, not the whole set.
+**Settings → Windows → Colours a window can be painted** is the list, and you can
+write your own: hex values or HTML colour names, separated by commas.
+
+```
+#FF00DD,red,blue,#1f2937
+```
+
+Anything in the list that is not a colour is ignored, so one typo costs only its
+own entry. Empty the field to go back to the nine. The title text is white, so a
+light colour is hard to read — the shipped nine are all dark enough.
+
+The list says what can be **chosen** from now on. A window already painted with a
+colour you have since removed keeps it.
+
 Both title-bar buttons can be switched off in **Settings → Buttons**, alongside
 the header and footer ones, if you would rather have the plain title bar back.
 

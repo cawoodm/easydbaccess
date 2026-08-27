@@ -38,7 +38,9 @@ export interface WindowColorChoice {
 }
 
 /**
- * What the picker offers.
+ * What the picker offers when the user has not said otherwise — the SHIPPED
+ * list. `windowColors()` is what the picker actually reads, and the setting
+ * `windows:colors` is what fills it (see `window-color-settings.ts`).
  *
  * Deliberately a short list of distinct HUES rather than a full colour wheel. The
  * point of an override is to tell two windows apart at a glance across a zoomed-
@@ -62,16 +64,120 @@ export const WINDOW_COLORS: readonly WindowColorChoice[] = [
   { id: 'violet', label: 'Violet', value: '#6d28d9' },
 ];
 
+/** The shipped list as the setting's text, so the field opens on what it does. */
+export const DEFAULT_WINDOW_COLOR_LIST = WINDOW_COLORS.filter((c) => c.value)
+  .map((c) => c.value)
+  .join(',');
+
+/**
+ * The list in force. Module state, set once at boot from the setting and again
+ * when it changes — the picker is built inside a click handler and the settings
+ * read is async, the same shape as `util/link-settings.ts`.
+ */
+let liveColors: readonly WindowColorChoice[] = WINDOW_COLORS;
+
+/** What the picker offers right now. */
+export function windowColors(): readonly WindowColorChoice[] {
+  return liveColors;
+}
+
+/** Replace the list. `null` puts the shipped one back. */
+export function setWindowColors(colors: readonly WindowColorChoice[] | null): void {
+  liveColors = colors && colors.length > 1 ? colors : WINDOW_COLORS;
+}
+
+/**
+ * The CSS named colours, which is what "an HTML colour value" means to a user
+ * writing `red` instead of `#f00`.
+ *
+ * Spelled out rather than asked of the browser (`CSS.supports('color', v)`),
+ * because this module is pure and unit-tested under Node, where `CSS` does not
+ * exist. A rule that answered differently in a test and in the app would be
+ * worse than the 148 names it saves.
+ *
+ * `transparent` and `currentColor` are deliberately absent, along with the
+ * keywords that mean "whatever the parent says": each paints a swatch the user
+ * cannot see and a titlebar that looks broken rather than coloured.
+ */
+const CSS_COLOR_NAMES = new Set(
+  (
+    'aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood ' +
+    'cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod ' +
+    'darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon ' +
+    'darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray ' +
+    'dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green ' +
+    'greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon ' +
+    'lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon ' +
+    'lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen ' +
+    'magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue ' +
+    'mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy ' +
+    'oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip ' +
+    'peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown ' +
+    'seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal ' +
+    'thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen'
+  ).split(' '),
+);
+
+/** Is this a colour a titlebar can be painted with? A hex value or a CSS name. */
+export function isWindowColor(value: string): boolean {
+  const v = value.trim();
+  if (/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v)) return true;
+  return CSS_COLOR_NAMES.has(v.toLowerCase());
+}
+
+/** Split the setting's text. Commas, spaces and new lines all separate. */
+function splitList(raw: string): string[] {
+  return raw
+    .split(/[\s,;]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+const capitalize = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+
+/**
+ * Turn the setting's text into the list the picker offers.
+ *
+ * Anything that is not a colour is DROPPED rather than refused: the field is one
+ * line of text and a typo in the middle of it must not cost the user the other
+ * eight colours. An empty setting — or one holding nothing usable at all — gives
+ * the shipped list back, so there is no way to end up with a picker that offers
+ * only "Kind".
+ *
+ * A shipped colour keeps its shipped name and id wherever it appears in the
+ * user's list, so `#15803d` is still "Green" and a window already painted with it
+ * still shows as the current one.
+ */
+export function parseWindowColors(raw: string | null | undefined): readonly WindowColorChoice[] {
+  const entries = typeof raw === 'string' ? splitList(raw) : [];
+  const out: WindowColorChoice[] = [WINDOW_COLORS[0]!];
+  const seenValue = new Set<string>();
+  const usedId = new Set<string>([WINDOW_COLORS[0]!.id]);
+  for (const value of entries) {
+    if (!isWindowColor(value)) continue;
+    const key = value.toLowerCase();
+    if (seenValue.has(key)) continue;
+    seenValue.add(key);
+    const shipped = WINDOW_COLORS.find((c) => c.value?.toLowerCase() === key);
+    const label = shipped ? shipped.label : key.startsWith('#') ? value.toUpperCase() : capitalize(value);
+    let id = shipped ? shipped.id : key.replace(/^#/, '');
+    for (let n = 2; usedId.has(id); n++) id = `${key.replace(/^#/, '')}-${n}`;
+    usedId.add(id);
+    out.push({ id, label, value });
+  }
+  return out.length > 1 ? out : WINDOW_COLORS;
+}
+
 /** The colour a menu id means, or `undefined` for an id nothing offers. */
 export function colorForChoice(id: string): string | null | undefined {
-  const found = WINDOW_COLORS.find((c) => c.id === id);
+  const found = windowColors().find((c) => c.id === id);
   return found ? found.value : undefined;
 }
 
 /** The choice a stored value corresponds to, for ticking the current one. */
 export function choiceForColor(color: string | null | undefined): string {
   if (!color) return 'default';
-  const found = WINDOW_COLORS.find((c) => c.value?.toLowerCase() === color.toLowerCase());
+  const found = windowColors().find((c) => c.value?.toLowerCase() === color.toLowerCase());
   return found ? found.id : 'custom';
 }
 
