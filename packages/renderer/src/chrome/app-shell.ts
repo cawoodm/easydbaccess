@@ -211,12 +211,6 @@ export class AppShell extends LitElement {
       a.icon-btn:hover {
         background: #374151;
       }
-      /* Highlight the collapsed search icon while a global filter is active, so
-         a live search stays discoverable after the box collapses. */
-      button.icon-btn.active {
-        color: #93c5fd;
-        border-color: #3b82f6;
-      }
       /* Inline-SVG button icons (icon strings that start with "<svg"). The svg
          inherits the button's text colour via fill/stroke: currentColor. */
       .icon-svg {
@@ -418,10 +412,19 @@ export class AppShell extends LitElement {
     this.broadcastSearch(this.searchQuery);
   };
 
-  // Clicking outside the input blurs it; collapse back to the icon. Any active
-  // query is preserved (the collapsed icon shows the highlighted state) so the
-  // global filter keeps applying.
+  /**
+   * Clicking outside the input blurs it; collapse back to the icon — but only
+   * when the box is EMPTY.
+   *
+   * A box holding a query used to collapse too, leaving a highlighted icon as
+   * the only sign that every table on screen was still being filtered. The
+   * rows were narrowed and the words that narrowed them were nowhere to be
+   * read, so the state was invisible exactly when it mattered: after clicking
+   * into a table to look at the results. A visible query says what it is, and
+   * carries its own × to clear it.
+   */
   private closeSearchOnBlur = () => {
+    if (this.searchQuery.trim() !== '') return;
     this.searchOpen = false;
   };
 
@@ -642,7 +645,7 @@ export class AppShell extends LitElement {
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
           <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
-            ><span class="version">v0.0.456</span></a
+            ><span class="version">v0.0.457</span></a
           ></strong
         >
         ${this.shownButtons('header')
@@ -653,12 +656,7 @@ export class AppShell extends LitElement {
               <input class="search" type="search" placeholder="search all tables…" .value=${this.searchQuery} @input=${this.onSearchInput} @blur=${this.closeSearchOnBlur} />
               ${this.searchQuery.length > 0 ? html`<button class="search-clear" title="Clear search" aria-label="Clear search" @mousedown=${this.clearSearch}>×</button>` : ''}
             </span>`
-          : html`<button
-              class="icon-btn ${this.searchQuery.trim().length > 0 ? 'active' : ''}"
-              title=${this.searchQuery.trim().length > 0 ? `Filtering all tables: ${this.searchQuery}` : 'Search across all tables in this workspace'}
-              aria-label="Search"
-              @click=${this.openSearch}
-            >
+          : html`<button class="icon-btn" title="Search across all tables in this workspace" aria-label="Search" @click=${this.openSearch}>
               <span class="mi" aria-hidden="true">search</span>
             </button>`}
         <button class="icon-btn" title="Add, disable, or remove plugins" aria-label="Plugins" @click=${() => this.api?.ui.openPluginManager()}>

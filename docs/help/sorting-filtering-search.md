@@ -112,6 +112,11 @@ field), and the header has a global search box that searches every open
 table at once. Filters, local search, and global search all apply together
 — a row has to pass all three to show up.
 
+The header box **stays open while it holds a query**, so what every table on
+screen is being filtered by is always readable — click into a table to look at
+the results and the words are still there, with the × to clear them. Empty it and
+the box folds back to its icon on the next click elsewhere.
+
 Typing multiple words searches for the whole phrase first, then falls back
 to every word (AND), then to any word (OR). You can also spell out the logic
 yourself with uppercase `AND`/`OR`, e.g. `berlin AND active`.

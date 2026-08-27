@@ -4,6 +4,7 @@
 
 ### Features
 
+- ✨ The header search box stays open while it holds a query, instead of collapsing to an icon that could not say what was being filtered (v0.0.457)
 - ✨ One box above the Settings tabs searches every tab at once, showing each match under the tab it lives on (v0.0.456)
 - ✨ A preview window has a header naming what it shows, with an Edit button that opens the value's source (v0.0.454)
 - ✨ Settings → Windows names the colours a window's palette button offers: hex values or HTML colour names (v0.0.453)

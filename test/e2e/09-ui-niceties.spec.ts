@@ -24,7 +24,7 @@ test.describe('ui niceties', () => {
     }
   });
 
-  test('header search focuses on open, collapses on click-outside, and sits far-right', async ({ page }) => {
+  test('header search focuses on open, stays open while it holds a query, and sits far-right', async ({ page }) => {
     const header = page.locator('app-shell header');
     // By accessible name, not `button.icon-btn` — the header carries three of
     // those now (search, plugins, help).
@@ -43,20 +43,25 @@ test.describe('ui niceties', () => {
     const input = header.locator('input.search');
     await expect(input).toBeFocused();
 
-    // Type a query, then click elsewhere (the title). The box blurs and
-    // collapses back to the icon; the active filter is preserved, so the icon
-    // reports it via title + the `active` class.
+    // Type a query, then click elsewhere (the title). The box blurs but STAYS —
+    // every table on screen is being filtered, and the words doing the filtering
+    // have to be readable while the results are looked at. It used to collapse to
+    // a highlighted icon, which said that something was filtered but not what.
     await input.fill('widget');
     await header.locator('strong').click();
-    await expect(header.locator('input.search')).toHaveCount(0);
-    const collapsed = header.getByRole('button', { name: 'Search' });
-    await expect(collapsed).toHaveClass(/active/);
-    await expect(collapsed).toHaveAttribute('title', /Filtering all tables: widget/);
-
-    // Re-opening restores the preserved query, focused.
-    await collapsed.click();
-    await expect(header.locator('input.search')).toBeFocused();
+    await expect(header.locator('input.search')).toBeVisible();
     await expect(header.locator('input.search')).toHaveValue('widget');
+    // Not focused any more — it kept its place, not the cursor.
+    await expect(header.locator('input.search')).not.toBeFocused();
+    // …and the × is still there to clear it with.
+    await expect(header.locator('.search-clear')).toBeVisible();
+
+    // Emptied, a blur collapses it as it always did: nothing is being filtered,
+    // so the header goes back to one icon.
+    await header.locator('input.search').fill('');
+    await header.locator('strong').click();
+    await expect(header.locator('input.search')).toHaveCount(0);
+    await expect(header.getByRole('button', { name: 'Search' })).toBeVisible();
   });
 
   test('header search has a clear (×) button that empties the query and keeps focus', async ({ page }) => {
