@@ -73,6 +73,7 @@ rather than guessing one and quietly filtering something you are not looking at.
 | `view?Book==Matthew`                    | the view you are already in, narrowed  |
 | `cmd/windows:tile`                      | any action from the palette, by its id |
 | `preview/notes/n-17`                    | one record's text, in a small window   |
+| `edit/notes/n-17`                       | one record in the record form          |
 | `goto/bible?Book=Mark;cmd/windows:tile` | both, in order — `;` joins them        |
 
 A `view/…` narrows the view the way `goto/…` narrows a table, and what it adds
@@ -113,6 +114,33 @@ The window's header says which column and which record you are looking at, and
 its **Edit** button opens the value's source in a textarea. Saving writes that
 one field of that one record, with the same rules the grid applies — a read-only
 table or column says **View source** instead and has nothing to save.
+
+## Correcting one record
+
+`edit/…` opens a record in the **record form** — the same form the **+** button
+uses to add one, with this record's values already in the boxes. It is the quick
+way to fix a record you have a key for, instead of finding its row in the grid
+and editing cell by cell.
+
+| Type this                 | And you get                                |
+| ------------------------- | ------------------------------------------ |
+| `edit/notes/n-17`         | record `n-17` — the key is the first column |
+| `edit/notes/Author/Smith` | the first note whose Author is Smith        |
+| `edit/notes?Title==Berlin` | the note titled Berlin                     |
+
+A **double-click on any row** opens the same form for that row, so you rarely
+have to type this at all. If you would rather double-click select a word inside a
+cell, switch the **Edit record on double-click** plugin off in the Plugin
+Manager.
+
+Save writes only the fields the form shows you; everything else in the record is
+left as it was. A **read-only** table opens read-only: you see the whole record,
+the boxes are greyed out and there is no Save.
+
+The table name is always needed, so `edit/n-17` reads as a table called `n-17`.
+The rest works like `preview/…`: a key is matched exactly against the first
+column, several matches open the first with a warning, and no match is a message
+rather than an empty form.
 
 ## Links
 

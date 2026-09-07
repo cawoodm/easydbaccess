@@ -21,6 +21,22 @@ One rule cannot be checked here: **Unique**. It needs the other rows, and a reco
 that does not exist yet has nothing to be a duplicate of. Editing the cell
 afterwards, or pressing ✓, catches it.
 
+## Editing a whole record
+
+**Double-click a row** and the same form opens with that record in it. It is the
+quick way to correct a record without hunting across a wide table cell by cell.
+Save writes only the fields the form shows you.
+
+A **computed** column is shown here, greyed out — an existing record has a value
+there, and the form would otherwise show you a different record from the grid. A
+**read-only** table opens read-only: the whole record, no boxes to type in and no
+Save.
+
+If you would rather double-click select a word inside a cell, switch the **Edit
+record on double-click** plugin off in the Plugin Manager. The
+[`edit/…` commandlet](commandlets.md) opens the same form from a link or the
+palette.
+
 ## Editing a cell
 
 Click any cell to edit it. Checkboxes for booleans, date pickers for dates,

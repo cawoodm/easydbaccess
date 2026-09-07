@@ -24,13 +24,14 @@
 // touches the store, a window or the registry lives in `commandlet-run.ts`.
 
 /** Verbs the language knows. `table` is an alias of `goto`. */
-export type CommandletVerb = 'goto' | 'search' | 'preview' | 'view' | 'cmd' | 'ui';
+export type CommandletVerb = 'goto' | 'search' | 'preview' | 'edit' | 'view' | 'cmd' | 'ui';
 
 const VERB_ALIASES: Record<string, CommandletVerb> = {
   goto: 'goto',
   table: 'goto',
   search: 'search',
   preview: 'preview',
+  edit: 'edit',
   view: 'view',
   cmd: 'cmd',
   ui: 'ui',
@@ -49,6 +50,11 @@ const ARITY: Record<CommandletVerb, { min: number; rest: boolean }> = {
   goto: { min: 0, rest: false },
   search: { min: 1, rest: true },
   preview: { min: 2, rest: false },
+  // `edit` needs the table and nothing else — the row can come from the query
+  // (`edit/notes?Title==Berlin`). It is NOT target-less like `goto`, because
+  // `edit/n-17` would then be unreadable: table name, or key in the table the
+  // click came from?
+  edit: { min: 1, rest: false },
   view: { min: 0, rest: true },
   cmd: { min: 1, rest: true },
   ui: { min: 1, rest: false },

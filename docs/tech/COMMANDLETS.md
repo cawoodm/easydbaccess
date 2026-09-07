@@ -32,6 +32,7 @@ stay filterable.
 | `view`                 | `<name>`?         | reveals a view window and applies the filters        |
 | `cmd`                  | `<commandId>`     | runs any registered command                         |
 | `preview`              | see below         | opens ONE cell in the preview window                |
+| `edit`                 | see below         | opens ONE record in the record form                 |
 | `ui`                   | `hide` / `show`   | not wired up yet                                    |
 
 Options: `@search=`, `@sort=` (`-Field` for descending, comma-separated for
@@ -123,6 +124,9 @@ nothing on screen to explain why.
 | `view/Reading plan?Book==Matthew`       | opens it and adds a `Book` chip                 |
 | `view?Book==Matthew`                    | the same, on the view the link is in            |
 | `view/Reading plan?@clear`              | drops that view's chips                         |
+| `edit/notes/n-17`                       | opens record `n-17` in the record form         |
+| `edit/notes/Author/Smith`               | the first note whose `Author` is Smith         |
+| `edit/$TABLE/$VALUE`                    | from a cell link: this table, this cell's key  |
 | `cmd/windows:tile`                      | runs a registered command — ids keep their `:` |
 | `cmd/app:plugins`                       | opens the Plugin Manager                       |
 | `goto/bible?Book=Mark;cmd/windows:tile` | a chain: filter, then tile the windows         |
@@ -258,6 +262,60 @@ renderer is built for a one-line row, and several of them draw an EDITOR (`link`
 renders a bare value as an `<input>`), which has no business in a read-only
 window onto a record that may not be open.
 
+## `edit` — the verb that opens the record form
+
+Three shapes, all resolving to one row:
+
+```
+edit/<table>?<filters>          row chosen by the filters
+edit/<table>/<key>              row by key — the first column, matched exactly
+edit/<table>/<field>/<value>    row by one named field
+```
+
+The form is `dialogs/new-record-dialog.ts`, the same one the table's **+** button
+opens, over an existing row. One form rather than two, because a person reading a
+record expects the layout they typed it into — and because the validation, the
+per-type boxes and the "Show all fields" toggle are already there.
+
+**The table name is required.** `edit` is not target-less like `goto`, because
+`edit/n-17` would then be unreadable: a table called `n-17`, or a key in the
+table the click came from? From a cell link, `edit/$TABLE/$VALUE` says the second
+thing explicitly.
+
+**A second target is always a KEY**, even when it names a column — the one place
+`edit` differs from `preview`. A form showing the whole record has no use for a
+lone field name, so there is no ambiguity to resolve and a field is only ever
+read from the three-target form. Rules in `plugins/commandlet-edit.ts`, which is
+pure and unit-tested.
+
+**Several matches** open the first plus a warning naming the count, and **no
+match** is an error — the same rule, for the same reason, as `preview`.
+
+**The form decides whether the record may be written**, not the caller:
+`openEditRecordDialog` reads `Table.readonly` itself. A read-only table shows
+the whole record with every box disabled and no Save button, so a commandlet
+cannot talk the app into editing one.
+
+**Save patches only the fields the form owns.** Derived columns (`readonly` — a
+Projection's computed and secondary-source columns) ARE shown in edit mode,
+disabled, because an existing row already has a value there and a form that hid
+it would show a different record from the grid. They are never written back, and
+neither is any key the row does not already have.
+
+### Double-click
+
+`plugins/edit-record.ts` opens the same form when a grid row is double-clicked.
+It is a plugin, not grid code, and that is the design: the grid edits in place,
+so this takes over the double-click that would otherwise select a word inside a
+cell. Switching the plugin off in the Plugin Manager gives that back, because
+nothing in the core listens for a double-click on a row.
+
+The plugin reads `data-row-id` off the `<tr>` and `tableId` off the
+`<data-table>` element, both from the event's composed path — the same technique
+`commandlets.ts` uses to find the table a clicked link was in. `data-row-id` is
+the one core change: it is DATA, not behaviour, and the grid itself ignores it.
+A double-click on a `<button>` or an `<a>` is left alone.
+
 ## Encoding in a hash
 
 `#goto/bible?Book=Matthew;preview/bible/Text?Chapter==5` survives a browser
@@ -318,6 +376,8 @@ know what a commandlet is.
 | Piece                                                                         | File                                                  |
 | ----------------------------------------------------------------------------- | ----------------------------------------------------- |
 | Grammar — parse, substitute, format. Pure, DOM-free                           | `packages/renderer/src/plugins/commandlet-lang.ts`    |
+| Which row `edit/…` means, from the targets alone. Pure                        | `packages/renderer/src/plugins/commandlet-edit.ts`    |
+| Double-click a row to open it — a toggleable plugin                           | `packages/renderer/src/plugins/edit-record.ts`        |
 | Runner + `checkCommandletString` — one set of lookups for running and vetting | `packages/renderer/src/plugins/commandlet-run.ts`     |
 | The plugin — palette entry, settings, `#hash`, `?cmdlet=`, link interception  | `packages/renderer/src/plugins/commandlets.ts`        |
 | The dialog — live validation and the `?` link                                 | `packages/renderer/src/dialogs/commandlet-dialog.ts`  |

@@ -2629,9 +2629,12 @@ export class DataTable extends LitElement {
                 <td colspan=${cols.length + 1}></td>
               </tr>`
             : ''}
+          <!-- data-row-id is DATA, not behaviour. It is the only way anything outside
+               this element can say which row a pointer is over; the edit-record plugin
+               reads it off a double-click's composed path. The grid ignores it. -->
           ${slice.map(
             (r) => html`
-              <tr>
+              <tr data-row-id=${r.id}>
                 ${cols.map(
                   (c) =>
                     html`<td

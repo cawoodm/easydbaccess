@@ -77,6 +77,14 @@ describe('recordFields', () => {
   it('is empty for a table whose every column is derived', () => {
     expect(recordFields([col('a', { readonly: true })], true)).toEqual([]);
   });
+
+  it('includes derived fields when the EDIT form asks for them', () => {
+    // An existing row already has a value in a derived column, and a record form
+    // that hid it would show a different record from the grid. The form draws
+    // these disabled and never writes them back.
+    expect(recordFields(columns, false, true).map((c) => c.field)).toEqual(['name', 'total', 'computed', 'note']);
+    expect(recordFields(columns, true, true).map((c) => c.field)).toEqual(['name', 'secret', 'total', 'computed', 'note']);
+  });
 });
 
 describe('hasMoreFields', () => {
@@ -87,6 +95,10 @@ describe('hasMoreFields', () => {
     expect(hasMoreFields([col('a'), col('b', { hidden: true, readonly: true })])).toBe(false);
     // A hidden SCRIPTED one is revealable — it has a stored cell to fill in.
     expect(hasMoreFields([col('a'), col('b', { hidden: true, script: 'function render(row){return 1}' })])).toBe(true);
+  });
+
+  it('counts a hidden derived column for the edit form, which shows those', () => {
+    expect(hasMoreFields([col('a'), col('b', { hidden: true, readonly: true })], true)).toBe(true);
   });
 });
 

@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 7 Sep 2026
+
+### Features
+
+- ✨ A double-click on a row, or `edit/<table>/<key>`, opens the whole record in one form — read-only where the table is (v0.0.460)
+
 ## 27 Aug 2026
 
 ### Features
