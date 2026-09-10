@@ -61,6 +61,14 @@ project site is served at the repo-name path, which is the same
 site now owns that path and the `easydbaccess` folder in
 `cawoodm/cawoodm.github.io` is no longer what visitors see.
 
+The deployed build is a **PWA**: `vite.config.ts`'s `gen-service-worker` plugin
+writes a `dist/sw.js` that precaches the whole app, so a reload with no internet
+still opens the workspace. Nothing is configured per deploy slot — the worker's
+scope and the manifest's are both base-relative, so a `/easydbaccess<N>/` preview
+scopes itself. A new build is offered to the user as a reload prompt and never
+swapped in silently. `?nosw=1` takes the worker off a device. Full picture:
+[`docs/tech/OFFLINE.md`](docs/tech/OFFLINE.md).
+
 Branch previews are still manual and still go through the Pages repo:
 `npm run publish -- -Target easydbaccess<N>`. Don't point `publish.ps1` at the
 plain `easydbaccess` slot any more — it would deploy to a folder nothing reads.

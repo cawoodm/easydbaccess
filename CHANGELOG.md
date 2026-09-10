@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 10 Sep 2026
+
+### Features
+
+- 🪶 The hosted app opens and works with no internet: it caches itself, installs like an app, and never hangs on a dead network (v0.0.461)
+
 ## 7 Sep 2026
 
 ### Features

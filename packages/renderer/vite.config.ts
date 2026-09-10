@@ -4,6 +4,7 @@ import { dirname, relative, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { generatePluginCatalog } from '../../scripts/generate-plugin-catalog.mjs';
+import { generateServiceWorker } from '../../scripts/generate-sw.mjs';
 import { generateTips } from '../../scripts/generate-tips.mjs';
 import { resolveDevPort } from '../../scripts/dev-port.mjs';
 
@@ -21,6 +22,13 @@ const tipsSource = fileURLToPath(new URL('../../docs/help/tips.md', import.meta.
 
 /** This package's root, so the bar below names a changed file the way you typed it. */
 const rendererRoot = fileURLToPath(new URL('.', import.meta.url));
+
+/**
+ * The single source of truth for the version, the same one `.githooks/pre-commit`
+ * bumps on every commit. It names the service worker's cache, so a deploy's
+ * assets can never be served out of the previous deploy's cache.
+ */
+const appVersion = (JSON.parse(readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8')) as { version: string }).version;
 
 /**
  * What a source change does in dev. `EASYDB_HMR=auto|ask|off`, default `auto`.
@@ -167,5 +175,38 @@ export default defineConfig({
         });
       },
     },
+    // Emit `dist/sw.js` — the service worker that makes the hosted build load
+    // with no internet. Source in `scripts/sw-template.js`, precache list built
+    // by `scripts/generate-sw.mjs`. Rationale: docs/tech/OFFLINE.md.
+    //
+    // Three gates, each load-bearing:
+    //
+    // - `apply: 'build'` — a precache in dev would serve yesterday's bundle,
+    //   the exact pain the EASYDB_HMR machinery above exists to avoid. (The
+    //   page half gates itself again on `import.meta.env.PROD`.)
+    // - `closeBundle`, not `writeBundle` — Vite copies `public/` into the
+    //   outDir AFTER the rollup bundle is written, and this is the first hook
+    //   that can see `manifest.webmanifest`, `favicon.svg` and `plugins/*`. The
+    //   list is read by walking the outDir for the same reason: half of it is
+    //   not in the rollup bundle object at all.
+    // - the `./` base bail — that is `build:electron` (`vite build --base ./`),
+    //   whose page is `file:`, where a service worker cannot register. A dead
+    //   `sw.js` in the desktop frontend would be pure noise.
+    (() => {
+      let base = '/';
+      let outDir = '';
+      return {
+        name: 'gen-service-worker',
+        apply: 'build' as const,
+        configResolved(config: { base: string; root: string; build: { outDir: string } }) {
+          base = config.base;
+          outDir = resolve(config.root, config.build.outDir);
+        },
+        closeBundle() {
+          if (base === './' || base === '') return;
+          generateServiceWorker({ outDir, version: appVersion, base });
+        },
+      };
+    })(),
   ],
 });

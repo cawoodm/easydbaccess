@@ -15,9 +15,17 @@
     <!-- `href` is relative so it resolves against the deploy base (the app also
          ships under a GitHub Pages subpath, where a leading "/" would 404). -->
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <!-- Installable, and offline-capable via `src/pwa/register-sw.ts`. Both
+         hrefs are relative for the same reason the favicon's is: every manifest
+         member resolves against the MANIFEST's URL, so `"scope": "./"` is
+         correct under `/easydbaccess/`, under a `/easydbaccess3/` branch
+         preview and at the root alike, with nothing to configure per deploy.
+         See docs/tech/OFFLINE.md. -->
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#1f2937" />
     <!-- The version is kept in sync by scripts/bump-version.mjs. app-shell
          prefixes the workspace title at runtime, keeping this as the base. -->
-    <title>easyDBAccess v0.0.460</title>
+    <title>easyDBAccess v0.0.461</title>
     <style>
       html,
       body {

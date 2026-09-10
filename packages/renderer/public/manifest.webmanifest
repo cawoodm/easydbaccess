@@ -1,0 +1,20 @@
+{
+  "name": "easyDBAccess",
+  "short_name": "easyDB",
+  "description": "Local-first, plugin-extensible, multi-table database app. Your data lives on this device and stays editable with no internet.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f3f4f6",
+  "theme_color": "#1f2937",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

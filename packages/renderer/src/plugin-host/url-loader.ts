@@ -1,5 +1,16 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
+import { fetchWithTimeout, isNetworkFailure, isOffline } from '../util/net.js';
 import { SAFE_MODE } from './safe-mode.js';
+
+/**
+ * How long the whole uncached phase may take, across every plugin.
+ *
+ * `app-context.ts` awaits this loader on the critical boot path, so anything
+ * that hangs here hangs the app: no tables, no error, no way out. A per-request
+ * timeout alone is not enough — ten unreachable plugins would still cost ten
+ * timeouts in series. One budget for the lot bounds the worst case.
+ */
+const BOOT_FETCH_BUDGET_MS = 10_000;
 
 /**
  * Loads third-party plugins by URL.
@@ -46,6 +57,9 @@ export async function loadUrlPlugins(api: HostApi): Promise<() => Promise<void>>
   const urls = ws?.pluginUrls ?? [];
   const loaded: Array<{ url: string; mod: PluginModule }> = [];
 
+  // One deadline for every blocking fetch below — see BOOT_FETCH_BUDGET_MS.
+  const budget = AbortSignal.timeout(BOOT_FETCH_BUDGET_MS);
+
   for (const url of urls) {
     try {
       const rec = await api.store.plugins.findOne(url);
@@ -57,9 +71,15 @@ export async function loadUrlPlugins(api: HostApi): Promise<() => Promise<void>>
         // Already cached — use it now, refresh in the background for next boot.
         void backgroundRefresh(api, url, body);
       } else {
-        // First boot for this URL: fetch synchronously.
+        // First boot for this URL: fetch synchronously. This is the ONLY path
+        // the network can delay — a plugin with a `cachedBody` (the normal
+        // case, above) already boots offline with no request at all.
         try {
-          body = await fetchPluginBody(url);
+          // Certainly offline, or the budget is already spent: fail this one
+          // now rather than wait for a request that cannot succeed.
+          if (isOffline()) throw new TypeError('offline');
+          if (budget.aborted) throw budget.reason ?? new Error('boot fetch budget exhausted');
+          body = await fetchPluginBody(url, budget);
         } catch (fetchErr) {
           await api.store.plugins.upsert({
             url,
@@ -67,7 +87,15 @@ export async function loadUrlPlugins(api: HostApi): Promise<() => Promise<void>>
             lastFetched: Date.now(),
             lastError: `fetch: ${(fetchErr as Error).message}`,
           });
-          api.events.emit('plugin:error', { url, phase: 'fetch', error: fetchErr });
+          // A network failure at boot is not a plugin fault and must not toast:
+          // offline, every uncached plugin fails at once, and the user would
+          // get one error per plugin for a condition they already know about.
+          // The `lastError` above still records it, and the Plugin Manager —
+          // which is where you go to ask why a plugin is missing — still shows
+          // it. A 404, bad JS or a throwing `init()` still toasts.
+          if (!isNetworkFailure(fetchErr)) {
+            api.events.emit('plugin:error', { url, phase: 'fetch', error: fetchErr });
+          }
           continue;
         }
         await api.store.plugins.upsert({
@@ -121,14 +149,18 @@ export async function loadUrlPlugins(api: HostApi): Promise<() => Promise<void>>
 }
 
 /**
- * Fetches a plugin URL and returns its body. Rejects on non-OK responses
- * AND when the response looks like HTML (sniffed via content-type + body
+ * Fetches a plugin URL and returns its body.
+ *
+ * Bounded by `fetchWithTimeout` (and, at boot, by the caller's shared budget
+ * signal), because a request that never settles is what wedges the whole app.
+ *
+ * Rejects on non-OK responses AND when the response looks like HTML (sniffed via content-type + body
  * prefix) — dev servers and many static hosts return 200 + index.html for
  * unknown paths, which would otherwise dynamic-import as JS and throw a
  * confusing SyntaxError ("Unexpected token '<'").
  */
-async function fetchPluginBody(url: string): Promise<string> {
-  const res = await fetch(url);
+async function fetchPluginBody(url: string, signal?: AbortSignal): Promise<string> {
+  const res = await fetchWithTimeout(url, signal ? { signal } : {});
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
   const body = await res.text();
   const ct = (res.headers.get('content-type') ?? '').toLowerCase();
@@ -147,6 +179,7 @@ async function fetchPluginBody(url: string): Promise<string> {
  */
 function backgroundRefresh(api: HostApi, url: string, currentBody: string): Promise<void> {
   return (async () => {
+    if (isOffline()) return; // nothing to refresh from, and the cache is already serving
     try {
       const fresh = await fetchPluginBody(url);
       if (fresh === currentBody) return;

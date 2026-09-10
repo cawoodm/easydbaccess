@@ -1,5 +1,6 @@
 import type { HostApi, PluginModule, Row, Setting, Table, ViewInstance, ViewTemplate } from '@easydb/shared';
 import { cryptoUUID, slugTable } from '../util/ids.js';
+import { describeNetworkError, fetchWithTimeout } from '../util/net.js';
 import { withoutRawSecrets } from '../db/secret-guard.js';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a
@@ -105,7 +106,7 @@ export function init(api: HostApi): void {
         } else if (choice === 'share') await openShare(api);
         else if (choice === 'view') await openViewGist(api);
       } catch (err) {
-        api.ui.dialogs.toast(`Gist ${choice} failed: ${(err as Error).message}`, {
+        api.ui.dialogs.toast(`Gist ${choice} failed: ${describeNetworkError(err)}`, {
           kind: 'error',
           title: 'Gist sync',
         });
@@ -132,7 +133,7 @@ export function init(api: HostApi): void {
         else if (choice === 'pull') await pullTable(api, ctx.tableId);
         else if (choice === 'view') await viewTableGist(api, ctx.tableId);
       } catch (err) {
-        api.ui.dialogs.toast(`Gist ${choice} failed: ${(err as Error).message}`, {
+        api.ui.dialogs.toast(`Gist ${choice} failed: ${describeNetworkError(err)}`, {
           kind: 'error',
           title: 'Gist sync',
         });
@@ -169,7 +170,16 @@ export async function load(api: HostApi): Promise<void> {
   const ok = await api.ui.dialogs.confirm(`Load shared workspace from gist ${creds.gistId || '(new)'} (owner: ${creds.user})?\n\nThis pulls its tables into the current workspace.`, 'Gist sync');
   if (!ok) return;
   await saveCreds(api, creds);
-  await pull(api);
+  try {
+    await pull(api);
+  } catch (err) {
+    // Guarded here rather than left to the plugin host: an unguarded throw
+    // comes back as a `plugin:error` toast titled "Plugin: gist-sync", which
+    // reads as a broken plugin. Opening a share link with no connection is not
+    // that — it is one thing that could not be reached, and the creds are
+    // already saved, so a retry is just the Pull button.
+    api.ui.dialogs.toast(`Could not load the shared workspace: ${describeNetworkError(err)}`, { kind: 'error', title: 'Gist sync' });
+  }
 }
 
 // -- Credentials --------------------------------------------------------------
@@ -398,7 +408,7 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
 
   let updated: { id: string; html_url?: string };
   if (creds.gistId) {
-    const res = await fetch(`https://api.github.com/gists/${creds.gistId}`, {
+    const res = await fetchWithTimeout(`https://api.github.com/gists/${creds.gistId}`, {
       method: 'PATCH',
       headers: {
         Authorization: `Bearer ${creds.token}`,
@@ -410,7 +420,7 @@ async function push(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
     if (!res.ok) throw new Error(await readError(res));
     updated = await res.json();
   } else {
-    const res = await fetch('https://api.github.com/gists', {
+    const res = await fetchWithTimeout('https://api.github.com/gists', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${creds.token}`,
@@ -455,7 +465,7 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
   const wsId = api.workspaceId();
   if (!wsId) throw new Error('no active workspace');
 
-  const res = await fetch(`https://api.github.com/gists/${creds.gistId}`, {
+  const res = await fetchWithTimeout(`https://api.github.com/gists/${creds.gistId}`, {
     headers: {
       Authorization: `Bearer ${creds.token}`,
       Accept: 'application/vnd.github+json',
@@ -645,7 +655,7 @@ async function pull(api: HostApi, scope: SyncScope = 'all'): Promise<void> {
 async function confirmStaleRemoval(api: HostApi, creds: GistCreds, pushed: string[]): Promise<string[]> {
   let remote: string[];
   try {
-    const res = await fetch(`https://api.github.com/gists/${creds.gistId}`, {
+    const res = await fetchWithTimeout(`https://api.github.com/gists/${creds.gistId}`, {
       headers: { Authorization: `Bearer ${creds.token}`, Accept: 'application/vnd.github+json' },
     });
     if (!res.ok) return [];
@@ -729,7 +739,7 @@ async function pushTable(api: HostApi, tableId: string): Promise<void> {
   const rows = table.source != null ? [] : await api.store.rows(tableId).find();
   const content = JSON.stringify(tableToFile(table, rows), null, 2);
   const files = { [`${slugTable(table.name)}.table.json`]: { content } };
-  const res = await fetch(`https://api.github.com/gists/${creds.gistId}`, {
+  const res = await fetchWithTimeout(`https://api.github.com/gists/${creds.gistId}`, {
     method: 'PATCH',
     headers: {
       Authorization: `Bearer ${creds.token}`,
@@ -751,7 +761,7 @@ async function pullTable(api: HostApi, tableId: string): Promise<void> {
   const table = await api.store.tables.findOne(tableId);
   if (!table) return;
   const filename = `${slugTable(table.name)}.table.json`;
-  const res = await fetch(`https://api.github.com/gists/${creds.gistId}`, {
+  const res = await fetchWithTimeout(`https://api.github.com/gists/${creds.gistId}`, {
     headers: { Authorization: `Bearer ${creds.token}`, Accept: 'application/vnd.github+json' },
   });
   if (!res.ok) throw new Error(await readError(res));
@@ -861,7 +871,10 @@ function syncedTableFields(p: TableFileMeta): Partial<Table> {
  * gist's raw_url is link-accessible and served with `Access-Control-Allow-Origin: *`,
  * so a plain GET (no auth header → no CORS preflight) works from the browser.
  */
-export async function fetchGistFileContent(file: { content: string; truncated?: boolean; raw_url?: string }, doFetch: (url: string) => Promise<Response> = (u) => fetch(u)): Promise<string> {
+export async function fetchGistFileContent(
+  file: { content: string; truncated?: boolean; raw_url?: string },
+  doFetch: (url: string) => Promise<Response> = (u) => fetchWithTimeout(u),
+): Promise<string> {
   if (!file.truncated) return file.content;
   if (!file.raw_url) throw new Error('GitHub truncated this file but returned no raw_url');
   const res = await doFetch(file.raw_url);

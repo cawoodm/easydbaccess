@@ -18,6 +18,7 @@
 import type { DataCollection, HostApi, PluginModule, Row, RowSourceCtx, Table, Unsubscribe } from '@easydb/shared';
 import { parseCsv } from './csv-import.js';
 import { isGitLfsPointer, readResponseText, toCorsFriendlyUrl, toGitLfsMediaUrl } from './read-url.js';
+import { describeNetworkError, isOffline } from '../util/net.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'url-source',
@@ -198,6 +199,9 @@ export function createUrlCollection(table: Table, ctx: RowSourceCtx): DataCollec
     try {
       res = await ctx.backend.fetch(target);
     } catch (err) {
+      // A live URL table is re-read on every render, so this is the message an
+      // offline user meets most often — say "offline", not "Failed to fetch".
+      if (isOffline()) throw new Error(describeNetworkError(err, url), { cause: err });
       throw new Error(`Could not reach ${url}: ${(err as Error)?.message ?? String(err)}`, {
         cause: err,
       });

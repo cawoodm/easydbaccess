@@ -9,6 +9,7 @@ import { hasColumnDrag } from '../table/column-drag.js';
 import { CHROME_SETTINGS_ID, CHROME_SETTINGS_NAME, chromeSettingsFields, readButtonText, readHiddenButtons } from './chrome-settings.js';
 import { TITLEBAR_BUTTONS } from '../window-mgr/titlebar-buttons.js';
 import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
+import { isOffline, onOnlineChange } from '../util/net.js';
 import '../dialogs/csv-paste-dialog.js';
 import type { CsvPasteDialog } from '../dialogs/csv-paste-dialog.js';
 import '../dialogs/new-table-dialog.js';
@@ -109,6 +110,26 @@ export class AppShell extends LitElement {
         opacity: 0.5;
         font-size: 0.75rem;
         margin-left: 0.5rem;
+      }
+      /* The offline chip. Amber rather than red: nothing is broken — the data
+         is local and fully editable — only the network-backed features are
+         away. See util/net.ts. */
+      header .offline-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        margin-left: 0.5rem;
+        padding: 0.1rem 0.4rem;
+        border: 1px solid #b45309;
+        border-radius: 0.75rem;
+        background: rgba(251, 191, 36, 0.15);
+        color: #fbbf24;
+        font-size: 0.7rem;
+        white-space: nowrap;
+        cursor: help;
+      }
+      header .offline-chip .mi {
+        font-size: 0.9rem;
       }
       button.primary,
       button.slot {
@@ -294,6 +315,17 @@ export class AppShell extends LitElement {
   @state() private searchQuery = '';
   @state() private searchOpen = false;
   @state() private workspaceTitle = '';
+  /**
+   * Is the browser reporting no connection?
+   *
+   * One chip in the header does the work of every call site's error text: once
+   * the chrome says "offline", a failed sync or a blank map tile needs no
+   * further explanation. `false` is only a hint (a captive portal reports
+   * online), which is why every request is bounded by a timeout as well — see
+   * `util/net.ts`.
+   */
+  @state() private offline = false;
+  private offlineUnsub?: () => void;
   private api: HostApi | null = null;
   private searchTimer: number | null = null;
   private workspaceUnsub?: () => void;
@@ -329,6 +361,8 @@ export class AppShell extends LitElement {
     // dynamic import keeps the chrome from depending on the window layer statically,
     // the same way the drop handlers do.
     void import('../window-mgr/table-window-manager.js').then((m) => (this.tablePanelAt = m.tablePanelAtNode));
+    this.offline = isOffline();
+    this.offlineUnsub = onOnlineChange((online) => (this.offline = !online));
     void this.bindRegistries();
   }
 
@@ -350,6 +384,7 @@ export class AppShell extends LitElement {
     document.removeEventListener('keydown', this.onGlobalKeydown);
     document.removeEventListener(SETTINGS_CHANGED_EVENT, this.onSettingsChanged);
     this.workspaceUnsub?.();
+    this.offlineUnsub?.();
   }
 
   private onEditColumns = (e: Event) => {
@@ -645,9 +680,14 @@ export class AppShell extends LitElement {
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
           <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
-            ><span class="version">v0.0.460</span></a
+            ><span class="version">v0.0.461</span></a
           ></strong
         >
+        ${this.offline
+          ? html`<span class="offline-chip" title="You are offline. Your data is local and fully editable. Sync, plugin installs and map tiles are unavailable until the connection is back."
+              ><span class="mi" aria-hidden="true">cloud_off</span>Offline</span
+            >`
+          : nothing}
         ${this.shownButtons('header')
           .filter((b) => b.variant !== 'secondary')
           .map((b) => this.renderSlotButton(b, 'header'))}
