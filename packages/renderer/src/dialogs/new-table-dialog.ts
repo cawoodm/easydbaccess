@@ -10,7 +10,16 @@ import { markDirty, watchDialogDirty } from '../chrome/dirty-guard.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
 import { allColumnsFlagged, buildColumnSpec, toggleColumnFlag, type ColumnFlag, type ColumnRow } from './column-row.js';
 import { renameRowFields, type FieldRename } from '../table/column-merge.js';
-import { remapFilterFields, sameFilterMap } from '../table/filter-map.js';
+import {
+  conditionalPatch,
+  constraintErrorMessage,
+  draftProblem,
+  migrateRowData,
+  planColumnChanges,
+  saveStageError,
+  tightenedConstraints,
+  type SaveStage,
+} from '../table/table-save.js';
 import { createValidator, issueMessages } from '../table/validate-rules.js';
 import { readRows } from '../db/row-reader.js';
 import { offerableRenderers, rendererOptionsFor } from '../table/renderer-options.js';
@@ -802,186 +811,163 @@ export class NewTableDialog extends LitElement {
   }
 
   /**
-   * The parts of an edit patch that are written only when they carry meaning:
+   * Save, in four visible stages: validate → apply the table edit → migrate the
+   * rows → repoint everything that names what just changed.
    *
-   * - `deletedColumns` — something is tracked, or a tracked set is being cleared.
-   * - `filters` — a funnel was toggled, or a rename / removal moved the keys.
-   *   Field-keyed, so `remapFilterFields` has to run whether or not the user
-   *   touched a funnel at all.
-   *
-   * Separate from `submit` because that method is already at the complexity
-   * limit the lint config sets.
+   * The stages are separate because they are separate WRITES. There is no
+   * transaction around a save, so the honest thing this method can do is say
+   * which of them landed when one fails — see {@link runStages}.
    */
-  private conditionalPatch(existing: Table | null | undefined, deletedColumns: string[], prevDeleted: readonly string[], savedFields: ReadonlySet<string>): Partial<Table> {
-    const out: Partial<Table> = {};
-    if (deletedColumns.length > 0 || prevDeleted.length > 0) out.deletedColumns = deletedColumns;
-    const filters = remapFilterFields(this.filters, this.fieldRenames(), savedFields);
-    if (!sameFilterMap(existing?.filters ?? {}, filters)) out.filters = filters;
-    return out;
-  }
-
   private async submit(e: Event): Promise<void> {
     e.preventDefault();
     const name = this.name.trim();
-    if (!name) {
-      this.errorMsg = 'Table name is required.';
-      return;
-    }
     const ctx = await getContext();
     const workspaceTables = (await ctx.store.tables.find()).filter((t) => t.workspaceId === ctx.workspaceId);
-    const lowerName = name.toLowerCase();
-    const clash = workspaceTables.find((t) => t.name.toLowerCase() === lowerName && t.id !== this.editTableId);
-    if (clash) {
-      this.errorMsg = `A table named "${clash.name}" already exists — names must be unique.`;
+    const problem = draftProblem({ name, fields: this.columns.map((c) => c.field), tables: workspaceTables, selfId: this.editTableId });
+    if (problem) {
+      this.errorMsg = problem;
       return;
     }
-    if (this.columns.length === 0) {
-      this.errorMsg = 'At least one column is required.';
-      return;
-    }
-    // Keyed by LOWER CASE, like the table-name check above. A field becomes a real
-    // SQL column and SQLite column names are case-insensitive, so `Name` beside
-    // `name` is one column in the file: the save went through with no complaint and
-    // one of the two columns then read as empty. The first spelling is kept so the
-    // message can name what the clash is with — "duplicate: name" reads like a
-    // false alarm when the other column is spelled `Name`.
-    const seen = new Map<string, string>();
-    for (const c of this.columns) {
-      const f = c.field.trim();
-      if (!f) {
-        this.errorMsg = 'Column field names cannot be empty.';
-        return;
-      }
-      const first = seen.get(f.toLowerCase());
-      if (first !== undefined) {
-        this.errorMsg = first === f ? `Duplicate column field: ${f}` : `Duplicate column field: "${f}" clashes with "${first}" — column names are not case-sensitive.`;
-        return;
-      }
-      seen.set(f.toLowerCase(), f);
-    }
-
-    const title = this.tableTitle.trim();
     // buildColumnSpec spreads each row's `orig` ColumnSpec (when hydrated from
     // a saved table) as the base, so fields the editor doesn't own — default,
     // width, description, units — survive the save instead of being dropped.
     // See column-row.ts for why clearing a field must explicitly delete it
     // rather than just skip setting it.
     const columns: ColumnSpec[] = this.columns.map(buildColumnSpec);
+    const editId = this.mode === 'edit' ? this.editTableId : null;
+    const saved = editId ? await this.applyTableEdit(editId, name, columns, workspaceTables) : await this.createTable(name, columns);
+    if (saved) this.close();
+  }
 
-    if (this.mode === 'edit' && this.editTableId) {
-      // Pre-flight scan: if any column has just been flagged unique or notnull
-      // and the existing rows would violate it, block the save with a list of
-      // offending row indices so the user can fix the data first.
-      const tableId = this.editTableId;
-      const existingTable = await ctx.store.tables.findOne(tableId);
-      const prevSpecs = new Map((existingTable?.columns ?? []).map((c) => [c.field, c]));
-      const newConstraints = columns.filter((c) => {
-        const prev = prevSpecs.get(c.field);
-        return (c.unique && !prev?.unique) || (c.notnull && !prev?.notnull) || (c.max && c.max > 0 && c.max !== prev?.max);
-      });
-      if (newConstraints.length > 0) {
-        const rows = await ctx.store.rows(tableId).find();
-        const violations = scanConstraintViolations(newConstraints, rows);
-        if (violations.length > 0) {
-          this.errorMsg = `Cannot save: ${violations.length} existing ${violations.length === 1 ? 'row violates' : 'rows violate'} the new constraints.\n${violations.slice(0, 5).join('\n')}${
-            violations.length > 5 ? `\n…and ${violations.length - 5} more.` : ''
-          }`;
-          return;
-        }
+  /**
+   * Run the save's writes one at a time, stopping at the first failure and
+   * naming what had already been written.
+   *
+   * Returns false when a stage threw, so the dialog stays open on its error
+   * banner instead of closing over a half-applied change.
+   */
+  private async runStages(stages: readonly SaveStage[]): Promise<boolean> {
+    const done: string[] = [];
+    for (const [what, run] of stages) {
+      try {
+        await run();
+      } catch (err) {
+        this.errorMsg = saveStageError(what, done, err);
+        return false;
       }
-      // Track columns the user removed so a later re-import / refresh doesn't
-      // re-add them. A removed column is an original field no longer kept by any
-      // row (renames keep their `origField`, so they don't count as deleted).
-      // Re-adding a column with a previously-deleted name clears it from the set.
-      const keptOrig = new Set(this.columns.map((c) => c.origField).filter((f): f is string => !!f));
-      const savedFields = new Set(columns.map((c) => c.field));
-      const removedNow = (existingTable?.columns ?? []).map((c) => c.field).filter((f) => !keptOrig.has(f));
-      const prevDeleted = existingTable?.deletedColumns ?? [];
-      const deletedColumns = [...new Set([...prevDeleted, ...removedNow])].filter((f) => !savedFields.has(f));
+      done.push(what);
+    }
+    return true;
+  }
 
-      // A rename breaks every name-based reference to this table — projections
-      // bind to their sources by name, and so do view instances. Say what will
-      // be affected BEFORE writing anything, and let the user back out; the
-      // references are then carried across below rather than left dangling.
-      let refs: TableReferences | null = null;
-      if (existingTable && existingTable.name !== name) {
-        const views = (await ctx.store.viewInstances.find()).filter((v) => v.workspaceId === ctx.workspaceId);
-        refs = findTableReferences(existingTable.name, workspaceTables, views, tableId);
-        const what = describeReferences(refs);
-        if (what) {
-          const ok = await confirmRename(existingTable.name, name, what);
-          if (!ok) return;
-        }
-      }
+  private async createTable(name: string, columns: ColumnSpec[]): Promise<boolean> {
+    const ctx = await getContext();
+    return this.runStages([
+      [
+        'the new table',
+        () =>
+          ctx.store.tables.insert({
+            id: cryptoUUID(),
+            workspaceId: ctx.workspaceId,
+            name,
+            title: this.tableTitle.trim(),
+            code: slugTable(name),
+            columns,
+            view: 'table',
+            updatedAt: Date.now(),
+          }),
+      ],
+    ]);
+  }
 
-      // Patch the saved table; renamed fields are re-keyed in every row's
-      // `data` below so existing values follow the field to its new name.
-      const patch: Partial<Table> = {
-        name,
-        title,
-        columns,
-        readonly: this.tableReadonly,
-        updatedAt: Date.now(),
-        ...this.conditionalPatch(existingTable, deletedColumns, prevDeleted, savedFields),
-      };
-      const oldName = existingTable?.name;
-      await ctx.store.tables.patch(tableId, patch);
+  /**
+   * Edit mode's save. Everything that can refuse the save runs first — the
+   * constraint pre-flight and the rename warning — so the write sequence below
+   * it is only ever entered once the answer is yes.
+   */
+  private async applyTableEdit(tableId: string, name: string, columns: ColumnSpec[], workspaceTables: Table[]): Promise<boolean> {
+    const ctx = await getContext();
+    const existing = await ctx.store.tables.findOne(tableId);
+    const blocked = await this.constraintPreflight(tableId, columns, existing);
+    if (blocked) {
+      this.errorMsg = blocked;
+      return false;
+    }
+    const keptOrig = new Set(this.columns.map((c) => c.origField).filter((f): f is string => !!f));
+    const changes = planColumnChanges(existing, columns, keptOrig);
+    const renames = this.fieldRenames();
+    const oldName = existing?.name;
+    const renamed = oldName !== undefined && oldName !== name;
 
-      // Scrub the data of genuinely-deleted columns from every row: deleted
-      // columns must not be stored, synced, or persisted — only their name is
-      // remembered (in `deletedColumns`) so a refresh/re-import won't re-add
-      // them. Renamed columns keep their `origField`, so they're excluded here;
-      // only true deletions are purged. Skip rows that carry none of the fields.
-      const purgeFields = removedNow.filter((f) => !savedFields.has(f));
-      // Renamed fields must be re-keyed too, or the new column reads undefined
-      // and the old value lingers under the stale key forever. Apply renames
-      // before purges so a renamed-then-purged field can never collide.
-      const renames = this.fieldRenames();
-      // Only LOCAL rows can be rewritten. A source-backed table's rows are
-      // derived or remote (a projection computes them; Datasette owns them), so
-      // there is nothing here to re-key — and attempting it would throw from a
-      // read-only row collection and abort the rest of the save.
-      if (!existingTable?.source && (purgeFields.length > 0 || renames.length > 0)) {
-        const rows = await ctx.store.rows(tableId).find();
-        for (const r of rows) {
-          let touched = false;
-          let data = { ...r.data };
-          const renamed = renameRowFields(data, renames);
-          if (renamed) {
-            data = renamed;
-            touched = true;
-          }
-          for (const f of purgeFields) {
-            if (f in data) {
-              delete data[f];
-              touched = true;
-            }
-          }
-          if (touched) {
-            await ctx.store.rows(tableId).patch(r.id, { data, updatedAt: Date.now() });
-          }
-        }
-      }
+    // A rename breaks every name-based reference to this table — projections
+    // bind to their sources by name, and so do view instances. Say what will be
+    // affected BEFORE writing anything, and let the user back out; the
+    // references are then carried across below rather than left dangling.
+    let refs: TableReferences | null = null;
+    if (existing && renamed) {
+      const views = (await ctx.store.viewInstances.find()).filter((v) => v.workspaceId === ctx.workspaceId);
+      refs = findTableReferences(existing.name, workspaceTables, views, tableId);
+      const what = describeReferences(refs);
+      if (what && !(await confirmRename(existing.name, name, what))) return false;
+    }
+
+    const patch: Partial<Table> = {
+      name,
+      title: this.tableTitle.trim(),
+      columns,
+      readonly: this.tableReadonly,
+      updatedAt: Date.now(),
+      ...conditionalPatch(existing, changes, this.filters, renames),
+    };
+    const stages: SaveStage[] = [
+      ['the column settings', () => ctx.store.tables.patch(tableId, patch)],
+      ['the row data', () => this.migrateRows(tableId, renames, changes.purgeFields, !!existing?.source)],
       // A renamed FIELD is name-bound too: a projection names its output fields,
       // the source fields it reads, and its join keys. Runs before the table
       // rename is carried across, because the specs still say the old NAME here.
-      await repointFieldRenames(tableId, oldName ?? name, renames, workspaceTables);
-      if (oldName !== undefined && oldName !== name) {
-        await repointReferences(tableId, oldName, name, refs);
-      }
-    } else {
-      await ctx.store.tables.insert({
-        id: cryptoUUID(),
-        workspaceId: ctx.workspaceId,
-        name,
-        title,
-        code: slugTable(name),
-        columns,
-        view: 'table',
-        updatedAt: Date.now(),
-      });
+      ['renamed fields in projections and views', () => repointFieldRenames(tableId, oldName ?? name, renames, workspaceTables)],
+    ];
+    if (renamed) stages.push(['references to the old table name', () => repointReferences(tableId, oldName, name, refs)]);
+    return this.runStages(stages);
+  }
+
+  /**
+   * Block the save when a column has just been flagged unique or notnull (or
+   * given a tighter `max`) and the rows already there would violate it. The
+   * message lists the offending rows so the user can fix the data first.
+   *
+   * Returns the banner text, or null when the save may go ahead.
+   */
+  private async constraintPreflight(tableId: string, columns: ColumnSpec[], existing: Table | null): Promise<string | null> {
+    const tightened = tightenedConstraints(columns, existing?.columns ?? []);
+    if (tightened.length === 0) return null;
+    const ctx = await getContext();
+    const rows = await ctx.store.rows(tableId).find();
+    const violations = scanConstraintViolations(tightened, rows);
+    return violations.length > 0 ? constraintErrorMessage(violations) : null;
+  }
+
+  /**
+   * Re-key renamed fields and scrub deleted ones out of every row.
+   *
+   * Deleted columns must not be stored, synced or persisted — only their name
+   * is remembered (in `deletedColumns`) so a refresh or re-import won't re-add
+   * them. Renamed fields must move with their values, or the new column reads
+   * undefined and the old value lingers under the stale key forever.
+   *
+   * `sourced` tables are skipped: their rows are derived or remote (a
+   * projection computes them; Datasette owns them), so there is nothing here to
+   * re-key — and attempting it would throw from a read-only row collection.
+   */
+  private async migrateRows(tableId: string, renames: readonly FieldRename[], purgeFields: readonly string[], sourced: boolean): Promise<void> {
+    if (sourced || (purgeFields.length === 0 && renames.length === 0)) return;
+    const ctx = await getContext();
+    const rows = await ctx.store.rows(tableId).find();
+    for (const r of rows) {
+      const data = migrateRowData(r.data, renames, purgeFields);
+      // Null means the row carries none of the affected fields — don't write it.
+      if (data) await ctx.store.rows(tableId).patch(r.id, { data, updatedAt: Date.now() });
     }
-    this.close();
   }
 
   /**

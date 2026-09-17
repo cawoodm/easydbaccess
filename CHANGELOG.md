@@ -14,6 +14,7 @@
 
 ### Bugs
 
+- 🪲 A column-editor save that failed part way said nothing at all, leaving no sign that the table was half-changed (v0.0.459)
 - 🪲 A save could replace a `.edb` that another tab, browser or machine had written since, without asking (v0.0.455)
 
 - 🪲 Clicking a `file:///` link opened a blank tab saying nothing, because a browser will not open a local file from a web page (v0.0.452)
