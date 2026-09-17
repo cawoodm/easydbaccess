@@ -1,22 +1,18 @@
 [CmdletBinding()]param(
-  [switch]$WorkingTree  # build the local working tree instead of main (uncommitted state)
+  [switch]$Main  # build the committed main tree instead of the local working tree
 )
 function main() {
   cd $PSScriptRoot
 
-  if ($WorkingTree) {
-    $ver = (Get-Content -Raw .\package.json | ConvertFrom-Json).version
-    Write-Warning "Building from the working tree (uncommitted local state), not main."
-    $context = "."
-    Build-Image $ver $context
-  } else {
+  if ($Main) {
     $ver = (git show main:package.json | ConvertFrom-Json).version
+    Write-Host "Building from the committed main tree."
 
     # First use: the Dockerfile may still be untracked on main. Fail fast with
     # a clear message instead of archiving a tree that doesn't have it.
     git cat-file -e main:Dockerfile 2>$null
     if ($LASTEXITCODE -ne 0) {
-      throw "Dockerfile is not committed to main yet. Commit it, or re-run with -WorkingTree."
+      throw "Dockerfile is not committed to main yet. Commit it, or run ``npm run docker`` to build the working tree."
     }
 
     # Export main to a temp dir and build from there so uncommitted local
@@ -44,6 +40,13 @@ function main() {
       Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
       Remove-Item "$tmp.zip" -Force -ErrorAction SilentlyContinue
     }
+  } else {
+    # The default: build what is on disk right now, so a local `docker build`
+    # shows the change you just made. `.dockerignore` is what keeps node_modules,
+    # dist/ and the .tsbuildinfo files out of the context — see the comments there.
+    $ver = (Get-Content -Raw .\package.json | ConvertFrom-Json).version
+    Write-Host "Building from the working tree (local, uncommitted state)."
+    Build-Image $ver "."
   }
 }
 
@@ -59,10 +62,14 @@ function Build-Image($ver, $context) {
   # Run detached with a restart policy so the container survives host reboots
   # and Docker Engine restarts (NOT --rm, which would delete it on stop). Port
   # 8190 echoes the dev server's 5190 and avoids twikki's 8081.
-  docker run -d --restart unless-stopped -p 8190:80 --name easydbaccess easydbaccess:latest
+  #
+  # Run the VERSIONED tag, not :latest. Both name the same image, but the tag
+  # you run is the one `docker ps` reports — and ":latest" there tells you
+  # nothing about which build is actually serving 8190.
+  docker run -d --restart unless-stopped -p 8190:80 --name easydbaccess "easydbaccess:$ver"
   if ($LASTEXITCODE -ne 0) { throw "docker run failed!" }
 
-  Write-Host "easyDBAccess running at http://localhost:8190/"
+  Write-Host "easyDBAccess $ver running at http://localhost:8190/"
 }
 $ErrorActionPreference = "Stop"
 main

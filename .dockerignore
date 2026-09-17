@@ -1,11 +1,20 @@
 node_modules
 **/node_modules
 **/dist
+# Paired with **/dist above, and load-bearing on the DEFAULT path: `npm run
+# docker` builds the local tree, which has these files. A copied-in
+# .tsbuildinfo tells `tsc -b` the build is already up to date, so
+# @easydb/shared emits no dist/ and the renderer build can't resolve it.
+**/*.tsbuildinfo
 .git
 .github
 .claude
 e2e
-docs
+# Not a bare `docs` exclusion: vite.config.ts's `gen-tips` buildStart hook
+# compiles docs/help/tips.md into the renderer bundle, so that one file has to
+# stay reachable. Same /* + ! trick as packages/* below.
+docs/*
+!docs/help
 test-results
 playwright-report
 # Excluded via /* (not a bare dir match) so the tree stays walkable and the

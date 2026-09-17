@@ -2,7 +2,7 @@
   "name": "easydbaccess",
   "author": "Marc Cawood",
   "license": "MIT",
-  "version": "0.0.461",
+  "version": "0.0.462",
   "private": true,
   "repository": "https://github.com/cawoodm/easydbaccess",
   "description": "Local-first, plugin-extensible, multi-table database app — runs in the browser and as an Electron desktop app.",
@@ -28,7 +28,8 @@
     "publish": "pwsh -File ./publish.ps1",
     "build:electron": "pwsh -File ./package-electron.ps1",
     "package:electron": "pwsh -File ./package-electron.ps1 -Installer",
-    "docker": "pwsh -File ./docker.ps1"
+    "docker": "pwsh -File ./docker.ps1",
+    "docker:main": "pwsh -File ./docker.ps1 -Main"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
