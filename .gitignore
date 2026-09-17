@@ -2,6 +2,7 @@ node_modules/
 dist/
 build/
 out/
+.preview/
 .wiki-build/
 packages/electron/frontend/
 *.tsbuildinfo

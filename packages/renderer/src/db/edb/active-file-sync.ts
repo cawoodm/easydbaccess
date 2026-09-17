@@ -72,7 +72,9 @@ export type ActiveFileOutcome =
   /** The user was asked and kept this copy. */
   | 'kept'
   /** The user was asked and wrote this copy over the file. */
-  | 'overwritten';
+  | 'overwritten'
+  /** The two copies were settled table by table, and both sides changed. */
+  | 'merged';
 
 /**
  * The clause the sync toast adds about this tab's own file.
@@ -93,6 +95,11 @@ export function describeActiveOutcome(outcome: ActiveFileOutcome, file: string):
       return ` Kept this copy of ${file}.`;
     case 'overwritten':
       return ` Wrote this copy over ${file}.`;
+    // Deliberately quiet about WHAT was merged: the merge itself said that, in
+    // its own toast and in the dialog the user just answered. This clause only
+    // has to stop the sync report from reading as though nothing happened.
+    case 'merged':
+      return ` Merged with ${file}.`;
     default:
       return '';
   }

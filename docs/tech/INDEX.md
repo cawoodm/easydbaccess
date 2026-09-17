@@ -13,6 +13,7 @@ changing code. For the user guide (how to use the app) see
 - [Commands](COMMANDS.md)
 - [Commandlets](COMMANDLETS.md) — `goto/bible?Book=Matthew` as a link, a `#hash` or a palette entry
 - [Refresh](REFRESH.md) — reloading one table from its source, and its open questions
+- [Offline](OFFLINE.md) — the service worker, the manifest, and what every network call does with no connection
 - [Cloud Synch](SYNCH.md)
 - [Server](SERVER.md)
 - [Windows](WINDOWS.md)

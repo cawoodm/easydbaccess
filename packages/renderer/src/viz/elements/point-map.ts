@@ -38,6 +38,7 @@ import { readChartTheme, type MapPoint } from './chart-data.js';
 import { MIN_WORLD_ZOOM, WORLD_BOUNDS, wholeZoomShowingWorld } from './map-zoom.js';
 import { markerRadiusRange, scaleMarkerRadii } from './marker-scale.js';
 import { sameMapPoints, sameVizOptions } from './same-input.js';
+import { isOffline } from '../../util/net.js';
 
 export interface MapOptions {
   tileUrl?: string | undefined;
@@ -346,7 +347,9 @@ export class VizPointMap extends LitElement {
       ></div>
       ${this.tileError
         ? html`<div role="status" style="position:absolute;left:0;right:0;bottom:0;z-index:500;padding:3px 8px;font:11px/1.35 system-ui,sans-serif;color:#92400e;background:rgba(255,251,235,.95)">
-            Map tiles could not be loaded — the points are still plotted. Check the tile URL in Settings → Visualizations, or your connection.
+            ${isOffline()
+              ? html`You are offline — the map background needs a connection, but the points are still plotted and the data is untouched.`
+              : html`Map tiles could not be loaded — the points are still plotted. Check the tile URL in Settings → Visualizations, or your connection.`}
           </div>`
         : nothing}
     `;

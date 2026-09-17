@@ -437,8 +437,7 @@ Until v0.0.455 only the SYNC command read the stamp. `persist()` wrote
 unconditionally, so an autosave tick would replace that work with no question
 asked — the one loss the app cannot undo, since the bytes it overwrote were the
 only copy. Every write now compares first (`mayOverwriteFile`), and a difference
-puts the same two-sided question in front of the user that a Save-over-a-file
-clash does: **Use disk version** (write nothing) or **Use local version**.
+stops it and asks — see the next section for what it asks.
 
 Four details, each of which is the reason something is quiet:
 
@@ -459,6 +458,96 @@ Four details, each of which is the reason something is quiet:
 What this does NOT do is notice the outside write on its own. The File System
 Access API has no change events, so that would be a poll, and nothing polls: the
 tab finds out when it next tries to write, or when the user runs Sync.
+
+## Settling two copies, table by table and row by row
+
+The check above stops the write. This is what the user can then DO about it.
+
+For as long as a `.edb` was one indivisible blob, the only two answers the file
+layer could act on were "keep the file" and "keep mine" — and **both of them
+throw away somebody's work whenever both copies were edited**, which is the
+ordinary case for a folder shared between two machines. The comparison is now
+per table, and inside a table per row. Four modules, in dependency order:
+
+| Module                              | What it owns                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------- |
+| `@easydb/shared`'s `replicate.ts`   | The RULES. Pure: diff two lists of stamps, decide a winner, turn answers into a plan. |
+| `db/edb/replicate-run.ts`           | Two databases at once: opens the file beside the live one and carries a plan out.    |
+| `dialogs/merge-dialog.ts`           | The table list and the record list. Collects answers; decides nothing.               |
+| `db/edb/merge-file.ts`              | The file handle, the permission, the progress bar, the toast. One entry for both callers. |
+
+### Timestamps are all there is
+
+`Table.updatedAt` and `Row.updatedAt` were already in the model, so this needed
+no format change. But there is no change log and there are no tombstones, and
+two consequences run through the whole design:
+
+- **A missing row is not a deleted row.** A row here and not there was either
+  added here or deleted there, and nothing stored can tell them apart. So
+  **`newest` never deletes**: a thing only one side has has no rival to lose to,
+  the side that has it wins, and it is carried across. Union, with the clock
+  settling only genuine collisions. Deleting happens only where the user
+  explicitly asks one side to be made to match the other.
+- **A table's stamp includes its ROWS.** Editing a cell writes the row, not the
+  `tables` doc, so `tableTouchedAt` is `max(doc.updatedAt, MAX(row.updatedAt))`.
+  Without that, a table with an hour of edits in it compares as untouched.
+
+Two stamps can also differ with no newer side — the same millisecond, different
+row counts. `winnerOf` answers `null` there rather than picking at random.
+
+### Cheap first, expensive only when asked
+
+Three reads, each one level more expensive, and each only reached because the
+one before it found something:
+
+1. **The file** — `mtime` and `size`. No file is opened.
+2. **The tables** — `EdbStore.tableStamps()`, two aggregates per table. No row is
+   read. This is what the four-answer question is costed at.
+3. **The rows** — `EdbStore.rowStamps()`, two numbers per row, for ONE table the
+   user opened. Their contents are read only for the rows actually on screen, and
+   only up to `RECORD_LIMIT` (200) of them.
+
+### The scratch worker must not touch the pool
+
+The file's copy is opened in a throwaway `createEdbBridge()` and dressed as a
+plain `DataStore`, so the merge is written against the same interface as the rest
+of the app rather than against SQL. That worker opens with `{ scratch: true }`,
+which is **not** cosmetic: `opfs-sahpool` is exclusive origin-wide, and a second
+worker asking for it makes the browser refuse the access handles the LIVE worker
+is already holding — a real error in the session the user is looking at, caused
+by a database nobody will keep. `scratch` also skips the OPFS mirror, which would
+otherwise leave a file behind for a copy with no history worth recovering.
+
+### The two directions are disjoint
+
+Every difference has exactly one winner, so the tables and rows written INTO this
+database and the ones written INTO the file never overlap. That is why neither
+pass needs a snapshot of the other and the order cannot matter. The file is only
+re-exported when its side actually changed — a merge that only pulled leaves the
+file alone, and rewriting it would move its timestamp for nothing and make the
+next comparison think it had moved.
+
+### What a merge does not settle
+
+**Tables and rows only.** Views, view templates and settings are left as each
+side has them, and the dialog says so. That is also why `merge-file.ts` always
+calls `recordDivergence` and never `recordAgreement`: after a merge this database
+is not a copy of the file, and saying otherwise would let the next Save write
+over it without asking. The ordinary Save that follows brings the file the rest
+of the way.
+
+### Where it is reached from
+
+Three places, all through `mergeWithFile`: the Save clash (`mayOverwriteFile`),
+the Sync clash (`refreshActiveFile`, which takes the merge as a callback because
+`folder-sync.ts` has neither the bridge nor the workspace id), and the palette
+command **Compare workspace with its file** — which exists because waiting for a
+Save to collide is waiting for the moment it is hardest to think about.
+
+The four button labels live in `db/edb/merge-answers.ts` rather than beside
+either caller. `folder-sync.ts` is imported by tests that run in Node with no
+DOM, and `merge-file.ts` pulls in a Lit dialog; a label duplicated between them
+would be a branch that never runs.
 
 ## Two things deliberately absent
 

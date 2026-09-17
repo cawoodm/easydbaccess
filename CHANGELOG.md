@@ -1,9 +1,28 @@
 # CHANGELOG
 
+## 17 Sep 2026
+
+### Bugs
+
+- 🪲 A column-editor save that failed part way said nothing at all, leaving no sign that the table was half-changed (v0.0.462)
+
+## 10 Sep 2026
+
+### Features
+
+- 🪶 The hosted app opens and works with no internet: it caches itself, installs like an app, and never hangs on a dead network (v0.0.461)
+
+## 7 Sep 2026
+
+### Features
+
+- ✨ A double-click on a row, or `edit/<table>/<key>`, opens the whole record in one form — read-only where the table is (v0.0.460)
+
 ## 27 Aug 2026
 
 ### Features
 
+- 🪶 A `.edb` that another machine wrote is settled table by table and row by row: Take newest, Compare tables, Push or Pull (v0.0.459)
 - ✨ Editing a list cell suggests the values that column already holds, so a tag vocabulary stops drifting by typing (v0.0.458)
 - ✨ The header search box stays open while it holds a query, instead of collapsing to an icon that could not say what was being filtered (v0.0.457)
 - ✨ One box above the Settings tabs searches every tab at once, showing each match under the tab it lives on (v0.0.456)
@@ -14,7 +33,6 @@
 
 ### Bugs
 
-- 🪲 A column-editor save that failed part way said nothing at all, leaving no sign that the table was half-changed (v0.0.459)
 - 🪲 A save could replace a `.edb` that another tab, browser or machine had written since, without asking (v0.0.455)
 
 - 🪲 Clicking a `file:///` link opened a blank tab saying nothing, because a browser will not open a local file from a web page (v0.0.452)

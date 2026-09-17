@@ -1,4 +1,5 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
+import { fetchWithTimeout, isOffline } from '../util/net.js';
 import { serializeWorkspace } from './dump-export.js';
 import { canonicalize, loadEtag, loadServerUrl, replaceWorkspace, saveEtag, stripEtag } from './server-sync-core.js';
 
@@ -48,6 +49,11 @@ export function load(api: HostApi): void {
  */
 export async function tick(api: HostApi): Promise<void> {
   if (prompting) return;
+  // Certainly offline: skip the whole cycle. `syncOnce` serializes the entire
+  // workspace before it makes its first request, and doing that once a minute
+  // for a request that cannot succeed is pure waste. The next tick picks it up
+  // when the network is back — nothing needs to watch for that.
+  if (isOffline()) return;
   const wsId = api.workspaceId();
   if (!wsId) return;
   const url = await loadServerUrl(api);
@@ -69,7 +75,7 @@ async function syncOnce(api: HostApi, url: string, wsId: string): Promise<void> 
 
   // Probe the server once per tick. GET also gives us the body so we can
   // tell "in sync" from "diverged" without a second round-trip.
-  const probe = await fetch(`${url}/sync/${encodeURIComponent(wsId)}`);
+  const probe = await fetchWithTimeout(`${url}/sync/${encodeURIComponent(wsId)}`);
 
   if (probe.status === 404) {
     // No copy on the server yet — silently seed it.
@@ -122,11 +128,18 @@ async function syncOnce(api: HostApi, url: string, wsId: string): Promise<void> 
 async function silentPut(api: HostApi, url: string, wsId: string, body: string, ifMatch: string | null): Promise<void> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (ifMatch) headers['If-Match'] = `"${ifMatch}"`;
-  const res = await fetch(`${url}/sync/${encodeURIComponent(wsId)}`, {
-    method: 'PUT',
-    headers,
-    body,
-  });
+  // A generous deadline, not the default one: this body is the whole workspace,
+  // which can be tens of megabytes on a slow uplink. It only has to be shorter
+  // than the tick interval so two pushes can never overlap.
+  const res = await fetchWithTimeout(
+    `${url}/sync/${encodeURIComponent(wsId)}`,
+    {
+      method: 'PUT',
+      headers,
+      body,
+    },
+    INTERVAL_MS - 5_000,
+  );
   if (res.ok) {
     const newEtag = stripEtag(res.headers.get('ETag'));
     if (newEtag) await saveEtag(api, wsId, newEtag);
