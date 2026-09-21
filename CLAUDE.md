@@ -45,6 +45,8 @@ process — the Electron storage layer depends on it.
 | `npm run test:e2e:desktop` | Playwright against the **real Electron app** (`test/e2e/desktop/`, own config). Builds the renderer and main process first. Covers boot, the file it writes, restart, Save As, Import.        |
 | `npm run format`           | Prettier across `packages/` and `test/`.                                                                                                                                                      |
 | `npm run package:electron` | `package-electron.ps1 -Installer` — builds renderer + electron, runs `electron-builder` for the Windows installer.                                                                            |
+| `npm run docker`           | Builds the **working tree** into `easydbaccess:<version>` + `:latest` and runs it detached on **`http://localhost:8190/`** (nginx serving the renderer's `dist`).                              |
+| `npm run docker:main`      | Same, but from a clean `git archive` of `main`, so local edits can't leak into the image. A separate script because npm eats `-Main` if you pass it to `npm run docker`.                       |
 | `npm run publish`          | `publish.ps1` — release script. Only needed for **branch previews** now; `main` publishes itself (see below).                                                                                 |
 
 The `dev` script chains renderer + server with `&`; on Windows prefer running

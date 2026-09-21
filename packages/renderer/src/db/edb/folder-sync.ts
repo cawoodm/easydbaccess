@@ -10,11 +10,22 @@ import type { DataStore, Dialogs, WorkspaceContents } from '@easydb/shared';
 import { edbBridge, storeBridge } from './active-bridge.js';
 import { countWorkspaceContents } from '../delete-workspace.js';
 import { fileInFolder, listWorkspaceFiles } from './file-handle.js';
-import { folderConflicts, isEmptyWorkspace, overwriteLosesData, partitionConflicts, writeFolderIndex, type FolderClash, type FolderIndex, type FolderWorkspace } from './folder-index.js';
+import {
+  activeFiles,
+  folderConflicts,
+  isEmptyWorkspace,
+  partitionConflicts,
+  readFolderSelection,
+  writeFolderIndex,
+  type FolderClash,
+  type FolderIndex,
+  type FolderWorkspace,
+} from './folder-index.js';
 import { afterRename, misfiledFiles, withoutFiles, type FileIdentity } from './file-identity.js';
 import { factsOf, factsOfHandle, readStamp, recordDivergence, verdictFor } from './file-stamp.js';
 import { decideActiveFileSync, type ActiveFileOutcome } from './active-file-sync.js';
 import { compareCopies, sizeChangeNote, type CopyFacts } from './copy-facts.js';
+import { confirmDataLoss } from './copy-choice.js';
 import { COMPARE, NEWEST } from './merge-answers.js';
 import { activeEdbName, adoptedFileName } from './session.js';
 import { adoptFolderFile, reloadActiveFromFile } from './space-adopt.js';
@@ -85,30 +96,18 @@ type MergeActiveFile = (handle: FileSystemFileHandle, mode: 'newest' | 'compare'
  */
 type RenameInFile = (file: string, from: string, to: string) => Promise<boolean>;
 
-/**
- * Ask again when an answer would replace work with nothing.
- *
- * On top of the choice, not instead of it: the choice is about which copy is
- * current, and the user answers it from the counts beside each side. This is the
- * one case where the answer is almost certainly a mistake — keeping an empty copy
- * over one holding tables — and it is worth the second question, which the first
- * one's two buttons cannot carry.
- *
- * `overwriteLosesData` is false whenever a count could not be taken, so an index
- * written by an older version asks nothing extra.
- *
- * `title` is the dialog's own heading, because the same guard now sits behind two
- * different questions — a folder sync and a Save over an existing file. A second
- * dialog headed with the wrong one of those reads as a stray prompt.
- */
-export function confirmDataLoss(dialogs: Dialogs, name: string, keep: CopyFacts, lose: CopyFacts, losing: string, title = 'Sync workspace folder'): Promise<boolean> | boolean {
-  if (!overwriteLosesData(keep, lose)) return true;
-  const held = [lose.tables ? `${lose.tables} table${lose.tables === 1 ? '' : 's'}` : '', lose.views ? `${lose.views} view${lose.views === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ');
-  return dialogs.confirm(`The copy you are keeping of "${name}" is empty, and ${losing} holds ${held}. Go ahead and lose it?`, title);
-}
-
 export interface SyncReport {
+  /** Files the sync READ — not what the folder holds. See {@link offFiles}. */
   files: number;
+  /**
+   * Files left alone because this device has them switched off in the Local
+   * Data dialog.
+   *
+   * Reported rather than passed over in silence: a sync that says "2 workspaces
+   * in 2 files" about a folder holding five looks like it lost three, and the
+   * user cannot tell a skipped file from a broken one without being told.
+   */
+  offFiles: number;
   /** Workspaces found across every file, including this tab's own. */
   found: number;
   /** Conflicts the user was asked about. */
@@ -152,19 +151,29 @@ export interface SyncReport {
 }
 
 /**
- * Read every `.edb` in `dir` and record what workspaces they hold.
+ * Read the `.edb` files in `dir` this device uses, and record what workspaces
+ * they hold.
  *
  * One file at a time rather than in parallel: the reads go through the single
  * worker, and holding several whole databases in its memory at once is the one
  * way this becomes a problem on a big folder.
+ *
+ * A file the user has switched off in the Local Data dialog is NOT read — not
+ * parsed, not conflict-checked, never written. Its NAME is still collected, and
+ * that is deliberate: listing a directory is cheap, and without the name there
+ * would be nothing in the dialog to switch back on. Everything expensive is on
+ * the far side of that check.
+ *
+ * `files` is every name found; `read` is the subset this scan actually opened.
  */
-export async function scanFolder(dir: FileSystemDirectoryHandle): Promise<{ index: FolderIndex; files: string[]; unreadable: string[] }> {
+export async function scanFolder(dir: FileSystemDirectoryHandle): Promise<{ index: FolderIndex; files: string[]; read: string[]; unreadable: string[] }> {
   const bridge = edbBridge();
   const files = await listWorkspaceFiles(dir);
+  const read = activeFiles(files, readFolderSelection(), activeEdbName());
   const workspaces: FolderWorkspace[] = [];
   const unreadable: string[] = [];
 
-  for (const file of files) {
+  for (const file of read) {
     const handle = await fileInFolder(dir, file, false);
     // The `File` object, not just the bytes: its size and last-modified time are
     // what the conflict prompts show about the copy the user cannot see, and they
@@ -190,7 +199,10 @@ export async function scanFolder(dir: FileSystemDirectoryHandle): Promise<{ inde
     }
   }
 
-  return { index: { folder: dir.name, at: Date.now(), workspaces }, files, unreadable };
+  // `files` goes into the index too, so the Local Data dialog can list what the
+  // folder holds — including the files this scan deliberately skipped — without
+  // re-reading the directory.
+  return { index: { folder: dir.name, at: Date.now(), workspaces, files }, files, read, unreadable };
 }
 
 /** One file, as a question about it should describe it. Always by name. */
@@ -381,7 +393,7 @@ export async function syncFolder(
   rename: RenameInFile = () => Promise.resolve(false),
   merge: MergeActiveFile | null = null,
 ): Promise<SyncReport> {
-  const { index, files, unreadable } = await scanFolder(dir);
+  const { index, files, read, unreadable } = await scanFolder(dir);
 
   // First, because everything below reads an id and a file name as a matched pair.
   const identity = await settleIdentities(index.workspaces, activeEdbName(), dialogs, rename);
@@ -432,7 +444,8 @@ export async function syncFolder(
   const active = await refreshActiveFile(dir, dialogs, overwrite, open, index, merge);
 
   return {
-    files: files.length,
+    files: read.length,
+    offFiles: files.length - read.length,
     found: index.workspaces.length,
     conflicts: ask.length,
     unreadable,

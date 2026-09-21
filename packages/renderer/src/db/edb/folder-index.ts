@@ -44,6 +44,19 @@ export interface FolderIndex {
   /** When the scan ran, so the UI can say how old this is. */
   at: number;
   workspaces: FolderWorkspace[];
+  /**
+   * Every `.edb` NAME the last scan saw, including the ones it did not read.
+   *
+   * Separate from `workspaces` because a file the user has switched off is
+   * never opened — so it has no workspace entry — and the Local Data dialog
+   * still has to list it, or there would be no way to switch it back on.
+   * Listing a directory is cheap; reading and parsing each file is not, and
+   * that is the whole saving.
+   *
+   * Optional: an index written before this existed has none, and the dialog
+   * falls back to the files its workspaces name.
+   */
+  files?: string[] | undefined;
 }
 
 const KEY = 'eda:folderIndex';
@@ -75,6 +88,86 @@ export function clearFolderIndex(): void {
   } catch {
     /* nothing to clear that anything can reach */
   }
+}
+
+// -- which files in the folder are in play ----------------------------------
+
+/**
+ * Which `.edb` files of the connected folder this device uses.
+ *
+ * `all` is a RULE, not a tick-everything shortcut: with it on, a file dropped
+ * into the folder tomorrow is picked up without anyone revisiting this. That is
+ * why it is not simply "every name is in `files`" — the two answer differently
+ * the moment the folder changes, and "all" is the one that keeps working.
+ *
+ * `files` is only read when `all` is off, and it is a list of file NAMES, which
+ * is what the folder deals in everywhere else.
+ *
+ * Device-local, like the index beside it, and for a stronger reason: it says
+ * what THIS machine wants to look at. Carried inside a shared `.edb` it would
+ * hide someone else's workspaces on their own computer.
+ */
+export interface FolderSelection {
+  all: boolean;
+  files: string[];
+}
+
+const SELECTION_KEY = 'eda:folderFiles';
+
+/** The default: everything, which is exactly how the folder behaved before this existed. */
+export const ALL_FILES: FolderSelection = { all: true, files: [] };
+
+export function readFolderSelection(): FolderSelection {
+  try {
+    const raw = globalThis.localStorage?.getItem(SELECTION_KEY);
+    if (!raw) return ALL_FILES;
+    const parsed = JSON.parse(raw) as Partial<FolderSelection>;
+    // A shape check, not a schema — same rule as the index above. Anything
+    // unrecognisable means "all", never "nothing": a bad value must not make a
+    // user's workspaces disappear.
+    if (typeof parsed?.all !== 'boolean') return ALL_FILES;
+    return { all: parsed.all, files: Array.isArray(parsed.files) ? parsed.files.filter((f) => typeof f === 'string') : [] };
+  } catch {
+    return ALL_FILES;
+  }
+}
+
+export function writeFolderSelection(selection: FolderSelection): void {
+  try {
+    globalThis.localStorage?.setItem(SELECTION_KEY, JSON.stringify(selection));
+  } catch {
+    /* private mode — the app works, it just forgets the choice next load */
+  }
+}
+
+/**
+ * May this file be read, listed and written?
+ *
+ * The file this tab currently has OPEN is always yes, whatever the selection
+ * says. Its workspace is live — the store, the panels and every plugin are
+ * bound to it — so "skip it" is not a state the app can be in. The dialog shows
+ * that row ticked and disabled rather than pretending otherwise.
+ */
+export function fileActive(file: string, selection: FolderSelection, activeFile: string): boolean {
+  if (file === activeFile) return true;
+  return selection.all || selection.files.includes(file);
+}
+
+/** The subset of a scan the selection admits. Pure, so the rule is testable on its own. */
+export function activeFiles(files: readonly string[], selection: FolderSelection, activeFile: string): string[] {
+  return files.filter((f) => fileActive(f, selection, activeFile));
+}
+
+/**
+ * Drop indexed workspaces whose file is switched off.
+ *
+ * A scan already skips those files, so this is normally a no-op. It matters for
+ * the index written BEFORE a file was switched off: without it the selector
+ * would keep offering that workspace until the next scan, and picking it would
+ * adopt a file the user just said to leave alone.
+ */
+export function activeWorkspaces(indexed: readonly FolderWorkspace[], selection: FolderSelection, activeFile: string): FolderWorkspace[] {
+  return indexed.filter((w) => fileActive(w.file, selection, activeFile));
 }
 
 /** A workspace as the selector needs to show it. */

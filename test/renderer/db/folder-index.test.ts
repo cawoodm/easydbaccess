@@ -1,11 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  ALL_FILES,
+  activeFiles,
+  activeWorkspaces,
+  fileActive,
   folderConflicts,
   isEmptyWorkspace,
   mergeWorkspaceList,
   overwriteLosesData,
   partitionConflicts,
+  readFolderSelection,
   workspaceLabel,
+  writeFolderSelection,
   type FolderClash,
   type FolderWorkspace,
 } from '../../../packages/renderer/src/db/edb/folder-index.js';
@@ -238,5 +244,90 @@ describe('overwriteLosesData', () => {
     // by. Inventing a warning here trains the user to click past the real one.
     expect(overwriteLosesData({}, { tables: 3 })).toBe(false);
     expect(overwriteLosesData({ tables: 0, views: 0 }, {})).toBe(false);
+  });
+});
+
+/**
+ * Which files of the folder this device uses.
+ *
+ * The rule is small and everything expensive hangs off it — `scanFolder` reads
+ * a file only if this says yes — so it is pinned down on its own, away from any
+ * directory or worker.
+ */
+describe('folder file selection', () => {
+  const FILES = ['sales.edb', 'demo.edb', 'archive.edb'];
+
+  it('takes everything by default, which is how the folder behaved before this existed', () => {
+    expect(activeFiles(FILES, ALL_FILES, 'sales.edb')).toEqual(FILES);
+  });
+
+  it('reads only the ticked files once "all" is off', () => {
+    const sel = { all: false, files: ['demo.edb'] };
+    expect(activeFiles(FILES, sel, '')).toEqual(['demo.edb']);
+  });
+
+  it('never switches off the file this tab has open', () => {
+    // Its workspace is live — the store, the panels and every plugin are bound
+    // to it, so "skip it" is not a state the app can be in.
+    const sel = { all: false, files: [] };
+    expect(fileActive('sales.edb', sel, 'sales.edb')).toBe(true);
+    expect(activeFiles(FILES, sel, 'sales.edb')).toEqual(['sales.edb']);
+  });
+
+  it('"all" is a rule, not a snapshot — a file added later is in', () => {
+    // This is the whole difference between `all: true` and ticking every box:
+    // one keeps working when the folder changes, the other silently does not.
+    expect(activeFiles([...FILES, 'new.edb'], ALL_FILES, '')).toContain('new.edb');
+    const everyBoxTicked = { all: false, files: FILES };
+    expect(activeFiles([...FILES, 'new.edb'], everyBoxTicked, '')).not.toContain('new.edb');
+  });
+
+  it('drops indexed workspaces whose file is switched off', () => {
+    // Matters for the index written BEFORE a file was switched off: the
+    // selector would otherwise keep offering that workspace, and picking it
+    // would adopt the very file the user said to leave alone.
+    const sel = { all: false, files: ['demo.edb'] };
+    expect(activeWorkspaces(FOLDER, sel, '').map((w) => w.file)).toEqual(['demo.edb']);
+  });
+
+  it('keeps the open file’s workspaces whatever the selection says', () => {
+    const sel = { all: false, files: [] };
+    expect(activeWorkspaces(FOLDER, sel, 'sales.edb').map((w) => w.id)).toEqual(['sales']);
+  });
+});
+
+describe('reading a stored selection', () => {
+  const KEY = 'eda:folderFiles';
+
+  // Plain Node has no localStorage, and these tests are about the PARSING —
+  // what a value written by another version, or by nothing at all, comes back
+  // as. A Map is enough store to ask that question.
+  beforeAll(() => {
+    const mem = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => mem.get(k) ?? null,
+      setItem: (k: string, v: string) => void mem.set(k, v),
+      removeItem: (k: string) => void mem.delete(k),
+    });
+  });
+  afterAll(() => vi.unstubAllGlobals());
+  afterEach(() => globalThis.localStorage?.removeItem(KEY));
+
+  it('round-trips', () => {
+    writeFolderSelection({ all: false, files: ['a.edb'] });
+    expect(readFolderSelection()).toEqual({ all: false, files: ['a.edb'] });
+  });
+
+  it('falls back to ALL for anything it cannot read', () => {
+    // Never to "nothing": a bad value must not make a user's workspaces vanish.
+    for (const bad of ['not json', '{}', '[]', 'null', '{"all":"yes"}']) {
+      globalThis.localStorage?.setItem(KEY, bad);
+      expect(readFolderSelection()).toEqual(ALL_FILES);
+    }
+  });
+
+  it('ignores non-string entries rather than trusting the list', () => {
+    globalThis.localStorage?.setItem(KEY, JSON.stringify({ all: false, files: ['a.edb', 7, null] }));
+    expect(readFolderSelection()).toEqual({ all: false, files: ['a.edb'] });
   });
 });

@@ -284,22 +284,76 @@ async function peekWorkspaces(bytes: Uint8Array): Promise<PeekedWorkspace[]> {
     const p = s3.wasm.allocFromTypedArray(bytes);
     probe = new s3.oo1.DB();
     probe.checkRc(s3.capi.sqlite3_deserialize(probe.pointer!, 'main', p, bytes.byteLength, bytes.byteLength, s3.capi.SQLITE_DESERIALIZE_FREEONCLOSE));
-    const rows = probe.selectObjects(`SELECT doc FROM _easydb WHERE coll = 'workspaces'`);
-    // One grouped pass for both counts. `workspaceId` is a real column of
-    // `_easydb`, so this needs no JSON extraction — and the `workspaces` rows
-    // themselves carry NULL there, which the filter excludes anyway.
-    const counted = probe.selectObjects(
-      `SELECT workspaceId AS ws, SUM(coll = 'tables') AS tables, SUM(coll = 'viewInstances') AS views
-         FROM _easydb WHERE coll IN ('tables', 'viewInstances') GROUP BY workspaceId`,
-    );
-    const counts = new Map(counted.map((r) => [String(r.ws), { tables: Number(r.tables ?? 0), views: Number(r.views ?? 0) }]));
-    return rows.map((r) => {
-      const doc = JSON.parse(String(r.doc)) as Record<string, unknown>;
-      const c = counts.get(String(doc['id'] ?? ''));
-      return { doc, tables: c?.tables ?? 0, views: c?.views ?? 0 };
-    });
+    return readWorkspaceDocs(probe);
   } catch {
     return []; // not our database, or not a database at all
+  } finally {
+    probe?.close();
+  }
+}
+
+/**
+ * The workspace records of an OPEN database, with their table and view counts.
+ *
+ * Split out because two callers need it over two different kinds of connection:
+ * {@link peekWorkspaces} deserializes bytes into a throwaway, and
+ * {@link peekDatabase} opens a file the pool already holds.
+ */
+function readWorkspaceDocs(probe: Database): PeekedWorkspace[] {
+  const rows = probe.selectObjects(`SELECT doc FROM _easydb WHERE coll = 'workspaces'`);
+  // One grouped pass for both counts. `workspaceId` is a real column of
+  // `_easydb`, so this needs no JSON extraction — and the `workspaces` rows
+  // themselves carry NULL there, which the filter excludes anyway.
+  const counted = probe.selectObjects(
+    `SELECT workspaceId AS ws, SUM(coll = 'tables') AS tables, SUM(coll = 'viewInstances') AS views
+       FROM _easydb WHERE coll IN ('tables', 'viewInstances') GROUP BY workspaceId`,
+  );
+  const counts = new Map(counted.map((r) => [String(r.ws), { tables: Number(r.tables ?? 0), views: Number(r.views ?? 0) }]));
+  return rows.map((r) => {
+    const doc = JSON.parse(String(r.doc)) as Record<string, unknown>;
+    const c = counts.get(String(doc['id'] ?? ''));
+    return { doc, tables: c?.tables ?? 0, views: c?.views ?? 0 };
+  });
+}
+
+/**
+ * What this browser's OWN copy of `name` holds, without adopting it.
+ *
+ * The other half of a conflict prompt. The file's counts ride along with the
+ * folder scan, but the browser's copy is a database nobody has opened — and
+ * `export`ing it to reach `peekWorkspaces` would copy the whole thing. A pooled
+ * database is a file, so a second connection on it is cheap and reads exactly
+ * what a boot onto it would.
+ *
+ * The database this worker already has open is answered from that connection
+ * instead: the pool takes an exclusive access handle per file, so opening a
+ * second one on the live database would be asking it to refuse.
+ */
+async function peekDatabase(name: string): Promise<PeekedWorkspace[]> {
+  sqlite3 ??= await sqlite3InitModule();
+  if (name === dbName && db) {
+    try {
+      return readWorkspaceDocs(db);
+    } catch {
+      return [];
+    }
+  }
+  const pool = await ensurePool(sqlite3);
+  if (!pool) {
+    // The memory fallback's only copy is its mirror, and that IS bytes.
+    const held = await readMirror(name);
+    return held ? peekWorkspaces(held.bytes) : [];
+  }
+  // Never `new OpfsSAHPoolDb` on a name the pool does not hold: that CREATES it,
+  // and an empty database invented by a question is the bug this prompt exists
+  // to report.
+  if (!pool.getFileNames().includes(poolPath(name))) return [];
+  let probe: Database | null = null;
+  try {
+    probe = new pool.OpfsSAHPoolDb(poolPath(name));
+    return readWorkspaceDocs(probe);
+  } catch {
+    return [];
   } finally {
     probe?.close();
   }
@@ -362,6 +416,8 @@ async function handleAsync(req: EdbRequest): Promise<unknown> {
       return renameDatabase(req.from, req.to);
     case 'peekWorkspaces':
       return peekWorkspaces(req.bytes);
+    case 'peekDatabase':
+      return peekDatabase(req.name);
     default:
       return handle(req);
   }

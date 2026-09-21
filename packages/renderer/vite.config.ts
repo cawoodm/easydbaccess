@@ -204,6 +204,11 @@ export default defineConfig({
         },
         closeBundle() {
           if (base === './' || base === '') return;
+          // Rollup runs closeBundle even when the build FAILED, and a failed
+          // build wrote no outDir — walking it then throws an ENOENT that
+          // replaces the real error in the log. Bail instead, so the actual
+          // cause is what the user sees. (A successful build always has one.)
+          if (!existsSync(outDir)) return;
           generateServiceWorker({ outDir, version: appVersion, base });
         },
       };

@@ -14,6 +14,7 @@
 // asking for that permission needs a gesture no boot sequence has.
 
 import { EDB_EXTENSION } from './file-handle.js';
+import type { FileVerdict } from './file-stamp.js';
 
 /**
  * A workspace id from anything a user typed.
@@ -101,15 +102,21 @@ export interface SpaceEvidence {
   /** The candidate file is in a folder this app can already read, unprompted. */
   inGrantedFolder: boolean;
   /**
-   * The file has been written since this browser's copy was made from it, and
-   * that copy holds nothing unsaved — so the file is simply the newer of the two.
+   * How this browser's copy and the file stand, from the recorded stamp.
    *
-   * This is how two origins sharing one folder converge: each holds its own
-   * imported copy (OPFS and the handle store are per-origin), and whoever opens
-   * the workspace next reads what the other one saved. `file-stamp.ts` is what
-   * can answer this at boot, where the in-memory dirty flag does not exist yet.
+   * A VERDICT, not a boolean, and that is the whole of the fix for a workspace
+   * opening empty. It used to be `fileIsNewer`, which collapsed five states into
+   * two: `unknown` — no stamp, so nothing can be concluded — came out false and
+   * was therefore indistinguishable from "our copy is fine". A stamp only exists
+   * on the origin that imported or wrote the file, so `unknown` is every new
+   * origin, every new profile and every new machine; the browser's copy won those
+   * silently, and where that copy was an empty shell the user saw a workspace
+   * with no tables while the data sat untouched in the file.
+   *
+   * `file-stamp.ts` is what can answer this at boot, where the in-memory dirty
+   * flag does not exist yet.
    */
-  fileIsNewer: boolean;
+  verdict: FileVerdict;
   /**
    * A folder this user has already chosen, which could be re-permissioned.
    *
@@ -149,6 +156,16 @@ export type SpaceAction =
   | 'adopt-local-db'
   /** Import the folder's file into this browser, then reload. */
   | 'adopt-folder-file'
+  /**
+   * Two copies exist and nothing here can say which the user means. Ask.
+   *
+   * The answer to "never prefer the browser's copy silently". Whoever acts on
+   * this must have a `Dialogs` and a user gesture, so a click asks straight away
+   * (`openWorkspaceInFile`) and a boot records the question for the UI to put
+   * once it exists — the same arrangement {@link SpaceAction} already makes for
+   * `ask-for-folder`.
+   */
+  | 'ask-which-copy'
   /** Nothing found unprompted, but a folder could be granted. Needs a gesture. */
   | 'ask-for-folder'
   /**
@@ -172,25 +189,62 @@ export type SpaceAction =
  * ends in `location.reload()`, an adopt here would reload into the same state
  * and decide the same thing again, forever.
  *
- * `fileIsNewer` is the one thing that lets the file win over a copy this browser
- * already holds, and it is narrow on purpose: the file was written after our copy
- * was made from it, and our copy holds nothing unsaved. Without it two tabs on
- * different origins never converge — each keeps re-opening its own stale import
- * of the same file, because everything except the folder is origin-scoped.
- *
- * `hasLocalDb` is otherwise checked BEFORE `inGrantedFolder`, which reads backwards: the
+ * `hasLocalDb` is checked BEFORE `inGrantedFolder`, which reads backwards: the
  * user's own file ought to win over a browser-held copy. It does not, because
  * adopting the folder file means `SAHPoolUtil.importDb` over the copy this
  * browser holds, and that copy may contain edits never written back to the file
  * — boot never reads the user's file at all (see `session.ts`), so unsaved work
  * lives only in the browser. Preferring the file would discard it without asking.
  * When there is no local copy there is nothing to lose and the file is used.
+ *
+ * But "do not discard it without asking" is not the same as "keep it without
+ * asking", and for four versions this did the second. See {@link settleTwoCopies}.
  */
 export function decideSpace(e: SpaceEvidence): SpaceAction {
   if (e.inOpenDb) return 'use-open';
   if (e.isActive) return 'create';
-  if (e.hasLocalDb) return e.inGrantedFolder && e.fileIsNewer ? 'adopt-folder-file' : 'adopt-local-db';
+  if (e.hasLocalDb) return e.inGrantedFolder ? settleTwoCopies(e.verdict) : 'adopt-local-db';
   if (e.inGrantedFolder) return 'adopt-folder-file';
   if (e.canAskForFolder) return 'ask-for-folder';
   return 'create';
+}
+
+/**
+ * Both copies exist: this browser's, and the file in the granted folder.
+ *
+ * ONE table, and it is the only place this question is answered — `decideSpace`
+ * and `decideActiveFileSync` used to read the same verdict two opposite ways,
+ * which is how a workspace could open empty here and be asked about there.
+ *
+ * Three verdicts are safe to settle without the user, because in each of them the
+ * stamp PROVES which copy is current and the other holds nothing the first does
+ * not:
+ *
+ * - `same` — the file is exactly as we left it, so the two copies are one thing
+ *   and there is nothing to choose between them.
+ * - `ahead` — we hold changes and the file has not moved, so this copy is the
+ *   file plus work. Taking the file would throw that work away.
+ * - `file-newer` — the mirror image: the file was written after our copy was made
+ *   from it and nothing here is unsaved, so the file is this copy plus work.
+ *   Taking it is what "prefer the disk" MEANS, and it is also the only way two
+ *   origins sharing a folder ever converge — everything but the folder is
+ *   origin-scoped, so each would otherwise re-open its own stale import forever.
+ *
+ * The other two ask, because in both of them each side may hold something the
+ * other does not and no stamp can say which the user wants:
+ *
+ * - `conflict` — the file was written AND we hold unsaved changes.
+ * - `unknown` — no stamp at all. We have never read this file on this origin, so
+ *   the browser's copy under that name may be anything, including the empty
+ *   database a boot creates when the pool is asked for a name it does not hold.
+ *   That case is why this function exists.
+ *
+ * (A Sync asks about `file-newer` too — `decideActiveFileSync` — and the
+ * difference is the moment, not the rule. There the workspace is already on
+ * screen and a Sync would replace it under the user; here they are OPENING that
+ * workspace, and handing them the current copy is what they asked for.)
+ */
+function settleTwoCopies(verdict: FileVerdict): SpaceAction {
+  if (verdict === 'same' || verdict === 'ahead') return 'adopt-local-db';
+  return verdict === 'file-newer' ? 'adopt-folder-file' : 'ask-which-copy';
 }

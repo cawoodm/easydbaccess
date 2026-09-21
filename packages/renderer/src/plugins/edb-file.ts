@@ -5,6 +5,7 @@ import {
   canSaveInPlace,
   ensureWritable,
   fileInFolder,
+  forgetFolder,
   forgetHandle,
   listWorkspaceFiles,
   pickFileToOpen,
@@ -24,7 +25,9 @@ import { deleteWorkspace } from '../db/delete-workspace.js';
 import { createAutosavePolicy, type AutosavePolicy } from '../db/edb/dirty.js';
 import { edbBridge, edbHandle, setEdbHandle, storeBridge } from '../db/edb/active-bridge.js';
 import { copyWorkspace } from '../db/edb/convert.js';
-import { confirmDataLoss, syncFolder } from '../db/edb/folder-sync.js';
+import { syncFolder } from '../db/edb/folder-sync.js';
+import { confirmDataLoss } from '../db/edb/copy-choice.js';
+import { openLocalDataDialog } from '../dialogs/local-data-dialog.js';
 import { describeActiveOutcome } from '../db/edb/active-file-sync.js';
 import { createEdbBridge } from '../db/edb/worker-bridge.js';
 import type { PeekedWorkspace } from '../db/edb/protocol.js';
@@ -32,10 +35,18 @@ import { compareCopies, type CopyFacts } from '../db/edb/copy-facts.js';
 import { askAboutFile, mergeWithFile, type MergeContext } from '../db/edb/merge-file.js';
 import { PULL, PUSH } from '../db/edb/merge-answers.js';
 import { countWorkspaceContents } from '../db/delete-workspace.js';
-import { isEmptyWorkspace } from '../db/edb/folder-index.js';
+import { clearFolderIndex, isEmptyWorkspace } from '../db/edb/folder-index.js';
 import { createIpcDataStore } from '../db/data-store-bridge.js';
 import { adoptEdbFile, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
-import { adoptFolderFile, clearPendingSpaceRequest, pendingSpaceRequest, reloadActiveFromFile } from '../db/edb/space-adopt.js';
+import {
+  adoptFolderFile,
+  clearPendingSpaceRequest,
+  pendingSpaceRequest,
+  reloadActiveFromFile,
+  settleCopyQuestion,
+  takeComparisonRequest,
+  takeCopyQuestion,
+} from '../db/edb/space-adopt.js';
 import { alsoWroteNote, withoutTheirOwnFile, writableWholesale } from '../db/edb/one-per-file.js';
 import { freeWorkspaceId, spaceFileName, workspaceIdFromFileName } from '../db/edb/space-resolve.js';
 
@@ -106,7 +117,7 @@ const FILE_GROUP = 'File';
  * applied — autosave did not actually resume after a reload, while the menu said
  * "Turn on autosave" as if it had never been on.
  */
-let session: { autosave: AutosavePolicy; refreshSaveButton: () => void; refreshFileCommands: () => Promise<void> } | null = null;
+let session: { autosave: AutosavePolicy; refreshSaveButton: () => void; refreshFileCommands: () => Promise<void>; compareWithOwnFile: () => Promise<void> } | null = null;
 
 /**
  * The name the throwaway worker opens a file under while Overwrite rewrites it.
@@ -378,12 +389,45 @@ export function init(api: HostApi): void {
    * the ordinary case for a folder shared between two machines. Take newest and
    * Compare settle it table by table instead; see `merge-file.ts`.
    */
+  /**
+   * An EMPTY workspace may never replace a file that holds something.
+   *
+   * Independent of the stamp, and that is the whole point of it. Every other
+   * guard here works off `compareWithFile`, which answers `unknown` when this
+   * origin has no record of the file — and `unknown` used to mean "go ahead". So
+   * the one state the app must never write out was the one it wrote out without
+   * asking: a tab that came up on an empty shell of a workspace whose data is in
+   * the file (see `db/edb/space-resolve.ts`) would, on the next autosave tick,
+   * put that empty database over it. The bytes it replaced were the only copy.
+   *
+   * The cheap half runs first: counting THIS workspace is two aggregates, and
+   * anything not empty stops here. Only an empty one pays for reading the file,
+   * which costs a peek — and an empty workspace is not one anybody is saving
+   * often.
+   *
+   * A count that could not be taken is not a count of none, so an unreadable
+   * store writes as before rather than refusing to save.
+   */
+  async function mayWriteNothingOverIt(handle: FileSystemFileHandle, file: string, now: { mtime: number; size: number }, auto: boolean): Promise<boolean> {
+    const mine = await openContentsFacts();
+    if (mine.tables !== 0 || (mine.views ?? 0) !== 0) return true;
+    // The timer asks once per state of the file, like every other question here:
+    // a modal every thirty seconds is worse than the problem it reports.
+    if (auto && writeDeclined(file, now)) return false;
+    const theirs = await countsInFileHandle(handle);
+    if (await confirmDataLoss(api.ui.dialogs, file, mine, theirs, `the copy in ${file}`, 'Save')) return true;
+    markWriteDeclined(file, now);
+    api.ui.dialogs.toast(`Left ${file} as it is. Run "Compare workspace with its file" to bring its tables in.`, { kind: 'info', title: 'Save' });
+    return false;
+  }
+
   async function mayOverwriteFile(handle: FileSystemFileHandle, auto: boolean): Promise<boolean> {
     const file = activeEdbName();
     const now = await factsOfHandle(handle);
     // Unreadable is not "changed": the permission check above already passed, so
     // this is a transient failure and the write is the user's own instruction.
     if (!now) return true;
+    if (!(await mayWriteNothingOverIt(handle, file, now, auto))) return false;
     const verdict = compareWithFile(readStamp(file), now);
     if (verdict !== 'file-newer' && verdict !== 'conflict') return true;
     if (auto && writeDeclined(file, now)) return false;
@@ -1064,6 +1108,25 @@ export function init(api: HostApi): void {
   }
 
   /**
+   * Give the folder grant back.
+   *
+   * Only the grant and the cached index go: every `.edb` stays exactly where it
+   * is, which is what the confirm has to say, because "disconnect" beside a
+   * list of files reads like a delete. The per-file selection is left alone on
+   * purpose — reconnecting the same folder should come back to the same
+   * choices, not silently switch everything on again.
+   */
+  async function disconnectFolder(): Promise<void> {
+    if ((await rememberedFolder()) === null) return;
+    if (!(await api.ui.dialogs.confirm('Stop using this folder? Every file in it stays where it is — this app just forgets it may read them.', 'Local Data'))) return;
+    await forgetFolder();
+    clearFolderIndex();
+    window.dispatchEvent(new CustomEvent('easydb:folder-index-changed'));
+    await refreshFileCommands();
+    api.ui.dialogs.toast('Folder disconnected. The files are untouched.', { kind: 'info', title: 'Local Data' });
+  }
+
+  /**
    * Re-read the connected folder. Offered separately, because files change on disk.
    *
    * Says so rather than opening a picker when there is no folder: a palette is a
@@ -1104,6 +1167,10 @@ export function init(api: HostApi): void {
       },
     );
     const skipped = report.unreadable.length > 0 ? ` ${report.unreadable.length} file(s) held no workspace.` : '';
+    // Files this device has switched off. Said out loud for the same reason the
+    // misfiled ones are: a count that is lower than the folder looks is the
+    // report that sends people looking for a bug.
+    const off = report.offFiles > 0 ? ` ${report.offFiles} file(s) switched off in Local Data.` : '';
     const written = alsoWroteNote(report.wrote);
     // A file whose name denies the workspace inside it has already had its own
     // dialog, so this only counts them — but it must count them, because a sync
@@ -1115,7 +1182,7 @@ export function init(api: HostApi): void {
     // read the same whether the sync had loaded the file or decided it could not,
     // which is what "Sync does nothing" looked like from the outside.
     const own = describeActiveOutcome(report.active, report.activeFile ?? '');
-    api.ui.dialogs.toast(`"${dir.name}": ${report.found} workspace(s) in ${report.files} file(s).${skipped}${fixed}${misfiled}${written}${own}`, { kind: 'success' });
+    api.ui.dialogs.toast(`"${dir.name}": ${report.found} workspace(s) in ${report.files} file(s).${off}${skipped}${fixed}${misfiled}${written}${own}`, { kind: 'success' });
     // The selector reads the index once, on connect, so it has to be told.
     window.dispatchEvent(new CustomEvent('easydb:folder-index-changed'));
   }
@@ -1285,7 +1352,11 @@ export function init(api: HostApi): void {
     run: () => chooseFolder(),
   };
 
-  session = { autosave, refreshSaveButton, refreshFileCommands };
+  // `compareWithOwnFile` goes in the holder for the same reason the autosave
+  // policy does: `load()` is a separate export and cannot see this closure, and
+  // both of the answers it has to carry out — a question boot left behind, and a
+  // "Compare them…" that survived the reload — end in exactly this call.
+  session = { autosave, refreshSaveButton, refreshFileCommands, compareWithOwnFile };
 
   api.ui.registerCommand({
     id: 'edb-file:open',
@@ -1294,6 +1365,31 @@ export function init(api: HostApi): void {
     icon: 'folder_open',
     keywords: ['edb', 'file', 'load', 'switch'],
     run: () => open(),
+  });
+
+  // The "Local Data" half of the Connect menu. A connector rather than another
+  // header button: Connect already asks the user's question ("what data can
+  // this app reach?"), and registering here is what stops `connect-menu.ts`
+  // from having to know this plugin exists. See `dialogs/local-data-dialog.ts`.
+  //
+  // Registered even where the folder picker is missing, because the dialog
+  // still offers the single-file open that every browser can do — and where it
+  // cannot, it says so, which is better than a Connect menu with one half.
+  api.ui.registerConnector({
+    id: 'workspace-folder',
+    scope: 'local',
+    label: 'Local Data',
+    icon: 'folder',
+    order: 10,
+    description: 'The folder your workspaces live in, and which files in it this device uses.',
+    connect: async () => {
+      openLocalDataDialog({
+        chooseFolder,
+        disconnectFolder,
+        rescan: syncConnectedFolder,
+        openFile: open,
+      });
+    },
   });
 
   // Save is a HEADER BUTTON, and the palette already lists every button under
@@ -1433,9 +1529,55 @@ async function offerReconnect(api: HostApi, folderName: string | null, file: str
   if (counted && isEmptyWorkspace(counted)) await reloadActiveFromFile(active);
 }
 
+/**
+ * Ask the "which copy?" question that boot had to leave behind.
+ *
+ * Boot takes the browser's copy — the answer that destroys nothing — and records
+ * the question, because `dialogs.choice` needs a shell boot has not built yet.
+ * This is where it gets asked, at the first moment there is something to ask it
+ * with, and it is the difference between a workspace that opens empty in silence
+ * and one that says which two copies it found.
+ *
+ * Both outright answers are already done by the time this returns: taking the
+ * file adopts it and reloads, and keeping this copy is what the tab already did.
+ */
+async function askPendingCopyQuestion(api: HostApi): Promise<void> {
+  const pending = takeCopyQuestion();
+  if (!pending) return;
+  const answer = await settleCopyQuestion(api.ui.dialogs, pending.file, pending.workspaceId, pending.verdict);
+  // Keeping this copy needs no work: it is the one the tab booted onto. A
+  // dismissed dialog comes to the same thing, which is what makes dismissing safe.
+  //
+  // `reloadActiveFromFile`, not `adoptFolderFile`: boot already pointed this tab
+  // at that file, so this is the Sync's "load the disk version" — re-read the
+  // bytes underneath and reload — rather than an adopt of somewhere new. It is
+  // also the one that does not spend the boot-loop guard on a file the user is
+  // deliberately asking for.
+  if (answer === 'file') await reloadActiveFromFile(pending.file);
+  if (answer === 'compare') await session?.compareWithOwnFile();
+}
+
+/**
+ * Run the comparison a "Compare them…" answer asked for before the reload.
+ *
+ * The comparison needs a live store bound to the workspace — `merge-file.ts`
+ * opens the file BESIDE it — so it cannot run in the tab that asked. The marker
+ * survives that one reload and is taken here.
+ */
+async function runRequestedComparison(): Promise<void> {
+  const wanted = takeComparisonRequest();
+  if (wanted === null) return;
+  // Only for the file this tab actually landed on. A marker left by a switch that
+  // went somewhere else would compare the wrong pair.
+  if (wanted !== adoptedFileName()) return;
+  await session?.compareWithOwnFile();
+}
+
 export async function load(api: HostApi): Promise<void> {
   if (!supported()) return;
   await offerSpaceFolder(api);
+  await askPendingCopyQuestion(api);
+  await runRequestedComparison();
 
   // The shell snapshots the registry during boot, and boot itself writes — the
   // workspace record, the seeded view templates — so the button can already be out

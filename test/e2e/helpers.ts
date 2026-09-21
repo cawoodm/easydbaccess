@@ -265,3 +265,22 @@ export async function waitForPanel(page: Page, tableId: string) {
     { timeout: 20_000 },
   );
 }
+
+/**
+ * Click the header **Connect** button and pick one half of its menu.
+ *
+ * Connect asks "your own data, or someone else's system?" before it asks
+ * anything else, so every test that used to click straight through to a
+ * backend now goes through here. The menu is skipped when only one half has a
+ * connector registered — which is why this waits for the menu rather than
+ * assuming it, instead of failing on a build where one half is switched off.
+ *
+ * See `packages/renderer/src/plugins/connect-menu.ts`.
+ */
+export async function openConnect(page: Page, half: 'Local Data' | 'Remote System' = 'Remote System'): Promise<void> {
+  await page.getByTitle(/^Connect data/).click();
+  const menu = page.locator('anchored-menu');
+  // `count()` rather than a visibility wait: with one half installed there is
+  // no menu at all, and waiting for one that will never come costs a timeout.
+  if ((await menu.count()) > 0) await menu.getByText(half, { exact: true }).click();
+}

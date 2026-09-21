@@ -75,6 +75,14 @@ export interface EdbBridge extends EasydbStoreBridge {
    */
   peekWorkspaces(bytes: Uint8Array): Promise<PeekedWorkspace[]>;
   /**
+   * The same, for a database this browser already holds, by NAME.
+   *
+   * What the other side of a conflict prompt is: the file's counts come free
+   * with the folder scan, and this is how the browser's own copy can be counted
+   * without adopting it or copying it out. Empty for a name nothing holds.
+   */
+  peekDatabase(name: string): Promise<PeekedWorkspace[]>;
+  /**
    * One stamp per table of a workspace, for comparing this database with another
    * copy of it. Cheap by design — two aggregates per table, no rows.
    */
@@ -132,6 +140,7 @@ export function createEdbBridge(): EdbBridge {
     hasDatabase: (name) => call<boolean>({ op: 'hasDatabase', name }),
     renameDatabase: (from, to) => call<boolean>({ op: 'renameDatabase', from, to }),
     peekWorkspaces: (bytes) => call<PeekedWorkspace[]>({ op: 'peekWorkspaces', bytes }),
+    peekDatabase: (name) => call<PeekedWorkspace[]>({ op: 'peekDatabase', name }),
     tableStamps: (workspaceId) => call<TableStamp[]>({ op: 'tableStamps', workspaceId }),
     rowStamps: (tableId) => call<RowStamp[]>({ op: 'rowStamps', tableId }),
     export: () => call<Uint8Array>({ op: 'export' }),

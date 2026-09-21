@@ -98,6 +98,19 @@ export type EdbRequest =
    */
   | { id: number; op: 'peekWorkspaces'; bytes: Uint8Array }
   /**
+   * The same answer about a database THIS BROWSER already holds, by name.
+   *
+   * `peekWorkspaces` needs bytes, and the bytes of a pooled database cost a full
+   * copy to get hold of. This opens the pool file directly instead, which is what
+   * lets a conflict prompt say how many tables the browser's own copy has without
+   * adopting it first — the question used to show counts for the file and nothing
+   * for the side it was being compared against.
+   *
+   * Empty for a name the pool does not hold, which is not an error: it is the
+   * ordinary answer for a workspace this browser has never seen.
+   */
+  | { id: number; op: 'peekDatabase'; name: string }
+  /**
    * One stamp per table of a workspace — what tells two copies of it apart
    * without reading a row. See `@easydb/shared`'s `replicate.ts`.
    *

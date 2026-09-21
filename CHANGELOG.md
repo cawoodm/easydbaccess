@@ -2,8 +2,15 @@
 
 ## 21 Sep 2026
 
+### Features
+
+- 🪶 Connect asks for your own data or a remote system, and Local Data holds the workspace folder and which of its files this device uses (v0.0.464)
+
 ### Bugs
 
+- 🪲 Opening a workspace could silently show an empty copy held by this browser instead of the full one in its file (v0.0.464)
+- 🪲 An empty workspace could be saved over a file holding tables, with no warning (v0.0.464)
+- 🪲 Two files holding a workspace of one name were one destination in the workspace list, so both rows opened the same file (v0.0.464)
 - 🪲 A column-editor save that failed part way said nothing at all, leaving no sign that the table was half-changed (v0.0.463)
 
 ## 10 Sep 2026

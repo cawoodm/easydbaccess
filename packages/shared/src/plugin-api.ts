@@ -448,6 +448,18 @@ export interface ConnectorSpec {
   id: string;
   /** Shown in the Connect menu. */
   label: string;
+  /**
+   * Which half of the Connect menu this belongs under.
+   *
+   * `remote` (the default) is what Connect originally meant: point a window at
+   * somebody else's live table and store nothing. `local` is where the user's
+   * OWN data lives — a workspace folder, a file on disk.
+   *
+   * The menu is built from this rather than from a list the button holds, so
+   * the button still knows no backend. A half with nothing registered under it
+   * is not offered.
+   */
+  scope?: 'local' | 'remote' | undefined;
   /** Material Icons ligature or inline `<svg>` for the menu entry. */
   icon?: string | undefined;
   /** Menu sort order; lower first. Absent ⇒ registration order. */
@@ -766,6 +778,13 @@ export interface UiRegistry {
    * `data` object) for renderers that need neighbouring fields — for
    * example the built-in `script` renderer. Renderers that only care
    * about a single value can ignore it.
+   *
+   * A grid also passes `rowId` and `tableId`: the identity of the record the
+   * cell belongs to, which `row` deliberately does not carry (it is the data
+   * object, not the record). A renderer needs both to act on the WHOLE record
+   * rather than on its own value — the `preview` cell uses them for the "Edit
+   * record" button in its popup. Neither is set where there is no record to
+   * point at, so a renderer that wants them must handle their absence.
    *
    * On a scripted column the element also receives `rawValue`: the cell's
    * STORED value, while `value` carries what the script computed. A renderer

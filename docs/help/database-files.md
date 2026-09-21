@@ -211,6 +211,34 @@ That one permission covers everything in that folder, for good. After it:
 stay where they are. **Sync workspace folder** re-reads the one you have, for
 files that arrived from another machine.
 
+### Connect ▸ Local Data
+
+The **Connect** button in the header now asks one question first: **Local Data**
+or **Remote System**. Local Data is this folder, all in one place — the folder
+you are using, a button to change or disconnect it, a Rescan, and the list of
+`.edb` files it holds.
+
+It is also where you say **which of those files you want**. Leave *Use every
+.edb in this folder* ticked and nothing changes: every file is read, and a file
+you drop in tomorrow is picked up on its own. Untick it and you choose file by
+file.
+
+A file you untick is left completely alone — not read, not compared, and never
+written. It stays on disk exactly as it is, and its workspace drops out of the
+workspace list until you tick it again. This is worth doing for a big archive
+you rarely open: every file in the folder is read each time the app scans it,
+and one you never use is just waiting.
+
+The file you have open right now cannot be unticked — you are working in it.
+
+**Disconnect** gives the folder permission back. Nothing is deleted; the app
+just stops being allowed to read it until you connect it again.
+
+**Open a workspace file…** at the bottom is for a `.edb` that is *not* in the
+folder. The browser grants the app that one file and remembers it. In Firefox
+and Safari it opens read-only — those browsers have no way to write a file back,
+so use Export to get a copy out.
+
 ### The same folder in more than one place
 
 Point two browsers — or two tabs on different addresses, or two machines with the
