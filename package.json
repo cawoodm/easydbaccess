@@ -28,7 +28,8 @@
     "publish": "pwsh -File ./publish.ps1",
     "build:electron": "pwsh -File ./package-electron.ps1",
     "package:electron": "pwsh -File ./package-electron.ps1 -Installer",
-    "docker": "pwsh -File ./docker.ps1"
+    "docker": "pwsh -File ./docker.ps1",
+    "docker:main": "pwsh -File ./docker.ps1 -Main"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
