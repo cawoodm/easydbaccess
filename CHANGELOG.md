@@ -1,10 +1,10 @@
 # CHANGELOG
 
-## 17 Sep 2026
+## 21 Sep 2026
 
 ### Bugs
 
-- 🪲 A column-editor save that failed part way said nothing at all, leaving no sign that the table was half-changed (v0.0.462)
+- 🪲 A column-editor save that failed part way said nothing at all, leaving no sign that the table was half-changed (v0.0.463)
 
 ## 10 Sep 2026
 
