@@ -585,8 +585,12 @@ describe('response carrying count + primary_keys but no columns key', () => {
     const byField = Object.fromEntries(inferColumnsFromRows(ET_EXTRA.rows).map((c) => [c.field, c.type]));
     expect(byField.rowid).toBe('number');
     expect(byField.executive_id).toBe('number');
-    expect(byField.start).toBe('datetime');
-    expect(byField.end).toBe('datetime');
+    // `1789-04-21` carries no time, so it is a DATE. This read `datetime` until
+    // every importer moved onto one inferrer: Datasette's own regex made the
+    // time optional, so a date-only column came back as a datetime and took the
+    // datetime renderer.
+    expect(byField.start).toBe('date');
+    expect(byField.end).toBe('date');
     expect(byField.type).toBe('string');
     expect(byField.party).toBe('string');
   });

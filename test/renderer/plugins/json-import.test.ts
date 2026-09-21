@@ -331,10 +331,18 @@ describe('parsedToTables: nested / heterogeneous objects (inferTypeFromValues vi
   });
 
   it('still types the date shapes it should', () => {
-    for (const v of ['2024-01-01', '2024-01-01 10:30', '01/02/2024', '1.2.2024']) {
+    for (const v of ['2024-01-01', '01/02/2024', '1.2.2024']) {
       const [t] = parsedToTables([{ d: v }], 'fallback');
       expect(t?.columns.find((c) => c.field === 'd')?.type, v).toBe('date');
     }
+  });
+
+  it('types a value carrying a time as a datetime, not a date', () => {
+    // This was `date` until every importer moved onto one inferrer: JSON had no
+    // datetime branch at all, so the time was typed away — while the identical
+    // value in a CSV was correctly a datetime.
+    const [t] = parsedToTables([{ d: '2024-01-01 10:30' }], 'fallback');
+    expect(t?.columns.find((c) => c.field === 'd')?.type).toBe('datetime');
   });
 
   it('defaults an all-empty/null/undefined column to "string"', () => {

@@ -176,7 +176,10 @@ test.describe('datasette import — whole database', () => {
     const executives = summary.tables['legislators/executives']!;
     expect(executives.rowCount).toBe(80);
     expect(executives.columns.id).toBe('number');
-    expect(executives.columns.bio_birthday).toBe('datetime');
+    // A birthday (`1732-02-22`) carries no time, so it is a DATE. This read
+    // `datetime` until every importer moved onto one inferrer — Datasette's own
+    // regex made the time optional.
+    expect(executives.columns.bio_birthday).toBe('date');
     expect(executives.columns.name).toBe('string');
 
     // executive_terms: paged via the `next` token to pull all 131 rows
@@ -184,7 +187,8 @@ test.describe('datasette import — whole database', () => {
     const execTerms = summary.tables['legislators/executive_terms']!;
     expect(execTerms.rowCount).toBe(131);
     expect(execTerms.columns.executive_id).toBe('number');
-    expect(execTerms.columns.start).toBe('datetime');
+    // Date-only too (`1789-04-21`) — see bio_birthday above.
+    expect(execTerms.columns.start).toBe('date');
     expect(execTerms.columns.type).toBe('string');
   });
 

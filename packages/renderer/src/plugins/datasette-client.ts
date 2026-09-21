@@ -11,7 +11,7 @@
 import type { ColumnSpec, ColumnType, FetchOpts, TableInfo } from '@easydb/shared';
 import { parseColumnFilter } from '@easydb/shared';
 import { isInternalField } from '../util/internal-fields.js';
-import { looksLikeArray, looksLikeTextColumn } from '@easydb/shared';
+import { inferColumnType as inferType } from '../import/infer-type.js';
 
 export interface DatasetteRef {
   base: string;
@@ -361,23 +361,13 @@ export function inferColumnsFromRows(rows: Array<Record<string, unknown>>): Colu
   });
 }
 
+/**
+ * Datasette answers in JSON, so the values are already typed — the same footing
+ * as json-import, and the same inferrer. SQLite has no array type, so a list
+ * arrives as a JSON string, which is exactly what an `array` column reads.
+ */
 function inferColumnType(values: unknown[]): ColumnType {
-  const samples = values.filter((v) => v !== null && v !== undefined && v !== '');
-  if (samples.length === 0) return 'string';
-  // SQLite has no array type, so a list arrives as a JSON string — which is
-  // exactly what an `array` column reads.
-  if (samples.every(looksLikeArray)) return 'array';
-  if (samples.every((v) => typeof v === 'boolean')) return 'boolean';
-  if (samples.every((v) => typeof v === 'number' && Number.isFinite(v))) return 'number';
-  if (samples.every((v) => typeof v === 'string' && isIsoDateish(v))) return 'datetime';
-  // Last, because a long cell cannot have been a number or a date anyway.
-  if (looksLikeTextColumn(samples)) return 'text';
-  return 'string';
-}
-
-/** Conservative ISO-8601-ish check — never treats a bare number as a date. */
-function isIsoDateish(s: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2})?/.test(s);
+  return inferType(values);
 }
 
 /**

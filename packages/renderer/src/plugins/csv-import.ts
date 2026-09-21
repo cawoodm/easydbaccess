@@ -2,9 +2,10 @@ import type { ColumnSpec, ColumnType, HostApi, ImporterSpec, ImportSourceInput, 
 import { filenameFromUrl } from '../import/fetch-source.js';
 import { askImportOntoMode, columnsLineUp, type ImportOntoMode } from '../import/import-mode.js';
 import { isUnsafeIntegerText } from '../import/big-numbers.js';
+import { inferColumnType } from '../import/infer-type.js';
 import { mapRowsToTarget, type ColumnMapping } from '../import/map-columns.js';
+import { remapRows } from '../table/column-merge.js';
 import { cryptoUUID, slugField } from '../util/ids.js';
-import { looksLikeArrayColumn, looksLikeTextColumn } from '@easydb/shared';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'csv-import',
@@ -716,59 +717,9 @@ function parseLines(text: string, sep: string, maxLines?: number): string[][] {
 
 // -- Type inference + coercion ------------------------------------------------
 
+/** CSV cells arrive as text, so the inferrer reads spellings — see `raw`. */
 function inferType(samples: string[]): ColumnType {
-  if (samples.length === 0) return 'string';
-  // A cell spelled `["a","b"]` is a list, whoever exported it. A cell with bare
-  // commas is NOT — prose is full of commas, so a comma list only becomes an
-  // `array` column when the header says so (`tags:Tags:array`) or the user picks
-  // the type in the columns editor.
-  if (looksLikeArrayColumn(samples)) return 'array';
-  if (samples.every(isBool)) return 'boolean';
-  if (samples.every(isNumber)) return 'number';
-  if (samples.every(isDateTime)) return 'datetime';
-  if (samples.every(isDate)) return 'date';
-  // Last, because a long cell cannot have been a number or a date anyway.
-  if (looksLikeTextColumn(samples)) return 'text';
-  return 'string';
-}
-
-const BOOL_RE = /^(true|false|yes|no|0|1)$/i;
-function isBool(s: string): boolean {
-  return BOOL_RE.test(s.trim());
-}
-
-function isNumber(s: string): boolean {
-  const t = s.trim();
-  if (t === '') return false;
-  // An integer past 2^53 cannot round-trip through a JS number, so a column
-  // holding one is TEXT — see import/big-numbers.ts.
-  if (isUnsafeIntegerText(t)) return false;
-  const n = Number(t);
-  return Number.isFinite(n);
-}
-
-/**
- * Date-only detection. Accepts ISO YYYY-MM-DD plus D{/-.}M{/-.}Y patterns
- * (both DMY and MDY ambiguous — we accept either; coerce() picks one).
- * Rejects bare integers so a column of years/IDs doesn't become 'date'.
- */
-function isDate(s: string): boolean {
-  const t = s.trim();
-  if (t === '' || /^\d+$/.test(t)) return false;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return true;
-  if (/^\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}$/.test(t)) return true;
-  return false;
-}
-
-/** Datetime detection — requires a time component after a space or 'T'. */
-function isDateTime(s: string): boolean {
-  const t = s.trim();
-  if (t === '') return false;
-  // ISO with time: YYYY-MM-DD[T ]HH:MM[:SS]
-  if (/^\d{4}-\d{2}-\d{2}[T ]\d{1,2}:\d{2}(:\d{2})?/.test(t)) return true;
-  // D{/-.}M{/-.}Y space-or-T HH:MM
-  if (/^\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}[T ]\d{1,2}:\d{2}/.test(t)) return true;
-  return false;
+  return inferColumnType(samples, { raw: true });
 }
 
 function coerce(raw: string, type: ColumnType): unknown {
@@ -917,13 +868,3 @@ export function dedupeFields(fields: string[]): string[] {
   return out;
 }
 
-/** Rekey each row's cells from old columns' fields onto new columns' fields (by index). */
-function remapRows(rows: Array<Record<string, unknown>>, oldCols: ColumnSpec[], newCols: ColumnSpec[]): Array<Record<string, unknown>> {
-  return rows.map((r) => {
-    const out: Record<string, unknown> = {};
-    for (let i = 0; i < oldCols.length; i++) {
-      out[newCols[i]!.field] = r[oldCols[i]!.field];
-    }
-    return out;
-  });
-}

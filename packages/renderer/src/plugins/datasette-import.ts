@@ -17,7 +17,7 @@
 // per-window progress bar, none of which the kernel can express yet (phase F).
 
 import type { ColumnSpec, HostApi, ImportResume, PluginModule, Row, Table } from '@easydb/shared';
-import { reconcileColumns, rowRekeyer } from '../table/column-merge.js';
+import { reconcileColumns, remapRows } from '../table/column-merge.js';
 import { mergeRefreshedRows } from '../table/refresh-merge.js';
 import { setTableLoading } from '../table/table-loading.js';
 import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
@@ -637,10 +637,7 @@ async function fillImportTable(
  * Refresh sees the remote column as new and re-adds it. That is the user's
  * choice to make — hiding a column has no such effect.
  */
-function remapRowKeys(rows: Array<Record<string, unknown>>, oldCols: ColumnSpec[], newCols: ColumnSpec[]): Array<Record<string, unknown>> {
-  const rekey = rowRekeyer(oldCols, newCols);
-  return rekey ? rows.map(rekey) : rows;
-}
+const remapRowKeys = remapRows;
 
 function summariseBatch(
   api: HostApi,

@@ -18,10 +18,10 @@ import { chooseTables } from '../dialogs/table-select-dialog.js';
 import { askImportOntoMode, columnsLineUp } from '../import/import-mode.js';
 import { quoteBigIntegers } from '../import/big-numbers.js';
 import { runImport } from '../import/import-kernel.js';
-import { rowRekeyer } from '../table/column-merge.js';
+import { inferColumnType } from '../import/infer-type.js';
+import { remapRows } from '../table/column-merge.js';
 import { filenameFromUrl } from '../import/fetch-source.js';
 import { cryptoUUID, slugTable } from '../util/ids.js';
-import { looksLikeArrayColumn, looksLikeTextColumn } from '@easydb/shared';
 import { restoreTemplates } from '../views/template-restore.js';
 // Type-only: erased at compile time, so importing this module for its type
 // never pulls in `lit`/`top-progress.js` at runtime (that module registers a
@@ -989,43 +989,16 @@ function inferTableFromRows(rows: Array<Record<string, unknown>>): {
   return { columns, rows };
 }
 
-function inferTypeFromValues(values: unknown[]): ColumnType {
-  const samples = values.filter((v) => v !== null && v !== undefined && v !== '');
-  if (samples.length === 0) return 'string';
-  // A real JS array, or the same thing as text (`["a","b"]`) — both are lists
-  // and both read per member once the column is typed `array`.
-  if (looksLikeArrayColumn(samples)) return 'array';
-  if (samples.every((v) => typeof v === 'boolean')) return 'boolean';
-  if (samples.every((v) => typeof v === 'number' && Number.isFinite(v))) return 'number';
-  if (samples.every((v) => typeof v === 'string' && isDateString(v))) return 'date';
-  // Last, because a long cell cannot have been a number or a date anyway.
-  if (looksLikeTextColumn(samples)) return 'text';
-  return 'string';
-}
-
 /**
- * Date detection by SHAPE, not by `new Date(s)`. V8's fallback parser is far
- * looser than it looks: `new Date('https://example.com/1')` returns a valid
- * date (it plucks the "1" out), so a column of URLs was typed `date` — which
- * then took the date renderer and locked out the link renderer. The accepted
- * shapes match csv-import's: ISO `YYYY-MM-DD` (optionally with a time) and the
- * D/M/Y forms with `/`, `-` or `.` separators.
+ * JSON arrives already typed, so the inferrer trusts the JS types and only reads
+ * spellings for the date shapes. Big integers are guarded earlier, at parse time
+ * (`quoteBigIntegers`) — by the time `JSON.parse` has run the precision is gone.
  */
-function isDateString(s: string): boolean {
-  const t = s.trim();
-  if (t === '' || /^\d+$/.test(t)) return false;
-  if (/^\d{4}-\d{2}-\d{2}([T ]\d{1,2}:\d{2}(:\d{2})?)?/.test(t)) return true;
-  if (/^\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}([T ]\d{1,2}:\d{2})?$/.test(t)) return true;
-  return false;
+function inferTypeFromValues(values: unknown[]): ColumnType {
+  return inferColumnType(values);
 }
 
 // -- helpers ------------------------------------------------------------------
-
-/** Apply a pre-import column rename to a whole table's rows. */
-function remapRows(rows: Array<Record<string, unknown>>, oldCols: ColumnSpec[], newCols: ColumnSpec[]): Array<Record<string, unknown>> {
-  const rekey = rowRekeyer(oldCols, newCols);
-  return rekey ? rows.map(rekey) : rows;
-}
 
 function isObject(v: unknown): v is object {
   return typeof v === 'object' && v !== null && !Array.isArray(v);

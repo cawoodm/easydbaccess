@@ -39,6 +39,21 @@ export function rowRekeyer(oldCols: ColumnSpec[], newCols: ColumnSpec[]): ((row:
   };
 }
 
+/**
+ * {@link rowRekeyer} over a whole array — the shape every importer needs after
+ * the pre-import column editor has run.
+ *
+ * The original array is returned untouched when nothing was renamed, which is
+ * the point of `rowRekeyer` returning null. csv-import used to hand-roll this
+ * and rebuilt every row unconditionally, so a plain import with no rename paid
+ * for a full copy of the table and two of the three importers disagreed about
+ * whether that copy was needed at all.
+ */
+export function remapRows(rows: Array<Record<string, unknown>>, oldCols: ColumnSpec[], newCols: ColumnSpec[]): Array<Record<string, unknown>> {
+  const rekey = rowRekeyer(oldCols, newCols);
+  return rekey ? rows.map(rekey) : rows;
+}
+
 export interface FieldRename {
   from: string;
   to: string;
