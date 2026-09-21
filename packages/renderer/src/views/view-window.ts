@@ -4,7 +4,7 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import type { ColumnSpec, DataCollection, Row, ViewInstance, ViewTemplate } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
-import { openViewsDialog } from '../dialogs/views-dialog.js';
+import { openViews } from '../dialogs/open-views.js';
 import { openViewColumnsDialog } from '../dialogs/view-columns-dialog.js';
 import { CELL_SLOT_CLASS, cyclePillValue, evaluateRows, extractFilterTokens, hasRowHtml, removePillValue, substituteRow, tokenValue, viewRows } from './view-render.js';
 import { persistPillFilters, withPillValue } from './pill-filters.js';
@@ -780,14 +780,14 @@ export class ViewWindow extends LitElement {
   /** Open the Views manager straight into this view's template editor. */
   private editTemplate() {
     if (!this.instance || !this.template) return;
-    openViewsDialog(this.instance.tableId, { editTemplateId: this.template.id });
+    void openViews(this.instance.tableId, { editTemplateId: this.template.id });
   }
 
   /** Open the Views manager straight into this view instance's editor
    * (rename / re-map the template tokens to columns). */
   private editView() {
     if (!this.instance) return;
-    openViewsDialog(this.instance.tableId, { editInstanceId: this.instance.id });
+    void openViews(this.instance.tableId, { editInstanceId: this.instance.id });
   }
 
   /** Delete this view instance after a confirm. No explicit window close: the

@@ -18,7 +18,7 @@
 // the dialog flips. Plugins must not manage windows themselves.
 
 import type { HostApi, PluginModule } from '@easydb/shared';
-import { openViewsDialog } from '../dialogs/views-dialog.js';
+import { openViews } from '../dialogs/open-views.js';
 import { seedDefaults } from './views-seed.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
@@ -51,7 +51,7 @@ export function init(api: HostApi): void {
     label: 'Views',
     icon: VIEWS_ICON,
     tooltip: 'Views -- display this table through a template',
-    onClick: (_a, { tableId }) => openViewsDialog(tableId),
+    onClick: (_a, { tableId }) => void openViews(tableId),
   });
 }
 

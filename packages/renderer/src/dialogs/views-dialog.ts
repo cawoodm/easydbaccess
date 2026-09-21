@@ -13,10 +13,12 @@ import { revealViewWindow } from '../window-mgr/view-window-manager.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
 
 /**
- * Open the Views manager for a table (mounted lazily into <body>). Pass
- * `editTemplateId` to jump straight into editing that template, or
- * `editInstanceId` to jump into editing that view instance (rename / re-map) —
- * both used by the icon buttons in a view window's footer.
+ * Open the Views manager for a table (mounted lazily into <body>).
+ *
+ * Call `openViews` from `dialogs/open-views.ts` instead of this, unless you are
+ * already inside this module: importing this one statically is what closed the
+ * two import cycles through `view-window` and `viz-pane`, and it drags the whole
+ * dialog into the boot bundle. That module dynamic-imports this function.
  */
 export function openViewsDialog(tableId: string, opts?: { editTemplateId?: string; editInstanceId?: string }): void {
   const dlg = ViewsDialog.instance ?? mount();

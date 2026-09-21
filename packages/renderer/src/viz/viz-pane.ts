@@ -15,7 +15,7 @@ import { LitElement, css, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
-import { openViewsDialog } from '../dialogs/views-dialog.js';
+import { openViews } from '../dialogs/open-views.js';
 import { dockIconStyles, popOutIcon } from './dock-icons.js';
 import './viz-panel.js';
 
@@ -155,7 +155,7 @@ export class VizPane extends LitElement {
     const ctx = await getContext();
     const inst = await ctx.store.viewInstances.findOne(this.viewInstanceId);
     if (!inst) return;
-    openViewsDialog(inst.tableId, what === 'template' ? { editTemplateId: inst.templateId } : { editInstanceId: this.viewInstanceId });
+    await openViews(inst.tableId, what === 'template' ? { editTemplateId: inst.templateId } : { editInstanceId: this.viewInstanceId });
   }
 
   /** Ask the embedded panel to re-read its data. */

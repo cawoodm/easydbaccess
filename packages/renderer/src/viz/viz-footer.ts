@@ -17,7 +17,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
-import { openViewsDialog } from '../dialogs/views-dialog.js';
+import { openViews } from '../dialogs/open-views.js';
 import { focusTableWindow } from '../window-mgr/table-window-manager.js';
 import { dockIconStyles, popInIcon } from './dock-icons.js';
 import { dockDescriptor } from './viz-dock.js';
@@ -130,7 +130,7 @@ export class VizFooter extends LitElement {
    */
   private settings(): void {
     if (!this.tableId) return;
-    openViewsDialog(this.tableId, { editInstanceId: this.viewInstanceId });
+    void openViews(this.tableId, { editInstanceId: this.viewInstanceId });
   }
 
   /**
@@ -148,7 +148,7 @@ export class VizFooter extends LitElement {
     const ctx = await getContext();
     const inst = await ctx.store.viewInstances.findOne(this.viewInstanceId);
     if (!inst) return;
-    openViewsDialog(this.tableId, { editTemplateId: inst.templateId });
+    await openViews(this.tableId, { editTemplateId: inst.templateId });
   }
 
   /**

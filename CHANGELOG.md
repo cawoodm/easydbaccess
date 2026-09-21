@@ -13,6 +13,11 @@
 - 🪲 Two files holding a workspace of one name were one destination in the workspace list, so both rows opened the same file (v0.0.464)
 - 🪲 A column-editor save that failed part way said nothing at all, leaving no sign that the table was half-changed (v0.0.463)
 
+### Chores
+
+- 🔧 The Views manager loads when it is first opened rather than at startup, taking 9 kB off what the app downloads to boot (v0.0.465)
+- 🔧 `npm run dev:renderer` serves its own branch's port again; a hardcoded 5190 had pointed every worktree at main's (v0.0.465)
+
 ## 10 Sep 2026
 
 ### Features
