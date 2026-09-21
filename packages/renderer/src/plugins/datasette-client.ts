@@ -12,6 +12,7 @@ import type { ColumnSpec, ColumnType, FetchOpts, TableInfo } from '@easydb/share
 import { parseColumnFilter } from '@easydb/shared';
 import { isInternalField } from '../util/internal-fields.js';
 import { inferColumnType as inferType } from '../import/infer-type.js';
+import { quoteBigIntegers } from '../import/big-numbers.js';
 
 export interface DatasetteRef {
   base: string;
@@ -543,7 +544,17 @@ async function fetchJson(fetchFn: FetchFn, url: string): Promise<unknown> {
     }
     throw new DatasetteError(body && typeof body === 'object' ? body : { error: `HTTP ${res.status} for ${url}` }, res.status);
   }
-  const json: unknown = await res.json();
+  // Read the body as TEXT and quote the oversized integers before parsing — the
+  // same guard json-import puts in front of its own `JSON.parse`. `res.json()`
+  // is already too late: an id past 2^53 has lost its last digits by the time
+  // the parser hands it over, and it lands in the table silently wrong. A
+  // snowflake id or a big rowid is exactly that shape.
+  //
+  // `text` is checked rather than assumed because `fetchFn` is `api.backend.fetch`,
+  // which a plugin MAY replace (monkey-patching the api surface is contractual —
+  // see plugin-api.ts), so what comes back need not be a full Response. Falling
+  // back keeps such a plugin working, at the precision it would have had anyway.
+  const json: unknown = typeof res.text === 'function' ? JSON.parse(quoteBigIntegers(await res.text())) : await res.json();
   if (field(json, 'ok') === false) throw new DatasetteError(json, res.status);
   return json;
 }

@@ -17,6 +17,7 @@
 - 🪲 A column of dates with no time was typed as a datetime by the Datasette importer, so a birthday column carried a time it never had (v0.0.466)
 - 🪲 A `31/01/2026` date column imported from Datasette was left as plain text, though the same column from a CSV or a JSON file was a date (v0.0.466)
 - 🪲 Referencing a URL typed its columns more crudely than importing the same data, so the referenced table lost the date and list renderers (v0.0.466)
+- 🪲 A Datasette id longer than 15 digits lost its last digits on the way in, so the row carried a number that was never in the source (v0.0.467)
 
 ### Chores
 
