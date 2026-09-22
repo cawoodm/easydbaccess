@@ -68,12 +68,30 @@ you want to see what is in it.
 
 A docked pane shares the grid's window and, importantly, the grid's **filters**:
 type in a column funnel and the chart narrows with it. Drag the splitter to
-resize the pane; the height is remembered. The strip along the top of a pane
+resize the pane; the size is remembered. The strip along the top of a pane
 has buttons to collapse it, open its definition (`<>`) or its
 **Settings**, refresh it, move it out into its own window, or close it.
 
 Minimizing the window puts the pane away with the grid, so a collapsed window
 costs nothing.
+
+### Side by side, or one above the other
+
+A new pane gets a band of its own, the full width of the window. Two buttons in
+the pane strip change that:
+
+- **Join the row above** puts the pane beside the ones in the band above it.
+  Three charts that filled three bands then fill one, and the grid gets the other
+  two back.
+- **Give it its own row** is the way back out.
+
+Panes sharing a row can be reordered with the **left** and **right** arrows, and
+the boundary between two of them is a splitter: drag it to give one more width
+and the other less. Both buttons only appear when there is something for them to
+do, so a single docked chart shows neither.
+
+Rows stack, so you can have two charts side by side with a wide one underneath,
+and the whole arrangement is saved with the workspace.
 
 ## The buttons on a visualization
 

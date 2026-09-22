@@ -112,6 +112,12 @@ export class VizWordCloud extends LitElement {
       void this.layout();
     });
     this.ro.observe(this);
+    // The words themselves survive a DOM move — they are in this element's own
+    // shadow root — but a layout that was still running when the move happened
+    // was abandoned by the generation guard, and `updated` will not re-ask for
+    // it because the terms have not changed. See `point-map.ts` for the same
+    // shape of bug in its more visible form.
+    if (this.hasUpdated && !this.matchesLayout()) void this.layout();
   }
 
   override disconnectedCallback(): void {

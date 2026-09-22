@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 22 Sep 2026
+
+### Features
+
+- 🪶 Visualizations dock side by side as well as stacked: several panes share a row, and both row heights and pane widths drag (v0.0.468)
+
+### Bugs
+
+- 🪲 A docked chart or map went blank when another visualization was docked beside it or taken from beside it (v0.0.468)
+- 🪲 A docked map stayed blank after a filter matched nothing, until the app was reloaded (v0.0.468)
+- 🪲 A save the browser refused because another program held the `.edb` reported that state "had changed since it was read from disk", which named neither the file nor the cause (v0.0.470)
+
 ## 21 Sep 2026
 
 ### Features
@@ -18,7 +30,6 @@
 - 🪲 A `31/01/2026` date column imported from Datasette was left as plain text, though the same column from a CSV or a JSON file was a date (v0.0.466)
 - 🪲 Referencing a URL typed its columns more crudely than importing the same data, so the referenced table lost the date and list renderers (v0.0.466)
 - 🪲 A Datasette id longer than 15 digits lost its last digits on the way in, so the row carried a number that was never in the source (v0.0.467)
-- 🪲 A save the browser refused because another program held the `.edb` reported that state "had changed since it was read from disk", which named neither the file nor the cause (v0.0.468)
 
 ### Chores
 

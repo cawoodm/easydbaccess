@@ -128,6 +128,12 @@ export class VizChartElement extends LitElement {
     // and a panel splitter resizes the element without resizing the window.
     this.ro = new ResizeObserver(() => this.chart?.resize());
     this.ro.observe(this);
+    // A DOM move — `panel-stack` re-parenting a pane that changed rows — is a
+    // disconnect followed by a connect, and the disconnect destroyed the chart.
+    // `updated` will not rebuild it, because it compares the incoming data BY
+    // VALUE and the data has not changed; only the canvas has been emptied. So
+    // the reconnect asks for the redraw. Same fix as `point-map.ts`.
+    if (this.hasUpdated) void this.draw();
   }
 
   override disconnectedCallback(): void {
