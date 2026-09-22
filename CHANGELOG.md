@@ -17,6 +17,8 @@
 - 🪲 Searching `!CC,Holiday` found nothing: the search box read an exclusion as ordinary text, so only a column's own filter box could exclude a value (v0.0.471)
 - 🪲 A search for `Berlin, DE` could not be made literal: every comma was read as OR, with no way to say the text was meant as typed (v0.0.473)
 - 🪲 Changing a Table grid setting left the rows on screen filtered by the old rules until something else forced a reload (v0.0.473)
+- 🪲 A filter typed exclusion-first, like `!CC,Flat`, matched the exact opposite of what was typed on a big table (v0.0.474)
+- 🪲 An exclusion in the search box excluded nothing once a table was big enough to be read a page at a time (v0.0.474)
 
 ## 21 Sep 2026
 

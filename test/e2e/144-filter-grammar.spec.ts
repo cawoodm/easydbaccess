@@ -51,7 +51,7 @@ test('an exclusion keeps the rest of the list', async ({ page }) => {
   await expect(rows).toHaveCount(2); // Holiday, Holiday Inn — CC is out
 });
 
-test('quoting the whole box searches for the text as typed', async ({ page }) => {
+test('quoting is how a value containing a comma is filtered on', async ({ page }) => {
   const id = await createTable(page, 'Places', [{ field: 'city' }]);
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [{ city: 'Berlin, DE' }, { city: 'Zurich, CH' }, { city: 'Berlin' }]);
@@ -60,10 +60,10 @@ test('quoting the whole box searches for the text as typed', async ({ page }) =>
   await expect(rows).toHaveCount(3);
   const box = panel.locator('data-table thead filter-combobox input').first();
 
-  // Unquoted the comma ORs, so "Berlin" or " CH" — two of the three.
+  // Unquoted the comma ORs, so "Berlin" or " CH" — all three match one or other.
   await box.fill('Berlin, CH');
   await expect(rows).toHaveCount(3);
-  // Quoted, the comma is part of the value.
+  // Quoted, the comma is part of the value, and the value is the whole cell.
   await box.fill('"Berlin, DE"');
   await expect(rows).toHaveCount(1);
 });

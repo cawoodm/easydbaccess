@@ -23,7 +23,7 @@
  * `AND` binds tighter than the comma.
  */
 
-import { groupColumnFilter, parseColumnFilter, type FilterToken } from './column-filter.js';
+import { groupColumnFilter, isListExpression, parseColumnFilter, plainTextOf, type FilterToken } from './column-filter.js';
 
 export interface SqlFragment {
   /** A boolean SQL expression, or '' when nothing needed saying. */
@@ -111,21 +111,32 @@ export function columnFilterToSql(columnSql: string, rawFilter: string, opts?: {
 
   // A group counts as negative when every token in it excludes — that is the
   // matcher's own reading of `Open,!urgent`: one positive set, one exclusion.
-  const positive: string[] = [];
-  const negative: string[] = [];
-  const params: unknown[] = [];
+  //
+  // Each group's params travel WITH its SQL rather than in one flat list, because
+  // the clauses are re-ordered below (positives first) and `?` binds by position.
+  // Collecting them in group order while emitting in clause order is what made
+  // `!CC,Flat` bind `%cc%` to the positive LIKE and `%flat%` to the NOT LIKE —
+  // the exact inverse of what was typed, and silent, since both are valid SQL.
+  const positive: Array<{ sql: string; params: unknown[] }> = [];
+  const negative: Array<{ sql: string; params: unknown[] }> = [];
   for (const group of groups) {
     const rendered = groupSql(columnSql, group, opts?.defaultSubstring ?? true);
     if (!rendered.sql) continue;
     const allNegated = group.every((t) => t.negate);
-    (allNegated ? negative : positive).push(rendered.sql);
-    params.push(...rendered.params);
+    (allNegated ? negative : positive).push(rendered);
   }
 
   const clauses: string[] = [];
-  if (positive.length > 0) clauses.push(`(${positive.join(' OR ')})`);
+  const params: unknown[] = [];
+  if (positive.length > 0) {
+    clauses.push(`(${positive.map((p) => p.sql).join(' OR ')})`);
+    for (const p of positive) params.push(...p.params);
+  }
   // Negatives are ANDed: every exclusion must hold.
-  for (const n of negative) clauses.push(n);
+  for (const n of negative) {
+    clauses.push(n.sql);
+    params.push(...n.params);
+  }
   return { sql: clauses.length > 0 ? clauses.join(' AND ') : '', params, expressible: true };
 }
 
@@ -167,23 +178,96 @@ export function buildWhere(
 
   const term = String(search ?? '').trim();
   if (term !== '') {
-    const perField: string[] = [];
-    for (const field of searchFields) {
-      const columnSql = columnSqlOf(field);
-      if (!columnSql) {
-        expressible = false;
-        continue;
-      }
-      const frag = columnFilterToSql(columnSql, term, opts);
-      if (!frag.sql) continue;
-      perField.push(`(${frag.sql})`);
-      params.push(...frag.params);
-    }
+    const cols = searchFields.map((f) => columnSqlOf(f)).filter((c): c is string => c != null);
+    if (cols.length !== searchFields.length) expressible = false;
     // No searchable column with a SQL form: the search cannot run here at all,
     // and saying so is the difference between "no matches" and "ask me again".
-    if (perField.length === 0) expressible = false;
-    else clauses.push(`(${perField.join(' OR ')})`);
+    if (cols.length === 0) expressible = false;
+    else {
+      const frag = searchToSql(cols, term, opts?.defaultSubstring ?? true);
+      if (frag.sql) {
+        clauses.push(`(${frag.sql})`);
+        params.push(...frag.params);
+      }
+    }
   }
 
   return { sql: clauses.join(' AND '), params, expressible };
+}
+
+/**
+ * A search term across SEVERAL columns — the SQL twin of `rowMatchesFilterExpr`.
+ *
+ * Not `columnFilterToSql` per column OR'd together, which is what this was and
+ * what made an exclusion useless: the two halves of the language take different
+ * quantifiers once there is more than one column to look in.
+ *
+ *   • a POSITIVE group is satisfied by ANY column — what a search box has always
+ *     done;
+ *   • an EXCLUSION must hold of EVERY column. `!CC` means "this row has no CC in
+ *     it", and OR-ing the per-column form asked "is SOME column not CC", which is
+ *     true of nearly every row and excluded nothing.
+ *
+ * The exclusion is therefore built from its own POSITIVE form and negated once,
+ * on the outside, over all the columns at once.
+ */
+function searchToSql(cols: readonly string[], term: string, defaultSubstring: boolean): { sql: string; params: unknown[] } {
+  // Plain text rather than a list — an ordinary phrase, or the whole box quoted
+  // to force it. `isListExpression` is the SAME gate `text-search.ts` applies in
+  // memory, and it has to be applied here too or a windowed table would answer
+  // `"Berlin, DE"` differently from a small one.
+  if (!isListExpression(term)) {
+    const literal = plainTextOf(term);
+    // An empty literal narrows nothing — and must not reach `tokenSql`, where an
+    // empty term is the NULL test rather than a match-anything.
+    if (literal === '') return { sql: '', params: [] };
+    const token: FilterToken = { term: literal, negate: false, contains: true };
+    const parts: string[] = [];
+    const params: unknown[] = [];
+    for (const col of cols) {
+      const one = tokenSql(col, token, defaultSubstring);
+      parts.push(one.sql);
+      params.push(...one.params);
+    }
+    return { sql: parts.length > 0 ? `(${parts.join(' OR ')})` : '', params };
+  }
+
+  const groups = groupColumnFilter(parseColumnFilter(term));
+  if (groups.length === 0) return { sql: '', params: [] };
+  const isVeto = (g: FilterToken[]): boolean => g.length === 1 && g[0]!.negate;
+
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+
+  // Same veto rule as the matcher: a lone negative token excludes outright, so
+  // `Open,!urgent` still reads as "Open but not urgent".
+  for (const g of groups.filter(isVeto)) {
+    const token = { ...g[0]!, negate: false };
+    const parts: string[] = [];
+    for (const col of cols) {
+      const one = tokenSql(col, token, defaultSubstring);
+      // A NULL cell must read as "does not contain it" rather than as unknown,
+      // or `NOT (… OR NULL)` drops rows whose other columns are perfectly fine.
+      // The null TOKEN tests for emptiness itself and must not be guarded.
+      parts.push(isNullToken(token) ? one.sql : `(${col} IS NOT NULL AND (${one.sql}))`);
+      params.push(...one.params);
+    }
+    if (parts.length > 0) clauses.push(`NOT (${parts.join(' OR ')})`);
+  }
+
+  const required = groups.filter((g) => !isVeto(g));
+  if (required.length > 0) {
+    const parts: string[] = [];
+    for (const g of required) {
+      for (const col of cols) {
+        const one = groupSql(col, g, defaultSubstring);
+        if (!one.sql) continue;
+        parts.push(`(${one.sql})`);
+        params.push(...one.params);
+      }
+    }
+    if (parts.length > 0) clauses.push(`(${parts.join(' OR ')})`);
+  }
+
+  return { sql: clauses.join(' AND '), params };
 }

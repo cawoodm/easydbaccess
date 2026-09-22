@@ -49,4 +49,39 @@ test.describe('search: exclude one value, keep another', () => {
     await input.fill('!Ann');
     await expect(rows).toHaveCount(2);
   });
+
+  /**
+   * The same query on a table whose cells are not one word each.
+   *
+   * Reported as "`!CC,Flat` should show Flat entries but doesn't". This spec is
+   * the READING — the excluded value in another column, and hidden inside a
+   * longer word — not the bug's regression net: a table this small is filtered
+   * in memory, and the bug was in the SQL the grid uses once it WINDOWS a large
+   * table. That half is pinned at the store level, where it can actually fail:
+   * `test/shared/filter-sql.test.ts`.
+   */
+  test('an exclusion reads the same on rows of more than one word', async ({ page }) => {
+    const id = await createTable(page, 'Lets', [{ field: 'type' }, { field: 'who' }]);
+    await waitForPanel(page, id);
+    await bulkAddRows(page, id, [
+      { type: 'CC', who: 'Ann' },
+      { type: 'Flat', who: 'Cid' },
+      { type: 'Flat', who: 'CC Dave' }, // excluded value, other column
+      { type: 'Flat Accommodation', who: 'Eve' }, // 'cc' inside a longer word
+    ]);
+    const panel = page.locator(`#${panelDomId(id)}`);
+    await expect(panel.locator('data-table tbody tr:visible')).toHaveCount(4);
+    await panel.locator('panel-search').getByRole('button').click();
+    const input = panel.locator('panel-search input');
+    const rows = panel.locator('data-table tbody tr:visible');
+
+    // Cid's row is the only Flat with no CC anywhere in it.
+    await input.fill('!CC,Flat');
+    await expect(rows).toHaveCount(1);
+    await expect(rows.locator('input').nth(1)).toHaveValue('Cid');
+
+    // The positive half alone is unaffected by the exclusion's reading.
+    await input.fill('Flat');
+    await expect(rows).toHaveCount(3);
+  });
 });
