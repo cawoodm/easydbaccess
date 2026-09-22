@@ -26,7 +26,6 @@
 - 🪲 An empty workspace could be saved over a file holding tables, with no warning (v0.0.464)
 - 🪲 Two files holding a workspace of one name were one destination in the workspace list, so both rows opened the same file (v0.0.464)
 - 🪲 A column-editor save that failed part way said nothing at all, leaving no sign that the table was half-changed (v0.0.463)
-
 - 🪲 A column of dates with a time was typed as a plain date by the JSON importer, dropping the time from the column's type (v0.0.466)
 - 🪲 A column of dates with no time was typed as a datetime by the Datasette importer, so a birthday column carried a time it never had (v0.0.466)
 - 🪲 A `31/01/2026` date column imported from Datasette was left as plain text, though the same column from a CSV or a JSON file was a date (v0.0.466)
