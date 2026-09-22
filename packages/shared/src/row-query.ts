@@ -51,12 +51,23 @@ export interface RowQuery {
   fields?: string[] | undefined;
   /**
    * Per-column filter expressions, keyed by field, in the app's filter language
-   * (`^` prefix, `=` exact, `!` negate, `,` OR, `AND`, `NULL`). An empty or
+   * (`*` wildcards, `^` prefix, `=` exact, `"…"` exact, `!` negate, `,` OR, `AND`, `NULL`). An empty or
    * absent expression filters nothing.
    */
   filters?: Record<string, string> | undefined;
   /** Global search across the filterable columns, same language. */
   search?: string | undefined;
+  /**
+   * What a filter value with NO wildcard and no quotes means: `true` (the
+   * default) a substring, `false` the whole cell. The `grid:defaultSubstring`
+   * setting, carried on the query rather than read where the rows are.
+   *
+   * It has to travel: the matcher runs in the renderer while the SQL is built
+   * in the worker and in the Electron main process, where a renderer module
+   * cannot be read — and the two MUST give the same answer or a windowed table
+   * would filter differently from a small one.
+   */
+  defaultSubstring?: boolean | undefined;
   /** Sort keys, most significant first. */
   sort?: SortSpec[] | undefined;
   /** Rows to skip. Counted AFTER filtering and sorting. */

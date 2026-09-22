@@ -167,7 +167,10 @@ describe('readRows', () => {
     const { coll, seen } = fakeColl();
     const page = await readRows(coll, req({ filters: { country: 'Sweden' }, sort: [{ field: 'age', asc: true }], limit: 1, offset: 0 }));
     expect(seen.finds).toBe(0);
-    expect(seen.queries).toEqual([{ filters: { country: 'Sweden' }, sort: [{ field: 'age', asc: true }], offset: 0, limit: 1 }]);
+    // `defaultSubstring` rides along on every pushed query: the SQL the store
+    // builds has to read a bare filter value the same way the in-memory pass
+    // does, and the store cannot see the renderer's setting on its own.
+    expect(seen.queries).toEqual([{ defaultSubstring: true, filters: { country: 'Sweden' }, sort: [{ field: 'age', asc: true }], offset: 0, limit: 1 }]);
     // The backend's own total survives — the point of asking for a page.
     expect(page.total).toBe(2);
     expect(page.rows).toHaveLength(1);

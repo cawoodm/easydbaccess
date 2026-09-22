@@ -33,6 +33,15 @@ export function init(api: HostApi): void {
         'Clicking a column header sorts descending, then ascending, then off. Turn this off to start ascending. Dates, scores and counts are usually read from the high end down, which took two clicks before.',
     },
     {
+      key: 'defaultSubstring',
+      label: 'Default to substring',
+      type: 'boolean',
+      default: true,
+      scope: 'workspace',
+      description:
+        'A filter value with no wildcard and no quotes matches any cell CONTAINING it. Turn this off to make it match the whole cell instead, which is what a list of values usually means. Either way `*foo*` asks for a substring and `"foo bar"` asks for the whole cell, so both are explicit. Workspace-wide rather than per device, because it decides what the filters saved in this workspace mean.',
+    },
+    {
       key: 'highlightNulls',
       label: 'Highlight empty cells',
       type: 'boolean',

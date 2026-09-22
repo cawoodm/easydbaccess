@@ -8,6 +8,7 @@
 
 import type { ColumnSpec, Row, ViewInstance } from '@easydb/shared';
 import { activeColumnScript, arrayMembers, composeColumnFilter, matchesColumnFilter, parseColumnFilter, scriptDeclined, type FilterToken } from '@easydb/shared';
+import { defaultSubstring } from './../util/filter-settings.js';
 import { runColumnScript } from '../util/column-script.js';
 import { formatByType } from '../util/local-datetime.js';
 
@@ -320,7 +321,7 @@ export function filterRows(rows: Row[], filters: Record<string, string>, columns
   const active = Object.entries(filters).filter(([, v]) => v != null && String(v).trim() !== '');
   if (active.length === 0) return rows;
   const typeOf = new Map((columns ?? []).map((c) => [c.field, c.type as string | undefined]));
-  return rows.filter((r) => active.every(([field, needle]) => matchesColumnFilter(r.data[field], needle, { type: typeOf.get(field) })));
+  return rows.filter((r) => active.every(([field, needle]) => matchesColumnFilter(r.data[field], needle, { type: typeOf.get(field), defaultSubstring: defaultSubstring() })));
 }
 
 /** Does an exact-match token's term equal `value`, case-insensitively? */

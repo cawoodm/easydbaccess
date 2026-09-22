@@ -17,7 +17,7 @@
 // what "contains" means (here: any field value contains the term, so a phrase
 // spanning two fields is NOT a phrase match, matching the old per-field logic).
 
-import { composeColumnFilter, groupColumnFilter, matchesColumnFilter, parseColumnFilter } from '@easydb/shared';
+import { composeColumnFilter, groupColumnFilter, isListExpression, matchesColumnFilter, parseColumnFilter, plainTextOf } from '@easydb/shared';
 
 /** Per-row predicate: does the row contain `needle` (already lower-cased)? */
 export type ContainsFn<T> = (row: T, needle: string) => boolean;
@@ -142,6 +142,16 @@ export function rowMatchesFilterExpr(values: readonly unknown[], raw: string): b
  * and the plain phrase→AND→OR fallback are unchanged.
  */
 export function searchRowsByField<T extends { data: Record<string, unknown> }>(rows: T[], query: string, fields: SearchField[]): T[] {
+  // The whole query in quotes is the escape hatch, and it has to be honoured
+  // BEFORE `searchRows` splits on whitespace: `"Berlin, DE"` would otherwise
+  // become the two words `"Berlin,` and `DE"` and go down the AND/OR fallback,
+  // which is exactly the literal reading the quotes were asking to avoid.
+  const whole = query.trim();
+  if (whole !== '' && !isListExpression(whole) && plainTextOf(whole) !== whole) {
+    const literal = plainTextOf(whole).toLowerCase();
+    if (literal === '') return rows;
+    return rows.filter((r) => Object.values(r.data).some((v) => v != null && String(v).toLowerCase().includes(literal)));
+  }
   // Lower-cased field name / label → the real data key.
   const byName = new Map<string, string>();
   const typeOf = new Map<string, string | undefined>();
@@ -169,9 +179,15 @@ export function searchRowsByField<T extends { data: Record<string, unknown> }>(r
       }
     }
     // A term with no `field:` prefix reads the SAME language, across every
-    // column. It used to be a raw substring test, so `!CC,Holiday` searched for
-    // the literal text "!cc,holiday" and found nothing — the one filter the
-    // search box could not express was the one a user would try first.
+    // column — but only when it LOOKS like a list. `!CC,Holiday` used to search
+    // for the literal text "!cc,holiday" and find nothing; reading every term as
+    // the language instead cost us the ability to search for `Berlin, DE`.
+    // `isListExpression` is the one rule that decides, and quoting the whole
+    // term is how a user overrides it.
+    if (!isListExpression(needle)) {
+      const literal = plainTextOf(needle);
+      return Object.values(row.data).some((v) => v != null && String(v).toLowerCase().includes(literal));
+    }
     return rowMatchesFilterExpr(Object.values(row.data), needle);
   };
   return searchRows(rows, q, contains);

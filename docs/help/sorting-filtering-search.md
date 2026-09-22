@@ -34,15 +34,42 @@ You can also just type into the filter box:
 
 | Type this | To get                              |
 | --------- | ----------------------------------- |
-| `text`    | Rows containing `text`              |
-| `!text`   | Rows that do **not** contain `text` |
-| `^text`   | Rows that **start with** `text`     |
-| `=text`   | Rows that are **exactly** `text`    |
+| `*text*`  | Rows **containing** `text`          |
+| `text*`   | Rows that **start with** `text`     |
+| `*text`   | Rows that **end with** `text`       |
+| `"text"`  | Rows that are **exactly** `text`    |
+| `!text`   | Rows that do **not** match `text`   |
 | `NULL`    | Rows where the value is blank/empty |
 | `!NULL`   | Rows that have any value at all     |
 
-`^` and `!` can be combined, and you can list several values separated by
-commas.
+`^text` still works as another way of writing `text*`, and `=text` as another
+way of writing `"text"`.
+
+`!` can be combined with any of them, and you can list several values separated
+by commas.
+
+### Plain text, or a list of values?
+
+The box takes both, and it decides by what you typed:
+
+- Type anything with a comma, `!`, `^`, `=`, `*`, `AND` or `OR` in it and it is
+  read as a **list of values**.
+- Type anything else and it is read as **plain text**, searched as you typed it.
+- Put the **whole box in quotes** to force plain text. That is the only way to
+  search for a value that really contains a comma: `"Berlin, DE"`.
+
+### What a plain value means
+
+A value with no wildcard and no quotes — just `Paris` — follows the **Default to
+substring** setting (Settings → Table grid), which is on to start with:
+
+- **On** — `Paris` matches any cell containing "Paris".
+- **Off** — `Paris` matches only a cell that is exactly "Paris", which is
+  usually what a list of values is for.
+
+Either way `*Paris*` and `"Paris"` say which they want and ignore the setting.
+The setting belongs to the workspace, not to your device, because it decides
+what the filters saved in that workspace mean.
 
 A comma means OR. To ask for two things at once, put `AND` between them:
 
@@ -120,3 +147,14 @@ the box folds back to its icon on the next click elsewhere.
 Typing multiple words searches for the whole phrase first, then falls back
 to every word (AND), then to any word (OR). You can also spell out the logic
 yourself with uppercase `AND`/`OR`, e.g. `berlin AND active`.
+
+The search box takes the **same language as a filter**, across every column at
+once — so `!CC,Holiday` leaves out the CC rows and keeps the Holiday ones, and
+`*lida*` finds them by part of a word. An exclusion has to hold of the whole
+row: `!CC` hides a row with "CC" in any of its columns.
+
+The same rule decides plain text against a list, so an ordinary phrase needs no
+syntax, and quoting the whole box searches for it exactly as typed.
+
+A term written `field:value` narrows to one column, and takes the whole language
+inside it — `city:Paris,Zurich`, `read:!true`, `status:A*`.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { composeColumnFilter, matchesColumnFilter, parseColumnFilter } from '../../../packages/shared/src/column-filter.js';
+import { composeColumnFilter, isListExpression, matchesColumnFilter, parseColumnFilter, plainTextOf } from '../../../packages/shared/src/column-filter.js';
 
 describe('matchesColumnFilter', () => {
   it('empty query matches everything', () => {
@@ -128,10 +128,12 @@ describe('parseColumnFilter / composeColumnFilter', () => {
       { term: 'Sweden', negate: false },
       { term: 'Norway', negate: true },
     ]);
-    expect(parseColumnFilter('"Berlin, DE"')).toEqual([{ term: 'Berlin, DE', negate: false }]);
-    expect(parseColumnFilter('!"a,b"')).toEqual([{ term: 'a,b', negate: true }]);
+    // A quoted entry of a list is an EXACT value, so these carry `exact`. The
+    // quotes still protect the comma; they now also say which match is wanted.
+    expect(parseColumnFilter('"Berlin, DE"')).toEqual([{ term: 'Berlin, DE', negate: false, exact: true }]);
+    expect(parseColumnFilter('!"a,b"')).toEqual([{ term: 'a,b', negate: true, exact: true }]);
     // A doubled quote is a literal only INSIDE a quoted run.
-    expect(parseColumnFilter('"a""b"')).toEqual([{ term: 'a"b', negate: false }]);
+    expect(parseColumnFilter('"a""b"')).toEqual([{ term: 'a"b', negate: false, exact: true }]);
     expect(parseColumnFilter('')).toEqual([]);
     expect(parseColumnFilter('!')).toEqual([{ term: '', negate: true }]);
   });
@@ -141,8 +143,9 @@ describe('parseColumnFilter / composeColumnFilter', () => {
     expect(parseColumnFilter('!^S')).toEqual([{ term: 'S', negate: true, prefix: true }]);
     // A second ^ is literal text, not a repeated modifier.
     expect(parseColumnFilter('^^S')).toEqual([{ term: '^S', negate: false, prefix: true }]);
-    // Quoting turns it back into an ordinary character.
-    expect(parseColumnFilter('"^S"')).toEqual([{ term: '^S', negate: false }]);
+    // Quoting turns it back into an ordinary character — and, being a quoted
+    // list entry, asks for an exact match on it.
+    expect(parseColumnFilter('"^S"')).toEqual([{ term: '^S', negate: false, exact: true }]);
   });
 
   it('round-trips through compose', () => {
@@ -277,9 +280,12 @@ describe('exact match (=)', () => {
   });
 
   it('a quoted leading = survives as literal text (not the exact-match modifier)', () => {
-    expect(parseColumnFilter('"=x"')).toEqual([{ term: '=x', negate: false }]);
+    // The `=` is text; the quotes are what ask for an exact match on it.
+    expect(parseColumnFilter('"=x"')).toEqual([{ term: '=x', negate: false, exact: true }]);
     expect(matchesColumnFilter('=x', '"=x"')).toBe(true);
     expect(matchesColumnFilter('x', '"=x"')).toBe(false);
+    // Exact, so a cell merely CONTAINING the text no longer matches.
+    expect(matchesColumnFilter('a=xb', '"=x"')).toBe(false);
   });
 
   it('=NULL matches the literal text "null", not an empty cell', () => {
@@ -354,5 +360,100 @@ describe('matchesColumnFilter on an array column', () => {
   it('leaves a column of any other type reading the whole cell', () => {
     expect(matchesColumnFilter('foo,bar', '=foo')).toBe(false);
     expect(matchesColumnFilter('foo,bar', '=foo,bar')).toBe(true);
+  });
+});
+
+describe('wildcards', () => {
+  it('reads the three star forms', () => {
+    expect(parseColumnFilter('*foo*')).toEqual([{ term: 'foo', negate: false, contains: true }]);
+    expect(parseColumnFilter('foo*')).toEqual([{ term: 'foo', negate: false, prefix: true }]);
+    expect(parseColumnFilter('*foo')).toEqual([{ term: 'foo', negate: false, suffix: true }]);
+  });
+
+  it('matches contains, starts-with and the ends-with that had no spelling before', () => {
+    expect(matchesColumnFilter('Holiday', '*lida*')).toBe(true);
+    expect(matchesColumnFilter('Holiday', 'Hol*')).toBe(true);
+    expect(matchesColumnFilter('Holiday', '*day')).toBe(true);
+    expect(matchesColumnFilter('Holiday', '*Hol')).toBe(false);
+    expect(matchesColumnFilter('Holiday', 'day*')).toBe(false);
+  });
+
+  it('negates a wildcard', () => {
+    expect(matchesColumnFilter('Holiday', '!*lida*')).toBe(false);
+    expect(matchesColumnFilter('Flat', '!*lida*')).toBe(true);
+  });
+
+  it('is a literal inside quotes, which is how a value holding one is matched', () => {
+    expect(parseColumnFilter('"a*b"')).toEqual([{ term: 'a*b', negate: false, exact: true }]);
+    expect(matchesColumnFilter('a*b', '"a*b"')).toBe(true);
+  });
+
+  it('leaves a token of nothing but stars as literal text', () => {
+    // Otherwise the term would be empty, which already means "is this cell blank".
+    expect(matchesColumnFilter('*', '*')).toBe(true);
+    expect(matchesColumnFilter('x', '*')).toBe(false);
+  });
+
+  it('beats the NULL test, like the other anchors', () => {
+    expect(matchesColumnFilter('null', '*NULL*')).toBe(true);
+    expect(matchesColumnFilter(null, '*NULL*')).toBe(false);
+  });
+
+  it('round-trips through compose', () => {
+    for (const raw of ['*foo*', '^foo', '*foo', '!*foo*', '!*foo', '*a b*']) {
+      expect(composeColumnFilter(parseColumnFilter(raw))).toBe(raw);
+    }
+  });
+});
+
+describe('defaultSubstring', () => {
+  it('a bare value is a substring by default', () => {
+    expect(matchesColumnFilter('Holiday', 'lida')).toBe(true);
+    expect(matchesColumnFilter('Holiday', 'Holiday')).toBe(true);
+  });
+
+  it('a bare value is the whole cell when the setting is off', () => {
+    const exact = { defaultSubstring: false };
+    expect(matchesColumnFilter('Holiday', 'lida', exact)).toBe(false);
+    expect(matchesColumnFilter('Holiday', 'Holiday', exact)).toBe(true);
+    expect(matchesColumnFilter('Holiday', 'CC,Holiday', exact)).toBe(true);
+    expect(matchesColumnFilter('Holiday Inn', 'CC,Holiday', exact)).toBe(false);
+  });
+
+  it('an explicit form ignores the setting, both ways', () => {
+    for (const opts of [{ defaultSubstring: true }, { defaultSubstring: false }]) {
+      expect(matchesColumnFilter('Holiday', '*lida*', opts)).toBe(true);
+      expect(matchesColumnFilter('Holiday', '"Holiday"', opts)).toBe(true);
+      expect(matchesColumnFilter('Holiday Inn', '"Holiday"', opts)).toBe(false);
+    }
+  });
+
+  it('does not change what a negation means, only how it matches', () => {
+    expect(matchesColumnFilter('Holiday', '!CC,Holiday', { defaultSubstring: false })).toBe(true);
+    expect(matchesColumnFilter('CC', '!CC,Holiday', { defaultSubstring: false })).toBe(false);
+  });
+});
+
+describe('isListExpression', () => {
+  it('is false for ordinary text, so a phrase needs no syntax', () => {
+    expect(isListExpression('Berlin')).toBe(false);
+    expect(isListExpression('Holiday Inn')).toBe(false);
+    expect(isListExpression('')).toBe(false);
+  });
+
+  it('is true for anything carrying a mark of the language', () => {
+    for (const q of ['a,b', '!a', '^a', '=a', '*a*', 'a AND b', 'a OR b']) {
+      expect(isListExpression(q), q).toBe(true);
+    }
+  });
+
+  it('is false when the whole input is quoted — the override', () => {
+    expect(isListExpression('"Berlin, DE"')).toBe(false);
+    expect(plainTextOf('"Berlin, DE"')).toBe('Berlin, DE');
+  });
+
+  it('is still a list when quotes are used INSIDE it', () => {
+    expect(isListExpression('"Foo Bar","Baz"')).toBe(true);
+    expect(plainTextOf('a,b')).toBe('a,b');
   });
 });

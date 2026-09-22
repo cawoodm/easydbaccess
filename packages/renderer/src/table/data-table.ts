@@ -12,6 +12,7 @@ import { FilterPopover } from '../chrome/filter-popover.js';
 import '../chrome/filter-combobox.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { viewColumnSpecs } from '../views/view-columns.js';
+import { defaultSubstring, readDefaultSubstring, setDefaultSubstring } from '../util/filter-settings.js';
 import { matchesColumnFilter } from '@easydb/shared';
 import { FACET_MAX_LEN, FACET_MAX_OPTIONS, facetable, facetCounts, facetValues } from '../search/facet-values.js';
 import { GRID_SETTINGS_ID, readHighlightErrors, readHighlightNulls, readSortDescFirst, readWindowRowsFrom, WINDOW_ROWS_FROM_DEFAULT } from './grid-settings.js';
@@ -757,8 +758,17 @@ export class DataTable extends LitElement {
       this.highlightNulls = await readHighlightNulls(ctx.api.settings);
       this.highlightErrors = await readHighlightErrors(ctx.api.settings);
       const from = await readWindowRowsFrom(ctx.api.settings);
-      const changed = from !== this.windowRowsFrom;
+      let changed = from !== this.windowRowsFrom;
       this.windowRowsFrom = from;
+      // `defaultSubstring` decides what a plain filter value MEANS, so flipping
+      // it changes which rows the filter already in the box matches. Read it
+      // here rather than trusting the module-state listener to have run first —
+      // two listeners on one event have no order between them.
+      const substring = await readDefaultSubstring(ctx.api.settings);
+      if (substring !== defaultSubstring()) {
+        setDefaultSubstring(substring);
+        changed = true;
+      }
       // Crossing the threshold changes what a fetch asks for, so the rows in
       // hand are the answer to the old question.
       if (changed && this.rowColl) void this.loadRows();
@@ -1944,7 +1954,7 @@ export class DataTable extends LitElement {
     let rows = this.rows;
     if (active.length > 0) {
       const typed = this.typedFilters(active);
-      rows = rows.filter((r) => typed.every((f) => matchesColumnFilter(r.data[f.field], f.query, { type: f.type })));
+      rows = rows.filter((r) => typed.every((f) => matchesColumnFilter(r.data[f.field], f.query, { type: f.type, defaultSubstring: defaultSubstring() })));
     }
     // Free-text search supports `field:value` (with !/^/comma-OR/NULL), boolean
     // AND/OR, and the phrase→AND→OR fallback. Local and global queries each
@@ -2191,7 +2201,7 @@ export class DataTable extends LitElement {
     const active = Object.entries(this.filters).filter(([f, q]) => q && q.trim().length > 0 && f !== focusField && !unfilterable.has(f));
     if (active.length === 0) return this.rows;
     const typed = this.typedFilters(active);
-    return this.rows.filter((r) => typed.every((f) => matchesColumnFilter(r.data[f.field], f.query, { type: f.type })));
+    return this.rows.filter((r) => typed.every((f) => matchesColumnFilter(r.data[f.field], f.query, { type: f.type, defaultSubstring: defaultSubstring() })));
   }
 
   /**
@@ -2621,7 +2631,7 @@ export class DataTable extends LitElement {
                         .value=${this.filters[c.field] ?? ''}
                         .options=${opts}
                         placeholder="filter…"
-                        title="Filter: text = contains, ^text = starts with, !text = does not contain, NULL = empty, !NULL = has a value. Comma-separate for several values (a,b = a OR b; !a,!b excludes both); quote a value containing a comma."
+                        title="Filter: *text* = contains, text* = starts with, *text = ends with, &quot;text&quot; = the whole cell, !text = not, NULL = empty, !NULL = has a value. Comma-separate for several values (a,b = a OR b; !a,b excludes a and keeps b). A plain value follows the &quot;Default to substring&quot; setting. Quote the WHOLE box to search for the text as typed, commas and all."
                         @filter-change=${(e: Event) => this.onFilterInput(c.field, (e as CustomEvent<{ value: string }>).detail.value)}
                       ></filter-combobox>
                     </th>

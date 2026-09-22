@@ -40,7 +40,8 @@ function normalised(columnSql: string): string {
 
 /** Is this token the whole-token NULL test rather than a text match? */
 function isNullToken(t: FilterToken): boolean {
-  if (t.prefix || t.exact) return false; // `^NULL` / `=NULL` are literal text
+  // Any anchor asks for the literal text: `^NULL`, `=NULL`, `*NULL*`.
+  if (t.prefix || t.exact || t.suffix || t.contains) return false;
   return t.term === '' || t.term.toUpperCase() === 'NULL';
 }
 
@@ -52,26 +53,31 @@ function isNullToken(t: FilterToken): boolean {
  * when the value is NULL, and the matcher's rule is that a null cell fails a
  * positive text test and therefore PASSES its negation.
  */
-function tokenSql(columnSql: string, t: FilterToken): { sql: string; params: unknown[] } {
+function tokenSql(columnSql: string, t: FilterToken, defaultSubstring: boolean): { sql: string; params: unknown[] } {
   const col = normalised(columnSql);
   if (isNullToken(t)) return { sql: `(${columnSql} IS NULL OR TRIM(${columnSql}) = '')`, params: [] };
   const term = t.term.toLowerCase();
-  if (t.exact) {
-    // Exact matches the WHOLE cell and is NOT trimmed (see the matcher).
-    return { sql: `LOWER(${columnSql}) = ?`, params: [term] };
-  }
+  // Exact matches the WHOLE cell and is NOT trimmed (see the matcher).
+  const equals = () => ({ sql: `LOWER(${columnSql}) = ?`, params: [term] });
+  if (t.exact) return equals();
   // ESCAPE, because a term may legitimately contain % or _.
   const like = (pattern: string) => ({ sql: `${col} LIKE ? ESCAPE '\\'`, params: [pattern] });
   const lit = term.replace(/[\\%_]/g, (c) => `\\${c}`);
-  return t.prefix ? like(`${lit}%`) : like(`%${lit}%`);
+  if (t.prefix) return like(`${lit}%`);
+  if (t.suffix) return like(`%${lit}`);
+  if (t.contains) return like(`%${lit}%`);
+  // No anchor: the same setting the matcher reads decides. The two MUST agree —
+  // `test/shared/filter-sql.test.ts` runs every case through real SQLite AND
+  // through `matchesColumnFilter` and requires the same answer.
+  return defaultSubstring ? like(`%${lit}%`) : equals();
 }
 
 /** A group is tokens joined by AND — they must hold of the same cell together. */
-function groupSql(columnSql: string, group: FilterToken[]): { sql: string; params: unknown[] } {
+function groupSql(columnSql: string, group: FilterToken[], defaultSubstring: boolean): { sql: string; params: unknown[] } {
   const parts: string[] = [];
   const params: unknown[] = [];
   for (const t of group) {
-    const one = tokenSql(columnSql, t);
+    const one = tokenSql(columnSql, t, defaultSubstring);
     if (!t.negate) {
       parts.push(one.sql);
     } else if (isNullToken(t)) {
@@ -97,7 +103,7 @@ function groupSql(columnSql: string, group: FilterToken[]): { sql: string; param
  * `columnSql` is the already-quoted SQL for the column, so the caller owns
  * identifier quoting and this function never builds one from user text.
  */
-export function columnFilterToSql(columnSql: string, rawFilter: string): SqlFragment {
+export function columnFilterToSql(columnSql: string, rawFilter: string, opts?: { defaultSubstring?: boolean | undefined }): SqlFragment {
   const raw = String(rawFilter ?? '').trim();
   if (raw === '') return { sql: '', params: [], expressible: true };
   const groups = groupColumnFilter(parseColumnFilter(raw));
@@ -109,7 +115,7 @@ export function columnFilterToSql(columnSql: string, rawFilter: string): SqlFrag
   const negative: string[] = [];
   const params: unknown[] = [];
   for (const group of groups) {
-    const rendered = groupSql(columnSql, group);
+    const rendered = groupSql(columnSql, group, opts?.defaultSubstring ?? true);
     if (!rendered.sql) continue;
     const allNegated = group.every((t) => t.negate);
     (allNegated ? negative : positive).push(rendered.sql);
@@ -134,7 +140,13 @@ export function columnFilterToSql(columnSql: string, rawFilter: string): SqlFrag
  * `searchFields` are the fields a bare search term looks in; the search matches
  * when ANY of them does.
  */
-export function buildWhere(filters: Record<string, string> | undefined, search: string | undefined, columnSqlOf: (field: string) => string | null, searchFields: readonly string[]): SqlFragment {
+export function buildWhere(
+  filters: Record<string, string> | undefined,
+  search: string | undefined,
+  columnSqlOf: (field: string) => string | null,
+  searchFields: readonly string[],
+  opts?: { defaultSubstring?: boolean | undefined },
+): SqlFragment {
   const clauses: string[] = [];
   const params: unknown[] = [];
   let expressible = true;
@@ -146,7 +158,7 @@ export function buildWhere(filters: Record<string, string> | undefined, search: 
       expressible = false; // computed column — the caller re-filters
       continue;
     }
-    const frag = columnFilterToSql(columnSql, raw);
+    const frag = columnFilterToSql(columnSql, raw, opts);
     if (!frag.expressible) expressible = false;
     if (!frag.sql) continue;
     clauses.push(`(${frag.sql})`);
@@ -162,7 +174,7 @@ export function buildWhere(filters: Record<string, string> | undefined, search: 
         expressible = false;
         continue;
       }
-      const frag = columnFilterToSql(columnSql, term);
+      const frag = columnFilterToSql(columnSql, term, opts);
       if (!frag.sql) continue;
       perField.push(`(${frag.sql})`);
       params.push(...frag.params);

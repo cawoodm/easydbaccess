@@ -14,6 +14,7 @@ import { loadUrlPlugins } from './plugin-host/url-loader.js';
 import { SAFE_MODE } from './plugin-host/safe-mode.js';
 import { startFileLinkGuard } from './util/file-link-guard.js';
 import { startLinkPolicy } from './util/link-settings.js';
+import { startFilterDefaults } from './util/filter-settings.js';
 import { startWindowColors } from './window-mgr/window-color-settings.js';
 
 export interface AppContext {
@@ -215,6 +216,7 @@ async function init(): Promise<AppContext> {
   // reads it while painting — so it is resolved here, once, and re-resolved when
   // it changes. See `util/link-settings.ts`.
   startLinkPolicy(api.settings);
+  startFilterDefaults(api.settings);
 
   // Which colours a window's palette button offers is a setting too, and the
   // picker is built inside a click handler. Same shape, same reason — see

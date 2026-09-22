@@ -190,3 +190,34 @@ describe('rowMatchesFilterExpr — quantifiers across columns', () => {
     expect(rowMatchesFilterExpr(['anything'], '')).toBe(true);
   });
 });
+
+describe('searchRowsByField — list or plain text', () => {
+  interface R {
+    data: Record<string, unknown>;
+  }
+  const rows: R[] = [{ data: { city: 'Berlin, DE' } }, { data: { city: 'Berlin' } }, { data: { city: 'Zurich, CH' } }, { data: { city: 'CC' } }];
+  const run = (q: string) => searchRowsByField(rows, q, [{ field: 'city' }]).map((r) => r.data.city);
+
+  it('reads a term carrying a mark of the language as a list', () => {
+    expect(run('!CC,Zurich')).toEqual(['Zurich, CH']);
+  });
+
+  it('reads ordinary text as ordinary text', () => {
+    // No comma, no `!` — nothing says "list", so the phrase is searched whole.
+    expect(run('Berlin')).toEqual(['Berlin, DE', 'Berlin']);
+  });
+
+  it('quoting the whole term forces plain text, commas and all', () => {
+    // Without the override this would be "Berlin" OR " DE" and pull in Zurich.
+    expect(run('"Berlin, DE"')).toEqual(['Berlin, DE']);
+  });
+
+  it('the same text unquoted is a list, so the comma ORs', () => {
+    expect(run('Berlin, CH')).toEqual(['Berlin, DE', 'Berlin', 'Zurich, CH']);
+  });
+
+  it('takes the wildcards too', () => {
+    expect(run('*CH')).toEqual(['Zurich, CH']);
+    expect(run('Berlin*')).toEqual(['Berlin, DE', 'Berlin']);
+  });
+});

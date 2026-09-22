@@ -39,8 +39,8 @@ afterEach(() => {
 });
 
 /** Values SQL returns for a filter. */
-function viaSql(filter: string): Array<string | null> {
-  const frag = columnFilterToSql('"v"', filter);
+function viaSql(filter: string, defaultSubstring = true): Array<string | null> {
+  const frag = columnFilterToSql('"v"', filter, { defaultSubstring });
   expect(frag.expressible).toBe(true);
   const where = frag.sql ? `WHERE ${frag.sql}` : '';
   const rows = db.prepare(`SELECT v FROM t ${where}`).all(...(frag.params as never[])) as Array<{ v: string | null }>;
@@ -48,8 +48,8 @@ function viaSql(filter: string): Array<string | null> {
 }
 
 /** Values the in-memory matcher returns for the same filter. */
-function viaMatcher(filter: string): Array<string | null> {
-  return VALUES.filter((v) => matchesColumnFilter(v, filter));
+function viaMatcher(filter: string, defaultSubstring = true): Array<string | null> {
+  return VALUES.filter((v) => matchesColumnFilter(v, filter, { defaultSubstring }));
 }
 
 const CASES = [
@@ -79,6 +79,17 @@ const CASES = [
   'null',
   '=null',
   '^null',
+  // Wildcards: the three shapes, negated, and against the values holding SQL's
+  // own wildcards so the LIKE escaping stays honest.
+  '*wede*',
+  'Swe*',
+  '*den',
+  '!*den',
+  '*den,Open',
+  '*%*',
+  '*_*',
+  '*NULL*',
+  '*,*',
 ];
 
 describe('columnFilterToSql agrees with the in-memory matcher', () => {
@@ -86,6 +97,15 @@ describe('columnFilterToSql agrees with the in-memory matcher', () => {
     it(`matches for ${JSON.stringify(filter)}`, () => {
       // Order-insensitive: SQL makes no promise about row order without ORDER BY.
       expect([...viaSql(filter)].sort()).toEqual([...viaMatcher(filter)].sort());
+    });
+  }
+
+  // The setting changes what a BARE value means, in both places at once. If the
+  // two ever disagree, a windowed table filters differently from a small one and
+  // nothing in the UI would say why.
+  for (const filter of ['Sweden', 'Sweden,Norway', 'sweden', '!Closed', 'Open,!urgent', '*wede*', 'Swe*', '=Open', 'NULL', '!NULL', '', 'w']) {
+    it(`matches with defaultSubstring off for ${JSON.stringify(filter)}`, () => {
+      expect([...viaSql(filter, false)].sort()).toEqual([...viaMatcher(filter, false)].sort());
     });
   }
 

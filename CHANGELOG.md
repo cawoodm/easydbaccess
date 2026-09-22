@@ -6,6 +6,8 @@
 
 - 🪶 Visualizations dock side by side as well as stacked: several panes share a row, and both row heights and pane widths drag (v0.0.468)
 - ✨ The preview window header also offers the whole record, so a value that looks wrong can be read against the fields beside it (v0.0.470)
+- 🪶 Filters take Excel's wildcards: `*foo*` contains, `foo*` starts with, `*foo` ends with, and `"foo"` matches the whole cell (v0.0.473)
+- ✨ Settings → Table grid: "Default to substring" decides whether a plain filter value means "contains" or "is exactly" (v0.0.473)
 
 ### Bugs
 
@@ -13,6 +15,8 @@
 - 🪲 A docked map stayed blank after a filter matched nothing, until the app was reloaded (v0.0.468)
 - 🪲 A save the browser refused because another program held the `.edb` reported that state "had changed since it was read from disk", which named neither the file nor the cause (v0.0.471)
 - 🪲 Searching `!CC,Holiday` found nothing: the search box read an exclusion as ordinary text, so only a column's own filter box could exclude a value (v0.0.471)
+- 🪲 A search for `Berlin, DE` could not be made literal: every comma was read as OR, with no way to say the text was meant as typed (v0.0.473)
+- 🪲 Changing a Table grid setting left the rows on screen filtered by the old rules until something else forced a reload (v0.0.473)
 
 ## 21 Sep 2026
 
