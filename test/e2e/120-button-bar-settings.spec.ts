@@ -30,7 +30,7 @@ const openButtonsTab = async (page: Page) => {
 const SHOW_NEW_TABLE = 'Show “New Table” in the header';
 
 /** A boolean field's own switch — the row's first checkbox is the "user" one. */
-const fieldSwitch = (dlg: Locator, label: string) => dlg.locator('.field', { hasText: label }).locator('label.scope', { hasText: 'enabled' }).locator('input');
+const fieldSwitch = (dlg: Locator, label: string) => dlg.locator('.field', { hasText: label }).locator('label.bool').locator('input');
 
 const headerLabels = (page: Page) => page.locator('app-shell header button.primary .btn-label');
 const footerLabels = (page: Page) => page.locator('app-shell footer button .btn-label');

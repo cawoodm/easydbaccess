@@ -420,6 +420,16 @@ export class DataTable extends LitElement {
       td.is-problem input[type='number'] {
         background: transparent;
       }
+      /* The _error column reads the other way round: a message IS the problem,
+         and an empty cell is the good news. So it gets the same pink when it has
+         something to say and a green when it has not — the only place in the
+         grid where empty is the state worth colouring. */
+      td.is-ok {
+        background: #dcfce7;
+      }
+      td.is-ok input[type='text'] {
+        background: transparent;
+      }
       /* Invalid stored value: the app-wide invalid red (see util/cell-validity),
          as an inset outline so the cell keeps its size and the grid lines stay
          put. Renderers additionally mark their own inputs. */
@@ -2703,6 +2713,13 @@ function sameSort(a: readonly SortSpec[], b: readonly SortSpec[]): boolean {
 
 function cellStateClass(row: Row, col: ColumnSpec, highlightNulls = true): string {
   if (activeColumnScript(col) !== undefined) return '';
+  // `_error` is Validate's own column, and its emptiness means the OPPOSITE of
+  // every other column's: a message is the fault and a blank cell is the row
+  // being fine. Marked both ways, and NOT behind the empty-cell setting — that
+  // switch is about gaps in the user's data, which this is not.
+  if (col.field === ERROR_FIELD) {
+    return String(row.data[ERROR_FIELD] ?? '').trim() === '' ? ' is-ok' : ' is-problem';
+  }
   const state = cellState(row.data[col.field], col.type);
   // The empty highlight is a setting; the invalid one is not. "Nothing here" is
   // normal and can be turned off as noise, while "this does not fit the type" is

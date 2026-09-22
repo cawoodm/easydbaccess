@@ -146,9 +146,18 @@ leave a stale panel on screen.
 wraps each collection in the minimal `DataCollection<T>` shape from
 [`plugin-api.ts`](../../packages/shared/src/plugin-api.ts):
 `find`/`findOne`/`insert`/`bulkInsert`/`upsert`/`patch`/`remove`/
-`bulkRemove`/`subscribe` (+ optional `refresh`). Plugins receive this wrapper
-and never the transport, so a third-party URL-loaded plugin cannot reach the
-database directly even if it wanted to.
+`bulkRemove`/`subscribe` (+ optional `refresh`, `bulkUpdate`). Plugins receive
+this wrapper and never the transport, so a third-party URL-loaded plugin cannot
+reach the database directly even if it wanted to.
+
+`bulkUpdate` is the batched counterpart of `patch` — many whole documents that
+already exist, one transaction, one change broadcast. It is optional and must
+be feature-detected: a fallback that looped `patch()` would hide exactly the
+cost it exists to remove (a round trip, a transaction and a grid-waking
+broadcast per row — 4 000 computed cells took two minutes that way, and 2.7 s
+through here). It cannot be `bulkInsert`, whose `INSERT OR REPLACE` hands a
+conflicting row a fresh `rowid` and would send every written row to the bottom
+of the grid.
 
 One optional member is a capability rather than a collection: `store.sql` is
 present only where the transport can run raw SQL, which is what lets the SQL

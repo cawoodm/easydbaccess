@@ -1,9 +1,10 @@
-import type { HostApi, PluginModule, Table } from '@easydb/shared';
+import type { HostApi, PluginModule, Row, Table } from '@easydb/shared';
 import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
 import { summarizeIssues } from '../table/validate-rules.js';
 import { scanTable } from '../table/validate-scan.js';
 import { clearRowErrors, ERROR_FIELD, errorColumnSpec, rowErrorsFrom, setRowErrors, type RowProblems } from '../table/row-errors.js';
 import { focusTableWindow } from '../window-mgr/table-window-manager.js';
+import { setTableLoading } from '../table/table-loading.js';
 
 // A ✓ button in each table's footer that checks every row against its columns'
 // rules — `notnull`, `max`, `unique` and a `validate` script — and hands what it
@@ -41,6 +42,9 @@ export const meta: NonNullable<PluginModule['meta']> = {
 /** Reported per column before the rest is counted rather than listed. */
 const CAP_PER_COLUMN = 500;
 
+/** Rows per `_error` write. Same reasoning as `materialize-script.ts`'s CHUNK. */
+const MARK_CHUNK = 500;
+
 export function init(api: HostApi): void {
   api.ui.registerTableButton({
     id: 'validate:run',
@@ -76,11 +80,17 @@ async function validateTable(api: HostApi, table: Table): Promise<void> {
       capPerColumn: CAP_PER_COLUMN,
       ...(table.labelColumn ? { labelField: table.labelColumn } : {}),
       cancelled: () => stop,
-      onProgress: (scanned, total) =>
+      onProgress: (scanned, total) => {
         setAppProgress({
           label: `Checking ${table.name} — press Esc to stop`,
           ...(total > 0 ? { fraction: Math.min(1, scanned / total), detail: `${scanned.toLocaleString()} of ${total.toLocaleString()} rows` } : { detail: `${scanned.toLocaleString()} rows` }),
-        }),
+        });
+        // And on the table's OWN window, the same bar an import draws. The
+        // app-wide bar under the header is easy to miss when the thing you are
+        // watching is a panel in the middle of the canvas — and a scan that runs
+        // for a minute with nothing happening in the grid reads as a hang.
+        setTableLoading(table.id, true, total > 0 ? Math.min(1, scanned / total) : undefined);
+      },
     });
 
     if (result.noRules) {
@@ -126,6 +136,7 @@ async function validateTable(api: HostApi, table: Table): Promise<void> {
   } finally {
     document.removeEventListener('keydown', onKey);
     clearAppProgress();
+    setTableLoading(table.id, false);
   }
 }
 
@@ -162,18 +173,37 @@ async function writeMessages(api: HostApi, table: Table, errors: ReadonlyMap<str
     await api.store.tables.patch(table.id, { columns: [...fresh.columns, errorColumnSpec()], updatedAt: Date.now() });
   }
 
-  const writes: Array<[string, string]> = [...[...errors].map(([id, p]) => [id, p.message] as [string, string]), ...stale.map((id) => [id, ''] as [string, string])];
-  let done = 0;
-  for (const [rowId, text] of writes) {
-    const row = await coll.findOne(rowId);
+  const wanted = new Map<string, string>([...[...errors].map(([id, p]) => [id, p.message] as const), ...stale.map((id) => [id, ''] as const)]);
+  if (wanted.size === 0) return;
+
+  // ONE read and batched writes.
+  //
+  // This was `findOne` + `patch` per row, which is two round trips, two
+  // transactions and two grid-waking broadcasts for every flagged row — the same
+  // arithmetic that made running a column script over 4 000 rows take two
+  // minutes. A table with a few thousand problems spent longer being MARKED than
+  // being checked. See `table/materialize-script.ts`, which fixed the twin.
+  const byId = new Map((await coll.find()).map((r) => [r.id, r]));
+  const pending: Row[] = [];
+  for (const [rowId, text] of wanted) {
+    const row = byId.get(rowId);
     // Deleted since the scan read it. The problem went with it.
-    if (row) {
-      // Unchanged rows are left alone: a write would bump `updatedAt` and give
-      // sync a row to carry for no reason.
-      const had = String(row.data[ERROR_FIELD] ?? '');
-      if (had !== text) await coll.patch(rowId, { data: { ...row.data, [ERROR_FIELD]: text }, updatedAt: Date.now() });
+    if (!row) continue;
+    // Unchanged rows are left alone: a write would bump `updatedAt` and give
+    // sync a row to carry for no reason.
+    if (String(row.data[ERROR_FIELD] ?? '') === text) continue;
+    pending.push({ ...row, data: { ...row.data, [ERROR_FIELD]: text }, updatedAt: Date.now() });
+  }
+
+  const bulk = coll.bulkUpdate?.bind(coll);
+  for (let from = 0; from < pending.length; from += MARK_CHUNK) {
+    const batch = pending.slice(from, from + MARK_CHUNK);
+    if (bulk) await bulk(batch);
+    else for (const row of batch) await coll.patch(row.id, { data: row.data, updatedAt: row.updatedAt });
+    if (pending.length > MARK_CHUNK) {
+      const done = Math.min(from + batch.length, pending.length);
+      setAppProgress({ label: `Marking rows in ${table.name}`, fraction: done / pending.length, detail: `${done.toLocaleString()} of ${pending.length.toLocaleString()}` });
+      setTableLoading(table.id, true, done / pending.length);
     }
-    done++;
-    if (writes.length > 50) setAppProgress({ label: `Marking rows in ${table.name}`, fraction: done / writes.length, detail: `${done.toLocaleString()} of ${writes.length.toLocaleString()}` });
   }
 }

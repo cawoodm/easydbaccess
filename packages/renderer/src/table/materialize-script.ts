@@ -26,8 +26,30 @@ export interface MaterializeResult {
   firstError: string | null;
 }
 
-/** Rows written per await, so a long run yields to the UI between batches. */
-const CHUNK = 200;
+/**
+ * Rows per write, so a long run yields to the UI between batches.
+ *
+ * With `bulkUpdate` this is also the transaction size: one round trip and one
+ * change broadcast per batch instead of per row, which is where nearly all of
+ * the run's time used to go.
+ *
+ * Measured over 4 000 rows in the browser store: ~120 s per row, 4.7 s at 200,
+ * 2.7 s at 500. What is left is mostly the grid re-reading the table once per
+ * broadcast, so a bigger batch keeps paying — but it buys less each time and
+ * costs progress granularity, and a batch the grid cannot redraw between is a
+ * frozen tab. 500 is where those meet.
+ */
+const CHUNK = 500;
+
+/**
+ * Yield long enough for the browser to paint. `setTimeout` rather than
+ * `requestAnimationFrame`, because the unit suites run under plain Node where
+ * there are no frames — and a run that never resumes there is worse than one
+ * that reports progress a millisecond late.
+ */
+function yieldToPaint(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 /**
  * Write `render(row)` into `field` for each of `targets`.
@@ -37,9 +59,16 @@ const CHUNK = 200;
  * one-off, and stopping at the first bad row would leave the column half
  * written with no way to tell where it stopped. The caller reports the tally.
  *
- * A row whose value is already what the script returns is not patched — the
+ * A row whose value is already what the script returns is not written — the
  * common case of re-running is then free, and it keeps `updatedAt` (and any
  * sync that reads it) honest about what actually changed.
+ *
+ * Rows are written a BATCH at a time through `bulkUpdate` where the collection
+ * has it. A loop of `patch()` costs a round trip, a transaction and a
+ * grid-waking change broadcast per row; 4 000 cells took about two minutes that
+ * way, nearly all of it that overhead. The per-row path is still here for a
+ * collection without `bulkUpdate` (a remote row source, say) — same tallies,
+ * same order, just slower.
  */
 export async function materializeColumnScript(
   rows: DataCollection<Row>,
@@ -50,6 +79,23 @@ export async function materializeColumnScript(
 ): Promise<MaterializeResult> {
   const result: MaterializeResult = { written: 0, unchanged: 0, failed: 0, firstError: null };
   const total = targets.length;
+  const bulk = rows.bulkUpdate?.bind(rows);
+  let batch: Row[] = [];
+
+  const flush = async (done: number): Promise<void> => {
+    if (batch.length > 0) {
+      if (bulk) await bulk(batch);
+      else for (const row of batch) await rows.patch(row.id, { data: row.data, updatedAt: row.updatedAt });
+      result.written += batch.length;
+      batch = [];
+    }
+    onProgress?.(done, total);
+    // Hand the frame back: a 20 000-row run would otherwise freeze the tab.
+    // A microtask is not enough — it runs before the browser paints, so the
+    // progress bar this reports to would not redraw until the run was over.
+    if (done < total) await yieldToPaint();
+  };
+
   for (let i = 0; i < total; i++) {
     const row = targets[i];
     if (!row) continue;
@@ -57,21 +103,22 @@ export async function materializeColumnScript(
     if (!run.ok) {
       result.failed++;
       result.firstError ??= run.message || run.label;
-      continue;
-    }
-    if (sameCell(row.data[field], run.value)) {
+    } else if (sameCell(row.data[field], run.value)) {
       result.unchanged++;
     } else {
-      await rows.patch(row.id, { data: { ...row.data, [field]: run.value as never } });
-      result.written++;
+      // The whole row, not a patch: `bulkUpdate` replaces the stored document,
+      // and the per-row fallback below passes the same object to `patch`.
+      //
+      // `updatedAt` is bumped because this IS an edit. The old per-row path left
+      // it alone — `patch` spreads over the stored doc, and the caller passed
+      // only `data` — so a materialized column looked untouched to replication,
+      // which settles a row by comparing stamps and would have handed the old
+      // values back on the next merge.
+      batch.push({ ...row, data: { ...row.data, [field]: run.value as never }, updatedAt: Date.now() });
     }
-    if ((i + 1) % CHUNK === 0) {
-      onProgress?.(i + 1, total);
-      // Hand the frame back: a 20 000-row run would otherwise freeze the tab.
-      await Promise.resolve();
-    }
+    if ((i + 1) % CHUNK === 0) await flush(i + 1);
   }
-  onProgress?.(total, total);
+  await flush(total);
   return result;
 }
 

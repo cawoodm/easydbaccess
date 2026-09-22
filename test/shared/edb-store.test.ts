@@ -265,6 +265,63 @@ describe('rows', () => {
     expect(order()).toEqual(['r1', 'r2', 'r3']);
   });
 
+  describe('bulkUpdate', () => {
+    it('overwrites many rows in one go and names the tables it touched', () => {
+      store.insert('rows', row('r1', { name: 'a', qty: 1 }));
+      store.insert('rows', row('r2', { name: 'b', qty: 2 }));
+
+      const touched = store.bulkUpdate('rows', [row('r1', { name: 'a!', qty: 1 }), row('r2', { name: 'b!', qty: 2 })]);
+
+      expect(touched).toEqual(['t1']);
+      expect((store.findOne('rows', 'r1') as { data: Record<string, unknown> }).data).toEqual({ name: 'a!', qty: 1 });
+      expect((store.findOne('rows', 'r2') as { data: Record<string, unknown> }).data).toEqual({ name: 'b!', qty: 2 });
+    });
+
+    it('leaves every row where it was — the reason it is not bulkInsert', () => {
+      // `bulkInsert` uses INSERT OR REPLACE, which hands a conflicting row a
+      // fresh rowid. Writing a computed column through it would send every
+      // written row to the bottom of the grid.
+      store.insert('rows', row('r1', { name: 'a' }));
+      store.insert('rows', row('r2', { name: 'b' }));
+      store.insert('rows', row('r3', { name: 'c' }));
+
+      store.bulkUpdate('rows', [row('r1', { name: 'a!' }), row('r2', { name: 'b!' }), row('r3', { name: 'c!' })]);
+
+      expect(
+        driver
+          .prepare(`SELECT _id FROM "Parts"`)
+          .all()
+          .map((r) => String(r._id)),
+      ).toEqual(['r1', 'r2', 'r3']);
+    });
+
+    it('means the WHOLE row, like the single-row upsert beside it', () => {
+      store.insert('rows', row('r1', { name: 'bolt', qty: 4, ghost: 'kept' }));
+      store.bulkUpdate('rows', [row('r1', { name: 'bolt' })]);
+      expect((store.findOne('rows', 'r1') as { data: Record<string, unknown> }).data).toEqual({ name: 'bolt' });
+      expect(driver.prepare(`SELECT qty, _extra FROM "Parts" WHERE _id = 'r1'`).get()).toEqual({ qty: null, _extra: null });
+    });
+
+    it('writes nothing, and does not throw, for a row that is no longer there', () => {
+      // The caller read its list before writing; a row deleted in between is a
+      // race, not a bug, and must not abandon the rest of the batch.
+      store.insert('rows', row('r1', { name: 'a' }));
+      store.bulkUpdate('rows', [row('gone', { name: 'x' }), row('r1', { name: 'a!' })]);
+      expect(store.findOne('rows', 'gone')).toBeNull();
+      expect((store.findOne('rows', 'r1') as { data: Record<string, unknown> }).data).toEqual({ name: 'a!' });
+    });
+
+    it('writes rows of DIFFERENT tables in one call and names both', () => {
+      store.insert('tables', table({ id: 't2', name: 'Other' }));
+      store.insert('rows', row('r1', { name: 'a' }));
+      store.insert('rows', row('s1', { name: 'z' }, 't2'));
+
+      const touched = store.bulkUpdate('rows', [row('r1', { name: 'a!' }), row('s1', { name: 'z!' }, 't2')]);
+
+      expect([...touched].sort()).toEqual(['t1', 't2']);
+    });
+  });
+
   it('an upsert still means the WHOLE row — a field left out goes back to empty', () => {
     // The UPDATE has to clear what it was not given, because that is what
     // `INSERT OR REPLACE` meant and callers were written against it.

@@ -59,6 +59,7 @@ function isMutation(req: EdbRequest): req is Extract<EdbRequest, { coll: string 
   switch (req.op) {
     case 'insert':
     case 'bulkInsert':
+    case 'bulkUpdate':
     case 'upsert':
     case 'patch':
     case 'remove':
@@ -221,6 +222,8 @@ function handle(req: EdbRequest): unknown {
       return s().insert(req.coll, req.doc);
     case 'bulkInsert':
       return s().bulkInsert(req.coll, req.docs);
+    case 'bulkUpdate':
+      return s().bulkUpdate(req.coll, req.docs);
     case 'upsert':
       return s().upsert(req.coll, req.doc);
     case 'patch':

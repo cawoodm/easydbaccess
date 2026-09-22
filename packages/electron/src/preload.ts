@@ -38,6 +38,7 @@ const store = {
   findOne: (coll: string, key: string): Promise<unknown | null> => ipcRenderer.invoke('store:findOne', coll, key),
   insert: (coll: string, doc: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('store:insert', coll, doc),
   bulkInsert: (coll: string, docs: Record<string, unknown>[]): Promise<unknown[]> => ipcRenderer.invoke('store:bulkInsert', coll, docs),
+  bulkUpdate: (coll: string, docs: Record<string, unknown>[]): Promise<void> => ipcRenderer.invoke('store:bulkUpdate', coll, docs),
   upsert: (coll: string, doc: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('store:upsert', coll, doc),
   patch: (coll: string, key: string, patch: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('store:patch', coll, key, patch),
   remove: (coll: string, key: string): Promise<void> => ipcRenderer.invoke('store:remove', coll, key),
@@ -135,6 +136,7 @@ declare global {
         findOne(coll: string, key: string): Promise<unknown | null>;
         insert(coll: string, doc: Record<string, unknown>): Promise<unknown>;
         bulkInsert(coll: string, docs: Record<string, unknown>[]): Promise<unknown[]>;
+        bulkUpdate(coll: string, docs: Record<string, unknown>[]): Promise<void>;
         upsert(coll: string, doc: Record<string, unknown>): Promise<unknown>;
         patch(coll: string, key: string, patch: Record<string, unknown>): Promise<unknown>;
         remove(coll: string, key: string): Promise<void>;

@@ -58,7 +58,8 @@ needs to expose to the renderer goes through `preload.ts`'s
 and only the specific functions the renderer needs:
 
 - **`store`** — one method per `store:*` IPC channel (`find`, `findOne`,
-  `insert`, `bulkInsert`, `upsert`, `patch`, `remove`, `bulkRemove`, `count`,
+  `insert`, `bulkInsert`, `bulkUpdate`, `upsert`, `patch`, `remove`,
+  `bulkRemove`, `count`,
   `dbPath`) plus `onChanged(cb)`, which subscribes to the main process's
   `store:changed` broadcast. That broadcast is what replaces Dexie's
   `liveQuery`: the main process names the mutated collection, the renderer's

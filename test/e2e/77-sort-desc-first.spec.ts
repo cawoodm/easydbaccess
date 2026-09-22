@@ -63,11 +63,10 @@ test('turning the setting off puts ascending first again', async ({ page }) => {
   const dlg = page.locator('settings-dialog dialog');
   await expect(dlg).toBeVisible();
   await dlg.getByRole('button', { name: 'Table grid' }).click();
-  // Both the value and its scope toggle are checkboxes in a label.scope; the
-  // value's label reads "enabled". Scope to this setting's own `.field` — the
-  // Table grid group gained a second boolean in 0.0.341 (Highlight empty
-  // cells), so a bare "enabled" matches two checkboxes.
-  const box = dlg.locator('.field', { hasText: 'Sort descending first' }).locator('label.scope', { hasText: 'enabled' }).locator('input');
+  // The value is `label.bool`; the storage-layer pill beside it is `.scope`.
+  // Scope to this setting's own `.field` anyway — the Table grid group gained a
+  // second boolean in 0.0.341 (Highlight empty cells).
+  const box = dlg.locator('.field', { hasText: 'Sort descending first' }).locator('label.bool').locator('input');
   await expect(box).toBeChecked(); // on by default
   await box.uncheck();
   await dlg.getByRole('button', { name: 'Done', exact: true }).click();

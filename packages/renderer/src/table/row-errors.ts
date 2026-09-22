@@ -45,6 +45,24 @@ export const ERROR_FIELD = '_error';
 export const ERROR_FILTER = '!NULL';
 
 /**
+ * Is this the column Validate owns?
+ *
+ * Used to refuse the two script editors and the Run button on it. Validate
+ * rewrites every value in this column on every run, so a render script there
+ * would be overwritten the next time ✓ is pressed, and a validation rule would
+ * be a rule about Validate's own output — a cell judging its own verdict.
+ * Neither is a thing the user can be meaningfully allowed to set up and then
+ * watch fail silently.
+ *
+ * Keyed on the CURRENT name, which is what makes a rename the way out: rename
+ * the column and it is an ordinary column of yours, scripts and all, while the
+ * next run creates a fresh `_error` beside it.
+ */
+export function isErrorField(field: string | undefined): boolean {
+  return field === ERROR_FIELD;
+}
+
+/**
  * The column a run creates when the table has no `_error` yet.
  *
  * `hidden`, because the message is not what the user is reading the table for —

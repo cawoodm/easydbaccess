@@ -24,6 +24,11 @@ export interface TestColumn {
    * renderer).
    */
   script?: string;
+  /**
+   * False parks `script`: kept on the column, not run on every draw. Absent (or
+   * true) means it runs — the same "absent means on" rule the store uses.
+   */
+  scriptActive?: boolean;
   /** No write target at all — a Projection's computed columns. Not the same as
    *  `script`, which has a stored cell underneath it. */
   readonly?: boolean;
@@ -62,6 +67,7 @@ export async function createTable(page: Page, name: string, columns: TestColumn[
             type: string;
             renderer?: string;
             script?: string;
+            scriptActive?: boolean;
             validate?: string;
             notnull?: boolean;
             unique?: boolean;
@@ -76,6 +82,9 @@ export async function createTable(page: Page, name: string, columns: TestColumn[
           };
           if (c.renderer) col.renderer = c.renderer;
           if (c.script) col.script = c.script;
+          // Only `false` is stored: absent means the script runs, and writing
+          // `true` would put a value on the column the app never writes itself.
+          if (c.script && c.scriptActive === false) col.scriptActive = false;
           if (c.validate) col.validate = c.validate;
           if (c.notnull) col.notnull = true;
           if (c.unique) col.unique = true;
