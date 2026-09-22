@@ -17,6 +17,7 @@ import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViews } from '../dialogs/open-views.js';
 import { dockIconStyles, popOutIcon } from './dock-icons.js';
+import { movePane, paneMoves, type PaneMove } from './viz-dock.js';
 import './viz-panel.js';
 
 /** Height the strip alone occupies when the pane is collapsed. */
@@ -169,6 +170,61 @@ export class VizPane extends LitElement {
     void this.patch({ dock: undefined });
   }
 
+  /**
+   * Which of the four layout moves this pane can make, refreshed from the store.
+   *
+   * Read rather than derived from anything this element knows: a move depends on
+   * the OTHER panes on the same edge, and a pane has no business holding a copy
+   * of its neighbours. Re-read whenever the instance list changes, so a button
+   * cannot stay enabled for a move that its neighbour has just made impossible.
+   */
+  @state() private moves: Record<PaneMove, boolean> = { 'join-above': false, 'own-row': false, left: false, right: false };
+
+  private unsubscribeMoves: (() => void) | null = null;
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    void this.watchMoves();
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.unsubscribeMoves?.();
+    this.unsubscribeMoves = null;
+  }
+
+  private async watchMoves(): Promise<void> {
+    const ctx = await getContext();
+    // The subscription hands over the whole collection, so this needs no read of
+    // its own — see the note on `DataCollection.subscribe`. It also fires once
+    // on subscribe, which is what fills the buttons in.
+    this.unsubscribeMoves = ctx.store.viewInstances.subscribe((all) => {
+      this.moves = paneMoves(all, this.viewInstanceId);
+    });
+  }
+
+  /**
+   * Carry out one layout move.
+   *
+   * `movePane` answers with a patch per pane on the edge — a pane cannot change
+   * rows without changing what the rows around it look like — and they are
+   * written one at a time rather than in a batch because `DataCollection` has no
+   * batch patch. Each is a `dock` rewrite the reconciler picks up and re-places.
+   */
+  private async move(which: PaneMove): Promise<void> {
+    if (this.busy || !this.viewInstanceId) return;
+    this.busy = true;
+    try {
+      const ctx = await getContext();
+      const all = await ctx.store.viewInstances.find();
+      const patches = movePane(all, this.viewInstanceId, which);
+      const now = Date.now();
+      for (const p of patches) await ctx.store.viewInstances.patch(p.id, { dock: p.dock, updatedAt: now });
+    } finally {
+      this.busy = false;
+    }
+  }
+
   /** Close: same flag a window's close writes, so both routes agree. */
   private close(): void {
     void this.patch({ open: false });
@@ -181,6 +237,27 @@ export class VizPane extends LitElement {
           <span class="mi sm">${this.collapsed ? 'chevron_right' : 'expand_more'}</span>
         </button>
         <span class="title" title=${this.label}>${this.label}</span>
+        <!-- Layout, left of the editing buttons: where the pane SITS is a
+             different question from what it shows, and the pair reads as one
+             control when they are together. Each is hidden rather than
+             disabled when its move is unavailable — a permanently greyed
+             arrow on a single docked chart is four buttons of noise. -->
+        ${this.moves.left
+          ? html`<button @click=${() => void this.move('left')} title="Move this pane left in its row" aria-label="Move left"><span class="mi sm">chevron_left</span></button>`
+          : null}
+        ${this.moves.right
+          ? html`<button @click=${() => void this.move('right')} title="Move this pane right in its row" aria-label="Move right"><span class="mi sm">chevron_right</span></button>`
+          : null}
+        ${this.moves['join-above']
+          ? html`<button @click=${() => void this.move('join-above')} title="Put this pane beside the ones in the row above" aria-label="Join the row above">
+              <span class="mi sm">vertical_align_top</span>
+            </button>`
+          : null}
+        ${this.moves['own-row']
+          ? html`<button @click=${() => void this.move('own-row')} title="Give this pane a row of its own" aria-label="Give it its own row">
+              <span class="mi sm">table_rows</span>
+            </button>`
+          : null}
         <button @click=${() => void this.openEditor('template')} title="Edit the definition: kind, aggregate and the options every view of it shares" aria-label="Edit definition">
           <span class="mi sm">code</span>
         </button>

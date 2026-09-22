@@ -386,7 +386,14 @@ function reconcileDockedPanes(all: ViewInstance[], ctx: AppContext): void {
     const key = hostKey(dock.host);
     const stack = getPanelStack(key);
     if (!stack) continue; // host not mounted — try again when it registers
-    if (stack.hasPane(inst.id)) continue;
+    if (stack.hasPane(inst.id)) {
+      // Already there, but its PLACEMENT may have moved: a pane joining another
+      // row is a store write, and this reconcile is what carries it onto the
+      // screen. Re-placed rather than re-added, or moving a chart one column
+      // would unmount it and make it re-read its rows to draw the same picture.
+      stack.updatePane(inst.id, { edge: dock.edge, size: dock.size, order: dock.order, row: dock.row, weight: dock.weight });
+      continue;
+    }
 
     const pane = document.createElement('viz-pane') as HTMLElement & { viewInstanceId: string; label: string };
     pane.viewInstanceId = inst.id;
@@ -408,9 +415,12 @@ function reconcileDockedPanes(all: ViewInstance[], ctx: AppContext): void {
       edge: dock.edge,
       size: dock.size,
       order: dock.order,
+      row: dock.row,
+      weight: dock.weight,
       // Persisted through the same serialized queue every other geometry write
       // uses, so a splitter release cannot interleave with a window drag save.
       onResized: (size) => void persistDockSize(inst.id, size),
+      onWeighted: (weight) => void persistDockWeight(inst.id, weight),
     });
     dockedPanes.set(inst.id, key);
   }
@@ -426,6 +436,31 @@ function persistDockSize(instanceId: string, size: number): Promise<void> {
       if (inst.dock.size === size) return;
       await ctx.store.viewInstances.patch(instanceId, {
         dock: { ...inst.dock, size },
+        updatedAt: Date.now(),
+      });
+    } catch {
+      /* instance may have been deleted mid-drag — ignore */
+    }
+  });
+}
+
+/**
+ * Write a pane's settled share of its row's width back onto its instance.
+ *
+ * Its own function rather than a flag on the one above, because the two drags
+ * settle different fields and a width drag writes every pane in the row: a pane
+ * that had no weight was drawing an equal share, and once a neighbour is dragged
+ * that share is a fact about the row rather than a default.
+ */
+function persistDockWeight(instanceId: string, weight: number): Promise<void> {
+  return queueGeometryWrite(`view:${instanceId}`, async () => {
+    try {
+      const ctx = await getContext();
+      const inst = await ctx.store.viewInstances.findOne(instanceId);
+      if (!inst?.dock) return;
+      if (inst.dock.weight === weight) return;
+      await ctx.store.viewInstances.patch(instanceId, {
+        dock: { ...inst.dock, weight },
         updatedAt: Date.now(),
       });
     } catch {

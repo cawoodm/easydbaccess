@@ -506,10 +506,37 @@ export interface VizSpec {
 export interface ViewDock {
   host: { kind: 'table'; tableId: string } | { kind: 'view'; viewInstanceId: string };
   edge: 'above' | 'below';
-  /** Pane height in px, written by the splitter drag. */
+  /**
+   * Height of the ROW this pane is in, px, written by the vertical splitter drag.
+   *
+   * Per row rather than per pane: panes sharing a row share its height, so the
+   * one being dragged sets it for all of them. The tallest wins where they
+   * disagree — which they can, after a pane moves between rows.
+   */
   size: number;
-  /** Order among the panes on the same edge, ascending. */
+  /** Left-to-right position within its row, ascending. */
   order: number;
+  /**
+   * Which row of the edge this pane is in.
+   *
+   * Absent means `order` — one pane per row, which is what every dock was before
+   * panes could share one. So nothing needs migrating: a workspace written by an
+   * older version reads back as the column of full-width bands it already was.
+   */
+  row?: number | undefined;
+  /**
+   * This pane's share of its row's width. Absent ⇒ an equal share.
+   *
+   * A WEIGHT, not a column span, and the reason is the width splitter: a span
+   * has to land on a whole column, so a drag could only move in steps of a
+   * twelfth (or whatever the grid's column count was) and a two-pane row could
+   * not be nudged at all. Weights are what `flex-grow` already takes, so the
+   * drag is continuous and the layout needs no grid engine.
+   *
+   * The cost is that a pane cannot span two ROWS — that needs integer spans.
+   * Deliberately out of scope; see `docs/tech/VIEWS.md`.
+   */
+  weight?: number | undefined;
 }
 
 /**

@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 22 Sep 2026
+
+### Features
+
+- 🪶 Visualizations dock side by side as well as stacked: several panes share a row, and both row heights and pane widths drag (v0.0.468)
+
+### Bugs
+
+- 🪲 A docked chart or map went blank when another visualization was docked beside it or taken from beside it (v0.0.468)
+- 🪲 A docked map stayed blank after a filter matched nothing, until the app was reloaded (v0.0.468)
+
 ## 21 Sep 2026
 
 ### Features
