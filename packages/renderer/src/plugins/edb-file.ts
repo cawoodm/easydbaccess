@@ -18,6 +18,7 @@ import {
   writeBytes,
 } from '../db/edb/file-handle.js';
 import { activeEdbName, adoptedFileName, reloadWithoutSpace, reloadWithSpace, setActiveEdbName } from '../db/edb/session.js';
+import { saveErrorMessage, saveErrorSummary } from '../db/edb/save-error.js';
 import { clearWriteDeclined, compareWithFile, factsOfHandle, markWriteDeclined, markLocalChanges, readStamp, recordAgreement, writeDeclined } from '../db/edb/file-stamp.js';
 import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
 import { cloneWorkspace } from '../db/clone-workspace.js';
@@ -587,7 +588,10 @@ export function init(api: HostApi): void {
       if (dir) await saveIntoFolder(dir);
       else await autosaveHasNowhereToGo();
     },
-    onError: (err) => api.ui.dialogs.toast(`Autosave failed: ${String(err)}`, { kind: 'error' }),
+    // A toast, so one line: the timer fires again, and the same cryptic
+    // DOMException the manual Save used to show was landing here every tick
+    // while some other program held the file.
+    onError: (err) => api.ui.dialogs.toast(saveErrorSummary(err, adoptedFileName()), { kind: 'error' }),
     onDirtyChange: () => refreshSaveButton(),
   });
 
@@ -982,7 +986,11 @@ export function init(api: HostApi): void {
       // Not a toast: a message about a save that did not happen must not vanish
       // after seven seconds. Everything saved before this is still intact — the
       // workspace itself is in SQLite and was never in the way.
-      await api.ui.dialogs.alert(`The workspace could not be saved: ${err instanceof Error ? err.message : String(err)}`, 'Save');
+      //
+      // Through `saveErrorMessage`, because the common failures arrive as
+      // DOMExceptions whose own wording describes the API's cached state rather
+      // than the file being busy — see that module.
+      await api.ui.dialogs.alert(saveErrorMessage(err, adoptedFileName()), 'Save');
       return false;
     }
     if (result.where === 'no-handle') {
