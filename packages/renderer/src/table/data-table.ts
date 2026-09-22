@@ -28,6 +28,13 @@ import { cachedRowCount, rememberRowCount } from './row-count-cache.js';
 import { rememberRowRequest } from './visible-request.js';
 import { ERROR_FIELD, ERROR_FILTER, problemAt, rowErrorsOf, watchRowErrors, type RowErrors } from './row-errors.js';
 import { TABLE_LOADING_EVENT, tableLoadingState, type TableLoadingDetail } from './table-loading.js';
+
+/**
+ * One frozen array for every column with no vocabulary, so a cell that has no
+ * suggestions is not handed a NEW empty array on every render — Lit would see a
+ * changed property and set it again for nothing.
+ */
+const EMPTY_OPTIONS: readonly string[] = Object.freeze([]);
 import { emitVisibleRows, provideVisibleRows, sameVisibleRows, visibleRowsWanted, type VisibleRowsDetail } from './visible-rows.js';
 import { providePaneActions } from './pane-actions.js';
 import { addPillValue } from '../views/view-render.js';
@@ -1770,6 +1777,7 @@ export class DataTable extends LitElement {
         .value=${raw ?? ''}
         .column=${col}
         .row=${row.data}
+        .suggestions=${this.tagOptions.get(col.field) ?? EMPTY_OPTIONS}
         .readonly=${cellReadonly}
         .sourceReadonly=${cellReadonly}
         @change=${cellReadonly ? undefined : (e: Event) => this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
@@ -2185,6 +2193,31 @@ export class DataTable extends LitElement {
    * narrows what the others offer. Drill-down UX. Both rules live in
    * `search/facet-values.ts`, which a view window's filter chip shares.
    */
+  /**
+   * Column field → the values that column already holds, for the `tags` cell's
+   * autocomplete. Computed once per render, next to the filter row's own
+   * suggestions and from the same helper.
+   *
+   * NOT faceted, unlike `computeFilterSuggestions`. A filter suggestion answers
+   * "what could I narrow to from here", so hiding values no live row carries is
+   * right; a cell editor answers "what does this column call things", and a tag
+   * used by rows the current filter excludes is still the tag to reuse. Typing a
+   * near-duplicate is the failure this exists to prevent.
+   *
+   * Only `array` columns, because only that renderer asks. Every other renderer
+   * ignores the property.
+   */
+  private tagOptions: Map<string, string[]> = new Map();
+
+  private computeTagOptions(cols: readonly ColumnSpec[]): Map<string, string[]> {
+    const out = new Map<string, string[]>();
+    for (const c of cols) {
+      if (c.type !== 'array' && c.renderer !== 'tags') continue;
+      out.set(c.field, facetValues(this.rows, c.field, { type: 'array' }));
+    }
+    return out;
+  }
+
   private computeFilterSuggestions(): Map<string, string[]> {
     const out = new Map<string, string[]>();
     for (const c of this.visibleColumns) {
@@ -2471,6 +2504,7 @@ export class DataTable extends LitElement {
     const cols = this.visibleColumns;
     const { slice, topPad, bottomPad } = this.virtualSlice(rows);
     const suggestions = this.computeFilterSuggestions();
+    this.tagOptions = this.computeTagOptions(cols);
     // Determinate only when an external producer reports a fraction; the
     // grid's own fetch has no incremental signal, so it stays indeterminate.
     const frac = this.externalLoading ? this.externalProgress : null;

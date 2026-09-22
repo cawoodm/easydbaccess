@@ -14,6 +14,7 @@ import {
   rememberHandle,
   rememberedFolder,
   rememberedHandle,
+  writeBytes,
 } from '../db/edb/file-handle.js';
 import { activeEdbName, adoptedFileName, reloadWithoutSpace, reloadWithSpace, setActiveEdbName } from '../db/edb/session.js';
 import { clearWriteDeclined, compareWithFile, factsOfHandle, markWriteDeclined, markLocalChanges, readStamp, recordAgreement, writeDeclined } from '../db/edb/file-stamp.js';
@@ -28,15 +29,14 @@ import { describeActiveOutcome } from '../db/edb/active-file-sync.js';
 import { createEdbBridge } from '../db/edb/worker-bridge.js';
 import type { PeekedWorkspace } from '../db/edb/protocol.js';
 import { compareCopies, type CopyFacts } from '../db/edb/copy-facts.js';
+import { askAboutFile, mergeWithFile, type MergeContext } from '../db/edb/merge-file.js';
+import { PULL, PUSH } from '../db/edb/merge-answers.js';
 import { countWorkspaceContents } from '../db/delete-workspace.js';
 import { isEmptyWorkspace } from '../db/edb/folder-index.js';
 import { createIpcDataStore } from '../db/data-store-bridge.js';
 import { adoptEdbFile, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
 import { adoptFolderFile, clearPendingSpaceRequest, pendingSpaceRequest, reloadActiveFromFile } from '../db/edb/space-adopt.js';
 import { alsoWroteNote, withoutTheirOwnFile, writableWholesale } from '../db/edb/one-per-file.js';
-import { installWriteGuard, writeUserBytes, type WriteGuardDeps } from '../db/edb/guarded-write.js';
-import { describeHolding, firstWarning, refusedNote, secondWarning, type Holding } from '../db/edb/empty-write.js';
-import { dangerConfirm } from '../dialogs/danger-confirm.js';
 import { freeWorkspaceId, spaceFileName, workspaceIdFromFileName } from '../db/edb/space-resolve.js';
 
 /**
@@ -242,7 +242,7 @@ export function init(api: HostApi): void {
   async function workspaceOnlyBytes(workspaceId: string, label: string): Promise<Uint8Array> {
     const scratch = createEdbBridge();
     try {
-      await scratch.open(null, SPLIT_SCRATCH);
+      await scratch.open(null, SPLIT_SCRATCH, { scratch: true });
       await copyWorkspace(
         createIpcDataStore(storeBridge(), () => workspaceId),
         createIpcDataStore(scratch, () => workspaceId),
@@ -307,55 +307,6 @@ export function init(api: HostApi): void {
     return out;
   }
 
-  /**
-   * What the empty-write guard needs: a way to measure bytes, and the red
-   * question to ask when a write would leave a file empty.
-   *
-   * A sibling of `mayOverwriteFile`, not a replacement for it. That one asks
-   * "did somebody else write this file since we last agreed with it?" and reads
-   * the stamp; this one asks "does what we are about to write hold anything at
-   * all?" and reads only the two sets of bytes. Both have to pass, because
-   * neither sees the other's failure: a file nobody else touched can still be
-   * emptied by us, which is exactly the loss this guards.
-   */
-  function writeGuardDeps(): WriteGuardDeps {
-    return {
-      // A missing bridge means nothing can be measured. Answering with a holding
-      // that looks USED keeps today's behaviour — the write goes ahead — rather
-      // than making an unmeasurable moment look like the dangerous one.
-      peek: async (b) => {
-        const live = edbBridge();
-        return live ? await live.peekWorkspaces(b) : [{ tables: 1, views: 0 }];
-      },
-      confirm: (f, onDisk: Holding, writing: Holding) =>
-        dangerConfirm({
-          title: 'This save would empty the file',
-          message: firstWarning(f, onDisk, writing),
-          secondMessage: secondWarning(f, onDisk),
-          confirmLabel: 'Replace the file anyway',
-          secondConfirmLabel: `Delete ${describeHolding(onDisk)}`,
-        }),
-      onRefused: (f) => api.ui.dialogs.toast(refusedNote(f), { kind: 'info', title: 'Save stopped' }),
-    };
-  }
-
-  /**
-   * Every write to a file the user owns goes through here.
-   *
-   * Answers whether the bytes were written. Every caller must treat `false` as
-   * "nothing happened": no stamp recorded, no "saved" toast, and above all no
-   * `markClean`, which would turn a write the user STOPPED into the same data
-   * loss on the next reload.
-   */
-  async function writeUserFile(handle: FileSystemFileHandle, bytes: Uint8Array, file: string, reason: string): Promise<boolean> {
-    return writeUserBytes(handle, bytes, { file, reason }, writeGuardDeps());
-  }
-
-  // Every OTHER writer of a user's file — `new-file.ts` building one from a
-  // picker — reaches the same guard through this, because it cannot reach the
-  // dialog or the live worker itself.
-  installWriteGuard(writeGuardDeps());
-
   async function fileTheStranded(opts: { skipEmpty?: boolean; includeActive?: boolean } = {}): Promise<string[]> {
     const dir = await connectedFolder();
     if (!dir) return [];
@@ -381,7 +332,7 @@ export function init(api: HostApi): void {
       const name = spaceFileName(id);
       const handle = await fileInFolder(dir, name, true);
       if (!handle) continue;
-      if (!(await writeUserFile(handle, await workspaceOnlyBytes(id, `Giving ${name} its own file`), name, 'Giving a workspace its own file'))) continue;
+      await writeBytes(handle, await workspaceOnlyBytes(id, `Giving ${name} its own file`));
       const facts = await factsOfHandle(handle);
       if (facts) recordAgreement(name, facts);
       wrote.push(name);
@@ -389,8 +340,18 @@ export function init(api: HostApi): void {
     return wrote;
   }
 
-  const KEEP_FILE = 'Use disk version';
-  const OVERWRITE_FILE = 'Use local version';
+  /**
+   * The context the merge machinery needs, or null where it cannot run.
+   *
+   * Null on a tab with no workspace and on a build with no worker bridge — the
+   * desktop, where this whole plugin registers nothing anyway.
+   */
+  function mergeContext(handle: FileSystemFileHandle): MergeContext | null {
+    const bridge = edbBridge();
+    const workspaceId = api.workspaceId();
+    if (!bridge || !workspaceId) return null;
+    return { handle, file: activeEdbName(), workspaceId, store: api.store, bridge, dialogs: api.ui.dialogs };
+  }
 
   /**
    * May we write over this file?
@@ -410,6 +371,12 @@ export function init(api: HostApi): void {
    * state of the file: the verdict does not improve by being declined, and a modal
    * every thirty seconds is worse than the problem it reports. A manual Save always
    * asks, because the user just asked for something and deserves an answer.
+   *
+   * **Four answers, not two.** "Keep the file" and "keep mine" were the only two
+   * the file layer could act on while a `.edb` was one indivisible blob, and both
+   * of them throw away somebody's work whenever BOTH copies were edited — which is
+   * the ordinary case for a folder shared between two machines. Take newest and
+   * Compare settle it table by table instead; see `merge-file.ts`.
    */
   async function mayOverwriteFile(handle: FileSystemFileHandle, auto: boolean): Promise<boolean> {
     const file = activeEdbName();
@@ -421,24 +388,62 @@ export function init(api: HostApi): void {
     if (verdict !== 'file-newer' && verdict !== 'conflict') return true;
     if (auto && writeDeclined(file, now)) return false;
 
+    const ctx = mergeContext(handle);
     const sides = compareCopies([
       { label: 'In this browser', facts: await openContentsFacts() },
       { label: file, facts: { ...(await countsInFileHandle(handle)), ...now } },
     ]);
-    const answer = await api.ui.dialogs.choice(
-      `${file} has been written since this tab last saved it — by another tab, another browser or another machine. Saving now would replace that work.${sides}`,
-      [KEEP_FILE, OVERWRITE_FILE],
-      'Save',
-    );
-    if (answer === OVERWRITE_FILE) return true;
-    // Dismissing means the same as keeping the file: the safe answer, and the only
-    // one that touches nothing. Loading it is a Sync, which is one command away and
-    // says what it will cost before it does it.
-    markWriteDeclined(file, now);
-    if (answer === KEEP_FILE) {
-      api.ui.dialogs.toast(`Left ${file} as it is. Run "Sync workspace folder" to read it in.`, { kind: 'info', title: 'Save' });
+    const lead = `${file} has been written since this tab last saved it — by another tab, another browser or another machine. Saving now would replace that work.`;
+    // Without a bridge there is nothing to compare WITH, so the old pair of
+    // answers is still the whole truth and offering four would be a lie.
+    if (!ctx) return (await api.ui.dialogs.choice(`${lead}${sides}`, [PUSH, PULL], 'Save')) === PUSH;
+
+    const answer = await askAboutFile(ctx, lead, sides);
+    if (answer === 'push') return true;
+    if (answer === 'newest' || answer === 'compare') {
+      const result = await mergeWithFile(ctx, answer === 'newest' ? 'newest' : 'compare');
+      // A merge that ran leaves this database holding the settled copy, so the
+      // save it interrupted is now the right thing to do: it writes that copy out
+      // and records the agreement. A merge the user backed out of does not.
+      if (result.merged) return true;
+      markWriteDeclined(file, now);
+      return false;
     }
+    if (answer === 'pull') {
+      // Replacing this database with the file is a reload, so nothing after this
+      // runs — including the save that asked.
+      await reloadActiveFromFile(file);
+      return false;
+    }
+    // Dismissing means the same as leaving the file: the safe answer, and the only
+    // one that touches nothing.
+    markWriteDeclined(file, now);
+    api.ui.dialogs.toast(`Left ${file} as it is. Run "Sync workspace folder" to read it in.`, { kind: 'info', title: 'Save' });
     return false;
+  }
+
+  /**
+   * Compare this workspace with its own file, on demand.
+   *
+   * The same machinery the two clash prompts reach, offered as a command so it
+   * does not have to be provoked. Two tabs sharing a folder is the case this
+   * whole feature is for, and in it the user usually knows the other machine has
+   * been working before this one has noticed — waiting for a Save to collide is
+   * waiting for the moment it is hardest to think about.
+   */
+  async function compareWithOwnFile(): Promise<void> {
+    const handle = edbHandle();
+    if (!handle) {
+      await api.ui.dialogs.alert('This workspace is stored in this browser, so there is no file to compare it with. Save it into a folder first.', 'Compare');
+      return;
+    }
+    if (!(await ensureWritable(handle, true))) {
+      await api.ui.dialogs.alert('easyDBAccess is not allowed to read that file. Run the "Connect workspace folder" command to grant it again.', 'Compare');
+      return;
+    }
+    const ctx = mergeContext(handle);
+    if (!ctx) return;
+    await mergeWithFile(ctx, 'compare');
   }
 
   /** What the OPEN database holds, for the side-by-side. Best effort. */
@@ -496,11 +501,7 @@ export function init(api: HostApi): void {
     // Before the bytes go out, not after: this is the only check standing between
     // an autosave tick and somebody else's afternoon.
     if (!(await mayOverwriteFile(handle, opts.auto === true))) return { where: 'none', alsoWrote: [] };
-    // The second guard, and the one that reads nothing but the bytes: a write that
-    // would leave an empty workspace where a full one was is confirmed twice, in
-    // red, or it does not happen. `where: 'none'` is what `save()` reads as
-    // "nothing happened", so a stopped write does NOT mark the workspace clean.
-    if (!(await writeUserFile(handle, await bytesForFile(bridge), activeEdbName(), 'Save'))) return { where: 'none', alsoWrote: [] };
+    await writeBytes(handle, await bytesForFile(bridge));
     // The file is ours again, so an earlier "leave it alone" no longer applies.
     clearWriteDeclined(activeEdbName());
     // The file now holds this workspace, so record what it looks like. That is what
@@ -998,7 +999,7 @@ export function init(api: HostApi): void {
         createIpcDataStore(scratch, () => workspaceId),
         workspaceId,
       );
-      if (!(await writeUserFile(handle, await scratch.export(), file, 'Overwrite the copy in a file'))) return;
+      await writeBytes(handle, await scratch.export());
       api.ui.dialogs.toast(`Wrote this workspace over the copy in ${file}.`, { kind: 'success' });
     } finally {
       scratch.terminate();
@@ -1037,7 +1038,7 @@ export function init(api: HostApi): void {
       await cloneWorkspace(scratch, { from, to, name: to, mode: 'all' });
       if (title) await scratch.patch('workspaces', to, { title });
       await scratch.deleteWorkspace?.(from);
-      if (!(await writeUserFile(handle, await scratch.export(), file, 'Rename the workspace in a file'))) return false;
+      await writeBytes(handle, await scratch.export());
       api.ui.dialogs.toast(`The workspace in ${file} is now "${to}".`, { kind: 'success' });
       return true;
     } catch (err) {
@@ -1094,6 +1095,13 @@ export function init(api: HostApi): void {
       // for. Written, not adopted — see the note in `fileTheStranded`.
       () => fileTheStranded({ skipEmpty: true, includeActive: true }),
       (file, from, to) => renameInFile(dir, file, from, to),
+      // Settling this tab's own file table by table, for the two states where
+      // both copies may hold work. Passed in rather than reached for, because
+      // `folder-sync.ts` has neither the bridge nor the workspace id.
+      async (handle, mode) => {
+        const ctx = mergeContext(handle);
+        return ctx ? (await mergeWithFile(ctx, mode)).merged : false;
+      },
     );
     const skipped = report.unreadable.length > 0 ? ` ${report.unreadable.length} file(s) held no workspace.` : '';
     const written = alsoWroteNote(report.wrote);
@@ -1314,6 +1322,14 @@ export function init(api: HostApi): void {
       icon: 'sync',
       keywords: ['refresh', 're-read', 'folder', 'file'],
       run: () => syncConnectedFolder(),
+    });
+    api.ui.registerCommand({
+      id: 'edb-file:compare-file',
+      title: 'Compare workspace with its file',
+      group: FILE_GROUP,
+      icon: 'difference',
+      keywords: ['merge', 'diff', 'replicate', 'conflict', 'file'],
+      run: () => compareWithOwnFile(),
     });
   }
 

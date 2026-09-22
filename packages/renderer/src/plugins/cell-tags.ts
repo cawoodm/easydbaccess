@@ -1,5 +1,6 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { arrayMembers } from '@easydb/shared';
+import { appendTag, applyTag, caretOf, suggestTags, type Caret } from './tag-suggest.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'cell-tags',
@@ -48,6 +49,23 @@ class CellTags extends HTMLElement {
    * being saved by its own trailing blur. Same rule as `cell-link`.
    */
   private _editor: HTMLInputElement | null = null;
+  /** The column's existing members, handed over by `data-table` each render. */
+  private _options: readonly string[] = [];
+  /** The open suggestion list, or null. A native popover, so nothing clips it. */
+  private _list: HTMLElement | null = null;
+  private _items: string[] = [];
+  /** Which suggestion the arrow keys have landed on; -1 is none. */
+  private _active = -1;
+  /**
+   * The caret the open list was built for, or null when it is answering "what
+   * else could go in here" rather than "finish this word".
+   *
+   * Taking a suggestion has to do what the list offered. The list on open is the
+   * column's vocabulary minus this cell's tags — an ADD — and applying that as a
+   * completion replaced the whole cell (the value is selected when the editor
+   * opens), so picking a second tag dropped the first.
+   */
+  private _caret: Caret | null = null;
 
   set value(v: unknown) {
     // A real array reaches us as an array; `String()` on it gives the comma list
@@ -60,6 +78,17 @@ class CellTags extends HTMLElement {
   }
   get value(): string {
     return this._value;
+  }
+
+  /**
+   * The values this column already holds, for the autocomplete.
+   *
+   * Stored, never rendered on: `data-table` sets this on EVERY render, and a
+   * repaint here would destroy the input being typed into. The live editor reads
+   * it when it needs it.
+   */
+  set suggestions(v: unknown) {
+    this._options = Array.isArray(v) ? v.map((x) => String(x)) : [];
   }
 
   set readonly(v: boolean) {
@@ -85,8 +114,10 @@ class CellTags extends HTMLElement {
 
   private render() {
     this.innerHTML = '';
-    // Any editor from a previous paint is dead the moment the DOM is wiped.
+    // Any editor from a previous paint is dead the moment the DOM is wiped, and
+    // a suggestion list belonging to it has nothing left to type into.
     this._editor = null;
+    this.closeList();
     if (this._editing && !this._readonly) {
       this.renderEditor();
       return;
@@ -140,11 +171,45 @@ class CellTags extends HTMLElement {
       if (this._editor !== input) return;
       this.commit(input.value);
     });
+    input.addEventListener('input', () => this.refreshList(input));
+    // Moving the caret changes which word is being typed, so the list has to
+    // follow it — `input` alone misses a click or an arrow across a comma.
+    input.addEventListener('click', () => this.refreshList(input));
     input.addEventListener('keydown', (e) => {
+      const n = this._items.length;
+      if (e.key === 'ArrowDown' && n > 0) {
+        e.preventDefault();
+        this.highlight((this._active + 1) % n);
+        return;
+      }
+      if (e.key === 'ArrowUp' && n > 0) {
+        e.preventDefault();
+        this.highlight((this._active - 1 + n) % n);
+        return;
+      }
       if (e.key === 'Enter') {
         e.preventDefault();
+        // A highlighted suggestion takes the Enter; with none highlighted the
+        // cell still saves, so a tag typed by hand never needs the mouse.
+        const pick = this._items[this._active];
+        if (pick !== undefined) {
+          this.takeSuggestion(input, pick);
+          return;
+        }
         this.commit(input.value);
-      } else if (e.key === 'Escape') {
+        return;
+      }
+      if (e.key === 'Escape') {
+        // One Escape closes the list, a second cancels the edit — dismissing a
+        // list the user never asked for must not throw away their typing.
+        // `stopPropagation` keeps that first Escape from reaching the panel
+        // shell, which would close the window behind the cell.
+        if (this._list) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.closeList();
+          return;
+        }
         // Disown this input first: render() removes it, which fires blur, and
         // that blur must not save the edit being cancelled.
         this._editor = null;
@@ -163,11 +228,109 @@ class CellTags extends HTMLElement {
     setTimeout(() => {
       input.focus();
       input.select();
+      // Opened straight away, so a cell shows what this column calls things
+      // rather than waiting for a first letter that has to be guessed.
+      //
+      // `null` — add mode. `select()` above selected the whole value, and a
+      // selection reads as the word being typed (see `tag-suggest.ts`), so asking
+      // at the real caret would offer only the tag already in the cell and then
+      // replace it. What is useful here is what the cell is MISSING.
+      this.refreshList(input, null);
     }, 0);
   }
 
-  private commit(v: string) {
-    const changed = v !== this._value;
+  /** Rebuild the list for whatever word the caret is in, or close it. */
+  private refreshList(input: HTMLInputElement, caret: Caret | null = caretOf(input)) {
+    this._caret = caret;
+    // In add mode the question is "what is missing from this cell", which is what
+    // an empty term at the start of the text asks.
+    this._items = suggestTags(this._options, input.value, caret ?? { from: 0, to: 0 });
+    this._active = -1;
+    if (this._items.length === 0) {
+      this.closeList();
+      return;
+    }
+    this.openList(input);
+  }
+
+  private openList(input: HTMLInputElement) {
+    let list = this._list;
+    if (!list) {
+      list = document.createElement('div');
+      list.className = 'tag-suggest';
+      // A popover, like every other transient layer in this app: the browser owns
+      // the top layer, so the cell's `overflow:hidden` cannot clip the list and
+      // there is no z-index race to lose. `manual`, not `auto`: an auto popover
+      // light-dismisses on the next click, and the next click is usually the
+      // suggestion itself. See docs/tech/DIALOGS.md.
+      list.setAttribute('popover', 'manual');
+      list.setAttribute('role', 'listbox');
+      list.style.cssText =
+        'position:fixed;margin:0;padding:0.15rem;border:1px solid #d1d5db;border-radius:0.25rem;' +
+        'background:#fff;color:#374151;box-shadow:0 6px 16px rgba(0,0,0,0.15);font:inherit;' +
+        'font-size:0.9em;max-height:14rem;overflow:auto;min-width:8rem';
+      document.body.append(list);
+      this._list = list;
+      (list as HTMLElement & { showPopover?: () => void }).showPopover?.();
+    }
+    list.innerHTML = '';
+    this._items.forEach((value, i) => {
+      const item = document.createElement('div');
+      item.className = 'tag-suggest-item';
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', i === this._active ? 'true' : 'false');
+      item.textContent = value;
+      item.style.cssText = 'padding:0.2rem 0.5rem;border-radius:0.2rem;cursor:pointer;white-space:nowrap;' + (i === this._active ? 'background:#eff6ff;color:#1d4ed8' : '');
+      // `mousedown`, not `click`: a click blurs the input first, and that blur
+      // commits and repaints the cell — taking this element with it before the
+      // click could land. The default is prevented so the caret stays put.
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        this.takeSuggestion(input, value);
+      });
+      list.append(item);
+    });
+    const r = input.getBoundingClientRect();
+    list.style.left = Math.round(r.left) + 'px';
+    list.style.top = Math.round(r.bottom + 2) + 'px';
+  }
+
+  private highlight(i: number) {
+    this._active = i;
+    if (this._editor) this.openList(this._editor);
+  }
+
+  /** Put a suggestion into the text and offer the next one. */
+  private takeSuggestion(input: HTMLInputElement, pick: string) {
+    const applied = this._caret ? applyTag(input.value, caretOf(input), pick) : appendTag(input.value, pick);
+    input.value = applied.text;
+    input.setSelectionRange(applied.caret, applied.caret);
+    this.refreshList(input);
+  }
+
+  private closeList() {
+    const list = this._list;
+    this._list = null;
+    this._items = [];
+    this._active = -1;
+    this._caret = null;
+    if (!list) return;
+    (list as HTMLElement & { hidePopover?: () => void }).hidePopover?.();
+    list.remove();
+  }
+
+  disconnectedCallback() {
+    this.closeList();
+  }
+
+  private commit(raw: string) {
+    const changed = raw !== this._value;
+    // A taken suggestion leaves `red, blue, ` — the trailing separator invites the
+    // next tag and is meaningless once the edit is over (`arrayMembers` drops
+    // empty members either way). Tidied only on a value that was actually
+    // edited: cleaning up an untouched cell would turn opening its editor and
+    // clicking away into a write, and every write marks the workspace unsaved.
+    const v = changed ? raw.replace(/[,\s]+$/, '') : raw;
     this._value = v;
     this._editing = false;
     // Repaint here: the host writes the value back through the `value` setter,

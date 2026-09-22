@@ -17,7 +17,7 @@
 // what "contains" means (here: any field value contains the term, so a phrase
 // spanning two fields is NOT a phrase match, matching the old per-field logic).
 
-import { matchesColumnFilter } from '@easydb/shared';
+import { composeColumnFilter, groupColumnFilter, matchesColumnFilter, parseColumnFilter } from '@easydb/shared';
 
 /** Per-row predicate: does the row contain `needle` (already lower-cased)? */
 export type ContainsFn<T> = (row: T, needle: string) => boolean;
@@ -95,6 +95,41 @@ export interface SearchField {
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
+ * One filter expression against a WHOLE row — the search box's terms are not
+ * tied to a column, so each token has to be read across all of them.
+ *
+ * The two halves of the filter language mean different things once there is more
+ * than one field to look in, and getting that backwards is what made a plain
+ * `values.some(matchesColumnFilter)` unusable here:
+ *
+ *   • a POSITIVE token is satisfied by ANY one field — that is what a search box
+ *     has always done;
+ *   • an EXCLUSION has to hold of EVERY field. `!CC` means "this row has no CC
+ *     in it", not "some column of it isn't CC" — which is true of nearly every
+ *     row and would exclude nothing at all.
+ *
+ * Each token is handed back to `matchesColumnFilter` rather than re-implemented,
+ * so the reading of `^`, `=`, `NULL` and quoting stays in one place. An
+ * exclusion is tested through its own POSITIVE form and the answer inverted,
+ * which is what puts the "every field" quantifier on the outside.
+ */
+export function rowMatchesFilterExpr(values: readonly unknown[], raw: string): boolean {
+  const groups = groupColumnFilter(parseColumnFilter(raw));
+  if (groups.length === 0) return true;
+  const anyField = (expr: string): boolean => (expr === '' ? false : values.some((v) => matchesColumnFilter(v, expr)));
+  const isVeto = (g: (typeof groups)[number]): boolean => g.length === 1 && g[0]!.negate;
+
+  // Same shape as `matchesColumnFilter`: a lone negative token vetoes outright,
+  // so `Open,!urgent` still reads as "Open but not urgent".
+  for (const g of groups.filter(isVeto)) {
+    if (anyField(composeColumnFilter([{ ...g[0]!, negate: false }]))) return false;
+  }
+  const required = groups.filter((g) => !isVeto(g));
+  if (required.length === 0) return true;
+  return required.some((g) => anyField(composeColumnFilter(g)));
+}
+
+/**
  * Field-aware free-text search over `{ data }` rows, sharing the boolean /
  * phrase engine of {@link searchRows}.
  *
@@ -133,7 +168,11 @@ export function searchRowsByField<T extends { data: Record<string, unknown> }>(r
         });
       }
     }
-    return Object.values(row.data).some((v) => v != null && String(v).toLowerCase().includes(needle));
+    // A term with no `field:` prefix reads the SAME language, across every
+    // column. It used to be a raw substring test, so `!CC,Holiday` searched for
+    // the literal text "!cc,holiday" and found nothing — the one filter the
+    // search box could not express was the one a user would try first.
+    return rowMatchesFilterExpr(Object.values(row.data), needle);
   };
   return searchRows(rows, q, contains);
 }

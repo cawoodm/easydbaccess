@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseSearchQuery, searchRows, searchRowsByField } from '../../../packages/renderer/src/search/text-search.js';
+import { parseSearchQuery, rowMatchesFilterExpr, searchRows, searchRowsByField } from '../../../packages/renderer/src/search/text-search.js';
 
 // Rows are plain strings; "contains" is a lower-cased substring test.
 const contains = (row: string, needle: string) => row.toLowerCase().includes(needle);
@@ -130,5 +130,63 @@ describe('searchRowsByField (field:value with column-filter operators)', () => {
     expect(run('zzz:Paris')).toEqual([]);
     // A plain word still searches every field.
     expect(run('Paris')).toEqual(['Alpha', 'Gamma']);
+  });
+});
+
+describe('searchRowsByField — the filter language in a bare term', () => {
+  interface R {
+    data: Record<string, unknown>;
+  }
+  // The reported shape: one string column, one word per cell.
+  const rows: R[] = [{ data: { type: 'CC' } }, { data: { type: 'Holiday' } }, { data: { type: 'Flat' } }];
+  const run = (q: string) => searchRowsByField(rows, q, [{ field: 'type' }]).map((r) => r.data.type);
+
+  it('excludes the negated value and keeps the listed one', () => {
+    // Was 0 hits: the box searched for the literal text "!cc,holiday".
+    expect(run('!CC,Holiday')).toEqual(['Holiday']);
+  });
+
+  it('a comma is OR, as it is in a column filter', () => {
+    expect(run('Holiday,Flat')).toEqual(['Holiday', 'Flat']);
+  });
+
+  it('a lone exclusion keeps everything else', () => {
+    expect(run('!CC')).toEqual(['Holiday', 'Flat']);
+  });
+
+  it('still reads a plain word as a substring', () => {
+    expect(run('Hol')).toEqual(['Holiday']);
+  });
+
+  it('carries the anchors across', () => {
+    expect(run('^F')).toEqual(['Flat']);
+    expect(run('=CC')).toEqual(['CC']);
+  });
+});
+
+describe('rowMatchesFilterExpr — quantifiers across columns', () => {
+  it('satisfies a positive term from ANY column', () => {
+    expect(rowMatchesFilterExpr(['CC', 'note'], 'note')).toBe(true);
+  });
+
+  it('applies an exclusion to EVERY column, not just one', () => {
+    // The trap: 'note' does not contain CC, so a per-field `.some()` would have
+    // called this row a match and excluded nothing.
+    expect(rowMatchesFilterExpr(['CC', 'note'], '!CC')).toBe(false);
+    expect(rowMatchesFilterExpr(['Holiday', 'note'], '!CC')).toBe(true);
+  });
+
+  it('keeps the veto rule, so Open,!urgent is not Open OR not-urgent', () => {
+    expect(rowMatchesFilterExpr(['Open'], 'Open,!urgent')).toBe(true);
+    expect(rowMatchesFilterExpr(['Open urgent'], 'Open,!urgent')).toBe(false);
+    expect(rowMatchesFilterExpr(['Closed'], 'Open,!urgent')).toBe(false);
+  });
+
+  it('an excluded value in a DIFFERENT column still drops the row', () => {
+    expect(rowMatchesFilterExpr(['Holiday', 'CC'], '!CC,Holiday')).toBe(false);
+  });
+
+  it('an empty expression matches everything', () => {
+    expect(rowMatchesFilterExpr(['anything'], '')).toBe(true);
   });
 });

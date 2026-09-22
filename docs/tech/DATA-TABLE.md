@@ -267,6 +267,31 @@ The `tags` renderer (`plugins/cell-tags.ts`) draws one pill per value, and an
 `rendererForType`, `auto-renderer`'s `inferRenderer`). Its pencil edits the raw
 list, not the pills, so an edit never rewrites one spelling into the other.
 
+**Editing one autocompletes from the column's own values.** The grid computes the
+vocabulary per render (`computeTagOptions`, `facetValues` over `array` columns)
+and hands it to the cell as `.suggestions`; a renderer that does not know the
+property ignores it. Deliberately NOT faceted, unlike the filter row's
+suggestions: a filter asks "what could I narrow to", a cell asks "what does this
+column call things", and a tag only used by rows the current filter hides is still
+the tag to reuse.
+
+The rules live in the pure `plugins/tag-suggest.ts`, and two of them are why it
+is not a native `<datalist>`:
+
+- **The term is the word at the CARET**, not the field. A cell holds a list, so
+  `red, gr` is completing `gr` — a datalist would match `red, gr` against the
+  vocabulary and offer nothing.
+- **Taking a suggestion is two different acts.** `applyTag` COMPLETES the word
+  being typed; `appendTag` ADDS to the list. The list shown the moment the editor
+  opens is an add — the editor opens with its value selected, and completing there
+  replaced the whole cell, so picking a second tag dropped the first.
+
+The list is a `popover="manual"` on `document.body`, not a child of the cell:
+the cell clips its own content, and `auto` would light-dismiss on the very click
+that takes a suggestion. Suggestions commit on `mousedown` for the same reason
+`.search-clear` does — a click blurs the input first, and that blur commits and
+repaints the cell out from under the pending click.
+
 Type inference marks a column `array` for a real array or a JSON-array text,
 **never** for bare commas: ordinary prose is full of commas. A comma list becomes
 an `array` column when the user picks the type in the columns editor or a CSV
@@ -321,18 +346,18 @@ So a big table is now read one PAGE at a time.
 Everything below is measured on the same 609,283-row table in the browser, Dexie over
 IndexedDB (`test/e2e/zz-bigtable-perf` is not committed — it seeds for 22 minutes):
 
-| Operation | Cost |
-| --- | --- |
-| Open the window, first row on screen | **191 ms** (from navigation, including boot) |
-| The same, with a SAVED SORT on a column | **128 ms** to first row, sorted rows 5.4 s later |
-| The same, with a SAVED FILTER | **5.2 s** — a filter cannot be windowed, see below |
-| Read one 500-row page | ~300 ms |
-| `count()` the table | 14.0 s |
-| `subscribe` — the whole table, to be told one row changed | 25.0 s |
-| `watch` — the same signal, no rows | **1 ms** |
-| `find()` the whole table | 21.6 s (5.3 s of it the raw read, the rest narrowing) |
-| Sort 609,283 rows already in memory | 0.3 s |
-| A 500-row page at offset 500,000 | 25.7 s (see the cursor note below) |
+| Operation                                                 | Cost                                                  |
+| --------------------------------------------------------- | ----------------------------------------------------- |
+| Open the window, first row on screen                      | **191 ms** (from navigation, including boot)          |
+| The same, with a SAVED SORT on a column                   | **128 ms** to first row, sorted rows 5.4 s later      |
+| The same, with a SAVED FILTER                             | **5.2 s** — a filter cannot be windowed, see below    |
+| Read one 500-row page                                     | ~300 ms                                               |
+| `count()` the table                                       | 14.0 s                                                |
+| `subscribe` — the whole table, to be told one row changed | 25.0 s                                                |
+| `watch` — the same signal, no rows                        | **1 ms**                                              |
+| `find()` the whole table                                  | 21.6 s (5.3 s of it the raw read, the rest narrowing) |
+| Sort 609,283 rows already in memory                       | 0.3 s                                                 |
+| A 500-row page at offset 500,000                          | 25.7 s (see the cursor note below)                    |
 
 - **The threshold is a setting** — `grid:windowRowsFrom` on the Table grid tab,
   default **`ROW_FETCH_CAP`** (20 000), `0` never windows
@@ -349,7 +374,7 @@ IndexedDB (`test/e2e/zz-bigtable-perf` is not committed — it seeds for 22 minu
   which is what lets an unmeasured table be read as a page before anything counts it.
 - **Nothing waits for a count.** This was the opposite of the original design, and
   the original design was wrong about one fact: counting is NOT cheap. `SELECT
-  COUNT(*)` is, but IndexedDB has to walk the whole `tableId` range. Measured on
+COUNT(*)` is, but IndexedDB has to walk the whole `tableId` range. Measured on
   609,283 rows: **14.0 s to count, against 0.3 s to read the 500-row page**, and a
   raw `IDBIndex.count(range)` is no faster — so there is no better path to find. The
   grid was paying that 14 s twice before it drew a row: once in `loadRows` to pick
@@ -360,6 +385,7 @@ IndexedDB (`test/e2e/zz-bigtable-perf` is not committed — it seeds for 22 minu
   `countSuffix` already used. The rows paint, and the size follows from `countSoon`.
   It is a HINT: the SQLite store ignores it and counts anyway, because there it
   really is free.
+
 - **The window shape is a guess until something counts.** An unmeasured table is read
   as a page on the assumption that it is big. Three things then settle it:
   a page that comes back SHORT at offset 0 is the whole answer (`windowed` goes back
@@ -402,6 +428,7 @@ IndexedDB (`test/e2e/zz-bigtable-perf` is not committed — it seeds for 22 minu
 
   Deliberately NOT done for a filter: an unfiltered page shown under an active filter
   is not an unfinished answer, it is a wrong one, and no progress bar makes it honest.
+
 - **A narrowed read teaches nothing about the table's size.** It measures its MATCHES.
   Settling the window on that compared `windowed` against a `tableTotal` still at 0 —
   which never reaches the threshold, so the mismatch never resolved and each re-read
@@ -413,11 +440,11 @@ IndexedDB (`test/e2e/zz-bigtable-perf` is not committed — it seeds for 22 minu
 
 Three things then mean something different, and each is handled where it is read:
 
-| Reader | Un-windowed | Windowed |
-| --- | --- | --- |
-| `virtualSlice` extent | `rows.length` | `matchingTotal` — else a 609k table scrolls 500 rows and stops |
-| Slice indices | absolute | absolute minus `windowOffset` (0 un-windowed, so it is the same arithmetic) |
-| Panel title count | rows in hand | `matchingTotal` — "500 of 609,283" would read as a filter nobody applied |
+| Reader                | Un-windowed   | Windowed                                                                    |
+| --------------------- | ------------- | --------------------------------------------------------------------------- |
+| `virtualSlice` extent | `rows.length` | `matchingTotal` — else a 609k table scrolls 500 rows and stops              |
+| Slice indices         | absolute      | absolute minus `windowOffset` (0 un-windowed, so it is the same arithmetic) |
+| Panel title count     | rows in hand  | `matchingTotal` — "500 of 609,283" would read as a filter nobody applied    |
 
 `virtualSlice` also pads for rows the page does not hold yet — the moment between
 scrolling and the next page landing. Without that the table shrinks under the
@@ -472,6 +499,7 @@ and not the other
   though opening it no longer is. Fixing that needs keyset paging (continue from the
   last key of the previous page instead of counting off from the start), which needs a
   compound `[tableId+id]` index and so a Dexie schema bump. Not done.
+
 - **Anything else** has to read the rows to match them: our filter language is not
   an IndexedDB query, and nothing indexes the fields inside `data`. That read is
   capped at `ROW_FETCH_CAP` and a capped answer reports `truncated`.
