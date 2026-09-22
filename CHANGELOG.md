@@ -5,6 +5,7 @@
 ### Features
 
 - 🪶 Visualizations dock side by side as well as stacked: several panes share a row, and both row heights and pane widths drag (v0.0.468)
+- ✨ The preview window header also offers the whole record, so a value that looks wrong can be read against the fields beside it (v0.0.470)
 
 ### Bugs
 

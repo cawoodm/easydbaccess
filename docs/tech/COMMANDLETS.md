@@ -262,6 +262,23 @@ renderer is built for a one-line row, and several of them draw an EDITOR (`link`
 renders a bare value as an `<input>`), which has no business in a read-only
 window onto a record that may not be open.
 
+**The header carries two buttons**, and they act on different things: **Edit**
+opens the value's source in a textarea, **Edit record** opens the whole row in
+the record form. The window shows ONE cell, and the answer to "is this the wrong
+value?" is usually in the fields beside it.
+
+The two read read-only-ness differently, on purpose. **Edit** becomes **View
+source** when the VALUE may not be written — a read-only table, view or column.
+**Edit record** becomes **View record** only for a read-only TABLE, because a
+read-only column in a table whose other fields are editable is still a record
+worth opening. The record form has the last word either way.
+
+The record button needs the row's identity, so a grid now passes `rowId` and
+`tableId` to every cell renderer alongside `row` (which is the data object and
+cannot answer it). A renderer mounted OUTSIDE a grid — a view template — gets
+neither, and the popup then draws no record button rather than one that cannot
+say which record it means.
+
 ## `edit` — the verb that opens the record form
 
 Three shapes, all resolving to one row:

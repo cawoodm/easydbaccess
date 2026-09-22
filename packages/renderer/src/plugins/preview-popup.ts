@@ -37,6 +37,11 @@ let popupSeq = 0;
  * click its text. The header says what is being shown and offers the same source
  * editor the cell offers, which is the one editor that is safe here: a textarea
  * over the STORED value, not a live renderer over the computed one.
+ *
+ * It also offers the RECORD, because the window shows one cell of one row and the
+ * answer to "is this the wrong value?" is often in the fields beside it. That
+ * button opens the record form, which decides for itself whether the record may
+ * be written — see `dialogs/new-record-dialog.ts`.
  */
 export interface PreviewHeaderSpec {
   /** What the window is showing — the column's label. */
@@ -47,7 +52,23 @@ export interface PreviewHeaderSpec {
   onEdit?: (() => void) | undefined;
   /** `Edit`, or `View source` where the value may not be written. */
   editLabel?: string | undefined;
+  /**
+   * Opens the whole record in the record form.
+   *
+   * The window shows ONE cell, and a reader who has just found the wrong value
+   * in it often wants the neighbouring fields too — which of two people this
+   * note is about, what date it carries. Omitted where the caller cannot name
+   * the record: a view mounts the same renderer with no row behind it.
+   */
+  onEditRecord?: (() => void) | undefined;
+  /** `Edit record`, or `View record` where the caller knows it cannot be written. */
+  recordLabel?: string | undefined;
 }
+
+/** A stack of lines — the record, rather than the one value beside it. */
+const RECORD_SVG =
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
+  '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="9" x2="9" y2="20"/></svg>';
 
 export function previewHeader(spec: PreviewHeaderSpec): HTMLElement {
   const bar = document.createElement('div');
@@ -70,22 +91,38 @@ export function previewHeader(spec: PreviewHeaderSpec): HTMLElement {
   spacer.style.cssText = 'flex:1 1 auto';
   bar.append(spacer);
 
+  // The record first, then the value — left to right, widest thing to narrowest.
+  // The value's own editor stays where it has always been, hard against the right
+  // edge, so the button a reader of this window already knows does not move.
+  if (spec.onEditRecord) {
+    const text = spec.recordLabel ?? 'Edit record';
+    const btn = headerButton(RECORD_SVG, text, 'Open the whole record in the record form');
+    btn.addEventListener('click', () => spec.onEditRecord?.());
+    bar.append(btn);
+  }
+
   if (spec.onEdit) {
     const text = spec.editLabel ?? 'Edit';
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.title = `${text} ${spec.label}`;
-    // The visible text is the accessible name, so it reads as one button rather
-    // than as an icon with a second label beside it.
-    btn.innerHTML = `${PENCIL_SVG}<span>${text}</span>`;
-    btn.style.cssText =
-      'flex:none;display:inline-flex;align-items:center;gap:0.3rem;padding:0.15rem 0.5rem;' +
-      'font:inherit;color:#4b5563;background:#fff;border:1px solid #d1d5db;border-radius:0.25rem;cursor:pointer';
+    const btn = headerButton(PENCIL_SVG, text, `${text} ${spec.label}`);
     btn.addEventListener('click', () => spec.onEdit?.());
     bar.append(btn);
   }
 
   return bar;
+}
+
+/**
+ * One button in the bar. The visible text is the accessible name, so it reads as
+ * one button rather than as an icon with a second label beside it.
+ */
+function headerButton(icon: string, text: string, title: string): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.title = title;
+  btn.innerHTML = `${icon}<span>${text}</span>`;
+  btn.style.cssText =
+    'flex:none;display:inline-flex;align-items:center;gap:0.3rem;padding:0.15rem 0.5rem;' + 'font:inherit;color:#4b5563;background:#fff;border:1px solid #d1d5db;border-radius:0.25rem;cursor:pointer';
+  return btn;
 }
 
 /**

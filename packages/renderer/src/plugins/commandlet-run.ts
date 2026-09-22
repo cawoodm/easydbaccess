@@ -325,6 +325,12 @@ async function runPreview(cmd: Commandlet, ctx: CommandletContext): Promise<void
   openPreviewPopup(`${table.name} — ${label}`, frame, {
     label,
     note: keyValue || undefined,
+    // The window shows one cell of a row that may not be on screen at all, so
+    // the whole record is one click away. `table.readonly` is the right test
+    // here — unlike `writable`, which also refuses a read-only COLUMN in a
+    // table whose other fields are perfectly editable.
+    recordLabel: table.readonly === true ? 'View record' : 'Edit record',
+    onEditRecord: () => void openRecordForm(table.id, current.id),
     editLabel: writable ? 'Edit' : 'View source',
     onEdit: () => {
       // The STORED cell, not the computed one: saving a script's output over the
@@ -399,8 +405,17 @@ async function runEdit(cmd: Commandlet, ctx: CommandletContext): Promise<void> {
     app.api.ui.dialogs.toast(`${matches.toLocaleString()} rows match ${describeFilters(filters)} — editing the first.`, { kind: 'warning', title: 'Edit' });
   }
 
+  await openRecordForm(table.id, row.id);
+}
+
+/**
+ * The record form, loaded on demand — the one effect this module does not route
+ * to something already imported. A commandlet chain runs on the first-paint path
+ * and the form is only ever wanted after the row has been found.
+ */
+async function openRecordForm(tableId: string, rowId: string): Promise<void> {
   const { openEditRecordDialog } = await import('../dialogs/new-record-dialog.js');
-  await openEditRecordDialog(table.id, row.id);
+  await openEditRecordDialog(tableId, rowId);
 }
 
 /** The key/field targets plus the commandlet's own query, as one filter set. */
