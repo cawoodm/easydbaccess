@@ -11,6 +11,7 @@
 - 🪲 A docked chart or map went blank when another visualization was docked beside it or taken from beside it (v0.0.468)
 - 🪲 A docked map stayed blank after a filter matched nothing, until the app was reloaded (v0.0.468)
 - 🪲 A save the browser refused because another program held the `.edb` reported that state "had changed since it was read from disk", which named neither the file nor the cause (v0.0.470)
+- 🪲 Searching `!CC,Holiday` found nothing: the search box read an exclusion as ordinary text, so only a column's own filter box could exclude a value (v0.0.470)
 
 ## 21 Sep 2026
 
