@@ -123,18 +123,17 @@ async function runCommand(page: Page, title: string): Promise<void> {
 }
 
 async function tableNames(page: Page): Promise<string[]> {
-  const tables = (await page.evaluate(async () => (window as unknown as { __easydb: { store: { tables: { find(): Promise<{ name: string }[]> } } } }).__easydb.store.tables.find())) as { name: string }[];
+  const tables = (await page.evaluate(async () => (window as unknown as { __easydb: { store: { tables: { find(): Promise<{ name: string }[]> } } } }).__easydb.store.tables.find())) as {
+    name: string;
+  }[];
   return tables.map((t) => t.name).sort();
 }
 
 async function tableIdNamed(page: Page, name: string): Promise<string> {
-  const id = await page.evaluate(
-    async (wanted) => {
-      const store = (window as unknown as { __easydb: { store: { tables: { find(): Promise<{ id: string; name: string }[]> } } } }).__easydb.store;
-      return (await store.tables.find()).find((t) => t.name === wanted)?.id ?? '';
-    },
-    name,
-  );
+  const id = await page.evaluate(async (wanted) => {
+    const store = (window as unknown as { __easydb: { store: { tables: { find(): Promise<{ id: string; name: string }[]> } } } }).__easydb.store;
+    return (await store.tables.find()).find((t) => t.name === wanted)?.id ?? '';
+  }, name);
   return id;
 }
 
@@ -264,10 +263,10 @@ async function fileAheadByARow(page: Page, space: string): Promise<string> {
   await saveAgain(page, space);
   const withExtra = await snapshotFile(page, `${space}.edb`);
 
-  await page.evaluate(
-    async ({ table, row }) => (window as unknown as { __easydb: { store: { rows(t: string): { remove(id: string): Promise<void> } } } }).__easydb.store.rows(table).remove(row),
-    { table: alpha, row: extra },
-  );
+  await page.evaluate(async ({ table, row }) => (window as unknown as { __easydb: { store: { rows(t: string): { remove(id: string): Promise<void> } } } }).__easydb.store.rows(table).remove(row), {
+    table: alpha,
+    row: extra,
+  });
   await saveAgain(page, space);
   await restoreFile(page, `${space}.edb`, withExtra);
   return alpha;

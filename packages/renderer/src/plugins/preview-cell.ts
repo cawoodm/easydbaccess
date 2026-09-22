@@ -19,6 +19,16 @@ import { openPreviewPopup, preformatted, previewFrame } from './preview-popup.js
 export const DEFAULT_MAX_CHARS = 2000;
 
 /**
+ * The record form, loaded on demand. Imported dynamically for the same reason
+ * `commandlet-run.ts` does it: a cell renderer is on the first-paint path and the
+ * form is only ever wanted after a click.
+ */
+async function openRecord(tableId: string, rowId: string): Promise<void> {
+  const { openEditRecordDialog } = await import('../dialogs/new-record-dialog.js');
+  await openEditRecordDialog(tableId, rowId);
+}
+
+/**
  * How much text goes INTO the cell. Not how much is visible: the cell clips with
  * CSS (`text-overflow: ellipsis`), so what you see follows the COLUMN WIDTH,
  * exactly as it does for a cell with no renderer. Widen the column and more of
@@ -89,6 +99,22 @@ export class PreviewCell extends HTMLElement {
   set column(c: { label?: string } | undefined) {
     this._label = c?.label;
   }
+
+  /**
+   * Which record this cell belongs to. A grid binds both; a view mounts the same
+   * element with neither, and the popup then offers no record button rather than
+   * one that cannot say which record it means.
+   *
+   * `row` is the row's DATA and cannot answer this — the identity is the id.
+   */
+  set rowId(v: string | undefined) {
+    this._rowId = v || undefined;
+  }
+  set tableId(v: string | undefined) {
+    this._tableId = v || undefined;
+  }
+  private _rowId: string | undefined;
+  private _tableId: string | undefined;
 
   /**
    * data-table binds `.sourceReadonly` when the STORED value may not be written:
@@ -237,10 +263,21 @@ export class PreviewCell extends HTMLElement {
     // The window's own header carries the way in to the editor, so a typo spotted
     // in the value can be fixed from where it was spotted. `fill` runs again after
     // a save, because the reader is looking at the value they just changed.
+    //
+    // The record button needs both ids, so it is absent outside a grid. The label
+    // follows `sourceReadonly`, which is what this element knows: a read-only
+    // table sets it, and the record form has the last word either way.
+    const record = this._rowId && this._tableId;
     openPreviewPopup(this.title_, content, {
       label: this.title_,
       editLabel: this._readonly ? 'View source' : 'Edit',
       onEdit: () => this.openEditor(fill),
+      ...(record
+        ? {
+            recordLabel: this._readonly ? 'View record' : 'Edit record',
+            onEditRecord: () => void openRecord(this._tableId!, this._rowId!),
+          }
+        : {}),
     });
   }
 

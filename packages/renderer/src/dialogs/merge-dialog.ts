@@ -351,12 +351,7 @@ export class MergeDialog extends LitElement {
 
   private renderChoice(value: MergeChoice, onPick: (c: MergeChoice) => void, testid: string) {
     return html`
-      <select
-        data-testid=${testid}
-        .value=${value}
-        @change=${(e: Event) => onPick((e.target as HTMLSelectElement).value as MergeChoice)}
-        title=${CHOICES.find((c) => c.value === value)?.hint ?? ''}
-      >
+      <select data-testid=${testid} .value=${value} @change=${(e: Event) => onPick((e.target as HTMLSelectElement).value as MergeChoice)} title=${CHOICES.find((c) => c.value === value)?.hint ?? ''}>
         ${CHOICES.map((c) => html`<option value=${c.value} ?selected=${c.value === value}>${c.label}</option>`)}
       </select>
     `;
@@ -378,8 +373,7 @@ export class MergeDialog extends LitElement {
         ${d.state === 'same'
           ? nothing
           : html`
-              ${drilled ? html`<span class="badge same">by record</span>` : nothing}
-              ${this.renderChoice(answer, (c) => this.setAnswer(d.name, c), `merge-choice-${d.name}`)}
+              ${drilled ? html`<span class="badge same">by record</span>` : nothing} ${this.renderChoice(answer, (c) => this.setAnswer(d.name, c), `merge-choice-${d.name}`)}
               ${d.state === 'differs'
                 ? html`<button type="button" class="records" data-testid=${`merge-records-${d.name}`} @click=${() => void this.showRecords(d.name)}>Compare records</button>`
                 : nothing}
@@ -412,9 +406,7 @@ export class MergeDialog extends LitElement {
     const counts = countDiffs(this.tables);
     const summary = describeDiffs(counts);
     return html`
-      <p class="message" data-testid="merge-summary">
-        ${summary === '' ? `Every table matches the copy in ${this.fileName}.` : `${summary}. Choose what happens to each, then Merge.`}
-      </p>
+      <p class="message" data-testid="merge-summary">${summary === '' ? `Every table matches the copy in ${this.fileName}.` : `${summary}. Choose what happens to each, then Merge.`}</p>
       <div class="toolbar">
         <span>${this.tables.length} table${this.tables.length === 1 ? '' : 's'}</span>
         <span>
@@ -450,7 +442,11 @@ export class MergeDialog extends LitElement {
         </span>
       </div>
       <ul class="rows">
-        ${this.loading || !list ? html`<li class="empty">Reading records…</li>` : list.items.length === 0 ? html`<li class="empty">No record differs.</li>` : list.items.map((r) => this.renderRecordRow(r))}
+        ${this.loading || !list
+          ? html`<li class="empty">Reading records…</li>`
+          : list.items.length === 0
+            ? html`<li class="empty">No record differs.</li>`
+            : list.items.map((r) => this.renderRecordRow(r))}
       </ul>
       ${list && list.total > list.items.length
         ? html`<p class="note">The other ${(list.total - list.items.length).toLocaleString()} differing records follow the "Set all" answer above.</p>`

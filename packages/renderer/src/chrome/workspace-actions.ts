@@ -7,7 +7,8 @@
 
 import type { Dialogs } from '@easydb/shared';
 import { forgetLastWorkspace, getContext, slugifyWorkspace } from '../app-context.js';
-import { workspaceLabel } from '../db/edb/folder-index.js';
+import { workspaceLabel, type ListEntry } from '../db/edb/folder-index.js';
+import { openWorkspaceInFile } from '../db/edb/space-adopt.js';
 import { storeBridge } from '../db/edb/active-bridge.js';
 import { cloneWorkspace, type CloneMode } from '../db/clone-workspace.js';
 import { countWorkspaceContents, deleteWorkspace, describeWorkspaceContents } from '../db/delete-workspace.js';
@@ -51,6 +52,40 @@ export function openWorkspace(name: string): void {
   location.assign(`${location.pathname}?${sp.toString()}${location.hash}`);
 }
 
+/**
+ * Open one entry of the workspace selector's list, wherever it lives.
+ *
+ * The list merges two things that look alike and route differently: the
+ * workspaces in the database this tab has open, and the ones the connected folder
+ * holds in OTHER files. Only the first can go through `?space=`.
+ *
+ * For the second, the FILE is the identity — `openWorkspace(entry.name)` threw it
+ * away and left boot to derive a file from the name, so two files holding a
+ * workspace called `simon` were one destination and the list's own file tooltip
+ * was the only thing that had ever told them apart. Same reason the open-database
+ * side switches on `id` rather than `name`: a name is not unique either
+ * (`freeWorkspaceId` mints `sales-2` beside `sales`, both still called `sales`).
+ */
+export async function openListEntry(entry: ListEntry): Promise<void> {
+  if (!entry.file) {
+    openWorkspace(entry.id);
+    return;
+  }
+  // The dialogs go in because the switch may have a question to ask: this browser
+  // and the file can each hold a copy of that workspace, and nothing in the
+  // storage layer may pick one of them on the user's behalf. See
+  // `db/edb/copy-choice.ts`.
+  const ctx = await getContext();
+  const outcome = await openWorkspaceInFile(entry.file, entry.id, ctx.api.ui.dialogs);
+  // A cancelled question is an answer, not a failure: the user just said to leave
+  // both copies alone, and a warning about it would read as a fault.
+  if (outcome !== 'unavailable') return;
+  // The index is a cache: the file may have been moved, renamed, or the folder
+  // grant let go since the last scan. Say which file, because that is the part
+  // the user can act on.
+  ctx.api.ui.dialogs.toast(`${entry.file} could not be opened. Reconnect the folder under Connect ▸ Local Data.`, { kind: 'warning', title: 'Switch workspace' });
+}
+
 /** Reload with no `?space=`, letting boot resolve which workspace to open. */
 function openResolvedWorkspace(): void {
   const sp = new URLSearchParams(location.search);
@@ -74,7 +109,10 @@ export async function switchWorkspaceFlow(): Promise<void> {
   const pick = await ctx.api.ui.dialogs.choice('Open which workspace?', others.map(workspaceLabel), 'Switch workspace');
   if (!pick) return;
   const chosen = others.find((w) => workspaceLabel(w) === pick);
-  if (chosen) openWorkspace(chosen.name);
+  // By id, not by name: two workspaces in one database may share a name
+  // (`freeWorkspaceId` puts `sales-2` beside `sales` and both stay called
+  // `sales`), and `?space=` would then resolve to whichever came first.
+  if (chosen) openWorkspace(chosen.id);
 }
 
 /** Name a new workspace, choose where it is stored and what it inherits, then open it. */

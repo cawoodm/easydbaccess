@@ -11,6 +11,11 @@
 // The button owns no backend knowledge. Every backend registers a
 // `ConnectorSpec` (`api.ui.registerConnector`) and this lists them, so adding a
 // local SQLite file or another remote database later needs no edit here.
+//
+// The list now has two halves, chosen by `ConnectorSpec.scope`: `local` is the
+// user's OWN data (the workspace folder, a file on disk) and `remote` is what
+// Connect originally meant. The split is a menu, not a second registry — the
+// button still knows no backend, only which half each one asked for.
 
 import type { ConnectorSpec, HostApi, PluginModule } from '@easydb/shared';
 import { AnchoredMenu } from '@marccawood/lit-menu';
@@ -36,39 +41,81 @@ export function init(api: HostApi): void {
     id: 'connect-menu:open',
     label: 'Connect',
     icon: CONNECT_ICON_SVG,
-    tooltip: 'Connect a live table on a remote backend (rows are never stored locally)',
+    tooltip: 'Connect data — a local folder or file, or a live table on a remote backend',
     onClick: (a, ctx) => openConnect(a, ctx?.anchor),
   });
 
   api.ui.registerCommand({
     id: 'connect-menu:open',
-    title: 'Connect a live table…',
+    title: 'Connect data…',
     group: 'Data',
     icon: CONNECT_ICON_SVG,
-    keywords: ['datasette', 'live', 'remote', 'backend'],
+    keywords: ['datasette', 'live', 'remote', 'backend', 'folder', 'local', 'file'],
     run: (a) => openConnect(a),
   });
 }
 
-/** Registered connectors, lowest `order` first. */
-async function connectors(): Promise<ConnectorSpec[]> {
+/** Registered connectors of one half, lowest `order` first. */
+async function connectors(scope: 'local' | 'remote'): Promise<ConnectorSpec[]> {
   const { registries } = await getContext();
-  return [...registries.connectors].sort((x, y) => (x.order ?? Number.MAX_SAFE_INTEGER) - (y.order ?? Number.MAX_SAFE_INTEGER));
+  return [...registries.connectors].filter((c) => (c.scope ?? 'remote') === scope).sort((x, y) => (x.order ?? Number.MAX_SAFE_INTEGER) - (y.order ?? Number.MAX_SAFE_INTEGER));
 }
 
 /**
- * Pick a backend and run its connect flow.
+ * The first question: your own data, or someone else's system.
  *
- * With exactly one connector installed a menu would be a pointless extra click,
- * so we go straight to it. The menu appears once there is a real choice.
+ * Two entries, flat — the menu library has no submenus, and nesting one backend
+ * behind two clicks would be worse than the dialog each half opens anyway.
+ * A half with nothing registered under it is left out rather than shown empty,
+ * which is also what keeps the old behaviour when only Datasette is installed.
  */
-async function openConnect(api: HostApi, anchor?: HTMLElement): Promise<void> {
-  const specs = await connectors();
+const HALVES: Array<{ scope: 'local' | 'remote'; label: string; icon: string }> = [
+  { scope: 'local', label: 'Local Data', icon: 'folder' },
+  { scope: 'remote', label: 'Remote System', icon: 'cloud' },
+];
 
-  if (specs.length === 0) {
+async function openConnect(api: HostApi, anchor?: HTMLElement): Promise<void> {
+  const halves = [];
+  for (const half of HALVES) {
+    if ((await connectors(half.scope)).length > 0) halves.push(half);
+  }
+
+  if (halves.length === 0) {
     await api.ui.dialogs.alert('No backends are installed to connect to. Install a connector plugin from the Plugin Manager first.', 'Connect');
     return;
   }
+
+  let scope = halves[0]?.scope;
+  if (halves.length > 1) {
+    const rect = anchor?.getBoundingClientRect();
+    const picked = rect
+      ? await AnchoredMenu.open(
+          rect,
+          halves.map((h) => ({ id: h.scope, label: h.label, icon: h.icon })),
+        )
+      : // No anchor (the command palette, say) — fall back to a modal list.
+        await api.ui.dialogs.choice(
+          'What do you want to connect?',
+          halves.map((h) => h.label),
+          'Connect',
+        );
+    if (!picked) return; // dismissed
+    scope = rect ? (picked as 'local' | 'remote') : halves.find((h) => h.label === picked)?.scope;
+  }
+  if (!scope) return;
+
+  await openScope(api, scope, anchor);
+}
+
+/**
+ * Pick a backend within one half and run its connect flow.
+ *
+ * With exactly one connector in the half a menu would be a pointless extra
+ * click, so we go straight to it — which is every case today, and the reason
+ * the second level is never seen.
+ */
+async function openScope(api: HostApi, scope: 'local' | 'remote', anchor?: HTMLElement): Promise<void> {
+  const specs = await connectors(scope);
 
   let chosen: ConnectorSpec | undefined = specs[0];
   if (specs.length > 1) {
@@ -78,8 +125,7 @@ async function openConnect(api: HostApi, anchor?: HTMLElement): Promise<void> {
           rect,
           specs.map((s) => ({ id: s.id, label: s.label, icon: s.icon })),
         )
-      : // No anchor (the command palette, say) — fall back to a modal list.
-        await api.ui.dialogs.choice(
+      : await api.ui.dialogs.choice(
           'Which backend do you want to connect to?',
           specs.map((s) => s.label),
           'Connect',

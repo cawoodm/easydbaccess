@@ -29,6 +29,10 @@ RUN npm ci --ignore-scripts --no-audit --no-fund
 # root, NOT from packages/renderer), and the two packages being built.
 COPY tsconfig.json tsconfig.base.json ./
 COPY scripts ./scripts
+# The `gen-tips` buildStart hook compiles this markdown into
+# packages/renderer/src/plugins/tips.json. Without it the hook throws ENOENT,
+# rollup transforms 0 modules and the build dies.
+COPY docs/help/tips.md ./docs/help/tips.md
 COPY packages/shared ./packages/shared
 COPY packages/renderer ./packages/renderer
 

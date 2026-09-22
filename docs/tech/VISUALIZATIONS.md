@@ -370,22 +370,24 @@ flattening it would put numbers in the file the chart never drew.
 ## Docking
 
 `createPanel()` takes a **single** `content` element, so `window-mgr/panel-stack.ts`
-holds `[panes above][primary][panes below]` with a drag splitter per pane. Both
-window managers pass a stack as their content.
+holds `[rows above][primary][rows below]`, where a row is one or more panes side
+by side. Both window managers pass a stack as their content.
 
 **An empty stack renders its primary child and nothing else** — one flex wrapper,
 no listeners, no layout of its own. That is the property the design leans on,
 since every table window in the app now goes through here, and it is pinned by an
 e2e check on a plain table window rather than left to inspection.
 
-- `flex-direction: column`, primary `flex: 1`, panes at fixed px. **Maximize
+- `flex-direction: column`, primary `flex: 1`, rows at fixed px; a row is a
+  nested `flex-direction: row` whose panes take `flex: <weight>`. **Maximize
   needs no new code** — the grid just gets more room, and the shell's
   counter-transform for the pan/zoom canvas is untouched.
 - `mountContent` / `unmountContent` build and tear down the *stack*, so
   minimizing still drops the grid **and** every pane with its subscriptions.
-- Splitter releases persist `ViewDock.size` through `queueGeometryWrite()`, the
-  same serialization every other geometry write uses. On release, not per
-  pointermove, which would queue a store write per pixel.
+- Splitter releases persist through `queueGeometryWrite()`, the same
+  serialization every other geometry write uses — `ViewDock.size` for the
+  `ns-resize` handle, `ViewDock.weight` for the `ew-resize` one. On release, not
+  per pointermove, which would queue a store write per pixel.
 - `stack-math.ts` holds the arithmetic, pure and unit-tested: a pane is clamped
   so the primary content keeps a floor, and a shrinking container **caps the tall
   panes to a common ceiling** rather than taking the whole excess off the
@@ -410,6 +412,114 @@ it find a host stack without importing `table-window-manager.ts` — the same
 decoupling `panel-registry.ts` and `shell-viewport.ts` already exist for. A host
 appearing is not a store change, so the registry notifies too; otherwise a pane
 whose host opened second would never appear.
+
+### Rows of panes, and why widths are weights not spans
+
+Docking stacked and only stacked until v0.0.468: `order` WAS the band a pane
+occupied, so three charts above a grid were three full-width bands and the grid
+had nothing left. `ViewDock` now carries two more optional fields — `row` and
+`weight` — and several panes can share one row.
+
+**Both absent is exactly the old layout**, so nothing was migrated. `rowOf()`
+falls back to `order` when `row` is absent, which reproduces one pane per band
+for every dock written before this. The fallback is retired per edge on the first
+move: `movePane` rewrites the WHOLE edge with an explicit `row` and `order`,
+because a pane still relying on the fallback would jump rows as soon as its
+`order` changed.
+
+**Width is a weight, not a column span**, and that is a trade rather than an
+oversight. A span-based grid would let a pane cover two ROWS; it would also make
+width undraggable, since a drag has to land on a whole column, and a two-pane row
+could not be nudged at all. Weights are what `flex-grow` already takes, so both
+splitters stay continuous and the layout needs no grid engine. The cost is that
+a pane cannot span rows — deliberately out of scope.
+
+Three rules the maths holds down (`stack-math.ts`, pure and unit-tested):
+
+- **Height belongs to the row, not the pane.** Panes sharing a row share its
+  height, so a drag writes `size` onto every pane in it and `rowHeight` takes the
+  tallest where they disagree — which they can, just after a pane moves in from a
+  taller row.
+- **A width drag moves the pair and nothing else.** `resizedRowWeights` keeps the
+  two neighbours' combined share fixed, so dragging one boundary cannot shuffle a
+  pane three columns away.
+- **An unweighted pane takes an equal share**, never zero. On release the whole
+  row's settled weights are written, because a pane that was drawing an equal
+  share by default has to keep that share once its neighbour has been dragged.
+
+The four moves live in `viz/viz-dock.ts` and are pure rewrites of the edge:
+**join the row above**, **give it its own row**, **move left**, **move right**.
+`paneMoves()` says which are available and the header strip reads it, so a
+disabled button and a move that does nothing cannot disagree — a move that is not
+available is HIDDEN rather than greyed, since a strip that already holds six
+buttons does not need four permanent no-ops. A row whose membership changes gives
+up its weights so it divides evenly among its new occupants; a pane that merely
+swapped places keeps its width, because the user moved the pane and not the slot.
+
+`PanelStack.updatePane()` exists for this: a pane changing rows must be
+**re-placed, not re-added**, or moving a chart one column would unmount its
+element, drop its row subscription and make it re-read and redraw to show the
+same picture.
+
+### A DOM move destroys a visualization, so the reflow avoids one
+
+Moving a node in the DOM is a REMOVE followed by an insert, and the removal fires
+`disconnectedCallback` on every custom element in the subtree. A chart destroys
+its Chart.js instance there and a map destroys its Leaflet one — both on purpose,
+since a pane that is gone should not keep an engine and a `ResizeObserver` alive.
+
+That made rebuilding an edge's rows fatal to the panes that were not moving. The
+symptom was a map in `powerplants.edb` going blank the moment a second
+visualization was docked beside it or one was removed from beside it, and staying
+blank until a reload. Two things had to be true for it, and both are now fixed:
+
+- **A reflow must not disturb a pane that did not move.** `window-mgr/child-plan.ts`
+  plans the minimum set of removals and insertions to turn one child list into
+  another, and drops before it inserts — so an edge that merely lost its first row
+  needs no insertion at all, because the survivor is already at index 0. Row
+  elements and both kinds of splitter are cached by SLOT (`edge:rowIndex`) and
+  reused, which is what makes "unchanged" expressible in the first place; a
+  splitter therefore resolves the row it acts on when the drag starts, not when it
+  was built.
+- **An element that IS moved has to come back.** Nothing was going to ask it to
+  redraw: the panel re-renders and hands over the same data, and `updated()`
+  compares that data BY VALUE (which is what stops a redraw mid-drag — see
+  `elements/same-input.ts`), so it correctly decided there was nothing to draw,
+  over an engine that no longer existed. So `connectedCallback` asks for the
+  redraw itself, in all three of `chart-element.ts`, `point-map.ts` and
+  `word-cloud.ts`. A rebuilt map also clears `fitted`, since the view it would
+  have preserved went with the old instance.
+
+`test/e2e/142-viz-pane-rows.spec.ts` pins both halves and they fail
+independently: one spec counts non-transparent canvas pixels after a neighbour is
+docked (the `table.a11y` mirror every other spec asserts on is Lit-rendered and
+would still be there over a destroyed chart, so it cannot see this), another
+counts the nodes the edge loses and expects **zero**.
+
+### The container can also be pulled out from under a live map
+
+Reported as "the map still craps out if I start filtering", and a different bug
+with the same shape. Every one of these elements renders its empty notice
+*instead of* its container, so `points.length === 0` makes Lit REMOVE the div a
+Leaflet instance was built against — and a filter that matches nothing is the
+ordinary way to get there while you are still typing. The map then held an orphan
+node and drew every later marker into it, off screen, for good: filtering back to
+the points you started with is "already drawn" as far as the value comparison is
+concerned, so nothing was even attempted.
+
+Two rules in `point-map.ts` close it, and the second is the invariant rather than
+a list of the renders that can do it:
+
+- **No points means no map.** `draw()` tears the instance down and RECORDS the
+  empty input, so filtering back to the original set counts as a change.
+- **A map whose `getContainer()` is not the container on screen is torn down** at
+  the top of every draw. An orphaned map is invisible rather than broken, which is
+  what made this cost a reload to notice.
+
+`chart-element.ts` and `word-cloud.ts` were already right here — the chart
+destroys its instance on the no-data path and re-queries the canvas afterwards,
+and the cloud holds no instance bound to a container at all — which is why the
+fix lives only in the map.
 
 ## How a chart looks is one pure module
 

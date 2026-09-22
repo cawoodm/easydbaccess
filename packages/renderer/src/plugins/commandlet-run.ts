@@ -13,6 +13,7 @@ import { getContext } from '../app-context.js';
 import { focusTableWindow } from '../window-mgr/table-window-manager.js';
 import { revealViewWindow } from '../window-mgr/view-window-manager.js';
 import { CommandletError, parseCommandlets, substituteCommandlet, type Commandlet } from './commandlet-lang.js';
+import { planEditKey } from './commandlet-edit.js';
 import { keyColumnOf, planPreview } from './commandlet-preview.js';
 import { openHtmlEditor } from './html-cell-editor.js';
 import { openPreviewPopup, previewFrame, renderValue } from './preview-popup.js';
@@ -111,6 +112,10 @@ async function describe(cmd: Commandlet, ctx: CommandletContext = {}): Promise<s
       const where = [...Object.keys(plan.keyFilter), ...fields];
       return `preview ${table.name}.${plan.field.label || plan.field.field}${where.length > 0 ? ` where ${where.join(' + ')}` : ''}`;
     }
+    case 'edit': {
+      const table = await resolveTable(cmd, ctx);
+      return `edit the ${table.name} record where ${describeFilters(editFilters(table, cmd))}`;
+    }
     case 'ui':
       throw new CommandletError(`"${cmd.verb}" is not wired up yet.`);
   }
@@ -141,6 +146,8 @@ async function runOne(cmd: Commandlet, ctx: CommandletContext = {}): Promise<voi
       return runCommandId(cmd);
     case 'preview':
       return runPreview(cmd, ctx);
+    case 'edit':
+      return runEdit(cmd, ctx);
     case 'ui':
       throw new CommandletError(`"${cmd.verb}" is not wired up yet.`);
   }
@@ -318,6 +325,12 @@ async function runPreview(cmd: Commandlet, ctx: CommandletContext): Promise<void
   openPreviewPopup(`${table.name} — ${label}`, frame, {
     label,
     note: keyValue || undefined,
+    // The window shows one cell of a row that may not be on screen at all, so
+    // the whole record is one click away. `table.readonly` is the right test
+    // here — unlike `writable`, which also refuses a read-only COLUMN in a
+    // table whose other fields are perfectly editable.
+    recordLabel: table.readonly === true ? 'View record' : 'Edit record',
+    onEditRecord: () => void openRecordForm(table.id, current.id),
     editLabel: writable ? 'Edit' : 'View source',
     onEdit: () => {
       // The STORED cell, not the computed one: saving a script's output over the
@@ -359,6 +372,66 @@ function describeFilters(filters: Record<string, string>): string {
   return Object.entries(filters)
     .map(([field, expr]) => `${field}${expr}`)
     .join(' + ');
+}
+
+// -- edit ---------------------------------------------------------------------
+
+/**
+ * Open ONE record in the record form: `edit/<table>/<key>`,
+ * `edit/<table>/<field>/<value>` or `edit/<table>?<filters>`.
+ *
+ * The same form as the table's + button, over an existing row — so a link, a
+ * double-click and the palette all correct a record in one place instead of
+ * hunting for its row in the grid. The form itself decides whether the record
+ * may be WRITTEN, from `Table.readonly`: a commandlet cannot talk the app into
+ * editing a read-only table.
+ *
+ * Several matches open the first and say so, exactly as `preview` does. The
+ * commonest way here is a link built from a nearly-unique value, and a form with
+ * a plausible record in it plus a count is more use than an error with nothing.
+ */
+async function runEdit(cmd: Commandlet, ctx: CommandletContext): Promise<void> {
+  const app = await getContext();
+  const table = await resolveTable(cmd, ctx);
+  const filters = editFilters(table, cmd);
+
+  const page = await readRows(app.store.rows(table.id), { columns: table.columns, filters, limit: 2 });
+  const row = page.rows[0];
+  if (!row) {
+    throw new CommandletError(`No row in "${table.name}" matches ${describeFilters(filters)}.`);
+  }
+  const matches = page.total ?? page.rows.length;
+  if (matches > 1) {
+    app.api.ui.dialogs.toast(`${matches.toLocaleString()} rows match ${describeFilters(filters)} — editing the first.`, { kind: 'warning', title: 'Edit' });
+  }
+
+  await openRecordForm(table.id, row.id);
+}
+
+/**
+ * The record form, loaded on demand — the one effect this module does not route
+ * to something already imported. A commandlet chain runs on the first-paint path
+ * and the form is only ever wanted after the row has been found.
+ */
+async function openRecordForm(tableId: string, rowId: string): Promise<void> {
+  const { openEditRecordDialog } = await import('../dialogs/new-record-dialog.js');
+  await openEditRecordDialog(tableId, rowId);
+}
+
+/** The key/field targets plus the commandlet's own query, as one filter set. */
+function editFilters(table: Table, cmd: Commandlet): Record<string, string> {
+  const plan = planEditKey(table, cmd.targets.slice(1));
+  if ('error' in plan) throw new CommandletError(plan.error);
+
+  const filters: Record<string, string> = { ...plan.keyFilter };
+  for (const [key, expr] of Object.entries(cmd.filters)) {
+    if (expr === '') continue;
+    filters[resolveField(table, key)] = expr;
+  }
+  if (Object.keys(filters).length === 0) {
+    throw new CommandletError('"edit" needs a key or a filter — without one there is no record to open.');
+  }
+  return filters;
 }
 
 // -- search / view / cmd ------------------------------------------------------

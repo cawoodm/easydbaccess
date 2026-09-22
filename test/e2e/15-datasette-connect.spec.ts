@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { panelDomId } from './helpers.js';
+import { openConnect, panelDomId } from './helpers.js';
 
 /**
  * Live read-write connect, end-to-end through the real UI: the "Connect
@@ -49,7 +49,7 @@ test.describe('datasette live connect', () => {
     });
 
     // Open the connect dialog from the header button, fill URL + token, connect.
-    await page.getByTitle(/Connect a live/).click();
+    await openConnect(page);
     const dlg = page.locator('datasette-connect-dialog dialog');
     await expect(dlg).toBeVisible();
     await dlg.locator('input[type="text"]').fill('https://ds.example/db/people');
@@ -137,7 +137,7 @@ test.describe('datasette live connect', () => {
     });
 
     // Connect with NO token → read-only.
-    await page.getByTitle(/Connect a live/).click();
+    await openConnect(page);
     const dlg = page.locator('datasette-connect-dialog dialog');
     await dlg.locator('input[type="text"]').fill('https://ds.example/db/people');
     await dlg.getByRole('button', { name: 'Connect', exact: true }).click();
@@ -211,7 +211,7 @@ test.describe('datasette live connect', () => {
     });
 
     // Connect token-less (read-only) and grab the live table's id.
-    await page.getByTitle(/Connect a live/).click();
+    await openConnect(page);
     const dlg = page.locator('datasette-connect-dialog dialog');
     await dlg.locator('input[type="text"]').fill('https://ds.example/db/people');
     await dlg.getByRole('button', { name: 'Connect', exact: true }).click();
@@ -289,7 +289,7 @@ test.describe('datasette live connect', () => {
       return route.fulfill({ status: 404, body: '{"ok":false}' });
     });
 
-    await page.getByTitle(/Connect a live/).click();
+    await openConnect(page);
     const dlg = page.locator('datasette-connect-dialog dialog');
     await dlg.locator('input[type="text"]').fill('https://ds.example/db/people');
     await dlg.getByRole('button', { name: 'Connect', exact: true }).click();
@@ -401,7 +401,7 @@ test.describe('datasette live connect', () => {
   });
 
   test('the connect dialog is prefilled with https://datasette.io', async ({ page }) => {
-    await page.getByTitle(/Connect a live/).click();
+    await openConnect(page);
     const dlg = page.locator('datasette-connect-dialog dialog');
     await expect(dlg).toBeVisible();
     await expect(dlg.locator('input[type="text"]')).toHaveValue('https://datasette.io');
@@ -444,7 +444,7 @@ test.describe('datasette live connect', () => {
       }
     });
 
-    await page.getByTitle(/Connect a live/).click();
+    await openConnect(page);
     const connect = page.locator('datasette-connect-dialog dialog');
     await connect.locator('input[type="text"]').fill('https://dbc.example/legislators');
     await connect.getByRole('button', { name: 'Connect', exact: true }).click();
@@ -508,7 +508,7 @@ test.describe('datasette live connect', () => {
       return route.fulfill({ status: 404, body: '{"ok":false}' });
     });
 
-    await page.getByTitle(/Connect a live/).click();
+    await openConnect(page);
     const connect = page.locator('datasette-connect-dialog dialog');
     await connect.locator('input[type="text"]').fill('https://wafed.example/legislators');
     await connect.getByRole('button', { name: 'Connect', exact: true }).click();
@@ -575,7 +575,7 @@ test.describe('datasette live connect', () => {
       }
     });
 
-    await page.getByTitle(/Connect a live/).click();
+    await openConnect(page);
     const connect = page.locator('datasette-connect-dialog dialog');
     await connect.locator('input[type="text"]').fill('https://inst.example');
     await connect.getByRole('button', { name: 'Connect', exact: true }).click();

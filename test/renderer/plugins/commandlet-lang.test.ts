@@ -79,6 +79,17 @@ describe('parseCommandlets', () => {
     expect(cmd?.options).toEqual({ search: 'foo' });
   });
 
+  // `edit` needs the table and nothing else — the row may come from the query.
+  it('accepts edit with the table alone, and with a key or a field/value', () => {
+    expect(parseCommandlets('edit/notes?Title==Berlin')[0]?.targets).toEqual(['notes']);
+    expect(parseCommandlets('edit/notes/n-17')[0]?.targets).toEqual(['notes', 'n-17']);
+    expect(parseCommandlets('edit/notes/Author/Smith')[0]?.targets).toEqual(['notes', 'Author', 'Smith']);
+  });
+
+  it('refuses edit with no table, because a bare target would be unreadable', () => {
+    expect(() => parseCommandlets('edit?Title==Berlin')).toThrow(CommandletError);
+  });
+
   it('keeps a named view in one target, trailing slash and all', () => {
     expect(parseCommandlets('view/AnotherView/?@search=foo')[0]?.targets).toEqual(['AnotherView']);
     // A `/` inside the name is part of it — `view` owns the rest of the path.

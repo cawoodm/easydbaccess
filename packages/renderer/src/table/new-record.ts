@@ -61,14 +61,19 @@ export function isDerived(c: ColumnSpec): boolean {
  * hidden column still gets its default written (see {@link blankRecord}); it is
  * only left off the FORM, because a form that asks for forty fields when the
  * table shows six is not the quick way to add a record.
+ *
+ * `includeDerived` is what the EDIT form passes. A new record cannot be asked
+ * for a column with no write target, but an existing one already has a value
+ * there, and a record form that hides it shows a different record from the grid.
+ * The form draws those fields disabled and never writes them back.
  */
-export function recordFields(columns: readonly ColumnSpec[], showAll: boolean): ColumnSpec[] {
-  return columns.filter((c) => !isDerived(c) && (showAll || c.hidden !== true));
+export function recordFields(columns: readonly ColumnSpec[], showAll: boolean, includeDerived = false): ColumnSpec[] {
+  return columns.filter((c) => (includeDerived || !isDerived(c)) && (showAll || c.hidden !== true));
 }
 
 /** Are there fields the toggle would reveal? No ⇒ do not offer it. */
-export function hasMoreFields(columns: readonly ColumnSpec[]): boolean {
-  return recordFields(columns, true).length > recordFields(columns, false).length;
+export function hasMoreFields(columns: readonly ColumnSpec[], includeDerived = false): boolean {
+  return recordFields(columns, true, includeDerived).length > recordFields(columns, false, includeDerived).length;
 }
 
 /**

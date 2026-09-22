@@ -8,6 +8,7 @@ import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@marccawood/lit-dialogs';
 import { builtinKey, builtinPlugins } from '../plugin-host/loader.js';
 import { CATALOG_URLS_SETTING, defaultCatalogUrl, fetchCatalog, type CatalogResolved } from '../plugin-host/plugin-catalog.js';
+import { describeNetworkError, fetchWithTimeout } from '../util/net.js';
 
 /** Small GitHub mark used for the "view source" link on rows with a `repo`. */
 const GITHUB_ICON_SVG =
@@ -502,7 +503,7 @@ export class PluginManagerDialog extends LitElement {
       this.catalogError = null;
     } catch (err) {
       this.catalog = [];
-      this.catalogError = (err as Error).message;
+      this.catalogError = describeNetworkError(err, catalogUrl);
     }
   }
 
@@ -529,7 +530,7 @@ export class PluginManagerDialog extends LitElement {
       this.serverCatalogError = null;
     } catch (err) {
       this.serverCatalog = [];
-      this.serverCatalogError = (err as Error).message;
+      this.serverCatalogError = describeNetworkError(err, registryUrl);
     }
   }
 
@@ -635,7 +636,7 @@ export class PluginManagerDialog extends LitElement {
     this.installing = new Set(this.installing).add(entry.absUrl);
     const ctx = await getContext();
     try {
-      const res = await fetch(entry.absUrl, { cache: 'no-store' });
+      const res = await fetchWithTimeout(entry.absUrl, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const body = await res.text();
 
@@ -677,7 +678,7 @@ export class PluginManagerDialog extends LitElement {
         lastFetched: Date.now(),
         lastError: `install: ${(err as Error).message}`,
       });
-      ctx.api.ui.dialogs.toast(`Could not install ${entry.name}: ${(err as Error).message}`, {
+      ctx.api.ui.dialogs.toast(`Could not install ${entry.name}: ${describeNetworkError(err)}`, {
         kind: 'error',
         title: 'Plugin error',
       });

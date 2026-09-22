@@ -422,4 +422,3 @@ async function runPlan(here: SideTables, disk: SideTables, diffs: readonly Table
 
   return out;
 }
-

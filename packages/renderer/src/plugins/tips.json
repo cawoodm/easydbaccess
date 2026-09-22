@@ -16,6 +16,10 @@
     {
       "id": "a-workspace-can-live-in-a-real-sqlite-file-you-s",
       "text": "A workspace can live in a real SQLite file you save — press Save, or pick Advanced when you make one"
+    },
+    {
+      "id": "double-click-a-row-to-open-the-whole-record-in-o",
+      "text": "Double-click a row to open the whole record in one form"
     }
   ]
 }

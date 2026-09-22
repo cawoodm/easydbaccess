@@ -30,33 +30,62 @@ on either way, and the window behind the list is not affected.
 
 ### Typing a filter directly
 
-You can also just type into the filter box:
+You can also just type into the filter box. Every example below is written
+against one **City** column holding these cells:
 
-| Type this | To get                              |
-| --------- | ----------------------------------- |
-| `text`    | Rows containing `text`              |
-| `!text`   | Rows that do **not** contain `text` |
-| `^text`   | Rows that **start with** `text`     |
-| `=text`   | Rows that are **exactly** `text`    |
-| `NULL`    | Rows where the value is blank/empty |
-| `!NULL`   | Rows that have any value at all     |
+`Bern` · `bern` · `Bernard` · `Basel` · `Berlin, DE` · `Zurich` ·
+`Salt AND Pepper` · `100% wool` · `under_score` · and two blank ones.
 
-`^` and `!` can be combined, and you can list several values separated by
-commas.
+| Type this           | What comes back                                                          |
+| ------------------- | ------------------------------------------------------------------------ |
+| `bern`              | `Bern`, `bern`, `Bernard` — anything **containing** it, in any case      |
+| `BERN`              | The same three. Capitals never change what a filter finds                |
+| `*ern*`             | The same three, said outright — the `*` means **contains**               |
+| `Bern*`             | `Bern`, `bern`, `Bernard` — cells that **start with** it                 |
+| `*ard`              | `Bernard` — cells that **end with** it                                   |
+| `"Bern"`            | `Bern`, `bern` only — the **whole cell** is that word. `Bernard` is out  |
+| `!Bern`             | Everything that does **not** match it — **including the blank cells**    |
+| `!"Bern"`           | Everything that is not exactly it, so `Bernard` stays                    |
+| `!Bern*`            | `Zurich`, `Salt AND Pepper`, `100% wool`, `under_score`, the blanks      |
+| `NULL`              | The blank cells — empty, or nothing but spaces                           |
+| `!NULL`             | Every cell that holds something. `!` on its own means the same           |
+| `Bern,Basel`        | Either one — a comma is **or**                                           |
+| `Bern OR Basel`     | The same thing spelled out                                               |
+| `!Bern,!Basel`      | Neither one. Several exclusions all have to hold                         |
+| `Bern* AND !Basel`  | `Bern`, `bern`, `Bernard`, `Berlin, DE` — starts with Bern, is not Basel |
+| `Basel AND Bern,Zurich` | Only `Zurich`: `AND` binds tighter, and no cell is both              |
+| `"Berlin, DE"`      | `Berlin, DE` — quote a value that contains a comma                       |
+| `"Salt AND Pepper"` | The cell itself. Quotes make `AND` ordinary text                         |
+| `100%`              | `100% wool`. `%` and `_` are ordinary characters here, not wildcards     |
 
-A comma means OR. To ask for two things at once, put `AND` between them:
+`^Bern` still works as another way of writing `Bern*`, and `=Bern` as another
+way of writing `"Bern"`. `!` can be combined with any of them.
 
-| Type this         | To get                               |
-| ----------------- | ------------------------------------ |
-| `Sweden,Norway`   | Sweden **or** Norway                 |
-| `!NULL AND Biden` | Has a value **and** contains "Biden" |
-| `^B AND !Bush`    | Starts with "B" but is not a Bush    |
-| `a AND b,c`       | (a **and** b) **or** c               |
-| `a OR b`          | The same as `a,b`                    |
+Three of these surprise people:
 
-`AND` and `OR` count as operators only in capitals and only on their own, so
-"brand" and "Andrew" stay ordinary words. To search for the word itself, put
-the value in quotes: `"Salt AND Pepper"`.
+- **`!Bern` keeps the blank cells.** A cell with nothing in it does not match
+  "Bern", so it passes. Use `!Bern AND !NULL` to leave the blanks out too.
+- **`AND` and `OR` are operators only in capitals and only on their own**, so
+  "brand" and "Andrew" stay ordinary words.
+- **`*` is a wildcard, but only outside quotes.** `"a*b"` looks for a value that
+  really holds an asterisk, and `*` on its own does too.
+
+On a **list** column each token is matched against one member rather than the
+whole cell, so `"red"` finds the rows whose list contains exactly `red` — with
+`green` or anything else alongside it.
+
+### What a plain value means
+
+A value with no wildcard and no quotes — just `Bern` — follows the **Default to
+substring** setting (Settings → Table grid), which is on to start with:
+
+- **On** — `Bern` matches any cell containing "Bern".
+- **Off** — `Bern` matches only a cell that is exactly "Bern", which is usually
+  what a list of values is for.
+
+Either way `*Bern*` and `"Bern"` say which they want and ignore the setting.
+The setting belongs to the workspace, not to your device, because it decides
+what the filters saved in that workspace mean.
 
 ### Filters narrow each other (faceting)
 
@@ -120,3 +149,44 @@ the box folds back to its icon on the next click elsewhere.
 Typing multiple words searches for the whole phrase first, then falls back
 to every word (AND), then to any word (OR). You can also spell out the logic
 yourself with uppercase `AND`/`OR`, e.g. `berlin AND active`.
+
+### The same language, across every column
+
+A search box takes everything the filter box takes. The difference is what it
+is matched against: a filter looks at **its own column**, a search looks at
+**the whole row**. Say the table has a **Type** column and a **Who** column:
+
+| Row | Type      | Who       |
+| --- | --------- | --------- |
+| 1   | `CC`      | `Ann`     |
+| 2   | `Holiday` | `Bob`     |
+| 3   | `Flat`    | `Cid`     |
+| 4   | `Flat`    | `CC Dave` |
+
+| Type this      | What comes back                                                            |
+| -------------- | -------------------------------------------------------------------------- |
+| `Flat`         | Rows 3 and 4 — **any** column containing it is enough                      |
+| `Ann`          | Row 1. It does not matter which column the word was in                     |
+| `!CC`          | Rows 2 and 3 — an exclusion has to hold of **every** column                |
+| `!CC,Flat`     | Row 3 alone: has "Flat" somewhere, and "CC" nowhere. Row 4 is out on `Who` |
+| `*lida*`       | Row 2 — the wildcards work here too                                        |
+| `=Flat`        | Rows 3 and 4 — some column is exactly that                                 |
+| `Flat AND Cid` | **Nothing.** `AND` asks ONE column to hold both, and no column does        |
+
+The rules to remember: a value you want is looked for in any column, a value you
+don't want must be absent from all of them, and `AND` never spans two columns.
+To ask for "Flat in one column and Cid in another", use two column filters, or
+search `Flat` and filter `Who` for `Cid`.
+
+### Plain text, or a list of values?
+
+The search box takes both, and it decides by what you typed:
+
+- Type anything with a comma, `!`, `^`, `=`, `*`, `AND` or `OR` in it and it is
+  read as a **list of values**, exactly as a filter would.
+- Type anything else and it is read as **plain text**, searched as you typed it.
+- Put the **whole box in quotes** to force plain text. That is the only way to
+  search for a phrase that really contains a comma: `"Berlin, DE"`.
+
+A term written `field:value` narrows to one column, and takes the whole language
+inside it — `city:Paris,Zurich`, `read:!true`, `status:A*`.

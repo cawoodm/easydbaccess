@@ -13,7 +13,7 @@
 // the UI too (the datasette-source plugin only registered an unsurfaced URL
 // source and a file-only drop handler, so there was no clickable way in).
 
-import type { ColumnSpec, ColumnType, HostApi, ImporterSpec, ImportSourceInput, PluginModule, Table } from '@easydb/shared';
+import type { ColumnSpec, HostApi, ImporterSpec, ImportSourceInput, PluginModule, Table } from '@easydb/shared';
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { getContext } from '../app-context.js';
@@ -29,7 +29,7 @@ import { hasSqlProjections, reportSqlRestore, restoreSqlScript } from './sql-imp
 import { fetchImportTextWithBar, filenameFromUrl } from '../import/fetch-source.js';
 import { runImport, type RunImportResult } from '../import/import-kernel.js';
 import { refreshFromOrigin } from '../import/refresh.js';
-import { looksLikeArray } from '@easydb/shared';
+import { inferColumnType } from '../import/infer-type.js';
 import type { ImportTarget } from '../import/land-tables.js';
 import {
   addUserSample,
@@ -404,18 +404,27 @@ function jsonRecords(text: string): Array<Record<string, unknown>> {
   return [];
 }
 
-/** Infer columns from the union of keys across the first rows of a JSON body. */
+/**
+ * Infer columns from the union of keys across the first rows of a JSON body.
+ *
+ * Every value of a key is collected before typing it, rather than the first
+ * non-null one deciding: the same inferrer the JSON importer uses, so
+ * REFERENCING a URL and IMPORTING it give a table the same column types. They
+ * used not to — this read one value per key and knew nothing about dates, text
+ * or list columns, so a referenced table lost the date and tag renderers that
+ * the identical imported table got.
+ */
 function inferJsonColumns(text: string): ColumnSpec[] {
   const records = jsonRecords(text).slice(0, 50);
-  const typeOf = (v: unknown): ColumnType => (looksLikeArray(v) ? 'array' : typeof v === 'number' ? 'number' : typeof v === 'boolean' ? 'boolean' : 'string');
-  const cols = new Map<string, ColumnType>();
+  const seen = new Map<string, unknown[]>();
   for (const rec of records) {
     for (const [k, v] of Object.entries(rec)) {
-      if (!cols.has(k) && v != null) cols.set(k, typeOf(v));
-      else if (!cols.has(k)) cols.set(k, 'string');
+      const values = seen.get(k);
+      if (values) values.push(v);
+      else seen.set(k, [v]);
     }
   }
-  return [...cols.entries()].map(([field, type]) => ({ field, label: field, type }));
+  return [...seen.entries()].map(([field, values]) => ({ field, label: field, type: inferColumnType(values) }));
 }
 
 /**

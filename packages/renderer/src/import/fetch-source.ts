@@ -16,6 +16,7 @@ import type { HostApi } from '@easydb/shared';
 // to remember it.
 import type { ProgressHandle } from '../chrome/top-progress.js';
 import { isGitLfsPointer, readResponseText, toCorsFriendlyUrl, toGitLfsMediaUrl } from '../plugins/read-url.js';
+import { describeNetworkError, isOffline } from '../util/net.js';
 
 /**
  * Hard ceiling on a URL import buffered into the browser. A CSV/JSON body is
@@ -120,6 +121,9 @@ export async function fetchImportText(api: HostApi, rawUrl: string, progress: Im
     try {
       res = await api.backend.fetch(target);
     } catch (err) {
+      // Offline first when the browser is sure of it: that one fact explains
+      // the failure better than any guess about the host — see `util/net.ts`.
+      if (isOffline()) throw new Error(describeNetworkError(err, urlHost(target)), { cause: err });
       throw new Error(
         `Could not reach ${urlHost(target)} — no response. The server may be down, ` +
           `blocking cross-origin (CORS) requests, or the transfer may have failed ` +

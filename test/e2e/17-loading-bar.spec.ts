@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { panelDomId } from './helpers.js';
+import { openConnect, panelDomId } from './helpers.js';
 
 /**
  * A slow-loading table shows an indeterminate progress bar in its header while
@@ -38,7 +38,7 @@ test('shows a header loading bar while a large/slow table loads, then hides it',
     return route.fulfill({ status: 404, body: '{"ok":false}' });
   });
 
-  await page.getByTitle(/Connect a live/).click();
+  await openConnect(page);
   const dlg = page.locator('datasette-connect-dialog dialog');
   await dlg.locator('input[type="text"]').fill('https://ds.example/db/people');
   await dlg.getByRole('button', { name: 'Connect', exact: true }).click();

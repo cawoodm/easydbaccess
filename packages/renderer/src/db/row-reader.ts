@@ -36,6 +36,7 @@
  */
 
 import type { ColumnSpec, DataCollection, Row, RowPage, RowQuery, SortSpec } from '@easydb/shared';
+import { defaultSubstring } from '../util/filter-settings.js';
 import { matchesColumnFilter } from '@easydb/shared';
 import { searchRowsByField, type SearchField } from '../search/text-search.js';
 import { searchableColumns } from '../search/searchable-columns.js';
@@ -127,7 +128,7 @@ export function applyRowRequest(rows: Row[], req: RowRequest): RowPage {
     // `NULL` mean different things with it than without. Leaving it out filtered
     // `["a","b"]` as one string and quietly dropped rows the grid would keep.
     const typeOf = new Map(req.columns.map((c) => [c.field, c.type as string | undefined]));
-    out = out.filter((r) => active.every(([field, q]) => matchesColumnFilter(r.data[field], q, { type: typeOf.get(field) })));
+    out = out.filter((r) => active.every(([field, q]) => matchesColumnFilter(r.data[field], q, { type: typeOf.get(field), defaultSubstring: defaultSubstring() })));
   }
 
   const term = (req.search ?? '').trim();
@@ -179,6 +180,10 @@ export async function readRows(coll: DataCollection<Row>, req: RowRequest, capWh
   }
 
   const q: RowQuery = {
+    // Carried so the SQL the store builds reads a bare filter value the same way
+    // this module's in-memory pass does. Drift here would mean a windowed table
+    // filtering differently from a small one.
+    defaultSubstring: defaultSubstring(),
     ...(req.fields ? { fields: req.fields } : {}),
     ...(Object.keys(req.filters ?? {}).length > 0 ? { filters: Object.fromEntries(activeFilters(req)) } : {}),
     ...(pushSearch && searchTerm ? { search: searchTerm } : {}),

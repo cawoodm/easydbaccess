@@ -2,12 +2,12 @@ import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { Workspace } from '@easydb/shared';
 import { getContext } from '../app-context.js';
-import { mergeWorkspaceList, readFolderIndex, workspaceLabel, type ListEntry } from '../db/edb/folder-index.js';
+import { activeWorkspaces, mergeWorkspaceList, readFolderIndex, readFolderSelection, workspaceLabel, type ListEntry } from '../db/edb/folder-index.js';
 import { ACTIVE_FILE_CHANGED_EVENT, activeEdbName, adoptedFileName } from '../db/edb/session.js';
 import { materialIconStyles } from './material-icon-css.js';
 // The flows themselves are shared with the command palette — see
 // `workspace-actions.ts`. This element is only their mouse-driven entry point.
-import { deleteWorkspaceFlow, newWorkspaceFlow, openWorkspace } from './workspace-actions.js';
+import { deleteWorkspaceFlow, newWorkspaceFlow, openListEntry } from './workspace-actions.js';
 
 @customElement('workspace-selector')
 export class WorkspaceSelector extends LitElement {
@@ -75,7 +75,13 @@ export class WorkspaceSelector extends LitElement {
   }
 
   private remerge() {
-    this.entries = mergeWorkspaceList(this.workspaces, readFolderIndex()?.workspaces ?? [], activeEdbName());
+    // `activeWorkspaces` is normally a no-op — a scan already skips the files
+    // this device has switched off, so they are not in the index to begin with.
+    // It matters for the index written BEFORE one was switched off: without it
+    // the list would keep offering that workspace until the next scan, and
+    // picking it would adopt the very file the user said to leave alone.
+    const indexed = activeWorkspaces(readFolderIndex()?.workspaces ?? [], readFolderSelection(), activeEdbName());
+    this.entries = mergeWorkspaceList(this.workspaces, indexed, activeEdbName());
   }
 
   /**
@@ -92,21 +98,31 @@ export class WorkspaceSelector extends LitElement {
   }
 
   /**
-   * Switch by NAME through `?space=`, which is what makes a workspace in another
-   * file reachable: the boot resolution finds that file and adopts it
-   * (`db/edb/space-resolve.ts`). Nothing here has to know where it lives.
+   * Switch to whichever entry that option stands for.
+   *
+   * The option's value is `id` + `file`, because neither alone identifies a row:
+   * the list deliberately shows two copies of one workspace when the folder holds
+   * one and this database holds another, and a title is not unique either — two
+   * files can both be titled "Simon".
+   *
+   * That pair is then what gets ACTED on. It used to be resolved back to the entry
+   * and thrown away again — `openWorkspace(entry.name)` — which put the file the
+   * user had just distinguished beyond the reach of everything downstream, so boot
+   * re-derived a file from the name and both copies opened the same one. See
+   * `openListEntry`.
    */
   private switchWorkspace(value: string) {
     const entry = this.entries.find((e) => `${e.id}\u0000${e.file ?? ''}` === value);
-    if (entry) openWorkspace(entry.name);
+    if (entry) void openListEntry(entry);
   }
 
   /**
    * The TITLE is what a workspace is called, so it is what the list shows
    * (`workspaceLabel`). The store subscription above re-runs on any write to
    * `workspaces`, so a title edited in Settings reaches this list with nothing else
-   * to wire up. Each option's VALUE stays keyed on the id — a title is not
-   * routable, and two workspaces may share one.
+   * to wire up. Each option's VALUE stays keyed on the id AND the file — a title
+   * is not routable and two workspaces may share one, and the file is what tells
+   * two copies of one workspace apart.
    *
    * The FILE is a tooltip, never part of the text. A list of
    * "workspace ┈ workspace.edb" is a list of names read twice, and the file name

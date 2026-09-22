@@ -35,17 +35,31 @@
 // explicit `AND` builds a group that must match as a whole.
 //
 // Per-token semantics (case-insensitive):
-//   • plain text        → substring match.
-//   • `^text`           → starts-with match, anchored at the first character.
+//   • plain text        → the `defaultSubstring` option decides: substring by
+//     default, exact when the user has turned that setting off. Every other
+//     form below says which it wants and ignores the setting.
+//   • `*text*`          → CONTAINS, said explicitly.
+//   • `text*` / `^text` → starts-with, anchored at the first character.
+//   • `*text`           → ends-with.
+//   • `"text"`          → exact, when it is one entry of a LIST. The whole
+//     input in quotes is not a list at all — see `isListExpression`.
 //   • `=text`           → exact match against the WHOLE cell (not trimmed).
-//   • `!text`           → NOT substring. Because a null or empty cell never
-//     contains a non-empty term, `!true` on a boolean column also surfaces the
-//     empty/null rows.
-//   • `!=text`          → NOT an exact match.
+//   • `!text`           → NOT. Because a null or empty cell never contains a
+//     non-empty term, `!true` on a boolean column also surfaces the empty rows.
 //   • `NULL`            → cell is null/undefined or (after trim) empty.
 //   • `!NULL`           → cell has any non-empty value.
 //   • `!` alone         → same as `!NULL` (cell has a value).
 //   • empty query       → matches everything (no filter).
+//
+// `*` is a wildcard OUTSIDE quotes only, so `"a*b"` is the literal value, and a
+// token that is nothing but stars stays literal too (`*` is a search for an
+// asterisk, since an empty term already means "is this cell blank").
+//
+// One limitation worth knowing: a BARE token whose term needs quoting (it holds
+// a comma, or starts with `!`/`^`/`=`/`*`) cannot survive
+// `compose → parse`, because the quotes it gains come back meaning `exact`.
+// Give such a token an explicit anchor — every composer in the app already
+// does, the funnel and the view pills both emitting `=`.
 //
 // `NULL` is matched as a whole token (case-insensitive), so a plain search for
 // the literal text "null" inside a cell is intentionally not reachable — the
@@ -74,6 +88,20 @@ export interface FilterToken {
   prefix?: boolean;
   exact?: boolean;
   /**
+   * `*foo` — the cell ENDS WITH the term. The one shape the grammar could not
+   * express before the wildcards arrived.
+   */
+  suffix?: boolean;
+  /**
+   * `*foo*` — the cell CONTAINS the term, said explicitly.
+   *
+   * Distinct from a bare token with no anchor at all, which means "whichever
+   * the `defaultSubstring` option says". Keeping the explicit form as its own
+   * flag is what lets `composeColumnFilter` round-trip it: a bare token would
+   * come back reading as the default, and the default can be off.
+   */
+  contains?: boolean;
+  /**
    * This token is joined to the one BEFORE it with `AND`, so the two must match
    * the same cell together. It describes the separator, not the term, which is
    * why the flat token list stays the public shape: every existing consumer
@@ -86,6 +114,44 @@ export interface FilterToken {
 /** Is a cell value considered empty/null for filtering purposes? */
 function isNullish(value: unknown): boolean {
   return value == null || String(value).trim() === '';
+}
+
+/**
+ * Does this input want to be read as a LIST of include/exclude values, or as
+ * one piece of plain text?
+ *
+ * The filter box takes both, and guessing wrong is the difference between
+ * finding the rows and finding nothing. Two rules, in order:
+ *
+ *  1. The WHOLE input in quotes, with no other quote in it, is plain text. This
+ *     is the deliberate override — the only way to search for a value that
+ *     really contains a comma or a leading `!`.
+ *  2. Otherwise it is a list only if it carries a mark that says so: a comma,
+ *     `!`, `^`, `=`, `*`, or a standalone `AND` / `OR`. `*` and `=` are in that
+ *     set because `foo*` and `=foo` mean nothing as literal text.
+ *
+ * Anything else is plain text, so an ordinary phrase keeps working with no
+ * syntax to learn.
+ */
+export function isListExpression(raw: string): boolean {
+  const q = String(raw ?? '').trim();
+  if (q === '') return false;
+  if (isFullyQuoted(q)) return false;
+  return /[,!^=*]/.test(q) || /\s(AND|OR)(?=[\s,]|$)/.test(q);
+}
+
+/** The whole input in quotes, with no other quote inside it. */
+function isFullyQuoted(q: string): boolean {
+  return q.length >= 2 && q.startsWith('"') && q.endsWith('"') && (q.match(/"/g) ?? []).length === 2;
+}
+
+/**
+ * The text a plain-text input is really asking for: the inner text when the
+ * user quoted the whole thing, otherwise the input as typed.
+ */
+export function plainTextOf(raw: string): string {
+  const q = String(raw ?? '').trim();
+  return isFullyQuoted(q) ? q.slice(1, -1) : q;
 }
 
 /**
@@ -113,11 +179,35 @@ export function parseColumnFilter(raw: string): FilterToken[] {
   let pendingAnd = false; // an `AND` was read; it belongs to the NEXT token
 
   const flush = () => {
-    const term = hadQuote ? buf : buf.trim();
+    let term = hadQuote ? buf : buf.trim();
+    // Excel's wildcard, and only outside quotes: `"a*b"` is the literal value.
+    // A token that is nothing but stars keeps them as text — `*` alone is a
+    // search for an asterisk, not a match-everything, because an empty term
+    // already means "is this cell blank" further down.
+    let star: 'contains' | 'prefix' | 'suffix' | null = null;
+    if (!hadQuote && !exact && !prefix && /[^*]/.test(term)) {
+      const lead = term.startsWith('*');
+      const tail = term.endsWith('*');
+      if (lead && tail && term.length > 1) {
+        star = 'contains';
+        term = term.slice(1, -1);
+      } else if (tail) {
+        star = 'prefix';
+        term = term.slice(0, -1);
+      } else if (lead) {
+        star = 'suffix';
+        term = term.slice(1);
+      }
+    }
     if (sawText || negate) {
       const token: FilterToken = { term, negate };
-      if (prefix) token.prefix = true;
-      if (exact) token.exact = true;
+      if (prefix || star === 'prefix') token.prefix = true;
+      if (star === 'suffix') token.suffix = true;
+      if (star === 'contains') token.contains = true;
+      // A quoted entry in a LIST is an exact value — `"Foo Bar","Baz"` is a
+      // two-value picker, not two substrings. The whole-input quoted form never
+      // reaches here: `isListExpression` sends it down the plain-text path.
+      if (exact || (hadQuote && !star)) token.exact = true;
       // Nothing to join to when this is the first token — a leading `AND` is
       // dropped rather than left dangling for `composeColumnFilter` to emit.
       if (pendingAnd && tokens.length > 0) token.and = true;
@@ -210,8 +300,14 @@ export function composeColumnFilter(tokens: FilterToken[]): string {
         : needsQuoting(t.term)
           ? `"${t.term.replace(/"/g, '""')}"`
           : t.term;
-    const anchor = t.exact ? '=' : t.prefix ? '^' : '';
-    const text = (t.negate ? '!' : '') + anchor + body;
+    // An EXACT token whose term had to be quoted is written as the quoted form
+    // alone: quotes already mean exact inside a list, so `="!bang"` would say it
+    // twice and, worse, would not survive `compose → parse → compose`.
+    // `^` rather than `foo*` for a prefix, because the two mean the same and the
+    // anchor is what every existing composer and test already round-trips.
+    const quoted = body !== t.term;
+    const anchored = t.exact ? (quoted ? body : `=${body}`) : t.prefix ? `^${body}` : t.contains ? `*${body}*` : t.suffix ? `*${body}` : body;
+    const text = (t.negate ? '!' : '') + anchored;
     // `and` joins to the token before it, so it cannot open the expression: a
     // caller that dropped the first token (the view pills do) must not get a
     // string that starts with " AND ".
@@ -239,11 +335,15 @@ export function groupColumnFilter(tokens: FilterToken[]): FilterToken[][] {
  * Does one piece of text satisfy a token's anchoring? Not trimmed — `=` is an
  * exact match against the whole thing, so " foo " is not `=foo`.
  */
-function matchesText(value: unknown, token: FilterToken): boolean {
+function matchesText(value: unknown, token: FilterToken, defaultSubstring: boolean): boolean {
   const haystack = String(value ?? '').toLowerCase();
   const needle = token.term.toLowerCase();
   if (token.exact) return haystack === needle;
-  return token.prefix ? haystack.startsWith(needle) : haystack.includes(needle);
+  if (token.prefix) return haystack.startsWith(needle);
+  if (token.suffix) return haystack.endsWith(needle);
+  if (token.contains) return haystack.includes(needle);
+  // No anchor of any kind: the setting decides which way a bare value leans.
+  return defaultSubstring ? haystack.includes(needle) : haystack === needle;
 }
 
 /** An array cell is empty when it has no members, whatever its spelling. */
@@ -256,22 +356,22 @@ function isEmptyCell(value: unknown, members: string[] | null): boolean {
  * `array` column, in which case the token tests each member and one hit is
  * enough.
  */
-function matchesTerm(value: unknown, token: FilterToken, members: string[] | null): boolean {
+function matchesTerm(value: unknown, token: FilterToken, members: string[] | null, defaultSubstring: boolean): boolean {
   const term = token.term;
-  // An empty term (a lone `!`) always tests emptiness — `^`/`=` cannot anchor
-  // nothing. `NULL` tests emptiness too, unless `^` or `=` asked for the
-  // literal text.
+  // An empty term (a lone `!`) always tests emptiness — an anchor cannot anchor
+  // nothing. `NULL` tests emptiness too, unless an anchor asked for the literal
+  // text.
   if (term.trim() === '') return isEmptyCell(value, members);
-  if (!token.prefix && !token.exact && term.toUpperCase() === 'NULL') {
+  if (!token.prefix && !token.exact && !token.suffix && !token.contains && term.toUpperCase() === 'NULL') {
     return isEmptyCell(value, members);
   }
-  if (members) return members.some((m) => matchesText(m, token));
-  return matchesText(value, token);
+  if (members) return members.some((m) => matchesText(m, token, defaultSubstring));
+  return matchesText(value, token, defaultSubstring);
 }
 
 /** Does the cell satisfy every token of one AND-group? */
-function matchesGroup(value: unknown, group: FilterToken[], members: string[] | null): boolean {
-  return group.every((t) => (t.negate ? !matchesTerm(value, t, members) : matchesTerm(value, t, members)));
+function matchesGroup(value: unknown, group: FilterToken[], members: string[] | null, defaultSubstring: boolean): boolean {
+  return group.every((t) => (t.negate ? !matchesTerm(value, t, members, defaultSubstring) : matchesTerm(value, t, members, defaultSubstring)));
 }
 
 /**
@@ -281,10 +381,11 @@ function matchesGroup(value: unknown, group: FilterToken[], members: string[] | 
  * matching to per-member (see the header). Every other type reads the cell as
  * one value, so a caller that knows no type can leave it out.
  */
-export function matchesColumnFilter(value: unknown, rawQuery: string, opts?: { type?: string | undefined }): boolean {
+export function matchesColumnFilter(value: unknown, rawQuery: string, opts?: { type?: string | undefined; defaultSubstring?: boolean | undefined }): boolean {
   const groups = groupColumnFilter(parseColumnFilter(rawQuery));
   if (groups.length === 0) return true;
   const members = opts?.type === 'array' ? arrayMembers(value) : null;
+  const defaultSubstring = opts?.defaultSubstring ?? true;
 
   // A comma-separated NEGATIVE token on its own still excludes outright, which
   // is what makes `Open,!urgent` mean "Open but not urgent" rather than "Open OR
@@ -292,9 +393,9 @@ export function matchesColumnFilter(value: unknown, rawQuery: string, opts?: { t
   // is one condition among several instead of a veto over the whole filter.
   const vetoes = groups.filter((g) => g.length === 1 && g[0]!.negate);
   for (const g of vetoes) {
-    if (matchesTerm(value, g[0]!, members)) return false;
+    if (matchesTerm(value, g[0]!, members, defaultSubstring)) return false;
   }
   const required = groups.filter((g) => !(g.length === 1 && g[0]!.negate));
   if (required.length === 0) return true;
-  return required.some((g) => matchesGroup(value, g, members));
+  return required.some((g) => matchesGroup(value, g, members, defaultSubstring));
 }

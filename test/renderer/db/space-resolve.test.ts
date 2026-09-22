@@ -15,7 +15,9 @@ const NOTHING: SpaceEvidence = {
   isActive: false,
   hasLocalDb: false,
   inGrantedFolder: false,
-  fileIsNewer: false,
+  // No stamp: we have never read that file on this origin. The default, because
+  // it is what every new origin, profile and machine starts from.
+  verdict: 'unknown',
   canAskForFolder: false,
 };
 
@@ -72,26 +74,42 @@ describe('decideSpace', () => {
     expect(decideSpace(evidence({ isActive: true, hasLocalDb: true, inGrantedFolder: true }))).toBe('create');
   });
 
-  it('prefers the browser copy over the folder file', () => {
-    // Adopting the folder file means importDb over the browser's copy, and that
-    // copy holds anything not yet saved back — boot never reads the user's file.
-    expect(decideSpace(evidence({ hasLocalDb: true, inGrantedFolder: true }))).toBe('adopt-local-db');
+  it('keeps the browser copy without asking when the file is exactly as we left it', () => {
+    // `same` is the only verdict that PROVES the two copies are one thing, so it
+    // is the only one that may be settled in silence.
+    expect(decideSpace(evidence({ hasLocalDb: true, inGrantedFolder: true, verdict: 'same' }))).toBe('adopt-local-db');
   });
 
-  it('takes the folder file when it has been written since this copy was made', () => {
-    // Two tabs on different origins share the folder and nothing else, so this is
-    // the only way the second one ever sees what the first one saved.
-    expect(decideSpace(evidence({ hasLocalDb: true, inGrantedFolder: true, fileIsNewer: true }))).toBe('adopt-folder-file');
+  it('keeps the browser copy without asking when this tab holds unsaved work', () => {
+    // `ahead` is the file plus work. Taking the file would throw the work away,
+    // and there is nothing on the file's side to weigh against it.
+    expect(decideSpace(evidence({ hasLocalDb: true, inGrantedFolder: true, verdict: 'ahead' }))).toBe('adopt-local-db');
   });
 
-  it('still prefers the browser copy when this tab has unsaved work', () => {
-    // `fileIsNewer` is false whenever the local copy is dirty — see file-stamp's
-    // `conflict` verdict, which a sync asks about rather than deciding here.
-    expect(decideSpace(evidence({ hasLocalDb: true, inGrantedFolder: true, fileIsNewer: false }))).toBe('adopt-local-db');
+  it('takes the file when it has been written since this copy was made', () => {
+    // The mirror image of `ahead`: the file is this copy plus work, so taking it
+    // loses nothing — and it is the only way two origins sharing a folder ever
+    // converge, since everything but the folder is origin-scoped.
+    expect(decideSpace(evidence({ hasLocalDb: true, inGrantedFolder: true, verdict: 'file-newer' }))).toBe('adopt-folder-file');
   });
 
-  it('does not adopt a newer file that is not in the folder any more', () => {
-    expect(decideSpace(evidence({ hasLocalDb: true, inGrantedFolder: false, fileIsNewer: true }))).toBe('adopt-local-db');
+  it('asks when both copies moved', () => {
+    expect(decideSpace(evidence({ hasLocalDb: true, inGrantedFolder: true, verdict: 'conflict' }))).toBe('ask-which-copy');
+  });
+
+  it('asks when there is no stamp, rather than keeping whatever the browser holds', () => {
+    // The whole bug: a stamp only exists on the origin that imported or wrote the
+    // file, so `unknown` is every new origin — and the browser's copy of that name
+    // may be the empty database a boot creates when the pool is asked for a file
+    // it does not hold. That copy used to win in silence.
+    expect(decideSpace(evidence({ hasLocalDb: true, inGrantedFolder: true, verdict: 'unknown' }))).toBe('ask-which-copy');
+  });
+
+  it('does not ask about a file that is not in the folder any more', () => {
+    // Nothing to compare with and nothing to offer: the browser's copy is all
+    // there is.
+    expect(decideSpace(evidence({ hasLocalDb: true, inGrantedFolder: false, verdict: 'file-newer' }))).toBe('adopt-local-db');
+    expect(decideSpace(evidence({ hasLocalDb: true, inGrantedFolder: false, verdict: 'unknown' }))).toBe('adopt-local-db');
   });
 
   it('opens the folder file when this browser holds nothing to lose', () => {
@@ -106,9 +124,17 @@ describe('decideSpace', () => {
     expect(decideSpace(NOTHING)).toBe('create');
   });
 
-  it('never asks when something was already found', () => {
+  it('never asks for a folder when something was already found', () => {
     expect(decideSpace(evidence({ hasLocalDb: true, canAskForFolder: true }))).toBe('adopt-local-db');
     expect(decideSpace(evidence({ inGrantedFolder: true, canAskForFolder: true }))).toBe('adopt-folder-file');
+  });
+
+  it('opens the folder file with no question when this browser holds no copy at all', () => {
+    // One copy is not a choice. The question only exists where both sides have
+    // something that could be lost.
+    for (const verdict of ['same', 'ahead', 'file-newer', 'conflict', 'unknown'] as const) {
+      expect(decideSpace(evidence({ inGrantedFolder: true, verdict }))).toBe('adopt-folder-file');
+    }
   });
 });
 

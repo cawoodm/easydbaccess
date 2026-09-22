@@ -45,6 +45,8 @@ process — the Electron storage layer depends on it.
 | `npm run test:e2e:desktop` | Playwright against the **real Electron app** (`test/e2e/desktop/`, own config). Builds the renderer and main process first. Covers boot, the file it writes, restart, Save As, Import.        |
 | `npm run format`           | Prettier across `packages/` and `test/`.                                                                                                                                                      |
 | `npm run package:electron` | `package-electron.ps1 -Installer` — builds renderer + electron, runs `electron-builder` for the Windows installer.                                                                            |
+| `npm run docker`           | Builds the **working tree** into `easydbaccess:<version>` + `:latest` and runs it detached on **`http://localhost:8190/`** (nginx serving the renderer's `dist`).                              |
+| `npm run docker:main`      | Same, but from a clean `git archive` of `main`, so local edits can't leak into the image. A separate script because npm eats `-Main` if you pass it to `npm run docker`.                       |
 | `npm run publish`          | `publish.ps1` — release script. Only needed for **branch previews** now; `main` publishes itself (see below).                                                                                 |
 
 The `dev` script chains renderer + server with `&`; on Windows prefer running
@@ -60,6 +62,14 @@ project site is served at the repo-name path, which is the same
 `/easydbaccess/` URL `publish.ps1` writes into the Pages repo — so the project
 site now owns that path and the `easydbaccess` folder in
 `cawoodm/cawoodm.github.io` is no longer what visitors see.
+
+The deployed build is a **PWA**: `vite.config.ts`'s `gen-service-worker` plugin
+writes a `dist/sw.js` that precaches the whole app, so a reload with no internet
+still opens the workspace. Nothing is configured per deploy slot — the worker's
+scope and the manifest's are both base-relative, so a `/easydbaccess<N>/` preview
+scopes itself. A new build is offered to the user as a reload prompt and never
+swapped in silently. `?nosw=1` takes the worker off a device. Full picture:
+[`docs/tech/OFFLINE.md`](docs/tech/OFFLINE.md).
 
 Branch previews are still manual and still go through the Pages repo:
 `npm run publish -- -Target easydbaccess<N>`. Don't point `publish.ps1` at the
@@ -184,8 +194,8 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
   `import-data`, `auto-sync`, `views`, `settings`, `url-source`,
   `datasette-import` (+ `datasette-views`), `datasette-connect`, `connect-menu`,
   `projection`, `command-palette-button`, `electron-db`, `sqlitefile-source`,
-  `tips`, `new-plugins`, `commandlets`, `edb-file`, `legacy-import`, `validate`,
-  `run-scripts`, `viz-charts`,
+  `tips`, `new-plugins`, `commandlets`, `edit-record`, `edb-file`, `legacy-import`, `validate`, `run-scripts`,
+  `viz-charts`,
   `viz-map`, `viz-wordcloud`, `viz-custom`.
   Don't add a feature to
   the core if it can be a plugin. (Exception: the Plugin Manager button is core

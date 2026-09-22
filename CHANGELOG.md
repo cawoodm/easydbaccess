@@ -1,5 +1,60 @@
 # CHANGELOG
 
+## 22 Sep 2026
+
+### Features
+
+- 🪶 Visualizations dock side by side as well as stacked: several panes share a row, and both row heights and pane widths drag (v0.0.468)
+- ✨ The preview window header also offers the whole record, so a value that looks wrong can be read against the fields beside it (v0.0.470)
+- 🪶 Filters take Excel's wildcards: `*foo*` contains, `foo*` starts with, `*foo` ends with, and `"foo"` matches the whole cell (v0.0.473)
+- ✨ Settings → Table grid: "Default to substring" decides whether a plain filter value means "contains" or "is exactly" (v0.0.473)
+
+### Bugs
+
+- 🪲 A docked chart or map went blank when another visualization was docked beside it or taken from beside it (v0.0.468)
+- 🪲 A docked map stayed blank after a filter matched nothing, until the app was reloaded (v0.0.468)
+- 🪲 A save the browser refused because another program held the `.edb` reported that state "had changed since it was read from disk", which named neither the file nor the cause (v0.0.471)
+- 🪲 Searching `!CC,Holiday` found nothing: the search box read an exclusion as ordinary text, so only a column's own filter box could exclude a value (v0.0.471)
+- 🪲 A search for `Berlin, DE` could not be made literal: every comma was read as OR, with no way to say the text was meant as typed (v0.0.473)
+- 🪲 Changing a Table grid setting left the rows on screen filtered by the old rules until something else forced a reload (v0.0.473)
+- 🪲 A filter typed exclusion-first, like `!CC,Flat`, matched the exact opposite of what was typed on a big table (v0.0.474)
+- 🪲 An exclusion in the search box excluded nothing once a table was big enough to be read a page at a time (v0.0.474)
+
+## 21 Sep 2026
+
+### Features
+
+- 🪶 Connect asks for your own data or a remote system, and Local Data holds the workspace folder and which of its files this device uses (v0.0.464)
+
+### Bugs
+
+- 🪲 Opening a workspace could silently show an empty copy held by this browser instead of the full one in its file (v0.0.464)
+- 🪲 An empty workspace could be saved over a file holding tables, with no warning (v0.0.464)
+- 🪲 Two files holding a workspace of one name were one destination in the workspace list, so both rows opened the same file (v0.0.464)
+- 🪲 A column-editor save that failed part way said nothing at all, leaving no sign that the table was half-changed (v0.0.463)
+- 🪲 A column of dates with a time was typed as a plain date by the JSON importer, dropping the time from the column's type (v0.0.466)
+- 🪲 A column of dates with no time was typed as a datetime by the Datasette importer, so a birthday column carried a time it never had (v0.0.466)
+- 🪲 A `31/01/2026` date column imported from Datasette was left as plain text, though the same column from a CSV or a JSON file was a date (v0.0.466)
+- 🪲 Referencing a URL typed its columns more crudely than importing the same data, so the referenced table lost the date and list renderers (v0.0.466)
+- 🪲 A Datasette id longer than 15 digits lost its last digits on the way in, so the row carried a number that was never in the source (v0.0.467)
+
+### Chores
+
+- 🔧 The Views manager loads when it is first opened rather than at startup, taking 9 kB off what the app downloads to boot (v0.0.465)
+- 🔧 `npm run dev:renderer` serves its own branch's port again; a hardcoded 5190 had pointed every worktree at main's (v0.0.465)
+
+## 10 Sep 2026
+
+### Features
+
+- 🪶 The hosted app opens and works with no internet: it caches itself, installs like an app, and never hangs on a dead network (v0.0.461)
+
+## 7 Sep 2026
+
+### Features
+
+- ✨ A double-click on a row, or `edit/<table>/<key>`, opens the whole record in one form — read-only where the table is (v0.0.460)
+
 ## 27 Aug 2026
 
 ### Features

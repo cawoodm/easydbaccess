@@ -178,6 +178,74 @@ it safe in the file on disk, none of it on screen, and the boot re-creating the
 workspace record on top. Fixed in v0.0.449;
 `138-first-save-survives-reload.spec.ts` holds it, rows included.
 
+## Which copy, when both exist
+
+Boot reading the pool has a second consequence, and for four versions it was
+silent. This browser's copy of `sales.edb` and the file `sales.edb` are two
+copies of one workspace, and `decideSpace` had to pick one. It picked the
+browser's, unless a boolean `fileIsNewer` said otherwise — and that boolean was
+false whenever there was no stamp to compute it from.
+
+**A stamp only exists on the origin that imported or wrote the file**
+(`file-stamp.ts` is `localStorage`). So `unknown` is every new origin — a branch
+port, the Docker build, another browser profile, another machine — and on all of
+them the browser's copy won with no question asked. Where that copy was the empty
+database a boot creates for a name the pool does not hold, the workspace opened
+with no tables while 7 MB of it sat in the file.
+
+`decideSpace` now takes the **verdict**, not a boolean, and two copies that both
+exist are settled by one table (`settleTwoCopies`):
+
+| verdict      | what happens                                             |
+| ------------ | -------------------------------------------------------- |
+| `same`       | the browser's copy — the two are one thing               |
+| `ahead`      | the browser's copy — it is the file plus work            |
+| `file-newer` | the FILE — it is the browser's copy plus work           |
+| `conflict`   | **ask**                                                  |
+| `unknown`    | **ask**                                                  |
+
+The three silent answers are silent because the stamp PROVES which copy is
+current and the other holds nothing it does not. The two that ask are the two
+where each side may hold something the other lacks — and `unknown` now means the
+same thing here as it does in `active-file-sync.ts`, which always answered it with
+`ask-unknown`. One verdict read two opposite ways in two modules is what let a
+workspace open empty in one place and be asked about in the other.
+
+A Sync asks about `file-newer` as well, and the difference is the moment rather
+than the rule: there the workspace is already on screen and loading the file
+replaces it under the user, where here they are OPENING that workspace and the
+current copy is what they asked for.
+
+### The question itself
+
+`db/edb/copy-choice.ts`. Three answers, each naming the copy that survives:
+
+- **Open the copy in the file** — import it over the browser's copy
+- **Keep the copy in this browser** — the file is not touched
+- **Compare them…** — open the browser's copy, then settle the two table by
+  table with the machinery in [Settling two copies](#settling-two-copies-table-by-table-and-row-by-row)
+
+Comparing cannot be done in place: `merge-file.ts` opens the file BESIDE a live
+store, and at this moment neither copy has been adopted. So it adopts the side
+that destroys nothing and leaves a one-shot `sessionStorage` marker that
+`edb-file.ts`'s `load()` picks up after the reload.
+
+Both sides are described with `copy-facts.ts`, and neither read is expensive: the
+file's counts come out of the folder index (the scan already had it open), and the
+browser's come from `peekDatabase` — a worker op that opens the pool file on a
+second connection and runs two aggregates. No rows on either side.
+
+**Who asks depends on who has a gesture.** A click on the workspace selector has
+one, so `openWorkspaceInFile` asks before it switches anything. A boot has none
+and no shell either, so it takes the browser's copy — the answer that cannot
+destroy anything — and records the question for `load()` to put. That note is
+`sessionStorage`, not module state: taking the browser's copy is itself an adopt,
+so the tab that recorded the question is replaced before anything can ask it.
+
+`openWorkspaceInFile` answers `switched | cancelled | unavailable` rather than a
+boolean, because a deliberate Cancel and a file that has been moved are not the
+same news and the selector must not report the first as the second.
+
 ## A folder, not a file
 
 The first time a workspace goes into a file, the app asks for a **folder**
@@ -194,6 +262,43 @@ The first time a workspace goes into a file, the app asks for a **folder**
 - **Connect / Change workspace folder** — one command, whose title says which of
   the two it will do. **Sync workspace folder** re-reads it, and says so rather than
   going quiet when no folder has been granted.
+
+All of it is also reachable from **Connect → Local Data**, which is the same
+folder plus the switch below. See "Which files this device uses".
+
+## Which files this device uses
+
+A connected folder was all-or-nothing: every `.edb` in it was read, parsed and
+listed. **Connect → Local Data** (`dialogs/local-data-dialog.ts`) is where that
+becomes a choice — one checkbox for "use every `.edb` in this folder", and a
+list of the files under it when that is off.
+
+Switching a file off is **not a view filter**. `scanFolder` skips it before it
+opens anything: not read, not parsed, not conflict-checked, never written. Only
+its NAME is collected — a directory listing is cheap, everything else is not,
+and without the name there would be nothing left in the dialog to switch back
+on. That is why `FolderIndex` carries `files` (every name seen) beside
+`workspaces` (the ones actually read).
+
+Two rules that are easy to get wrong:
+
+- **"Every `.edb`" is a rule, not a tick-everything shortcut.** With it on, a
+  file dropped into the folder tomorrow is picked up on its own. Turning it OFF
+  seeds the list with every file currently known, so unticking the rule never
+  hides anything by itself — the user then unticks what they actually mean.
+- **The file this tab has OPEN can never be switched off.** Its workspace is
+  live and everything is bound to it, so the row is ticked and disabled rather
+  than offered as a choice.
+
+The selection is **device-local** (`eda:folderFiles`), like the index beside it
+and for a stronger reason: it says what THIS machine wants to look at. Carried
+inside a shared `.edb` it would hide someone else's workspaces on their own
+computer. Anything unreadable there reads back as "all" — never as "nothing",
+because a bad value must not make a user's workspaces disappear.
+
+A sync says how many files it left alone (`SyncReport.offFiles`). A count lower
+than the folder looks, with no explanation, is the report that sends people
+hunting for a bug.
 
 **Nothing asks for a file NAME any more.** `edbTargetNamed` (was
 `chooseEdbTarget`) takes the name rather than suggesting it: since Open reads the
@@ -277,8 +382,9 @@ second copy beside it, or an OS save dialog renamed one. Then the folder holds
 the four things the rule underpins breaks (`db/edb/file-identity.ts`):
 
 - the workspace list holds `alpha` twice, told apart only by the file name;
-- picking either entry goes through `?space=alpha`, which resolves the file from
-  the id — so both entries open `alpha.edb`;
+- ~~picking either entry goes through `?space=alpha`, which resolves the file from
+  the id — so both entries open `alpha.edb`~~ — **fixed in v0.0.462**, see
+  [the selector opens the file, not the name](#the-selector-opens-the-file-not-the-name);
 - a clash is matched on the workspace NAME, so one local `alpha` clashes with two
   files and asks the same question twice;
 - Save writes `alpha.edb`, so the copy in `beta.edb` is never written again and
@@ -308,6 +414,53 @@ the other is set aside until the user renames it on disk.
 The file this tab has OPEN is never touched. Its workspace is live — the store, the
 panels and every plugin are bound to that id — so a rename inside the file would
 leave the tab saving under an id the file no longer holds.
+
+### The selector opens the file, not the name
+
+Repairing the identity is the right fix for a folder that holds two files of one
+workspace, but it is not the only way the list shows two rows for one name, and it
+needs the user's answer before it can do anything. Declining the clash prompt means
+"keep both" **on purpose**, and two workspaces in one database may share a name
+outright (`freeWorkspaceId` puts `sales-2` beside `sales` and both stay called
+`sales`). So the list has to be able to open a row it cannot tell apart by name.
+
+It could not. Each `<option>`'s value was already the pair `id` + `file` — the only
+thing that identifies a row — and `switchWorkspace` resolved it back to the entry
+and then threw the file away again, calling `openWorkspace(entry.name)`. From there
+the name was all anything downstream had, and boot turned it back into a file with
+`spaceFileName`. Two files holding `simon` were one destination and both rows
+opened `simon.edb`.
+
+`openListEntry` (`chrome/workspace-actions.ts`) acts on the pair instead:
+
+- **No file** — a workspace in the database this tab has open. `?space=<id>`, as
+  before, but on the **id** rather than the name, because a name is not unique
+  inside one database either.
+- **A file** — `openWorkspaceInFile(file, id)` (`db/edb/space-adopt.ts`). The file
+  decides the database and the id decides the workspace inside it; neither is
+  inferred from the other. Both come from the folder index, which read them out of
+  that file.
+
+`openWorkspaceInFile` runs `decideSpace` keyed on the **file** — the same rule boot
+uses, which until now could only be reached through an id — and then adopts, sets
+the active-file marker and calls `reloadWithSpace(id)`. Not `location.reload()`:
+the URL still carries the `?space=` of the workspace being left, and it would
+outrank the file just adopted.
+
+Three differences from the boot path, all because a click is not a boot.
+
+The boot-loop guard is skipped, or one failed boot would make that row unclickable
+for the rest of the tab's life.
+
+`ask-for-folder` is answered here instead of being handed to the UI. That verdict
+means the folder is remembered but its grant has lapsed, which is every fresh
+browser session unless Chrome persisted it; boot cannot ask because
+`requestPermission` needs a gesture, and a click is one. Without it the list would
+go on offering every file in the folder and refusing to open any of them.
+
+And a file that cannot be got at is reported rather than created: the index is a
+cache, so the file may have been moved or renamed since the last scan — and
+inventing an empty workspace in its place would be a lie the list told the user.
 
 ### What this deliberately does NOT do
 

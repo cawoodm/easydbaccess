@@ -38,6 +38,7 @@ import { readChartTheme, type MapPoint } from './chart-data.js';
 import { MIN_WORLD_ZOOM, WORLD_BOUNDS, wholeZoomShowingWorld } from './map-zoom.js';
 import { markerRadiusRange, scaleMarkerRadii } from './marker-scale.js';
 import { sameMapPoints, sameVizOptions } from './same-input.js';
+import { isOffline } from '../../util/net.js';
 
 export interface MapOptions {
   tileUrl?: string | undefined;
@@ -163,6 +164,14 @@ export class VizPointMap extends LitElement {
       this.floorZoomToWorld();
     });
     this.ro.observe(this);
+    // A DOM MOVE is a disconnect followed by a connect, and `disconnectedCallback`
+    // below destroys the Leaflet map. Nothing was going to ask for it back: the
+    // panel re-renders and hands over the same points, and `updated` compares
+    // them BY VALUE (that is what stops a redraw mid-drag), so it correctly
+    // decides there is nothing to draw — over a map that no longer exists. The
+    // pane came back empty and stayed empty until a reload. So a reconnect asks
+    // for the redraw itself.
+    if (this.hasUpdated) void this.draw();
   }
 
   override disconnectedCallback(): void {
@@ -170,10 +179,23 @@ export class VizPointMap extends LitElement {
     this.generation++;
     this.ro?.disconnect();
     this.ro = null;
+    this.teardownMap();
+  }
+
+  /**
+   * Let the Leaflet instance go.
+   *
+   * Called from two places, and the second is the less obvious one: whenever the
+   * CONTAINER it was built against is no longer the container on screen. The view
+   * goes with it, so `fitted` is cleared too — the next draw has no pan or zoom of
+   * the user's left to preserve.
+   */
+  private teardownMap(): void {
     this.map?.remove();
     this.map = null;
     this.tiles = null;
     this.markers = [];
+    this.fitted = false;
   }
 
   override updated(changed: PropertyValues): void {
@@ -237,8 +259,27 @@ export class VizPointMap extends LitElement {
 
   private async draw(): Promise<void> {
     const gen = ++this.generation;
+    // Nothing to plot: `render()` puts the empty notice where the container was,
+    // so the map has to go with it. Leaving it alive was the whole of the "the map
+    // craps out if I start filtering" bug — a filter matching nothing removed the
+    // div from under a live Leaflet instance, which then held an orphan node and
+    // drew every later marker into it, off screen.
+    if (this.points.length === 0) {
+      this.teardownMap();
+      // Remembered, unlike an abandoned run below: the empty state IS drawn, and
+      // the input has to be recorded or filtering back to the points we started
+      // with reads as "already drawn" and nothing is rebuilt.
+      this.drawnPoints = this.points;
+      this.drawnOptions = this.options;
+      return;
+    }
     const host = this.querySelector('.map') as HTMLElement | null;
-    if (!host || this.points.length === 0) return;
+    if (!host) return;
+    // The container Lit has on screen now, not the one the map remembers. They
+    // differ after any render that swapped the empty notice back out, and a map
+    // pointing at the wrong one is invisible rather than broken — so this is the
+    // invariant rather than a guess at which renders can do it.
+    if (this.map && this.map.getContainer() !== host) this.teardownMap();
     // The CSS has to be in place BEFORE the map is built: Leaflet measures the
     // container and positions its panes on creation, and an unstyled container
     // measures wrong.
@@ -346,7 +387,9 @@ export class VizPointMap extends LitElement {
       ></div>
       ${this.tileError
         ? html`<div role="status" style="position:absolute;left:0;right:0;bottom:0;z-index:500;padding:3px 8px;font:11px/1.35 system-ui,sans-serif;color:#92400e;background:rgba(255,251,235,.95)">
-            Map tiles could not be loaded — the points are still plotted. Check the tile URL in Settings → Visualizations, or your connection.
+            ${isOffline()
+              ? html`You are offline — the map background needs a connection, but the points are still plotted and the data is untouched.`
+              : html`Map tiles could not be loaded — the points are still plotted. Check the tile URL in Settings → Visualizations, or your connection.`}
           </div>`
         : nothing}
     `;

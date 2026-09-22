@@ -11,6 +11,7 @@
 // `/plugins/registry` answers the same shape, which is why one reader serves both.
 
 import type { PluginType } from '@easydb/shared';
+import { fetchWithTimeout } from '../util/net.js';
 
 /** One plugin offered by a catalog. `url` may be relative to the catalog itself. */
 export interface CatalogEntry {
@@ -53,9 +54,13 @@ export function resolveCatalog(entries: readonly CatalogEntry[], catalogUrl: str
  *
  * `no-store`, because the question both callers ask is "what is in it NOW", and a
  * cached copy is exactly the answer that hides a new plugin.
+ *
+ * Bounded: `new-plugins` reads this at the tail of every boot, so a catalog host
+ * that accepts the connection and then says nothing would otherwise stall the
+ * end of the boot sequence indefinitely.
  */
 export async function fetchCatalog(catalogUrl: string): Promise<CatalogResolved[]> {
-  const res = await fetch(catalogUrl, { cache: 'no-store' });
+  const res = await fetchWithTimeout(catalogUrl, { cache: 'no-store' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = (await res.json()) as { plugins?: CatalogEntry[] };
   return resolveCatalog(Array.isArray(json.plugins) ? json.plugins : [], catalogUrl);

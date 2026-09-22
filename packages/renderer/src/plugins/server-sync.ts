@@ -1,4 +1,5 @@
 import type { HostApi, PluginModule } from '@easydb/shared';
+import { describeNetworkError, fetchWithTimeout, isOffline } from '../util/net.js';
 import { serializeWorkspace } from './dump-export.js';
 import { loadEtag, loadServerUrl, replaceWorkspace, saveEtag, saveServerUrl, stripEtag } from './server-sync-core.js';
 
@@ -43,10 +44,34 @@ export function init(api: HostApi): void {
         if (choice === 'push') await push(api);
         else if (choice === 'pull') await pull(api);
       } catch (err) {
-        api.ui.dialogs.toast(`${choice === 'push' ? 'Push' : 'Pull'} failed: ${(err as Error).message}`, { kind: 'error', title: 'Server sync' });
+        // `describeNetworkError` so an unreachable server says so, instead of
+        // the browser's bare "Failed to fetch".
+        api.ui.dialogs.toast(`${choice === 'push' ? 'Push' : 'Pull'} failed: ${describeNetworkError(err)}`, { kind: 'error', title: 'Server sync' });
       }
     },
   });
+}
+
+/**
+ * Deadline for a request carrying a whole workspace. Deliberately far longer
+ * than the default: the body can be tens of megabytes, the user started this
+ * and is watching, and cutting off a nearly-finished push would be worse than
+ * waiting.
+ */
+const SYNC_BODY_TIMEOUT_MS = 120_000;
+
+/**
+ * Stop before doing anything expensive or destructive when the device is
+ * certainly offline, and say so.
+ *
+ * Ordering matters more than it looks: `pull` used to ask "replace your local
+ * copy?" and only then discover it had no network — so the user answered a
+ * frightening question for nothing.
+ */
+function stopIfOffline(api: HostApi): boolean {
+  if (!isOffline()) return false;
+  api.ui.dialogs.toast(describeNetworkError(null), { kind: 'warning', title: 'Server sync' });
+  return true;
 }
 
 // -- Push ---------------------------------------------------------------------
@@ -56,6 +81,7 @@ async function push(api: HostApi): Promise<void> {
   if (!wsId) throw new Error('no active workspace');
   const url = await ensureServerUrl(api);
   if (!url) return;
+  if (stopIfOffline(api)) return;
 
   const body = await serializeWorkspace(api);
   const etag = await loadEtag(api, wsId);
@@ -63,11 +89,15 @@ async function push(api: HostApi): Promise<void> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (etag) headers['If-Match'] = `"${etag}"`;
 
-  let res = await fetch(`${url}/sync/${encodeURIComponent(wsId)}`, {
-    method: 'PUT',
-    headers,
-    body,
-  });
+  let res = await fetchWithTimeout(
+    `${url}/sync/${encodeURIComponent(wsId)}`,
+    {
+      method: 'PUT',
+      headers,
+      body,
+    },
+    SYNC_BODY_TIMEOUT_MS,
+  );
 
   // Conflict: server has newer data than we last saw. Ask whether to force.
   if (res.status === 412) {
@@ -84,11 +114,15 @@ async function push(api: HostApi): Promise<void> {
       });
       return;
     }
-    res = await fetch(`${url}/sync/${encodeURIComponent(wsId)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' }, // no If-Match → force
-      body,
-    });
+    res = await fetchWithTimeout(
+      `${url}/sync/${encodeURIComponent(wsId)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' }, // no If-Match → force
+        body,
+      },
+      SYNC_BODY_TIMEOUT_MS,
+    );
   }
 
   if (!res.ok) throw new Error(await readError(res));
@@ -109,11 +143,13 @@ async function pull(api: HostApi): Promise<void> {
   if (!wsId) throw new Error('no active workspace');
   const url = await ensureServerUrl(api);
   if (!url) return;
+  // Before the confirm, not after it — see `stopIfOffline`.
+  if (stopIfOffline(api)) return;
 
   const ok = await api.ui.dialogs.confirm(`Replace your local copy of "${wsId}" with the server's version?\n\n` + `Local tables that aren't on the server will be removed.`, 'Server sync — pull');
   if (!ok) return;
 
-  const res = await fetch(`${url}/sync/${encodeURIComponent(wsId)}`);
+  const res = await fetchWithTimeout(`${url}/sync/${encodeURIComponent(wsId)}`, {}, SYNC_BODY_TIMEOUT_MS);
   if (res.status === 404) {
     api.ui.dialogs.toast(`Workspace "${wsId}" doesn't exist on the server yet. Push first.`, {
       kind: 'warning',

@@ -86,3 +86,84 @@ export function orderPanes<T extends { order: number }>(panes: readonly T[]): T[
     .sort((a, b) => a.p.order - b.p.order || a.i - b.i)
     .map(({ p }) => p);
 }
+
+// -- rows of panes ---------------------------------------------------------
+
+/** Narrowest useful pane in a row. Below this a chart has no room for an axis. */
+export const MIN_PANE_W = 80;
+
+/** What the row maths needs off a pane. `row`/`weight` absent ⇒ the old layout. */
+export interface RowMember {
+  order: number;
+  row?: number | undefined;
+  weight?: number | undefined;
+}
+
+/**
+ * Which row a pane is in.
+ *
+ * `row` absent falls back to `order`, which is the whole of the compatibility
+ * story: before panes could share a row, `order` WAS the row index, so a dock
+ * written by an older version groups into one pane per row and nothing changes
+ * on screen.
+ */
+export function rowOf(p: RowMember): number {
+  return p.row ?? p.order;
+}
+
+/**
+ * Panes on one edge, grouped into rows and ordered within each.
+ *
+ * Rows come back in ascending row index and are RENUMBERED as they are grouped —
+ * the caller gets a dense list, so a gap left by a pane that moved away does not
+ * become an empty band. The row index a pane carries is therefore a sort key, not
+ * a coordinate, which is what makes the moves in `viz-dock.ts` able to insert
+ * between two rows with a fraction.
+ */
+export function paneRows<T extends RowMember>(panes: readonly T[]): T[][] {
+  const byRow = new Map<number, T[]>();
+  for (const p of panes) {
+    const key = rowOf(p);
+    const list = byRow.get(key);
+    if (list) list.push(p);
+    else byRow.set(key, [p]);
+  }
+  return [...byRow.entries()].sort((a, b) => a[0] - b[0]).map(([, list]) => orderPanes(list));
+}
+
+/**
+ * The flex weights for one row, normalised.
+ *
+ * A pane with no weight of its own takes an equal share of what the weighted
+ * panes have left, so a row that nobody has dragged divides evenly and a row
+ * where one pane was dragged keeps the others equal to each other. Weights are
+ * floored, because `flex-grow: 0` is a pane of no width at all and a pane the
+ * user cannot see is one they cannot get back.
+ */
+export function rowWeights(panes: readonly RowMember[]): number[] {
+  if (panes.length === 0) return [];
+  const each = 1 / panes.length;
+  const raw = panes.map((p) => (typeof p.weight === 'number' && Number.isFinite(p.weight) && p.weight > 0 ? p.weight : each));
+  const total = raw.reduce((a, b) => a + b, 0);
+  if (total <= 0) return panes.map(() => each);
+  return raw.map((w) => w / total);
+}
+
+/**
+ * Move width between two neighbours in a row, and only those two.
+ *
+ * `dx` is the pointer delta in px and `width` the row's inner width. The pair's
+ * combined share is fixed, so the rest of the row does not reflow under a drag —
+ * dragging one splitter must not shuffle a pane three columns away.
+ *
+ * Both sides are held at `MIN_PANE_W`, expressed as a share of the row, so a
+ * drag past the end stops rather than collapsing a pane to nothing.
+ */
+export function resizedRowWeights(left: number, right: number, dx: number, width: number): [number, number] {
+  const pair = left + right;
+  if (!(width > 0) || !(pair > 0) || !Number.isFinite(dx)) return [left, right];
+  const floor = Math.min(MIN_PANE_W / width, pair / 2);
+  const wantLeft = left + dx / width;
+  const nextLeft = Math.max(floor, Math.min(pair - floor, wantLeft));
+  return [nextLeft, pair - nextLeft];
+}

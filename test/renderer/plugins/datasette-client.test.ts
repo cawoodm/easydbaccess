@@ -585,8 +585,12 @@ describe('response carrying count + primary_keys but no columns key', () => {
     const byField = Object.fromEntries(inferColumnsFromRows(ET_EXTRA.rows).map((c) => [c.field, c.type]));
     expect(byField.rowid).toBe('number');
     expect(byField.executive_id).toBe('number');
-    expect(byField.start).toBe('datetime');
-    expect(byField.end).toBe('datetime');
+    // `1789-04-21` carries no time, so it is a DATE. This read `datetime` until
+    // every importer moved onto one inferrer: Datasette's own regex made the
+    // time optional, so a date-only column came back as a datetime and took the
+    // datetime renderer.
+    expect(byField.start).toBe('date');
+    expect(byField.end).toBe('date');
     expect(byField.type).toBe('string');
     expect(byField.party).toBe('string');
   });
@@ -1266,5 +1270,40 @@ describe('discoverViews', () => {
     });
     const out = await discoverViews(fetchFn, parseDatasetteUrl('https://x.datasette.io/mydb'));
     expect(out).toEqual([{ db: 'mydb', name: 'v', sql: VIEW_SQL }]);
+  });
+});
+
+describe('big integers survive the read', () => {
+  /** A faithful Response double: a real one has `text()`, and that is the path taken. */
+  const textRes = (body: string): Promise<Response> =>
+    Promise.resolve({
+      json: () => Promise.resolve(JSON.parse(body)),
+      text: () => Promise.resolve(body),
+    } as unknown as Response);
+
+  // 19 digits — past 2^53, so `JSON.parse` alone rounds the last digits away.
+  const BIG = '1234567890123456789';
+
+  it('keeps every digit of an id too big for a JS number', async () => {
+    const body = `{"rows":[{"id":${BIG},"name":"a"}],"columns":["id","name"],"next":null}`;
+    const fetchFn = vi.fn(() => textRes(body));
+
+    const out = await fetchRows(fetchFn, parseDatasetteUrl('https://x.datasette.io/db/t'));
+
+    expect(out.rows[0]?.id).toBe(BIG);
+    // The point of the guard: the naive read loses the tail.
+    expect(String(JSON.parse(body).rows[0].id)).not.toBe(BIG);
+  });
+
+  it('still reads an ordinary number as a number', async () => {
+    const fetchFn = vi.fn(() => textRes('{"rows":[{"id":42}],"columns":["id"],"next":null}'));
+    const out = await fetchRows(fetchFn, parseDatasetteUrl('https://x.datasette.io/db/t'));
+    expect(out.rows[0]?.id).toBe(42);
+  });
+
+  it('falls back when a plugin-supplied fetch returns a Response without text()', async () => {
+    const fetchFn = vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ rows: [{ id: 7 }], columns: ['id'], next: null }) } as unknown as Response));
+    const out = await fetchRows(fetchFn, parseDatasetteUrl('https://x.datasette.io/db/t'));
+    expect(out.rows[0]?.id).toBe(7);
   });
 });

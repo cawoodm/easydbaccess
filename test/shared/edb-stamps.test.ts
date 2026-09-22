@@ -93,10 +93,12 @@ describe('rowStamps', () => {
 
     const stamps = store.rowStamps('t1');
     expect(stamps).toHaveLength(2);
-    expect(new Map(stamps.map((s) => [s.id, s.updatedAt]))).toEqual(new Map([
-      ['r1', 100],
-      ['r2', 200],
-    ]));
+    expect(new Map(stamps.map((s) => [s.id, s.updatedAt]))).toEqual(
+      new Map([
+        ['r1', 100],
+        ['r2', 200],
+      ]),
+    );
     // No contents: reading them is what the comparison exists to avoid.
     expect(Object.keys(stamps[0] ?? {}).sort()).toEqual(['id', 'updatedAt']);
   });
