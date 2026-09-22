@@ -35,7 +35,7 @@ Save.
 If you would rather double-click select a word inside a cell, switch the **Edit
 record on double-click** plugin off in the Plugin Manager. The
 [`edit/…` commandlet](commandlets.md) opens the same form from a link or the
-palette.
+palette, and so does the **Edit record** button in a preview window's header.
 
 ## Editing a cell
 

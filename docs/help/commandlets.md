@@ -111,9 +111,13 @@ popup icon in the cell. Every other column is shown as plain text — the value 
 never mounted as a live editor onto a record you may not have open.
 
 The window's header says which column and which record you are looking at, and
-its **Edit** button opens the value's source in a textarea. Saving writes that
-one field of that one record, with the same rules the grid applies — a read-only
-table or column says **View source** instead and has nothing to save.
+carries two buttons. **Edit** opens the value's source in a textarea. Saving
+writes that one field of that one record, with the same rules the grid applies —
+a read-only table or column says **View source** instead and has nothing to save.
+
+**Edit record** opens the whole row in the record form, because the window shows
+one cell and the answer to "is this the wrong value?" is usually in the fields
+beside it. On a read-only table it says **View record**.
 
 ## Correcting one record
 

@@ -1719,6 +1719,8 @@ export class DataTable extends LitElement {
       .rawValue=${row.data[col.field] ?? ''}
       .column=${col}
       .row=${row.data}
+      .rowId=${row.id}
+      .tableId=${this.tableId}
       .readonly=${true}
       .sourceReadonly=${this.readOnly}
       @change=${this.readOnly ? undefined : (e: Event) => this.setCell(row, col.field, (e as CustomEvent<{ value: unknown }>).detail.value)}
@@ -1767,6 +1769,10 @@ export class DataTable extends LitElement {
       // `.row` is the full row data object, passed through for any renderer
       // that wants neighbouring fields (built-ins currently ignore it —
       // `renderScriptedCell` above is where a column's own script gets `.row`).
+      // `.rowId` / `.tableId` are the record's IDENTITY, which `.row` does not
+      // carry — a renderer needs both to act on the whole record instead of on
+      // its own value. The `preview` cell's "Edit record" button is the one
+      // reader today.
       // `.readonly` tells editor renderers (date/datetime/boolean) to display,
       // not edit, in a read-only view; display-only renderers (link/image/
       // html/…) just ignore it. `.sourceReadonly` is the other question — may the
@@ -1777,6 +1783,8 @@ export class DataTable extends LitElement {
         .value=${raw ?? ''}
         .column=${col}
         .row=${row.data}
+        .rowId=${row.id}
+        .tableId=${this.tableId}
         .suggestions=${this.tagOptions.get(col.field) ?? EMPTY_OPTIONS}
         .readonly=${cellReadonly}
         .sourceReadonly=${cellReadonly}
