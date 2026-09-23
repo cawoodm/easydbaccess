@@ -195,7 +195,7 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
   `datasette-import` (+ `datasette-views`), `datasette-connect`, `connect-menu`,
   `projection`, `command-palette-button`, `electron-db`, `sqlitefile-source`,
   `tips`, `new-plugins`, `commandlets`, `edit-record`, `edb-file`, `legacy-import`, `validate`, `viz-charts`,
-  `viz-map`, `viz-wordcloud`, `viz-custom`.
+  `viz-map`, `viz-wordcloud`, `viz-custom`, `date-filter`.
   Don't add a feature to
   the core if it can be a plugin. (Exception: the Plugin Manager button is core
   chrome in `app-shell.ts`, not a plugin — it opens the manager that governs
@@ -291,6 +291,9 @@ These have already bitten this codebase. Don't re-litigate them.
   closed popover loses; and Escape must still be claimed with a capture-phase
   `preventDefault`, because the browser's own close is silent and
   `panel-shell` would then close the window behind it. See `docs/tech/DIALOGS.md`.
+  A custom funnel dropdown (a `registerFilterPicker`) extends
+  `chrome/filter-picker-shell.ts` rather than re-implementing these popover
+  rules itself.
 
 ## What's intentionally not wired yet
 

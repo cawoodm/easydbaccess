@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 23 Sep 2026
+
+- 🪶 Date columns filter by preset or date range; the filter language takes >= <= > < comparisons (v0.0.490)
+
 ## 22 Sep 2026
 
 ### Features

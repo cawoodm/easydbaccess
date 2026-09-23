@@ -2682,7 +2682,7 @@ export class DataTable extends LitElement {
                         .value=${this.filters[c.field] ?? ''}
                         .options=${opts}
                         placeholder="filter…"
-                        title="Filter: *text* = contains, text* = starts with, *text = ends with, &quot;text&quot; = the whole cell, !text = not, NULL = empty, !NULL = has a value. Comma-separate for several values (a,b = a OR b; !a,b excludes a and keeps b). A plain value follows the &quot;Default to substring&quot; setting. Quote the WHOLE box to search for the text as typed, commas and all."
+                        title="Filter: *text* = contains, text* = starts with, *text = ends with, &quot;text&quot; = the whole cell, !text = not, NULL = empty, !NULL = has a value. Comma-separate for several values (a,b = a OR b; !a,b excludes a and keeps b). A plain value follows the &quot;Default to substring&quot; setting. Quote the WHOLE box to search for the text as typed, commas and all. Comparisons: >=2026-01-01, <=2026-12-31, >100, <100 — and on a date column a relative bound like >=-3m (last 3 months) or >=ytd (year to date)."
                         @filter-change=${(e: Event) => this.onFilterInput(c.field, (e as CustomEvent<{ value: string }>).detail.value)}
                       ></filter-combobox>
                     </th>
