@@ -396,13 +396,13 @@ function isEmptyCell(value: unknown, members: string[] | null): boolean {
  * `array` column, in which case the token tests each member and one hit is
  * enough.
  */
-function matchesTerm(value: unknown, token: FilterToken, members: string[] | null, defaultSubstring: boolean, type: string | undefined): boolean {
+function matchesTerm(value: unknown, token: FilterToken, members: string[] | null, defaultSubstring: boolean, type: string | undefined, now: Date): boolean {
   const term = token.term;
   // A comparison is an order test against the term as written — `>=NULL` looks
   // for cells at or after the literal text "null", not for blank ones.
   if (token.cmp) {
-    if (members) return members.some((m) => satisfiesCmp(m, term, token.cmp!, type));
-    return satisfiesCmp(value, term, token.cmp, type);
+    if (members) return members.some((m) => satisfiesCmp(m, term, token.cmp!, type, now));
+    return satisfiesCmp(value, term, token.cmp, type, now);
   }
   // An empty term (a lone `!`) always tests emptiness — an anchor cannot anchor
   // nothing. `NULL` tests emptiness too, unless an anchor asked for the literal
@@ -416,8 +416,8 @@ function matchesTerm(value: unknown, token: FilterToken, members: string[] | nul
 }
 
 /** Does the cell satisfy every token of one AND-group? */
-function matchesGroup(value: unknown, group: FilterToken[], members: string[] | null, defaultSubstring: boolean, type: string | undefined): boolean {
-  return group.every((t) => (t.negate ? !matchesTerm(value, t, members, defaultSubstring, type) : matchesTerm(value, t, members, defaultSubstring, type)));
+function matchesGroup(value: unknown, group: FilterToken[], members: string[] | null, defaultSubstring: boolean, type: string | undefined, now: Date): boolean {
+  return group.every((t) => (t.negate ? !matchesTerm(value, t, members, defaultSubstring, type, now) : matchesTerm(value, t, members, defaultSubstring, type, now)));
 }
 
 /**
@@ -427,12 +427,15 @@ function matchesGroup(value: unknown, group: FilterToken[], members: string[] | 
  * matching to per-member (see the header). Every other type reads the cell as
  * one value, so a caller that knows no type can leave it out.
  */
-export function matchesColumnFilter(value: unknown, rawQuery: string, opts?: { type?: string | undefined; defaultSubstring?: boolean | undefined }): boolean {
+export function matchesColumnFilter(value: unknown, rawQuery: string, opts?: { type?: string | undefined; defaultSubstring?: boolean | undefined; now?: Date | undefined }): boolean {
   const groups = groupColumnFilter(parseColumnFilter(rawQuery));
   if (groups.length === 0) return true;
   const members = opts?.type === 'array' ? arrayMembers(value) : null;
   const defaultSubstring = opts?.defaultSubstring ?? true;
   const type = opts?.type;
+  // Resolved ONCE per call, so the two halves of `>=-3m AND <=today` cannot
+  // land on different sides of midnight.
+  const now = opts?.now ?? new Date();
 
   // A comma-separated NEGATIVE token on its own still excludes outright, which
   // is what makes `Open,!urgent` mean "Open but not urgent" rather than "Open OR
@@ -440,9 +443,9 @@ export function matchesColumnFilter(value: unknown, rawQuery: string, opts?: { t
   // is one condition among several instead of a veto over the whole filter.
   const vetoes = groups.filter((g) => g.length === 1 && g[0]!.negate);
   for (const g of vetoes) {
-    if (matchesTerm(value, g[0]!, members, defaultSubstring, type)) return false;
+    if (matchesTerm(value, g[0]!, members, defaultSubstring, type, now)) return false;
   }
   const required = groups.filter((g) => !(g.length === 1 && g[0]!.negate));
   if (required.length === 0) return true;
-  return required.some((g) => matchesGroup(value, g, members, defaultSubstring, type));
+  return required.some((g) => matchesGroup(value, g, members, defaultSubstring, type, now));
 }

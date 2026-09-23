@@ -588,3 +588,34 @@ describe('type-aware comparison', () => {
     expect(matchesColumnFilter('2026-08-02', q, { type: 'date' })).toBe(false);
   });
 });
+
+describe('relative date terms', () => {
+  const now = new Date(2026, 8, 23); // 23 Sep 2026
+
+  it('>=-3m selects the last three months', () => {
+    expect(matchesColumnFilter('2026-07-01', '>=-3m', { type: 'date', now })).toBe(true);
+    expect(matchesColumnFilter('2026-06-23', '>=-3m', { type: 'date', now })).toBe(true);
+    expect(matchesColumnFilter('2026-06-22', '>=-3m', { type: 'date', now })).toBe(false);
+  });
+
+  it('>=ytd selects this calendar year', () => {
+    expect(matchesColumnFilter('2026-01-01', '>=ytd', { type: 'date', now })).toBe(true);
+    expect(matchesColumnFilter('2025-12-31', '>=ytd', { type: 'date', now })).toBe(false);
+  });
+
+  it('follows the clock — the same filter means something else later', () => {
+    const later = new Date(2026, 11, 1); // 1 Dec 2026
+    expect(matchesColumnFilter('2026-07-01', '>=-3m', { type: 'date', now })).toBe(true);
+    expect(matchesColumnFilter('2026-07-01', '>=-3m', { type: 'date', now: later })).toBe(false);
+  });
+
+  it('a relative term only resolves on a date-ish column', () => {
+    // On a string column `-3m` is a literal value, not an offset.
+    expect(matchesColumnFilter('-3m', '>=-3m')).toBe(true);
+  });
+
+  it('a relative term survives compose', () => {
+    expect(composeColumnFilter(parseColumnFilter('>=-3m'))).toBe('>=-3m');
+    expect(composeColumnFilter(parseColumnFilter('>=ytd'))).toBe('>=ytd');
+  });
+});

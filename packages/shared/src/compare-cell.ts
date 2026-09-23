@@ -12,6 +12,7 @@
 // lowercased text, which is what the grammar did before comparisons existed.
 
 import type { FilterCmp } from './column-filter.js';
+import { resolveDateTerm } from './relative-date.js';
 
 /** `YYYY-MM-DD`, and the date half of a naive datetime. */
 const DATE_ONLY = /^(\d{4}-\d{2}-\d{2})$/;
@@ -70,10 +71,16 @@ function isoOf(s: string): string | null {
  * On a `datetime` column a DATE-ONLY bound compares only the date part, so
  * `<=2026-08-01` covers all of that day rather than cutting at midnight — which
  * is what someone who typed a date meant.
+ *
+ * On a `date` / `datetime` column the bound may also be a RELATIVE term
+ * (`-3m`, `ytd`, …), resolved against `now` — see `relative-date.ts`. Any
+ * other column type leaves the term alone: `-3m` there is a literal value
+ * someone might really hold in a cell.
  */
-export function satisfiesCmp(value: unknown, term: string, cmp: FilterCmp, type: string | undefined): boolean {
-  const bound = term.trim();
+export function satisfiesCmp(value: unknown, term: string, cmp: FilterCmp, type: string | undefined, now: Date): boolean {
+  let bound = term.trim();
   if (bound === '') return false;
+  if (type === 'date' || type === 'datetime') bound = resolveDateTerm(bound, now) ?? bound;
   const dateOnlyBound = type === 'datetime' && DATE_ONLY.test(bound);
   const keyType = dateOnlyBound ? 'date' : type;
   const a = compareKey(value, keyType);
