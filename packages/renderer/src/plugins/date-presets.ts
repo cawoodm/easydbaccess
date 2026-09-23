@@ -65,8 +65,8 @@ function readCode(code: string): { term: string; label: string } | null {
   const m = OFFSET.exec(code);
   if (!m) return null;
   const n = Number(m[1]);
-  const suffix = m[2]!;
-  const unit = UNITS[suffix];
+  const suffix = m[2];
+  const unit = suffix === undefined ? undefined : UNITS[suffix];
   if (!unit || n < 1) return null;
   // "Last year" would read as the previous CALENDAR year, which is not what a
   // rolling twelve-month window is. Every other unit is unambiguous at one.

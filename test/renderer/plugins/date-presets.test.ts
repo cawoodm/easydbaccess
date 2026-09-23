@@ -37,17 +37,17 @@ describe('parseDatePresets', () => {
   });
 
   it('skips an entry it cannot read rather than showing a broken row', () => {
-    expect(parseDatePresets('3m,nonsense,1y').map((p: any) => p.term)).toEqual(['-3m', '-1y']);
+    expect(parseDatePresets('3m,nonsense,1y').map((p) => p.term)).toEqual(['-3m', '-1y']);
     expect(parseDatePresets('3x')).toEqual([]);
   });
 
   it('tolerates whitespace and an empty spec', () => {
-    expect(parseDatePresets(' 3m , 6m ').map((p: any) => p.term)).toEqual(['-3m', '-6m']);
+    expect(parseDatePresets(' 3m , 6m ').map((p) => p.term)).toEqual(['-3m', '-6m']);
     expect(parseDatePresets('')).toEqual([]);
     expect(parseDatePresets('   ')).toEqual([]);
   });
 
   it('drops a duplicate entry', () => {
-    expect(parseDatePresets('3m,3m').map((p: any) => p.term)).toEqual(['-3m']);
+    expect(parseDatePresets('3m,3m').map((p) => p.term)).toEqual(['-3m']);
   });
 });
