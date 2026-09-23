@@ -67,7 +67,7 @@ export function init(api: HostApi): void {
  */
 class DateFilterPopover extends FilterPickerShell {
   /** Set by `init` — the plugin owns the settings read, the element does not. */
-  static readPresets: () => Promise<DatePreset[]> = async () => parseDatePresets(DEFAULT_DATE_PRESETS);
+  static readPresets: () => Promise<DatePreset[]> = () => Promise.resolve(parseDatePresets(DEFAULT_DATE_PRESETS));
 
   static override styles = [
     ...FilterPickerShell.filterPickerStyles,
@@ -132,27 +132,38 @@ class DateFilterPopover extends FilterPickerShell {
   @state() private bounds: { min?: string; max?: string } = {};
   private ctx: FilterPickerContext | null = null;
 
-  async open(anchor: DOMRect, ctx: FilterPickerContext): Promise<FilterPickerResult> {
+  open(anchor: DOMRect, ctx: FilterPickerContext): Promise<FilterPickerResult> {
     this.ctx = ctx;
     this.shellTitle = ctx.label;
     this.range = readRange(ctx.current);
     this.bounds = {};
     this.presets = [];
-    const settled = this.openShell(anchor);
+    const opening = this.openShell(anchor);
     // Both reads are deliberately AFTER the popover is on screen: a funnel click
     // has to stay instant, and on a windowed grid the value list may cost a
-    // round trip.
-    void DateFilterPopover.readPresets().then((p) => (this.presets = p));
+    // round trip. Each swallows its own failure — a picker that cannot read its
+    // presets or the column's span is still a working picker, and an unhandled
+    // rejection here would surface as a console error the user cannot act on.
+    void DateFilterPopover.readPresets()
+      .then((p) => (this.presets = p))
+      .catch(() => {
+        // Settings unreadable: the panel says "No presets configured" and the
+        // from/to boxes still work.
+      });
     void ctx
       .values()
       .then(({ values }) => {
         const dates = values.map((v) => v.value.slice(0, 10)).filter((v) => /^\d{4}-\d{2}-\d{2}$/.test(v)).sort();
-        if (dates.length > 0) this.bounds = { min: dates[0]!, max: dates[dates.length - 1]! };
+        // `noUncheckedIndexedAccess` does not narrow through a length check, so
+        // the ends are destructured and tested rather than asserted with `!`.
+        const [min] = dates;
+        const max = dates.at(-1);
+        if (min !== undefined && max !== undefined) this.bounds = { min, max };
       })
       .catch(() => {
         // A store that cannot answer just means no min/max hint on the inputs.
       });
-    return settled;
+    return opening;
   }
 
   /** Apply a new range, keeping whatever else the filter held. */
