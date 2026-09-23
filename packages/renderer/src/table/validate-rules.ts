@@ -71,8 +71,22 @@ function isBlank(v: unknown): boolean {
 }
 
 /** Does this column carry any rule worth a pass over the rows? */
-function hasRule(c: ColumnSpec, runScripts: boolean): boolean {
+export function hasRule(c: ColumnSpec, runScripts: boolean): boolean {
   return c.notnull === true || (c.max != null && c.max > 0) || c.unique === true || (runScripts && activeValidateScript(c) !== undefined);
+}
+
+/**
+ * What this column would be checked for, in words — the note beside it in the
+ * Run picker, so the user ticking boxes can see what each one costs and covers.
+ * A rule the run would not apply (a parked `validate` script) is not named.
+ */
+export function ruleNames(c: ColumnSpec, runScripts: boolean): string[] {
+  const out: string[] = [];
+  if (c.notnull === true) out.push('required');
+  if (c.max != null && c.max > 0) out.push(`max ${c.max}`);
+  if (c.unique === true) out.push('unique');
+  if (runScripts && activeValidateScript(c) !== undefined) out.push('script');
+  return out;
 }
 
 /**

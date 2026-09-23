@@ -21,6 +21,7 @@ import type { SettingsDialog } from '../dialogs/settings-dialog.js';
 import '../dialogs/command-palette-dialog.js';
 import type { CommandPaletteDialog } from '../dialogs/command-palette-dialog.js';
 import '../dialogs/script-editor-dialog.js';
+import '../dialogs/run-picker-dialog.js';
 import { materialIconStyles } from './material-icon-css.js';
 import './app-progress.js';
 import './table-list.js';
@@ -680,7 +681,7 @@ export class AppShell extends LitElement {
         <strong
           >${this.workspaceTitle || 'easyDBAccess'}
           <a class="version-link" href="https://github.com/cawoodm/easydbaccess/blob/main/CHANGELOG.md" target="_blank" rel="noopener" title="View the changelog on GitHub"
-            ><span class="version">v0.0.474</span></a
+            ><span class="version">v0.0.476</span></a
           ></strong
         >
         ${this.offline
@@ -729,6 +730,7 @@ export class AppShell extends LitElement {
       <settings-dialog></settings-dialog>
       <command-palette-dialog></command-palette-dialog>
       <script-editor-dialog></script-editor-dialog>
+      <run-picker-dialog></run-picker-dialog>
       <host-dialogs></host-dialogs>
       <toast-host></toast-host>
     `;

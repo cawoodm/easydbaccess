@@ -1,13 +1,22 @@
-import type { HostApi, PluginModule, Table } from '@easydb/shared';
+import type { ColumnSpec, HostApi, PluginModule, Row, Table } from '@easydb/shared';
 import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
-import { summarizeIssues } from '../table/validate-rules.js';
+import { hasRule, ruleNames, summarizeIssues } from '../table/validate-rules.js';
 import { scanTable } from '../table/validate-scan.js';
 import { clearRowErrors, ERROR_FIELD, errorColumnSpec, rowErrorsFrom, setRowErrors, type RowProblems } from '../table/row-errors.js';
 import { focusTableWindow } from '../window-mgr/table-window-manager.js';
+import { setTableLoading } from '../table/table-loading.js';
+import { registerRunAction } from '../table/run-actions.js';
+import { RunPickerDialog } from '../dialogs/run-picker-dialog.js';
+import { requestVisibleRows } from '../table/visible-rows.js';
 
-// A ✓ button in each table's footer that checks every row against its columns'
-// rules — `notnull`, `max`, `unique` and a `validate` script — and hands what it
-// finds back to the table's own grid.
+// **Run validations** — one item on the footer's ▶ Run menu — checks rows
+// against their columns' rules (`notnull`, `max`, `unique` and a `validate`
+// script) and hands what it finds back to the table's own grid.
+//
+// It had a ✓ button of its own until v0.0.476. The button is now shared with the
+// script runner (`plugins/run-scripts.ts` owns it, `table/run-actions.ts` is the
+// list it draws), and which columns and which rows to check are asked in one
+// dialog rather than assumed to be all of both.
 //
 // A run leaves three things behind:
 //
@@ -41,22 +50,65 @@ export const meta: NonNullable<PluginModule['meta']> = {
 /** Reported per column before the rest is counted rather than listed. */
 const CAP_PER_COLUMN = 500;
 
-export function init(api: HostApi): void {
-  api.ui.registerTableButton({
+/** Rows per `_error` write. Same reasoning as `materialize-script.ts`'s CHUNK. */
+const MARK_CHUNK = 500;
+
+export function init(_api: HostApi): void {
+  registerRunAction({
     id: 'validate:run',
-    label: 'Validate',
+    label: 'Run validations',
     icon: 'check',
-    tooltip: 'Check every row against this table’s rules',
-    onClick: async (api, ctx) => {
-      const table = await api.store.tables.findOne(ctx.tableId);
-      if (!table) return;
-      await validateTable(api, table);
-    },
+    order: 20,
+    run: validateTable,
   });
 }
 
-/** Scan one table, then report. */
+/** The columns this run could check, in column order. */
+export function ruleColumns(columns: readonly ColumnSpec[]): ColumnSpec[] {
+  return columns.filter((c) => hasRule(c, true));
+}
+
+/**
+ * Ask which columns and which rows, then scan and report.
+ *
+ * Both answers narrow what the run may CLEAR as well as what it checks — see
+ * `spokeForEveryRow` below. A partial run adds messages and never takes one
+ * back, because a rule it did not apply is not a rule that passed.
+ */
 async function validateTable(api: HostApi, table: Table): Promise<void> {
+  const picker = RunPickerDialog.instance;
+  const withRules = ruleColumns(table.columns);
+  if (withRules.length === 0) {
+    api.ui.dialogs.toast(`No column of "${table.name}" carries a rule, so there is nothing to check. Set Required, Maximum, Unique or a validation script in the columns editor.`, {
+      kind: 'info',
+      title: 'Validate',
+    });
+    return;
+  }
+  if (!picker) return;
+
+  const coll = api.store.rows(table.id);
+  const shown = requestVisibleRows(table.id)?.rows ?? null;
+  const totalRows = coll.count ? await coll.count() : (await coll.find()).length;
+
+  const answer = await picker.open({
+    title: `Run validations — ${table.name}`,
+    intro: 'Each ticked column is checked against its rules. Cells that are wrong are marked, the grid narrows to their rows, and the verdicts are written into the table’s _error column.',
+    items: withRules.map((c) => ({ field: c.field, label: c.label || c.field, note: ruleNames(c, true).join(', ') })),
+    visibleRows: shown?.length ?? totalRows,
+    totalRows,
+    runLabel: 'Check',
+  });
+  if (!answer) return;
+
+  const columns = withRules.filter((c) => answer.fields.includes(c.field));
+  if (columns.length === 0) return;
+  const rows = answer.rows === 'visible' ? (shown ?? undefined) : undefined;
+  await runValidation(api, table, columns, rows, columns.length === withRules.length && rows === undefined);
+}
+
+/** Scan the chosen columns over the chosen rows, then report. */
+async function runValidation(api: HostApi, table: Table, columns: readonly ColumnSpec[], rows: readonly Row[] | undefined, whole: boolean): Promise<void> {
   const coll = api.store.rows(table.id);
   // Cleared BEFORE the scan, not after it. What is on screen while the scan runs
   // must not be the last run's verdict on rows the user has edited since — and the
@@ -71,16 +123,23 @@ async function validateTable(api: HostApi, table: Table): Promise<void> {
   document.addEventListener('keydown', onKey);
 
   try {
-    const result = await scanTable(coll, table.columns, {
+    const result = await scanTable(coll, columns, {
       runScripts: true,
       capPerColumn: CAP_PER_COLUMN,
       ...(table.labelColumn ? { labelField: table.labelColumn } : {}),
+      ...(rows ? { rows } : {}),
       cancelled: () => stop,
-      onProgress: (scanned, total) =>
+      onProgress: (scanned, total) => {
         setAppProgress({
           label: `Checking ${table.name} — press Esc to stop`,
           ...(total > 0 ? { fraction: Math.min(1, scanned / total), detail: `${scanned.toLocaleString()} of ${total.toLocaleString()} rows` } : { detail: `${scanned.toLocaleString()} rows` }),
-        }),
+        });
+        // And on the table's OWN window, the same bar an import draws. The
+        // app-wide bar under the header is easy to miss when the thing you are
+        // watching is a panel in the middle of the canvas — and a scan that runs
+        // for a minute with nothing happening in the grid reads as a hang.
+        setTableLoading(table.id, true, total > 0 ? Math.min(1, scanned / total) : undefined);
+      },
     });
 
     if (result.noRules) {
@@ -94,9 +153,13 @@ async function validateTable(api: HostApi, table: Table): Promise<void> {
     const errors = rowErrorsFrom(result.issues);
     // A run that stopped early, or that hit a per-column cap, did not speak for
     // every row: a row past the cap is still wrong and this run said nothing about
-    // it. Such a run may add messages but must not take any back, or pressing ✓ on
-    // a table with 600 broken rows would erase the verdict on 100 of them.
-    const spokeForEveryRow = !result.cancelled && result.capped.size === 0;
+    // it. Such a run may add messages but must not take any back, or pressing Run
+    // on a table with 600 broken rows would erase the verdict on 100 of them.
+    //
+    // `whole` is the same rule for the picker's two answers. A run over some of
+    // the columns, or some of the rows, has said nothing about the rest — and a
+    // message it never looked at is not a message it disproved.
+    const spokeForEveryRow = whole && !result.cancelled && result.capped.size === 0;
     // The messages go into the table's own `_error` column BEFORE anything is
     // reported — including on a clean run, which has stale messages to clear.
     await writeMessages(api, table, errors, spokeForEveryRow ? result.stale : []);
@@ -111,14 +174,14 @@ async function validateTable(api: HostApi, table: Table): Promise<void> {
       return;
     }
 
-    const lines = summarizeIssues(result.issues, result.capped, table.columns);
+    const lines = summarizeIssues(result.issues, result.capped, columns);
     // Both numbers, because they answer different questions: how much is wrong, and
     // how much of the table it is wrong in.
     const head = `${result.issues.length.toLocaleString()} issue${result.issues.length === 1 ? '' : 's'} in ${errors.size.toLocaleString()} of ${result.scanned.toLocaleString()} rows of "${table.name}"${
       result.cancelled ? ', before you stopped it' : ''
     }.`;
     const pick = await api.ui.dialogs.choice(
-      `${head}\n\n${lines.join('\n')}\n\n"${table.name}" now shows those rows only. Each cell that is wrong is marked, with the reason in its tooltip. Fix them, then press ✓ again.`,
+      `${head}\n\n${lines.join('\n')}\n\n"${table.name}" now shows those rows only. Each cell that is wrong is marked, with the reason in its tooltip. Fix them, then run the check again.`,
       ['Show me', 'Close'],
       'Validate',
     );
@@ -126,6 +189,7 @@ async function validateTable(api: HostApi, table: Table): Promise<void> {
   } finally {
     document.removeEventListener('keydown', onKey);
     clearAppProgress();
+    setTableLoading(table.id, false);
   }
 }
 
@@ -162,18 +226,37 @@ async function writeMessages(api: HostApi, table: Table, errors: ReadonlyMap<str
     await api.store.tables.patch(table.id, { columns: [...fresh.columns, errorColumnSpec()], updatedAt: Date.now() });
   }
 
-  const writes: Array<[string, string]> = [...[...errors].map(([id, p]) => [id, p.message] as [string, string]), ...stale.map((id) => [id, ''] as [string, string])];
-  let done = 0;
-  for (const [rowId, text] of writes) {
-    const row = await coll.findOne(rowId);
+  const wanted = new Map<string, string>([...[...errors].map(([id, p]) => [id, p.message] as const), ...stale.map((id) => [id, ''] as const)]);
+  if (wanted.size === 0) return;
+
+  // ONE read and batched writes.
+  //
+  // This was `findOne` + `patch` per row, which is two round trips, two
+  // transactions and two grid-waking broadcasts for every flagged row — the same
+  // arithmetic that made running a column script over 4 000 rows take two
+  // minutes. A table with a few thousand problems spent longer being MARKED than
+  // being checked. See `table/materialize-script.ts`, which fixed the twin.
+  const byId = new Map((await coll.find()).map((r) => [r.id, r]));
+  const pending: Row[] = [];
+  for (const [rowId, text] of wanted) {
+    const row = byId.get(rowId);
     // Deleted since the scan read it. The problem went with it.
-    if (row) {
-      // Unchanged rows are left alone: a write would bump `updatedAt` and give
-      // sync a row to carry for no reason.
-      const had = String(row.data[ERROR_FIELD] ?? '');
-      if (had !== text) await coll.patch(rowId, { data: { ...row.data, [ERROR_FIELD]: text }, updatedAt: Date.now() });
+    if (!row) continue;
+    // Unchanged rows are left alone: a write would bump `updatedAt` and give
+    // sync a row to carry for no reason.
+    if (String(row.data[ERROR_FIELD] ?? '') === text) continue;
+    pending.push({ ...row, data: { ...row.data, [ERROR_FIELD]: text }, updatedAt: Date.now() });
+  }
+
+  const bulk = coll.bulkUpdate?.bind(coll);
+  for (let from = 0; from < pending.length; from += MARK_CHUNK) {
+    const batch = pending.slice(from, from + MARK_CHUNK);
+    if (bulk) await bulk(batch);
+    else for (const row of batch) await coll.patch(row.id, { data: row.data, updatedAt: row.updatedAt });
+    if (pending.length > MARK_CHUNK) {
+      const done = Math.min(from + batch.length, pending.length);
+      setAppProgress({ label: `Marking rows in ${table.name}`, fraction: done / pending.length, detail: `${done.toLocaleString()} of ${pending.length.toLocaleString()}` });
+      setTableLoading(table.id, true, done / pending.length);
     }
-    done++;
-    if (writes.length > 50) setAppProgress({ label: `Marking rows in ${table.name}`, fraction: done / writes.length, detail: `${done.toLocaleString()} of ${writes.length.toLocaleString()}` });
   }
 }

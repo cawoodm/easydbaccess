@@ -148,6 +148,7 @@ export function createEdbBridge(): EdbBridge {
     findOne: (coll, key) => call<unknown | null>({ op: 'findOne', coll, key }),
     insert: (coll, doc) => call<unknown>({ op: 'insert', coll, doc }),
     bulkInsert: (coll, docs) => call<unknown[]>({ op: 'bulkInsert', coll, docs }),
+    bulkUpdate: (coll, docs) => call<void>({ op: 'bulkUpdate', coll, docs }),
     upsert: (coll, doc) => call<unknown>({ op: 'upsert', coll, doc }),
     patch: (coll, key, patch) => call<unknown>({ op: 'patch', coll, key, patch }),
     remove: (coll, key) => call<void>({ op: 'remove', coll, key }),

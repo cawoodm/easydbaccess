@@ -40,6 +40,8 @@ export type EdbRequest =
   | { id: number; op: 'insert'; coll: string; doc: Record<string, unknown> }
   | { id: number; op: 'bulkInsert'; coll: string; docs: Record<string, unknown>[] }
   | { id: number; op: 'upsert'; coll: string; doc: Record<string, unknown> }
+  /** Overwrite many EXISTING docs in one transaction — see `EdbStore.bulkUpdate`. */
+  | { id: number; op: 'bulkUpdate'; coll: string; docs: Record<string, unknown>[] }
   | { id: number; op: 'patch'; coll: string; key: string; patch: Record<string, unknown> }
   | { id: number; op: 'remove'; coll: string; key: string }
   | { id: number; op: 'bulkRemove'; coll: string; keys: string[] }

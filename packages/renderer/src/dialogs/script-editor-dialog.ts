@@ -17,7 +17,8 @@ import {
 import { getContext } from '../app-context.js';
 import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
 import { requestVisibleRows } from '../table/visible-rows.js';
-import { materializeColumnScript, materializeSummary } from '../table/materialize-script.js';
+import { KEEP_ENABLED_HINT, RUN_AND_DISABLE, RUN_AND_KEEP, materializeColumnScript, materializeSummary } from '../table/materialize-script.js';
+import { isErrorField } from '../table/row-errors.js';
 
 /**
  * Which script is being edited. They share this one editor because everything
@@ -53,7 +54,8 @@ export interface ScriptEdit {
 /**
  * The saved column a `render` script belongs to, which is what Run needs to
  * write to. Absent while a table is still being created — there are no rows to
- * write yet — and Run is hidden then.
+ * write yet — and Run is shown but disabled then, so the button does not appear
+ * and disappear as a column goes from draft to saved.
  */
 export interface ScriptTarget {
   tableId: string;
@@ -214,26 +216,67 @@ export class ScriptEditorDialog extends LitElement {
         opacity: 0.4;
         cursor: default;
       }
-      /* The switch that parks a script without deleting it. Red while it is off,
-         because "this rule exists and is doing nothing" is a state the author has
-         to see from across the dialog — the same red the column editor's button
-         goes, so the two obviously say the same thing. */
+      /* The switch that parks a script without deleting it.
+         It sits in the dialog HEADER, which is near-black (--dlg-header-bg,
+         #1f2937) — so the label takes the header's own foreground. It used to
+         be #374151, which is dark grey on dark grey and only legible at all in
+         the "off" state, where it went red. Same word in both states now: the
+         tick says on or off, and red read as an error, which a deliberately
+         parked script is not. The column editor's button still goes red, which
+         is where the state belongs — visible without opening anything. */
       label.run-switch {
         display: inline-flex;
         align-items: center;
         gap: 0.3rem;
         font-size: 0.85rem;
-        color: #374151;
+        font-weight: 600;
+        color: var(--dlg-header-fg, #fff);
         cursor: pointer;
         user-select: none;
-      }
-      label.run-switch.off {
-        color: #dc2626;
-        font-weight: 600;
       }
       label.run-switch input {
         margin: 0;
         cursor: pointer;
+      }
+      /* The run's own progress bar, inside the dialog.
+         The app-wide bar under the header is raised too, but a modal <dialog>
+         sits in the top layer behind its own backdrop — so from in here that bar
+         is invisible, and a run over 20 000 rows looked like a hang. */
+      .progress {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.35rem 0.6rem;
+        border: 1px solid #c7d2fe;
+        background: #eef2ff;
+        border-radius: 0.25rem;
+        font-size: 0.8rem;
+        color: #3730a3;
+      }
+      .progress .label {
+        white-space: nowrap;
+      }
+      .progress .bar {
+        flex: 1;
+        height: 5px;
+        border-radius: 3px;
+        background: #c7d2fe;
+        overflow: hidden;
+      }
+      .progress .fill {
+        display: block;
+        height: 100%;
+        background: #4f46e5;
+        transition: width 0.15s linear;
+      }
+      .progress .detail {
+        color: #6366f1;
+        white-space: nowrap;
+      }
+      .progress .pct {
+        min-width: 3rem;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
       }
       textarea {
         font:
@@ -268,10 +311,16 @@ export class ScriptEditorDialog extends LitElement {
    * built-in sample is code and cannot be deleted.
    */
   @state() private pickedUserId: string | null = null;
-  /** Where Run writes. Null hides the button — see `ScriptTarget`. */
+  /** Where Run writes. Null disables the button — see `ScriptTarget`. */
   @state() private target: ScriptTarget | null = null;
   /** A run is in flight; Run and Save are held so neither can race the writes. */
   @state() private running = false;
+  /**
+   * How far the write has got, while it is writing. Null outside a run — and
+   * still null during the questions that precede it, because nothing is being
+   * written yet and a bar at 0% would claim otherwise.
+   */
+  @state() private progress: { done: number; total: number } | null = null;
   /**
    * The "Run this script" box. `null` means this caller did not ask for the
    * switch, and the box is not drawn at all — a view token and a visualization
@@ -323,6 +372,7 @@ export class ScriptEditorDialog extends LitElement {
     this.undoText = null;
     this.pickedUserId = null;
     this.running = false;
+    this.progress = null;
     // Only a column's render script has cells to write; a validation rule
     // returns nothing and a view token never touches the stored value.
     this.target = kind === 'render' ? (opts?.target ?? null) : null;
@@ -386,6 +436,24 @@ export class ScriptEditorDialog extends LitElement {
     if (this.kind === 'validate') return 'Edit validation';
     if (this.kind === 'viz-html') return 'Edit HTML';
     return 'Edit script';
+  }
+
+  /**
+   * What the Enable box promises, in each state.
+   *
+   * A render script that is switched off is not dead — **Run…** still writes
+   * its output into the cells on demand, and the cells go back to being
+   * editable. That is the whole point of parking one, so the tooltip says it
+   * rather than leaving "does nothing" to be read as "is useless". A validation
+   * rule has no manual mode: off means off.
+   */
+  private get activeTitle(): string {
+    if (this.kind === 'validate') {
+      return this.active ? 'Untick to keep this rule but stop enforcing it' : 'This rule is switched off — it is kept with the column but never checks an edit until you tick this';
+    }
+    return this.active
+      ? 'Untick to keep this script and stop the column computing — the cells become editable again, and you can still run it by hand with Run…'
+      : 'This script is switched off — the column shows its stored values and the cells can be edited; the script runs only when you press Run…';
   }
 
   /** The shipped samples for whichever script is being edited. */
@@ -463,25 +531,52 @@ export class ScriptEditorDialog extends LitElement {
    * Run the script in the editor over the table's rows and write what it
    * returns into the cells.
    *
-   * Two questions before anything is written, because both answers change the
-   * result and neither has a safe default:
+   * **Run never touches the script itself.** It used to end by asking "write and
+   * keep, or write and clear?", which made a one-off write into a decision about
+   * the column and could destroy a script the author still wanted. The script is
+   * now always kept; **Enable** is the one control over whether it computes, and
+   * it is not consulted here — running by hand is the whole reason to park a
+   * script rather than delete it.
    *
-   *  - **Which rows** — asked only when the grid is showing fewer than the
-   *    table holds. With no filter on there is one possible answer, and a
-   *    dialog that only ever has one answer is a click, not a choice.
-   *  - **Keep or clear the script** — a kept script goes on computing, so the
-   *    cells still show the computed value and the write is invisible until
-   *    something exports or syncs them. Clearing it hands the column over to
-   *    the data. Both are legitimate; guessing is not.
+   * What is still asked:
    *
-   * The write itself is immediate and cannot be undone. Clearing the script is
-   * NOT: it comes back as this dialog's result, so it lands with the columns
-   * editor's own Save, like every other column edit.
+   *  - **Which rows** — only when the grid is showing fewer than the table
+   *    holds. With no filter on there is one possible answer, and a dialog that
+   *    only ever has one answer is a click, not a choice.
+   *  - **Are you sure, and should the script stay live** — one dialog, because
+   *    they are one decision. The write replaces stored values and cannot be
+   *    undone, which is not something a single click should do to a whole
+   *    table; and a script that is still ENABLED goes on recomputing on every
+   *    draw after its output has been written, which is what
+   *    `KEEP_ENABLED_HINT` explains. A parked script gets the plain confirm —
+   *    there is nothing to switch off.
+   *
+   * The editor stays open afterwards. There is nothing left to decide, and
+   * closing it would throw away edits the author had not saved yet.
+   *
+   * **The button is never disabled.** A greyed-out Run leaves the user holding a
+   * control that does nothing and says nothing about why, and the two reasons it
+   * used to grey out — an empty editor, and a column that is not saved yet — are
+   * both one sentence to explain. So they are explained here instead.
    */
   private async runNow(): Promise<void> {
-    const target = this.target;
     const dialogs = HostDialogs.instance;
-    if (!target || !dialogs || this.running || !this.text.trim()) return;
+    if (!dialogs || this.running) return;
+    if (!this.text.trim()) {
+      await dialogs.alert('There is no script to run. Write a render(row) function first, or pick one from the samples.', 'Run script');
+      return;
+    }
+    const target = this.target;
+    if (!target) {
+      await dialogs.alert('This column has no rows to write to yet. Create the table first, then open this script again and press Run.', 'Run script');
+      return;
+    }
+    if (isErrorField(target.field)) {
+      // Belt and braces: the columns editor already refuses to open this editor
+      // on `_error`, but Run is the half that would destroy Validate's output.
+      await dialogs.alert('Validate owns the “_error” column and rewrites it on every run, so writing to it here would be undone. Rename the column to make it yours.', 'Run script');
+      return;
+    }
     this.running = true;
     try {
       const ctx = await getContext();
@@ -503,30 +598,70 @@ export class ScriptEditorDialog extends LitElement {
         targets = scope === someLabel ? shown : all;
       }
 
-      const keep = 'Write and keep the script';
-      const clear = 'Write and clear the script';
-      const answer = await dialogs.choice(
-        `Write what this script returns into “${target.field}” for ${targets.length.toLocaleString()} ${targets.length === 1 ? 'row' : 'rows'}? The stored values are replaced and this cannot be undone. ` +
-          'Keeping the script leaves the column computed and read-only; clearing it makes the written values the data.',
-        [clear, keep],
-        'Run script',
-      );
-      if (answer === null) return;
+      const write =
+        `Write what this script returns into “${target.field}” for ${targets.length.toLocaleString()} ${targets.length === 1 ? 'row' : 'rows'}? ` +
+        'The stored values are replaced and this cannot be undone. The script itself is kept either way.';
+      // A LIVE script gets the extra question, because for it the answer changes
+      // something: it recomputes on every draw, and materializing it is usually
+      // the moment that stops being worth paying for. A parked one is already
+      // costing nothing, so it gets the plain confirm.
+      let park = false;
+      if (this.active === true) {
+        const picked = await dialogs.choice(`${write}\n\n${KEEP_ENABLED_HINT}`, [RUN_AND_DISABLE, RUN_AND_KEEP], 'Run script');
+        if (picked === null) return;
+        park = picked === RUN_AND_DISABLE;
+      } else {
+        const ok = await dialogs.confirm(write, 'Run script');
+        if (!ok) return;
+      }
 
       setAppProgress({ label: `Writing “${target.field}”`, fraction: 0 });
-      const result = await materializeColumnScript(coll, this.text, target.field, targets, (done, total) =>
-        setAppProgress({ label: `Writing “${target.field}”`, fraction: total > 0 ? done / total : undefined, detail: `${done.toLocaleString()} of ${total.toLocaleString()}` }),
-      );
+      this.progress = { done: 0, total: targets.length };
+      const result = await materializeColumnScript(coll, this.text, target.field, targets, (done, total) => {
+        // Both bars, because the run can outlive neither: the app bar is behind
+        // this modal's backdrop, and the dialog's own bar goes with the dialog.
+        this.progress = { done, total };
+        setAppProgress({ label: `Writing “${target.field}”`, fraction: total > 0 ? done / total : undefined, detail: `${done.toLocaleString()} of ${total.toLocaleString()}` });
+      });
+      this.progress = null;
       clearAppProgress();
-      ctx.api.ui.dialogs.toast(materializeSummary(result, target.field), { kind: result.failed > 0 ? 'error' : 'success', title: 'Run script' });
-      // Resolving closes the editor: the run IS the decision about this script.
-      this.resolve({ text: answer === clear ? '' : this.text, active: this.active !== false });
+      // Unticking the box is the whole of "and disable" HERE: the editor does not
+      // own the column — `active` rides back on Save, the same as the text does.
+      // So the toast says what is still outstanding rather than letting the user
+      // close the dialog believing the script is already parked.
+      if (park) this.active = false;
+      const done = materializeSummary(result, target.field);
+      ctx.api.ui.dialogs.toast(park ? `${done} Enable is now off — press Save to keep it that way.` : done, {
+        kind: result.failed > 0 ? 'error' : 'success',
+        title: 'Run script',
+      });
     } catch (err) {
+      this.progress = null;
       clearAppProgress();
       await dialogs.alert(`Could not run the script: ${err instanceof Error ? err.message : String(err)}`, 'Run script');
     } finally {
       this.running = false;
+      this.progress = null;
     }
+  }
+
+  /**
+   * The bar shown while Run is writing. Nothing at all when no run is in
+   * flight, so the dialog does not reserve space for a control that is absent
+   * almost always.
+   */
+  private renderProgress() {
+    const p = this.progress;
+    if (!p) return null;
+    const pct = p.total > 0 ? Math.round(Math.min(1, p.done / p.total) * 100) : 0;
+    return html`
+      <div class="progress" role="status" aria-live="polite" data-testid="script-run-progress">
+        <span class="label">Writing ${this.target ? html`“${this.target.field}”` : null}</span>
+        <span class="bar"><span class="fill" style=${`width:${pct}%`}></span></span>
+        <span class="detail">${p.done.toLocaleString()} of ${p.total.toLocaleString()}</span>
+        <span class="pct">${pct}%</span>
+      </div>
+    `;
   }
 
   /** The explanation above the textarea — different job, different contract. */
@@ -588,6 +723,10 @@ export class ScriptEditorDialog extends LitElement {
         Besides the JS globals you can call <code>markdownToHtml(text)</code> (also <code>easydb.markdownToHtml</code>) — set this column's renderer to <code>html</code> so the result shows as
         formatted text rather than as its own source. A sample that needs a particular renderer says so in its first line; the dropdown can't set it for you.
       </p>
+      <p class="hint">
+        <strong>Enable</strong> is what makes the column compute on every draw. Untick it and the script is kept, but the column shows its stored values and the cells can be typed into again — the
+        script then runs only when you press <strong>Run…</strong>, which writes what it returns into the cells and never changes the script itself.
+      </p>
     `;
   }
 
@@ -602,13 +741,12 @@ export class ScriptEditorDialog extends LitElement {
           <div class="dialog-header">
             <h2>${this.heading}${this.columnLabel ? ` — ${this.columnLabel}` : ''}</h2>
             <div class="header-actions">
-              ${this.target
+              ${this.kind === 'render'
                 ? html`<button
                     type="button"
                     class="ghost"
                     data-testid="script-run"
-                    title="Write what this script returns into the column’s cells"
-                    ?disabled=${this.running || !this.text.trim()}
+                    title="Write what this script returns into the column’s cells — works whether or not the script is enabled"
                     @click=${() => void this.runNow()}
                   >
                     Run…
@@ -616,19 +754,16 @@ export class ScriptEditorDialog extends LitElement {
                 : null}
               ${this.active === null
                 ? null
-                : html`<label
-                    class=${`run-switch${this.active ? '' : ' off'}`}
-                    title=${this.active ? 'Untick to keep this script but stop running it' : 'This script is switched off — it is kept with the column but does nothing until you tick this'}
-                  >
+                : html`<label class="run-switch" title=${this.activeTitle}>
                     <input type="checkbox" data-testid="script-active" .checked=${this.active} @change=${(e: Event) => (this.active = (e.target as HTMLInputElement).checked)} />
-                    ${validating ? 'Enforce' : 'Run'}
+                    Enable
                   </label>`}
               <button type="button" class="ghost" @click=${this.onCancel}>Cancel</button>
               <button type="submit" class="primary" ?disabled=${this.running}>Save</button>
             </div>
           </div>
           <div class="dialog-body">
-            ${this.renderHints()}
+            ${this.renderProgress()} ${this.renderHints()}
             <div class="samples">
               <label for="sample">Start from a sample</label>
               <select

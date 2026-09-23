@@ -46,7 +46,7 @@ const openButtonsTab = async (page: Page): Promise<Locator> => {
   return dlg;
 };
 
-const fieldSwitch = (dlg: Locator, label: string) => dlg.locator('.field', { hasText: label }).locator('label.scope', { hasText: 'enabled' }).locator('input');
+const fieldSwitch = (dlg: Locator, label: string) => dlg.locator('.field', { hasText: label }).locator('label.bool').locator('input');
 
 test('the filter row is shown by default, and the funnel hides it', async ({ page }) => {
   const id = await seed(page, 'People');

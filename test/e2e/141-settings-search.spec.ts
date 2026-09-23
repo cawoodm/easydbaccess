@@ -37,7 +37,7 @@ test('the control in the results is the real one', async ({ page }) => {
   const dlg = await openSettings(page);
   await search(dlg).fill('pink');
 
-  const toggle = panel(dlg).locator('.field', { hasText: 'Highlight empty cells' }).locator('label.scope', { hasText: 'enabled' }).locator('input');
+  const toggle = panel(dlg).locator('.field', { hasText: 'Highlight empty cells' }).locator('label.bool').locator('input');
   await expect(toggle).toBeChecked();
   await toggle.uncheck();
 
@@ -45,7 +45,7 @@ test('the control in the results is the real one', async ({ page }) => {
   await dlg.getByRole('button', { name: 'Done', exact: true }).click();
   const again = await openSettings(page);
   await again.getByRole('button', { name: 'Table grid' }).click();
-  await expect(panel(again).locator('.field', { hasText: 'Highlight empty cells' }).locator('label.scope', { hasText: 'enabled' }).locator('input')).not.toBeChecked();
+  await expect(panel(again).locator('.field', { hasText: 'Highlight empty cells' }).locator('label.bool').locator('input')).not.toBeChecked();
 });
 
 test('every word has to match, so a second word narrows', async ({ page }) => {

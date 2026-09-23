@@ -15,11 +15,11 @@ Rules are checked as you type and the reason appears under the field. **They do
 not stop you saving.** The button reads **Save anyway** on the first press, so you
 know the record goes in with the problem, and the message afterwards says how many
 went with it. A half-known record is usually worth keeping — the grid marks what
-is wrong, and the ✓ button lists it later.
+is wrong, and **Run → Run validations** lists it later.
 
 One rule cannot be checked here: **Unique**. It needs the other rows, and a record
 that does not exist yet has nothing to be a duplicate of. Editing the cell
-afterwards, or pressing ✓, catches it.
+afterwards, or running the check, catches it.
 
 ## Editing a whole record
 
@@ -116,20 +116,28 @@ Tick the box again to switch it back on. Clearing the body instead deletes the
 rule outright — and clears the switch with it, so a rule you write later starts
 switched on.
 
-## Checking every row: the ✓ button
+## Checking every row: Run → Run validations
 
 Rules only meet a value as it is typed, so an imported table has never been
-checked. The **✓** button in a table's footer checks all of it, against every
-rule its columns carry: Required, Maximum, Unique and your own validation
-scripts.
+checked. The **▶ Run** button in a table's footer checks all of it. Press it and
+pick **Run validations**; one dialog then asks what to check:
+
+- **Which columns** — every column that carries a rule is listed, with the rules
+  it carries beside it. All of them are ticked to start with; untick the ones you
+  do not want.
+- **Which rows** — what the grid is showing, or the whole table.
 
 What you get back is a summary — one line per column, in the order the columns
 appear — and **the table itself, narrowed to the rows with something wrong**.
 Every cell that broke a rule is **pink**, and hovering it says why: `Age value 40
 is over the maximum of 20`. Fix it in place.
 
-Press ✓ again when you have finished. The rows you repaired drop out, and a run
+Run it again when you have finished. The rows you repaired drop out, and a run
 that finds nothing leaves the table as it was.
+
+A run that covered only some of the columns, or only some of the rows, can **add**
+messages but never takes one back — a rule it did not apply is not a rule that
+passed. Check everything to clear everything.
 
 ### The `_error` column
 
@@ -139,10 +147,20 @@ already says it where you are looking — but it is an ordinary column:
 
 - The **columns editor** shows it, so you can unhide it and read the messages in
   a column of their own. Once you unhide it, it stays unhidden.
-- **Rename it** and it is yours. The messages come with it, the next ✓ leaves it
-  alone, and a fresh `_error` is made for that run. This is how you keep a copy
+- **Rename it** and it is yours. The messages come with it, the next check leaves
+  it alone, and a fresh `_error` is made for that run. This is how you keep a copy
   of what a run found.
 - A script can read it as `row._error` like any other field.
+
+Two things it does differently, because it is Validate's column and not yours:
+
+- **It colours the other way round.** A cell with a message is pink; an empty
+  one is **green**. Everywhere else pink means empty — here a message is the
+  problem and a blank cell is the row being fine.
+- **Neither script can be set on it**, and **Run** will not write to it. Validate
+  rewrites every value in it on each run, so a script there would be overwritten
+  and a rule there would be judging Validate's own output. Rename the column and
+  both work normally.
 
 Each run rewrites it: messages for the rows that are wrong now, and nothing on
 the rows that are not. So it is never a verdict on data that has since changed.
@@ -151,8 +169,9 @@ Three more things worth knowing:
 
 - A table whose columns carry no rules is not read at all. There is nothing to
   check, and the button says so instead of pretending to work.
-- A long scan shows a bar under the header and can be stopped with **Esc**. It
-  then reports what it found so far.
+- A long scan shows a bar under the header **and one on the table's own window**,
+  the same one an import draws, and can be stopped with **Esc**. It then reports
+  what it found so far.
 - A column stops listing after 500 problems and counts the rest, so one broken
   rule cannot bury the others.
 
@@ -238,10 +257,15 @@ The **+** works here too, and this list is shared with views: a script
 you save on a column is offered when you script a view's `$TOKEN`, and one you
 save there is offered on your columns. Validation rules stay in their own list.
 
-A display script has the same switch as a validation rule — untick **Run** at
-the top of the editor and the column shows its stored value again, with the
-script kept. Its button follows the same gray / blue / red as the rule button
-beside it.
+A display script has the same switch as a validation rule — untick **Enable**
+at the top of the editor and the column shows its stored value again, with the
+script kept. The cells go back to being ordinary editable cells, because there
+is no longer a computed value in the way. Its button follows the same gray /
+blue / red as the rule button beside it.
+
+A script that is not enabled is not dead: **Run…** still runs it on demand and
+writes what it returns into the cells. That is the difference between parking a
+script and deleting it — see below.
 
 #### Turning a computed column into data
 
@@ -250,20 +274,54 @@ alone. **Run…** in the script editor does the opposite: it writes what the
 script returns into the cells, so the values become ordinary data you can
 export, sync, filter and edit.
 
-It asks twice before writing, because neither answer has a safe default:
+**Run never deletes your script.** It writes the cells and stops there.
+
+It asks before writing:
 
 - **Which rows** — only when the grid is showing fewer than the table holds.
   You can write the whole table or just what the filter left.
-- **Keep or clear the script** — keeping it leaves the column computed and
-  read-only, so the written values only show up in an export. Clearing it hands
-  the column over to the data.
+- **Are you sure, and should the script stay enabled** — the write replaces
+  stored values and cannot be undone, so it is confirmed; and if the script is
+  still enabled you are offered **Run and disable** or **Run and keep enabled**.
+  Leaving it enabled means it goes on recomputing on every draw after its output
+  has been written, so disabling is usually what you want. Choosing to disable
+  unticks **Enable** for you — press **Save** to keep it that way. The script
+  itself is kept either way.
 
-The write happens straight away and cannot be undone. Clearing the script is a
-column edit like any other, so it lands when you save the columns editor. Rows
-the script throws on are skipped and counted — the message says how many.
+The write happens straight away. Rows the script throws on are skipped and
+counted — the message says how many. The editor stays open, so nothing you have
+typed is lost.
 
-**Run…** is not offered while you are still creating a table: there are no
-rows to write to yet.
+A progress bar appears in the editor while it writes, with the row count and a
+percentage, so a long run over a big table does not look like a hang. Writes go
+in batches of 500: about two and a half seconds for 4 000 rows.
+
+**Run…** is always there, and works whether or not the script is enabled. It is
+never greyed out — if it cannot run (no script yet, or a table you are still
+creating) it says so when you press it.
+
+#### Running every column at once
+
+**Run…** does one column. The **▶ Run** button in the table's footer → **Run
+scripts** does the whole table. One dialog asks both questions:
+
+- **Which columns** — every scripted column is listed, with `enabled` or
+  `disabled` beside it. All are ticked to start with; untick what you do not
+  want, or use **All** at the top.
+- **Which rows** — what the grid is showing, or the whole table.
+
+If any column you ticked is still enabled, it then offers **Run and disable** or
+**Run and keep enabled**, and disabling is the one to take once the values are
+written — an enabled script keeps recomputing on every draw for a column that is
+now ordinary data. Disabling parks the script; it is never deleted.
+
+Then it writes, one column after another, with a progress bar counting cells
+across the whole job.
+
+A parked script is worth knowing about. A script you have unticked is one you do
+not want computing on every draw — a slow lookup, an expensive join, a value that
+should be frozen once and then edited. Park it, and run it from here when you
+want it.
 
 ### Built-in renderers
 

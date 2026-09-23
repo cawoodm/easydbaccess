@@ -287,10 +287,34 @@ Two things are specific to this dialog, not the shared chrome:
   a move: the value is written to the new layer and removed from the old
   one, so a key is never split across both.
 
+- **A search box that replaces the tab selection.** The box above the nav
+  searches every tab at once (`dialogs/settings-search.ts`, pure and
+  unit-tested), and while it holds anything the panel shows the matches
+  grouped under the name of the tab each came from — the tab a setting
+  lives in is an implementation fact, so filtering only the tab the user
+  happens to be on would answer the wrong question. Four rules:
+  - The result rows render the **real controls**, through the same
+    `renderField`, so a setting found by searching is changed where it was
+    found.
+  - The General tab's two hand-rolled controls (workspace title, secrets)
+    are searchable too, via `GENERAL_FIELDS` and `renderGeneralField` —
+    "search inside settings" that misses two of them teaches the user not
+    to search.
+  - Picking a tab, in the nav or from a result's heading, CLEARS the
+    query (`goToTab`). Searching and browsing are two modes, and a stale
+    query behind a tab would make the tab look empty.
+  - Escape clears the query before it closes the dialog. The keydown
+    handler on the input `preventDefault`s, which is what stops the
+    `<dialog>`'s own cancel.
+
 Like every other dialog since the Ctrl+Enter audit, its `<dialog>` wraps a
 real `<form>` (header + body inside it, "Done" as `type="submit"`) with
-`@keydown=${ctrlEnterSubmits}` — and the two tab-nav `<button>`s needed an
+`@keydown=${ctrlEnterSubmits}` — and the tab-nav `<button>`s needed an
 explicit `type="button"` for the same reason called out above.
+
+The dialog opens with the search box focused: the reason to open Settings is
+usually one particular setting, and by the time the tab names have been read the
+name could have been typed.
 
 ## `<app-shell>` — the mount point and the header/footer slot host
 

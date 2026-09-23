@@ -13,8 +13,8 @@ import {
   rememberFolder,
   rememberHandle,
   rememberedFolder,
-  writeBytes,
 } from './file-handle.js';
+import { writeUserBytes } from './guarded-write.js';
 import { edbBridge } from './active-bridge.js';
 import { factsOfHandle, recordAgreement } from './file-stamp.js';
 import { setActiveEdbName } from './session.js';
@@ -106,8 +106,11 @@ export async function buildEdbFile(target: EdbTarget, workspaceId: string, fill?
   } finally {
     bridge.terminate();
   }
-  if (target.handle) await writeBytes(target.handle, bytes);
-  else downloadBytes(target.name, bytes);
+  // A picker can name a file that already exists, so this write is as capable of
+  // wiping one as a Save is. It goes through the same door — see `guarded-write.ts`.
+  if (target.handle) {
+    if (!(await writeUserBytes(target.handle, bytes, { file: target.name, reason: 'Create a workspace file' }))) return;
+  } else downloadBytes(target.name, bytes);
   await placeForNextBoot(target.name, bytes);
   // The file and the copy just placed in the pool are the same bytes. Recording
   // that is what stops the next sync reading our own brand-new file back over it.

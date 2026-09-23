@@ -259,10 +259,10 @@ which happens in two moments:
 so.** When the file has moved on and you have nothing unsaved, it asks first —
 loading costs you nothing, but it does replace what is on screen:
 
-| Choice                | What happens                                           |
-| --------------------- | ------------------------------------------------------ |
-| **Load disk version** | What the other machine saved appears here.             |
-| **Keep this copy**    | Nothing changes. The file stays where it is.            |
+| Choice                | What happens                                 |
+| --------------------- | -------------------------------------------- |
+| **Load disk version** | What the other machine saved appears here.   |
+| **Keep this copy**    | Nothing changes. The file stays where it is. |
 
 When there is nothing to load, the message after the sync says which: the file is
 up to date, or you have unsaved changes here — a Save is what that wants.
@@ -382,6 +382,43 @@ You do not have to wait for a clash to do any of this: the command palette has
 **Compare workspace with its file**, which asks the same question at a moment of
 your choosing. If the two copies match, it says so and stops.
 
+### Save will not empty a file that holds work
+
+The last check before anything is written, and the bluntest one: if the workspace
+open here holds **no tables and no views**, and the file holds some, the save
+stops and says so in red — with a ⚠ in the title, a ❗ beside the text, and two
+separate confirmations.
+
+```
+⚠ This save would empty the file                    Step 1 of 2
+
+❗  "sales.edb" holds 6 tables and 2 views.
+    The workspace open here holds nothing — 0 tables.
+
+    Saving now REPLACES the file with an empty workspace.
+    Everything in it is lost, and there is no undo.
+```
+
+**Cancel is the safe answer, and it is the one already selected.** Esc, the ✕ and
+clicking outside all mean the same thing: nothing is written and the file is left
+exactly as it was. Only two deliberate clicks — "Replace the file anyway", then
+"Delete 6 tables and 2 views" — go through.
+
+If you see this, the file is almost certainly the copy you want. Cancel, then use
+**Sync workspace folder** or open the file to bring it back.
+
+Three things it deliberately does not do:
+
+- **It never appears on an ordinary save.** A workspace with even one table saves
+  silently, as always.
+- **It does not fire when you delete one table of six.** Only a total wipe is
+  worth stopping — an alarm on every ordinary deletion would be clicked through
+  without reading, which would cost more than it saves.
+- **It does not block a first save.** A file that holds nothing has nothing to
+  lose.
+
+Emptying a file on purpose is still possible. It just takes both clicks.
+
 ### A file whose name is not its workspace
 
 Each file is named after the workspace inside it, and the app opens a workspace by
@@ -391,10 +428,10 @@ under a name that says `sales-copy`.
 
 The next **Sync workspace folder** says so and offers two answers:
 
-| Choice                          | What happens                                                                                    |
-| ------------------------------- | ----------------------------------------------------------------------------------------------- |
-| **Rename it to "sales-copy"**   | The workspace inside the file is renamed to match. The data stays, and you have two workspaces. |
-| **Leave it out**                | The file is left off the workspace list. Nothing is written to it and nothing is deleted.       |
+| Choice                        | What happens                                                                                    |
+| ----------------------------- | ----------------------------------------------------------------------------------------------- |
+| **Rename it to "sales-copy"** | The workspace inside the file is renamed to match. The data stays, and you have two workspaces. |
+| **Leave it out**              | The file is left off the workspace list. Nothing is written to it and nothing is deleted.       |
 
 Left out is not deleted: the file stays on disk exactly as it is, and the next sync
 asks again. It is the answer for a file you want to look at yourself first — delete

@@ -142,7 +142,8 @@ export class SettingsDialog extends LitElement {
         font-weight: 600;
         font-size: 0.9rem;
       }
-      .scope {
+      /* A boolean setting's own value. A tick box, because it IS a yes/no. */
+      .bool {
         display: inline-flex;
         align-items: center;
         gap: 0.25rem;
@@ -150,6 +151,60 @@ export class SettingsDialog extends LitElement {
         color: #6b7280;
         cursor: pointer;
         user-select: none;
+      }
+      /* WHERE the setting is stored — a different kind of question, so a
+         different kind of control.
+         It was a tick box labelled "user", sitting in the same row as the
+         boolean tick box above and looking exactly like it. People read it as a
+         second on/off option ("enable this for my user") and set it expecting
+         the feature to change. A two-state pill cannot be read that way: both
+         answers are on screen at once, one of them is always chosen, and
+         neither is spelled as on or off. */
+      .scope {
+        display: inline-flex;
+        align-items: stretch;
+        border: 1px solid #d1d5db;
+        border-radius: 999px;
+        overflow: hidden;
+        background: #f9fafb;
+        font-size: 0.7rem;
+        line-height: 1;
+        user-select: none;
+      }
+      .scope label {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.2rem 0.55rem;
+        color: #6b7280;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .scope label + label {
+        border-left: 1px solid #e5e7eb;
+      }
+      .scope label.on {
+        background: #1f2937;
+        color: #fff;
+      }
+      .scope label:not(.on):hover {
+        background: #eef2ff;
+        color: #3730a3;
+      }
+      /* The radios drive it; the pill is what is seen. Not display:none —
+         that takes them out of the tab order and off the a11y tree, and this is
+         the control a keyboard user needs to reach to move a setting between
+         layers. */
+      .scope input {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        margin: 0;
+        pointer-events: none;
+      }
+      .scope label:focus-within {
+        outline: 2px solid #2563eb;
+        outline-offset: -2px;
       }
       .desc {
         font-size: 0.78rem;
@@ -462,6 +517,12 @@ export class SettingsDialog extends LitElement {
     // Re-write the current value into the chosen layer; the resolver removes
     // the other layer so the key lives in exactly one place.
     await ctx.api.settings.set(tab.id, f.key, this.values[k], scope);
+    // Announced for the same reason `setValue` announces: moving a key between
+    // layers CHANGES WHAT READS RESOLVE TO, because the two layers can hold
+    // different values. Without this, ticking "this device only" left every
+    // component still showing the workspace answer until a reload — which read
+    // as "the user layer does nothing".
+    emitSettingsChanged(tab.id, f.key);
   }
 
   /** Drop a blocked-close message once the offending value is gone. Adding the
@@ -513,7 +574,7 @@ export class SettingsDialog extends LitElement {
           }}
         />`;
       case 'boolean':
-        return html`<label class="scope"><input type="checkbox" .checked=${Boolean(v)} @change=${(e: Event) => this.setValue(tab, f, (e.target as HTMLInputElement).checked)} /> enabled</label>`;
+        return html`<label class="bool"><input type="checkbox" .checked=${Boolean(v)} @change=${(e: Event) => this.setValue(tab, f, (e.target as HTMLInputElement).checked)} /> enabled</label>`;
       case 'date':
         return html`<input type="date" .value=${String(v ?? '')} @change=${(e: Event) => this.setValue(tab, f, (e.target as HTMLInputElement).value)} />`;
       case 'secret':
@@ -595,10 +656,16 @@ export class SettingsDialog extends LitElement {
               <span class="mi sm" aria-hidden="true">info</span>
             </button>`
           : nothing}
-        <label class="scope" title="Store on this device only (not synced)">
-          <input type="checkbox" .checked=${this.placements[k] === 'user'} @change=${(e: Event) => this.toggleScope(tab, f, (e.target as HTMLInputElement).checked)} />
-          user
-        </label>
+        <span class="scope" role="radiogroup" aria-label=${`Where “${f.label}” is stored`}>
+          <label class=${this.placements[k] === 'user' ? '' : 'on'} title="Stored in this workspace — it travels with the workspace and its file">
+            <input type="radio" name=${`scope-${k}`} .checked=${this.placements[k] !== 'user'} @change=${() => this.toggleScope(tab, f, false)} />
+            Workspace
+          </label>
+          <label class=${this.placements[k] === 'user' ? 'on' : ''} title="Stored on this device only — never synced, and not in the workspace file">
+            <input type="radio" name=${`scope-${k}`} .checked=${this.placements[k] === 'user'} @change=${() => this.toggleScope(tab, f, true)} />
+            This device
+          </label>
+        </span>
       </div>
       ${hasHelp && helpOpen
         ? html`<div class="help-panel">

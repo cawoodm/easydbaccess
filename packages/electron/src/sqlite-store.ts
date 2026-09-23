@@ -132,6 +132,11 @@ export class SqliteStore {
     return this.store.bulkInsert(coll, docs);
   }
 
+  /** For `rows`, the distinct tables the docs went into — see `EdbStore.bulkUpdate`. */
+  bulkUpdate(coll: string, docs: Record<string, unknown>[]): string[] {
+    return this.store.bulkUpdate(coll, docs);
+  }
+
   upsert(coll: string, doc: Record<string, unknown>): unknown {
     return this.store.upsert(coll, doc);
   }

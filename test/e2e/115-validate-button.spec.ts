@@ -1,8 +1,9 @@
 import { test, expect, type Page } from './fixtures.js';
-import { bulkAddRows, createTable, panelDomId, readRows, readTable, waitForPanel } from './helpers.js';
+import { bulkAddRows, createTable, openRun, panelDomId, readRows, readTable, runPickerAll, waitForPanel } from './helpers.js';
 
 /**
- * The ✓ button in a table's footer: check every row against its columns' rules.
+ * **Run → Run validations** in a table's footer: check its rows against its
+ * columns' rules.
  *
  * Until now a rule was only ever checked one cell at a time — as you typed — plus
  * a Save pre-flight over the rows already in memory. So a table imported from a
@@ -20,12 +21,13 @@ const gridRows = (page: Page, id: string) => page.locator(`#${panelDomId(id)} da
 /** Cells the last run flagged. */
 const flagged = (page: Page, id: string) => page.locator(`#${panelDomId(id)} data-table tbody td.is-problem`);
 
-/** Click the footer's ✓ button. */
+/**
+ * Run every rule over every row — what the ✓ button did in one click, and what
+ * Run → Run validations does once the picker has been told "all of both".
+ */
 async function validate(page: Page, id: string) {
-  await page
-    .locator(`#${panelDomId(id)} panel-footer`)
-    .getByTitle(/Check every row/)
-    .click();
+  await openRun(page, id, 'Run validations');
+  await runPickerAll(page, 'all');
 }
 
 /** Headers the grid is showing. */
@@ -248,9 +250,59 @@ test('a table with no rules is not scanned at all', async ({ page }) => {
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [{ anything: '' }, { anything: null }]);
 
-  await validate(page, id);
+  // No picker either: with nothing to tick, the answer comes before the question.
+  await openRun(page, id, 'Run validations');
   await expect(toast(page).getByText(/no column of "Loose" carries a rule/i)).toBeVisible();
+  await expect(page.locator('run-picker-dialog [data-testid="run-picker"]')).toBeHidden();
   // Nothing to say, so no column either.
   const table = await readTable(page, id);
   expect((table?.columns as Array<Record<string, unknown>>).map((c) => c.field)).not.toContain('_error');
+});
+
+test('the _error column marks itself the other way round: pink with a message, green without', async ({ page }) => {
+  // Every other column is pink when EMPTY. Here a message is the fault and a
+  // blank cell is the row being fine, so the rule is inverted — and it is not
+  // behind the empty-cell setting, which is about gaps in the user's own data.
+  //
+  // Built by hand rather than by running ✓, because a run narrows the grid to
+  // the rows it flagged and the clean row — the green one — is exactly what that
+  // hides.
+  const id = await createTable(page, 'Marked', [
+    { field: 'name' },
+    { field: '_error', label: 'Problem', type: 'text' },
+  ]);
+  await waitForPanel(page, id);
+  await bulkAddRows(page, id, [{ name: 'broken', _error: 'Name is empty' }, { name: 'fine', _error: '' }, { name: 'also fine' }]);
+
+  const cells = (cls: string) => page.locator(`#${panelDomId(id)} data-table tbody td.t-text.${cls}`);
+  await expect(cells('is-problem')).toHaveCount(1);
+  // Empty and absent both count as "nothing to say".
+  await expect(cells('is-ok')).toHaveCount(2);
+  // And never the plain empty-cell pink, which would say the opposite.
+  await expect(page.locator(`#${panelDomId(id)} data-table tbody td.t-text.is-null`)).toHaveCount(0);
+});
+
+test('the _error column refuses both script editors', async ({ page }) => {
+  // Validate rewrites every value in it on each run, so a script there would be
+  // overwritten and a rule there would be judging Validate's own output.
+  const id = await pets(page);
+  await validate(page, id);
+  await dialogs(page).getByRole('button', { name: 'Close' }).click();
+
+  await page
+    .locator(`#${panelDomId(id)} panel-footer`)
+    .getByRole('button', { name: /Columns/ })
+    .click();
+  const dlg = page.locator('new-table-dialog dialog');
+  await expect(dlg).toBeVisible();
+  // _error is the last column — the run appended it.
+  await dlg.locator('button.script-btn').last().click();
+  await expect(dialogs(page)).toContainText('Validate owns the “_error” column');
+  await dialogs(page).getByRole('button', { name: 'OK', exact: true }).click();
+  await expect(page.locator('script-editor-dialog dialog')).toBeHidden();
+
+  await dlg.locator('button.validate-btn').last().click();
+  await expect(dialogs(page)).toContainText('Validate owns the “_error” column');
+  await dialogs(page).getByRole('button', { name: 'OK', exact: true }).click();
+  await expect(page.locator('script-editor-dialog dialog')).toBeHidden();
 });

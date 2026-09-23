@@ -26,6 +26,17 @@ export const SCAN_PAGE_ROWS = 2_000;
 export interface ScanOptions extends ValidatorOptions {
   /** Rows per page. */
   pageRows?: number;
+  /**
+   * Check exactly these rows instead of reading the table.
+   *
+   * What the Run picker's "Visible rows" answer hands over: the grid has
+   * already filtered, searched and sorted them, and re-deriving that here would
+   * be a second definition of the same thing — and a second read of a table the
+   * grid holds. A scan of a subset never speaks for the whole table, so the
+   * caller must not clear a message it did not look at; `validate.ts` is where
+   * that rule lives.
+   */
+  rows?: readonly Row[] | undefined;
   /** Told how many rows have been checked, and out of how many if known. */
   onProgress?: (scanned: number, total: number) => void;
   /** Asked between pages. True ⇒ stop and report what was found so far. */
@@ -79,8 +90,9 @@ export async function scanTable(coll: DataCollection<Row>, columns: readonly Col
 
   // The count is what makes the progress bar determinate. It is optional on the
   // contract, and on a big IndexedDB table it costs seconds — but this scan is
-  // going to read every row anyway, so the count is a rounding error here.
-  const total = coll.count ? await coll.count() : 0;
+  // going to read every row anyway, so the count is a rounding error here. A
+  // given row set counts itself and reads nothing.
+  const total = opts.rows ? opts.rows.length : coll.count ? await coll.count() : 0;
   opts.onProgress?.(0, total);
 
   /** Run the validator over one batch, and report. Returns false to stop. */
@@ -101,7 +113,14 @@ export async function scanTable(coll: DataCollection<Row>, columns: readonly Col
     return true;
   };
 
-  if (coll.query) {
+  if (opts.rows) {
+    // Already in hand — chunked all the same, so the loop still yields and can
+    // still be cancelled.
+    const given = opts.rows;
+    for (let from = 0; from < given.length; from += pageRows) {
+      if (!(await takeBatch(given.slice(from, from + pageRows)))) break;
+    }
+  } else if (coll.query) {
     for (let offset = 0; ; offset += pageRows) {
       // `countTotal: false` — the total came from `count()` above, and asking each
       // page to count the table again would pay for it once per page.

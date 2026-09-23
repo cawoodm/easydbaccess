@@ -70,6 +70,12 @@ export interface EasydbStoreBridge {
   findOne(coll: string, key: string): Promise<unknown | null>;
   insert(coll: string, doc: Record<string, unknown>): Promise<unknown>;
   bulkInsert(coll: string, docs: Record<string, unknown>[]): Promise<unknown[]>;
+  /**
+   * Overwrite many EXISTING docs in one transaction. Optional for the same
+   * reason as the reads above — an older Electron preload does not have it —
+   * so the collection only exposes `bulkUpdate` when the transport does.
+   */
+  bulkUpdate?(coll: string, docs: Record<string, unknown>[]): Promise<void>;
   upsert(coll: string, doc: Record<string, unknown>): Promise<unknown>;
   patch(coll: string, key: string, patch: Record<string, unknown>): Promise<unknown>;
   remove(coll: string, key: string): Promise<void>;
@@ -392,6 +398,20 @@ function rowsViewIpc(bridge: EasydbStoreBridge, tableId: string): DataCollection
       await bridge.bulkInsert('rows', stamped as unknown as Record<string, unknown>[]);
       return stamped;
     },
+    // Feature-detected by its callers, exactly like `query`: a fallback that
+    // looped `patch()` would hide the per-row round trip and broadcast this
+    // exists to collapse.
+    ...(bridge.bulkUpdate
+      ? {
+          bulkUpdate: async (docs: Row[]): Promise<void> => {
+            if (docs.length === 0) return;
+            await bridge.bulkUpdate!(
+              'rows',
+              docs.map((d) => ({ ...d, tableId })) as unknown as Record<string, unknown>[],
+            );
+          },
+        }
+      : {}),
     async upsert(doc) {
       const stamped = { ...doc, tableId };
       await bridge.upsert('rows', stamped as unknown as Record<string, unknown>);

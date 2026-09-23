@@ -115,6 +115,7 @@ function registerStoreIpc(): void {
   handle('store:findOne', (coll: string, key: string) => getStore().findOne(coll, key));
   handleMutating('store:insert', (coll: string, doc: Record<string, unknown>) => getStore().insert(coll, doc));
   handleMutating('store:bulkInsert', (coll: string, docs: Record<string, unknown>[]) => getStore().bulkInsert(coll, docs));
+  handleMutating('store:bulkUpdate', (coll: string, docs: Record<string, unknown>[]) => getStore().bulkUpdate(coll, docs));
   handleMutating('store:upsert', (coll: string, doc: Record<string, unknown>) => getStore().upsert(coll, doc));
   handleMutating('store:patch', (coll: string, key: string, patch: Record<string, unknown>) => getStore().patch(coll, key, patch));
   handleMutating('store:remove', (coll: string, key: string) => getStore().remove(coll, key));

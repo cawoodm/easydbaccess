@@ -87,6 +87,19 @@ export interface DataCollection<T> {
   insert(doc: T): Promise<T>;
   /** Batched insert. Always prefer this over a loop of `insert()` in importers. */
   bulkInsert(docs: T[]): Promise<T[]>;
+  /**
+   * Optional: overwrite many documents that ALREADY exist, in one transaction
+   * and one change broadcast. Each doc replaces the stored one whole, so the
+   * caller passes a full document, not a patch.
+   *
+   * Optional because `patch()` remains the whole contract a collection must
+   * satisfy — but a loop of `patch()` pays a round trip, a transaction and a
+   * grid-waking broadcast PER ROW, which is what made writing a computed column
+   * over 4 000 rows take two minutes. Callers must feature-detect and fall back.
+   *
+   * A doc naming something that is not there writes nothing; it is not an error.
+   */
+  bulkUpdate?(docs: T[]): Promise<void>;
   upsert(doc: T): Promise<T>;
   patch(id: string, patch: Partial<T>): Promise<T>;
   remove(id: string): Promise<void>;

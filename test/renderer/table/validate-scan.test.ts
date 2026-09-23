@@ -102,6 +102,29 @@ describe('scanTable', () => {
     expect(out.issues).toHaveLength(20);
   });
 
+  it('checks a given row set without reading the table at all', async () => {
+    // What the Run picker's "Visible rows" answer hands over. The grid has
+    // already filtered and sorted them, so a second read here would be both a
+    // second definition of the same set and a second fetch of a table that is
+    // already in memory.
+    const all = rows(10, (i) => ({ a: i % 2 === 0 ? '' : 'x' }));
+    const { coll, seen } = fakeColl(all);
+    const out = await scanTable(coll, [col({ field: 'a', notnull: true })], { rows: [all[0]!, all[2]!] });
+    expect(out.scanned).toBe(2);
+    expect(out.issues).toHaveLength(2);
+    expect(seen.queries).toEqual([]);
+    expect(seen.finds).toBe(0);
+    expect(seen.counts).toBe(0);
+  });
+
+  it('counts a given row set as its own total, so the bar is still determinate', async () => {
+    const all = rows(10, () => ({ a: 'x' }));
+    const { coll } = fakeColl(all);
+    const seenProgress: Array<[number, number]> = [];
+    await scanTable(coll, [col({ field: 'a', notnull: true })], { rows: all.slice(0, 3), onProgress: (s, t) => seenProgress.push([s, t]) });
+    expect(seenProgress.at(-1)).toEqual([3, 3]);
+  });
+
   it('works on a collection with no windowed read, chunking in memory', async () => {
     const { coll, seen } = fakeColl(
       rows(25, (i) => ({ a: i === 24 ? '' : 'x' })),

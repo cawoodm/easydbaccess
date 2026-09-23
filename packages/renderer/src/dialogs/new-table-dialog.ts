@@ -9,6 +9,7 @@ import { ctrlEnterSubmits, dialogChromeStyles, HostDialogs, makeDialogDraggable 
 import { markDirty, watchDialogDirty } from '../chrome/dirty-guard.js';
 import { ScriptEditorDialog } from './script-editor-dialog.js';
 import { allColumnsFlagged, buildColumnSpec, toggleColumnFlag, type ColumnFlag, type ColumnRow } from './column-row.js';
+import { isErrorField } from '../table/row-errors.js';
 import { renameRowFields, type FieldRename } from '../table/column-merge.js';
 import {
   conditionalPatch,
@@ -781,6 +782,7 @@ export class NewTableDialog extends LitElement {
     if (!dlg) return;
     const c = this.columns[idx];
     if (!c) return;
+    if (await this.refuseErrorColumn(c)) return;
     // The target is what lets the editor offer Run. Only a SAVED column of a
     // SAVED table has cells to write: a field being renamed in this editor is
     // not yet the key the rows are stored under, so Run would write a column
@@ -797,6 +799,23 @@ export class NewTableDialog extends LitElement {
   }
 
   /**
+   * Refuse both script editors on Validate's own `_error` column, and say why.
+   *
+   * An alert rather than a disabled button: the reason is one sentence and the
+   * way out (rename the column) is not guessable from a greyed-out pencil.
+   * Returns true when the caller should stop.
+   */
+  private async refuseErrorColumn(c: ColumnRow): Promise<boolean> {
+    if (!isErrorField(c.field)) return false;
+    const dialogs = HostDialogs.instance;
+    await dialogs?.alert(
+      'Validate owns the “_error” column — it rewrites every value in it on each run, so a script here would be overwritten and a rule here would be judging Validate’s own output. Rename the column to make it yours; the next run creates a fresh _error beside it.',
+      'Scripts',
+    );
+    return true;
+  }
+
+  /**
    * Same modal, the column's OTHER script: the `validate(value, row)` rule run
    * before a manual cell edit is written.
    */
@@ -805,6 +824,7 @@ export class NewTableDialog extends LitElement {
     if (!dlg) return;
     const c = this.columns[idx];
     if (!c) return;
+    if (await this.refuseErrorColumn(c)) return;
     const next = await dlg.open(c.validate ?? '', c.label || c.field, 'validate', { active: c.validateActive !== false });
     if (next === null) return;
     this.patchColumn(idx, { validate: next.text.trim() ? next.text : undefined, validateActive: next.active ? undefined : false });

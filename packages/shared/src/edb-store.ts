@@ -32,7 +32,7 @@
 import { groupColumnFilter, parseColumnFilter } from './column-filter.js';
 import { buildWhere, columnFilterToSql } from './filter-sql.js';
 import type { DistinctPage, DistinctQuery, RowPage, RowQuery } from './row-query.js';
-import type { SqlDriver } from './sql-driver.js';
+import type { SqlDriver, SqlStatement } from './sql-driver.js';
 import type { SqlRunOptions, SqlRunResult } from './sql-run.js';
 import { decodeValue, encodeValue, quoteIdent, sqlAffinity, sqlTableNameFor } from './sql-mapping.js';
 import type { CloneMode, ColumnSpec, Row, WorkspaceContents } from './types.js';
@@ -262,6 +262,40 @@ export class EdbStore {
       else for (const doc of docs) this.insertNoTx(coll, doc);
     });
     return docs;
+  }
+
+  /**
+   * Overwrite many EXISTING documents in one transaction, and report which
+   * tables they were in.
+   *
+   * The counterpart of `bulkInsert` for rows that are already there, and the
+   * reason it exists is arithmetic: a loop of `patch()` is one transaction, one
+   * statement compile and one read-back PER ROW, plus — over a transport — one
+   * round trip and one change broadcast each. Writing 4 000 computed cells that
+   * way took about two minutes, nearly all of it overhead; through here it is
+   * one transaction and one broadcast.
+   *
+   * It cannot be `bulkInsert`, which uses `INSERT OR REPLACE`: on a conflict
+   * SQLite deletes and re-inserts, handing the row a fresh `rowid`, and a read
+   * with no ORDER BY comes back in rowid order — so every updated row would jump
+   * to the bottom of the grid. This UPDATEs in place, like the single-row upsert
+   * beside it.
+   *
+   * A doc naming a row that is not there updates nothing and is not an error:
+   * the caller read its list before writing, and a row deleted in between is a
+   * race, not a bug.
+   */
+  bulkUpdate(coll: string, docs: Record<string, unknown>[]): string[] {
+    if (docs.length === 0) return [];
+    return this.tx(() => {
+      const touched = new Set<string>();
+      if (coll === 'rows') {
+        this.bulkUpdateRowsNoTx(docs, touched);
+      } else {
+        for (const doc of docs) this.writeNoTx('upsert', coll, doc);
+      }
+      return [...touched];
+    });
   }
 
   patch(coll: string, key: string, patch: Record<string, unknown>): unknown {
@@ -1014,6 +1048,45 @@ export class EdbStore {
       const allCols = ['_id', '_updatedAt', '_extra', ...cols];
       const placeholders = allCols.map(() => '?').join(', ');
       this.db.prepare(`INSERT OR REPLACE INTO ${quoteIdent(target.sqlTable)} (${allCols.map(quoteIdent).join(', ')}) VALUES (${placeholders})`).run(id, updatedAt, extraJson, ...values);
+    }
+  }
+
+  /**
+   * UPDATE many existing rows, one prepared statement per table.
+   *
+   * The statement shape is fixed by the table's columns — every declared column
+   * is written, absent fields as NULL, exactly as the single-row upsert does —
+   * so it compiles once per table however many rows go through it. No row is
+   * read back: `bulkUpdate` returns table ids, not docs, so the primary-key
+   * lookup the single-row path pays for would be thrown away.
+   *
+   * `touched` collects the tables for the caller's change broadcast.
+   */
+  private bulkUpdateRowsNoTx(docs: Record<string, unknown>[], touched: Set<string>): void {
+    const targets = new Map<string, { columns: ColumnSpec[]; stmt: SqlStatement }>();
+    for (const doc of docs) {
+      const id = doc.id;
+      const tableId = doc.tableId;
+      if (typeof id !== 'string') throw new Error(`EdbStore.bulkUpdate: "rows" doc is missing its primary key "id"`);
+      if (typeof tableId !== 'string') throw new Error(`EdbStore.bulkUpdate: "rows" doc is missing "tableId"`);
+      let target = targets.get(tableId);
+      if (!target) {
+        const ctx = this.tableContext(tableId);
+        const setCols = ['_updatedAt', '_extra', ...ctx.columns.map((c) => c.field)];
+        // Prepared out here, not per row: the browser driver caches by SQL text
+        // but the desktop one compiles on every `prepare`, and this loop is the
+        // one place that difference is worth thousands of compiles.
+        const stmt = this.db.prepare(`UPDATE ${quoteIdent(ctx.sqlTable)} SET ${setCols.map((c) => `${quoteIdent(c)} = ?`).join(', ')} WHERE _id = ?`);
+        target = { columns: ctx.columns, stmt };
+        targets.set(tableId, target);
+      }
+      const data = (doc.data as Record<string, unknown>) ?? {};
+      const updatedAt = typeof doc.updatedAt === 'number' ? doc.updatedAt : 0;
+      const { cols, values, extraJson } = this.encodeRowColumns(target.columns, data);
+      const written = new Map(cols.map((c, i) => [c, values[i]] as const));
+      const setValues: unknown[] = [updatedAt, extraJson, ...target.columns.map((c) => (written.has(c.field) ? written.get(c.field) : null))];
+      target.stmt.run(...setValues, id);
+      touched.add(tableId);
     }
   }
 

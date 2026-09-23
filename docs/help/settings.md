@@ -94,16 +94,27 @@ radio buttons, or a set of checkboxes, depending on what the setting is for.
 
 ## Workspace vs. this device only
 
-Every field has a small **user** checkbox next to its label.
+Every field has a small pill next to its label with two halves —
+**Workspace** and **This device**. It says _where the value is kept_, not what
+the value is:
 
-- **Unchecked (default):** the value is stored with your workspace. It
-  syncs to your other devices along with your tables.
-- **Checked:** the value stays on this device only. It never syncs, and
-  never leaves with an export.
+- **Workspace** (default): stored with your workspace. It syncs to your other
+  devices along with your tables, and travels inside the workspace file.
+- **This device**: stays on this machine only. It never syncs, and never leaves
+  with an export.
 
-Use "this device only" for anything that shouldn't follow your data around —
-a personal access token, a machine-specific URL, or a setting you want
-different on each device.
+Use "This device" for anything that shouldn't follow your data around — a
+personal access token, a machine-specific URL, or a setting you want different
+on each device.
+
+A value moves with the key: switching a setting to **This device** takes its
+current value along, so nothing changes at the moment you switch. Switching back
+puts it in the workspace again.
+
+This used to be a tick box labelled "user", sitting beside the tick box that
+turns a yes/no setting on — which read as a second option to enable rather than
+a question about storage. Both answers are on the pill now, and one of them is
+always the one in force.
 
 ## Example: the Datasette tab
 

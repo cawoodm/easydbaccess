@@ -28,6 +28,7 @@ import * as cellTags from '../plugins/cell-tags.js';
 import * as autoRenderer from '../plugins/auto-renderer.js';
 import * as deleteTable from '../plugins/delete-table.js';
 import * as validate from '../plugins/validate.js';
+import * as runScripts from '../plugins/run-scripts.js';
 import * as tableCopy from '../plugins/table-copy.js';
 import * as sqlConsole from '../plugins/sql-console.js';
 import * as importData from '../plugins/import-data.js';
@@ -98,6 +99,7 @@ const modules: PluginModule[] = [
   autoRenderer,
   deleteTable,
   validate,
+  runScripts,
   tableCopy,
   sqlConsole,
   importData,
