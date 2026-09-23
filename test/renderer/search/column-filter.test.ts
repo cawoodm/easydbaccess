@@ -457,3 +457,76 @@ describe('isListExpression', () => {
     expect(plainTextOf('a,b')).toBe('a,b');
   });
 });
+
+describe('comparison tokens', () => {
+  it('parses each operator off the front of the term', () => {
+    expect(parseColumnFilter('>=100')).toEqual([{ term: '100', negate: false, cmp: '>=' }]);
+    expect(parseColumnFilter('<=100')).toEqual([{ term: '100', negate: false, cmp: '<=' }]);
+    expect(parseColumnFilter('>100')).toEqual([{ term: '100', negate: false, cmp: '>' }]);
+    expect(parseColumnFilter('<100')).toEqual([{ term: '100', negate: false, cmp: '<' }]);
+  });
+
+  it('parses a negated comparison', () => {
+    expect(parseColumnFilter('!>=100')).toEqual([{ term: '100', negate: true, cmp: '>=' }]);
+  });
+
+  it('round-trips through compose', () => {
+    for (const q of ['>=100', '<=100', '>100', '<100', '!>=100', '>=a AND <=b', '>=2026-01-01,<=2020-01-01']) {
+      expect(composeColumnFilter(parseColumnFilter(q))).toBe(q);
+    }
+  });
+
+  it('a value that merely starts with > stays literal text', () => {
+    // Quoted on the way in, and the quotes must come back — otherwise the
+    // round trip turns the value into an operator.
+    const tokens = parseColumnFilter('">=not an operator"');
+    expect(tokens).toEqual([{ term: '>=not an operator', negate: false, exact: true }]);
+    expect(composeColumnFilter(tokens)).toBe('">=not an operator"');
+  });
+
+  it('a comparison is an expression, not plain text', () => {
+    expect(isListExpression('>=100')).toBe(true);
+    expect(isListExpression('<2026-01-01')).toBe(true);
+  });
+
+  it('a star inside a comparison term is literal, not a wildcard', () => {
+    expect(parseColumnFilter('>=a*')).toEqual([{ term: 'a*', negate: false, cmp: '>=' }]);
+  });
+
+  it('compares as text when no type is given', () => {
+    expect(matchesColumnFilter('b', '>=b')).toBe(true);
+    expect(matchesColumnFilter('c', '>=b')).toBe(true);
+    expect(matchesColumnFilter('a', '>=b')).toBe(false);
+    expect(matchesColumnFilter('b', '>b')).toBe(false);
+    expect(matchesColumnFilter('a', '<=b')).toBe(true);
+    expect(matchesColumnFilter('c', '<b')).toBe(false);
+  });
+
+  it('comparison is case-insensitive, like every other token', () => {
+    expect(matchesColumnFilter('B', '>=b')).toBe(true);
+    expect(matchesColumnFilter('b', '>=B')).toBe(true);
+  });
+
+  it('an empty cell never satisfies a comparison', () => {
+    expect(matchesColumnFilter(null, '>=a')).toBe(false);
+    expect(matchesColumnFilter('', '>=a')).toBe(false);
+    expect(matchesColumnFilter('   ', '<=z')).toBe(false);
+  });
+
+  it('a negated comparison passes for an empty cell', () => {
+    // Same rule as every other negated text test: a null cell fails the
+    // positive test and therefore passes its negation.
+    expect(matchesColumnFilter(null, '!>=a')).toBe(true);
+    expect(matchesColumnFilter('z', '!>=a')).toBe(false);
+  });
+
+  it('NULL after a comparison is the literal text, not the blank test', () => {
+    expect(matchesColumnFilter(null, '>=NULL')).toBe(false);
+    expect(matchesColumnFilter('zzz', '>=NULL')).toBe(true);
+  });
+
+  it('two comparisons joined by AND make a closed range', () => {
+    expect(matchesColumnFilter('m', '>=a AND <=z')).toBe(true);
+    expect(matchesColumnFilter('m', '>=n AND <=z')).toBe(false);
+  });
+});

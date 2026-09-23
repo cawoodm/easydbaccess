@@ -4,10 +4,11 @@
 // the read-only view windows. Pure and DOM-free so it's unit-testable.
 //
 // A filter is a COMMA-SEPARATED list of tokens. Each token may be negated with
-// a leading `!` and/or anchored with a leading `^` (starts-with) or `=` (exact
-// match) — `^` and `=` are mutually exclusive, both being anchors. A row
-// passes when it matches at least one positive token (or there are none) and
-// matches no negative token:
+// a leading `!` and/or anchored with a leading `^` (starts-with), `=` (exact
+// match), or one of `>=` `<=` `>` `<` (order comparison) — these anchors are
+// mutually exclusive, since a term cannot be both "starts with" and "at
+// least". A row passes when it matches at least one positive token (or there
+// are none) and matches no negative token:
 //
 //   `Sweden,Norway`      → Sweden OR Norway
 //   `!Closed,!Cancelled` → everything except those two
@@ -16,6 +17,8 @@
 //   `!^S`                → cells that do NOT start with "S"
 //   `=foo`               → cells that are EXACTLY "foo"
 //   `!=foo`              → cells that are NOT exactly "foo"
+//   `>=100`              → cells AT LEAST "100"
+//   `<100`               → cells BEFORE "100"
 //   `"Berlin, DE",Zurich` → a value containing a comma must be quoted
 //
 // Two tokens can also be joined with a standalone uppercase `AND`, which is the
@@ -44,6 +47,12 @@
 //   • `"text"`          → exact, when it is one entry of a LIST. The whole
 //     input in quotes is not a list at all — see `isListExpression`.
 //   • `=text`           → exact match against the WHOLE cell (not trimmed).
+//   • `>=text` `<=text`
+//     `>text` `<text`   → ORDER comparison. Lexicographic text order when no
+//     column type is given (`compare-cell.ts` — type-aware comparison is a
+//     later addition). False for an empty cell — a comparison against nothing
+//     is not an order relation — so `!>=x` passes an empty cell the same way
+//     every other negated test does.
 //   • `!text`           → NOT. Because a null or empty cell never contains a
 //     non-empty term, `!true` on a boolean column also surfaces the empty rows.
 //   • `NULL`            → cell is null/undefined or (after trim) empty.
@@ -53,7 +62,9 @@
 //
 // `*` is a wildcard OUTSIDE quotes only, so `"a*b"` is the literal value, and a
 // token that is nothing but stars stays literal too (`*` is a search for an
-// asterisk, since an empty term already means "is this cell blank").
+// asterisk, since an empty term already means "is this cell blank"). A `*`
+// after a comparison anchor is likewise literal — `>=a*` compares against the
+// text "a*", since the star-wildcard guard does not run once `cmp` is set.
 //
 // One limitation worth knowing: a BARE token whose term needs quoting (it holds
 // a comma, or starts with `!`/`^`/`=`/`*`) cannot survive
@@ -64,8 +75,10 @@
 // `NULL` is matched as a whole token (case-insensitive), so a plain search for
 // the literal text "null" inside a cell is intentionally not reachable — the
 // null test wins. `^` and `=` both beat it: `^NULL` looks for cells starting
-// with the TEXT "null", `=NULL` looks for cells that ARE exactly "null". Quote
-// a token to search for a literal leading `!`, `^` or `=` (`"^caret"`).
+// with the TEXT "null", `=NULL` looks for cells that ARE exactly "null". Every
+// comparison anchor beats it too: `>=NULL` compares against the literal text
+// "null", not the blank test. Quote a token to search for a literal leading
+// `!`, `^`, `=`, `>` or `<` (`"^caret"`).
 //
 // An `array` column (pass `{ type: 'array' }`) matches PER MEMBER: the cell is
 // taken apart by `array-cell.ts` and a token that hits any one member hits
@@ -75,6 +88,10 @@
 // member matches", and `NULL` as "no members at all".
 
 import { arrayMembers } from './array-cell.js';
+import { satisfiesCmp } from './compare-cell.js';
+
+/** The four order comparisons. `>=2026-06-23`, `<100`. */
+export type FilterCmp = '>' | '>=' | '<' | '<=';
 
 /**
  * One term of a column filter. `negate` excludes instead of includes; `prefix`
@@ -109,6 +126,15 @@ export interface FilterToken {
    * the list it already read, and only the matcher groups it.
    */
   and?: boolean;
+  /**
+   * `>=2026-06-23` — an ORDER comparison against the term rather than a text
+   * match. Mutually exclusive with every other anchor: a term cannot be both
+   * "starts with" and "at least".
+   *
+   * What the comparison MEANS depends on the column type and lives in
+   * `compare-cell.ts`, not here.
+   */
+  cmp?: FilterCmp;
 }
 
 /** Is a cell value considered empty/null for filtering purposes? */
@@ -137,7 +163,7 @@ export function isListExpression(raw: string): boolean {
   const q = String(raw ?? '').trim();
   if (q === '') return false;
   if (isFullyQuoted(q)) return false;
-  return /[,!^=*]/.test(q) || /\s(AND|OR)(?=[\s,]|$)/.test(q);
+  return /[,!^=*<>]/.test(q) || /\s(AND|OR)(?=[\s,]|$)/.test(q);
 }
 
 /** The whole input in quotes, with no other quote inside it. */
@@ -175,6 +201,7 @@ export function parseColumnFilter(raw: string): FilterToken[] {
   let negate = false;
   let prefix = false;
   let exact = false;
+  let cmp: FilterCmp | null = null;
   let atStart = true; // still eligible to consume a leading `!` / `^` / `=`
   let pendingAnd = false; // an `AND` was read; it belongs to the NEXT token
 
@@ -185,7 +212,7 @@ export function parseColumnFilter(raw: string): FilterToken[] {
     // search for an asterisk, not a match-everything, because an empty term
     // already means "is this cell blank" further down.
     let star: 'contains' | 'prefix' | 'suffix' | null = null;
-    if (!hadQuote && !exact && !prefix && /[^*]/.test(term)) {
+    if (!hadQuote && !exact && !prefix && !cmp && /[^*]/.test(term)) {
       const lead = term.startsWith('*');
       const tail = term.endsWith('*');
       if (lead && tail && term.length > 1) {
@@ -204,6 +231,7 @@ export function parseColumnFilter(raw: string): FilterToken[] {
       if (prefix || star === 'prefix') token.prefix = true;
       if (star === 'suffix') token.suffix = true;
       if (star === 'contains') token.contains = true;
+      if (cmp) token.cmp = cmp;
       // A quoted entry in a LIST is an exact value — `"Foo Bar","Baz"` is a
       // two-value picker, not two substrings. The whole-input quoted form never
       // reaches here: `isListExpression` sends it down the plain-text path.
@@ -221,6 +249,7 @@ export function parseColumnFilter(raw: string): FilterToken[] {
     negate = false;
     prefix = false;
     exact = false;
+    cmp = null;
     atStart = true;
   };
 
@@ -265,11 +294,22 @@ export function parseColumnFilter(raw: string): FilterToken[] {
       negate = true;
       continue;
     }
-    if (ch === '=' && !quoted && atStart && !prefix && !exact) {
+    // `>` / `<`, optionally followed by `=`. Before the `=` branch, which would
+    // otherwise eat the second character of `>=` as the exact-match anchor.
+    if ((ch === '>' || ch === '<') && !quoted && atStart && !cmp && !prefix && !exact) {
+      if (raw[i + 1] === '=') {
+        cmp = `${ch}=` as FilterCmp;
+        i++;
+      } else {
+        cmp = ch as FilterCmp;
+      }
+      continue;
+    }
+    if (ch === '=' && !quoted && atStart && !cmp && !prefix && !exact) {
       exact = true;
       continue;
     }
-    if (ch === '^' && !quoted && atStart && !prefix && !exact) {
+    if (ch === '^' && !quoted && atStart && !cmp && !prefix && !exact) {
       prefix = true;
       continue;
     }
@@ -287,7 +327,7 @@ export function parseColumnFilter(raw: string): FilterToken[] {
  * and a term carrying a standalone `AND` / `OR` would come back split in two.
  */
 function needsQuoting(term: string): boolean {
-  return term.includes(',') || term.includes('"') || term !== term.trim() || term === '' || term.startsWith('!') || term.startsWith('^') || term.startsWith('=') || /\s(AND|OR)(?=[\s,]|$)/.test(term);
+  return term.includes(',') || term.includes('"') || term !== term.trim() || term === '' || term.startsWith('!') || term.startsWith('^') || term.startsWith('=') || term.startsWith('>') || term.startsWith('<') || /\s(AND|OR)(?=[\s,]|$)/.test(term);
 }
 
 /** Render tokens back into a filter string, quoting terms that need it. */
@@ -306,7 +346,7 @@ export function composeColumnFilter(tokens: FilterToken[]): string {
     // `^` rather than `foo*` for a prefix, because the two mean the same and the
     // anchor is what every existing composer and test already round-trips.
     const quoted = body !== t.term;
-    const anchored = t.exact ? (quoted ? body : `=${body}`) : t.prefix ? `^${body}` : t.contains ? `*${body}*` : t.suffix ? `*${body}` : body;
+    const anchored = t.cmp ? `${t.cmp}${body}` : t.exact ? (quoted ? body : `=${body}`) : t.prefix ? `^${body}` : t.contains ? `*${body}*` : t.suffix ? `*${body}` : body;
     const text = (t.negate ? '!' : '') + anchored;
     // `and` joins to the token before it, so it cannot open the expression: a
     // caller that dropped the first token (the view pills do) must not get a
@@ -356,8 +396,14 @@ function isEmptyCell(value: unknown, members: string[] | null): boolean {
  * `array` column, in which case the token tests each member and one hit is
  * enough.
  */
-function matchesTerm(value: unknown, token: FilterToken, members: string[] | null, defaultSubstring: boolean): boolean {
+function matchesTerm(value: unknown, token: FilterToken, members: string[] | null, defaultSubstring: boolean, type: string | undefined): boolean {
   const term = token.term;
+  // A comparison is an order test against the term as written — `>=NULL` looks
+  // for cells at or after the literal text "null", not for blank ones.
+  if (token.cmp) {
+    if (members) return members.some((m) => satisfiesCmp(m, term, token.cmp!, type));
+    return satisfiesCmp(value, term, token.cmp, type);
+  }
   // An empty term (a lone `!`) always tests emptiness — an anchor cannot anchor
   // nothing. `NULL` tests emptiness too, unless an anchor asked for the literal
   // text.
@@ -370,8 +416,8 @@ function matchesTerm(value: unknown, token: FilterToken, members: string[] | nul
 }
 
 /** Does the cell satisfy every token of one AND-group? */
-function matchesGroup(value: unknown, group: FilterToken[], members: string[] | null, defaultSubstring: boolean): boolean {
-  return group.every((t) => (t.negate ? !matchesTerm(value, t, members, defaultSubstring) : matchesTerm(value, t, members, defaultSubstring)));
+function matchesGroup(value: unknown, group: FilterToken[], members: string[] | null, defaultSubstring: boolean, type: string | undefined): boolean {
+  return group.every((t) => (t.negate ? !matchesTerm(value, t, members, defaultSubstring, type) : matchesTerm(value, t, members, defaultSubstring, type)));
 }
 
 /**
@@ -386,6 +432,7 @@ export function matchesColumnFilter(value: unknown, rawQuery: string, opts?: { t
   if (groups.length === 0) return true;
   const members = opts?.type === 'array' ? arrayMembers(value) : null;
   const defaultSubstring = opts?.defaultSubstring ?? true;
+  const type = opts?.type;
 
   // A comma-separated NEGATIVE token on its own still excludes outright, which
   // is what makes `Open,!urgent` mean "Open but not urgent" rather than "Open OR
@@ -393,9 +440,9 @@ export function matchesColumnFilter(value: unknown, rawQuery: string, opts?: { t
   // is one condition among several instead of a veto over the whole filter.
   const vetoes = groups.filter((g) => g.length === 1 && g[0]!.negate);
   for (const g of vetoes) {
-    if (matchesTerm(value, g[0]!, members, defaultSubstring)) return false;
+    if (matchesTerm(value, g[0]!, members, defaultSubstring, type)) return false;
   }
   const required = groups.filter((g) => !(g.length === 1 && g[0]!.negate));
   if (required.length === 0) return true;
-  return required.some((g) => matchesGroup(value, g, members, defaultSubstring));
+  return required.some((g) => matchesGroup(value, g, members, defaultSubstring, type));
 }
