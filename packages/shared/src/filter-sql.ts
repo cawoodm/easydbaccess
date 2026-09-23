@@ -24,6 +24,8 @@
  */
 
 import { groupColumnFilter, hasInnerWildcard, isListExpression, parseColumnFilter, plainTextOf, type FilterToken } from './column-filter.js';
+import { isValidBound } from './compare-cell.js';
+import { resolveDateTerm } from './relative-date.js';
 
 export interface SqlFragment {
   /** A boolean SQL expression, or '' when nothing needed saying. */
@@ -40,9 +42,79 @@ function normalised(columnSql: string): string {
 
 /** Is this token the whole-token NULL test rather than a text match? */
 function isNullToken(t: FilterToken): boolean {
-  // Any anchor asks for the literal text: `^NULL`, `=NULL`, `*NULL*`.
-  if (t.prefix || t.exact || t.suffix || t.contains) return false;
+  // Any anchor asks for the literal text: `^NULL`, `=NULL`, `*NULL*`, `>=NULL`.
+  if (t.prefix || t.exact || t.suffix || t.contains || t.cmp) return false;
   return t.term === '' || t.term.toUpperCase() === 'NULL';
+}
+
+/**
+ * `compare-cell.ts`'s number reading, as SQL: a blank cell is `0` (`Number('')`
+ * is `0`, not `NaN`), and any other cell parses only if the WHOLE trimmed text
+ * is an optionally-signed decimal, optionally followed by an `e`/`E` exponent
+ * (itself optionally signed) — the same grammar JS `Number()` accepts for
+ * ordinary and scientific notation. Anything else is NULL.
+ *
+ * Plain `CAST(x AS REAL)` cannot stand in for this: SQLite takes the longest
+ * numeric PREFIX of the text and treats anything with no such prefix as `0.0`
+ * (`CAST('n/a' AS REAL)` is `0`, not NULL), which would let a non-numeric cell
+ * satisfy a comparison the matcher fails.
+ *
+ * Deliberately NOT reproduced: hex/binary/octal literals (`'0x1A'`, `'0b101'`)
+ * and `Infinity`/`NaN` spellings. `Number()` reads the first as a number, but
+ * `compareKey` immediately rejects `Infinity` itself (`Number.isFinite`), and
+ * hex/octal/binary text is not a shape `sql-mapping.ts` or any importer ever
+ * writes into a `number` column — only plain decimal and scientific notation
+ * are reachable in practice. A future task with a real fixture in that shape
+ * should revisit this, not assume it was an oversight.
+ */
+function numberExpr(columnSql: string): string {
+  return (
+    `(SELECT CASE ` +
+    `WHEN raw = '' THEN 0 ` +
+    `WHEN epos = 0 AND mantissaOk THEN CAST(raw AS REAL) ` +
+    `WHEN epos > 0 AND mantissaOk AND expOk THEN CAST(raw AS REAL) ` +
+    `ELSE NULL END ` +
+    `FROM (SELECT raw, epos, ` +
+    `(mantissa <> '' AND mantissa <> '.' AND mantissa NOT GLOB '*[^0-9.]*' AND (LENGTH(mantissa) - LENGTH(REPLACE(mantissa, '.', ''))) <= 1) AS mantissaOk, ` +
+    `(expBody <> '' AND expBody NOT GLOB '*[^0-9]*') AS expOk ` +
+    `FROM (SELECT raw, epos, mantissa, ` +
+    `CASE WHEN substr(remainder, 1, 1) IN ('+', '-') THEN substr(remainder, 2) ELSE remainder END AS expBody ` +
+    `FROM (SELECT raw, epos, ` +
+    `CASE WHEN epos > 0 THEN substr(body, 1, epos - 1) ELSE body END AS mantissa, ` +
+    `CASE WHEN epos > 0 THEN substr(body, epos + 1) ELSE '' END AS remainder ` +
+    `FROM (SELECT raw, body, INSTR(LOWER(body), 'e') AS epos ` +
+    `FROM (SELECT raw, CASE WHEN substr(raw, 1, 1) IN ('+', '-') THEN substr(raw, 2) ELSE raw END AS body ` +
+    `FROM (SELECT TRIM(${columnSql}) AS raw)))))))`
+  );
+}
+
+/**
+ * The SQL expression a comparison compares, and the bound it compares against.
+ *
+ * `date()` / `datetime()` are what make this agree with `compare-cell.ts`:
+ * SQLite accepts ISO-8601 with a `Z` or `±HH:MM` suffix and answers in UTC,
+ * which is exactly the normalisation the matcher applies.
+ *
+ * `valid` is false when a `date`/`datetime` bound cannot be read at all —
+ * checked with `compare-cell.ts`'s own `isValidBound`, the exact reading
+ * `satisfiesCmp` uses for the bound, so the two can never drift apart. The
+ * caller must then short-circuit the whole token to always-false: binding an
+ * unparseable bound in as raw text and comparing it lexicographically against
+ * `date(col)` text can return every row instead of none, depending on which
+ * side of the alphabet the malformed text happens to sort (digits sort before
+ * letters, so `>=`/`>` against a bound like `not-a-date` "agree" with the
+ * matcher only by accident, while `<=`/`<` return everything).
+ */
+function cmpOperands(columnSql: string, term: string, type: string | undefined, now: Date): { expr: string; bound: string; valid: boolean } {
+  let bound = term.trim();
+  if (type === 'date' || type === 'datetime') bound = resolveDateTerm(bound, now) ?? bound;
+  const dateOnlyBound = /^\d{4}-\d{2}-\d{2}$/.test(bound);
+  if (type === 'date' || (type === 'datetime' && dateOnlyBound)) {
+    return { expr: `date(${columnSql})`, bound, valid: isValidBound(bound, 'date') };
+  }
+  if (type === 'datetime') return { expr: `datetime(${columnSql})`, bound, valid: isValidBound(bound, 'datetime') };
+  if (type === 'number') return { expr: numberExpr(columnSql), bound, valid: true }; // validated by the caller, against `Number(bound)`
+  return { expr: normalised(columnSql), bound: bound.toLowerCase(), valid: true };
 }
 
 /**
@@ -53,9 +125,28 @@ function isNullToken(t: FilterToken): boolean {
  * when the value is NULL, and the matcher's rule is that a null cell fails a
  * positive text test and therefore PASSES its negation.
  */
-function tokenSql(columnSql: string, t: FilterToken, defaultSubstring: boolean): { sql: string; params: unknown[] } {
+function tokenSql(columnSql: string, t: FilterToken, defaultSubstring: boolean, type: string | undefined, now: Date): { sql: string; params: unknown[] } {
   const col = normalised(columnSql);
   if (isNullToken(t)) return { sql: `(${columnSql} IS NULL OR TRIM(${columnSql}) = '')`, params: [] };
+  if (t.cmp) {
+    const { expr, bound, valid } = cmpOperands(columnSql, t.term, type, now);
+    // A bound with no meaningful reading (a malformed date, say) satisfies no
+    // comparison at all — `satisfiesCmp` returns false unconditionally, and
+    // this reproduces that, exactly like the `number` arm below does for its
+    // own unparseable bound.
+    if (!valid) return { sql: '0', params: [] };
+    // The IS NOT NULL / <> '' guard is the matcher's "an empty cell never
+    // satisfies a comparison" — EXCEPT on a `number` column, where the matcher
+    // reads a blank cell as `0` (`Number('')`), not as absent. `numberExpr`
+    // already encodes that, so the blank-text guard would only make SQL
+    // stricter than the matcher there and must be left out.
+    const blankGuard = type === 'number' ? '' : ` AND TRIM(${columnSql}) <> ''`;
+    const guard = `${columnSql} IS NOT NULL${blankGuard} AND ${expr} IS NOT NULL`;
+    // A number bound binds as a number so SQLite compares numerically.
+    const param: unknown = type === 'number' ? Number(bound) : bound;
+    if (type === 'number' && !Number.isFinite(param as number)) return { sql: '0', params: [] };
+    return { sql: `(${guard} AND ${expr} ${t.cmp} ?)`, params: [param] };
+  }
   const term = t.term.toLowerCase();
   // Exact matches the WHOLE cell and is NOT trimmed (see the matcher).
   const equals = () => ({ sql: `LOWER(${columnSql}) = ?`, params: [term] });
@@ -82,11 +173,11 @@ function tokenSql(columnSql: string, t: FilterToken, defaultSubstring: boolean):
 }
 
 /** A group is tokens joined by AND — they must hold of the same cell together. */
-function groupSql(columnSql: string, group: FilterToken[], defaultSubstring: boolean): { sql: string; params: unknown[] } {
+function groupSql(columnSql: string, group: FilterToken[], defaultSubstring: boolean, type: string | undefined, now: Date): { sql: string; params: unknown[] } {
   const parts: string[] = [];
   const params: unknown[] = [];
   for (const t of group) {
-    const one = tokenSql(columnSql, t, defaultSubstring);
+    const one = tokenSql(columnSql, t, defaultSubstring, type, now);
     if (!t.negate) {
       parts.push(one.sql);
     } else if (isNullToken(t)) {
@@ -112,11 +203,12 @@ function groupSql(columnSql: string, group: FilterToken[], defaultSubstring: boo
  * `columnSql` is the already-quoted SQL for the column, so the caller owns
  * identifier quoting and this function never builds one from user text.
  */
-export function columnFilterToSql(columnSql: string, rawFilter: string, opts?: { defaultSubstring?: boolean | undefined }): SqlFragment {
+export function columnFilterToSql(columnSql: string, rawFilter: string, opts?: { defaultSubstring?: boolean | undefined; type?: string | undefined; now?: Date | undefined }): SqlFragment {
   const raw = String(rawFilter ?? '').trim();
   if (raw === '') return { sql: '', params: [], expressible: true };
   const groups = groupColumnFilter(parseColumnFilter(raw));
   if (groups.length === 0) return { sql: '', params: [], expressible: true };
+  const now = opts?.now ?? new Date();
 
   // A group counts as negative when every token in it excludes — that is the
   // matcher's own reading of `Open,!urgent`: one positive set, one exclusion.
@@ -129,7 +221,7 @@ export function columnFilterToSql(columnSql: string, rawFilter: string, opts?: {
   const positive: Array<{ sql: string; params: unknown[] }> = [];
   const negative: Array<{ sql: string; params: unknown[] }> = [];
   for (const group of groups) {
-    const rendered = groupSql(columnSql, group, opts?.defaultSubstring ?? true);
+    const rendered = groupSql(columnSql, group, opts?.defaultSubstring ?? true, opts?.type, now);
     if (!rendered.sql) continue;
     const allNegated = group.every((t) => t.negate);
     (allNegated ? negative : positive).push(rendered);
@@ -165,7 +257,7 @@ export function buildWhere(
   search: string | undefined,
   columnSqlOf: (field: string) => string | null,
   searchFields: readonly string[],
-  opts?: { defaultSubstring?: boolean | undefined },
+  opts?: { defaultSubstring?: boolean | undefined; typeOf?: ((field: string) => string | undefined) | undefined; now?: Date | undefined },
 ): SqlFragment {
   const clauses: string[] = [];
   const params: unknown[] = [];
@@ -178,7 +270,11 @@ export function buildWhere(
       expressible = false; // computed column — the caller re-filters
       continue;
     }
-    const frag = columnFilterToSql(columnSql, raw, opts);
+    const frag = columnFilterToSql(columnSql, raw, {
+      ...(opts?.defaultSubstring === undefined ? {} : { defaultSubstring: opts.defaultSubstring }),
+      ...(opts?.now ? { now: opts.now } : {}),
+      ...(opts?.typeOf ? { type: opts.typeOf(field) } : {}),
+    });
     if (!frag.expressible) expressible = false;
     if (!frag.sql) continue;
     clauses.push(`(${frag.sql})`);
@@ -221,6 +317,7 @@ export function buildWhere(
  * on the outside, over all the columns at once.
  */
 function searchToSql(cols: readonly string[], term: string, defaultSubstring: boolean): { sql: string; params: unknown[] } {
+  const now = new Date();
   // Plain text rather than a list — an ordinary phrase, or the whole box quoted
   // to force it. `isListExpression` is the SAME gate `text-search.ts` applies in
   // memory, and it has to be applied here too or a windowed table would answer
@@ -237,7 +334,7 @@ function searchToSql(cols: readonly string[], term: string, defaultSubstring: bo
     const parts: string[] = [];
     const params: unknown[] = [];
     for (const col of cols) {
-      const one = tokenSql(col, token, defaultSubstring);
+      const one = tokenSql(col, token, defaultSubstring, undefined, now);
       parts.push(one.sql);
       params.push(...one.params);
     }
@@ -257,7 +354,7 @@ function searchToSql(cols: readonly string[], term: string, defaultSubstring: bo
     const token = { ...g[0]!, negate: false };
     const parts: string[] = [];
     for (const col of cols) {
-      const one = tokenSql(col, token, defaultSubstring);
+      const one = tokenSql(col, token, defaultSubstring, undefined, now);
       // A NULL cell must read as "does not contain it" rather than as unknown,
       // or `NOT (… OR NULL)` drops rows whose other columns are perfectly fine.
       // The null TOKEN tests for emptiness itself and must not be guarded.
@@ -272,7 +369,7 @@ function searchToSql(cols: readonly string[], term: string, defaultSubstring: bo
     const parts: string[] = [];
     for (const g of required) {
       for (const col of cols) {
-        const one = groupSql(col, g, defaultSubstring);
+        const one = groupSql(col, g, defaultSubstring, undefined, now);
         if (!one.sql) continue;
         parts.push(`(${one.sql})`);
         params.push(...one.params);

@@ -8,6 +8,7 @@
 
 - ✨ The Settings dialog reopens on the tab and search you left it on, until the page is reloaded (v0.0.479)
 - ✨ Autosave is in Settings → Files, not only behind a palette command; both drive one device-local record (v0.0.478)
+- 🪶 Date columns filter by preset or date range; the filter language takes >= <= > < comparisons (v0.0.490)
 
 ### Bugs
 

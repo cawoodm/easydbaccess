@@ -297,3 +297,111 @@ describe('buildWhere — a search across several columns', () => {
     expect(search('*oli*')).toEqual(['Holiday|Bob']);
   });
 });
+
+/** A typed table, for the comparisons whose meaning depends on the column type. */
+function crossCheck(values: Array<string | null>, filter: string, type: string, now?: Date): void {
+  const d2 = new DatabaseSync(':memory:');
+  try {
+    d2.exec(`CREATE TABLE t (v TEXT)`);
+    const ins = d2.prepare(`INSERT INTO t (v) VALUES (?)`);
+    for (const v of values) ins.run(v);
+    const frag = columnFilterToSql('"v"', filter, { type, ...(now ? { now } : {}) });
+    expect(frag.expressible).toBe(true);
+    const where = frag.sql ? `WHERE ${frag.sql}` : '';
+    const sql = (d2.prepare(`SELECT v FROM t ${where}`).all(...(frag.params as never[])) as Array<{ v: string | null }>).map((r) => r.v);
+    const mem = values.filter((v) => matchesColumnFilter(v, filter, { type, ...(now ? { now } : {}) }));
+    expect(sql, `filter ${filter} on a ${type} column`).toEqual(mem);
+  } finally {
+    d2.close();
+  }
+}
+
+const DATES = ['2026-06-17', '2026-06-23', '2026-08-01', '2026-12-31', '2025-01-01', '2026-06-17T23:30:00Z', 'not a date', '', null];
+const NUMBERS = ['9', '10', '100', '-5', '0', '9.5', 'n/a', '', null];
+
+describe('comparison tokens as SQL', () => {
+  it('agrees with the matcher on a date column', () => {
+    for (const f of ['>=2026-06-23', '<=2026-06-23', '>2026-06-23', '<2026-06-23', '>=2026-02-14 AND <=2026-08-01', '!>=2026-06-23']) {
+      crossCheck(DATES, f, 'date');
+    }
+  });
+
+  it('agrees with the matcher on a number column', () => {
+    for (const f of ['>=9', '<=9', '>9', '<9', '>=0 AND <=100', '!>=10']) {
+      crossCheck(NUMBERS, f, 'number');
+    }
+  });
+
+  it('agrees with the matcher on a relative bound', () => {
+    crossCheck(DATES, '>=-3m', 'date', new Date(2026, 8, 23));
+    crossCheck(DATES, '>=ytd', 'date', new Date(2026, 8, 23));
+  });
+
+  it('agrees with the matcher on an untyped column', () => {
+    for (const f of ['>=n', '<=n']) crossCheck(VALUES, f, 'string');
+  });
+});
+
+/**
+ * Finding 1: a malformed date/datetime BOUND must fail every comparison, the
+ * same as `satisfiesCmp` — never silently fall back to a raw-text compare
+ * that can return every row instead of none.
+ *
+ * Two bounds are needed to catch the whole bug, not just half of it: as plain
+ * text, digits sort before letters, so a bound like `not-a-date` (leading
+ * `n`) is lexicographically AFTER every stored `YYYY-MM-DD` value, and a
+ * bound like `-nonsense` (leading `-`) is lexicographically BEFORE all of
+ * them. Text `<=`/`<` against an AFTER bound and text `>=`/`>` against a
+ * BEFORE bound are both wrongly satisfied by every row — the other pairing on
+ * each bound "agrees" with the matcher only because both sides happen to
+ * answer empty. Testing all four operators against both bounds forces every
+ * combination through, so no operator can hide behind that luck.
+ */
+const MALFORMED_DATES: Array<string | null> = ['2026-06-17', '2026-06-23', '2026-08-01', '2026-12-31', '2025-01-01', null];
+
+describe('a malformed comparison bound never returns a superset (Finding 1)', () => {
+  const OPS = ['>=', '<=', '>', '<'];
+  const AFTER = 'not-a-date'; // sorts AFTER every stored date as text
+  const BEFORE = '-nonsense'; // sorts BEFORE every stored date as text
+
+  for (const type of ['date', 'datetime'] as const) {
+    for (const bound of [AFTER, BEFORE]) {
+      for (const op of OPS) {
+        it(`agrees with the matcher for ${op}${bound} on a ${type} column`, () => {
+          crossCheck(MALFORMED_DATES, `${op}${bound}`, type);
+        });
+      }
+    }
+  }
+});
+
+/**
+ * Finding 2: `compareKey`'s number reading (plain JS `Number()`) accepts
+ * scientific notation, so `numberExpr` must too, or a `number` column that
+ * picked up raw scientific-notation text (e.g. a column retyped from
+ * `string` after being filled in, which `EdbStore.reconcileColumnsNoTx` never
+ * re-encodes) reads as unparseable in SQL while the matcher reads it fine.
+ */
+const SCI_NUMBERS: Array<string | null> = ['1e3', '1E3', '1e-2', '9', '10', '100', '-5', '0', '9.5', '1.2.3', 'n/a', '', null];
+
+describe('numberExpr accepts scientific notation (Finding 2)', () => {
+  it('agrees with the matcher across ordinary and scientific-notation cell text', () => {
+    for (const f of ['>=9', '<=9', '>9', '<9', '>=1000', '<=1000', '>=0.005', '<=0.005', '!>=1000']) {
+      crossCheck(SCI_NUMBERS, f, 'number');
+    }
+  });
+});
+
+/**
+ * isNullToken must exclude tokens with `cmp` set, so a comparison like `>=NULL`
+ * is not read as the blank-cell test but as a literal text match against "null".
+ */
+const NULL_CORPUS: Array<string | null> = ['aaa', 'zzz', 'null', '', '   ', null];
+
+describe('comparison against NULL or empty string', () => {
+  it('agrees with the matcher for >=NULL on a string column', () => {
+    for (const f of ['>=NULL', '>=', '<=NULL', '<=', '>NULL', '><', '<NULL', '<']) {
+      crossCheck(NULL_CORPUS, f, 'string');
+    }
+  });
+});

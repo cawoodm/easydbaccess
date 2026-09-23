@@ -17,6 +17,7 @@ import * as serverSync from '../plugins/server-sync.js';
 import * as newTableButton from '../plugins/new-table-button.js';
 import * as cellDate from '../plugins/cell-date.js';
 import * as cellDatetime from '../plugins/cell-datetime.js';
+import * as dateFilter from '../plugins/date-filter.js';
 import * as cellBoolean from '../plugins/cell-boolean.js';
 import * as cellColor from '../plugins/cell-color.js';
 import * as cellImage from '../plugins/cell-image.js';
@@ -88,6 +89,7 @@ const modules: PluginModule[] = [
   serverSync,
   cellDate,
   cellDatetime,
+  dateFilter,
   cellBoolean,
   cellColor,
   cellImage,

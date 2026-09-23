@@ -510,3 +510,165 @@ describe('isListExpression', () => {
     expect(plainTextOf('a,b')).toBe('a,b');
   });
 });
+
+describe('comparison tokens', () => {
+  it('parses each operator off the front of the term', () => {
+    expect(parseColumnFilter('>=100')).toEqual([{ term: '100', negate: false, cmp: '>=' }]);
+    expect(parseColumnFilter('<=100')).toEqual([{ term: '100', negate: false, cmp: '<=' }]);
+    expect(parseColumnFilter('>100')).toEqual([{ term: '100', negate: false, cmp: '>' }]);
+    expect(parseColumnFilter('<100')).toEqual([{ term: '100', negate: false, cmp: '<' }]);
+  });
+
+  it('parses a negated comparison', () => {
+    expect(parseColumnFilter('!>=100')).toEqual([{ term: '100', negate: true, cmp: '>=' }]);
+  });
+
+  it('round-trips through compose', () => {
+    for (const q of ['>=100', '<=100', '>100', '<100', '!>=100', '>=a AND <=b', '>=2026-01-01,<=2020-01-01']) {
+      expect(composeColumnFilter(parseColumnFilter(q))).toBe(q);
+    }
+  });
+
+  it('a value that merely starts with > stays literal text', () => {
+    // Quoted on the way in, and the quotes must come back — otherwise the
+    // round trip turns the value into an operator.
+    const tokens = parseColumnFilter('">=not an operator"');
+    expect(tokens).toEqual([{ term: '>=not an operator', negate: false, exact: true }]);
+    expect(composeColumnFilter(tokens)).toBe('">=not an operator"');
+  });
+
+  it('a comparison is an expression, not plain text', () => {
+    expect(isListExpression('>=100')).toBe(true);
+    expect(isListExpression('<2026-01-01')).toBe(true);
+  });
+
+  it('a star inside a comparison term is literal, not a wildcard', () => {
+    expect(parseColumnFilter('>=a*')).toEqual([{ term: 'a*', negate: false, cmp: '>=' }]);
+  });
+
+  it('compares as text when no type is given', () => {
+    expect(matchesColumnFilter('b', '>=b')).toBe(true);
+    expect(matchesColumnFilter('c', '>=b')).toBe(true);
+    expect(matchesColumnFilter('a', '>=b')).toBe(false);
+    expect(matchesColumnFilter('b', '>b')).toBe(false);
+    expect(matchesColumnFilter('a', '<=b')).toBe(true);
+    expect(matchesColumnFilter('c', '<b')).toBe(false);
+  });
+
+  it('comparison is case-insensitive, like every other token', () => {
+    expect(matchesColumnFilter('B', '>=b')).toBe(true);
+    expect(matchesColumnFilter('b', '>=B')).toBe(true);
+  });
+
+  it('an empty cell never satisfies a comparison', () => {
+    expect(matchesColumnFilter(null, '>=a')).toBe(false);
+    expect(matchesColumnFilter('', '>=a')).toBe(false);
+    expect(matchesColumnFilter('   ', '<=z')).toBe(false);
+  });
+
+  it('a negated comparison passes for an empty cell', () => {
+    // Same rule as every other negated text test: a null cell fails the
+    // positive test and therefore passes its negation.
+    expect(matchesColumnFilter(null, '!>=a')).toBe(true);
+    expect(matchesColumnFilter('z', '!>=a')).toBe(false);
+  });
+
+  it('NULL after a comparison is the literal text, not the blank test', () => {
+    expect(matchesColumnFilter(null, '>=NULL')).toBe(false);
+    expect(matchesColumnFilter('zzz', '>=NULL')).toBe(true);
+  });
+
+  it('two comparisons joined by AND make a closed range', () => {
+    expect(matchesColumnFilter('m', '>=a AND <=z')).toBe(true);
+    expect(matchesColumnFilter('m', '>=n AND <=z')).toBe(false);
+  });
+});
+
+describe('type-aware comparison', () => {
+  it('a number column compares numerically, not as text', () => {
+    expect(matchesColumnFilter('10', '>=9', { type: 'number' })).toBe(true);
+    expect(matchesColumnFilter('10', '>=9')).toBe(false); // text order, no type
+    expect(matchesColumnFilter(9.5, '>9', { type: 'number' })).toBe(true);
+    expect(matchesColumnFilter(-5, '<0', { type: 'number' })).toBe(true);
+  });
+
+  it('a number cell that is not a number never matches', () => {
+    expect(matchesColumnFilter('n/a', '>=0', { type: 'number' })).toBe(false);
+    expect(matchesColumnFilter('n/a', '<=999', { type: 'number' })).toBe(false);
+  });
+
+  it('a date column compares by calendar date', () => {
+    expect(matchesColumnFilter('2026-06-23', '>=2026-06-23', { type: 'date' })).toBe(true);
+    expect(matchesColumnFilter('2026-06-22', '>=2026-06-23', { type: 'date' })).toBe(false);
+    expect(matchesColumnFilter('2026-12-01', '>=2026-06-23', { type: 'date' })).toBe(true);
+  });
+
+  it('a zoned value is compared on its UTC date', () => {
+    // Matches what SQLite's date() returns, so the matcher and the pushdown
+    // cannot drift. 23:30Z on the 17th is the 17th, not the 18th.
+    expect(matchesColumnFilter('2026-06-17T23:30:00Z', '>=2026-06-17', { type: 'date' })).toBe(true);
+    expect(matchesColumnFilter('2026-06-17T23:30:00Z', '>2026-06-17', { type: 'date' })).toBe(false);
+    expect(matchesColumnFilter('2026-06-18T00:30:00+02:00', '<=2026-06-17', { type: 'date' })).toBe(true);
+  });
+
+  it('a naive datetime keeps its own wall clock', () => {
+    expect(matchesColumnFilter('2026-06-17 23:30', '>=2026-06-17', { type: 'date' })).toBe(true);
+    expect(matchesColumnFilter('2026-06-17 23:30', '<=2026-06-17', { type: 'date' })).toBe(true);
+  });
+
+  it('a date-only bound on a datetime column covers the whole day', () => {
+    expect(matchesColumnFilter('2026-08-01T23:59:00', '<=2026-08-01', { type: 'datetime' })).toBe(true);
+    expect(matchesColumnFilter('2026-08-01T00:00:00', '>=2026-08-01', { type: 'datetime' })).toBe(true);
+    expect(matchesColumnFilter('2026-08-02T00:00:00', '<=2026-08-01', { type: 'datetime' })).toBe(false);
+  });
+
+  it('a bound carrying a time compares at full precision', () => {
+    expect(matchesColumnFilter('2026-08-01T14:00:00', '>=2026-08-01T13:00', { type: 'datetime' })).toBe(true);
+    expect(matchesColumnFilter('2026-08-01T12:00:00', '>=2026-08-01T13:00', { type: 'datetime' })).toBe(false);
+  });
+
+  it('an unparseable date never matches', () => {
+    expect(matchesColumnFilter('not a date', '>=2026-01-01', { type: 'date' })).toBe(false);
+    expect(matchesColumnFilter('not a date', '<=2026-01-01', { type: 'date' })).toBe(false);
+  });
+
+  it('a range on a date column selects the rows inside it', () => {
+    const q = '>=2026-02-14 AND <=2026-08-01';
+    expect(matchesColumnFilter('2026-02-14', q, { type: 'date' })).toBe(true);
+    expect(matchesColumnFilter('2026-05-01', q, { type: 'date' })).toBe(true);
+    expect(matchesColumnFilter('2026-08-01', q, { type: 'date' })).toBe(true);
+    expect(matchesColumnFilter('2026-02-13', q, { type: 'date' })).toBe(false);
+    expect(matchesColumnFilter('2026-08-02', q, { type: 'date' })).toBe(false);
+  });
+});
+
+describe('relative date terms', () => {
+  const now = new Date(2026, 8, 23); // 23 Sep 2026
+
+  it('>=-3m selects the last three months', () => {
+    expect(matchesColumnFilter('2026-07-01', '>=-3m', { type: 'date', now })).toBe(true);
+    expect(matchesColumnFilter('2026-06-23', '>=-3m', { type: 'date', now })).toBe(true);
+    expect(matchesColumnFilter('2026-06-22', '>=-3m', { type: 'date', now })).toBe(false);
+  });
+
+  it('>=ytd selects this calendar year', () => {
+    expect(matchesColumnFilter('2026-01-01', '>=ytd', { type: 'date', now })).toBe(true);
+    expect(matchesColumnFilter('2025-12-31', '>=ytd', { type: 'date', now })).toBe(false);
+  });
+
+  it('follows the clock — the same filter means something else later', () => {
+    const later = new Date(2026, 11, 1); // 1 Dec 2026
+    expect(matchesColumnFilter('2026-07-01', '>=-3m', { type: 'date', now })).toBe(true);
+    expect(matchesColumnFilter('2026-07-01', '>=-3m', { type: 'date', now: later })).toBe(false);
+  });
+
+  it('a relative term only resolves on a date-ish column', () => {
+    // On a string column `-3m` is a literal value, not an offset.
+    expect(matchesColumnFilter('-3m', '>=-3m')).toBe(true);
+  });
+
+  it('a relative term survives compose', () => {
+    expect(composeColumnFilter(parseColumnFilter('>=-3m'))).toBe('>=-3m');
+    expect(composeColumnFilter(parseColumnFilter('>=ytd'))).toBe('>=ytd');
+  });
+});

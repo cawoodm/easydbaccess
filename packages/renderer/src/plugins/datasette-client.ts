@@ -427,6 +427,13 @@ export function translateQuery(
         params[`${col}__startswith`] = one;
         continue;
       }
+      // DEAD since comparisons joined the filter grammar: the parser now
+      // consumes a leading `>` / `<` into `FilterToken.cmp`, so a term can no
+      // longer start with one and the four comparison arms below never fire.
+      // Left as-is on purpose. This whole function has no callers, and
+      // `row-query.ts:25-34` lists three further ways it disagrees with the
+      // matcher — reconciling it needs the treatment `filter-sql.ts` got, every
+      // case run both ways and required to agree, not a patch to one arm.
       let m: RegExpMatchArray | null;
       if ((m = one.match(/^>=\s*(.+)$/))) params[`${col}__gte`] = m[1]!.trim();
       else if ((m = one.match(/^<=\s*(.+)$/))) params[`${col}__lte`] = m[1]!.trim();

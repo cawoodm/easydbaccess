@@ -28,6 +28,14 @@ Each click applies at once, so there is nothing to confirm. Close the list with
 **Esc**, the × in its corner, or a click outside it — the filter you built stays
 on either way, and the window behind the list is not affected.
 
+### A date column's filter
+
+The funnel on a **date** column opens presets instead of a value list:
+"Last 3 months", "Past year", "Year to date" and the like, plus a from/to
+range. Presets are relative, so a saved view still means "the last three
+months" whenever it is opened. Which presets show is configurable in
+Settings; a **←** button switches back to the ordinary value list.
+
 ### Typing a filter directly
 
 You can also just type into the filter box. Every example below is written
@@ -60,6 +68,37 @@ against one **City** column holding these cells:
 
 `^Bern` still works as another way of writing `Bern*`, and `=Bern` as another
 way of writing `"Bern"`. `!` can be combined with any of them.
+
+### Comparisons
+
+`>=`, `<=`, `>` and `<` compare instead of matching text. On a **number**
+column they compare numerically; on a **date** or **datetime** column they
+compare chronologically; anywhere else they compare the text.
+
+| Type this        | What comes back                                  |
+| ----------------- | ------------------------------------------------- |
+| `>=2026-01-01`    | Rows dated on or after 1 Jan 2026                  |
+| `<=2026-12-31`    | Rows dated on or before 31 Dec 2026                |
+| `>100`            | Numbers greater than 100                           |
+| `<100`            | Numbers less than 100                              |
+
+On a **date** column a bound can also be relative, so a saved filter still
+means "the last 3 months" next month:
+
+| Type this    | Means                          |
+| ------------ | ------------------------------- |
+| `>=-7d`      | The last 7 days                 |
+| `>=-2w`      | The last 2 weeks                |
+| `>=-3m`      | The last 3 months                |
+| `>=-1y`      | The last year                    |
+| `>=today`    | From today on                    |
+| `>=wtd`      | Since the start of this week     |
+| `>=mtd`      | Since the start of this month    |
+| `>=qtd`      | Since the start of this quarter  |
+| `>=ytd`      | Since the start of this year     |
+
+A `date` column's funnel also opens a picker with these as one-click presets,
+plus a from/to range — see below.
 
 Three of these surprise people:
 
