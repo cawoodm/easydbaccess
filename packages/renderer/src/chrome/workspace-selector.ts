@@ -4,6 +4,7 @@ import type { Workspace } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { activeWorkspaces, mergeWorkspaceList, readFolderIndex, readFolderSelection, workspaceLabel, type ListEntry } from '../db/edb/folder-index.js';
 import { ACTIVE_FILE_CHANGED_EVENT, activeEdbName, adoptedFileName } from '../db/edb/session.js';
+import { backendActiveFile } from '../db/file-workspaces.js';
 import { materialIconStyles } from './material-icon-css.js';
 // The flows themselves are shared with the command palette — see
 // `workspace-actions.ts`. This element is only their mouse-driven entry point.
@@ -80,8 +81,21 @@ export class WorkspaceSelector extends LitElement {
     // It matters for the index written BEFORE one was switched off: without it
     // the list would keep offering that workspace until the next scan, and
     // picking it would adopt the very file the user said to leave alone.
-    const indexed = activeWorkspaces(readFolderIndex()?.workspaces ?? [], readFolderSelection(), activeEdbName());
-    this.entries = mergeWorkspaceList(this.workspaces, indexed, activeEdbName());
+    const open = this.openFile();
+    const indexed = activeWorkspaces(readFolderIndex()?.workspaces ?? [], readFolderSelection(), open);
+    this.entries = mergeWorkspaceList(this.workspaces, indexed, open);
+  }
+
+  /**
+   * The file this build has open.
+   *
+   * Two builds answer it two ways. The browser keeps the name in its own marker
+   * (`activeEdbName`); the desktop learns it from the main process and caches it
+   * (`backendActiveFile`). Whichever it is, it is what stops the open file being
+   * listed a second time as if it were somewhere else.
+   */
+  private openFile(): string {
+    return backendActiveFile() ?? activeEdbName();
   }
 
   /**
@@ -94,7 +108,7 @@ export class WorkspaceSelector extends LitElement {
    */
   private whereItLives(e: ListEntry): string {
     if (e.file) return e.file;
-    return adoptedFileName() ?? 'Stored in this browser';
+    return backendActiveFile() ?? adoptedFileName() ?? 'Stored in this browser';
   }
 
   /**

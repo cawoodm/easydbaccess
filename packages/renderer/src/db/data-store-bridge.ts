@@ -229,6 +229,53 @@ export interface EasydbDbBridge {
   /** Whether the last workspace reopens on startup (default true) — app-level, not per workspace. */
   autoLoadLast?(): Promise<boolean>;
   setAutoLoadLast?(on: boolean): Promise<void>;
+
+  // -- The workspace folder ---------------------------------------------------
+  //
+  // The desktop half of what `db/edb/file-handle.ts` does in the browser. Every
+  // one of these is OPTIONAL, because a renderer may be talking to an older
+  // preload: `plugins/electron-folder.ts` checks before it registers anything,
+  // so a desktop build from before v0.0.491 shows no folder UI rather than a
+  // folder UI that throws.
+
+  /** The connected folder's path, or null. Never asks for one. */
+  folder?(): Promise<string | null>;
+  /** Ask for a folder. Null when the user cancels. Remembers what they chose. */
+  pickFolder?(): Promise<string | null>;
+  /** Give the folder back. Every file in it stays where it is. */
+  forgetFolder?(): Promise<void>;
+  /** Read the folder. `only` lists the files this device uses — the rest are named, never opened. */
+  scanFolder?(only?: string[]): Promise<EasydbFolderScan | null>;
+  /** One file name turned back into a path this app can open. */
+  folderFilePath?(file: string): Promise<string | null>;
+  /** Write a new `.edb` in the folder holding one empty workspace. Answers its path. */
+  newWorkspaceFile?(id: string, name: string): Promise<string | null>;
+}
+
+/** One workspace a folder scan found inside one file. */
+export interface EasydbFolderWorkspaceInfo {
+  id: string;
+  name: string;
+  title?: string | undefined;
+  tables: number;
+  views: number;
+}
+
+/** One `.edb` in the connected folder. `workspaces` is empty for a file that was not read. */
+export interface EasydbFolderFileInfo {
+  file: string;
+  size: number;
+  mtime: number;
+  workspaces: EasydbFolderWorkspaceInfo[];
+}
+
+export interface EasydbFolderScan {
+  /** The folder's own name, for the dialog. */
+  folder: string;
+  /** Its full path, for a tooltip and for turning a file name into a path. */
+  folderPath: string;
+  at: number;
+  files: EasydbFolderFileInfo[];
 }
 
 declare global {

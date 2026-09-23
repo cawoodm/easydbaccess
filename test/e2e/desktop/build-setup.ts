@@ -26,8 +26,14 @@ export default function build(): void {
 }
 
 function run(args: string[]): void {
-  // `npm.cmd` by name rather than `npm` under `shell: true`: a shell would
-  // concatenate these arguments into a command line (Node warns about it,
-  // DEP0190) for no benefit — there is nothing here a shell needs to do.
-  execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, { stdio: 'inherit' });
+  // On Windows this MUST go through a shell. Node refuses to spawn a `.cmd`
+  // without one since 18.20.2 / 20.12 (CVE-2024-27980, argument injection into
+  // the command interpreter) and answers `EINVAL` — which is what this suite did
+  // on every Windows machine, before it had run a single spec.
+  //
+  // The cost is the DEP0190 warning: with `shell: true` Node concatenates the
+  // arguments into a command line itself. Harmless here, where every argument is
+  // a literal written above and none of them can contain a space or a quote.
+  const win = process.platform === 'win32';
+  execFileSync(win ? 'npm.cmd' : 'npm', args, { stdio: 'inherit', shell: win });
 }

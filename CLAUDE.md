@@ -193,7 +193,7 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
   `sql-console`,
   `import-data`, `auto-sync`, `views`, `settings`, `url-source`,
   `datasette-import` (+ `datasette-views`), `datasette-connect`, `connect-menu`,
-  `projection`, `command-palette-button`, `electron-db`, `sqlitefile-source`,
+  `projection`, `command-palette-button`, `electron-db` (+ `electron-folder`), `sqlitefile-source`,
   `tips`, `new-plugins`, `commandlets`, `edit-record`, `edb-file`, `legacy-import`, `validate`, `run-scripts`,
   `viz-charts`,
   `viz-map`, `viz-wordcloud`, `viz-custom`, `date-filter`.

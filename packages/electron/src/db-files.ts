@@ -68,6 +68,31 @@ function locationFilePath(): string {
   return path.join(app.getPath('userData'), LOCATION_FILE_NAME);
 }
 
+/**
+ * Everything `db-location.json` holds, as it is on disk.
+ *
+ * The file carries three unrelated things — the remembered database path, the
+ * auto-load switch and the workspace folder — because all three are read BEFORE
+ * any database is open, so none of them can live inside one. Reading and writing
+ * it goes through this pair so a writer cannot drop a key it did not know about.
+ * That has already happened once: an Open rewrote the file wholesale and reset
+ * `autoLoadLastWorkspace` every time.
+ */
+export function readLocationConfig(): Record<string, unknown> {
+  try {
+    return JSON.parse(readFileSync(locationFilePath(), 'utf-8')) as Record<string, unknown>;
+  } catch {
+    return {}; // no config yet, or it is unreadable
+  }
+}
+
+/** Merge `patch` into the config. Every other key survives. */
+export function patchLocationConfig(patch: Record<string, unknown>): void {
+  const current = readLocationConfig();
+  mkdirSync(app.getPath('userData'), { recursive: true });
+  writeFileSync(locationFilePath(), JSON.stringify({ ...current, ...patch }), 'utf-8');
+}
+
 interface PersistedLocation {
   path: string;
   isDefault: boolean;
@@ -103,13 +128,7 @@ export function isWorkspaceFileName(name: string): boolean {
  * exists for the case where a huge workspace makes that the wrong default.
  */
 function readAutoLoadLast(): boolean {
-  try {
-    const raw = readFileSync(locationFilePath(), 'utf-8');
-    const parsed = JSON.parse(raw) as { autoLoadLastWorkspace?: unknown };
-    return parsed.autoLoadLastWorkspace !== false;
-  } catch {
-    return true;
-  }
+  return readLocationConfig()['autoLoadLastWorkspace'] !== false;
 }
 
 export function autoLoadLastWorkspace(): boolean {
@@ -117,14 +136,7 @@ export function autoLoadLastWorkspace(): boolean {
 }
 
 export function setAutoLoadLastWorkspace(on: boolean): void {
-  let current: Record<string, unknown> = {};
-  try {
-    current = JSON.parse(readFileSync(locationFilePath(), 'utf-8')) as Record<string, unknown>;
-  } catch {
-    /* no config yet */
-  }
-  mkdirSync(app.getPath('userData'), { recursive: true });
-  writeFileSync(locationFilePath(), JSON.stringify({ ...current, autoLoadLastWorkspace: on }), 'utf-8');
+  patchLocationConfig({ autoLoadLastWorkspace: on });
 }
 
 /**
@@ -154,32 +166,18 @@ export function workspaceFromArgv(argv: readonly string[]): string | null {
  * just see a blank default database with no indication why.
  */
 function readPersistedLocation(): PersistedLocation {
-  try {
-    const raw = readFileSync(locationFilePath(), 'utf-8');
-    const parsed = JSON.parse(raw) as { path?: string };
-    if (parsed.path && existsSync(parsed.path)) {
-      return { path: parsed.path, isDefault: parsed.path === defaultDbPath(), fellBack: false };
-    }
-    if (parsed.path) {
-      return { path: defaultDbPath(), isDefault: true, fellBack: true };
-    }
-  } catch {
-    /* no location file yet, or it's unreadable/corrupt — use the default */
+  const remembered = readLocationConfig()['path'];
+  if (typeof remembered === 'string' && remembered) {
+    if (existsSync(remembered)) return { path: remembered, isDefault: remembered === defaultDbPath(), fellBack: false };
+    return { path: defaultDbPath(), isDefault: true, fellBack: true };
   }
   return { path: defaultDbPath(), isDefault: true, fellBack: false };
 }
 
 function persistLocation(dbPath: string): void {
-  // Merged, not overwritten: this file also carries `autoLoadLastWorkspace`, and
-  // rewriting it wholesale silently reset that setting on the next Open.
-  let current: Record<string, unknown> = {};
-  try {
-    current = JSON.parse(readFileSync(locationFilePath(), 'utf-8')) as Record<string, unknown>;
-  } catch {
-    /* no config yet */
-  }
-  mkdirSync(app.getPath('userData'), { recursive: true });
-  writeFileSync(locationFilePath(), JSON.stringify({ ...current, path: dbPath }), 'utf-8');
+  // Merged, not overwritten: this file also carries `autoLoadLastWorkspace` and
+  // the workspace folder, and rewriting it wholesale reset them on every Open.
+  patchLocationConfig({ path: dbPath });
 }
 
 // -- The switchable store singleton ----------------------------------------
@@ -301,8 +299,44 @@ export async function pickDatabaseToOpen(win: BrowserWindow | null): Promise<Dia
  */
 export function switchToDatabase(win: BrowserWindow | null, newPath: string): { ok: true; path: string } {
   switchToPath(newPath);
-  win?.reload();
+  reloadOntoNewFile(win);
   return { ok: true, path: newPath };
+}
+
+/**
+ * Reload the window, WITHOUT the `?space=` the last workspace left in the URL.
+ *
+ * `reload()` re-requests the current URL, query string and all, and
+ * `chrome/workspace-actions.ts` writes `?space=<id>` whenever the user switches
+ * workspace — a parameter nothing ever takes out again. So switching to another
+ * file while the URL still said `?space=powerplants` asked the NEW file for a
+ * workspace it has never held. Boot then creates an empty one inside it, and the
+ * user sees a workspace with no tables where their data should be.
+ *
+ * The file the user just chose decides which workspace is active. A parameter
+ * from the last one must not outrank it. The browser build strips the same two
+ * parameters for the same reason — see `reloadWithoutSpace` in
+ * `renderer/src/db/edb/session.ts`.
+ *
+ * Done here rather than in the renderer because the reload is here: a renderer
+ * that navigated first would never reach the call that switches the store.
+ */
+function reloadOntoNewFile(win: BrowserWindow | null): void {
+  if (!win) return;
+  const current = win.webContents.getURL();
+  try {
+    const url = new URL(current);
+    if (!url.searchParams.has('space') && !url.searchParams.has('workspace')) {
+      win.reload();
+      return;
+    }
+    url.searchParams.delete('space');
+    url.searchParams.delete('workspace');
+    void win.loadURL(url.toString());
+  } catch {
+    // An unparseable URL cannot be carrying a query string either.
+    win.reload();
+  }
 }
 
 // -- Save As --------------------------------------------------------------
@@ -376,7 +410,9 @@ export async function convertAndOpen(
   // file here instead meant ~15 seconds of nothing for `northwind.db`.
   const prepared = prepareConvert(sourcePath, result.filePath, only);
   switchToPath(prepared.path);
-  win?.reload();
+  // Same rule as Open: the converted file is a different file, so a `?space=`
+  // naming a workspace in the old one must not decide what opens.
+  reloadOntoNewFile(win);
   return { ok: true, path: prepared.path, tables: [], pending: prepared.pending.plan.length };
 }
 

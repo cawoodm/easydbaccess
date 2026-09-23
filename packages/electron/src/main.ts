@@ -20,6 +20,7 @@ import { getStore, pickDatabaseToOpen, switchToDatabase, saveDbAs, importDb, imp
 import { prepareImport, probeDatabaseFile, type ImportPlanEntry } from './db-import';
 import { runImport } from './import-runner';
 import { listBrowsable, readBrowseRows } from './db-browse';
+import { createWorkspaceFile, fileInWorkspaceFolder, pickWorkspaceFolder, scanWorkspaceFolder, setWorkspaceFolder, workspaceFolder } from './db-folder';
 import { ALL_COLLECTIONS, changeScopeOf, type CloneMode, type ColumnSpec, type RowQuery, type SqlRunOptions } from '@easydb/shared';
 import type { ImportDecision } from './db-import';
 
@@ -263,6 +264,37 @@ function registerDbFileIpc(): void {
 }
 
 registerDbFileIpc();
+
+/**
+ * The workspace folder: which folder holds the user's `.edb` files, what is in
+ * it, and making a new one there.
+ *
+ * The browser build has had this since v0.0.404. The desktop reaches it through
+ * the same dialog and the same workspace selector — see
+ * `renderer/src/plugins/electron-folder.ts`. Nothing here is desktop-shaped:
+ * the renderer gets file NAMES, exactly as the browser's folder does, and asks
+ * this side to turn one back into a path when it wants to open it.
+ */
+function registerFolderIpc(): void {
+  handle('db:folder', () => workspaceFolder());
+  ipcMain.handle('db:pickFolder', async (event) => {
+    try {
+      return await pickWorkspaceFolder(BrowserWindow.fromWebContents(event.sender));
+    } catch (err) {
+      throw new Error(toErrorMessage(err), { cause: err });
+    }
+  });
+  handle('db:forgetFolder', () => setWorkspaceFolder(null));
+  // Read-only, and skips any file the device has switched off — see
+  // `scanWorkspaceFolder`. Safe to run at boot and on demand.
+  handle('db:scanFolder', (only?: string[]) => scanWorkspaceFolder(only));
+  handle('db:folderFilePath', (file: string) => fileInWorkspaceFolder(file));
+  // A new workspace in its own file. It is WRITTEN here and opened by the
+  // caller through `db:openCommit`, so the switch-and-reload stays in one place.
+  handle('db:newWorkspaceFile', (id: string, name: string) => createWorkspaceFile(id, name));
+}
+
+registerFolderIpc();
 
 // Content-Security-Policy applied only to the packaged/file:// production
 // load. The Vite dev server injects its own dev-time script handling (HMR
