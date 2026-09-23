@@ -760,6 +760,48 @@ export interface VisualizationSpec {
   defaultAggregate?: VizAggregate | undefined;
 }
 
+/** One column's values, as a filter picker sees them. */
+export interface FilterPickerValues {
+  values: Array<{ value: string; count: number }>;
+  blanks: number;
+  /** Set when these are the loaded page's values rather than the column's. */
+  note?: string | undefined;
+}
+
+/** What a filter picker is told about the column it was opened on. */
+export interface FilterPickerContext {
+  field: string;
+  label: string;
+  /** The column's `ColumnType`. */
+  type: string;
+  /** The column's renderer name, when it has one. */
+  renderer?: string | undefined;
+  /** The column's current filter string. */
+  current: string;
+  /** Apply a filter live. The picker stays open. */
+  onChange(filter: string): void;
+  /**
+   * The column's values, faceted the way the stock value-list popover's are.
+   *
+   * A FUNCTION, not a value: a funnel click has to stay instant, most pickers
+   * never ask, and on a windowed grid the answer may cost a round trip. Call it
+   * after the picker is already on screen.
+   */
+  values(): Promise<FilterPickerValues>;
+}
+
+/**
+ * How a picker finished. `{ fallback: true }` means "not mine after all" — the
+ * host then opens its own value-list popover on the same anchor, which is what
+ * the ← button in a custom picker resolves with.
+ */
+export type FilterPickerResult = string | null | { clear: true } | { fallback: true };
+
+/** The element a `registerFilterPicker` tag must define. */
+export interface FilterPickerElement extends HTMLElement {
+  open(anchor: DOMRect, ctx: FilterPickerContext): Promise<FilterPickerResult>;
+}
+
 export interface UiRegistry {
   registerHeaderButton(spec: ButtonSpec): Unregister;
   registerFooterButton(spec: ButtonSpec): Unregister;
@@ -794,6 +836,22 @@ export interface UiRegistry {
    * column means its edits are dropped.
    */
   registerCellRenderer(name: string, tag: string): Unregister;
+  /**
+   * Take over the funnel dropdown for a column, instead of the stock list of
+   * distinct values.
+   *
+   * `key` is matched against the column's RENDERER first and its TYPE second,
+   * so `registerFilterPicker('date', …)` claims both a `date` column and a
+   * `string` column whose renderer is `date` — which is how `cell-date` is
+   * meant to be applied.
+   *
+   * `tag` names a custom element satisfying `FilterPickerElement`. The host
+   * creates and mounts one if the plugin has not already.
+   *
+   * Unlike the button slots, this is a MAP: two pickers cannot both own one
+   * funnel, so a second registration under the same key replaces the first.
+   */
+  registerFilterPicker(key: string, tag: string): Unregister;
   registerRowRenderer(viewName: string, tag: string): Unregister;
   registerTableRenderer(viewName: string, tag: string): Unregister;
   /**

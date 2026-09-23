@@ -9,6 +9,7 @@ import { isComputedOnly, searchableColumns } from '../search/searchable-columns.
 import { getContext } from '../app-context.js';
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { FilterPopover } from '../chrome/filter-popover.js';
+import type { FilterPickerElement, FilterPickerValues } from '@easydb/shared';
 import '../chrome/filter-combobox.js';
 import { searchRowsByField } from '../search/text-search.js';
 import { viewColumnSpecs } from '../views/view-columns.js';
@@ -519,6 +520,7 @@ export class DataTable extends LitElement {
   @state() private dropEdge: 'before' | 'after' | null = null;
   @state() private resizing: { field: string; startX: number; startW: number } | null = null;
   @state() private cellRenderers: Map<string, string> = new Map();
+  @state() private filterPickers: Map<string, string> = new Map();
   @state() private scrollY = 0;
   @state() private viewportHeight = 0;
   /** Loading bar driven by this grid's own row fetch (see bind()). */
@@ -1054,7 +1056,11 @@ export class DataTable extends LitElement {
     // register during init/load(); we resnapshot on app:ready so anything
     // that registered late is picked up too.
     this.cellRenderers = new Map(ctx.registries.cellRenderers);
-    ctx.events.on('app:ready', () => (this.cellRenderers = new Map(ctx.registries.cellRenderers)));
+    this.filterPickers = new Map(ctx.registries.filterPickers);
+    ctx.events.on('app:ready', () => {
+      this.cellRenderers = new Map(ctx.registries.cellRenderers);
+      this.filterPickers = new Map(ctx.registries.filterPickers);
+    });
     this.rowColl = ctx.store.rows(this.tableId);
     // What a Validate run left for this table, and anything a later run leaves.
     // Adopted BEFORE the first load, so a grid re-opened while messages are up
@@ -1972,9 +1978,54 @@ export class DataTable extends LitElement {
     return sortRowsBySpecs(this.filteredRows(), this.sortSpecs, this.columns);
   }
 
+  /**
+   * The funnel. A plugin may own this column's dropdown — see
+   * `registerFilterPicker` — and the stock value list is what everything else
+   * gets, and what a plugin picker's ← button falls back to.
+   */
   private async openFilterPicker(e: Event, field: string) {
     e.stopPropagation();
     const btn = e.currentTarget as HTMLElement;
+    const col = this.columns.find((c) => c.field === field);
+    // Renderer first: a `string` column rendered as a date is a date to the
+    // user, and `cell-date` documents the renderer as how you apply it.
+    const tag = (col?.renderer ? this.filterPickers.get(col.renderer) : undefined) ?? (col?.type ? this.filterPickers.get(col.type) : undefined);
+    if (tag && (await this.openPluginPicker(tag, btn, field))) return;
+    await this.openValuePicker(btn, field);
+  }
+
+  /**
+   * Open a plugin's picker. Returns false when it handed back — the ← button —
+   * so the caller shows the stock value list instead.
+   */
+  private async openPluginPicker(tag: string, btn: HTMLElement, field: string): Promise<boolean> {
+    const el = mountFilterPicker(tag);
+    if (!el) return false;
+    const col = this.columns.find((c) => c.field === field);
+    const result = await el.open(btn.getBoundingClientRect(), {
+      field,
+      label: col?.label || field,
+      type: col?.type ?? 'string',
+      ...(col?.renderer ? { renderer: col.renderer } : {}),
+      current: this.filters[field] ?? '',
+      onChange: (next: string) => this.onFilterInput(field, next),
+      values: () => this.pickerValuesFor(field),
+    });
+    if (result && typeof result === 'object' && 'fallback' in result) return false;
+    if (result === null) return true;
+    if (typeof result === 'object' && 'clear' in result) this.onFilterInput(field, '');
+    else if (typeof result === 'string') this.onFilterInput(field, result);
+    return true;
+  }
+
+  /** The value list a plugin picker asks for, same facets the stock one shows. */
+  private async pickerValuesFor(field: string): Promise<FilterPickerValues> {
+    if (this.needsSiblings(field) && this.siblings.get(field)?.key !== this.siblingKey(field)) await this.loadSiblings();
+    const { values, blanks } = this.pickerValues(field);
+    return { values, blanks, ...(this.windowed ? { note: 'Values from the rows loaded so far — there may be more.' } : {}) };
+  }
+
+  private async openValuePicker(btn: HTMLElement, field: string) {
     const popover = FilterPopover.instance;
     if (!popover) return;
     // Faceted: count values only across rows that pass every OTHER column's
@@ -2746,6 +2797,23 @@ function isNonEmptyButUnparsed(raw: unknown, parsed: string): boolean {
 }
 
 export { setTableLoading } from './table-loading.js';
+
+/**
+ * The singleton instance of a plugin's picker element, created on first use.
+ *
+ * The host mounts it rather than requiring the plugin to: a plugin that forgot
+ * would otherwise register a tag whose funnel silently did nothing. Returns null
+ * when the tag was never defined — a plugin that registered and then failed to
+ * load — so the caller falls back to the stock list.
+ */
+function mountFilterPicker(tag: string): FilterPickerElement | null {
+  if (!customElements.get(tag)) return null;
+  const existing = document.querySelector(tag);
+  if (existing) return existing as FilterPickerElement;
+  const el = document.createElement(tag) as FilterPickerElement;
+  document.body.append(el);
+  return el;
+}
 
 declare global {
   interface HTMLElementTagNameMap {

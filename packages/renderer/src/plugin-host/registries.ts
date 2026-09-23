@@ -43,6 +43,11 @@ export interface Registries {
   rowRenderers: Map<string, string>;
   tableRenderers: Map<string, string>;
   /**
+   * Custom funnel dropdowns, keyed by column renderer name OR column type.
+   * The renderer is looked up first — see `registerFilterPicker`.
+   */
+  filterPickers: Map<string, string>;
+  /**
    * Ways of DRAWING a table, keyed by `VisualizationSpec.id` — the value a viz
    * template puts in `VizSpec.kind`. Distinct from the two maps above, which
    * nothing reads; see `registerVisualization` in the plugin contract.
@@ -82,6 +87,7 @@ export function createRegistries(): Registries {
     cellRenderers: new Map(),
     rowRenderers: new Map(),
     tableRenderers: new Map(),
+    filterPickers: new Map(),
     visualizations: new Map(),
     rowSources: new Map(),
     settings: new Map(),
@@ -119,6 +125,7 @@ export function createUiRegistry(r: Registries): UiRegistry {
     registerCellRenderer: (name, tag) => mapReg(r.cellRenderers, name, tag),
     registerRowRenderer: (viewName, tag) => mapReg(r.rowRenderers, viewName, tag),
     registerTableRenderer: (viewName, tag) => mapReg(r.tableRenderers, viewName, tag),
+    registerFilterPicker: (key, tag) => mapReg(r.filterPickers, key, tag),
     registerVisualization: (spec) => {
       r.visualizations.set(spec.id, spec);
       return () => {
