@@ -101,7 +101,11 @@ test.describe('plugin manager status filter', () => {
     // `core-renderers` used to be the other fixed built-in; it was split into
     // four separately-toggleable cell-renderer plugins (cell-date/-datetime/
     // -boolean/-script), so `settings` is now the only one left.
-    const settings = dialog.locator('.row', { hasText: 'Settings' });
+    // By its ID, exactly. `hasText: 'Settings'` searched the whole row —
+    // description included — so it started matching two rows the moment
+    // `date-filter` (v0.0.490) said "configurable in Settings → Dates". A row is
+    // identified by its `.row-id`, which is the one field that cannot collide.
+    const settings = dialog.locator('.row').filter({ has: page.locator('.row-id', { hasText: /^settings$/ }) });
     await expect(settings.locator('.lock-icon')).toBeVisible();
 
     await dialog.locator('.filters .tri.status').click();

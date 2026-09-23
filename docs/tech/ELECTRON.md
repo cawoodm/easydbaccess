@@ -69,7 +69,49 @@ and only the specific functions the renderer needs:
   two-phase on purpose: the OS dialog has to return before the app can name
   the file (or the colliding table) in its own confirmation prompt, so phase
   one picks and previews with no side effects and phase two commits what the
-  user agreed to.
+  user agreed to. Since v0.0.491 it also carries the **workspace folder** —
+  `folder`, `pickFolder`, `forgetFolder`, `scanFolder`, `folderFilePath`,
+  `newWorkspaceFile`. Every one of them is optional on the renderer's side of
+  the type, because a renderer can outlive its preload.
+
+## The workspace folder
+
+The desktop reads a whole folder of `.edb` files and treats each one as a
+workspace you can switch to. It is not a desktop feature: the browser has done
+this since v0.0.404, and the desktop now reaches the **same** dialog
+(Connect ▸ Local Data), the same header selector and the same "File" palette
+group. Nothing in the UI names a platform.
+
+[`src/db-folder.ts`](../../packages/electron/src/db-folder.ts) is the whole
+main-process side:
+
+| Function | Role |
+|---|---|
+| `workspaceFolder` / `setWorkspaceFolder` | The remembered path. It lives in the existing `db-location.json`, beside the remembered database path, because both are read before any database is open. |
+| `pickWorkspaceFolder` | `showOpenDialog` with `openDirectory`. |
+| `scanWorkspaceFolder` | Every `*.edb` in the folder, with its size, its date and a **read-only** peek at the workspaces inside. |
+| `createWorkspaceFile` | A new `.edb` in the folder holding one empty workspace — what New workspace ▸ Advanced writes. |
+
+Two rules the specs hold down:
+
+- **A scan writes nothing.** Each peek opens the file `readOnly` and closes it,
+  so listing a folder leaves every file byte-identical, not even a `-wal`
+  beside one. `db-browse.ts` works the same way and for the same reason.
+- **A file the device switched off is named but never opened.** Listing a
+  directory is cheap and reading each file is not, so a file left out of the
+  selection still appears in the Local Data dialog — otherwise there would be
+  no way to switch it back on.
+
+On the renderer's side the work is small, because the workspace selector does
+not read a folder: it reads a device-local cache of one, in `localStorage`
+(`db/edb/folder-index.ts`). The desktop writes the same cache.
+[`plugins/electron-folder.ts`](../../packages/renderer/src/plugins/electron-folder.ts)
+does the translation and answers the two questions the two builds answer
+differently — which file is open, and how another is opened — through the
+`FileWorkspaceBackend` seam in
+[`db/file-workspaces.ts`](../../packages/renderer/src/db/file-workspaces.ts).
+
+Design: [`2026-09-23-desktop-workspace-folder.md`](../../.claude/plans/2026-09-23-desktop-workspace-folder.md).
 
 `preload.ts` imports the main-side modules **for their types only**
 (`import type`, erased at compile time). Their runtime code calls
@@ -85,7 +127,8 @@ The store lives in the main process, not the renderer:
 |---|---|
 | [`src/sqlite-store.ts`](../../packages/electron/src/sqlite-store.ts) | The desktop's binding to `EdbStore` (`packages/shared`), plus the pragmas, `checkpoint()` and file copy only a real file needs. No storage logic of its own. |
 | [`src/node-sqlite-driver.ts`](../../packages/electron/src/node-sqlite-driver.ts) | The `SqlDriver` over `node:sqlite`. The browser's file mode binds the same store to sqlite-wasm instead. |
-| [`src/db-files.ts`](../../packages/electron/src/db-files.ts) | Store singleton (open / switch / remembered path) and the Open / Save As dialogs. |
+| [`src/db-files.ts`](../../packages/electron/src/db-files.ts) | Store singleton (open / switch / remembered path) and the Open / Save As dialogs. Also `readLocationConfig` / `patchLocationConfig`, the merge-don't-overwrite pair every writer of `db-location.json` goes through. |
+| [`src/db-folder.ts`](../../packages/electron/src/db-folder.ts) | The workspace folder: the remembered path, the directory picker, the read-only scan, and writing a new `.edb` into it. See above. |
 | [`src/db-import.ts`](../../packages/electron/src/db-import.ts) | Imports **any** SQLite file by reading its `sqlite_master` — not only files easyDBAccess wrote. `probeDatabaseFile` classifies a picked file read-only. |
 
 User tables are real SQL tables; everything else — `workspaces`, `settings`,
@@ -154,7 +197,7 @@ Two levels, and the split matters:
 
 | Where | Runner | Covers |
 |---|---|---|
-| `test/electron/` | Vitest | `sqlite-store.ts`, `db-import.ts`, `db-browse.ts`, `import-runner.ts` driven directly. Pure Node — no Electron runtime. |
+| `test/electron/` | Vitest | `sqlite-store.ts`, `db-import.ts`, `db-browse.ts`, `db-folder.ts`, `import-runner.ts` driven directly. Pure Node — no Electron runtime. |
 | `test/e2e/desktop/` | Playwright, `npm run test:e2e:desktop` | The app itself: `_electron.launch` starts the real main process and `file://` renderer. |
 
 The e2e suite exists because a whole class of behaviour has no other test.
@@ -178,7 +221,9 @@ Three things make it work:
 Native dialogs cannot be clicked from Playwright, so the specs replace
 `dialog.showSaveDialog` / `showOpenDialog` in the main process
 (`app.evaluate`). Everything under them — checkpoint, close, copy, switch —
-still runs as it does for a real user.
+still runs as it does for a real user. The folder picker is
+`showOpenDialog` too, differing only in its `properties`, so
+`stubFolderDialog` is the same helper under the name those specs mean by it.
 
 ## Packaging
 

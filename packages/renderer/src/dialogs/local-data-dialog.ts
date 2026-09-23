@@ -32,6 +32,7 @@ import { ctrlEnterSubmits, dialogChromeStyles, makeDialogDraggable } from '@marc
 import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { canPickFolder, rememberedFolder } from '../db/edb/file-handle.js';
 import { activeEdbName } from '../db/edb/session.js';
+import { backendActiveFile } from '../db/file-workspaces.js';
 import { readFolderIndex, readFolderSelection, workspaceLabel, writeFolderSelection, type FolderSelection, type FolderWorkspace } from '../db/edb/folder-index.js';
 
 /** What the dialog cannot do for itself — see the module header. */
@@ -44,7 +45,26 @@ export interface LocalDataActions {
   rescan(): Promise<void>;
   /** The file picker, for a `.edb` that is not in the folder at all. */
   openFile(): Promise<void>;
+  /**
+   * Whether this build can take a whole folder at all.
+   *
+   * The dialog is shared, so it may not test for a browser API to find out: the
+   * desktop reaches a folder through the main process and would fail that test
+   * while being perfectly able to. Absent means "ask the browser", which is what
+   * this did before the desktop had a folder.
+   */
+  canConnectFolder?(): boolean;
+  /** Said in place of the folder controls when {@link canConnectFolder} is false. */
+  noFolderReason?: string | undefined;
+  /** The line under "Open a workspace file…". Each build grants a file differently. */
+  openFileHint?: string | undefined;
 }
+
+/** What the browser says when it has no directory picker. */
+const NO_FOLDER_HERE = 'This browser cannot hand over a whole folder — the directory picker is Chromium-only. You can still open a single workspace file below, and in this browser it opens read-only.';
+
+/** What the browser says about a file outside the folder. */
+const OPEN_FILE_HINT = 'The browser grants this app that one file, and remembers it across reloads.';
 
 let actions: LocalDataActions | null = null;
 
@@ -314,7 +334,9 @@ export class LocalDataDialog extends LitElement {
   }
 
   private renderRow(row: FileRow) {
-    const isOpen = row.file === activeEdbName();
+    // Whichever build is running says which file it has open — see
+    // `workspace-selector.ts`'s `openFile` for the same pair.
+    const isOpen = row.file === (backendActiveFile() ?? activeEdbName());
     const on = isOpen || this.selection.all || this.selection.files.includes(row.file);
     const w = row.workspace;
     const facts = [w?.tables === undefined ? '' : `${w.tables} table${w.tables === 1 ? '' : 's'}`, w?.views === undefined ? '' : `${w.views} view${w.views === 1 ? '' : 's'}`, size(w?.size)]
@@ -339,7 +361,7 @@ export class LocalDataDialog extends LitElement {
   }
 
   override render() {
-    const canFolder = canPickFolder();
+    const canFolder = actions?.canConnectFolder?.() ?? canPickFolder();
     return html`
       <dialog @cancel=${this.close} @keydown=${ctrlEnterSubmits}>
         <button type="button" class="close-x" title="Close" @click=${this.close}>×</button>
@@ -360,9 +382,7 @@ export class LocalDataDialog extends LitElement {
                     ${this.folder ? html`<button type="button" class="ghost" ?disabled=${this.busy} @click=${() => void this.act((a) => a.disconnectFolder())}>Disconnect</button>` : nothing}
                   </div>
                 `
-              : html`<p class="hint">
-                  This browser cannot hand over a whole folder — the directory picker is Chromium-only. You can still open a single workspace file below, and in this browser it opens read-only.
-                </p>`}
+              : html`<p class="hint">${actions?.noFolderReason ?? NO_FOLDER_HERE}</p>`}
             ${this.folder
               ? html`
                   <label class="all">
@@ -388,7 +408,7 @@ export class LocalDataDialog extends LitElement {
               : nothing}
             <div class="outside">
               <button type="button" class="ghost" ?disabled=${this.busy} @click=${() => void this.act((a) => a.openFile())}>Open a workspace file…</button>
-              <p class="hint">For a <code>.edb</code> that is not in the folder. The browser grants this app that one file, and remembers it across reloads.</p>
+              <p class="hint">For a <code>.edb</code> that is not in the folder. ${actions?.openFileHint ?? OPEN_FILE_HINT}</p>
             </div>
           </div>
         </form>

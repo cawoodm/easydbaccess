@@ -20,6 +20,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { CurrentDbInfo, DialogResult, CancelledResult } from './db-files';
 import type { DatabaseFileKind, ImportDecision, ImportedTableResult, ImportPreview } from './db-import';
 import type { BrowsableObject, BrowseRow } from './db-browse';
+import type { FolderScan } from './db-folder';
 import type { CloneMode, DistinctPage, RowPage, RowQuery, SqlRunOptions, SqlRunResult, WorkspaceContents } from '@easydb/shared';
 import type { ImportPlan, ImportPlanEntry, ImportProgress } from './db-import';
 
@@ -110,6 +111,16 @@ const db = {
   /** Whether the last workspace reopens on startup (default true). */
   autoLoadLast: (): Promise<boolean> => ipcRenderer.invoke('db:autoLoadLast'),
   setAutoLoadLast: (on: boolean): Promise<void> => ipcRenderer.invoke('db:setAutoLoadLast', on),
+
+  // The workspace folder — see `db-folder.ts`. The renderer deals in file
+  // NAMES, as the browser's folder does; `folderFilePath` is what turns one
+  // back into something openable.
+  folder: (): Promise<string | null> => ipcRenderer.invoke('db:folder'),
+  pickFolder: (): Promise<string | null> => ipcRenderer.invoke('db:pickFolder'),
+  forgetFolder: (): Promise<void> => ipcRenderer.invoke('db:forgetFolder'),
+  scanFolder: (only?: string[]): Promise<FolderScan | null> => ipcRenderer.invoke('db:scanFolder', only),
+  folderFilePath: (file: string): Promise<string | null> => ipcRenderer.invoke('db:folderFilePath', file),
+  newWorkspaceFile: (id: string, name: string): Promise<string | null> => ipcRenderer.invoke('db:newWorkspaceFile', id, name),
 };
 
 contextBridge.exposeInMainWorld('easydb', {
@@ -162,6 +173,12 @@ declare global {
         currentDb(): Promise<CurrentDbInfo>;
         autoLoadLast(): Promise<boolean>;
         setAutoLoadLast(on: boolean): Promise<void>;
+        folder(): Promise<string | null>;
+        pickFolder(): Promise<string | null>;
+        forgetFolder(): Promise<void>;
+        scanFolder(only?: string[]): Promise<FolderScan | null>;
+        folderFilePath(file: string): Promise<string | null>;
+        newWorkspaceFile(id: string, name: string): Promise<string | null>;
       };
     };
   }

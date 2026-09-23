@@ -9,10 +9,12 @@
 - ✨ The Settings dialog reopens on the tab and search you left it on, until the page is reloaded (v0.0.479)
 - ✨ Autosave is in Settings → Files, not only behind a palette command; both drive one device-local record (v0.0.478)
 - 🪶 Date columns filter by preset or date range; the filter language takes >= <= > < comparisons (v0.0.490)
+- 🪶 The desktop app opens a whole folder of .edb files, through the same Connect ▸ Local Data surface the browser has (v0.0.493)
 
 ### Bugs
 
 - 🪲 Sync's "Take newest" carried tables and rows across but left every visualization and its docked layout behind (v0.0.492)
+- 🪲 Opening another database file on the desktop could show an empty workspace, because the last one's ?space= survived the reload (v0.0.493)
 - 🪲 A filter with a star between two words, such as `*Marc*Julian*`, found nothing (v0.0.477)
 - 🪲 Running several column scripts at once left only the last column written (v0.0.476)
 - 🪲 Run offered to clear the script it had just written into the cells (v0.0.476)

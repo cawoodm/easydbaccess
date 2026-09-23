@@ -13,6 +13,7 @@ import { storeBridge } from '../db/edb/active-bridge.js';
 import { cloneWorkspace, type CloneMode } from '../db/clone-workspace.js';
 import { countWorkspaceContents, deleteWorkspace, describeWorkspaceContents } from '../db/delete-workspace.js';
 import { EDB_EXTENSION } from '../db/edb/file-handle.js';
+import { fileWorkspaceBackend } from '../db/file-workspaces.js';
 import { adoptEdbFile, buildEdbFile, edbTargetNamed } from '../db/edb/new-file.js';
 
 // The three answers of the "what should it start with?" question. Constants
@@ -21,22 +22,32 @@ const CLONE_ALL = 'Clone everything (tables, views, settings)';
 const CLONE_SETTINGS = 'Clone settings only (no data)';
 const CLONE_NOTHING = 'Empty workspace';
 
-// Where the new workspace's data lives. Simple is what every workspace has been
-// until now; Advanced puts it in a real SQLite file the user owns.
-// "in this browser" is not IndexedDB any more — it is a SQLite database in the
-// OPFS pool, and it survives a reload exactly as a file does. The old label named
-// a storage engine this app stopped using in v0.0.383.
-const SIMPLE = 'Simple — in this browser';
-const ADVANCED = 'Advanced — in a SQLite file you save (.edb)';
+// Where the new workspace's data lives. Simple puts it beside the one open now;
+// Advanced gives it a `.edb` of its own.
+//
+// Neither label names a storage engine or a platform, and both used to. "Simple
+// — in this browser" was wrong twice over: it was written when that meant
+// IndexedDB, which this app dropped in v0.0.383, and it reads as a lie in the
+// desktop build, which offers the same two choices since v0.0.491. What the user
+// is actually choosing is whether the new workspace shares a file with this one.
+const SIMPLE = 'Simple — alongside this workspace';
+const ADVANCED = 'Advanced — in a file of its own (.edb)';
 
 /**
- * Can this browser keep a workspace in a file?
+ * Can this build keep a workspace in a file of its own?
  *
- * Needs a Web Worker for sqlite-wasm. Electron is excluded because it has its own
- * `.db` file operations, and offering two file systems in one build would be two
- * answers to one question.
+ * Two ways to say yes. A build that installed a {@link FileWorkspaceBackend}
+ * answers for itself — that is the desktop, once a workspace folder is
+ * connected. Otherwise it is the browser's own route, which needs a Web Worker
+ * for sqlite-wasm.
+ *
+ * The desktop used to be excluded outright, on the grounds that it had its own
+ * `.db` file commands. It no longer has a separate set: both builds reach files
+ * through Connect ▸ Local Data, so both offer the same New workspace question.
  */
-function canUseFileStorage(): boolean {
+async function canUseFileStorage(): Promise<boolean> {
+  const backend = fileWorkspaceBackend();
+  if (backend) return backend.canCreate();
   return typeof Worker === 'function' && !window.easydb?.store;
 }
 
@@ -71,11 +82,21 @@ export async function openListEntry(entry: ListEntry): Promise<void> {
     openWorkspace(entry.id);
     return;
   }
+  const ctx = await getContext();
+  // A build with its own way of reaching files answers first. On the desktop that
+  // is the main process switching the store to another path and reloading the
+  // window — there is no handle to adopt and no `?space=` to write. See
+  // `db/file-workspaces.ts`.
+  const backend = fileWorkspaceBackend();
+  if (backend) {
+    if ((await backend.open(entry.file, entry.id)) !== 'unavailable') return;
+    ctx.api.ui.dialogs.toast(`${entry.file} could not be opened. Check the folder under Connect ▸ Local Data.`, { kind: 'warning', title: 'Switch workspace' });
+    return;
+  }
   // The dialogs go in because the switch may have a question to ask: this browser
   // and the file can each hold a copy of that workspace, and nothing in the
   // storage layer may pick one of them on the user's behalf. See
   // `db/edb/copy-choice.ts`.
-  const ctx = await getContext();
   const outcome = await openWorkspaceInFile(entry.file, entry.id, ctx.api.ui.dialogs);
   // A cancelled question is an answer, not a failure: the user just said to leave
   // both copies alone, and a warning about it would read as a fault.
@@ -125,7 +146,7 @@ export async function newWorkspaceFlow(): Promise<void> {
   // Asked before anything else, because the answer decides which of two entirely
   // different creation paths runs. Only asked where a file is possible at all —
   // a question with one usable answer is not a question.
-  if (canUseFileStorage()) {
+  if (await canUseFileStorage()) {
     const where = await ctx.api.ui.dialogs.choice(`Where should "${name}" keep its data?`, [SIMPLE, ADVANCED], 'New workspace');
     if (!where) return;
     if (where === ADVANCED) {
@@ -161,6 +182,14 @@ export async function newWorkspaceFlow(): Promise<void> {
  */
 async function newFileWorkspace(dialogs: Dialogs, name: string): Promise<void> {
   const id = slugifyWorkspace(name);
+  // Same split as `openListEntry`: a build that owns its own file access does
+  // this itself. The desktop writes the `.edb` into the connected folder and
+  // switches the store to it, which ends in a reload, so nothing after this runs.
+  const backend = fileWorkspaceBackend();
+  if (backend) {
+    await backend.create(name, id);
+    return;
+  }
   const target = await edbTargetNamed(dialogs, `${id}${EDB_EXTENSION}`);
   if (!target) return;
   await buildEdbFile(target, id, async (store) => {

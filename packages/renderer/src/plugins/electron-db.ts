@@ -1,20 +1,26 @@
 /**
- * electron-db — everything the user can do with a `.db` file. Electron-only: it
- * registers nothing at all — no footer button, no drop handler, no error — when
+ * electron-db — everything the user can do with a `.db` file. Desktop-only: it
+ * registers nothing at all — no commands, no drop handler, no error — when
  * `window.easydb?.db` is absent, which is always true in the browser build
  * (see `packages/electron/src/preload.ts` for the bridge this reads). That
  * guard in `init()` below is the one hard requirement for this plugin.
  *
- * A single footer button opens an anchored menu (Open… / Save As… / Import…)
- * rather than three separate buttons, matching how `gist-sync.ts` groups its
- * own multi-action footer button.
+ * **There is no "Database" button any more.** Until v0.0.491 a footer button of
+ * that name held Open… / Save As… / Import…, and it was the desktop's own answer
+ * to a question the browser answers through Connect ▸ Local Data and the File
+ * palette group. Two builds, two interfaces, one of which could not open a
+ * folder at all. Now both builds have the same one: the folder and its files are
+ * Connect ▸ Local Data (`electron-folder.ts`), and what is left here — Open one
+ * file, Save As, Import — are palette commands under the same "File" and "Data"
+ * groups the browser uses.
  *
- * Two entry points bring a `.db` in — that menu's Open…, and dropping the file
+ * Two entry points bring a `.db` in — the Open command, and dropping the file
  * on the window — and both funnel into `handleDatabaseFile`, which asks the one
  * question: Open Workspace / Browse / Import data. Keeping that in a single
  * place is deliberate; a dropped file and a picked file must not be offered
  * different things. Design:
- * `.claude/plans/2026-08-03-open-db-three-ways.md`.
+ * `.claude/plans/2026-08-03-open-db-three-ways.md` and
+ * `.claude/plans/2026-09-23-desktop-workspace-folder.md`.
  */
 import type { HostApi, PluginModule } from '@easydb/shared';
 import type {
@@ -29,6 +35,7 @@ import type {
 import { IMPORT_PROGRESS_EVENT, type ImportProgressDetail } from '../window-mgr/panel-title.js';
 import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
 import { ImportProgress } from './import-progress.js';
+import { installWorkspaceFolder, type WorkspaceFolderSession } from './electron-folder.js';
 
 /**
  * Where an unfinished conversion records the rows it still owes. Must match
@@ -85,7 +92,7 @@ export const meta: NonNullable<PluginModule['meta']> = {
   name: 'Database File',
   type: 'ui',
   version: '0.1.0',
-  description: 'Open, Save As, or Import a .db file (Electron desktop build only).',
+  description: 'Open, copy or import a database file, and browse one without opening it. Desktop only.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/electron-db.ts',
@@ -150,37 +157,75 @@ export function init(api: HostApi): void {
     });
   });
 
-  api.ui.registerFooterButton({
-    id: 'electron-db:menu',
-    label: 'Database',
-    icon: 'storage',
-    tooltip: 'Open, Save As, or Import a .db file',
-    onClick: async (api, ctx) => {
-      const { AnchoredMenu } = await import('@marccawood/lit-menu');
-      const rect = ctx?.anchor?.getBoundingClientRect() ?? new DOMRect(16, window.innerHeight - 48, 0, 0);
-      const choice = await AnchoredMenu.open(rect, [
-        { id: 'open', label: 'Open…', icon: 'folder_open' },
-        { id: 'saveAs', label: 'Save As…', icon: 'save' },
-        { id: 'import', label: 'Import…', icon: 'file_download' },
-        // Only while there is something to stop — an import of a big file runs
-        // for tens of seconds, and it must not be a one-way door.
-        ...(isImporting() ? [{ id: 'stop', label: 'Stop importing', icon: 'cancel' }] : []),
-      ]);
-      if (!choice) return;
-      try {
-        if (choice === 'open') await openFlow(api, bridge);
-        else if (choice === 'saveAs') await saveAsFlow(api, bridge);
-        else if (choice === 'import') await importFlow(api, bridge);
-        else if (choice === 'stop') cancelImport();
-      } catch (err) {
-        api.ui.dialogs.toast(`${choice} failed: ${(err as Error).message}`, {
-          kind: 'error',
-          title: 'Database file',
-        });
+  /** Run one flow, reporting a failure the same way wherever it came from. */
+  const guarded = (what: string, run: () => Promise<void>) => async (): Promise<void> => {
+    try {
+      await run();
+    } catch (err) {
+      api.ui.dialogs.toast(`${what} failed: ${(err as Error).message}`, { kind: 'error', title: 'Database file' });
+    }
+  };
+
+  // The folder, and everything that reads it: the Local Data connector, the two
+  // folder commands and the file-backed-workspace backend. Null on a renderer
+  // whose preload is older than the folder IPC, and then the commands below are
+  // the whole desktop file surface, exactly as they were.
+  folderSession = installWorkspaceFolder(api, bridge, guarded('Open', () => openFlow(api, bridge)));
+
+  // "File", matching `edb-file.ts`'s group in the browser. The same word for the
+  // same shelf, so the palette reads alike in both builds.
+  api.ui.registerCommand({
+    id: 'electron-db:open',
+    title: 'Open workspace file…',
+    group: 'File',
+    icon: 'folder_open',
+    keywords: ['edb', 'db', 'sqlite', 'load', 'switch', 'database'],
+    run: guarded('Open', () => openFlow(api, bridge)),
+  });
+
+  api.ui.registerCommand({
+    id: 'electron-db:saveAs',
+    title: 'Save a copy of this workspace…',
+    group: 'File',
+    icon: 'save',
+    keywords: ['save', 'as', 'copy', 'database', 'edb'],
+    run: guarded('Save As', () => saveAsFlow(api, bridge)),
+  });
+
+  api.ui.registerCommand({
+    id: 'electron-db:import',
+    title: 'Import a database file…',
+    group: 'Data',
+    icon: 'file_download',
+    keywords: ['db', 'sqlite', 'import', 'tables', 'database'],
+    run: guarded('Import', () => importFlow(api, bridge)),
+  });
+
+  // Offered whether or not an import is running: a palette is a flat list, and a
+  // command that appears only for the twenty seconds you might want it is one
+  // nobody finds. It says so instead when there is nothing to stop.
+  api.ui.registerCommand({
+    id: 'electron-db:stopImport',
+    title: 'Stop importing',
+    group: 'Data',
+    icon: 'cancel',
+    keywords: ['cancel', 'abort', 'import'],
+    run: async () => {
+      if (!isImporting()) {
+        api.ui.dialogs.toast('No import is running.', { kind: 'info', title: 'Import database' });
+        return;
       }
+      cancelImport();
     },
   });
 }
+
+/**
+ * The folder session `load()` has to start, put here because `load` is a
+ * separate export and cannot see `init`'s closure — the same arrangement
+ * `edb-file.ts` uses for its autosave policy.
+ */
+let folderSession: WorkspaceFolderSession | null = null;
 
 /**
  * Runs after the workspace is resolved, which `init` cannot rely on — the
@@ -190,6 +235,12 @@ export function init(api: HostApi): void {
 export function load(api: HostApi): void {
   const bridge = window.easydb?.db;
   if (!bridge) return;
+  // Which file is open, and what the folder holds. Before the pending-import
+  // offer, because that offer is a modal and the workspace selector should not
+  // sit behind it still showing yesterday's list.
+  void folderSession?.boot().catch((err: unknown) => {
+    api.ui.dialogs.toast(`The workspace folder could not be read: ${(err as Error).message}`, { kind: 'warning', title: 'Local Data' });
+  });
   void resumePendingImport(api, bridge).catch((err: unknown) => {
     api.ui.dialogs.toast(`Finishing the conversion failed: ${(err as Error).message}`, {
       kind: 'error',

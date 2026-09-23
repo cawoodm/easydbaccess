@@ -158,6 +158,40 @@ export function readEdb(dbPath: string): EdbFile {
 }
 
 /**
+ * Writes a workspace file the app has never seen, for the folder specs.
+ *
+ * Deliberately raw SQL, like {@link readEdb} and for the same reason: a `.edb`
+ * that only this app's own code can produce is not the portable database the
+ * format claims to be. Four inserts is the whole of an empty workspace, and if
+ * that ever stops being true the folder scan has to be told, not this helper.
+ */
+export function writeEdbWorkspace(path: string, id: string, opts: { name?: string; title?: string; tables?: string[] } = {}): void {
+  const db = new DatabaseSync(path);
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS _easydb (coll TEXT NOT NULL, key TEXT NOT NULL, workspaceId TEXT, doc TEXT NOT NULL, PRIMARY KEY (coll, key))`);
+    const put = db.prepare(`INSERT OR REPLACE INTO _easydb (coll, key, workspaceId, doc) VALUES (?, ?, ?, ?)`);
+    put.run('_meta', 'format', null, JSON.stringify({ version: 2, app: 'easydbaccess' }));
+    // A `workspaces` doc carries no `workspaceId` column of its own — the store
+    // writes NULL there, and `deleteWorkspace` has a separate statement for it.
+    put.run('workspaces', id, null, JSON.stringify({ id, name: opts.name ?? id, createdAt: Date.now(), pluginUrls: [], ...(opts.title ? { title: opts.title } : {}) }));
+    for (const name of opts.tables ?? []) {
+      put.run('tables', `${id}-${name}`, id, JSON.stringify({ id: `${id}-${name}`, workspaceId: id, name, columns: [], view: 'table', _sqlTable: name, updatedAt: Date.now() }));
+    }
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Replaces the native folder picker with a fixed answer.
+ *
+ * `showOpenDialog` serves both the file picker and the folder picker — they
+ * differ only by `properties` — so this is {@link stubOpenDialog} under the name
+ * the folder specs mean by it.
+ */
+export const stubFolderDialog = stubOpenDialog;
+
+/**
  * Writes a plain SQLite database — not one of ours — for the Import and Convert
  * paths to consume. Those are the two operations that take a stranger's file,
  * so a test fixture for them must be exactly that.
