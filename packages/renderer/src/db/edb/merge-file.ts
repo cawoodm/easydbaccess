@@ -13,13 +13,13 @@
 // `replicate-run.ts` carries them out, and this is the part that knows about a
 // file handle, a permission, a dialog and a toast.
 
-import type { DataStore, Dialogs } from '@easydb/shared';
-import { countDiffs, defaultChoice, describeDiffs, inStep } from '@easydb/shared';
+import type { DataStore, DiffCounts, Dialogs } from '@easydb/shared';
+import { countDiffs, defaultChoice, describeDiffs } from '@easydb/shared';
 import { openMergeDialog } from '../../dialogs/merge-dialog.js';
 import { clearAppProgress, setAppProgress } from '../../chrome/app-progress-signal.js';
 import { factsOfHandle, recordDivergence } from './file-stamp.js';
 import { COMPARE, NEWEST, PULL, PUSH, answerOf, type FileAnswer } from './merge-answers.js';
-import { openComparison, type MergeOutcome, type MergePlan } from './replicate-run.js';
+import { nothingToSettle, openComparison, type MergeOutcome, type MergePlan } from './replicate-run.js';
 import { writeBytes } from './file-handle.js';
 import type { EdbBridge } from './worker-bridge.js';
 
@@ -72,7 +72,15 @@ export async function mergeWithFile(ctx: MergeContext, mode: 'newest' | 'compare
   try {
     clearAppProgress();
     const counts = countDiffs(comparison.tables);
-    if (inStep(counts)) {
+    const templateCounts = countDiffs(comparison.views.templates);
+    const instanceCounts = countDiffs(comparison.views.instances);
+    // Views are diffed too, and ALL of tables/templates/instances have to be
+    // in step for there to be nothing to do. Checking `counts` alone was the
+    // bug this closes: a chart added on one side with every table untouched
+    // compared as "nothing to do" and the chart never crossed — the reported
+    // bug, one layer down, because tables were never the only thing a merge
+    // could carry.
+    if (nothingToSettle(counts, templateCounts, instanceCounts)) {
       // The whole point of comparing: a file whose timestamp moved may hold
       // exactly what we hold. Saying so is a better answer than a dialog with
       // nothing in it.
@@ -83,7 +91,7 @@ export async function mergeWithFile(ctx: MergeContext, mode: 'newest' | 'compare
     const plan = mode === 'newest' ? allNewest(comparison.tables) : await openMergeDialog(comparison, ctx.file);
     if (!plan) return { merged: false, wroteFile: false };
 
-    setAppProgress({ label: `Merging with ${ctx.file}`, detail: describeDiffs(counts) });
+    setAppProgress({ label: `Merging with ${ctx.file}`, detail: describeMergeScope(counts, templateCounts, instanceCounts) });
     const { outcome, bytes: merged } = await comparison.apply(plan, (detail) => setAppProgress({ label: `Merging with ${ctx.file}`, detail }));
 
     let wroteFile = false;
@@ -105,6 +113,27 @@ function allNewest(tables: readonly { name: string; state: Parameters<typeof def
   return { tables: new Map(tables.map((d) => [d.name, defaultChoice(d.state)])), rows: new Map() };
 }
 
+/**
+ * The progress line's detail: tables, and — only when there is one — a view
+ * clause too. Without this a merge that touches only views showed a blank
+ * detail while it worked, which reads as hung rather than as doing something.
+ *
+ * Templates and instances are summed into one "view" count here: the gate
+ * that decides whether there is anything to do needs them apart (an instance
+ * with no template makes no sense, but the reverse is ordinary), but one
+ * progress clause naming both collections separately would read as more detail
+ * than the sentence needs.
+ */
+function describeMergeScope(tableCounts: DiffCounts, templateCounts: DiffCounts, instanceCounts: DiffCounts): string {
+  const viewCounts: DiffCounts = {
+    same: templateCounts.same + instanceCounts.same,
+    differs: templateCounts.differs + instanceCounts.differs,
+    hereOnly: templateCounts.hereOnly + instanceCounts.hereOnly,
+    diskOnly: templateCounts.diskOnly + instanceCounts.diskOnly,
+  };
+  return [describeDiffs(tableCounts), describeDiffs(viewCounts, 'view')].filter((s) => s !== '').join('; ');
+}
+
 async function readFileBytes(handle: FileSystemFileHandle): Promise<Uint8Array | null> {
   try {
     return new Uint8Array(await (await handle.getFile()).arrayBuffer());
@@ -117,12 +146,14 @@ async function readFileBytes(handle: FileSystemFileHandle): Promise<Uint8Array |
  * What this browser knows about the file, after a merge.
  *
  * Always `recordDivergence`, never `recordAgreement` — even when the merge wrote
- * the file. A merge settles TABLES; the views, templates and settings on the two
- * sides are left as each had them, so the file is not a copy of this database and
- * claiming otherwise would let the next Save write over it without asking. Marked
- * as ours-ahead instead, which is what it is: the file's current facts are
- * recorded (so the pair stays comparable and the next outside write is seen), and
- * the ordinary Save that follows brings the file the rest of the way.
+ * the file. A merge settles tables, rows, view templates and view instances, but
+ * NOT `settings` — `Setting` carries no `updatedAt`, so there is no clock to
+ * settle it by, and it is left as each side had it. That means the file is still
+ * not a full copy of this database, and claiming otherwise would let the next
+ * Save write over it without asking. Marked as ours-ahead instead, which is what
+ * it is: the file's current facts are recorded (so the pair stays comparable and
+ * the next outside write is seen), and the ordinary Save that follows brings the
+ * file the rest of the way.
  */
 async function restamp(file: string, handle: FileSystemFileHandle): Promise<void> {
   const facts = await factsOfHandle(handle);
@@ -134,6 +165,7 @@ export function describeOutcome(o: MergeOutcome, file: string): string {
   const parts: string[] = [];
   if (o.pulled.length > 0) parts.push(`took ${o.pulled.join(', ')} from ${file}`);
   if (o.pushed.length > 0) parts.push(`wrote ${o.pushed.join(', ')} out to it`);
+  if (o.viewsIn > 0 || o.viewsOut > 0) parts.push(`settled ${o.viewsIn + o.viewsOut} view${o.viewsIn + o.viewsOut === 1 ? '' : 's'}`);
   if (parts.length === 0) return `Nothing changed on either side.`;
   const rows = [o.rowsIn > 0 ? `${o.rowsIn.toLocaleString()} in` : '', o.rowsOut > 0 ? `${o.rowsOut.toLocaleString()} out` : ''].filter(Boolean).join(', ');
   return `Merged: ${parts.join('; ')}${rows ? ` (${rows} rows)` : ''}.`;

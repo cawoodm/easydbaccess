@@ -734,3 +734,7 @@ nowhere, and (docked instances being excluded from the window reconcile) vanishe
 entirely. `remapDock` in `plugins/json-import.ts` carries the host across for the
 ordinary case, where the pane is docked into the window of the table it charts,
 and DROPS the dock otherwise: visible in the wrong place beats invisible.
+
+The `.edb` merge path has the same hazard — a merged-in view instance can point
+at a table with a different id on each side — and solves it the same way, in
+`db/edb/view-replicate.ts`; see `docs/tech/EDB.md`.

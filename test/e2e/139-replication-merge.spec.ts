@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { addRow, createTable, readRows, waitForPanel } from './helpers.js';
+import { addRow, createTable, readRows, readViewInstance, waitForPanel } from './helpers.js';
 
 /**
  * Settling a workspace against the copy of it in a `.edb`, table by table and
@@ -306,6 +306,157 @@ test('a record answered Push is dropped from the file instead of pulled in', asy
   await expect(toast(page)).toContainText('Merged', { timeout: 30_000 });
   // This side asked to win, so the row it does not have goes from the file too.
   expect(await readRows(page, alpha)).toHaveLength(1);
+});
+
+/**
+ * The view layer: a `ViewTemplate` (the "viz" kind — a chart) and a
+ * `ViewInstance` docked into a table's own window, inserted straight through
+ * the store the same way `createTable`/`addRow` do — there is no UI path in
+ * these specs to build a chart, and there does not need to be one for what
+ * this checks: that a merge carries `viewTemplates`/`viewInstances` the same
+ * way it already carries tables and rows.
+ */
+async function insertViewTemplate(page: Page): Promise<string> {
+  return page.evaluate(async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ctx = (window as any).__easydb;
+    const id = crypto.randomUUID();
+    await ctx.store.viewTemplates.insert({
+      id,
+      workspaceId: ctx.workspaceId,
+      name: 'Chart',
+      headerHtml: '',
+      rowHtml: '',
+      footerHtml: '',
+      kind: 'viz',
+      viz: { kind: 'bar-chart' },
+      updatedAt: Date.now(),
+    });
+    return id;
+  });
+}
+
+/** A view instance docked BELOW the window of the table it charts. */
+async function insertDockedViewInstance(page: Page, tableId: string, templateId: string): Promise<string> {
+  return page.evaluate(
+    async ({ tableId, templateId }) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      const id = crypto.randomUUID();
+      await ctx.store.viewInstances.insert({
+        id,
+        workspaceId: ctx.workspaceId,
+        tableId,
+        templateId,
+        name: 'Chart view',
+        filters: {},
+        visibleColumns: [],
+        mapping: {},
+        dock: { host: { kind: 'table', tableId }, edge: 'below', size: 220, order: 0 },
+        open: true,
+        updatedAt: Date.now(),
+      });
+      return id;
+    },
+    { tableId, templateId },
+  );
+}
+
+test('Take newest brings back a docked chart only the file has, dock intact', async ({ page }) => {
+  const space = 'viz-newest';
+  await boot(page, space);
+  const alpha = await createTable(page, 'Alpha', [{ field: 'part' }]);
+  await waitForPanel(page, alpha);
+  await saveIntoFolder(page, space);
+
+  // The other machine adds a table AND a chart docked into it.
+  const beta = await createTable(page, 'Beta', [{ field: 'note' }]);
+  await addRow(page, beta, { note: 'from the other machine' });
+  const template = await insertViewTemplate(page);
+  const instance = await insertDockedViewInstance(page, beta, template);
+  await saveAgain(page, space);
+  const withBetaAndChart = await snapshotFile(page, `${space}.edb`);
+
+  // This tab loses all three and saves, so the file no longer has any of them
+  // either — the same setup `fileAheadByATable` uses, extended to the view
+  // layer so the clash is on a table AND its chart at once.
+  await page.evaluate(
+    async ({ table, tmpl, inst }) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      await ctx.store.viewInstances.remove(inst);
+      await ctx.store.viewTemplates.remove(tmpl);
+      await ctx.store.tables.remove(table);
+    },
+    { table: beta, tmpl: template, inst: instance },
+  );
+  await saveAgain(page, space);
+  // ...and then the older copy — table, chart and all — goes back on disk.
+  await restoreFile(page, `${space}.edb`, withBetaAndChart);
+
+  expect(await readViewInstance(page, instance)).toBeNull();
+
+  await saveButton(page).click();
+  await dialog(page).getByRole('button', { name: 'Take newest', exact: true }).click();
+
+  // Newest never deletes: the chart only the file has is carried back — same
+  // union rule that already covers tables and rows — and its dock survives
+  // pointing at the table it was docked into, not dropped or left floating.
+  await expect.poll(() => tableNames(page), { timeout: 30_000 }).toEqual(['Alpha', 'Beta']);
+  const restoredBeta = await tableIdNamed(page, 'Beta');
+  await expect.poll(async () => readViewInstance(page, instance), { timeout: 30_000 }).not.toBeNull();
+  const restoredInstance = (await readViewInstance(page, instance)) as { tableId: string; dock?: { host: { kind: string; tableId: string } } };
+  expect(restoredInstance.tableId).toBe(restoredBeta);
+  expect(restoredInstance.dock).toEqual({ host: { kind: 'table', tableId: restoredBeta }, edge: 'below', size: 220, order: 0 });
+});
+
+test('Take newest brings back a chart even when every table already matches', async ({ page }) => {
+  // The bug this closes: the "nothing to compare" gate used to look only at
+  // the table diffs, so a chart added with every table left untouched compared
+  // as nothing to do and the chart never crossed. Here NO table ever changes —
+  // only the view layer does — which is exactly the case that used to be
+  // waved through with "Every table matches", silently.
+  const space = 'viz-only';
+  await boot(page, space);
+  const alpha = await createTable(page, 'Alpha', [{ field: 'part' }]);
+  await waitForPanel(page, alpha);
+  await saveIntoFolder(page, space);
+
+  // The other machine docks a chart into Alpha. Alpha ITSELF is untouched.
+  const template = await insertViewTemplate(page);
+  const instance = await insertDockedViewInstance(page, alpha, template);
+  await saveAgain(page, space);
+  const withChart = await snapshotFile(page, `${space}.edb`);
+
+  // This tab loses the chart and saves — Alpha still untouched throughout.
+  await page.evaluate(
+    async ({ tmpl, inst }) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = (window as any).__easydb;
+      await ctx.store.viewInstances.remove(inst);
+      await ctx.store.viewTemplates.remove(tmpl);
+    },
+    { tmpl: template, inst: instance },
+  );
+  await saveAgain(page, space);
+  // ...and the older copy — chart and all, table unchanged — goes back on disk.
+  await restoreFile(page, `${space}.edb`, withChart);
+
+  expect(await readViewInstance(page, instance)).toBeNull();
+  expect(await tableNames(page)).toEqual(['Alpha']);
+
+  await saveButton(page).click();
+  // The clash question itself must still appear — a byte-level mismatch always
+  // asks, regardless of what differs underneath it.
+  await expect(dialog(page).getByText(/has been written since this tab last saved it/)).toBeVisible({ timeout: 20_000 });
+  await dialog(page).getByRole('button', { name: 'Take newest', exact: true }).click();
+
+  // No table ever differed, so the fix under test is precisely that this does
+  // NOT stop at "Every table matches" — the chart still has to come back.
+  await expect.poll(async () => readViewInstance(page, instance), { timeout: 30_000 }).not.toBeNull();
+  const restored = (await readViewInstance(page, instance)) as { tableId: string; dock?: { host: { kind: string; tableId: string } } };
+  expect(restored.tableId).toBe(alpha);
+  expect(restored.dock).toEqual({ host: { kind: 'table', tableId: alpha }, edge: 'below', size: 220, order: 0 });
 });
 
 test('a file that matches says so instead of opening an empty comparison', async ({ page }) => {

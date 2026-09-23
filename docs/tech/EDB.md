@@ -689,11 +689,12 @@ For as long as a `.edb` was one indivisible blob, the only two answers the file
 layer could act on were "keep the file" and "keep mine" — and **both of them
 throw away somebody's work whenever both copies were edited**, which is the
 ordinary case for a folder shared between two machines. The comparison is now
-per table, and inside a table per row. Four modules, in dependency order:
+per table, and inside a table per row. Five modules, in dependency order:
 
 | Module                              | What it owns                                                                        |
 | ----------------------------------- | ------------------------------------------------------------------------------------- |
 | `@easydb/shared`'s `replicate.ts`   | The RULES. Pure: diff two lists of stamps, decide a winner, turn answers into a plan. |
+| `db/edb/view-replicate.ts`          | Pure: the table-id remap a view instance needs to survive a merge — see below.       |
 | `db/edb/replicate-run.ts`           | Two databases at once: opens the file beside the live one and carries a plan out.    |
 | `dialogs/merge-dialog.ts`           | The table list and the record list. Collects answers; decides nothing.               |
 | `db/edb/merge-file.ts`              | The file handle, the permission, the progress bar, the toast. One entry for both callers. |
@@ -723,8 +724,12 @@ Three reads, each one level more expensive, and each only reached because the
 one before it found something:
 
 1. **The file** — `mtime` and `size`. No file is opened.
-2. **The tables** — `EdbStore.tableStamps()`, two aggregates per table. No row is
-   read. This is what the four-answer question is costed at.
+2. **The tables, and the views** — `EdbStore.tableStamps()`, two aggregates per
+   table, no row read; alongside it, `viewTemplates`/`viewInstances` on both
+   sides (tens of documents each, not hundreds of thousands) diffed by
+   `{id, updatedAt}` the same way. This pair is what decides whether there is
+   ANYTHING to settle at all — see below — and what the four-answer question is
+   costed at.
 3. **The rows** — `EdbStore.rowStamps()`, two numbers per row, for ONE table the
    user opened. Their contents are read only for the rows actually on screen, and
    only up to `RECORD_LIMIT` (200) of them.
@@ -749,14 +754,62 @@ re-exported when its side actually changed — a merge that only pulled leaves t
 file alone, and rewriting it would move its timestamp for nothing and make the
 next comparison think it had moved.
 
+### Views travel the same way rows do
+
+`viewTemplates` (workspace-global: the header/row/footer HTML or `VizSpec` of a
+display) and `viewInstances` (per-table: a bound table, a dock, a window
+geometry) are each `{id, updatedAt}` at heart — exactly a `RowStamp` — so
+`replicate-run.ts` settles them with the SAME `diffRows`/`planRows` pair it uses
+for a table's rows, always answered `newest`. There is no per-view question in
+the Compare dialog — only per-table — and `newest` is the one rule of the four
+that can never delete somebody's chart, which is what makes it safe to apply
+with nobody asked. Templates are settled before instances: an instance names a
+`templateId`, and landing the template first means nothing reads an instance
+pointing at a template that has not arrived yet.
+
+A `ViewInstance.tableId` is the one part of this that a stamp comparison alone
+cannot settle. `diffTables` pairs a table by id first and then by NAME, so a
+table that was deleted and re-imported — the ordinary refresh loop for anything
+backed by a URL or a Datasette instance — is matched by name but carries a
+DIFFERENT id on each side. An instance copied across with its old `tableId`
+would point at nothing on the target side. `db/edb/view-replicate.ts` is the
+pure module that owns this: `tableIdMap` builds the id-on-here ↔ id-on-disk
+correspondence from the table diffs (only for tables BOTH sides have — an id
+absent from the map means the two sides already agree on it), and
+`remapInstance` uses it to re-point `tableId` and, where `dock.host.kind ===
+'table'`, the docked host too. An instance whose (remapped) table does not exist
+on the target side at all is dropped — it has nothing to draw from, though
+`ViewInstance.tableName` still lets `view-window-manager.ts` reconnect it to a
+same-named table later, the same as an ordinary reload does. A dock whose HOST
+table is unbindable is dropped on its own, keeping the instance: it opens in its
+own window instead of vanishing, mirroring `remapDock` in
+`plugins/json-import.ts` on the import path (visible in the wrong place beats
+invisible). A `dock.host.kind === 'view'` needs no remap — view-instance ids are
+carried across merges unchanged.
+
+### "Nothing to compare" means nothing anywhere, not just no table
+
+`Comparison.views` in `replicate-run.ts` carries `viewTemplates`/`viewInstances`
+diffed at the moment the file was opened — `Comparison.tables`'s sibling, not a
+copy of what `settleTemplates`/`settleInstances` later merge by (those re-read
+at apply time, for the same reason a table's rows do: the live database can move
+under a dialog the user is still reading). `merge-file.ts`'s "everything
+matches, nothing to compare" gate — and the Compare dialog's own "every table
+matches" line — used to check the table diffs alone, which meant a chart added
+to an otherwise-untouched table compared as nothing to do and never crossed. The
+gate now holds only when the tables AND both view collections are all in step;
+short of that, the four-answer question opens, even when its table list has
+nothing to show, and the dialog says so rather than looking empty.
+
 ### What a merge does not settle
 
-**Tables and rows only.** Views, view templates and settings are left as each
-side has them, and the dialog says so. That is also why `merge-file.ts` always
-calls `recordDivergence` and never `recordAgreement`: after a merge this database
-is not a copy of the file, and saying otherwise would let the next Save write
-over it without asking. The ordinary Save that follows brings the file the rest
-of the way.
+**`settings` only, now.** `Setting` carries no `updatedAt`, so there is no clock
+to settle it by — the newest-wins rule this whole module runs on has nothing to
+run on for it, and both sides are left exactly as they were. That is also why
+`merge-file.ts` always calls `recordDivergence` and never `recordAgreement`:
+after a merge this database is still not a full copy of the file, and saying
+otherwise would let the next Save write over it without asking. The ordinary
+Save that follows brings the file the rest of the way.
 
 ### Where it is reached from
 

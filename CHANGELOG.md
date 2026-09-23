@@ -12,6 +12,7 @@
 
 ### Bugs
 
+- 🪲 Sync's "Take newest" carried tables and rows across but left every visualization and its docked layout behind (v0.0.492)
 - 🪲 A filter with a star between two words, such as `*Marc*Julian*`, found nothing (v0.0.477)
 - 🪲 Running several column scripts at once left only the last column written (v0.0.476)
 - 🪲 Run offered to clear the script it had just written into the cells (v0.0.476)

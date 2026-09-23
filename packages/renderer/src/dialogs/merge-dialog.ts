@@ -219,6 +219,16 @@ export class MergeDialog extends LitElement {
   ];
 
   @state() private tables: TableDiff[] = [];
+  /**
+   * Whether `viewTemplates`/`viewInstances` differ, from `Comparison.views` —
+   * open-time intelligence, not something this dialog offers a question about
+   * (views are always settled by `newest`; see the note in `renderTables`).
+   * Needed so a comparison whose TABLE list is entirely "in step" still reads
+   * as having something to do, rather than as an empty dialog: the merge that
+   * follows a Compare-and-Merge here is not a no-op just because no table
+   * differs.
+   */
+  @state() private viewsDiffer = false;
   /** Table name → answer. Seeded with the union-and-newest default. */
   @state() private answers = new Map<string, MergeChoice>();
   /** Table name → per-row answers, for every table the user has drilled into. */
@@ -253,6 +263,7 @@ export class MergeDialog extends LitElement {
     this.comparison = comparison;
     this.fileName = fileName;
     this.tables = comparison.tables;
+    this.viewsDiffer = [...comparison.views.templates, ...comparison.views.instances].some((d) => d.state !== 'same');
     // Seeded rather than blank: the default IS the recommendation, and a dialog
     // that opens with every row unanswered makes the user do the work twice.
     this.answers = new Map(comparison.tables.map((d) => [d.name, defaultChoice(d.state)]));
@@ -405,8 +416,14 @@ export class MergeDialog extends LitElement {
   private renderTables() {
     const counts = countDiffs(this.tables);
     const summary = describeDiffs(counts);
+    // Every table can be "in step" while the views still differ — a chart
+    // added on an otherwise-unchanged table is the ordinary way this happens.
+    // The dialog only ever opens when there is SOMETHING to settle (see
+    // `merge-file.ts`), so a table list with nothing in it here does not mean
+    // an empty Merge; it means the views are what Merge is for this time.
+    const matchLine = this.viewsDiffer ? `Every table matches the copy in ${this.fileName}, but its views differ — Merge will settle those.` : `Every table matches the copy in ${this.fileName}.`;
     return html`
-      <p class="message" data-testid="merge-summary">${summary === '' ? `Every table matches the copy in ${this.fileName}.` : `${summary}. Choose what happens to each, then Merge.`}</p>
+      <p class="message" data-testid="merge-summary">${summary === '' ? matchLine : `${summary}. Choose what happens to each, then Merge.`}</p>
       <div class="toolbar">
         <span>${this.tables.length} table${this.tables.length === 1 ? '' : 's'}</span>
         <span>
@@ -420,7 +437,9 @@ export class MergeDialog extends LitElement {
       <ul class="rows">
         ${this.tables.length === 0 ? html`<li class="empty">This workspace has no tables.</li>` : this.tables.map((d) => this.renderTableRow(d))}
       </ul>
-      <p class="note">A merge settles tables and their rows. Views, templates and settings are left as each side has them.</p>
+      <p class="note">
+        A merge settles tables, their rows, and views — views always by whichever was written last, with no question asked. Settings are left as each side has them.
+      </p>
     `;
   }
 

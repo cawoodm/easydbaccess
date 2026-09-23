@@ -24,10 +24,11 @@
 // back; writing them (and the permission, the stamp, the toast) stays with the
 // caller that owns the file handle.
 
-import type { DataStore, MergeChoice, RowDiff, RowStamp, Table, TableDiff, TableStamp } from '@easydb/shared';
-import { diffRows, diffTables, planRows, winnerOf } from '@easydb/shared';
+import type { DataStore, DiffCounts, MergeChoice, RowDiff, RowStamp, Table, TableDiff, TableStamp } from '@easydb/shared';
+import { diffRows, diffTables, inStep, planRows, winnerOf } from '@easydb/shared';
 import { createEdbBridge, type EdbBridge } from './worker-bridge.js';
 import { createIpcDataStore } from '../data-store-bridge.js';
+import { remapInstance, tableIdMap } from './view-replicate.js';
 
 /** The scratch database's name. One per origin, reused, never opened by a boot. */
 const MERGE_SCRATCH = '__edb-merge-scratch.edb';
@@ -113,12 +114,21 @@ export interface MergeOutcome {
   rowsIn: number;
   /** Rows copied out to the file. */
   rowsOut: number;
+  /**
+   * View templates AND view instances brought in from the file, counted
+   * together — a merge report talks about tables and rows two ways each; a
+   * third pair of counters for "one, but as two collections" would say more
+   * about the implementation than about what happened.
+   */
+  viewsIn: number;
+  /** View templates and instances written out to the file. */
+  viewsOut: number;
   /** True when the file's copy changed and the bytes have to be written. */
   fileChanged: boolean;
 }
 
 function emptyOutcome(): MergeOutcome {
-  return { pulled: [], pushed: [], rowsIn: 0, rowsOut: 0, fileChanged: false };
+  return { pulled: [], pushed: [], rowsIn: 0, rowsOut: 0, viewsIn: 0, viewsOut: 0, fileChanged: false };
 }
 
 /**
@@ -133,6 +143,22 @@ export interface Comparison {
   workspaceId: string;
   /** Every table of it, paired up. Sorted by name. */
   tables: TableDiff[];
+  /**
+   * `viewTemplates`/`viewInstances`, diffed by `{id, updatedAt}` the moment the
+   * comparison was OPENED — cheap (tens of documents, two reads per side)
+   * alongside `tableStamps`, and computed for one reason: so "is there anything
+   * to settle at all" can be answered without pretending views don't exist. A
+   * workspace whose tables match byte for byte but whose views don't must NOT
+   * read as "nothing to compare" — that is the bug this field exists to close.
+   *
+   * This is NOT what `apply` merges by. It is a snapshot from the moment the
+   * file was opened, and the live database can move under a dialog the user is
+   * still reading (an autosave, a plugin, the grid behind it) — the same reason
+   * `runPlan`'s row settling re-reads rather than reusing the comparison's row
+   * stamps. `settleTemplates`/`settleInstances` re-read and re-diff at APPLY
+   * time; this field is read-only intelligence, not the plan.
+   */
+  views: { templates: RowDiff[]; instances: RowDiff[] };
   /** The rows of one table, paired up by id. Two numbers per row, no contents. */
   rowsOf(name: string): Promise<RowDiff[]>;
   /**
@@ -144,6 +170,20 @@ export interface Comparison {
   apply(plan: MergePlan, report?: (label: string) => void): Promise<{ outcome: MergeOutcome; bytes: Uint8Array | null }>;
   /** Release the scratch worker. Safe to call twice. */
   close(): void;
+}
+
+/**
+ * Whether there is nothing anywhere to settle: the tables agree AND both view
+ * collections agree.
+ *
+ * Exported so `merge-file.ts`'s "nothing to compare" gate and the Compare
+ * dialog's own "every table matches" wording read off the one rule, not two
+ * copies of it. Checking `comparison.tables` alone — what this replaces — was
+ * exactly the bug: a chart added to an otherwise-untouched table compared as
+ * nothing to do, and the chart never crossed.
+ */
+export function nothingToSettle(tableCounts: DiffCounts, viewTemplateCounts: DiffCounts, viewInstanceCounts: DiffCounts): boolean {
+  return inStep(tableCounts) && inStep(viewTemplateCounts) && inStep(viewInstanceCounts);
 }
 
 /** The stamps of one side, as a map keyed the way the appliers want them. */
@@ -174,34 +214,71 @@ export async function openComparison(here: DataStore, hereBridge: EdbBridge, byt
     if (diskId === undefined) throw new Error('That file holds no workspace to compare with.');
     const disk: SideTables = { store: createIpcDataStore(scratch, () => diskId), workspaceId: diskId, stamps: await scratch.tableStamps(diskId) };
     const mine: SideTables = { store: here, workspaceId, stamps: await hereBridge.tableStamps(workspaceId) };
-    return makeComparison(mine, disk, scratch, hereBridge);
+    // `await` rather than a bare `return makeComparison(...)`: a promise
+    // returned (not awaited) from inside a try block adopts the async
+    // function's result WITHOUT running through this catch, so an error
+    // thrown while reading the view collections would leak the scratch
+    // worker instead of terminating it.
+    return await makeComparison(mine, disk, scratch, hereBridge);
   } catch (err) {
     scratch.terminate();
     throw err;
   }
 }
 
-function makeComparison(here: SideTables, disk: SideTables, scratch: EdbBridge, hereBridge: EdbBridge): Comparison {
+/** A view document as far as the merge rules care: exactly what a row is. */
+function toRowStamps(docs: readonly { id: string; updatedAt: number }[]): RowStamp[] {
+  return docs.map((d) => ({ id: d.id, updatedAt: d.updatedAt }));
+}
+
+/**
+ * Read both sides' `viewTemplates`/`viewInstances` and diff each by
+ * `{id, updatedAt}` — the same `diffRows` a table's rows are settled with,
+ * because a view document is exactly that shape. See `Comparison.views` for
+ * why this is computed at OPEN time and what it is (and isn't) used for.
+ */
+async function viewDiffsAtOpen(here: SideTables, disk: SideTables): Promise<{ templates: RowDiff[]; instances: RowDiff[] }> {
+  const [hereTemplates, diskTemplates, hereInstances, diskInstances] = await Promise.all([
+    here.store.viewTemplates.find({ workspaceId: here.workspaceId }),
+    disk.store.viewTemplates.find({ workspaceId: disk.workspaceId }),
+    here.store.viewInstances.find({ workspaceId: here.workspaceId }),
+    disk.store.viewInstances.find({ workspaceId: disk.workspaceId }),
+  ]);
+  return {
+    templates: diffRows(toRowStamps(hereTemplates), toRowStamps(diskTemplates)),
+    instances: diffRows(toRowStamps(hereInstances), toRowStamps(diskInstances)),
+  };
+}
+
+async function makeComparison(here: SideTables, disk: SideTables, scratch: EdbBridge, hereBridge: EdbBridge): Promise<Comparison> {
   const tables = diffTables(here.stamps, disk.stamps);
   const byName = new Map(tables.map((d) => [d.name, d]));
+  const views = await viewDiffsAtOpen(here, disk);
   let open = true;
 
   /** Row stamps from whichever side has the table, or none where it does not. */
   const stampsOf = async (bridge: EdbBridge, id: string | undefined): Promise<RowStamp[]> => (id === undefined ? [] : bridge.rowStamps(id));
 
+  // A named local rather than `this.rowsOf(...)` inside `recordsOf` below: an
+  // object literal returned from an async function gets contextually typed
+  // against `Comparison | PromiseLike<Comparison>` (TS allows for the literal
+  // itself being thenable), which makes `this` inside its methods untypeable.
+  async function rowsOf(name: string): Promise<RowDiff[]> {
+    const diff = byName.get(name);
+    if (!diff) return [];
+    const [mine, theirs] = await Promise.all([stampsOf(hereBridge, diff.here?.id), stampsOf(scratch, diff.disk?.id)]);
+    return diffRows(mine, theirs);
+  }
+
   return {
     workspaceId: here.workspaceId,
     tables,
-    async rowsOf(name) {
-      const diff = byName.get(name);
-      if (!diff) return [];
-      const [mine, theirs] = await Promise.all([stampsOf(hereBridge, diff.here?.id), stampsOf(scratch, diff.disk?.id)]);
-      return diffRows(mine, theirs);
-    },
+    views,
+    rowsOf,
     async recordsOf(name, limit = RECORD_LIMIT) {
       const diff = byName.get(name);
       if (!diff || !diff.here || !diff.disk) return { items: [], total: 0 };
-      const all = (await this.rowsOf(name)).filter((d) => d.state !== 'same');
+      const all = (await rowsOf(name)).filter((d) => d.state !== 'same');
       const shown = all.slice(0, limit);
       const doc = (await here.store.tables.findOne(diff.here.id)) as Table | null;
       const labelField = doc?.labelColumn ?? doc?.columns?.[0]?.field;
@@ -420,5 +497,99 @@ async function runPlan(here: SideTables, disk: SideTables, diffs: readonly Table
     }
   }
 
+  // Templates before instances: an instance names a `templateId`, so landing
+  // the template first means whatever reads it next (the view window manager,
+  // the next merge) never sees an instance pointing at a template that has not
+  // arrived yet.
+  //
+  // `settings` and `plugins` are NOT settled here, deliberately. `Setting` has
+  // no `updatedAt`, so there is no clock to decide a winner by — the newest-wins
+  // rule this whole module runs on has nothing to run on for it. Leaving both
+  // sides exactly as they were is the honest answer, not an oversight.
+  await settleTemplates(here, disk, out, report);
+  await settleInstances(here, disk, diffs, out, report);
+
   return out;
+}
+
+/** A view document as far as the merge rules care: exactly what a row is. */
+interface Stamped {
+  id: string;
+  updatedAt: number;
+}
+
+/**
+ * Which of two lists of view documents to pull and which to push, by the same
+ * newest-wins UNION rule `replicate.ts` uses for a table's rows — a view
+ * document is `{id, updatedAt}`, precisely the shape `diffRows`/`planRows`
+ * already settle, so this is reuse rather than a second diff implementation.
+ *
+ * Always answered `newest`, even when the user picked Push/Pull/Skip per TABLE
+ * in the Compare dialog: there is no per-view question in that dialog, and
+ * `newest` is the one rule of the four that can never delete somebody's chart
+ * (see `winnerOf` in `replicate.ts`) — which is what makes it safe to apply
+ * with nobody asked.
+ */
+function planViewDocs<T extends Stamped>(hereDocs: readonly T[], diskDocs: readonly T[]): { pull: T[]; push: T[] } {
+  const stamps = (docs: readonly T[]): RowStamp[] => docs.map((d) => ({ id: d.id, updatedAt: d.updatedAt }));
+  const diffs = diffRows(stamps(hereDocs), stamps(diskDocs));
+  const plan = planRows(diffs, () => 'newest');
+  const hereById = new Map(hereDocs.map((d) => [d.id, d]));
+  const diskById = new Map(diskDocs.map((d) => [d.id, d]));
+  return {
+    pull: plan.pull.map((id) => diskById.get(id)).filter((d): d is T => d !== undefined),
+    push: plan.push.map((id) => hereById.get(id)).filter((d): d is T => d !== undefined),
+  };
+}
+
+/** Settle `viewTemplates` — workspace-global, no table id to remap. */
+async function settleTemplates(here: SideTables, disk: SideTables, out: MergeOutcome, report: (label: string) => void): Promise<void> {
+  const [hereDocs, diskDocs] = await Promise.all([here.store.viewTemplates.find({ workspaceId: here.workspaceId }), disk.store.viewTemplates.find({ workspaceId: disk.workspaceId })]);
+  const { pull, push } = planViewDocs(hereDocs, diskDocs);
+  if (pull.length === 0 && push.length === 0) return;
+  report('Merging view templates');
+  for (const doc of pull) {
+    await here.store.viewTemplates.upsert({ ...doc, workspaceId: here.workspaceId });
+    out.viewsIn++;
+  }
+  for (const doc of push) {
+    await disk.store.viewTemplates.upsert({ ...doc, workspaceId: disk.workspaceId });
+    out.viewsOut++;
+    out.fileChanged = true;
+  }
+}
+
+/**
+ * Settle `viewInstances` — per-table, so each one is re-pointed at the table
+ * id its TARGET side uses before it is written there, and dropped rather than
+ * written where the table it needs does not exist on that side at all.
+ */
+async function settleInstances(here: SideTables, disk: SideTables, diffs: readonly TableDiff[], out: MergeOutcome, report: (label: string) => void): Promise<void> {
+  const [hereDocs, diskDocs] = await Promise.all([here.store.viewInstances.find({ workspaceId: here.workspaceId }), disk.store.viewInstances.find({ workspaceId: disk.workspaceId })]);
+  const { pull, push } = planViewDocs(hereDocs, diskDocs);
+  if (pull.length === 0 && push.length === 0) return;
+  report('Merging views');
+
+  // Read AFTER the table loop above has run, so this reflects what the merge
+  // actually produced on each side — including a table that just arrived by
+  // this very merge — rather than the pre-merge snapshot the comparison opened
+  // with.
+  const idMap = tableIdMap(diffs);
+  const [tablesHere, tablesDisk] = await Promise.all([here.store.tables.find({ workspaceId: here.workspaceId }), disk.store.tables.find({ workspaceId: disk.workspaceId })]);
+  const tablesHereIds = new Set(tablesHere.map((t) => t.id));
+  const tablesDiskIds = new Set(tablesDisk.map((t) => t.id));
+
+  for (const doc of pull) {
+    const remapped = remapInstance(doc, idMap.diskToHere, here.workspaceId, tablesHereIds);
+    if (!remapped) continue;
+    await here.store.viewInstances.upsert(remapped);
+    out.viewsIn++;
+  }
+  for (const doc of push) {
+    const remapped = remapInstance(doc, idMap.hereToDisk, disk.workspaceId, tablesDiskIds);
+    if (!remapped) continue;
+    await disk.store.viewInstances.upsert(remapped);
+    out.viewsOut++;
+    out.fileChanged = true;
+  }
 }

@@ -24,6 +24,10 @@
  *
  * Pure: no I/O, no store, no DOM. Both callers — the browser's live database
  * and a `.edb`'s bytes in a scratch worker — hand it the same two shapes.
+ *
+ * `diffRows` and `planRows` are reused as-is for view templates and view
+ * instances too: a view document is `{id, updatedAt}`, precisely a `RowStamp`,
+ * so it needs no diff logic of its own. See `replicate-run.ts`.
  */
 
 /** Which copy. `here` is the open database, `disk` is the copy in the file. */
