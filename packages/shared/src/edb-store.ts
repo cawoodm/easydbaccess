@@ -1104,7 +1104,7 @@ export class EdbStore {
     };
     const searchFields = columns.filter((c) => activeColumnScript(c) === undefined && c.type !== 'array' && c.filterable !== false).map((c) => c.field);
 
-    const where = buildWhere(q.filters, q.search, sqlOf, searchFields, { defaultSubstring: q.defaultSubstring });
+    const where = buildWhere(q.filters, q.search, sqlOf, searchFields, { defaultSubstring: q.defaultSubstring, typeOf: (f: string) => specOf.get(f)?.type });
     // Plus a narrowing pass over `_extra`, which `sqlOf` cannot express.
     // Optimisation only: `expressible` is already false for those fields, so the
     // caller re-filters this result whatever it contains.
@@ -1230,7 +1230,7 @@ export class EdbStore {
       return quoteIdent(s.field);
     };
     const searchFields = columns.filter((c) => activeColumnScript(c) === undefined && c.type !== 'array' && c.filterable !== false).map((c) => c.field);
-    const where = buildWhere(q.where?.filters, q.where?.search, sqlOf, searchFields, { defaultSubstring: q.where?.defaultSubstring });
+    const where = buildWhere(q.where?.filters, q.where?.search, sqlOf, searchFields, { defaultSubstring: q.where?.defaultSubstring, typeOf: (f: string) => specOf.get(f)?.type });
 
     const col = quoteIdent(spec.field);
     const limit = q.limit != null && q.limit > 0 ? Math.floor(q.limit) : 500;
