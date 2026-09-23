@@ -351,3 +351,17 @@ describe('numberExpr accepts scientific notation (Finding 2)', () => {
     }
   });
 });
+
+/**
+ * isNullToken must exclude tokens with `cmp` set, so a comparison like `>=NULL`
+ * is not read as the blank-cell test but as a literal text match against "null".
+ */
+const NULL_CORPUS: Array<string | null> = ['aaa', 'zzz', 'null', '', '   ', null];
+
+describe('comparison against NULL or empty string', () => {
+  it('agrees with the matcher for >=NULL on a string column', () => {
+    for (const f of ['>=NULL', '>=', '<=NULL', '<=', '>NULL', '><', '<NULL', '<']) {
+      crossCheck(NULL_CORPUS, f, 'string');
+    }
+  });
+});

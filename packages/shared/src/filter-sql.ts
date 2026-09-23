@@ -42,8 +42,8 @@ function normalised(columnSql: string): string {
 
 /** Is this token the whole-token NULL test rather than a text match? */
 function isNullToken(t: FilterToken): boolean {
-  // Any anchor asks for the literal text: `^NULL`, `=NULL`, `*NULL*`.
-  if (t.prefix || t.exact || t.suffix || t.contains) return false;
+  // Any anchor asks for the literal text: `^NULL`, `=NULL`, `*NULL*`, `>=NULL`.
+  if (t.prefix || t.exact || t.suffix || t.contains || t.cmp) return false;
   return t.term === '' || t.term.toUpperCase() === 'NULL';
 }
 
