@@ -6,6 +6,7 @@
 
 - 🪶 One ▶ Run button in a table's footer runs column scripts or validations, over the columns and rows you tick (v0.0.476)
 
+- ✨ The Settings dialog reopens on the tab and search you left it on, until the page is reloaded (v0.0.479)
 - ✨ Autosave is in Settings → Files, not only behind a palette command; both drive one device-local record (v0.0.478)
 
 ### Bugs

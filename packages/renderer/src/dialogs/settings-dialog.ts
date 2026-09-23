@@ -400,10 +400,23 @@ export class SettingsDialog extends LitElement {
     this.values = values;
     this.placements = placements;
     this.secretsText = readSecretsText();
-    this.active = GENERAL;
-    // Every open starts on a clean search. A stale query would hide the tab the
-    // user came for behind results they had forgotten they asked for.
-    this.query = '';
+    // The tab and the search SURVIVE a close, so coming back lands where you
+    // left off — the dialog is a place you visit repeatedly while tuning one
+    // thing, and starting at General every time meant re-finding it every time.
+    //
+    // It used to reset both, on the grounds that a stale query would hide the
+    // tab the user came for. The query is not hidden though: it is in the box,
+    // with its ✕ beside it, so a narrowed panel says why it is narrowed. The
+    // memory is per PAGE, not stored — a reload starts clean, so a filter typed
+    // last week cannot greet anyone.
+    //
+    // A remembered tab can go away: turn a plugin off in the Plugin Manager and
+    // its tab is not in `this.tabs` any more. Falling back to General beats
+    // opening on a tab that renders nothing.
+    if (this.active !== GENERAL && !this.tabs.some((t) => t.id === this.active)) this.active = GENERAL;
+    // A blocked-close message is about the value that blocked it, and that was
+    // either fixed or abandoned while the dialog was shut.
+    this.secretError = '';
 
     await this.updateComplete;
     this.dialogEl?.showModal();

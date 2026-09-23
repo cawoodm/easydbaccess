@@ -93,11 +93,40 @@ test('clearing the search, or picking a tab, goes back to the tabs', async ({ pa
   await expect(panel(dlg)).toContainText('Protocols that may be links');
 });
 
-test('a fresh open starts with no query', async ({ page }) => {
+test('re-opening comes back to the search you left', async ({ page }) => {
+  // The dialog is somewhere you go back to repeatedly while tuning one thing,
+  // so it reopens where you left it. The query is visible in the box with its ✕
+  // beside it, which is what makes a narrowed panel explain itself.
+  const first = await openSettings(page);
+  await search(first).fill('pink');
+  await expect(panel(first)).toContainText('Highlight empty cells');
+  await first.getByRole('button', { name: 'Done', exact: true }).click();
+
+  const second = await openSettings(page);
+  await expect(search(second)).toHaveValue('pink');
+  await expect(panel(second)).toContainText('Highlight empty cells');
+
+  // And clearing it still works from there, so the memory is not a trap.
+  await second.getByRole('button', { name: 'Clear the search' }).click();
+  await expect(panel(second)).toContainText('Workspace title');
+});
+
+test('re-opening comes back to the tab you left', async ({ page }) => {
+  const first = await openSettings(page);
+  await first.getByRole('button', { name: 'Links' }).click();
+  await expect(panel(first)).toContainText('Protocols that may be links');
+  await first.getByRole('button', { name: 'Done', exact: true }).click();
+
+  const second = await openSettings(page);
+  await expect(panel(second)).toContainText('Protocols that may be links');
+});
+
+test('a reload starts clean, so a filter cannot greet you later', async ({ page }) => {
   const first = await openSettings(page);
   await search(first).fill('pink');
   await first.getByRole('button', { name: 'Done', exact: true }).click();
 
+  await page.reload();
   const second = await openSettings(page);
   await expect(search(second)).toHaveValue('');
   await expect(panel(second)).toContainText('Workspace title');
