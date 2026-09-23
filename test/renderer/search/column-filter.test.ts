@@ -530,3 +530,61 @@ describe('comparison tokens', () => {
     expect(matchesColumnFilter('m', '>=n AND <=z')).toBe(false);
   });
 });
+
+describe('type-aware comparison', () => {
+  it('a number column compares numerically, not as text', () => {
+    expect(matchesColumnFilter('10', '>=9', { type: 'number' })).toBe(true);
+    expect(matchesColumnFilter('10', '>=9')).toBe(false); // text order, no type
+    expect(matchesColumnFilter(9.5, '>9', { type: 'number' })).toBe(true);
+    expect(matchesColumnFilter(-5, '<0', { type: 'number' })).toBe(true);
+  });
+
+  it('a number cell that is not a number never matches', () => {
+    expect(matchesColumnFilter('n/a', '>=0', { type: 'number' })).toBe(false);
+    expect(matchesColumnFilter('n/a', '<=999', { type: 'number' })).toBe(false);
+  });
+
+  it('a date column compares by calendar date', () => {
+    expect(matchesColumnFilter('2026-06-23', '>=2026-06-23', { type: 'date' })).toBe(true);
+    expect(matchesColumnFilter('2026-06-22', '>=2026-06-23', { type: 'date' })).toBe(false);
+    expect(matchesColumnFilter('2026-12-01', '>=2026-06-23', { type: 'date' })).toBe(true);
+  });
+
+  it('a zoned value is compared on its UTC date', () => {
+    // Matches what SQLite's date() returns, so the matcher and the pushdown
+    // cannot drift. 23:30Z on the 17th is the 17th, not the 18th.
+    expect(matchesColumnFilter('2026-06-17T23:30:00Z', '>=2026-06-17', { type: 'date' })).toBe(true);
+    expect(matchesColumnFilter('2026-06-17T23:30:00Z', '>2026-06-17', { type: 'date' })).toBe(false);
+    expect(matchesColumnFilter('2026-06-18T00:30:00+02:00', '<=2026-06-17', { type: 'date' })).toBe(true);
+  });
+
+  it('a naive datetime keeps its own wall clock', () => {
+    expect(matchesColumnFilter('2026-06-17 23:30', '>=2026-06-17', { type: 'date' })).toBe(true);
+    expect(matchesColumnFilter('2026-06-17 23:30', '<=2026-06-17', { type: 'date' })).toBe(true);
+  });
+
+  it('a date-only bound on a datetime column covers the whole day', () => {
+    expect(matchesColumnFilter('2026-08-01T23:59:00', '<=2026-08-01', { type: 'datetime' })).toBe(true);
+    expect(matchesColumnFilter('2026-08-01T00:00:00', '>=2026-08-01', { type: 'datetime' })).toBe(true);
+    expect(matchesColumnFilter('2026-08-02T00:00:00', '<=2026-08-01', { type: 'datetime' })).toBe(false);
+  });
+
+  it('a bound carrying a time compares at full precision', () => {
+    expect(matchesColumnFilter('2026-08-01T14:00:00', '>=2026-08-01T13:00', { type: 'datetime' })).toBe(true);
+    expect(matchesColumnFilter('2026-08-01T12:00:00', '>=2026-08-01T13:00', { type: 'datetime' })).toBe(false);
+  });
+
+  it('an unparseable date never matches', () => {
+    expect(matchesColumnFilter('not a date', '>=2026-01-01', { type: 'date' })).toBe(false);
+    expect(matchesColumnFilter('not a date', '<=2026-01-01', { type: 'date' })).toBe(false);
+  });
+
+  it('a range on a date column selects the rows inside it', () => {
+    const q = '>=2026-02-14 AND <=2026-08-01';
+    expect(matchesColumnFilter('2026-02-14', q, { type: 'date' })).toBe(true);
+    expect(matchesColumnFilter('2026-05-01', q, { type: 'date' })).toBe(true);
+    expect(matchesColumnFilter('2026-08-01', q, { type: 'date' })).toBe(true);
+    expect(matchesColumnFilter('2026-02-13', q, { type: 'date' })).toBe(false);
+    expect(matchesColumnFilter('2026-08-02', q, { type: 'date' })).toBe(false);
+  });
+});
