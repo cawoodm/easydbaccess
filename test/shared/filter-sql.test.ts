@@ -20,7 +20,30 @@ import { matchesColumnFilter } from '../../packages/shared/src/column-filter.js'
 const { DatabaseSync } = require('node:sqlite') as { DatabaseSync: typeof DatabaseSyncType };
 
 /** The awkward cases: nulls, blanks, mixed case, punctuation, SQL wildcards. */
-const VALUES: Array<string | null> = ['Sweden', 'sweden', 'Norway', 'Switzerland', 'Berlin, DE', 'Closed', 'Cancelled', 'Open', 'urgent Open', '100%', 'under_score', 'null', '', '   ', null];
+const VALUES: Array<string | null> = [
+  'Sweden',
+  'sweden',
+  'Norway',
+  'Switzerland',
+  'Berlin, DE',
+  'Closed',
+  'Cancelled',
+  'Open',
+  'urgent Open',
+  '100%',
+  'under_score',
+  'null',
+  '',
+  '   ',
+  null,
+  // For the inner wildcard: both segments present in order, present out of
+  // order, adjacent, and the overlap case where one run must not count twice.
+  'Dr Marc Julian Smith',
+  'Julian Marc',
+  'MarcJulian',
+  'aa',
+  'aaaa',
+];
 
 let dir: string;
 let db: DatabaseSyncType;
@@ -102,6 +125,23 @@ const CASES = [
   '*_*',
   '*NULL*',
   '*,*',
+  // A star BETWEEN two pieces of text: LIKE spells it `%`, and the two engines
+  // have to agree about order, overlap and where the pattern is pinned.
+  '*Marc*Julian*',
+  'Marc*Julian*',
+  '*Marc*Julian',
+  '!*Marc*Julian*',
+  '*Marc*Julian*,Open',
+  '!*Marc*Julian*,Open',
+  '*aa*aa*',
+  '*a*b*c*',
+  // Still literal where the grammar says so.
+  '=a*b',
+  '"a*b"',
+  // And an inner star beside SQL's own wildcards, so the per-segment escaping
+  // is honest.
+  '*100*%*',
+  '*under*score*',
 ];
 
 describe('columnFilterToSql agrees with the in-memory matcher', () => {
@@ -115,7 +155,7 @@ describe('columnFilterToSql agrees with the in-memory matcher', () => {
   // The setting changes what a BARE value means, in both places at once. If the
   // two ever disagree, a windowed table filters differently from a small one and
   // nothing in the UI would say why.
-  for (const filter of ['Sweden', 'Sweden,Norway', 'sweden', '!Closed', 'Open,!urgent', '*wede*', 'Swe*', '=Open', 'NULL', '!NULL', '', 'w']) {
+  for (const filter of ['Sweden', 'Sweden,Norway', 'sweden', '!Closed', 'Open,!urgent', '*wede*', 'Swe*', '=Open', 'NULL', '!NULL', '', 'w', '*Marc*Julian*', 'Marc*Julian', 'Marc*Julian*']) {
     it(`matches with defaultSubstring off for ${JSON.stringify(filter)}`, () => {
       expect([...viaSql(filter, false)].sort()).toEqual([...viaMatcher(filter, false)].sort());
     });

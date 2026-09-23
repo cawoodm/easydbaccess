@@ -406,6 +406,59 @@ describe('wildcards', () => {
   });
 });
 
+/**
+ * A star between two pieces of text, not only at the ends.
+ *
+ * The parser always kept these — `*Marc*Julian*` parses to the term
+ * `Marc*Julian` with `contains` — but both engines then looked for a LITERAL
+ * asterisk, so the filter found nothing. Excel's reading is the one implemented:
+ * a `*` stands for any run of characters, including none.
+ */
+describe('a star inside a term', () => {
+  it('finds the segments in the order they were typed', () => {
+    expect(matchesColumnFilter('Hello Marc Julian Smith', '*Marc*Julian*')).toBe(true);
+    expect(matchesColumnFilter('Marc Julian', '*Marc*Julian*')).toBe(true);
+    expect(matchesColumnFilter('MarcJulian', '*Marc*Julian*')).toBe(true);
+  });
+
+  it('is an ORDERED match, and every segment has to be there', () => {
+    expect(matchesColumnFilter('Julian Marc', '*Marc*Julian*')).toBe(false);
+    expect(matchesColumnFilter('Marc Smith', '*Marc*Julian*')).toBe(false);
+  });
+
+  it('lets the outer stars anchor the pattern, as they do without an inner one', () => {
+    expect(matchesColumnFilter('Marc Julian Smith', 'Marc*Julian*')).toBe(true);
+    expect(matchesColumnFilter('Dr Marc Julian', 'Marc*Julian*')).toBe(false);
+    expect(matchesColumnFilter('Dr Marc Julian', '*Marc*Julian')).toBe(true);
+    expect(matchesColumnFilter('Dr Marc Julian Smith', '*Marc*Julian')).toBe(false);
+  });
+
+  it('does not let one run of text satisfy two segments at once', () => {
+    expect(matchesColumnFilter('aa', '*aa*aa*')).toBe(false);
+    expect(matchesColumnFilter('aaaa', '*aa*aa*')).toBe(true);
+  });
+
+  it('is case-insensitive like every other form', () => {
+    expect(matchesColumnFilter('hello marc julian', '*MARC*julian*')).toBe(true);
+  });
+
+  it('stays literal where the grammar already says a star is not a wildcard', () => {
+    expect(matchesColumnFilter('a*b', '"a*b"')).toBe(true);
+    expect(matchesColumnFilter('a*b', '=a*b')).toBe(true);
+    expect(matchesColumnFilter('axb', '=a*b')).toBe(false);
+  });
+
+  it('round-trips through compose', () => {
+    // `^` is how compose spells a starts-with, so `Marc*Julian*` comes back as
+    // `^Marc*Julian` — the same reading, the canonical spelling. That is the
+    // existing rule for `foo*` and the inner star does not change it.
+    for (const raw of ['*Marc*Julian*', '^Marc*Julian', '*Marc*Julian', '!*Marc*Julian*']) {
+      expect(composeColumnFilter(parseColumnFilter(raw))).toBe(raw);
+    }
+    expect(composeColumnFilter(parseColumnFilter('Marc*Julian*'))).toBe('^Marc*Julian');
+  });
+});
+
 describe('defaultSubstring', () => {
   it('a bare value is a substring by default', () => {
     expect(matchesColumnFilter('Holiday', 'lida')).toBe(true);
