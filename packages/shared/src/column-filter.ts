@@ -51,9 +51,16 @@
 //   • `!` alone         → same as `!NULL` (cell has a value).
 //   • empty query       → matches everything (no filter).
 //
+// A `*` BETWEEN two pieces of text is a wildcard as well, standing for any run
+// of characters: `*Marc*Julian*` finds "Dr Marc Julian Smith". The segments must
+// appear in the order they were typed and may not overlap, and the outer stars
+// still say where the whole pattern is pinned — `Marc*Julian*` is anchored at
+// the first character, `*Marc*Julian` at the last.
+//
 // `*` is a wildcard OUTSIDE quotes only, so `"a*b"` is the literal value, and a
 // token that is nothing but stars stays literal too (`*` is a search for an
-// asterisk, since an empty term already means "is this cell blank").
+// asterisk, since an empty term already means "is this cell blank"). `=a*b` is
+// literal for the same reason: `=` asks for the whole cell, verbatim.
 //
 // One limitation worth knowing: a BARE token whose term needs quoting (it holds
 // a comma, or starts with `!`/`^`/`=`/`*`) cannot survive
@@ -109,6 +116,16 @@ export interface FilterToken {
    * the list it already read, and only the matcher groups it.
    */
   and?: boolean;
+  /**
+   * Read `term` verbatim: a `*` inside it is an asterisk, not a wildcard.
+   *
+   * Only for a token built by hand from text the user did NOT write as filter
+   * syntax — `searchToSql`'s plain-text branch, whose in-memory twin
+   * (`search/text-search.ts`) does a flat `String.includes`. A token that came
+   * out of `parseColumnFilter` never carries this: there, a star IS the
+   * grammar.
+   */
+  literal?: boolean;
 }
 
 /** Is a cell value considered empty/null for filtering purposes? */
@@ -332,13 +349,76 @@ export function groupColumnFilter(tokens: FilterToken[]): FilterToken[][] {
 }
 
 /**
+ * Is this term a PATTERN — text with a wildcard standing between two pieces of
+ * it — rather than a plain string to look for?
+ *
+ * The `/[^*]/` half is the same rule the parser applies at the ends: a token of
+ * nothing but stars is a search for an asterisk, because an empty term already
+ * means "is this cell blank".
+ */
+export function hasInnerWildcard(term: string, token?: Pick<FilterToken, 'literal' | 'exact'>): boolean {
+  if (token?.literal || token?.exact) return false;
+  return term.includes('*') && /[^*]/.test(term);
+}
+
+/**
+ * Does `haystack` hold each of `parts` in the order given, with `anchorStart` /
+ * `anchorEnd` pinning the first and last to the ends of the cell?
+ *
+ * Leftmost-greedy, and two parts may never share the same characters: `*aa*aa*`
+ * wants four a's, not two. Greedy is safe here because taking each part as early
+ * as possible leaves the most room for the ones after it.
+ *
+ * An empty part is skipped — it comes from `**`, or from a star sitting against
+ * an anchored end, and the star beside it already allows anything.
+ */
+function matchesParts(haystack: string, parts: readonly string[], anchorStart: boolean, anchorEnd: boolean): boolean {
+  const last = parts.length - 1;
+  let at = 0;
+  for (let i = 0; i <= last; i++) {
+    const part = parts[i]!;
+    if (part === '') continue;
+    if (i === 0 && anchorStart) {
+      if (!haystack.startsWith(part)) return false;
+      at = part.length;
+    } else if (i === last && anchorEnd) {
+      // `< at` rather than `<=`: the tail must begin at or after everything
+      // already consumed, so it cannot reuse those characters.
+      if (!haystack.endsWith(part) || haystack.length - part.length < at) return false;
+      at = haystack.length;
+    } else {
+      const found = haystack.indexOf(part, at);
+      if (found < 0) return false;
+      at = found + part.length;
+    }
+  }
+  return true;
+}
+
+/**
  * Does one piece of text satisfy a token's anchoring? Not trimmed — `=` is an
  * exact match against the whole thing, so " foo " is not `=foo`.
+ *
+ * A term carrying a star BETWEEN two pieces of text is matched as a pattern.
+ * The parser only ever took the stars off the ENDS — an inner one stayed in the
+ * term and was then hunted for as a literal asterisk, so `*Marc*Julian*` looked
+ * for the characters `marc*julian` and found nothing. The outer stars still say
+ * where the pattern is pinned; the inner ones stand for any run of characters.
  */
 function matchesText(value: unknown, token: FilterToken, defaultSubstring: boolean): boolean {
   const haystack = String(value ?? '').toLowerCase();
   const needle = token.term.toLowerCase();
   if (token.exact) return haystack === needle;
+  if (hasInnerWildcard(needle, token)) {
+    const parts = needle.split('*');
+    if (token.prefix) return matchesParts(haystack, parts, true, false);
+    if (token.suffix) return matchesParts(haystack, parts, false, true);
+    if (token.contains) return matchesParts(haystack, parts, false, false);
+    // No anchor: the setting decides, exactly as for a starless term — floating
+    // when a bare value means "contains", pinned at both ends when it means
+    // "is".
+    return matchesParts(haystack, parts, !defaultSubstring, !defaultSubstring);
+  }
   if (token.prefix) return haystack.startsWith(needle);
   if (token.suffix) return haystack.endsWith(needle);
   if (token.contains) return haystack.includes(needle);

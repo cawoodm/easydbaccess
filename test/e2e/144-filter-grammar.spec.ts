@@ -38,6 +38,29 @@ test('the three wildcards', async ({ page }) => {
   await expect(rows).toHaveCount(1);
 });
 
+test('a star between two pieces of text finds them in that order', async ({ page }) => {
+  const id = await createTable(page, 'People', [{ field: 'name' }]);
+  await waitForPanel(page, id);
+  await bulkAddRows(page, id, [{ name: 'Dr Marc Julian Smith' }, { name: 'Marc Julian' }, { name: 'Julian Marc' }, { name: 'Marc Cawood' }]);
+  const panel = page.locator(`#${panelDomId(id)}`);
+  const rows = panel.locator('data-table tbody tr:not(.spacer)');
+  await expect(rows).toHaveCount(4);
+  const box = panel.locator('data-table thead filter-combobox input').first();
+
+  // The reported bug: this found nothing, because the inner star was hunted for
+  // as a literal asterisk.
+  await box.fill('*Marc*Julian*');
+  await expect(rows).toHaveCount(2); // Dr Marc Julian Smith, Marc Julian
+  // Ordered — "Julian Marc" is the wrong way round.
+  await box.fill('*Julian*Marc*');
+  await expect(rows).toHaveCount(1);
+  // The outer stars still anchor it.
+  await box.fill('Marc*Julian*');
+  await expect(rows).toHaveCount(1); // only the one that STARTS with Marc
+  await box.fill('*Marc*Julian');
+  await expect(rows).toHaveCount(1); // only the one that ENDS with Julian
+});
+
 test('a quoted value is the whole cell, not a part of it', async ({ page }) => {
   const { box, rows } = await seed(page);
   await box.fill('"Holiday"');
@@ -77,7 +100,10 @@ test('the Default to substring setting decides a plain value, and nothing else',
 
   const dlg = await openSettings(page);
   await dlg.getByRole('searchbox', { name: 'Search settings' }).fill('Default to substring');
-  const toggle = dlg.locator('.panel .field', { hasText: 'Default to substring' }).locator('label.scope', { hasText: 'enabled' }).locator('input');
+  // `label.bool` is the setting's own on/off box. It was `label.scope` until
+  // v0.0.475, when the storage-layer control beside it became a Workspace /
+  // This device pill and took that class with it.
+  const toggle = dlg.locator('.panel .field', { hasText: 'Default to substring' }).locator('label.bool').locator('input');
   await toggle.uncheck();
   await dlg.getByRole('button', { name: 'Done' }).click();
   await expect(dlg).toBeHidden();

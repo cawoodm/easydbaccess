@@ -23,7 +23,7 @@
  * `AND` binds tighter than the comma.
  */
 
-import { groupColumnFilter, isListExpression, parseColumnFilter, plainTextOf, type FilterToken } from './column-filter.js';
+import { groupColumnFilter, hasInnerWildcard, isListExpression, parseColumnFilter, plainTextOf, type FilterToken } from './column-filter.js';
 
 export interface SqlFragment {
   /** A boolean SQL expression, or '' when nothing needed saying. */
@@ -62,14 +62,23 @@ function tokenSql(columnSql: string, t: FilterToken, defaultSubstring: boolean):
   if (t.exact) return equals();
   // ESCAPE, because a term may legitimately contain % or _.
   const like = (pattern: string) => ({ sql: `${col} LIKE ? ESCAPE '\\'`, params: [pattern] });
-  const lit = term.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const esc = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+  // A star between two pieces of text is a wildcard, and `%` is LIKE's spelling
+  // of it — so the escaping runs per SEGMENT and the stars become the joins.
+  // `hasInnerWildcard` is the matcher's own rule, imported rather than repeated.
+  const starry = hasInnerWildcard(term, t);
+  const lit = starry ? term.split('*').map(esc).join('%') : esc(term);
   if (t.prefix) return like(`${lit}%`);
   if (t.suffix) return like(`%${lit}`);
   if (t.contains) return like(`%${lit}%`);
   // No anchor: the same setting the matcher reads decides. The two MUST agree —
   // `test/shared/filter-sql.test.ts` runs every case through real SQLite AND
   // through `matchesColumnFilter` and requires the same answer.
-  return defaultSubstring ? like(`%${lit}%`) : equals();
+  if (defaultSubstring) return like(`%${lit}%`);
+  // "Is exactly", and a pattern can still say that — anchored at both ends. It
+  // goes through the UNtrimmed column, like `equals()` beside it, so the pair
+  // keeps agreeing with the matcher on a padded cell.
+  return starry ? { sql: `LOWER(${columnSql}) LIKE ? ESCAPE '\\'`, params: [lit] } : equals();
 }
 
 /** A group is tokens joined by AND — they must hold of the same cell together. */
@@ -221,7 +230,10 @@ function searchToSql(cols: readonly string[], term: string, defaultSubstring: bo
     // An empty literal narrows nothing — and must not reach `tokenSql`, where an
     // empty term is the NULL test rather than a match-anything.
     if (literal === '') return { sql: '', params: [] };
-    const token: FilterToken = { term: literal, negate: false, contains: true };
+    // `literal`: this is text the user typed as a PHRASE, not as filter syntax,
+    // so a `*` in it is an asterisk. The in-memory twin does a flat
+    // `String.includes` (`search/text-search.ts`), and the two have to agree.
+    const token: FilterToken = { term: literal, negate: false, contains: true, literal: true };
     const parts: string[] = [];
     const params: unknown[] = [];
     for (const col of cols) {

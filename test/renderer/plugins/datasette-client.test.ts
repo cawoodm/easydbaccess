@@ -32,7 +32,32 @@ import {
   testConnection,
   withAuthFetch,
   probeSingleTable,
+  translateQuery,
 } from '../../../packages/renderer/src/plugins/datasette-client.js';
+
+describe('translateQuery', () => {
+  it('sends the operators it can express', () => {
+    expect(translateQuery({ filters: { name: '*marc*' } })).toEqual({ name__contains: 'marc' });
+    expect(translateQuery({ filters: { name: '^marc' } })).toEqual({ name__startswith: 'marc' });
+    // An `=` token arrives here with the `=` already eaten by the parser, so it
+    // goes out as `__contains` — a superset the client-side filter then narrows.
+    expect(translateQuery({ filters: { name: '=marc' } })).toEqual({ name__contains: 'marc' });
+  });
+
+  it('sends NO param for a star between two pieces of text', () => {
+    // `__contains` is a literal substring, so the pattern would ask the server
+    // for the characters "Marc*Julian" and come back empty — and a wrong param
+    // is worse than none, because it narrows the page the client-side filter
+    // then reads. Same rule as the `^`-in-a-set and `AND` cases.
+    expect(translateQuery({ filters: { name: '*Marc*Julian*' } })).toEqual({});
+    expect(translateQuery({ filters: { name: 'Marc*Julian' } })).toEqual({});
+    expect(translateQuery({ filters: { name: '*Marc*Julian*,Open' } })).toEqual({});
+  });
+
+  it('still sends a param when the star is literal by the grammar', () => {
+    expect(translateQuery({ filters: { name: '=a*b' } })).toEqual({ name__contains: 'a*b' });
+  });
+});
 
 describe('parseDatabaseList', () => {
   it('reads the pre-1.0 array of { name } objects', () => {

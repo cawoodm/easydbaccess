@@ -9,7 +9,7 @@
 // ../../../../eda-datasette-plugin/datasette-client.js (21 node --test cases).
 
 import type { ColumnSpec, ColumnType, FetchOpts, TableInfo } from '@easydb/shared';
-import { parseColumnFilter } from '@easydb/shared';
+import { hasInnerWildcard, parseColumnFilter } from '@easydb/shared';
 import { isInternalField } from '../util/internal-fields.js';
 import { inferColumnType as inferType } from '../import/infer-type.js';
 import { quoteBigIntegers } from '../import/big-numbers.js';
@@ -414,6 +414,12 @@ export function translateQuery(
     const val = String(raw).trim();
     if (val === '') continue;
     const tokens = parseColumnFilter(val);
+    // A star BETWEEN two pieces of text has no Datasette operator: `__contains`
+    // is a literal substring, so `*Marc*Julian*` would ask the server for the
+    // characters "Marc*Julian" and come back empty — and a wrong param is worse
+    // than none, because it narrows the page the client-side filter then reads.
+    // Same rule, and same reason, as the `^`-anchored and `AND` cases below.
+    if (tokens.some((t) => hasInnerWildcard(t.term, t))) continue;
     // A single plain (un-negated) token keeps the comparison-operator ladder.
     if (tokens.length === 1 && !tokens[0]!.negate) {
       const one = tokens[0]!.term;
