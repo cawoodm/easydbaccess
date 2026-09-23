@@ -55,6 +55,11 @@ export abstract class FilterPickerShell extends LitElement {
         box-shadow: 0 10px 25px rgba(0, 0, 0, 0.18);
         min-width: 240px;
         max-width: 320px;
+        /* Bounds what .body's overflow:auto clips against. Without it the host
+           grows to fit its content, nothing ever scrolls, and a long panel runs
+           off the viewport with no scrollbar. The value matches filter-popover,
+           whose list has the same problem and solved it the same way. */
+        max-height: 360px;
         display: flex;
         flex-direction: column;
         font:
@@ -122,6 +127,11 @@ export abstract class FilterPickerShell extends LitElement {
     `,
   ];
 
+  /**
+   * The column's label, shown in the header. Nothing here reads it — a subclass
+   * sets it in its own `open()` and hands it to `renderShell`. It is state
+   * rather than a plain field so that setting it mid-opening repaints.
+   */
   @state() protected shellTitle = '';
   private resolveFn: ((v: FilterPickerResult) => void) | null = null;
   /**
