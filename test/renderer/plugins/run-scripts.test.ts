@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ColumnSpec } from '../../../packages/shared/src/index.js';
-import { columnsFor, runSummary } from '../../../packages/renderer/src/plugins/run-scripts.js';
+import { isScriptEnabled, runSummary, scriptedColumns } from '../../../packages/renderer/src/plugins/run-scripts.js';
 
 /**
- * The two pure rules behind the footer's **Run scripts** button: which columns
- * an answer selects, and what the run says afterwards. Everything else in that
- * plugin is dialogs and progress.
+ * The pure rules behind the footer's **Run** button: which columns it offers,
+ * which of them are live, and what the run says afterwards. Everything else in
+ * that plugin is dialogs and progress.
  */
 
 const SRC = 'function render(row) { return 1; }';
@@ -22,27 +22,31 @@ const COLUMNS: ColumnSpec[] = [
   col({ field: 'blank', script: '   ' }),
 ];
 
-describe('columnsFor', () => {
-  it('takes the enabled scripts, treating an absent switch as on', () => {
-    expect(columnsFor(COLUMNS, 'enabled').map((c) => c.field)).toEqual(['on', 'alsoOn']);
-  });
-
-  it('takes the parked ones alone — the reason to park rather than delete', () => {
-    expect(columnsFor(COLUMNS, 'disabled').map((c) => c.field)).toEqual(['parked']);
-  });
-
-  it('takes every scripted column for "all"', () => {
-    expect(columnsFor(COLUMNS, 'all').map((c) => c.field)).toEqual(['on', 'alsoOn', 'parked']);
+describe('scriptedColumns', () => {
+  it('offers every scripted column, enabled or not — the picker decides, not us', () => {
+    expect(scriptedColumns(COLUMNS).map((c) => c.field)).toEqual(['on', 'alsoOn', 'parked']);
   });
 
   it('ignores a column with no script, and one whose script is whitespace', () => {
-    expect(columnsFor(COLUMNS, 'all').map((c) => c.field)).not.toContain('plain');
-    expect(columnsFor(COLUMNS, 'all').map((c) => c.field)).not.toContain('blank');
+    const fields = scriptedColumns(COLUMNS).map((c) => c.field);
+    expect(fields).not.toContain('plain');
+    expect(fields).not.toContain('blank');
   });
 
   it('never runs on _error, which Validate owns and rewrites', () => {
     const withError = [...COLUMNS, col({ field: '_error', script: SRC })];
-    expect(columnsFor(withError, 'all').map((c) => c.field)).not.toContain('_error');
+    expect(scriptedColumns(withError).map((c) => c.field)).not.toContain('_error');
+  });
+});
+
+describe('isScriptEnabled', () => {
+  it('treats an absent switch as on', () => {
+    expect(isScriptEnabled(col({ field: 'on', script: SRC }))).toBe(true);
+  });
+
+  it('reads an explicit switch both ways', () => {
+    expect(isScriptEnabled(col({ field: 'a', script: SRC, scriptActive: true }))).toBe(true);
+    expect(isScriptEnabled(col({ field: 'b', script: SRC, scriptActive: false }))).toBe(false);
   });
 });
 
@@ -60,6 +64,8 @@ describe('runSummary', () => {
       { field: 'a', result: { written: 1, unchanged: 0, failed: 0, firstError: null } },
       { field: 'b', result: { written: 0, unchanged: 0, failed: 2, firstError: 'no name' } },
     ]);
+    // A summary reads a tally, never the rows — which is why the two are
+    // separate types.
     expect(text).toContain('2 failed');
     expect(text).toContain('no name');
   });

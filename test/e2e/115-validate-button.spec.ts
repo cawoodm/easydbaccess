@@ -1,8 +1,9 @@
 import { test, expect, type Page } from './fixtures.js';
-import { bulkAddRows, createTable, panelDomId, readRows, readTable, waitForPanel } from './helpers.js';
+import { bulkAddRows, createTable, openRun, panelDomId, readRows, readTable, runPickerAll, waitForPanel } from './helpers.js';
 
 /**
- * The ✓ button in a table's footer: check every row against its columns' rules.
+ * **Run → Run validations** in a table's footer: check its rows against its
+ * columns' rules.
  *
  * Until now a rule was only ever checked one cell at a time — as you typed — plus
  * a Save pre-flight over the rows already in memory. So a table imported from a
@@ -20,12 +21,13 @@ const gridRows = (page: Page, id: string) => page.locator(`#${panelDomId(id)} da
 /** Cells the last run flagged. */
 const flagged = (page: Page, id: string) => page.locator(`#${panelDomId(id)} data-table tbody td.is-problem`);
 
-/** Click the footer's ✓ button. */
+/**
+ * Run every rule over every row — what the ✓ button did in one click, and what
+ * Run → Run validations does once the picker has been told "all of both".
+ */
 async function validate(page: Page, id: string) {
-  await page
-    .locator(`#${panelDomId(id)} panel-footer`)
-    .getByTitle(/Check every row/)
-    .click();
+  await openRun(page, id, 'Run validations');
+  await runPickerAll(page, 'all');
 }
 
 /** Headers the grid is showing. */
@@ -248,8 +250,10 @@ test('a table with no rules is not scanned at all', async ({ page }) => {
   await waitForPanel(page, id);
   await bulkAddRows(page, id, [{ anything: '' }, { anything: null }]);
 
-  await validate(page, id);
+  // No picker either: with nothing to tick, the answer comes before the question.
+  await openRun(page, id, 'Run validations');
   await expect(toast(page).getByText(/no column of "Loose" carries a rule/i)).toBeVisible();
+  await expect(page.locator('run-picker-dialog [data-testid="run-picker"]')).toBeHidden();
   // Nothing to say, so no column either.
   const table = await readTable(page, id);
   expect((table?.columns as Array<Record<string, unknown>>).map((c) => c.field)).not.toContain('_error');

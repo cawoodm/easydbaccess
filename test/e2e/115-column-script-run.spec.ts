@@ -38,11 +38,12 @@ test('Run writes the script’s value into the cells and NEVER clears the script
   await editor.locator('textarea').fill(UPPER);
   await editor.getByTestId('script-run').click();
 
-  // One question only, and it is a plain confirm: nothing is filtered, so "which
-  // rows" has a single answer, and Run no longer offers to destroy the script.
+  // One question only: nothing is filtered, so "which rows" has a single answer.
+  // Run never offers to destroy the script — the most it offers is to PARK one,
+  // and this test takes the other branch.
   const host = page.locator('host-dialogs');
   await expect(host.getByRole('button', { name: 'Write and clear the script', exact: true })).toHaveCount(0);
-  await host.getByRole('button', { name: 'Yes', exact: true }).click();
+  await host.getByRole('button', { name: 'Run and keep enabled', exact: true }).click();
 
   // The write is immediate — it does not wait for the columns editor's Save.
   await expect.poll(async () => (await readRows(page, id)).map((r: { data: Record<string, unknown> }) => r.data['shout']).sort()).toEqual(['ADA', 'BOB']);
@@ -74,7 +75,7 @@ test('a run stamps the rows it wrote, so replication sees the change', async ({ 
   const { editor } = await openScript(page, id, 1);
   await editor.locator('textarea').fill(UPPER);
   await editor.getByTestId('script-run').click();
-  await page.locator('host-dialogs').getByRole('button', { name: 'Yes', exact: true }).click();
+  await page.locator('host-dialogs').getByRole('button', { name: 'Run and keep enabled', exact: true }).click();
 
   await expect.poll(async () => (await readRows(page, id))[0].data['shout']).toBe('ADA');
   expect((await readRows(page, id))[0].updatedAt).toBeGreaterThan(before);
@@ -96,7 +97,7 @@ test('Run asks which rows when the grid is filtered, and honours the answer', as
 
   const host = page.locator('host-dialogs');
   await host.getByRole('button', { name: 'Only the 1 rows shown', exact: true }).click();
-  await host.getByRole('button', { name: 'Yes', exact: true }).click();
+  await host.getByRole('button', { name: 'Run and keep enabled', exact: true }).click();
 
   // Only the filtered row is written; the other two keep an empty cell.
   await expect.poll(async () => (await readRows(page, id)).filter((r: { data: Record<string, unknown> }) => r.data['shout'] !== undefined).length).toBe(1);
@@ -131,6 +132,38 @@ test('Run says so when the editor is empty, rather than greying out', async ({ p
   await expect(editor.getByTestId('script-run')).toBeEnabled();
   await editor.getByTestId('script-run').click();
   await expect(page.locator('host-dialogs')).toContainText('no script to run');
+});
+
+test('an enabled script is offered “Run and disable”, which unticks Enable for the Save', async ({ page }) => {
+  // The editor does not own the column — both halves of what it holds ride back
+  // on Save — so "and disable" here means unticking the box and saying so.
+  const id = await createTable(page, 'Parker', [{ field: 'name' }, { field: 'shout' }]);
+  await waitForPanel(page, id);
+  await addRow(page, id, { name: 'ada' });
+
+  const { dlg, editor } = await openScript(page, id, 1);
+  await editor.locator('textarea').fill(UPPER);
+  await editor.getByTestId('script-run').click();
+
+  const host = page.locator('host-dialogs');
+  await expect(host).toContainText('it will run continuously');
+  await host.getByRole('button', { name: 'Run and disable', exact: true }).click();
+
+  await expect.poll(async () => (await readRows(page, id))[0].data['shout']).toBe('ADA');
+  await expect(editor.locator('input[data-testid="script-active"]')).not.toBeChecked();
+
+  await editor.getByRole('button', { name: 'Save' }).click();
+  await dlg.getByRole('button', { name: /Save|Create/ }).click();
+  await expect(dlg).toBeHidden();
+
+  const columns = await page.evaluate(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async (tid) => (await (window as any).__easydb.store.tables.findOne(tid)).columns,
+    id,
+  );
+  expect(columns[1].scriptActive).toBe(false);
+  // Parked, not deleted.
+  expect(columns[1].script).toContain('toUpperCase');
 });
 
 test('a parked script still runs from the button, and its cells stay editable', async ({ page }) => {
@@ -202,7 +235,7 @@ test('a long run shows a progress bar', async ({ page }) => {
   });
 
   await editor.getByTestId('script-run').click();
-  await page.locator('host-dialogs').getByRole('button', { name: 'Yes', exact: true }).click();
+  await page.locator('host-dialogs').getByRole('button', { name: 'Run and keep enabled', exact: true }).click();
 
   await expect.poll(async () => (await readRows(page, id)).filter((r: { data: Record<string, unknown> }) => r.data['shout'] !== undefined).length, { timeout: 30_000 }).toBe(450);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -217,7 +250,7 @@ test('a row the script throws on is skipped, and the run says how many', async (
   const { editor } = await openScript(page, id, 1);
   await editor.locator('textarea').fill('function render(row) { if (!row.name) throw new Error("no name"); return row.name.toUpperCase(); }');
   await editor.getByTestId('script-run').click();
-  await page.locator('host-dialogs').getByRole('button', { name: 'Yes', exact: true }).click();
+  await page.locator('host-dialogs').getByRole('button', { name: 'Run and keep enabled', exact: true }).click();
 
   await expect.poll(async () => (await readRows(page, id)).map((r: { data: Record<string, unknown> }) => r.data['shout'] ?? '').sort()).toEqual(['', 'ADA', 'CY']);
   await expect(page.locator('toast-host')).toContainText('1 failed');

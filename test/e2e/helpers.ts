@@ -286,6 +286,41 @@ export async function waitForPanel(page: Page, tableId: string) {
  *
  * See `packages/renderer/src/plugins/connect-menu.ts`.
  */
+/**
+ * The footer's ▶ **Run** button, and the item to take from its menu.
+ *
+ * Run hosts every whole-table pass — the column-script runner and Validate —
+ * so a test that used to click one of two footer buttons now picks from one
+ * menu. The menu is skipped when only one action is registered, which is why
+ * this waits for it rather than assuming it is there.
+ *
+ * See `packages/renderer/src/table/run-actions.ts`.
+ */
+export async function openRun(page: Page, tableId: string, which: 'Run scripts' | 'Run validations'): Promise<void> {
+  await page
+    .locator(`#${panelDomId(tableId)} panel-footer`)
+    .getByRole('button', { name: 'Run', exact: true })
+    .click();
+  const menu = page.locator('anchored-menu');
+  await menu.waitFor({ state: 'visible' });
+  await menu.getByText(which, { exact: true }).click();
+}
+
+/**
+ * Answer the Run picker with everything it offers, over `rows`, and go.
+ *
+ * The row choice is clicked rather than left alone on purpose: the dialog
+ * starts on "visible" whenever the grid is showing fewer rows than the table
+ * holds, which is a sensible default and a flaky assumption in a test.
+ */
+export async function runPickerAll(page: Page, rows: 'all' | 'visible' = 'all'): Promise<void> {
+  const dlg = page.locator('run-picker-dialog');
+  await dlg.locator('[data-testid="run-picker"]').waitFor({ state: 'visible' });
+  await dlg.locator('[data-testid="run-picker-all"]').setChecked(true);
+  await dlg.locator(`[data-testid="run-picker-rows-${rows}"]`).check();
+  await dlg.locator('[data-testid="run-picker-go"]').click();
+}
+
 export async function openConnect(page: Page, half: 'Local Data' | 'Remote System' = 'Remote System'): Promise<void> {
   await page.getByTitle(/^Connect data/).click();
   const menu = page.locator('anchored-menu');

@@ -17,7 +17,7 @@ import {
 import { getContext } from '../app-context.js';
 import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
 import { requestVisibleRows } from '../table/visible-rows.js';
-import { materializeColumnScript, materializeSummary } from '../table/materialize-script.js';
+import { KEEP_ENABLED_HINT, RUN_AND_DISABLE, RUN_AND_KEEP, materializeColumnScript, materializeSummary } from '../table/materialize-script.js';
 import { isErrorField } from '../table/row-errors.js';
 
 /**
@@ -543,8 +543,13 @@ export class ScriptEditorDialog extends LitElement {
    *  - **Which rows** — only when the grid is showing fewer than the table
    *    holds. With no filter on there is one possible answer, and a dialog that
    *    only ever has one answer is a click, not a choice.
-   *  - **Are you sure** — the write replaces stored values and cannot be undone,
-   *    which is not something a single click should do to a whole table.
+   *  - **Are you sure, and should the script stay live** — one dialog, because
+   *    they are one decision. The write replaces stored values and cannot be
+   *    undone, which is not something a single click should do to a whole
+   *    table; and a script that is still ENABLED goes on recomputing on every
+   *    draw after its output has been written, which is what
+   *    `KEEP_ENABLED_HINT` explains. A parked script gets the plain confirm —
+   *    there is nothing to switch off.
    *
    * The editor stays open afterwards. There is nothing left to decide, and
    * closing it would throw away edits the author had not saved yet.
@@ -593,12 +598,22 @@ export class ScriptEditorDialog extends LitElement {
         targets = scope === someLabel ? shown : all;
       }
 
-      const ok = await dialogs.confirm(
-        `Write what this script returns into “${target.field}” for ${targets.length.toLocaleString()} ${targets.length === 1 ? 'row' : 'rows'}? The stored values are replaced and this cannot be undone. ` +
-          'The script is kept either way.',
-        'Run script',
-      );
-      if (!ok) return;
+      const write =
+        `Write what this script returns into “${target.field}” for ${targets.length.toLocaleString()} ${targets.length === 1 ? 'row' : 'rows'}? ` +
+        'The stored values are replaced and this cannot be undone. The script itself is kept either way.';
+      // A LIVE script gets the extra question, because for it the answer changes
+      // something: it recomputes on every draw, and materializing it is usually
+      // the moment that stops being worth paying for. A parked one is already
+      // costing nothing, so it gets the plain confirm.
+      let park = false;
+      if (this.active === true) {
+        const picked = await dialogs.choice(`${write}\n\n${KEEP_ENABLED_HINT}`, [RUN_AND_DISABLE, RUN_AND_KEEP], 'Run script');
+        if (picked === null) return;
+        park = picked === RUN_AND_DISABLE;
+      } else {
+        const ok = await dialogs.confirm(write, 'Run script');
+        if (!ok) return;
+      }
 
       setAppProgress({ label: `Writing “${target.field}”`, fraction: 0 });
       this.progress = { done: 0, total: targets.length };
@@ -610,7 +625,16 @@ export class ScriptEditorDialog extends LitElement {
       });
       this.progress = null;
       clearAppProgress();
-      ctx.api.ui.dialogs.toast(materializeSummary(result, target.field), { kind: result.failed > 0 ? 'error' : 'success', title: 'Run script' });
+      // Unticking the box is the whole of "and disable" HERE: the editor does not
+      // own the column — `active` rides back on Save, the same as the text does.
+      // So the toast says what is still outstanding rather than letting the user
+      // close the dialog believing the script is already parked.
+      if (park) this.active = false;
+      const done = materializeSummary(result, target.field);
+      ctx.api.ui.dialogs.toast(park ? `${done} Enable is now off — press Save to keep it that way.` : done, {
+        kind: result.failed > 0 ? 'error' : 'success',
+        title: 'Run script',
+      });
     } catch (err) {
       this.progress = null;
       clearAppProgress();

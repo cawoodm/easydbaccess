@@ -15,11 +15,11 @@ Rules are checked as you type and the reason appears under the field. **They do
 not stop you saving.** The button reads **Save anyway** on the first press, so you
 know the record goes in with the problem, and the message afterwards says how many
 went with it. A half-known record is usually worth keeping — the grid marks what
-is wrong, and the ✓ button lists it later.
+is wrong, and **Run → Run validations** lists it later.
 
 One rule cannot be checked here: **Unique**. It needs the other rows, and a record
 that does not exist yet has nothing to be a duplicate of. Editing the cell
-afterwards, or pressing ✓, catches it.
+afterwards, or running the check, catches it.
 
 ## Editing a whole record
 
@@ -116,20 +116,28 @@ Tick the box again to switch it back on. Clearing the body instead deletes the
 rule outright — and clears the switch with it, so a rule you write later starts
 switched on.
 
-## Checking every row: the ✓ button
+## Checking every row: Run → Run validations
 
 Rules only meet a value as it is typed, so an imported table has never been
-checked. The **✓** button in a table's footer checks all of it, against every
-rule its columns carry: Required, Maximum, Unique and your own validation
-scripts.
+checked. The **▶ Run** button in a table's footer checks all of it. Press it and
+pick **Run validations**; one dialog then asks what to check:
+
+- **Which columns** — every column that carries a rule is listed, with the rules
+  it carries beside it. All of them are ticked to start with; untick the ones you
+  do not want.
+- **Which rows** — what the grid is showing, or the whole table.
 
 What you get back is a summary — one line per column, in the order the columns
 appear — and **the table itself, narrowed to the rows with something wrong**.
 Every cell that broke a rule is **pink**, and hovering it says why: `Age value 40
 is over the maximum of 20`. Fix it in place.
 
-Press ✓ again when you have finished. The rows you repaired drop out, and a run
+Run it again when you have finished. The rows you repaired drop out, and a run
 that finds nothing leaves the table as it was.
+
+A run that covered only some of the columns, or only some of the rows, can **add**
+messages but never takes one back — a rule it did not apply is not a rule that
+passed. Check everything to clear everything.
 
 ### The `_error` column
 
@@ -139,8 +147,8 @@ already says it where you are looking — but it is an ordinary column:
 
 - The **columns editor** shows it, so you can unhide it and read the messages in
   a column of their own. Once you unhide it, it stays unhidden.
-- **Rename it** and it is yours. The messages come with it, the next ✓ leaves it
-  alone, and a fresh `_error` is made for that run. This is how you keep a copy
+- **Rename it** and it is yours. The messages come with it, the next check leaves
+  it alone, and a fresh `_error` is made for that run. This is how you keep a copy
   of what a run found.
 - A script can read it as `row._error` like any other field.
 
@@ -266,15 +274,19 @@ alone. **Run…** in the script editor does the opposite: it writes what the
 script returns into the cells, so the values become ordinary data you can
 export, sync, filter and edit.
 
-**Run never changes your script.** It writes the cells and stops there. If you
-want the column to stop computing afterwards, untick **Enable** — that keeps
-the script and hands the cells back to you.
+**Run never deletes your script.** It writes the cells and stops there.
 
 It asks before writing:
 
 - **Which rows** — only when the grid is showing fewer than the table holds.
   You can write the whole table or just what the filter left.
-- **Are you sure** — the write replaces stored values and cannot be undone.
+- **Are you sure, and should the script stay enabled** — the write replaces
+  stored values and cannot be undone, so it is confirmed; and if the script is
+  still enabled you are offered **Run and disable** or **Run and keep enabled**.
+  Leaving it enabled means it goes on recomputing on every draw after its output
+  has been written, so disabling is usually what you want. Choosing to disable
+  unticks **Enable** for you — press **Save** to keep it that way. The script
+  itself is kept either way.
 
 The write happens straight away. Rows the script throws on are skipped and
 counted — the message says how many. The editor stays open, so nothing you have
@@ -290,21 +302,26 @@ creating) it says so when you press it.
 
 #### Running every column at once
 
-**Run…** does one column. The **`</>`** button in the table's footer, beside
-Validate's ✓, does the whole table. It asks twice:
+**Run…** does one column. The **▶ Run** button in the table's footer → **Run
+scripts** does the whole table. One dialog asks both questions:
 
-1. **Which scripts** — only the enabled ones, all of them, or only the disabled
-   ones. Each answer says how many columns it covers.
-2. **Which rows** — what the grid is showing, or the whole table.
+- **Which columns** — every scripted column is listed, with `enabled` or
+  `disabled` beside it. All are ticked to start with; untick what you do not
+  want, or use **All** at the top.
+- **Which rows** — what the grid is showing, or the whole table.
+
+If any column you ticked is still enabled, it then offers **Run and disable** or
+**Run and keep enabled**, and disabling is the one to take once the values are
+written — an enabled script keeps recomputing on every draw for a column that is
+now ordinary data. Disabling parks the script; it is never deleted.
 
 Then it writes, one column after another, with a progress bar counting cells
-across the whole job. Nothing about the scripts themselves changes: **Enable** in
-the column editor stays the only thing that turns one on or off.
+across the whole job.
 
-"Only the disabled ones" is the answer worth knowing about. A script you have
-unticked is one you do not want computing on every draw — a slow lookup, an
-expensive join, a value that should be frozen once and then edited. Untick it,
-and run it from here when you want it.
+A parked script is worth knowing about. A script you have unticked is one you do
+not want computing on every draw — a slow lookup, an expensive join, a value that
+should be frozen once and then edited. Park it, and run it from here when you
+want it.
 
 ### Built-in renderers
 

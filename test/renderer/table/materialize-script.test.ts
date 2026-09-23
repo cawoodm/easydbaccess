@@ -59,6 +59,33 @@ function row(id: string, data: Record<string, unknown>): Row {
 
 const UPPER = `function render(row) { return String(row.name).toUpperCase(); }`;
 
+const LOWER = `function render(row) { return String(row.name).toLowerCase(); }`;
+
+describe('the rows a run hands back', () => {
+  it('carries every target out, written or not, with this run applied', async () => {
+    const rows = [row('a', { name: 'ada' }), row('b', { name: 'ADA' })];
+    const { coll } = fakeBulkRows(rows);
+
+    const result = await materializeColumnScript(coll, UPPER, 'shout', rows);
+
+    expect(result.rows.map((r) => r.id)).toEqual(['a', 'b']);
+    expect(result.rows.map((r) => r.data['shout'])).toEqual(['ADA', 'ADA']);
+  });
+
+  it('lets a second column build on the first instead of undoing it', async () => {
+    // A write replaces the whole row DOCUMENT. Running a second column from the
+    // snapshot the first one started with therefore erased the first column —
+    // `Run scripts` over two scripted columns left only the second written.
+    const rows = [row('a', { name: 'Ada' })];
+    const { coll } = fakeBulkRows(rows);
+
+    const first = await materializeColumnScript(coll, UPPER, 'shout', rows);
+    await materializeColumnScript(coll, LOWER, 'quiet', first.rows);
+
+    expect(rows[0]!.data).toMatchObject({ name: 'Ada', shout: 'ADA', quiet: 'ada' });
+  });
+});
+
 describe('materializeColumnScript', () => {
   it('writes what the script returns into the named field', async () => {
     const rows = [row('a', { name: 'ada' }), row('b', { name: 'bob' })];

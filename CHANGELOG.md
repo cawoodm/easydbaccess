@@ -1,9 +1,21 @@
 # CHANGELOG
 
+## 23 Sep 2026
+
+### Features
+
+- 🪶 One ▶ Run button in a table's footer runs column scripts or validations, over the columns and rows you tick (v0.0.476)
+
+### Bugs
+
+- 🪲 Running several column scripts at once left only the last column written (v0.0.476)
+- 🪲 Run offered to clear the script it had just written into the cells (v0.0.476)
+
 ## 22 Sep 2026
 
 ### Features
 
+- 🪶 A table's footer runs every column's script at once: enabled, all, or only the disabled ones, over the visible rows or all of them (v0.0.475)
 - 🪶 Visualizations dock side by side as well as stacked: several panes share a row, and both row heights and pane widths drag (v0.0.468)
 - ✨ The preview window header also offers the whole record, so a value that looks wrong can be read against the fields beside it (v0.0.470)
 - 🪶 Filters take Excel's wildcards: `*foo*` contains, `foo*` starts with, `*foo` ends with, and `"foo"` matches the whole cell (v0.0.473)
@@ -11,6 +23,17 @@
 
 ### Bugs
 
+- 🪲 Writing a column script over 4,000 rows took about two minutes (v0.0.475)
+- 🪲 Validate spent longer marking the rows it flagged than it spent checking them (v0.0.475)
+- 🪲 A run of a column script showed no progress: the app bar sat behind the editor’s own backdrop (v0.0.475)
+- 🪲 Run offered to delete the script it had just run, which could throw away work the author still wanted (v0.0.475)
+- 🪲 A column written by Run looked untouched to replication, so the next merge could hand the old values back (v0.0.475)
+- 🪲 The script editor’s Enable box was dark grey on a dark header, readable only when it turned red for "off" (v0.0.475)
+- 🪲 Run was greyed out with nothing to say about why (v0.0.475)
+- 🪲 The _error column was pink when empty and plain when it held a problem — the wrong way round (v0.0.475)
+- 🪲 A script or a validation rule could be put on _error, where Validate overwrites it on every run (v0.0.475)
+- 🪲 A setting’s "user" box sat beside the box that turns the setting on, and was read as a second option to enable (v0.0.475)
+- 🪲 A save could write an empty workspace over a file that held work, losing all of it without a word (v0.0.475)
 - 🪲 A docked chart or map went blank when another visualization was docked beside it or taken from beside it (v0.0.468)
 - 🪲 A docked map stayed blank after a filter matched nothing, until the app was reloaded (v0.0.468)
 - 🪲 A save the browser refused because another program held the `.edb` reported that state "had changed since it was read from disk", which named neither the file nor the cause (v0.0.471)
@@ -70,7 +93,6 @@
 
 ### Bugs
 
-- 🪲 A save could write an empty workspace over a file that held work, losing all of it without a word (v0.0.459)
 - 🪲 A save could replace a `.edb` that another tab, browser or machine had written since, without asking (v0.0.455)
 
 - 🪲 Clicking a `file:///` link opened a blank tab saying nothing, because a browser will not open a local file from a web page (v0.0.452)
