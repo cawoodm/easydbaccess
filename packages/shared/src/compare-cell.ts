@@ -61,6 +61,25 @@ function isoOf(s: string): string | null {
 }
 
 /**
+ * Would `compareKey` be able to read `bound` as a value of `type`? Used by
+ * `filter-sql.ts` to decide whether a comparison bound has a meaningful SQL
+ * form at all — an unparseable bound must fail every comparison, the same as
+ * `satisfiesCmp` does below, rather than being bound in as raw text and
+ * compared lexicographically (which can return every row instead of none,
+ * depending on which side of the alphabet the malformed text happens to
+ * sort).
+ *
+ * Mirrors `satisfiesCmp`'s `dateOnlyBound` special case: a DATE-ONLY bound
+ * against a `datetime` column is validated as a `date`, matching what it is
+ * actually compared against.
+ */
+export function isValidBound(bound: string, type: string | undefined): boolean {
+  const dateOnlyBound = type === 'datetime' && DATE_ONLY.test(bound);
+  const keyType = dateOnlyBound ? 'date' : type;
+  return compareKey(bound, keyType) !== null;
+}
+
+/**
  * Does `value` stand in relation `cmp` to `term`?
  *
  * False for a cell with no content, and for one whose key cannot be read: a

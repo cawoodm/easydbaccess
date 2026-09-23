@@ -24,6 +24,7 @@
  */
 
 import { groupColumnFilter, isListExpression, parseColumnFilter, plainTextOf, type FilterToken } from './column-filter.js';
+import { isValidBound } from './compare-cell.js';
 import { resolveDateTerm } from './relative-date.js';
 
 export interface SqlFragment {
@@ -49,21 +50,41 @@ function isNullToken(t: FilterToken): boolean {
 /**
  * `compare-cell.ts`'s number reading, as SQL: a blank cell is `0` (`Number('')`
  * is `0`, not `NaN`), and any other cell parses only if the WHOLE trimmed text
- * is an optionally-signed integer or decimal — otherwise the result is NULL.
+ * is an optionally-signed decimal, optionally followed by an `e`/`E` exponent
+ * (itself optionally signed) — the same grammar JS `Number()` accepts for
+ * ordinary and scientific notation. Anything else is NULL.
  *
  * Plain `CAST(x AS REAL)` cannot stand in for this: SQLite takes the longest
  * numeric PREFIX of the text and treats anything with no such prefix as `0.0`
  * (`CAST('n/a' AS REAL)` is `0`, not NULL), which would let a non-numeric cell
  * satisfy a comparison the matcher fails.
+ *
+ * Deliberately NOT reproduced: hex/binary/octal literals (`'0x1A'`, `'0b101'`)
+ * and `Infinity`/`NaN` spellings. `Number()` reads the first as a number, but
+ * `compareKey` immediately rejects `Infinity` itself (`Number.isFinite`), and
+ * hex/octal/binary text is not a shape `sql-mapping.ts` or any importer ever
+ * writes into a `number` column — only plain decimal and scientific notation
+ * are reachable in practice. A future task with a real fixture in that shape
+ * should revisit this, not assume it was an oversight.
  */
 function numberExpr(columnSql: string): string {
   return (
     `(SELECT CASE ` +
     `WHEN raw = '' THEN 0 ` +
-    `WHEN body <> '' AND body <> '.' AND body NOT GLOB '*[^0-9.]*' AND (LENGTH(body) - LENGTH(REPLACE(body, '.', ''))) <= 1 THEN CAST(raw AS REAL) ` +
+    `WHEN epos = 0 AND mantissaOk THEN CAST(raw AS REAL) ` +
+    `WHEN epos > 0 AND mantissaOk AND expOk THEN CAST(raw AS REAL) ` +
     `ELSE NULL END ` +
+    `FROM (SELECT raw, epos, ` +
+    `(mantissa <> '' AND mantissa <> '.' AND mantissa NOT GLOB '*[^0-9.]*' AND (LENGTH(mantissa) - LENGTH(REPLACE(mantissa, '.', ''))) <= 1) AS mantissaOk, ` +
+    `(expBody <> '' AND expBody NOT GLOB '*[^0-9]*') AS expOk ` +
+    `FROM (SELECT raw, epos, mantissa, ` +
+    `CASE WHEN substr(remainder, 1, 1) IN ('+', '-') THEN substr(remainder, 2) ELSE remainder END AS expBody ` +
+    `FROM (SELECT raw, epos, ` +
+    `CASE WHEN epos > 0 THEN substr(body, 1, epos - 1) ELSE body END AS mantissa, ` +
+    `CASE WHEN epos > 0 THEN substr(body, epos + 1) ELSE '' END AS remainder ` +
+    `FROM (SELECT raw, body, INSTR(LOWER(body), 'e') AS epos ` +
     `FROM (SELECT raw, CASE WHEN substr(raw, 1, 1) IN ('+', '-') THEN substr(raw, 2) ELSE raw END AS body ` +
-    `FROM (SELECT TRIM(${columnSql}) AS raw)))`
+    `FROM (SELECT TRIM(${columnSql}) AS raw)))))))`
   );
 }
 
@@ -72,18 +93,28 @@ function numberExpr(columnSql: string): string {
  *
  * `date()` / `datetime()` are what make this agree with `compare-cell.ts`:
  * SQLite accepts ISO-8601 with a `Z` or `±HH:MM` suffix and answers in UTC,
- * which is exactly the normalisation the matcher applies. A bound that cannot
- * be read at all still goes through as text — SQLite will simply match nothing,
- * which is what the matcher does too.
+ * which is exactly the normalisation the matcher applies.
+ *
+ * `valid` is false when a `date`/`datetime` bound cannot be read at all —
+ * checked with `compare-cell.ts`'s own `isValidBound`, the exact reading
+ * `satisfiesCmp` uses for the bound, so the two can never drift apart. The
+ * caller must then short-circuit the whole token to always-false: binding an
+ * unparseable bound in as raw text and comparing it lexicographically against
+ * `date(col)` text can return every row instead of none, depending on which
+ * side of the alphabet the malformed text happens to sort (digits sort before
+ * letters, so `>=`/`>` against a bound like `not-a-date` "agree" with the
+ * matcher only by accident, while `<=`/`<` return everything).
  */
-function cmpOperands(columnSql: string, term: string, type: string | undefined, now: Date): { expr: string; bound: string } {
+function cmpOperands(columnSql: string, term: string, type: string | undefined, now: Date): { expr: string; bound: string; valid: boolean } {
   let bound = term.trim();
   if (type === 'date' || type === 'datetime') bound = resolveDateTerm(bound, now) ?? bound;
   const dateOnlyBound = /^\d{4}-\d{2}-\d{2}$/.test(bound);
-  if (type === 'date' || (type === 'datetime' && dateOnlyBound)) return { expr: `date(${columnSql})`, bound };
-  if (type === 'datetime') return { expr: `datetime(${columnSql})`, bound };
-  if (type === 'number') return { expr: numberExpr(columnSql), bound };
-  return { expr: normalised(columnSql), bound: bound.toLowerCase() };
+  if (type === 'date' || (type === 'datetime' && dateOnlyBound)) {
+    return { expr: `date(${columnSql})`, bound, valid: isValidBound(bound, 'date') };
+  }
+  if (type === 'datetime') return { expr: `datetime(${columnSql})`, bound, valid: isValidBound(bound, 'datetime') };
+  if (type === 'number') return { expr: numberExpr(columnSql), bound, valid: true }; // validated by the caller, against `Number(bound)`
+  return { expr: normalised(columnSql), bound: bound.toLowerCase(), valid: true };
 }
 
 /**
@@ -98,7 +129,12 @@ function tokenSql(columnSql: string, t: FilterToken, defaultSubstring: boolean, 
   const col = normalised(columnSql);
   if (isNullToken(t)) return { sql: `(${columnSql} IS NULL OR TRIM(${columnSql}) = '')`, params: [] };
   if (t.cmp) {
-    const { expr, bound } = cmpOperands(columnSql, t.term, type, now);
+    const { expr, bound, valid } = cmpOperands(columnSql, t.term, type, now);
+    // A bound with no meaningful reading (a malformed date, say) satisfies no
+    // comparison at all — `satisfiesCmp` returns false unconditionally, and
+    // this reproduces that, exactly like the `number` arm below does for its
+    // own unparseable bound.
+    if (!valid) return { sql: '0', params: [] };
     // The IS NOT NULL / <> '' guard is the matcher's "an empty cell never
     // satisfies a comparison" — EXCEPT on a `number` column, where the matcher
     // reads a blank cell as `0` (`Number('')`), not as absent. `numberExpr`
