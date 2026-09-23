@@ -21,6 +21,7 @@ import { activeEdbName, adoptedFileName, reloadWithoutSpace, reloadWithSpace, se
 import { saveErrorMessage, saveErrorSummary } from '../db/edb/save-error.js';
 import { clearWriteDeclined, compareWithFile, factsOfHandle, markWriteDeclined, markLocalChanges, readStamp, recordAgreement, writeDeclined } from '../db/edb/file-stamp.js';
 import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
+import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
 import { cloneWorkspace } from '../db/clone-workspace.js';
 import { deleteWorkspace } from '../db/delete-workspace.js';
 import { createAutosavePolicy, type AutosavePolicy } from '../db/edb/dirty.js';
@@ -222,6 +223,26 @@ function supported(): boolean {
 
 export function init(api: HostApi): void {
   if (!supported()) return;
+
+  // The same record the palette's "Turn on autosave" writes — one setting, two
+  // ways in. The command is where you reach for it mid-edit; this is where you
+  // find out it exists at all, which a command hidden behind a palette search
+  // never was. Device-local, because a `.edb` travels between machines and
+  // which of them writes on a timer is not a property of the workspace.
+  api.ui.registerSettings(meta.id, 'Files', [
+    {
+      key: AUTOSAVE_KEY,
+      label: 'Autosave',
+      type: 'boolean',
+      default: false,
+      scope: 'user',
+      description: 'Write this workspace back to its .edb file a moment after every change, instead of waiting for Save.',
+      help:
+        'Autosave needs somewhere to write. A workspace that has never been saved has no file, so the first tick asks for a folder — ' +
+        'and if you decline, autosave turns itself back off rather than asking again on every change. ' +
+        'An import or a bulk delete counts as one change, not thousands: the file is written once, when the batch finishes.',
+    },
+  ]);
 
   /**
    * Where a save landed.
@@ -1325,6 +1346,30 @@ export function init(api: HostApi): void {
     await refreshFileCommands();
     api.ui.dialogs.toast(`Autosave ${next ? 'on' : 'off'}`, { kind: 'info' });
   }
+
+  /**
+   * Autosave is a SETTING as well as a command, and both drive the one record.
+   *
+   * The Settings dialog writes straight to the store, so without this the tick
+   * box would change what a RELOAD does and nothing else: the timer would stay
+   * as it was, and the palette would go on offering to turn on what the setting
+   * already said was on. That is the same trap the stored flag fell into before
+   * v0.0.443 — see the note on `session` at the top of this file.
+   *
+   * Reading the record back rather than trusting the event is deliberate: the
+   * event carries no value (`db/settings-events.ts`), which is what keeps one
+   * source of truth.
+   */
+  document.addEventListener(SETTINGS_CHANGED_EVENT, (e) => {
+    const detail = (e as CustomEvent<SettingsChangedDetail>).detail;
+    if (detail?.pluginId !== meta.id || detail.key !== AUTOSAVE_KEY) return;
+    void (async () => {
+      const on = (await api.settings.get(meta.id, AUTOSAVE_KEY)) === true;
+      if (on === autosave.enabled()) return;
+      autosave.setEnabled(on);
+      await refreshFileCommands();
+    })();
+  });
 
   /**
    * Two of the commands say what they will do, so their titles follow the state.

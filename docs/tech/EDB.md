@@ -517,7 +517,7 @@ palette commands now, under the group `File`:
 | Command                           | Notes                                                                            |
 | --------------------------------- | -------------------------------------------------------------------------------- |
 | `edb-file:open`                   | Open workspace file…                                                             |
-| `edb-file:autosave`               | Title follows the state: "Turn on" / "Turn off"                                  |
+| `edb-file:autosave`               | Title follows the state: "Turn on" / "Turn off". Same record as Settings → Files |
 | `edb-file:folder`                 | Title follows the state: "Connect" / "Change". Only where a folder can be picked |
 | `edb-file:sync-folder`            | Only where a folder can be picked                                                |
 | `edb-file:leave`                  | Back to browser storage                                                          |
@@ -555,6 +555,26 @@ knowing:
 Save and the autosave switch are offered whether or not a file has been adopted.
 They used to appear only in file mode, which read as "this app cannot save" in the
 one state where saving is both possible and not yet done.
+
+### Autosave has two ways in, and one record
+
+The palette command and **Settings → Files → Autosave** both write
+`edb-file` / `autosave` on the **user** (device-local) layer. Device-local
+because a `.edb` travels between machines and which of them writes on a timer is
+not a property of the workspace.
+
+The Settings dialog writes straight to the store, so `edb-file` listens for
+`easydb:settings-changed` and applies the new value to the LIVE
+`AutosavePolicy`. Without that the tick box would change what a RELOAD does and
+nothing else — the timer would stay as it was and the palette would go on
+offering to turn on what the record already said was on. That is the same shape
+as the boot bug the `session` note at the top of `plugins/edb-file.ts` describes,
+and `test/e2e/145-autosave-setting.spec.ts` is what holds it down: it asserts the
+palette's title, which is read off the running policy rather than off the record.
+
+The listener re-READS the record rather than trusting the event, because the
+event carries no value — one source of truth, by design
+(`db/settings-events.ts`).
 
 ## A dropped `.edb` is COPIED IN, not opened
 

@@ -6,6 +6,8 @@
 
 - 🪶 One ▶ Run button in a table's footer runs column scripts or validations, over the columns and rows you tick (v0.0.476)
 
+- ✨ Autosave is in Settings → Files, not only behind a palette command; both drive one device-local record (v0.0.478)
+
 ### Bugs
 
 - 🪲 A filter with a star between two words, such as `*Marc*Julian*`, found nothing (v0.0.477)

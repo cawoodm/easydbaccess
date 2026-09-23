@@ -469,8 +469,13 @@ dot** in the corner of that button means there is something not in the file yet;
 it goes when you save. This is the main difference from the desktop app, where
 every change lands in the file at once.
 
-Run **Turn on autosave** if you would rather not think about it. It saves shortly
-after a change, and once at the end of an import rather than once per row.
+Turn on **autosave** if you would rather not think about it. It saves shortly
+after a change, and once at the end of an import rather than once per row. It is
+in **Settings → Files**, and as the command **Turn on autosave** — one setting,
+two ways in, so whichever you use the other agrees.
+
+Autosave is remembered **per device**, not in the workspace: a `.edb` moves
+between machines, and which of them writes on a timer is your choice on each.
 
 You will not lose work in the meantime. The browser keeps its own private copy
 as you go, so closing the tab, a crash or a reload all come back to where you
