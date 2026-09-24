@@ -54,32 +54,15 @@ export function createHostApi(opts: ApiFactoryOpts): HostApi {
     settings,
     backend: {
       /**
-       * Routes through the Hono `/fetch` proxy when the user has configured
-       * a server URL (the same `server-sync:url` setting `server-sync` and
-       * `auto-sync` use). Falls back to direct browser fetch when no URL is
-       * set, so offline workspaces work unchanged.
-       *
-       * The proxy lets plugins reach CORS-blocked APIs and enforces the
-       * server's allowlist + byte cap. ArrayBuffer bodies bypass the proxy
-       * — the server route only accepts string bodies, so forwarding binary
-       * payloads would need a separate base64 path.
+       * Always a direct browser fetch. There used to be a proxy fallback
+       * here that routed through the (now-removed) Hono `/fetch` route
+       * when a `server-sync:url` setting was present. That fallback keyed
+       * on the SETTING being present, not on the server being reachable,
+       * so a workspace with a stale `server-sync:url` sent every plugin
+       * fetch to a dead host. A direct fetch has no such hazard, at the
+       * cost of depending on the target site's CORS headers.
        */
-      fetch: async (url, init) => {
-        const base = await readServerBaseUrl(opts.store);
-        const bodyIsArrayBuffer = init?.body instanceof ArrayBuffer;
-        if (!base || bodyIsArrayBuffer) {
-          return globalThis.fetch(url, init as RequestInit | undefined);
-        }
-        const payload: Record<string, unknown> = { url };
-        if (init?.method) payload.method = init.method;
-        if (init?.headers) payload.headers = init.headers;
-        if (typeof init?.body === 'string') payload.body = init.body;
-        return globalThis.fetch(`${base}/fetch`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      },
+      fetch: async (url, init) => globalThis.fetch(url, init as RequestInit | undefined),
       async saveFile(filename, body, mimeType) {
         const blob = typeof body === 'string' ? new Blob([body], { type: mimeType ?? 'application/octet-stream' }) : body;
         const url = URL.createObjectURL(blob);
@@ -96,19 +79,6 @@ export function createHostApi(opts: ApiFactoryOpts): HostApi {
     workspaceId: () => opts.workspaceId(),
     selfUrl: () => opts.selfUrl ?? '(builtin)',
   };
-}
-
-/**
- * Reads `server-sync:url` — honouring a device-local (user-layer) override —
- * same key server-sync and auto-sync write. Inlined here so api-factory
- * doesn't import from `plugins/`, which would invert the dependency direction.
- */
-async function readServerBaseUrl(store: DataStore): Promise<string | null> {
-  const key = 'server-sync:url';
-  let v: unknown = hasUserSetting(key) ? readUserSetting(key) : undefined;
-  if (v === undefined) v = (await store.settings.findOne(key))?.value;
-  if (typeof v !== 'string' || v.length === 0) return null;
-  return interpolateSecrets(v, parseSecrets(readSecretsText())).replace(/\/+$/, '');
 }
 
 /**

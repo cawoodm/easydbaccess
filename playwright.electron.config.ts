@@ -4,11 +4,10 @@ import { defineConfig } from '@playwright/test';
  * E2E tests for the DESKTOP app — its own config, not a project inside
  * `playwright.config.ts`.
  *
- * That config starts two web servers (Vite on the branch's port, and the backing
- * Hono server) and hands every test a `baseURL`. The desktop suite needs none of
- * it: Electron loads the built renderer over `file://` and stores its data in a
- * SQLite file. As a second project it would still pay for both servers on every
- * run.
+ * That config starts a web server (Vite on the branch's port) and hands every
+ * test a `baseURL`. The desktop suite needs none of it: Electron loads the
+ * built renderer over `file://` and stores its data in a SQLite file. As a
+ * second project it would still pay for that server on every run.
  *
  * The specs live under `test/e2e/desktop/`, inside the browser suite's tree, so
  * that the repo's existing decisions about Playwright specs keep covering them —

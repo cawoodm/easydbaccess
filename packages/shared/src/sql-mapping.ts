@@ -1,13 +1,12 @@
 /**
  * SQL mapping helpers shared between every store that explodes a document
  * (workspace dump, row) into real SQL tables/columns and back —
- * `packages/server/src/storage/sqlite-store.ts` (whole-workspace `/sync`
- * blobs) and `packages/electron/src/sqlite-store.ts` (the relational
- * Electron main-process store). One convention here means a `.db` file
- * written by either side has the same shape.
+ * `packages/electron/src/sqlite-store.ts` (the relational Electron
+ * main-process store) and the browser's sqlite-wasm store. One convention
+ * here means a `.db` file written by either side has the same shape.
  *
- * Pure — no I/O, no Node APIs — so it works in server, Electron main, and
- * (if ever needed) the renderer.
+ * Pure — no I/O, no Node APIs — so it works in Electron main, the browser,
+ * and (if ever needed) a server.
  */
 
 import type { ColumnType } from './types.js';

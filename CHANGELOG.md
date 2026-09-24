@@ -2,6 +2,14 @@
 
 ## 24 Sep 2026
 
+### Features
+
+- ✨ Sync workspace settles this workspace against its own `.edb`, without re-reading every file in the folder (v0.0.496)
+
+### Chores
+
+- 🔧 The Hono server is gone, and with it server sync, the auto-sync timer, the URL proxy and the server plugin registry (v0.0.496)
+
 ### Bugs
 
 - 🪲 Filtering a number column by `=180` found nothing, and a plain `180` also matched 1800 and 180.5 (v0.0.495)

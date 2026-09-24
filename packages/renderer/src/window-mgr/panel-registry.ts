@@ -14,7 +14,7 @@
  * into the stored geometry (`stampFrontOrder` / `stampViewFrontOrder`). A
  * restack must not stamp: the saved `z` is the restack's INPUT, so re-deriving
  * it from the restack is circular, and it would rewrite `z` + `updatedAt` for
- * every window on every boot — churning the store and, with auto-sync/gist on,
+ * every window on every boot — churning the store and, with gist sync on,
  * pushing the whole workspace after each page load (and letting two devices
  * ping-pong geometry). A user click still fronts through the shell and
  * stamps — unless the panel is already topmost (`isTopmost` suppresses the

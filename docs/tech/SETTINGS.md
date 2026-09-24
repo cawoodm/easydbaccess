@@ -17,7 +17,7 @@ api.ui.registerSettings(pluginId: string, name: string, fields: SettingsFieldSpe
 ```
 
 - `pluginId` — the tab's identifier. By convention this is the plugin's own
-  `meta.id` (`gist-sync`, `server-sync`, `preview`), but it's a free-form
+  `meta.id` (`gist-sync`, `preview`), but it's a free-form
   string, not a lookup into the plugin registry — see "A tab id need not be a
   real plugin id" below.
 - `name` — the tab's display label in the Settings dialog nav.
@@ -129,8 +129,8 @@ Every setting is addressed as `${pluginId}:${key}` — e.g. `gist-sync:gist_toke
   [`data-store-dexie.ts`](../../packages/renderer/src/db/data-store-dexie.ts)),
   but plugins never build that key themselves — `store.settings` and
   `api.settings` both scope automatically to the active workspace. This
-  layer travels with the workspace: it's included in JSON dump export,
-  gist-sync's push/pull, and server-sync's whole-workspace push/pull.
+  layer travels with the workspace: it's included in JSON dump export and
+  gist-sync's push/pull.
 - **User layer** — a single JSON blob in `localStorage` at
   `/easydbaccess/settings.json`
   ([`user-settings.ts`](../../packages/renderer/src/db/user-settings.ts),

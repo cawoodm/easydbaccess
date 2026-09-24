@@ -246,12 +246,11 @@ window behind it. Dismissing the filter popover this way keeps whatever was
 already ticked: each value is applied as it is clicked, so Escape means "done with
 the list", not "undo".
 
-This is what replaced several plugins' one-button-per-action footer
-buttons with a single button opening a menu: `gist-sync` (Push / Pull /
-Settings / Share / View gist, plus a per-table variant) and `server-sync`
-(Push / Pull) — see `PLUGINS.md`'s Sync section. Reach for `AnchoredMenu` instead
-of a full dialog whenever a footer/table button's job is picking one of a
-short, static list of actions.
+This is what replaced `gist-sync`'s one-button-per-action footer buttons with
+a single button opening a menu (Push / Pull / Settings / Share / View gist,
+plus a per-table variant) — see `PLUGINS.md`'s Sync section. Reach for
+`AnchoredMenu` instead of a full dialog whenever a footer/table button's job
+is picking one of a short, static list of actions.
 
 **And it is the wrong shape once the actions take options.** Export used two of
 these menus — a format list on the workspace footer, another per table — and the

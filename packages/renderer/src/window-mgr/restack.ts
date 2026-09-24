@@ -10,7 +10,7 @@
  * its panel last, not by the saved z. This module is the one place both kinds
  * are merged and re-fronted together.
  *
- * Originally this only ran after a bulk gist/server-sync pull (which inserts
+ * Originally this only ran after a bulk gist-sync pull (which inserts
  * tables one at a time and defeats the boot sort — see the dispatch sites in
  * `gist-sync.ts` / `json-import.ts`). The exact same problem exists at plain
  * boot: `table-list.ts` calls `initWindowManager()` (opens all tables) before

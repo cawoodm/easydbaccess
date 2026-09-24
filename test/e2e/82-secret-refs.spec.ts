@@ -74,12 +74,12 @@ test('a value embedded in text is protected the same way', async ({ page }) => {
   await page.evaluate(async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ctx = (window as any).__easydb;
-    await ctx.api.settings.set('server-sync', 'url', 'https://s.dev/?k=${secret:tok}', 'workspace');
-    const seen = await ctx.api.settings.get('server-sync', 'url');
-    await ctx.api.settings.set('server-sync', 'url', seen, 'workspace');
+    await ctx.api.settings.set('example-sync', 'url', 'https://s.dev/?k=${secret:tok}', 'workspace');
+    const seen = await ctx.api.settings.get('example-sync', 'url');
+    await ctx.api.settings.set('example-sync', 'url', seen, 'workspace');
   });
 
-  expect(await rawWorkspace(page, 'server-sync:url')).toBe('https://s.dev/?k=${secret:tok}');
+  expect(await rawWorkspace(page, 'example-sync:url')).toBe('https://s.dev/?k=${secret:tok}');
 });
 
 test('an ordinary setting is untouched by the rule', async ({ page }) => {
@@ -88,9 +88,9 @@ test('an ordinary setting is untouched by the rule', async ({ page }) => {
   await page.evaluate(async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ctx = (window as any).__easydb;
-    await ctx.api.settings.set('server-sync', 'url', 'https://one.dev', 'workspace');
-    await ctx.api.settings.set('server-sync', 'url', 'https://two.dev', 'workspace');
+    await ctx.api.settings.set('example-sync', 'url', 'https://one.dev', 'workspace');
+    await ctx.api.settings.set('example-sync', 'url', 'https://two.dev', 'workspace');
   });
 
-  expect(await rawWorkspace(page, 'server-sync:url')).toBe('https://two.dev');
+  expect(await rawWorkspace(page, 'example-sync:url')).toBe('https://two.dev');
 });

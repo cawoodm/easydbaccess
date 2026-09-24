@@ -3,10 +3,9 @@ import { columnTypeFromSqlType, decodeValue, encodeValue, quoteIdent, sanitizeTa
 
 /**
  * Unit tests for the SQL-mapping helpers shared between
- * `packages/server/src/storage/sqlite-store.ts` and
- * `packages/electron/src/sqlite-store.ts`. Lives here (not in
- * `packages/shared`) because that package has no test runner configured —
- * see the 2026-07-31 electron-sqlite-storage plan.
+ * `packages/electron/src/sqlite-store.ts` and the browser's sqlite-wasm
+ * store. Lives here (not in `packages/shared`) because that package has no
+ * test runner configured — see the 2026-07-31 electron-sqlite-storage plan.
  */
 
 describe('quoteIdent', () => {

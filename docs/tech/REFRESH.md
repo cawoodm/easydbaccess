@@ -3,10 +3,10 @@
 How a table reloads from where it came from — what happens today, what it costs
 the user, and how it could work better.
 
-Refresh is not sync. [`SERVER.md`](./SERVER.md) and the gist/server-sync plugins
-move a whole workspace between devices. Refresh moves ONE table's rows in ONE
-direction: from the source it was made from, into the table. Nothing a refresh
-does ever travels back to the source.
+Refresh is not sync. [`SYNCH.md`](./SYNCH.md) covers moving a whole workspace
+between devices (Gist Sync or a local `.edb` merge). Refresh moves ONE table's
+rows in ONE direction: from the source it was made from, into the table.
+Nothing a refresh does ever travels back to the source.
 
 ## 1. The two kinds of table
 

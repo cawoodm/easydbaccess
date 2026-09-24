@@ -66,4 +66,4 @@ other semantics.
 ## Build
 
 `tsc -b` only. No bundler. Output goes to `dist/` and is consumed via the
-workspace `*` dependency from renderer / server / electron.
+workspace `*` dependency from renderer / electron.

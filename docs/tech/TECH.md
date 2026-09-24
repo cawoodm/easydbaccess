@@ -10,44 +10,43 @@ rationale on a specific feature see the dated notes in `.claude/plans/`.
 easyDBAccess is a **local-first, plugin-extensible, multi-table database
 app**. The same TypeScript renderer ships in two skins:
 
-- A **browser app** (Vite-served SPA) that stores everything in IndexedDB.
-- An **Electron desktop app** that swaps IndexedDB for an on-disk SQLite
-  file. (Embedding the sync server in the same process is designed but not
-  yet wired — see the runtime-shapes table below.)
+- A **browser app** (Vite-served SPA) that stores a workspace as a real
+  SQLite file (`.edb`) in the `opfs-sahpool` VFS via sqlite-wasm.
+- An **Electron desktop app** that stores the same format on disk through
+  the main-process `node:sqlite` store.
 
-A small companion **Hono server** handles things the browser sandbox cannot:
-multi-device sync, URL-based data ingestion (CORS-blocked APIs), and a
-plugin registry.
+There is no backend of our own. Multi-device sync goes through GitHub Gists
+(see [`SYNCH.md`](./SYNCH.md)); URL-based data ingestion is a direct browser
+fetch, subject to the target site's CORS headers.
 
 ## Tech stack at a glance
 
 | Layer | Tech |
 |---|---|
-| Language | TypeScript everywhere — renderer, server, Electron main, plugin host |
+| Language | TypeScript everywhere — renderer, Electron main, plugin host |
 | UI | [Lit](https://lit.dev/) web components (no virtual DOM, plugin-friendly) |
 | Renderer build | [Vite](https://vitejs.dev/) (dev server on port `5190`) |
-| Browser storage | IndexedDB via [Dexie](https://dexie.org/) — `liveQuery` reactivity and explicit versioned migrations. **Or** SQLite via [`@sqlite.org/sqlite-wasm`](https://sqlite.org/wasm) in a Web Worker, writing a real `.edb` file through the File System Access API, opt-in per workspace — see [`EDB.md`](./EDB.md) |
-| Desktop storage | The **same** store as above, bound to the built-in **`node:sqlite`** in the Electron main process — no native binding to rebuild per platform. The renderer reaches it over IPC; the workspace is a real `.db` file the user opens and saves, in the same format a browser writes. |
-| Backend | [Hono](https://hono.dev/) on `@hono/node-server`, ESM, Node ≥ 24 |
+| Browser storage | SQLite via [`@sqlite.org/sqlite-wasm`](https://sqlite.org/wasm) in a Web Worker, in the `opfs-sahpool` VFS, writing a real `.edb` file — see [`EDB.md`](./EDB.md) |
+| Desktop storage | The **same** store, bound to the built-in **`node:sqlite`** in the Electron main process — no native binding to rebuild per platform. The renderer reaches it over IPC; the workspace is a real `.db`/`.edb` file the user opens and saves, in the same format a browser writes. |
+| Multi-device sync | GitHub Gists (`gist-sync` plugin) — no backend of ours; see [`SYNCH.md`](./SYNCH.md) |
 | Desktop shell | Electron 43 with contextIsolation, sandbox, no nodeIntegration (43 is also what makes `node:sqlite` available unflagged) |
 | Windows | in-repo panel shell (`window-mgr/panel-shell/`) for draggable in-app panels |
 | Icons | `material-icons` |
-| Reactivity | Dexie `liveQuery` in the browser; a `store:changed` IPC broadcast under Electron |
+| Reactivity | A `changed` broadcast per collection in the browser worker; a `store:changed` IPC broadcast under Electron |
 | Testing | Vitest (unit) + Playwright (e2e) |
 | Tooling | npm workspaces, `tsc -b` project references, Prettier, ESLint |
 | Packaging | `electron-builder` (via PowerShell wrappers in repo root) |
 
 ## Repository layout
 
-The repo is an **npm-workspaces monorepo** with four packages plus example
+The repo is an **npm-workspaces monorepo** with three packages plus example
 plugins:
 
 ```
 easyDBAccess/
 ├── packages/
 │   ├── shared/      types, plugin-api contract, SQL mapping   (pure TS, zero deps)
-│   ├── renderer/    Lit chrome + Dexie + plugin host          (browser + Electron renderer)
-│   ├── server/      Hono app, sync routes, storage adapters   (standalone + in-process)
+│   ├── renderer/    Lit chrome + sqlite-wasm store + plugin host (browser + Electron renderer)
 │   └── electron/    desktop shell (BrowserWindow + preload) AND desktop
 │                    storage (node:sqlite store, .db file operations)
 ├── plugins-examples/  reference plugins loaded by URL
@@ -56,49 +55,44 @@ easyDBAccess/
 │   └── help/          user guide + screenshots
 ├── test/              every test suite
 │   ├── renderer/      Vitest units, mirroring packages/renderer/src/
-│   ├── server/        Vitest HTTP suites for the Hono app
+│   ├── electron/      Vitest units, mirroring packages/electron/src/
+│   ├── shared/        Vitest units, mirroring packages/shared/src/
 │   └── e2e/           Playwright specs + fixtures
 └── .claude/plans/     authoritative design docs
 ```
 
 Each package keeps its own `CLAUDE.md` with package-specific gotchas.
 
-## The three runtime shapes
+## The two runtime shapes
 
-The same renderer code runs in three deployment modes; only the storage
-adapter and sync target change.
+The same renderer code runs in two deployment modes; only the storage
+transport changes. Neither talks to a backend of ours — see "The sync
+model" below for how a workspace still moves between devices.
 
-| Mode | Renderer | Local storage | Backend | Sync target |
-|---|---|---|---|---|
-| **Browser** | Lit + Vite bundle | Dexie (IndexedDB), or `data-store-bridge.ts` over `postMessage` → a sqlite-wasm worker in a user-chosen `.edb` file **(landed)** | none locally | optional remote Hono |
-| **Electron** | Same Lit bundle in renderer process | `data-store-bridge.ts` over IPC → main-process `node:sqlite` store, in a user-chosen `.db` file **(landed)** | Hono in-process *(not wired yet)* | optional remote Hono |
-| **Hosted Hono** | n/a | filesystem (one JSON per workspace) or SQLite | Hono | central peer for multi-device |
-
-The **same** Hono code in [`packages/server`](../../packages/server) runs both
-inside Electron's main process and as a remote peer — `createServer({ store,
-fetchFn, ... })` is the single entry point, parameterized by a
-`StoreAdapter`.
+| Mode | Renderer | Local storage |
+|---|---|---|
+| **Browser** | Lit + Vite bundle | `data-store-bridge.ts` over `postMessage` → a sqlite-wasm worker, database in the `opfs-sahpool` VFS, in a user-chosen `.edb` file |
+| **Electron** | Same Lit bundle in renderer process | `data-store-bridge.ts` over IPC → main-process `node:sqlite` store, in a user-chosen `.db`/`.edb` file |
 
 ## Architecture diagram
 
 ```
-Browser                       Electron renderer        Electron main / Node server
-┌───────────────────────┐    ┌────────────────┐       ┌──────────────────────┐
-│ Lit chrome            │    │ Lit chrome     │       │ node:sqlite store    │
-│ Plugin runtime        │    │ Plugin runtime │       │  → a user-chosen .db │
-│ Plugins .js           │    │ Plugins .js    │       │ Hono server:         │
-│                       │    │                │       │  /sync (pull/push)   │
-│ Dexie (IndexedDB)     │    │ data-store-    │─IPC──→│  /fetch (URL proxy)  │
-│   or                  │    │ bridge.ts      │       │  /plugins/registry   │
-│ data-store-bridge.ts  │    └────────────────┘       └──────────────────────┘
-│   │ postMessage       │                                        ↑
-│   ▼                   │──────────────HTTP──────────────────────┘
+Browser                       Electron renderer + main
+┌───────────────────────┐    ┌────────────────┐    ┌──────────────────────┐
+│ Lit chrome            │    │ Lit chrome     │    │ node:sqlite store    │
+│ Plugin runtime        │    │ Plugin runtime │    │  → a user-chosen .db │
+│ Plugins .js           │    │ Plugins .js    │    │    (main process)    │
+│                       │    │                │    │                      │
+│ data-store-bridge.ts  │    │ data-store-    │IPC→│                      │
+│   │ postMessage       │    │ bridge.ts      │    │                      │
+│   ▼                   │    └────────────────┘    └──────────────────────┘
 │ sqlite-wasm worker    │
-│  → a user-saved .edb  │      (the Hono half does not run in Electron's main
-│  + an OPFS mirror     │       process yet — only the store does)
+│  → a user-saved .edb  │
+│  + an OPFS mirror     │
 └───────────────────────┘
-                              multi-device sync via HTTP to a hosted instance
-                              of the same Hono server.
+
+Multi-device sync is Gist Sync (GitHub) or settling two local .edb copies —
+neither goes through a server of ours. See SYNCH.md.
 ```
 
 `data-store-bridge.ts` appears twice on purpose. It is one `DataStore` over an
@@ -122,8 +116,8 @@ is the single source of truth for what plugins can do.
   - `ui` — slot registries for header/footer/table buttons, cell/row/table
     renderers, importers, exporters, drop handlers, URL sources.
   - `windows` — panel-shell-backed window manager.
-  - `backend.fetch` — URL proxy through the Hono server (escapes the CORS
-    cage when one is available).
+  - `backend.fetch` — a direct browser fetch, subject to the target site's
+    CORS headers (there is no proxy to escape that).
 - Plugins **may monkey-patch `api.*` methods** to override defaults — this
   is contractual, not a bug.
 - **Built-in features ARE plugins** (CSV import, default table renderer,
@@ -165,30 +159,21 @@ See [`STORAGE.md`](./STORAGE.md) for the full picture and
 
 ## The sync model
 
-The server stores **one JSON document per workspace** and does not inspect
-its shape — merge semantics live entirely in the client. Concurrency is
-managed by **ETag-based optimistic locking** (`If-Match` on PUT, `412` on
-conflict).
+There is no sync server. A workspace moves between devices two ways, both
+client-only — see [`SYNCH.md`](./SYNCH.md) for the full detail:
 
-| Route | Purpose |
-|---|---|
-| `GET /sync/:workspaceId` | Pull blob, returns `ETag` header |
-| `PUT /sync/:workspaceId` | Push blob, `If-Match` enforces concurrency |
-| `GET /sync/:workspaceId/stream` | SSE live-change notifications |
-| `POST /fetch` | URL proxy with allowlist + byte cap |
-| `GET /plugins/registry` | Stub for future curated plugin catalog |
-| `GET /health` | Liveness + version |
+- **Gist Sync** — the `gist-sync` plugin pushes/pulls a workspace (or one
+  table) to a private GitHub Gist, straight from the browser to GitHub's
+  REST API. Manual, whole-object, no merge — push or pull asks before it
+  would delete something the other side lacks.
+- **Local `.edb` sync** — settling two copies of the same workspace file
+  table by table and row by row, by comparing each row's `updatedAt`. See
+  [`EDB.md`](./EDB.md#settling-two-copies-table-by-table-and-row-by-row).
 
-Storage adapters implementing `StoreAdapter` swap freely:
-
-- `fs-store.ts` — one JSON file per workspace (default).
-- `sqlite-store.ts` — one SQLite DB per workspace, single-row blob table.
-
-A new backend (Postgres, S3, …) is a single `StoreAdapter` implementation,
-roughly 80 lines. See [`SYNCH.md`](./SYNCH.md) for the full protocol.
-
-Row-level replication with last-write-wins conflict resolution is still
-ahead (Phase 7); today `/sync` moves the whole workspace as one blob.
+Row-level replication with automatic conflict resolution across the network
+is not built — a `packages/server` Hono backend attempted a version of this
+(whole-workspace JSON blob, ETag concurrency) and was removed once Gist Sync
+covered the need with no backend to run.
 
 ## Build, dev, and packaging
 
@@ -197,17 +182,15 @@ All commands run from the repo root:
 | Command | Result |
 |---|---|
 | `npm run dev:renderer` | Vite dev server at `http://localhost:5190` |
-| `npm run dev:server` | `tsx watch` Hono server on `http://localhost:3000` |
 | `npm run dev:electron` | Boots Vite + Electron with live reload |
 | `npm run build` | Builds every workspace that has a `build` script |
 | `npm run typecheck` | `tsc -b` across all project references, then `test/tsconfig.json` |
 | `npm run test` | One Vitest run over `test/` |
-| `npm run test:e2e` | Playwright specs in `test/e2e/` — one Chromium project against the browser build. There is no Electron Playwright project; desktop-only code is covered by Vitest instead (see [`TESTING.md`](./TESTING.md)) |
+| `npm run test:e2e` | Playwright specs in `test/e2e/` — one Chromium project against the browser build. There is also a separate Electron Playwright config for `test/e2e/desktop/` (see [`TESTING.md`](./TESTING.md)) |
 | `npm run package:electron` | Produces an installer via `electron-builder` |
 
-Renderer is shipped via Vite; shared/server/electron compile with `tsc -b`
-project references; Electron is the only `commonjs` package (the rest are
-ESM).
+Renderer is shipped via Vite; shared/electron compile with `tsc -b` project
+references; Electron is the only `commonjs` package (the rest are ESM).
 
 ## Cross-cutting conventions
 
@@ -235,20 +218,21 @@ A handful of rules that touch every layer:
 
 ## Status
 
-Phases 1–6 are complete: skeleton, shared types, Dexie storage, the plugin
-host, the built-in plugin roster, the in-repo panel shell, and the standalone
-Hono server (`/sync`, `/fetch`, `/plugins/registry`). Phase 8's **storage**
-half is complete too — inside Electron the renderer runs on a main-process
-`node:sqlite` store and the workspace is a `.db` file the user opens and
-saves.
+Phases 1–6 are complete: skeleton, shared types, SQLite storage, the plugin
+host, the built-in plugin roster, and the in-repo panel shell. Storage is
+complete too — inside Electron the renderer runs on a main-process
+`node:sqlite` store and the workspace is a `.db`/`.edb` file the user opens
+and saves. A standalone Hono server existed for a time as an experiment in
+server-mediated sync and URL proxying, and was removed — Gist Sync and a
+direct `backend.fetch` cover those needs with no backend to run.
 
 Still ahead:
 
-- **Phase 7** — live multi-device replication beyond the whole-workspace blob.
-- **Phase 8, the rest** — Hono in the Electron main process, and routing
-  `api.backend.saveFile` through the native save dialog.
-- **Phase 9** — migration from v1 minniDBMax `localStorage`.
-- **Phase 10** — polish.
+- Live multi-device replication beyond Gist Sync's manual whole-object
+  push/pull.
+- Routing `api.backend.saveFile` through Electron's native save dialog.
+- Migration from v1 minniDBMax `localStorage`.
+- Polish.
 
 Progress lives in `TODO.md` at the repo root (untracked — it's a local
 working file, not part of the repo).

@@ -3,8 +3,8 @@
  *
  * The point of keeping a workspace in a real SQLite database is that it can be
  * queried like one. This is the type surface for that — shared, because the same
- * shape crosses three transports: the browser worker's postMessage protocol,
- * Electron's IPC, and (later) the Hono server.
+ * shape crosses two transports: the browser worker's postMessage protocol and
+ * Electron's IPC.
  *
  * **Read-only is the default, and it is enforced by SQLite, not by inspecting
  * the statement.** `PRAGMA query_only = ON` makes the connection reject every

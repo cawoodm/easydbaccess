@@ -69,9 +69,9 @@ no read path, so a v1 file does not open.
 
 `packages/shared/src/sql-mapping.ts` owns the type↔SQL mapping
 (`sanitizeTableName` / `quoteIdent` / `sqlAffinity` / `encodeValue` /
-`decodeValue` / `columnTypeFromSqlType`) and the server's `sqlite-store.ts`
-imports the same helpers — one convention, so a `.db` written by any of the
-three has the same shape.
+`decodeValue` / `columnTypeFromSqlType`) and the browser's sqlite-wasm store
+imports the same helpers — one convention, so a `.db` written by either side
+has the same shape.
 
 ## Dev vs prod
 
@@ -119,16 +119,6 @@ the bundler/transpiler chain mishandles the built-in otherwise. Electron 43
 
 ## What's intentionally not wired yet
 
-The remaining Phase 8 work-items:
-
-- **Hono in-process** — main process boots `createServer(...)` from
-  `@easydb/server` and mounts it on a localhost port, passing it a
-  `StoreAdapter` over the same SQLite file. `@easydb/server` is currently
-  **not** a dependency of this package (removed in v0.0.314 — it sat unused
-  and, as a `file:` dependency, was tripping electron-builder's
-  production-install step under npm workspaces; see "Packaging" below). Add
-  it back to `package.json` `dependencies` (and `../server/dist/**/*` to
-  `electron-builder.json`'s `files`) when this lands.
 - **Native saveFile** — `api.backend.saveFile` still uses a browser
   `<a download>`. The `.db` operations already use
   `dialog.showSaveDialog`; routing `saveFile` through it is the leftover.

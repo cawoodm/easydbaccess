@@ -53,8 +53,8 @@ export function init(api: HostApi): void {
   // footer button into its "Actions" group (`command-palette-dialog.ts`), so
   // also calling `registerCommand` would list the console twice — once as
   // "SQL", once under whatever the command was titled. Every other footer-button
-  // plugin (`edb-file`, `gist-sync`, `dump-export`, `server-sync`,
-  // `electron-db`) registers only the button for the same reason.
+  // plugin (`edb-file`, `gist-sync`, `dump-export`, `electron-db`) registers
+  // only the button for the same reason.
   //
   // The palette matches on label + tooltip, which is why the tooltip is worded
   // as a phrase somebody would actually type.

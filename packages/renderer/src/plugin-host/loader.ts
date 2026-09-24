@@ -13,7 +13,6 @@ import * as urlSource from '../plugins/url-source.js';
 import * as dumpExport from '../plugins/dump-export.js';
 import * as sqlExport from '../plugins/sql-export.js';
 import * as gistSync from '../plugins/gist-sync.js';
-import * as serverSync from '../plugins/server-sync.js';
 import * as newTableButton from '../plugins/new-table-button.js';
 import * as cellDate from '../plugins/cell-date.js';
 import * as cellDatetime from '../plugins/cell-datetime.js';
@@ -33,7 +32,6 @@ import * as runScripts from '../plugins/run-scripts.js';
 import * as tableCopy from '../plugins/table-copy.js';
 import * as sqlConsole from '../plugins/sql-console.js';
 import * as importData from '../plugins/import-data.js';
-import * as autoSync from '../plugins/auto-sync.js';
 import * as views from '../plugins/views.js';
 import * as settings from '../plugins/settings.js';
 import * as projection from '../plugins/projection.js';
@@ -86,7 +84,6 @@ const modules: PluginModule[] = [
   dumpExport,
   sqlExport,
   gistSync,
-  serverSync,
   cellDate,
   cellDatetime,
   dateFilter,
@@ -105,7 +102,6 @@ const modules: PluginModule[] = [
   tableCopy,
   sqlConsole,
   importData,
-  autoSync,
   views,
   projection,
   vizCharts,

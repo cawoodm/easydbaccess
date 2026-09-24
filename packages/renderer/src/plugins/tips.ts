@@ -25,8 +25,8 @@ const TIPS: Tip[] = tipsData.tips;
 
 /**
  * E2E specs boot the app on every test; a modal tip would intercept their very
- * first click. `?test=1` suppresses the tip the same way `auto-sync` suppresses
- * its timer — and `?tips=1` forces it back on for the spec that tests it.
+ * first click. `?test=1` suppresses the tip, and `?tips=1` forces it back on
+ * for the spec that tests it.
  */
 function suppressed(): boolean {
   if (typeof location === 'undefined') return true;

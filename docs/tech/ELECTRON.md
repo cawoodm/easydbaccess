@@ -2,19 +2,16 @@
 
 `packages/electron` is the desktop wrapper: a `BrowserWindow` loading the
 exact same renderer bundle the browser uses, **plus** the desktop storage
-layer. Inside Electron the renderer does not use Dexie/IndexedDB at all — it
-talks over IPC to a `node:sqlite` store in the main process, and the user can
-open, save and import `.db` files (see [`STORAGE.md`](./STORAGE.md)). An
-in-process sync server is still ahead. See
+layer. Inside Electron the renderer talks over IPC to a `node:sqlite` store
+in the main process, and the user can open, save and import `.db` files
+(see [`STORAGE.md`](./STORAGE.md)). There is no in-process sync server —
+multi-device sync goes through GitHub Gists (see
+[`SYNCH.md`](./SYNCH.md)). See
 [`packages/electron/CLAUDE.md`](../../packages/electron/CLAUDE.md) for the
 terse contributor-facing version, and the
 [storage design](../../.claude/plans/2026-07-31-electron-sqlite-storage.md)
 for why the file is laid out the way it is. The user-facing side of the `.db`
 operations is [`help/database-files.md`](../help/database-files.md).
-
-"Phase 8" throughout this doc refers to the original rewrite plan's numbering.
-That plan file is gone, but the numbering is still how the docs and `CLAUDE.md`
-talk about remaining scope.
 
 ## What's actually running today
 
@@ -152,8 +149,8 @@ Database footer button) registers nothing at all when the bridge is absent,
 which is how the browser build stays untouched.
 
 `packages/shared/src/sql-mapping.ts` holds the type↔SQL mapping used by
-**both** this store and the server's `sqlite-store.ts`, so a `.db` written by
-either has the same shape. Full layout and the three rules that must not be
+**both** this store and the browser's sqlite-wasm store, so a `.db`/`.edb`
+written by either has the same shape. Full layout and the three rules that must not be
 broken (`sql_table` assigned once, additive-only column reconciliation,
 `_extra` overflow) are in
 [`packages/electron/CLAUDE.md`](../../packages/electron/CLAUDE.md) and the
@@ -234,17 +231,14 @@ still runs as it does for a real user. The folder picker is
 ./package-electron.ps1 -Installer   # build + electron-builder installer
 ```
 
-Build order matters — shared and server are built first (Electron pulls
-both as workspace dependencies; `@easydb/shared` is imported for real, by
-`sqlite-store.ts` and `db-import.ts`, while `@easydb/server` is still only
-pre-staged), then the renderer is built via the
-Electron-specific `build:electron` script (→ `packages/electron/frontend/`,
-`base=./`), then `packages/electron` itself (`tsc`).
-[`electron-builder.json`](../../packages/electron/electron-builder.json)
-bundles `dist/**/*` (compiled main/preload), `frontend/**/*` (the renderer
-build), and `../server/dist/**/*` (again, pre-staged) into
-platform installers — NSIS on Windows, a `.dmg` on macOS, an AppImage on
-Linux — output to `packages/electron/dist-installer/`.
+Build order matters — shared is built first (Electron pulls it as a workspace
+dependency, imported for real by `sqlite-store.ts` and `db-import.ts`), then
+the renderer is built via the Electron-specific `build:electron` script
+(→ `packages/electron/frontend/`, `base=./`), then `packages/electron`
+itself (`tsc`). [`electron-builder.json`](../../packages/electron/electron-builder.json)
+bundles `dist/**/*` (compiled main/preload) and `frontend/**/*` (the renderer
+build) into platform installers — NSIS on Windows, a `.dmg` on macOS, an
+AppImage on Linux — output to `packages/electron/dist-installer/`.
 
 One documented friction point: `-Installer` runs `electron-builder`, which
 internally does `npm install --omit=dev` inside `packages/electron` to
@@ -256,15 +250,6 @@ workspace.
 
 ## What's deliberately not wired yet
 
-Two Phase 8 items remain. Each is a coordinated change across the renderer and
-this package, not a local patch:
-
-- **Hono in-process.** The main process will call `createServer(...)` from
-  `@easydb/server` (see [`SERVER.md`](./SERVER.md)) directly and mount it
-  on a localhost port, instead of the renderer talking to a separately
-  spawned Node process — the same exported `Hono` app, given a `StoreAdapter`
-  over the same SQLite file. `@easydb/server` is already a dependency and is
-  already pre-staged into the installer; nothing imports it yet.
 - **Native save dialog for exports.** `api.backend.saveFile` (see
   `PLUGINS.md`'s exporter plugins, all of which call it) still falls back to
   a browser `<a download>` even inside Electron. `dialog.showSaveDialog` is

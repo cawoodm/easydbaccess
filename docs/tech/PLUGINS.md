@@ -31,8 +31,8 @@ export function init(api: HostApi): void {
 
 - `init()` runs once at boot (or on hot-install from the Plugin Manager).
 - `load()` runs once the app shell is ready (`app:ready`) — used for anything
-  that should wait until the workspace/UI has settled (e.g. `auto-sync`'s
-  polling timer, `views`' template seeding).
+  that should wait until the workspace/UI has settled (e.g. `views`' template
+  seeding).
 - `meta.id` is the stable kebab-case key used everywhere a plugin is
   referenced by identity (the `builtin:<id>` disabled-state key, the
   catalog, the Plugin Manager list). `meta.type` is a single primary
@@ -72,12 +72,12 @@ Every plugin gets one `api` object. The pieces plugins actually touch:
 | `api.ui.registerConnector`                        | A live-backend CONNECT flow, listed by the Connect menu                                                                          | `datasette-connect`                                        |
 | `api.ui.registerSettings(pluginId, name, fields)` | Declares a settings tab (rendered by the Settings dialog)                                                                        | `gist-sync`'s `user`/`gist_id`/`gist_token` fields         |
 | `api.ui.openSettings()`                           | Opens the Settings dialog                                                                                                        | the `settings` built-in's header gear button               |
-| `api.settings`                                    | Layered settings accessor (`get`/`set`/`placement`) — user layer shadows workspace layer, resolves `${secret:name}` refs on read | `gist-sync`, `server-sync` reading their config            |
+| `api.settings`                                    | Layered settings accessor (`get`/`set`/`placement`) — user layer shadows workspace layer, resolves `${secret:name}` refs on read | `gist-sync` reading its config                              |
 | `api.ui.dialogs`                                  | Promise-based alert/confirm/prompt/choice/toast                                                                                  | used everywhere instead of `window.*`                      |
 | `api.store`                                       | The `DataStore` (tables, rows, settings, plugins, view templates/instances)                                                      | every plugin that persists data                            |
 | `api.registerRowSource`                           | Backs a table carrying a `source` descriptor with a non-local row collection                                                     | `datasette-connect`                                        |
 | `api.events`                                      | Typed pub/sub (`AppEvents`)                                                                                                      | `import:before`/`import:after`, `plugin:error`             |
-| `api.backend.fetch` / `saveFile`                  | CORS-aware fetch (proxied through the Hono server in browser mode) and a save-file abstraction                                   | `import-data`, `gist-sync`, all exporters                  |
+| `api.backend.fetch` / `saveFile`                  | A direct fetch (no proxy — depends on the target site's CORS headers) and a save-file abstraction                                | `import-data`, `gist-sync`, all exporters                  |
 | `api.windows`                                     | Open/list/find panel-shell-backed windows                                                                                        | the core window manager; plugins rarely call this directly |
 
 A `ButtonSpec.onClick(api, ctx?)` handler for a header/footer button
@@ -108,7 +108,6 @@ defaults to enabled but **can** be turned off by the user.
 | `dump-export`       | exporter      |       | The two buttons that open the export dialog, plus `serializeWorkspace` — the `.db.json` wire format the sync plugins share.                                                                                                                                                                                                                                                                                | `registerFooterButton`                                             |
 | `sql-export`        | exporter      |       | The `sql` format: `CREATE TABLE` + `INSERT` per table, a projection as the SELECT behind it.                                                                                                                                                                                                                                                                  | none (library only)                                                |
 | `gist-sync`         | sync          |       | Footer "Gist" menu button (Push/Pull/Settings/Share/View gist) plus a per-table "Gist" menu (push/pull/view just that table's file) that store the workspace as a private GitHub Gist. Credentials are Settings-dialog fields (`user`/`gist_id` workspace-scope, `gist_token` a user-scope secret).                                                                                                                                                              | `registerFooterButton`, `registerTableButton`, `registerSettings`  |
-| `server-sync`       | sync          |       | Footer "Sync" menu button (Push/Pull) against a configured easyDBAccess Hono server, with ETag-based conflict detection.                                                                                                                                                                                                                                                                                                                                         | `registerFooterButton`, `registerSettings`                         |
 | `cell-date`         | cell-renderer |       | `date` renderer: a native `<input type=date>` picker.                                                                                                                                                                                                                                                                                                                                                                                                            | `registerCellRenderer`                                             |
 | `cell-datetime`     | cell-renderer |       | `datetime` renderer: a native `<input type=datetime-local>` picker.                                                                                                                                                                                                                                                                                                                                                                                              | `registerCellRenderer`                                             |
 | `cell-boolean`      | cell-renderer |       | `boolean` renderer: a native checkbox.                                                                                                                                                                                                                                                                                                                                                                                                                           | `registerCellRenderer`                                             |
@@ -118,7 +117,6 @@ defaults to enabled but **can** be turned off by the user.
 | `cell-markdown`     | cell-renderer |       | `markdown` renderer for a column written in Markdown: one line of flattened plain text in the cell, the formatted value in the popup, clicking the text edits the source. Shares its cell with `preview` (`preview-cell.ts`) but never guesses the language.                                                                                                                                                                                                     | `registerCellRenderer`                                             |
 | `cell-link`         | cell-renderer |       | `link` renderer: detects a URL of ANY scheme (`file:///` included, script schemes refused), email addresses, and phone numbers per-value and renders the matching `<a>` (target `_blank`/`mailto:`/`tel:`), with a pencil to switch to raw-text edit mode.                                                                                                                                                                                                                                                            | `registerCellRenderer`                                             |
 | `import-data`       | importer      |       | Header "Import" button — a URL/file dialog with curated sample sources (Northwind JSON, a public CSV, Datasette examples) that runs `csv-import` and `json-import` through the import kernel and still routes Datasette to `datasette-import`; recognises a native `.db.json` dump and offers to restore the workspace instead of importing its tables; adds a per-table Refresh button for CSV/JSON snapshot origins.                                           | `registerHeaderButton`, `registerTableButton`                      |
-| `auto-sync`         | sync          |       | Background timer (1 min) that silently pushes local changes to the configured sync server and prompts to pull when the server has diverged. Shares its config with `server-sync` via `api.settings`.                                                                                                                                                                                                                                                             | `load()` (timer)                                                   |
 | `views`             | ui            |       | The View system: workspace-global HTML templates (header/row/footer with `$TOKEN` substitution) rendered read-only per table in their own windows, with auto-mapped tokens and an optional row limit; seeds a default "RSS Feed" template. Footer "Views" button opens the manager dialog; window lifecycle itself is core, not plugin, code.                                                                                                                    | `registerTableButton`, `load()` (template seeding)                 |
 | `validate`          | ui            |       | Footer ✓ button that checks every row against its columns' rules — `notnull`, `max`, `unique` and a `validate` script — and writes what it finds into a `<table> issues` table. Pages through the rows, reports progress, stops on Esc. Shares its rules with the columns editor's Save pre-flight (`table/validate-rules.ts`). | `registerTableButton` |
 | `viz-charts`        | ui            |       | Bar, column, line and pie visualizations, registered via `registerVisualization`. A chart is a `ViewTemplate` whose `kind` is `'viz'`; see [`VISUALIZATIONS.md`](./VISUALIZATIONS.md). Chart.js is lazily imported, so a user who never opens a chart downloads none of it.                                                                                                                                                                                                | `registerVisualization`                                            |
@@ -476,8 +474,7 @@ single-table file is not a workspace question, and offering "Replace entire
 workspace" for one was a trap that deleted every other table. A table carrying a live
 `source` (e.g. a Datasette connection) or snapshot `origin` in the dump is
 reconstructed with that backing intact rather than as a plain local table.
-Exports `parsedToTables`/`importJsonText` for reuse by `import-data` and
-`server-sync-core`.
+Exports `parsedToTables`/`importJsonText` for reuse by `import-data`.
 
 **A dump's rows may carry fields its own column list omits**, and the reader adds a
 column for each of them (`withUndeclaredFields`). A real case: `bible.db.json`
@@ -684,10 +681,9 @@ to nothing.
 
 Two buttons, and nothing else: the workspace footer's "Export" and each table
 footer's "Export", both of which now open the dialog. It keeps
-`serializeWorkspace` — the `{ tables: [...] }` `.db.json` shape that
-`server-sync`/`auto-sync` push over the Hono `/sync` route and `gist-sync` writes per
-table. That is a WIRE format with no options, which is why it did not move into
-`json-export` with the dialog's JSON.
+`serializeWorkspace` — the `{ tables: [...] }` `.db.json` shape `gist-sync`
+writes per table. That is a WIRE format with no options, which is why it did
+not move into `json-export` with the dialog's JSON.
 
 ### sql-export
 
@@ -770,29 +766,6 @@ serialized JSON exceeds 10 MB (slow) or GitHub's 100 MB-per-file limit
 continues past a single failing table, reporting which file failed rather
 than aborting the whole pull.
 
-### server-sync
-
-A single footer "Sync" menu button (Push / Pull) against a configured
-easyDBAccess Hono server's `/sync/:workspaceId` route — replacing the old
-separate "Sync ↑"/"Sync ↓" buttons — sharing its URL/ETag persistence
-helpers (`server-sync-core.ts`) with `auto-sync`. Its server URL is now a
-`registerSettings` field too. Push sends an `If-Match` ETag header; a `412`
-conflict (server changed since the last pull) prompts force-push-anyway vs.
-cancel-and-pull-first. Pull always confirms first, since it
-wholesale-replaces local tables with the server's copy.
-
-### auto-sync
-
-Optional background version of `server-sync`: on a 60-second timer
-(`load()`, skipped entirely under Playwright's `?test=1`, which drives
-`tick()` manually instead), it diffs the local workspace against the
-server's copy. If they match, nothing happens; if local is ahead (server
-still shows the ETag we last saw), it force-pushes silently; if the server
-has genuinely diverged, it prompts to pull once, then remembers the
-dismissed ETag so it won't re-prompt for the same remote state on every
-tick. Never toasts on transient errors — only `console.warn`s — since a
-minute-by-minute failure toast would be miserable.
-
 ## Settings
 
 ### settings
@@ -812,8 +785,8 @@ path" pattern `new-table-button` follows.
 
 Any other plugin participates in this system by calling
 `api.ui.registerSettings(pluginId, name, fields)` once in `init()` — see
-`gist-sync` and `server-sync` above for real examples — which gets it a tab
-in the dialog for free with no per-plugin UI code.
+`gist-sync` above for a real example — which gets it a tab in the dialog
+for free with no per-plugin UI code.
 
 ## Views
 

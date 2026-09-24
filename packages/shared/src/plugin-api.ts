@@ -193,8 +193,8 @@ export interface DataStore {
  * Context handed to a `RowCollectionProvider` when the store instantiates a
  * non-local collection for a sourced table. Deliberately free of DOM/UI
  * surface so providers stay storage-agnostic and unit-testable:
- *  - `backend.fetch` is the CORS-aware fetch (direct, or proxied through the
- *    Hono `/fetch` route when a sync server is configured).
+ *  - `backend.fetch` is a direct fetch. It depends on the target site's CORS
+ *    headers — there is no proxy to sidestep that.
  *  - `events` lets a provider emit `row:*` events on remote mutations.
  *  - `settings` exposes device-local settings (thresholds, connection refs)
  *    — never the workspace dump, so tokens stay off synced data.
@@ -957,12 +957,12 @@ export interface FetchOpts {
   method?: string;
   headers?: Record<string, string>;
   body?: string | ArrayBuffer;
-  /** Maximum response size in bytes; backend enforces a hard ceiling too. */
+  /** Maximum response size in bytes; the caller must enforce this itself. */
   maxBytes?: number;
 }
 
 export interface Backend {
-  /** URL fetch that works in both modes — proxied through Hono in the browser. */
+  /** A direct URL fetch. Subject to the target site's CORS headers — there is no proxy. */
   fetch(url: string, opts?: FetchOpts): Promise<Response>;
   /**
    * Save bytes/text to a file the user picks. Browser mode triggers a download;

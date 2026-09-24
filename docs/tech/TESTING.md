@@ -8,8 +8,8 @@ layer — Lit component *behavior* is covered by e2e, not by mounting
 components in jsdom.
 
 ```bash
-npm run test         # Vitest — test/renderer/ + test/server/ (694 tests)
-npm run test:e2e     # Playwright — the test/e2e/ suite (79 specs)
+npm run test         # Vitest — test/renderer/ + test/electron/ + test/shared/
+npm run test:e2e     # Playwright — the test/e2e/ suite
 npm run test:e2e:ui  # same, with Playwright's interactive UI
 npm run test:e2e:desktop  # Playwright — the real Electron app (test/e2e/desktop/)
 ```
@@ -22,16 +22,18 @@ covers:
 ```
 test/
 ├── renderer/   Vitest units, mirroring packages/renderer/src/
-├── server/     Vitest HTTP suites for the Hono app
+├── electron/   Vitest units, mirroring packages/electron/src/
+├── shared/     Vitest units, mirroring packages/shared/src/
 ├── e2e/        Playwright specs, helpers and fixtures
 │   └── desktop/  Playwright specs that launch Electron itself
 └── tsconfig.json
 ```
 
-`test/renderer/` and `test/server/` mirror the source tree of the package they
-cover, so `test/renderer/window-mgr/z-order.test.ts` covers
-`packages/renderer/src/window-mgr/z-order.ts`. Suites import the module under
-test by relative source path (`../../../packages/renderer/src/...`).
+`test/renderer/`, `test/electron/` and `test/shared/` mirror the source tree
+of the package they cover, so `test/renderer/window-mgr/z-order.test.ts`
+covers `packages/renderer/src/window-mgr/z-order.ts`. Suites import the
+module under test by relative source path
+(`../../../packages/renderer/src/...`).
 
 `npm run test` is a single `vitest run` driven by the root `vitest.config.ts`,
 which picks up `test/**/*.test.ts`. The Playwright specs are `.spec.ts`, so
@@ -75,25 +77,12 @@ merge resolves) can be pulled into a plain function next to it — that's
 the difference between something Vitest can check in milliseconds and
 something that only e2e can ever exercise.
 
-### `test/server` — real HTTP, real adapters, no mocks
-
-The root `vitest.config.ts` sets `pool: 'forks'` (SQLite's native bindings
-don't play well with Vitest's default worker-thread pool) and
-`EASYDB_LOG: 'quiet'` (so the request logger doesn't spam test output). Its
-two suites (`test/server/sync.e2e.test.ts`, `test/server/plugins.e2e.test.ts`) are
-E2E-style despite running under Vitest: each test boots the **real** `Hono`
-app via `@hono/node-server` on an ephemeral port (`port: 0`), against a
-**real** storage adapter pointed at a fresh `mkdtemp()` directory — both
-`fs` and `sqlite` adapters are exercised — and talks to it over actual
-`fetch()` calls, including reading a real SSE stream body for the
-`/sync/:id/stream` route. Nothing about `createServer`/`StoreAdapter` is
-mocked; see `SERVER.md` for what's actually being exercised here.
-
 ### `packages/electron` — the real store, real files, no Electron runtime
 
-`packages/electron/vitest.config.ts` sets `pool: 'forks'`, for the same
-reason the server's does: these suites open real SQLite databases through
-`node:sqlite`. What makes them possible at all is that the store is **pure
+The root `vitest.config.ts` sets `pool: 'forks'`: SQLite's native bindings
+don't play well with Vitest's default worker-thread pool, and `test/electron`
+opens real SQLite databases through `node:sqlite`. What makes them possible
+at all is that the store is **pure
 Node** — `sqlite-store.ts`, `db-import.ts` and `sql-mapping.ts` never import
 `electron`, so vitest exercises them directly with no BrowserWindow, no
 `app`, and no display. The pieces that genuinely need Electron (the OS file
@@ -112,8 +101,8 @@ the same file.
 | `sql-mapping.test.ts` | 23 | The shared mapping in `@easydb/shared`: `quoteIdent` escaping, `sanitizeTableName`, `sqlAffinity` per `ColumnType`, and `encodeValue`/`decodeValue` round-trips |
 
 That last suite covers `packages/shared/src/sql-mapping.ts`, which the
-**server's** `storage/sqlite-store.ts` imports too — so the one convention
-that keeps a `.db` written by either side identical has one set of tests.
+browser's sqlite-wasm store imports too — so the one convention that keeps
+a `.db`/`.edb` written by either side identical has one set of tests.
 
 ## `test/shared/` — the `.edb` store, on real SQLite
 
@@ -131,12 +120,12 @@ abstraction is leaking.
 
 ## End-to-end tests (Playwright) — the real app, driven two ways
 
-`test/e2e/` holds 79 numbered specs (`01-dialogs` through `71-projection-join-writeback`),
+`test/e2e/` holds numbered specs (`01-dialogs` through the current highest),
 covering dialogs, the data table, column editing, cell editing, filters,
-the window manager, import/export, auto-sync, SQL export, the backend
-`/fetch` proxy, the plugin registry, mobile UI, loading bars, Datasette
-import/connect, views, DB schema upgrades, and more — roughly one spec file
-per feature area, growing as features are added.
+the window manager, import/export, gist sync, SQL export, `backend.fetch`,
+the plugin catalog, mobile UI, loading bars, Datasette import/connect, views,
+DB schema upgrades, and more — roughly one spec file per feature area,
+growing as features are added.
 
 ### The desktop suite
 
@@ -144,7 +133,7 @@ per feature area, growing as features are added.
 a page: `_electron.launch` starts the real main process, which loads the built
 renderer over `file://`. It has its own config,
 `playwright.electron.config.ts` (`npm run test:e2e:desktop`), because the
-browser config boots two web servers this suite has no use for; and
+browser config boots the renderer dev server this suite has no use for; and
 `playwright.config.ts` sets `testIgnore: ['desktop/**']` so the browser project
 leaves it alone. The specs sit under `test/e2e/` all the same, so the lint and
 typecheck exclusions for Playwright specs cover them, and `helpers.ts` is one
@@ -171,23 +160,13 @@ for the `?test=1` hook. Native dialogs cannot be clicked, so the specs replace
 
 **Isolation.** `playwright.config.ts` runs a single Chromium project,
 `workers: 1`, `fullyParallel: false` — deliberately serial, not parallelized
-across workers. Two dev servers are booted for the run: the renderer
-(`npm run dev:renderer`) and a **throwaway** backend server
-(`npm run dev:server`) pointed at `STORAGE_PATH=.playwright-storage` with `fs`
-storage and a fixture-backed `PLUGINS_REGISTRY_PATH`, purely so the
-sync/auto-sync/plugins-registry specs have a real backend to talk to.
+across workers. One dev server is booted for the run: the renderer
+(`npm run dev:renderer`).
 
-**Neither port is hardcoded.** Both come from `scripts/dev-port.mjs`, keyed on
-the current git branch — `resolveDevPort()` for the renderer (main 5190) and
-`resolveServerPort()` for the backing server (renderer port + 1000, so main
-6190). Specs that need the backend import `SERVER_URL` from
-`test/e2e/server-url.ts`, which calls the same resolver, so the config and the
-specs can't disagree. This is what lets two worktrees run `npm run test:e2e`
-at the same time: with one shared server port, whichever run started first
-owned it, and the other run's auto-sync / backend-proxy / plugins-registry
-specs failed on CORS — the running server's `CORS_ORIGINS` named only the
-first run's renderer origin. Pin both with `RENDERER_PORT` /
-`EASYDB_SERVER_PORT` if you need a specific pair.
+**The port is not hardcoded.** It comes from `scripts/dev-port.mjs`, keyed on
+the current git branch — `resolveDevPort()` (main 5190). This is what lets
+two worktrees run `npm run test:e2e` at the same time without colliding on
+one port. Pin it with `RENDERER_PORT` if you need a specific one.
 
 **Per-test isolation without wiping the whole database.** The `app` page
 fixture (`test/e2e/fixtures.ts`) gives every test a unique `workspaceId`
@@ -199,10 +178,7 @@ inside one workspace; each test effectively starts from a blank slate.
 **Driving the app two ways.** Every test navigates to
 `/?test=1&space=<workspaceId>` — the `?test=1` flag is read once, in
 `packages/renderer/src/main.ts`, and (only then) exposes the live
-`AppContext` as `window.__easydb`, plus a `window.__autoSyncTick()` escape
-hatch so the auto-sync spec can fire one sync cycle on demand instead of
-waiting out the real 60-second interval. Tests then choose per-assertion
-whether to:
+`AppContext` as `window.__easydb`. Tests then choose per-assertion whether to:
 
 - **drive real UI** — click buttons, type into inputs, drag column headers —
   for anything the test is actually about (the whole point of e2e), or
@@ -228,9 +204,6 @@ rendering section). A test that wants to type into a cell needs to pass
 
 - **Extracted a pure function out of DOM/store glue?** Add a `.test.ts`
   next to it and run it under Vitest — fast, isolated, no browser.
-- **Added a server route or storage adapter behavior?** Add it to
-  `packages/server/test/*.e2e.test.ts` — boot the real app, hit it over
-  real HTTP, don't mock `StoreAdapter`.
 - **Changed the desktop store, `.db` import, or the SQL mapping?** Add it to
   `test/electron/*.test.ts` against a `mkdtempSync` temp file — no Electron
   runtime needed, because none of those modules import `electron`. Keep it that

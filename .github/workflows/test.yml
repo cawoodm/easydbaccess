@@ -14,9 +14,9 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          # Server's sqlite-store uses node:sqlite, which is a built-in from
-          # Node 22.5+. .nvmrc + package.json engines pin the floor; keep this
-          # in sync with both.
+          # test/electron uses node:sqlite directly under plain Node (not
+          # through Electron), and it needs it unflagged. .nvmrc + package.json
+          # engines pin the floor; keep this in sync with both.
           node-version-file: '.nvmrc'
           cache: npm
 
@@ -28,7 +28,7 @@ jobs:
       - name: Build shared (workspace consumers depend on its dist)
         run: npm run build --workspace @easydb/shared
 
-      - name: Unit + server tests
+      - name: Unit tests
         run: npm test
 
       - name: Install Playwright browsers

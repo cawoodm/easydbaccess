@@ -2,19 +2,18 @@
 
 # ---------- Stage 1: build ----------
 # The web client is packages/renderer only — it runs standalone against
-# Dexie/IndexedDB and doesn't need the Hono server or Electron at runtime.
+# sqlite-wasm/OPFS and doesn't need Electron at runtime.
 # @easydb/renderer depends on @easydb/shared (workspace `*` dep), so shared
 # must be compiled to dist/ before the renderer build can resolve it.
 FROM node:24-alpine AS builder
 WORKDIR /app
 
 # Dependency layer: package.json files only, so this caches across source
-# changes. All four packages/* manifests are needed because npm workspaces
+# changes. All three packages/* manifests are needed because npm workspaces
 # resolves the whole workspace graph even though we only build two of them.
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json ./packages/shared/package.json
 COPY packages/renderer/package.json ./packages/renderer/package.json
-COPY packages/server/package.json ./packages/server/package.json
 COPY packages/electron/package.json ./packages/electron/package.json
 
 # --ignore-scripts is load-bearing: without it, npm ci would trigger

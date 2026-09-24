@@ -6,51 +6,49 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 easyDBAccess is a greenfield rewrite of [`minniDBMax`](C:\projects\Marc\minniDBMax) —
 a local-first, plugin-extensible, multi-table database app that runs both as a
-browser app and as an Electron desktop app, with a small loosely-coupled Node
-backend for multi-device sync and URL-based data ingestion.
+browser app and as an Electron desktop app. There is no backend of our own:
+multi-device sync goes through GitHub Gists (see `docs/tech/SYNCH.md`) and URL
+ingestion is a direct browser fetch, subject to the target site's CORS headers.
 
 The canonical design lived at `.claude/plans/2026-05-21-rewrite-architecture.md`.
 That file no longer exists; the dated per-feature notes still in
 `.claude/plans/` are what survives of it, and they remain more authoritative
 than this file for the _why_ behind anything they cover. Read the relevant one
 before making structural changes. Phases 1–6 are landed (skeleton +
-shared types + SQLite + plugin host + built-in plugins + jsPanel windows +
-standalone Hono server with `/sync`, `/fetch`, `/plugins/registry`). Phase 8's
-storage half is landed too: inside Electron the renderer talks to a
-main-process SQLite store over IPC (`node:sqlite`, not `better-sqlite3`) and
-the user can open / save / import `.db` files. Phase 7 (live multi-device
-replication beyond whole-workspace blob push/pull), the rest of Phase 8
-(Hono in-process, native save dialog), Phase 9 (migration from v1
-localStorage), and Phase 10 (polish) are ahead.
+shared types + SQLite + plugin host + built-in plugins + jsPanel windows).
+Storage is landed too: inside Electron the renderer talks to a main-process
+SQLite store over IPC (`node:sqlite`, not `better-sqlite3`) and the user can
+open / save / import `.db` files. A standalone Hono server (`/sync`, `/fetch`,
+`/plugins/registry`) existed for a time as an experiment in server-mediated
+sync and URL proxying, and was removed — Gist Sync and direct fetch cover
+those needs with no backend to run. Electron native saveFile / openFile and
+migration from v1 minniDBMax localStorage are ahead.
 
 ## Commands
 
 All scripts run from the repo root (`npm` workspaces). Node ≥24 required
-(`engines.node`); the server's `process.loadEnvFile` and Electron 43 expect it.
-Electron 43 is also what makes `node:sqlite` available unflagged in the main
-process — the Electron storage layer depends on it.
+(`engines.node`): `test/electron` runs `node:sqlite` directly under plain
+Node (not through Electron), and it needs it unflagged; Electron 43's bundled
+Node is also 24, which is what makes `node:sqlite` available unflagged in the
+main process — the Electron storage layer depends on it.
 
-| Command                    | What it does                                                                                                                                                                                  |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm install`              | Install all workspace dependencies.                                                                                                                                                           |
-| `npm run dev:renderer`     | Vite dev server at **`http://localhost:5190`** (port chosen to avoid clashing with the legacy `minniDBMax` on `:5173`).                                                                       |
-| `npm run dev:server`       | `tsx watch` for the Hono server (`packages/server/src/standalone.ts`), defaults to port 3000.                                                                                                 |
-| `npm run dev:electron`     | Vite + Electron with live reload (`scripts/dev.cjs` boots renderer first, then launches Electron pointed at it).                                                                              |
-| `npm run build`            | Build every workspace that defines a `build` script.                                                                                                                                          |
-| `npm run typecheck`        | `tsc -b` across all project references, then `test/tsconfig.json` for the suites. Run this before claiming work is done.                                                                      |
-| `npm run lint`             | ESLint over `packages/` and `test/` (`test/e2e/` is ignored — see `eslint.config.mjs`).                                                                                                       |
-| `npm run test`             | One Vitest run over `test/renderer/` + `test/server/` (the server suites are e2e-style HTTP tests).                                                                                           |
-| `npm run test:e2e`         | Playwright suite under `test/e2e/` (79 specs covering dialogs, table, columns editor, cells, import/export, filters, window manager, auto-sync, sql-export, backend proxy, plugins registry). |
-| `npm run test:e2e:ui`      | Same, with Playwright's interactive UI.                                                                                                                                                       |
-| `npm run test:e2e:desktop` | Playwright against the **real Electron app** (`test/e2e/desktop/`, own config). Builds the renderer and main process first. Covers boot, the file it writes, restart, Save As, Import.        |
-| `npm run format`           | Prettier across `packages/` and `test/`.                                                                                                                                                      |
-| `npm run package:electron` | `package-electron.ps1 -Installer` — builds renderer + electron, runs `electron-builder` for the Windows installer.                                                                            |
-| `npm run docker`           | Builds the **working tree** into `easydbaccess:<version>` + `:latest` and runs it detached on **`http://localhost:8190/`** (nginx serving the renderer's `dist`).                              |
-| `npm run docker:main`      | Same, but from a clean `git archive` of `main`, so local edits can't leak into the image. A separate script because npm eats `-Main` if you pass it to `npm run docker`.                       |
-| `npm run publish`          | `publish.ps1` — release script. Only needed for **branch previews** now; `main` publishes itself (see below).                                                                                 |
-
-The `dev` script chains renderer + server with `&`; on Windows prefer running
-`dev:renderer` and `dev:server` in separate terminals.
+| Command                    | What it does                                                                                                                                                                           |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm install`              | Install all workspace dependencies.                                                                                                                                                    |
+| `npm run dev:renderer`     | Vite dev server at **`http://localhost:5190`** (port chosen to avoid clashing with the legacy `minniDBMax` on `:5173`).                                                                |
+| `npm run dev:electron`     | Vite + Electron with live reload (`scripts/dev.cjs` boots renderer first, then launches Electron pointed at it).                                                                       |
+| `npm run build`            | Build every workspace that defines a `build` script.                                                                                                                                   |
+| `npm run typecheck`        | `tsc -b` across all project references, then `test/tsconfig.json` for the suites. Run this before claiming work is done.                                                               |
+| `npm run lint`             | ESLint over `packages/` and `test/` (`test/e2e/` is ignored — see `eslint.config.mjs`).                                                                                                |
+| `npm run test`             | One Vitest run over `test/renderer/` + `test/electron/` + `test/shared/`.                                                                                                              |
+| `npm run test:e2e`         | Playwright suite under `test/e2e/` covering dialogs, table, columns editor, cells, import/export, filters, window manager, sql-export, backend fetch, plugins.                         |
+| `npm run test:e2e:ui`      | Same, with Playwright's interactive UI.                                                                                                                                                |
+| `npm run test:e2e:desktop` | Playwright against the **real Electron app** (`test/e2e/desktop/`, own config). Builds the renderer and main process first. Covers boot, the file it writes, restart, Save As, Import. |
+| `npm run format`           | Prettier across `packages/` and `test/`.                                                                                                                                               |
+| `npm run package:electron` | `package-electron.ps1 -Installer` — builds renderer + electron, runs `electron-builder` for the Windows installer.                                                                     |
+| `npm run docker`           | Builds the **working tree** into `easydbaccess:<version>` + `:latest` and runs it detached on **`http://localhost:8190/`** (nginx serving the renderer's `dist`).                       |
+| `npm run docker:main`      | Same, but from a clean `git archive` of `main`, so local edits can't leak into the image. A separate script because npm eats `-Main` if you pass it to `npm run docker`.                |
+| `npm run publish`          | `publish.ps1` — release script. Only needed for **branch previews** now; `main` publishes itself (see below).                                                                          |
 
 ## Publishing
 
@@ -92,20 +90,15 @@ scripts read the version from `package.json`.
 
 ## Architecture in one paragraph
 
-Three logical pieces:
+Two logical pieces:
 
 1. **`packages/renderer`** — Lit web components for the chrome. Identical code
    runs in the browser (Vite-served) and inside the Electron renderer. Both talk
    to SQLite through one `DataStore` implementation: in the browser, sqlite-wasm
    in a worker with the database in the `opfs-sahpool` VFS; in Electron, the
-   main-process `node:sqlite` store over IPC. Sync goes over HTTP to the server.
-2. **`packages/server`** — A Hono app exposed by `createServer({ store, fetchFn, ... })`.
-   The _same_ exported app is designed to run inside Electron's main process
-   **and** as a remote peer (`packages/server/src/standalone.ts`). Routes:
-   `/health`, `/sync` (whole-workspace JSON blob push/pull with ETag), `/sync/:workspaceId/stream`
-   (SSE), `/fetch` (URL proxy with allowlist + size cap), `/plugins/registry`
-   (operator-curated catalog file).
-3. **`packages/electron`** — Shell that loads the renderer (Vite in dev, built
+   main-process `node:sqlite` store over IPC. Multi-device sync goes through
+   GitHub Gists, not a backend of ours — see `docs/tech/SYNCH.md`.
+2. **`packages/electron`** — Shell that loads the renderer (Vite in dev, built
    `frontend/index.html` in prod) **and** owns the desktop storage: a
    `node:sqlite` store (`src/sqlite-store.ts`) that keeps user tables as real
    SQL tables, file operations for Open / Save As / Import (`src/db-files.ts`,
@@ -185,13 +178,13 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
   contractual, not a bug. The host does not police it.
 - **Built-in features ARE plugins.** The full built-in roster (`plugin-host/loader.ts`)
   is currently: `new-table-button`, `csv-import`, `json-import`, `sql-import`,
-  `csv-export`, `dump-export`, `sql-export`, `gist-sync`, `server-sync`,
+  `csv-export`, `dump-export`, `sql-export`, `gist-sync`,
   `cell-color`, `cell-image`, `cell-link`, `cell-date`, `cell-datetime`,
   `cell-boolean`, `cell-tags`, `auto-renderer`, `preview`, `html-render`, `cell-markdown`,
   `delete-table`,
   `table-copy`,
   `sql-console`,
-  `import-data`, `auto-sync`, `views`, `settings`, `url-source`,
+  `import-data`, `views`, `settings`, `url-source`,
   `datasette-import` (+ `datasette-views`), `datasette-connect`, `connect-menu`,
   `projection`, `command-palette-button`, `electron-db` (+ `electron-folder`), `sqlitefile-source`,
   `tips`, `new-plugins`, `commandlets`, `edit-record`, `edb-file`, `legacy-import`, `validate`, `run-scripts`,
@@ -267,7 +260,7 @@ These have already bitten this codebase. Don't re-litigate them.
   clash with native class fields. The renderer's `tsconfig.json` sets
   `useDefineForClassFields: false` and `experimentalDecorators: true`. Do
   **not** change this without rewriting all Lit components to use the
-  `declare` keyword. The shared/server/electron packages keep TS defaults.
+  `declare` keyword. The shared/electron packages keep TS defaults.
 - **Lit override modifiers:** `tsconfig.base.json` sets `noImplicitOverride`.
   `connectedCallback`, `disconnectedCallback`, `updated`, `render`, and
   `static styles` all need `override` (or `static override`).
@@ -300,14 +293,12 @@ These have already bitten this codebase. Don't re-litigate them.
 
 Don't "fix" these without checking the plan section first:
 
-- **Hono in the Electron main process** — Phase 8's other half. `main.ts` boots
-  the storage IPC but does not mount `@easydb/server`, even though the package
-  is already a dependency. (Storage itself IS wired — see the DataStore
-  section.)
-- **Live multi-device replication beyond the JSON-blob `/sync` route** —
-  Phase 7. The current `server-sync` plugin and `/sync/:workspaceId` route
-  push/pull the entire workspace as one document with ETag concurrency. SSE
-  notifies of remote changes; full row-level replication is not yet wired.
+- **Live multi-device replication.** A workspace syncs through Gist Sync
+  (whole-workspace or per-table, manual push/pull, no merge — see
+  `docs/tech/SYNCH.md`) or by settling two local `.edb` copies table by table
+  and row by row (`docs/tech/EDB.md`). There is no background poller and no
+  server-mediated row-level replication; a `packages/server` Hono backend
+  attempted the latter and was removed.
 - **Electron native saveFile / openFile** — the `backend.saveFile` plugin
   surface exists, but in Electron it still uses the browser `<a download>`
   fallback. `dialog.showSaveDialog` is already used for the `.db` file
@@ -333,8 +324,8 @@ with no migration and no read path. See `docs/tech/EDB.md`.
 
 ## Every test lives in root `test/`
 
-No test file sits next to the code it covers. `test/renderer/` and
-`test/server/` mirror the source tree of their package, so a new test for
+No test file sits next to the code it covers. `test/renderer/`, `test/electron/`
+and `test/shared/` mirror the source tree of their package, so a new test for
 `packages/renderer/src/util/ids.ts` goes to `test/renderer/util/ids.test.ts`
 and imports the module by relative source path
 (`../../../packages/renderer/src/util/ids.js`). Playwright specs go in
@@ -361,15 +352,6 @@ for any branch not listed above), and both `packages/renderer/vite.config.ts`
 dev:renderer` and `npm run test:e2e` always agree on one port per branch and
 never silently drift onto a neighboring branch's port. Override for a one-off
 with `RENDERER_PORT=<n>`.
-
-The **e2e backing Hono server** gets a per-branch port the same way, from
-`resolveServerPort()` in that file: the renderer port **+ 1000** (main 6190,
-todos1 6191, todos2 6192). `playwright.config.ts` starts the server on it and
-`test/e2e/server-url.ts` hands the matching URL to the specs, so two worktrees can
-run `npm run test:e2e` simultaneously — with a single shared port, the first
-server to start locked the others out of the auto-sync / backend-proxy /
-plugins-registry specs, because its `CORS_ORIGINS` only named its own
-renderer origin. Override with `EASYDB_SERVER_PORT=<n>`.
 
 ## Pull request descriptions
 

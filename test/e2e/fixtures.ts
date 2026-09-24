@@ -16,10 +16,8 @@ export interface AppFixture {
 
 export const test = base.extend<AppFixture>({
   workspaceId: async ({}, use, testInfo) => {
-    // Per-test-invocation random suffix so server-side state (the Hono
-    // backend stores one blob per workspaceId at .playwright-storage/) is
-    // always fresh — without it, a rerun would see the previous run's blob
-    // and the "seeds via PUT when server is empty" assertion would fail.
+    // Per-test-invocation random suffix so a rerun never sees a previous
+    // run's leftover local state for the same workspace id.
     const nonce = Math.random().toString(36).slice(2, 8);
     await use(`e2e-${testInfo.testId}-${nonce}`.replace(/[^a-z0-9_-]/gi, '-'));
   },

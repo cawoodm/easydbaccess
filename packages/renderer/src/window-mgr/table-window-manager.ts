@@ -199,7 +199,7 @@ export async function initWindowManager(): Promise<void> {
     for (const t of toOpen) openPanel(t, ctx);
   });
 
-  // A bulk pull (gist / server-sync) inserts tables one at a time, so the
+  // A bulk pull (gist sync) inserts tables one at a time, so the
   // reactive `subscribe` above opens each panel in insertion order, not saved-z
   // order (liveQuery fires per write, defeating its sort) — and the same is
   // true across kinds at plain boot (tables always open before views; see
