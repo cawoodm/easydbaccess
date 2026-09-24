@@ -467,6 +467,21 @@ describe('queryRows', () => {
   it('is an empty page for a table that does not exist, not a throw', () => {
     expect(store.queryRows('nope')).toEqual({ rows: [], total: 0 });
   });
+
+  /**
+   * The backlog bug, end-to-end through the real `qty REAL` column: `=180`
+   * used to compare the REAL 180's text rendering ("180.0") against the raw
+   * term "180" and lose, and a bare `180` used to substring-match `1800`.
+   * `page.partial` must stay falsy — the fix is exact SQL, not a re-filter.
+   */
+  it('=180 and a bare 180 find only the row holding 180, not 1800', () => {
+    store.bulkInsert('rows', [row('r10', { name: 'ten', qty: 180 }), row('r11', { name: 'eleven', qty: 1800 })]);
+    for (const filter of ['=180', '180']) {
+      const page = store.queryRows('t1', { filters: { qty: filter } });
+      expect(page.rows.map((r) => r.data.name)).toEqual(['ten']);
+      expect(page.partial).toBeFalsy();
+    }
+  });
 });
 
 describe('distinctValues', () => {

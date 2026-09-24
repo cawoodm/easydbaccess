@@ -208,6 +208,19 @@ A list with no members also SHOWS as an empty cell (pink, no tooltip) instead of
 as the text it is stored in: `[]` is how an absent list arrives from most exports,
 and two brackets read as content where there is none.
 
+**A `number` column's equality is numeric, not text.** `=180` and a bare `180`
+both match a cell holding `180`, `180.0`, `"180.00"`, `" 180 "` or `1.8e2` — every
+spelling an import or a REAL-affinity SQLite column can leave behind for the
+same value. A bare term on a `number` column always means EQUALS and never
+substring, so `180` does not match `1800`; the `defaultSubstring` setting does
+not apply there (see its description in the Settings plugin). A term that is
+not a valid number (dirt left by a bad import, like `abc`) falls back to plain
+text matching, so it is still findable. `compare-cell.ts`'s `compareKey` is the
+one place this parsing lives, reused by both the `=`/bare-term equality and the
+`>=`/`<=`/`>`/`<` comparisons, so they can never disagree about what a term
+means; `filter-sql.ts` renders equality through the same `numberExpr` SQL
+expression the comparisons use, for the same reason.
+
 **A hidden column's filter needs a second way out.** `Table.filters` is keyed by
 FIELD and survives the column being hidden, but the funnel that would clear it
 lives in the header — which a hidden column does not have. The grid then narrows

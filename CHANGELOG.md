@@ -4,6 +4,7 @@
 
 ### Bugs
 
+- 🪲 Filtering a number column by `=180` found nothing, and a plain `180` also matched 1800 and 180.5 (v0.0.495)
 - 🪲 A template's filter pills and the view header's chips were three hand-kept copies of one control, free to drift apart (v0.0.494)
 
 ## 23 Sep 2026

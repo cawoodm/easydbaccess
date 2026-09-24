@@ -8,7 +8,8 @@
 // a number, and both readings are right for some column. `column-filter.ts`
 // owns the grammar; this file owns what the grammar's comparison MEANS.
 //
-// Type-aware keys arrive in the next task. Today every type compares as
+// `compareKey` is type-aware: `number` compares numerically, `date`/`datetime`
+// compare as normalised ISO text, and every other type falls back to
 // lowercased text, which is what the grammar did before comparisons existed.
 
 import type { FilterCmp } from './column-filter.js';

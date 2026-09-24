@@ -40,19 +40,26 @@
 // Per-token semantics (case-insensitive):
 //   • plain text        → the `defaultSubstring` option decides: substring by
 //     default, exact when the user has turned that setting off. Every other
-//     form below says which it wants and ignores the setting.
+//     form below says which it wants and ignores the setting. On a `number`
+//     column a bare term ALWAYS means equals, and compares numerically — see
+//     the `=text` bullet below, which it shares its reading with.
 //   • `*text*`          → CONTAINS, said explicitly.
 //   • `text*` / `^text` → starts-with, anchored at the first character.
 //   • `*text`           → ends-with.
 //   • `"text"`          → exact, when it is one entry of a LIST. The whole
 //     input in quotes is not a list at all — see `isListExpression`.
-//   • `=text`           → exact match against the WHOLE cell (not trimmed).
+//   • `=text`           → exact match against the WHOLE cell (not trimmed). On
+//     a `number` column this compares NUMERICALLY (`compare-cell.ts`'s
+//     `compareKey`), so `=180` matches `180`, `180.0` and `" 180 "` alike — a
+//     `number` cell has many text spellings of the same value, and string
+//     equality answers a different question than the user asked. Falls back
+//     to text equality when the term itself is not a valid number.
 //   • `>=text` `<=text`
-//     `>text` `<text`   → ORDER comparison. Lexicographic text order when no
-//     column type is given (`compare-cell.ts` — type-aware comparison is a
-//     later addition). False for an empty cell — a comparison against nothing
-//     is not an order relation — so `!>=x` passes an empty cell the same way
-//     every other negated test does.
+//     `>text` `<text`   → ORDER comparison, type-aware per `compare-cell.ts`:
+//     numeric for a `number` column, calendar/instant for `date`/`datetime`,
+//     lexicographic text otherwise. False for an empty cell — a comparison
+//     against nothing is not an order relation — so `!>=x` passes an empty
+//     cell the same way every other negated test does.
 //   • `!text`           → NOT. Because a null or empty cell never contains a
 //     non-empty term, `!true` on a boolean column also surfaces the empty rows.
 //   • `NULL`            → cell is null/undefined or (after trim) empty.
@@ -76,8 +83,10 @@
 // One limitation worth knowing: a BARE token whose term needs quoting (it holds
 // a comma, or starts with `!`/`^`/`=`/`*`) cannot survive
 // `compose → parse`, because the quotes it gains come back meaning `exact`.
-// Give such a token an explicit anchor — every composer in the app already
-// does, the funnel and the view pills both emitting `=`.
+// Give such a token an explicit anchor — the view pills already emit `=`. The
+// grid funnel does not (`filter-popover.ts`, `data-table.ts`); it composes a
+// BARE term, which is why a number column's bare-term-means-equals rule
+// matters at the language level and not just for the `=` anchor.
 //
 // `NULL` is matched as a whole token (case-insensitive), so a plain search for
 // the literal text "null" inside a cell is intentionally not reachable — the
@@ -95,7 +104,7 @@
 // member matches", and `NULL` as "no members at all".
 
 import { arrayMembers } from './array-cell.js';
-import { satisfiesCmp } from './compare-cell.js';
+import { compareKey, satisfiesCmp } from './compare-cell.js';
 
 /** The four order comparisons. `>=2026-06-23`, `<100`. */
 export type FilterCmp = '>' | '>=' | '<' | '<=';
@@ -490,6 +499,26 @@ function matchesTerm(value: unknown, token: FilterToken, members: string[] | nul
   if (term.trim() === '') return isEmptyCell(value, members);
   if (!token.prefix && !token.exact && !token.suffix && !token.contains && term.toUpperCase() === 'NULL') {
     return isEmptyCell(value, members);
+  }
+  // Equality on a NUMBER column compares NUMERICALLY, through the same
+  // `compareKey` reading `satisfiesCmp` uses above, so `=180`/`>=180` can never
+  // disagree about what "180" is. A `number` cell has many text spellings of
+  // the same value ("180", "180.0", " 180 ") — string equality was answering a
+  // different question than the user asked. A BARE term (no anchor at all)
+  // also means equals here, never substring, regardless of `defaultSubstring`
+  // — "No operator means =" — which only applies to `=` and to a bare term,
+  // not to `^`/`*` anchors, so those still read as text.
+  //
+  // Falls back to ordinary text matching when the term itself is not a valid
+  // number: a `number` column can hold dirt after an import, and `abc` typed
+  // into its funnel should still find a cell containing "abc" rather than
+  // silently matching nothing.
+  if (type === 'number' && !token.prefix && !token.suffix && !token.contains) {
+    const termKey = compareKey(term, 'number');
+    if (termKey !== null) {
+      if (members) return members.some((m) => compareKey(m, 'number') === termKey);
+      return compareKey(value, 'number') === termKey;
+    }
   }
   if (members) return members.some((m) => matchesText(m, token, defaultSubstring));
   return matchesText(value, token, defaultSubstring);
