@@ -71,7 +71,10 @@ test.describe('custom HTML visualization', () => {
     await expect(canvas.locator('#n')).toHaveText('4');
     await expect(canvas.locator('#t')).toHaveText('23');
     // One pill per DISTINCT value, not one per row — three countries, four rows.
-    await expect(canvas.locator('#pills .eda-filter-pill')).toHaveCount(3);
+    // A viz-custom pill is the shared chip's solid shape (`pill-chip.ts`), one
+    // value button and no field half — see `viz-tokens.ts` for why — so
+    // `.eda-pill-chip-value` is the one-per-pill class to count.
+    await expect(canvas.locator('#pills .eda-pill-chip-value')).toHaveCount(3);
   });
 
   test('clicking a pill narrows the host grid, and the pane redraws from it', async ({ page }) => {
@@ -82,7 +85,7 @@ test.describe('custom HTML visualization', () => {
     const canvas = panel.locator('viz-custom-html .canvas');
     await expect(panel.locator('data-table tbody tr')).toHaveCount(4);
 
-    await canvas.locator('.eda-filter-pill', { hasText: 'CH' }).click();
+    await canvas.locator('.eda-pill-chip-value', { hasText: 'CH' }).click();
 
     // The GRID narrows — this is the two-way street, and it is the grid's own
     // filter, so its funnel is where it shows and where it clears.
@@ -90,7 +93,7 @@ test.describe('custom HTML visualization', () => {
     // …and the pane follows, because the grid republishes what it now shows.
     await expect(canvas.locator('#n')).toHaveText('2');
     await expect(canvas.locator('#t')).toHaveText('17');
-    await expect(canvas.locator('#pills .eda-filter-pill')).toHaveCount(1);
+    await expect(canvas.locator('#pills .eda-pill-chip-value')).toHaveCount(1);
   });
 
   test('a script can build the picture itself and ask the grid to filter', async ({ page }) => {

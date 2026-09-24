@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 24 Sep 2026
+
+### Bugs
+
+- 🪲 A template's filter pills and the view header's chips were three hand-kept copies of one control, free to drift apart (v0.0.494)
+
 ## 23 Sep 2026
 
 ### Features

@@ -155,7 +155,11 @@ test.describe('view token scripts', () => {
 
     const vw = page.locator('view-window');
     await expect(vw.locator('.sum')).toHaveText('6');
-    await expect(vw.locator('.eda-filter-pill')).toHaveText('red');
+    // The body pill's ONE button carries the row's stored text, never the
+    // (ignored) script output. Scoped by the data attribute: the toolbar
+    // ALSO offers an idle chip for the field ("tag ▾"), which is a
+    // `.eda-pill-chip-value` too but carries no `data-eda-filter-value`.
+    await expect(vw.locator('.eda-pill-chip-value[data-eda-filter-value="red"]')).toHaveText('red');
   });
 
   test('a broken script shows an error chip rather than an empty card', async ({ page, workspaceId }) => {

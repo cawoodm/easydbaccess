@@ -135,13 +135,21 @@ describe('view-render', () => {
     });
   });
 
-  it('$filter.TOKEN renders a clickable pill with field/value data attributes', () => {
+  /**
+   * A body pill shows the VALUE ALONE — one button, one click — never the
+   * field name. The field name belongs to the header chip a click on this
+   * pill grows (`view-window.ts`'s `renderPillChips`); repeating it here was
+   * the rejected design. Asserting the field-half class is absent pins that
+   * decision so it cannot silently regress.
+   */
+  it('$filter.TOKEN renders the value alone, with no field half', () => {
     const out = substituteRow('$filter.TAG', row({ tag: 'foo' }), { TAG: 'tag' });
-    expect(out).toContain('class="eda-filter-pill"');
+    expect(out).toContain('class="eda-pill-chip"');
+    expect(out).toContain('class="eda-pill-chip-value"');
+    expect(out).not.toContain('eda-pill-chip-field');
     expect(out).toContain('data-eda-filter-field="tag"');
     expect(out).toContain('data-eda-filter-value="foo"');
-    expect(out).toContain('>foo</button>');
-    expect(out).toContain('<button type="button"');
+    expect(out).toBe('<span class="eda-pill-chip"><button type="button" class="eda-pill-chip-value" data-eda-filter-field="tag" data-eda-filter-value="foo" title="Filter by tag: foo">foo</button></span>');
   });
 
   it('$filter.TOKEN escapes the field/value attributes and text', () => {
@@ -164,7 +172,9 @@ describe('view-render', () => {
    */
   describe('$filter.TOKEN over an array field', () => {
     const arrayCols = new Map([['tags', col('tags', 'array')]]);
-    const pills = (out: string) => [...out.matchAll(/data-eda-filter-value="([^"]*)"/g)].map((m) => m[1]);
+    // A body pill is one button — the value half only — so the value button
+    // matches one-to-one with the chips rendered.
+    const pills = (out: string) => [...out.matchAll(/class="eda-pill-chip-value"[^>]*data-eda-filter-value="([^"]*)"/g)].map((m) => m[1]);
 
     it('renders one pill per member of a comma list', () => {
       const out = substituteRow('$filter.TAGS', row({ tags: 'foo, bar' }), { TAGS: 'tags' }, { columns: arrayCols });
@@ -389,7 +399,7 @@ describe('view-render', () => {
 
     it('$input. and $filter. are untouched by any of this', () => {
       expect(sub('$input.URL')).toContain('<input');
-      expect(sub('$filter.URL')).toContain('eda-filter-pill');
+      expect(sub('$filter.URL')).toContain('eda-pill-chip');
     });
 
     it('tokenValue is the one rule for what a token shows, script or stored cell', () => {

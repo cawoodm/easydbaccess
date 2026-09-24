@@ -869,16 +869,42 @@ from a blank one.
 - `$input.TOKEN` — an editable control bound to the cell (checkbox for a
   boolean, number/text otherwise), disabled for a read-only view or a scripted
   column, which has nowhere to write back to.
-- `$filter.TOKEN` — a clickable chip. Clicking it OR-appends an exact-match
-  filter for that value onto the instance's separate `pillFilters`, and the chip
-  appears in the view's toolbar where its field cycles `=` → `≠` → off and its
-  value opens the field's other values as a checklist.
+- `$filter.TOKEN` — a pill showing the row's value for the mapped field, and
+  that value ALONE: `Food`, not `Category = Food`. One button, one click. A
+  card pill sits in the flow of the template's own text, under a heading or a
+  label that has already said which field it is — repeating the field name
+  there says nothing the reader has not just read, and it makes a row of tags
+  three times as wide. Clicking it OR-appends an exact-match filter onto the
+  instance's separate `pillFilters` layer — never the view's own snapshotted
+  `filters` — exactly as a filter pill always did before chips existed. A
+  null/empty value renders no pill at all.
 
-An **`array` field renders one `$filter.` chip per member** (and a real JS array
-is taken apart whatever the column type says). One chip for the whole cell
-filtered on `=red,blue`, and no list cell is ever exactly equal to that, so the
-click emptied the view. Per member it matches per member, which is what an
-`array` column's filter already does — see `search/column-filter.ts`.
+  Everything else the filter can become — excluded, widened to a second
+  value, dropped — is the split `field = value` chip that click grows in the
+  TOOLBAR, not the card. The field half cycles that ONE value's state, `off`
+  → `on` (`=`) → `not` (`≠`) → `off` again. The value half opens the field's
+  other values as a tri-state checklist. A card pill and the toolbar chip for
+  the same value are drawn from one shared definition — class names, operator
+  glyphs, the CSS — in `views/pill-chip.ts`, so a value reads the same
+  wherever it is shown rather than out of three hand-synchronised copies (a
+  third used to live in `viz/viz-tokens.ts` too — see below).
+
+An **`array` field renders one `$filter.` pill per member** (and a real JS
+array is taken apart whatever the column type says) — clicking one filters on
+that member alone. One pill for the whole cell would have filtered on
+`=red,blue`, and no list cell is ever exactly equal to that, so the click
+emptied the view. Per member it matches per member, which is what an `array`
+column's filter already does — see `search/column-filter.ts`.
+
+A visualization's own `$filter.` pill (`viz/viz-tokens.ts`, used by
+`viz-custom`) is drawn from the same shared definition and looks identical to
+a card pill — the value alone, one click. What differs is only where the
+click LANDS: a pane has no `pillFilters` layer and no header chip to grow —
+it narrows its HOST GRID through `table/pane-actions.ts`, whose
+`filter(field, value)` can only OR-append a value, so there is nowhere for a
+split chip to go and nothing that could answer "already filtered?" or
+"excluded?" if one tried. It still reads as one family with a view's pill,
+because it is one family, just with a shorter reach.
 
 **Rendering a `$TOKEN` needs a DOM pass**, not just string substitution: a cell
 renderer is a custom element fed by PROPERTIES (`.value`, `.column`, `.row` — see
