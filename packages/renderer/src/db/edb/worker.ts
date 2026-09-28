@@ -5,6 +5,7 @@ import { type EdbRequest, type EdbResponse, type PeekedWorkspace } from './proto
 import { createAutosavePolicy, type AutosavePolicy } from './dirty.js';
 import { clearMirror, readMirror, writeMirror } from './mirror.js';
 import { ensurePool, ensureRoomToImport, openInPool, poolPath, renameInPool, tunePooledDb } from './substrate.js';
+import { clearWalHeader } from './wal-header.js';
 import { wasmDriver } from './wasm-driver.js';
 
 /**
@@ -72,6 +73,9 @@ function isMutation(req: EdbRequest): req is Extract<EdbRequest, { coll: string 
 
 async function open(bytes: Uint8Array | null, name: string, scratch = false): Promise<void> {
   sqlite3 ??= await sqlite3InitModule();
+  // Neither substrate here can host a WAL, and a file the desktop has written
+  // says WAL in its header for good. See `wal-header.ts`.
+  if (bytes) clearWalHeader(bytes);
   driver?.close();
   mirror?.dispose();
   mirror = null;
@@ -160,6 +164,9 @@ async function openInMemory(bytes: Uint8Array | null, name: string, scratch = fa
  */
 async function importBytes(name: string, bytes: Uint8Array): Promise<void> {
   sqlite3 ??= await sqlite3InitModule();
+  // The boot that opens what this places would be the one to hit `CANTOPEN`, a
+  // reload away from the import that caused it. See `wal-header.ts`.
+  clearWalHeader(bytes);
   if (name === dbName) {
     driver?.close();
     mirror?.dispose();
@@ -282,6 +289,10 @@ function handle(req: EdbRequest): unknown {
 async function peekWorkspaces(bytes: Uint8Array): Promise<PeekedWorkspace[]> {
   if (bytes.byteLength === 0) return [];
   const s3 = (sqlite3 ??= await sqlite3InitModule());
+  // Without this a desktop-written file answered `[]` — the same answer as "not
+  // our database" — so a folder scan quietly left the user's own workspace out
+  // of the list. See `wal-header.ts`.
+  clearWalHeader(bytes);
   let probe: Database | null = null;
   try {
     const p = s3.wasm.allocFromTypedArray(bytes);

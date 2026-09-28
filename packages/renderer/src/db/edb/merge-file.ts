@@ -21,6 +21,7 @@ import { factsOfHandle, recordDivergence } from './file-stamp.js';
 import { COMPARE, NEWEST, PULL, PUSH, answerOf, type FileAnswer } from './merge-answers.js';
 import { nothingToSettle, openComparison, type MergeOutcome, type MergePlan } from './replicate-run.js';
 import { writeBytes } from './file-handle.js';
+import { describePendingWal, pendingWalBytes } from './wal-sidecar.js';
 import type { EdbBridge } from './worker-bridge.js';
 
 export interface MergeContext {
@@ -53,6 +54,16 @@ export interface MergeResult {
  * cancelled, and in that case NOTHING has been written on either side.
  */
 export async function mergeWithFile(ctx: MergeContext, mode: 'newest' | 'compare'): Promise<MergeResult> {
+  // Before anything is read: a file the desktop app is holding open has its
+  // newest commits in a `-wal` sidecar this browser cannot apply, so comparing
+  // would work from an older copy and merging would write over the live one.
+  // See `wal-sidecar.ts`.
+  const pending = await pendingWalBytes(ctx.file);
+  if (pending !== null && pending > 0) {
+    await ctx.dialogs.alert(describePendingWal(ctx.file, pending), 'Compare');
+    return { merged: false, wroteFile: false };
+  }
+
   const bytes = await readFileBytes(ctx.handle);
   if (!bytes) {
     await ctx.dialogs.alert(`${ctx.file} could not be read, so there is nothing to compare with.`, 'Compare');

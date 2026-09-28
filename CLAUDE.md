@@ -342,6 +342,7 @@ To make testing easier we need each branch on a stable port. The convention is:
 - main: http://localhost:5190
 - todos1: http://localhost:5191
 - todos2: http://localhost:5192
+- todos3: http://localhost:5193
 
 Don't let other branches run on these ports, only run on this ports (strict).
 

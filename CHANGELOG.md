@@ -13,6 +13,7 @@
 
 ### Bugs
 
+- 🪲 A workspace the desktop app had opened could not be compared, adopted or even listed in the browser (v0.0.499)
 - 🪲 Editing a row out of its own filter left the row below it showing that edit, over a record that never changed (v0.0.498)
 - 🪲 A docked visualization added a redraw listener every time its settings were edited, and never dropped one (v0.0.498)
 - 🪲 A view template's `$input` wrote whatever was typed, ignoring Not-null, read-only and validation rules (v0.0.497)

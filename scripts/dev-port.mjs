@@ -17,6 +17,7 @@ const FIXED_PORTS = {
   main: 5190,
   todos1: 5191,
   todos2: 5192,
+  todos3: 5193,
 };
 
 // Any branch not in FIXED_PORTS still gets a stable port (not a random one

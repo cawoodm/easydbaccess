@@ -832,3 +832,52 @@ describe('find("rows") row cap', () => {
     }
   });
 });
+
+/**
+ * A closed file must be readable by the OTHER build.
+ *
+ * `journal_mode` is recorded in the database header, not on the connection, so
+ * the WAL this store switches on marks the `.edb` for every later reader —
+ * and the browser cannot open a WAL-marked file at all (it has neither a real
+ * file to put a `-wal` beside nor the shared memory WAL needs). A file the
+ * desktop closed cleanly therefore has to go back the way it came.
+ */
+describe('a cleanly closed file is portable', () => {
+  /** Bytes 18 and 19 of the header: 2 is WAL, 1 is a rollback journal. */
+  function journalBytes(path: string): [number, number] {
+    const header = readFileSync(path).subarray(0, 100);
+    return [header[18]!, header[19]!];
+  }
+
+  it('runs on WAL while it is open — the import worker needs a second writer', () => {
+    const store = new SqliteStore({ path: dbPath });
+    try {
+      expect(store.journalMode()).toBe('wal');
+      expect(journalBytes(dbPath)).toEqual([2, 2]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('hands the file back in rollback mode, with no sidecar left beside it', () => {
+    const store = new SqliteStore({ path: dbPath });
+    store.insert('workspaces', { id: 'ws', name: 'ws', createdAt: 1 });
+    store.close();
+
+    expect(journalBytes(dbPath)).toEqual([1, 1]);
+    expect(existsSync(`${dbPath}-wal`)).toBe(false);
+  });
+
+  it('keeps everything that was written, which is the point of checkpointing first', () => {
+    const first = new SqliteStore({ path: dbPath });
+    first.insert('workspaces', { id: 'ws', name: 'Finances', createdAt: 1 });
+    first.close();
+
+    const second = new SqliteStore({ path: dbPath });
+    try {
+      expect(second.find('workspaces')).toHaveLength(1);
+    } finally {
+      second.close();
+    }
+  });
+});

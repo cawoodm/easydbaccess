@@ -196,11 +196,35 @@ export class SqliteStore {
     return this.store.sqlTableOf(tableId);
   }
 
+  /**
+   * Put the file back into rollback-journal mode, and remove the sidecar with it.
+   *
+   * `journal_mode` lives in the database HEADER, not on the connection, so a file
+   * this store has opened stays marked WAL for every later reader — and the
+   * browser cannot open a WAL-marked file at all (`renderer/src/db/edb/wal-header.ts`
+   * explains why, and neutralises the header on its own side so an
+   * ungracefully-closed file still works). Handing the file back the way we found
+   * it is the other half: a `.edb` closed cleanly by the desktop is then an
+   * ordinary, portable database with nothing beside it.
+   *
+   * Tolerated rather than required, like the WAL switch itself — a second
+   * connection still on the file refuses the change, and that is not worth
+   * failing a close over.
+   */
+  private leaveRollbackJournal(): void {
+    try {
+      this.driver.exec('PRAGMA journal_mode = DELETE');
+    } catch {
+      /* another connection still has it open — it keeps the WAL header */
+    }
+  }
+
   close(): void {
     // Fold the WAL back in first. A store closed with a `-wal` beside it is still
     // correct, but anything that then COPIES the file (Save As) would miss the
     // most recent writes.
     this.checkpoint();
+    this.leaveRollbackJournal();
     this.driver.close();
   }
 }

@@ -851,6 +851,68 @@ would be a branch that never runs.
 page-cache and WAL pragmas, `checkpoint()`, `setDurability()` and the file copy
 Save As makes. It holds no storage logic of its own.
 
+### The desktop's WAL is the browser's `SQLITE_CANTOPEN`
+
+The one place the two bindings do not agree about a file, and it took a bug
+report to find.
+
+`journal_mode` is **not a connection setting**. It is recorded in the database
+header — bytes 18 and 19 — and `2` there means WAL. So the desktop's
+`PRAGMA journal_mode = WAL`, which exists so the import worker can write the
+file while the main connection reads it, marks the `.edb` ITSELF, for every
+later reader. Checkpointing folds the `-wal` sidecar back in; it does not change
+the header.
+
+The browser has no substrate that can host a WAL. A `sqlite3_deserialize`d
+throwaway has no file to put a `-wal` beside, and `opfs-sahpool` has no shared
+memory (which is why the pooled database runs on `TRUNCATE` — see
+`substrate.ts`). SQLite's answer in both cases is
+
+```
+SQLITE_CANTOPEN: sqlite3 result code 14: unable to open database file
+```
+
+naming a file that was read perfectly well one line earlier. Until v0.0.499 that
+meant a workspace opened once on the desktop could not be compared, adopted, or
+even LISTED in the browser — `peekWorkspaces` swallows the throw and answers
+`[]`, the same answer it gives for "not our database", so a folder scan simply
+left the file out.
+
+Two halves fix it, and both are needed:
+
+- **`renderer/src/db/edb/wal-header.ts`** writes `1` over those two bytes,
+  in place, before the bytes reach SQLite — at `open`, `importBytes` and
+  `peekWorkspaces`. Sound because the main file is a complete, self-consistent
+  database at its last checkpoint whatever the header claims; the mode only says
+  where the NEXT writer would journal, and the next writer is a copy in this
+  browser using its own. This half is what makes an ungracefully-closed file
+  work.
+- **`SqliteStore.close()`** runs `PRAGMA journal_mode = DELETE` after its
+  checkpoint, so a file the desktop closed cleanly is handed back an ordinary
+  portable database with no sidecar beside it. Tolerated, not required — a
+  second connection still on the file refuses the change.
+
+### A `-wal` beside the file means the bytes are not the whole story
+
+The header fix makes such a file open. It cannot invent the commits still
+sitting in `<name>.edb-wal`, which is where a WAL-mode database keeps a
+committed row until the next checkpoint. Reading that is a stale copy; WRITING
+over it is worse, because a merge rewrites the whole `.edb` and the desktop's
+next checkpoint would lay its own frames over a database they did not come from.
+
+So `mergeWithFile` asks `wal-sidecar.ts` first and refuses outright when the
+sidecar is non-empty, naming the desktop app and the way out. Three states, and
+only one of them stops anything:
+
+| Sidecar            | Means                                     | Merge   |
+| ------------------ | ----------------------------------------- | ------- |
+| absent, or 0 bytes | checkpointed — the `.edb` is complete     | goes on |
+| non-empty          | another process has it open               | refused |
+| no folder grant    | cannot tell; a single file from the picker | goes on |
+
+The last row is deliberate: a sibling file is only visible through the FOLDER
+handle, and absence of evidence must not become an error message.
+
 ## Format versions
 
 **v2 is the only format.** v1 — an `_easydb_tables` registry, one
@@ -864,6 +926,10 @@ cannot recover one. `coll='_meta', key='format'` is what distinguishes them.
 - `test/shared/edb-store.test.ts` — the store on `node:sqlite`
 - `test/shared/edb-file.test.ts` — a saved file read back with plain SQL, no store
 - `test/renderer/db/wasm-driver.test.ts` — the same store on sqlite-wasm
+- `test/renderer/db/wal-header.test.ts` — the two header bytes, and the real
+  engine refusing a WAL-marked database until they are cleared
+- `test/renderer/db/wal-sidecar.test.ts` — what a `-wal` beside the file means
+- `test/electron/sqlite-store.test.ts` — WAL while open, rollback once closed
 - `test/renderer/db/edb-convert.test.ts` — copying a workspace in
 - `test/renderer/db/edb-dirty.test.ts` — autosave timing
 - `test/e2e/desktop/` — the desktop app writing and reopening a real file
