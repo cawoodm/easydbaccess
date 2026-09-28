@@ -43,6 +43,13 @@ const VALUES: Array<string | null> = [
   'MarcJulian',
   'aa',
   'aaaa',
+  // Cells with surrounding whitespace. The matcher reads a cell AS WRITTEN for
+  // every text test, so the SQL side must not trim it either — and because
+  // these sit in the shared corpus, every case above is now checked against a
+  // padded cell too, not just the ones below that name the problem.
+  ' Bern ',
+  '  Sweden',
+  'Norway  ',
 ];
 
 let dir: string;
@@ -175,6 +182,62 @@ describe('columnFilterToSql agrees with the in-memory matcher', () => {
   });
 });
 
+/**
+ * A cell's surrounding whitespace is part of the cell.
+ *
+ * Every text test used to go through `LOWER(TRIM(v))` on the SQL side, so
+ * `" Bern "` matched `^Bern` in SQL and failed it in memory. The matcher is the
+ * specification and it never trims the cell for a text test, so the two only
+ * disagreed once a table grew past the windowing threshold and its filter moved
+ * into SQL — the same filter, the same data, a different answer, and nothing in
+ * the UI to say why.
+ *
+ * Trimming is still right where the matcher trims: the NULL/blank test
+ * (`isNullish`) and an order comparison (`compareKey`). Those keep `TRIM`.
+ */
+describe('a text test reads a padded cell as written', () => {
+  it('does not let ^Bern match " Bern "', () => {
+    // The anchor is pinned at the real start of the cell, which is a space.
+    expect(viaMatcher('^Bern')).toEqual([]);
+    expect(viaSql('^Bern')).toEqual([]);
+  });
+
+  it('reaches the padding through the two forms that keep a space', () => {
+    // An unquoted term is trimmed by the PARSER (`^ Bern` is `^Bern`), so these
+    // are the only two spellings that can say "with the spaces": stars, which
+    // are stripped from the ends without touching what is between them, and the
+    // whole input quoted, which is the language's literal-text override.
+    expect(viaSql('* Bern *')).toEqual([' Bern ']);
+    expect(viaSql('" Bern "')).toEqual([' Bern ']);
+  });
+
+  it('does not let =Bern match " Bern "', () => {
+    expect(viaMatcher('=Bern')).toEqual([]);
+    expect(viaSql('=Bern')).toEqual([]);
+  });
+
+  it('finds a padded cell by substring, which is unaffected by the padding', () => {
+    expect(viaSql('Bern')).toEqual([' Bern ']);
+    expect(viaSql('*Bern*')).toEqual([' Bern ']);
+  });
+
+  it('agrees with the matcher on every anchor over the padded cells', () => {
+    const cases = ['^Bern', '^ Bern', '=Bern', '= Bern ', 'Bern', '*Bern*', '*Bern', 'Bern*', '!^Bern', '^S', '^ ', 'Sweden', '=Sweden', '^Sweden', 'Norway*', '*Norway', 'NULL', '!NULL'];
+    for (const f of cases) {
+      expect([...viaSql(f)].sort(), f).toEqual([...viaMatcher(f)].sort());
+      expect([...viaSql(f, false)].sort(), `${f} (defaultSubstring off)`).toEqual([...viaMatcher(f, false)].sort());
+    }
+  });
+
+  it('still trims for the blank test and for an order comparison', () => {
+    // `isNullish` and `compareKey` both trim, so these two must NOT change: a
+    // whitespace-only cell is blank, and a comparison reads the trimmed text.
+    expect([...viaSql('NULL')].sort()).toEqual([...viaMatcher('NULL')].sort());
+    crossCheck(VALUES, '>=n', 'string');
+    crossCheck(VALUES, '<=n', 'string');
+  });
+});
+
 describe('buildWhere', () => {
   const sqlOf = (f: string) => (f === 'v' ? '"v"' : null);
 
@@ -187,7 +250,7 @@ describe('buildWhere', () => {
   it('ANDs a column filter with a global search', () => {
     const frag = buildWhere({ v: '!NULL' }, 'sweden', sqlOf, ['v']);
     const rows = db.prepare(`SELECT v FROM t WHERE ${frag.sql}`).all(...(frag.params as never[])) as Array<{ v: string }>;
-    expect(rows.map((r) => r.v).sort()).toEqual(['Sweden', 'sweden']);
+    expect(rows.map((r) => r.v).sort()).toEqual(['  Sweden', 'Sweden', 'sweden']);
   });
 
   it('reports a filter on a computed column as inexpressible instead of dropping it', () => {

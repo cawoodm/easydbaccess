@@ -35,9 +35,22 @@ export interface SqlFragment {
   expressible: boolean;
 }
 
-/** `LOWER(TRIM(x))` — the shape every comparison here comes down to. */
+/**
+ * `LOWER(TRIM(x))` — the shape an ORDER COMPARISON comes down to, because
+ * `compareKey` trims the cell before reading it (`compare-cell.ts`).
+ *
+ * NOT for text matching. `matchesText` reads the cell as written, so a `^`/`*`
+ * anchor or a substring test must go through `lowered` below instead. Trimming
+ * there made `^Bern` match `" Bern "` in SQL and fail it in memory — the same
+ * filter answering differently depending on whether the table was windowed.
+ */
 function normalised(columnSql: string): string {
   return `LOWER(TRIM(${columnSql}))`;
+}
+
+/** `LOWER(x)` — the cell as written, which is what every TEXT test matches. */
+function lowered(columnSql: string): string {
+  return `LOWER(${columnSql})`;
 }
 
 /** Is this token the whole-token NULL test rather than a text match? */
@@ -126,7 +139,7 @@ function cmpOperands(columnSql: string, term: string, type: string | undefined, 
  * positive text test and therefore PASSES its negation.
  */
 function tokenSql(columnSql: string, t: FilterToken, defaultSubstring: boolean, type: string | undefined, now: Date): { sql: string; params: unknown[] } {
-  const col = normalised(columnSql);
+  const col = lowered(columnSql);
   if (isNullToken(t)) return { sql: `(${columnSql} IS NULL OR TRIM(${columnSql}) = '')`, params: [] };
   if (t.cmp) {
     const { expr, bound, valid } = cmpOperands(columnSql, t.term, type, now);
@@ -167,8 +180,9 @@ function tokenSql(columnSql: string, t: FilterToken, defaultSubstring: boolean, 
     }
   }
   const term = t.term.toLowerCase();
-  // Exact matches the WHOLE cell and is NOT trimmed (see the matcher).
-  const equals = () => ({ sql: `LOWER(${columnSql}) = ?`, params: [term] });
+  // Every text test below reads the cell as written — `col` is untrimmed, and so
+  // is this. `=foo` matches the WHOLE cell, so " foo " is not `=foo`.
+  const equals = () => ({ sql: `${col} = ?`, params: [term] });
   if (t.exact) return equals();
   // ESCAPE, because a term may legitimately contain % or _.
   const like = (pattern: string) => ({ sql: `${col} LIKE ? ESCAPE '\\'`, params: [pattern] });
@@ -185,10 +199,8 @@ function tokenSql(columnSql: string, t: FilterToken, defaultSubstring: boolean, 
   // `test/shared/filter-sql.test.ts` runs every case through real SQLite AND
   // through `matchesColumnFilter` and requires the same answer.
   if (defaultSubstring) return like(`%${lit}%`);
-  // "Is exactly", and a pattern can still say that — anchored at both ends. It
-  // goes through the UNtrimmed column, like `equals()` beside it, so the pair
-  // keeps agreeing with the matcher on a padded cell.
-  return starry ? { sql: `LOWER(${columnSql}) LIKE ? ESCAPE '\\'`, params: [lit] } : equals();
+  // "Is exactly", and a pattern can still say that — anchored at both ends.
+  return starry ? like(lit) : equals();
 }
 
 /** A group is tokens joined by AND — they must hold of the same cell together. */

@@ -13,6 +13,7 @@
 
 ### Bugs
 
+- 🪲 On a table big enough to page, a `^` or `=` filter counted cells with surrounding spaces that it did not show (v0.0.500)
 - 🪲 A workspace the desktop app had opened could not be compared, adopted or even listed in the browser (v0.0.499)
 - 🪲 Editing a row out of its own filter left the row below it showing that edit, over a record that never changed (v0.0.498)
 - 🪲 A docked visualization added a redraw listener every time its settings were edited, and never dropped one (v0.0.498)
