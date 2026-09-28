@@ -151,6 +151,14 @@ export class VizPanel extends LitElement {
   private tableUnsub?: (() => void) | undefined;
   private dockUnsub?: (() => void) | undefined;
   private currentRowUnsub?: (() => void) | undefined;
+  /**
+   * The `app:ready` listener that re-snapshots the cell renderers.
+   *
+   * Kept apart from the others because it is per ELEMENT, not per bind: `bind()`
+   * runs again on every instance edit and must not stack a second one. See the
+   * note where it is registered.
+   */
+  private readyUnsub?: (() => void) | undefined;
 
   /**
    * Which row a record pane draws, followed from the host grid.
@@ -178,6 +186,10 @@ export class VizPanel extends LitElement {
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.teardown();
+    // Not in `teardown()`: that runs on every `reload()` too, and this listener
+    // outlives a rebind on purpose.
+    this.readyUnsub?.();
+    this.readyUnsub = undefined;
   }
 
   private teardown(): void {
@@ -330,8 +342,14 @@ export class VizPanel extends LitElement {
     // it needs the same registry snapshot the view window takes — and re-takes on
     // `app:ready`, which is what carries a hot-installed cell renderer into a pane
     // that is already open.
+    //
+    // ONE subscription per element, released on disconnect. `bind()` runs again
+    // on every instance edit, and subscribing here without this left a listener
+    // behind each time: each one calls `requestUpdate()` on `app:ready`, so a
+    // long-lived pane redrew once per rebind it had ever had. It showed up as a
+    // word cloud measuring itself mid-relayout.
     this.cellRenderers = new Map(ctx.registries.cellRenderers);
-    ctx.events.on('app:ready', () => {
+    this.readyUnsub ??= ctx.events.on('app:ready', () => {
       this.cellRenderers = new Map(ctx.registries.cellRenderers);
       this.requestUpdate();
     });

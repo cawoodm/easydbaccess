@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { html as staticHtml, unsafeStatic } from 'lit/static-html.js';
 import { customElement, property, state } from 'lit/decorators.js';
+import { repeat } from 'lit/directives/repeat.js';
 import type { ColumnSpec, DataCollection, Row, RowPage, RowQuery, SortSpec, Table, ViewInstance } from '@easydb/shared';
 import { applyRowRequest, readRows, type RowRequest } from '../db/row-reader.js';
 import { ROW_FETCH_CAP } from '../db/data-store-bridge.js';
@@ -2730,7 +2731,19 @@ export class DataTable extends LitElement {
           <!-- data-row-id is DATA, not behaviour. It is the only way anything outside
                this element can say which row a pointer is over; the edit-record plugin
                reads it off a double-click's composed path. The grid ignores it. -->
-          ${slice.map(
+          <!-- KEYED BY ROW ID, and it has to be. A plain map gives Lit parts that it
+               reuses BY POSITION, and a cell is an input whose value binding is
+               dirty-checked against the last value BOUND, not against what is in the
+               box. So: filter to two rows both holding "foo", clear the first, and that
+               row leaves the filter — the second row slides into the first row's DOM,
+               its new value ("foo") equals what that part last committed ("foo"), Lit
+               skips the write, and the box stays empty. An untouched record then reads
+               as edited, and only a reload disagrees. Keying moves the DOM with the
+               record instead.
+               (No backticks in this comment: it sits inside a template literal.) -->
+          ${repeat(
+            slice,
+            (r) => r.id,
             (r) => html`
               <tr data-row-id=${r.id}>
                 ${cols.map(
