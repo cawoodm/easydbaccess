@@ -5,13 +5,43 @@ import { addRow, createTable, panelDomId, readRows, waitForPanel } from './helpe
  * Editing an existing record in the record form — the same form the + button
  * opens, over a row that is already there.
  *
- * Two ways in: a double-click on the row (the `edit-record` plugin) and the
- * `edit/…` commandlet. Both land in one dialog, and the dialog — not the caller
- * — decides whether the record may be written, from `Table.readonly`.
+ * Two ways in: a double-click on the row, and the `edit/…` commandlet. Both land
+ * in one dialog, and the dialog — not the caller — decides whether the record
+ * may be written, from `Table.readonly`.
+ *
+ * **The double-click is now one hop longer.** `edit-record.ts` owns the gesture
+ * and hands it to the record WINDOW when the Record visualization is loaded,
+ * which it is by default; the window's header is then what opens this form. So
+ * the tests below click that button, which is the path a user actually takes —
+ * and the form itself is unchanged, which is the point.
  */
 
 const form = (page: Page) => page.locator('new-record-dialog dialog');
 const grid = (page: Page, id: string) => page.locator(`#${panelDomId(id)} data-table`);
+const recordWindow = (page: Page) => page.locator('[id^="easydb-record-"]');
+
+/**
+ * Double-click the first row and follow it into the record form.
+ *
+ * The readiness poll is not belt-and-braces: plugin `load()` runs after first
+ * paint, so a double-click dispatched before it takes a DIFFERENT branch (the
+ * form opens directly). Asking the registry is deterministic where waiting is
+ * not — and it is what used to make this spec flake.
+ */
+async function openFormByDoubleClick(page: Page, id: string, button: 'Edit record' | 'View record' = 'Edit record'): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const m = (await import('/src/plugins/record-popup.ts')) as unknown as { recordPopupWanted(): boolean };
+        return m.recordPopupWanted();
+      }),
+    )
+    .toBe(true);
+  await grid(page, id).locator('tr[data-row-id]').first().dblclick();
+  const win = recordWindow(page);
+  await expect(win).toBeVisible();
+  await win.getByRole('button', { name: button, exact: true }).click();
+}
 
 /** A field's input, found by the label the form shows. */
 const boxFor = (page: Page, label: string) => form(page).locator('label.field', { hasText: label }).locator('input, textarea').first();
@@ -32,13 +62,13 @@ async function makeReadonly(page: Page, tableId: string): Promise<void> {
 }
 
 test.describe('the record form over an existing row', () => {
-  test('a double-click on a row opens it, and Save patches that row', async ({ page }) => {
+  test('a double-click on a row reaches it, and Save patches that row', async ({ page }) => {
     const id = await createTable(page, 'Parts', [{ field: 'sku' }, { field: 'qty', type: 'number' }]);
     await addRow(page, id, { sku: 'A-1', qty: 4 });
     await addRow(page, id, { sku: 'B-2', qty: 9 });
     await waitForPanel(page, id);
 
-    await grid(page, id).locator('tr[data-row-id]').first().dblclick();
+    await openFormByDoubleClick(page, id);
     await expect(form(page)).toBeVisible();
     await expect(form(page)).toContainText('Edit record');
     // The row's own values, not a blank form.
@@ -61,7 +91,7 @@ test.describe('the record form over an existing row', () => {
     await addRow(page, id, { sku: 'A-1' });
     await waitForPanel(page, id);
 
-    await grid(page, id).locator('tr[data-row-id]').first().dblclick();
+    await openFormByDoubleClick(page, id);
     await boxFor(page, 'sku').fill('changed');
     await form(page).getByRole('button', { name: 'Cancel', exact: true }).click();
 
@@ -75,7 +105,9 @@ test.describe('the record form over an existing row', () => {
     await makeReadonly(page, id);
     await waitForPanel(page, id);
 
-    await grid(page, id).locator('tr[data-row-id]').first().dblclick();
+    // A read-only table says "View record" on the button, because the form will
+    // refuse the write anyway — one promise, kept in both places.
+    await openFormByDoubleClick(page, id, 'View record');
     await expect(form(page)).toBeVisible();
     await expect(form(page)).toContainText('This table is read-only');
     await expect(form(page)).not.toContainText('Edit record');

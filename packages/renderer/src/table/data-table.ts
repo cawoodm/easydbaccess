@@ -39,7 +39,9 @@ import { TABLE_LOADING_EVENT, tableLoadingState, type TableLoadingDetail } from 
 const EMPTY_OPTIONS: readonly string[] = Object.freeze([]);
 import { emitVisibleRows, provideVisibleRows, sameVisibleRows, visibleRowsWanted, type VisibleRowsDetail } from './visible-rows.js';
 import { providePaneActions } from './pane-actions.js';
+import { provideCurrentRow, rememberedCurrentRow } from './current-row.js';
 import { addPillValue } from '../views/view-render.js';
+import { withRowMeta } from '../views/row-meta.js';
 import { formatByType, toDateInput, toDatetimeInput } from '../util/local-datetime.js';
 import { cellState, INVALID_CLASS, INVALID_INPUT_STYLE } from '../util/cell-validity.js';
 
@@ -695,6 +697,10 @@ export class DataTable extends LitElement {
     // taking filter requests from a pane that outlived it.
     this.actionsUnsub?.();
     this.actionsUnsub = undefined;
+    // The selection provider goes the same way, and for the same reason: a
+    // detached grid cannot say whether a row is still on screen.
+    this.currentRowUnsub?.();
+    this.currentRowUnsub = undefined;
     this.providedKey = '';
     // A pending refetch would otherwise land on a detached element — and bump
     // the generation, so a later re-connect could discard its own fresh load.
@@ -857,6 +863,7 @@ export class DataTable extends LitElement {
 
   private provideUnsub?: (() => void) | undefined;
   private actionsUnsub?: (() => void) | undefined;
+  private currentRowUnsub?: (() => void) | undefined;
   private providedKey = '';
 
   /**
@@ -873,6 +880,8 @@ export class DataTable extends LitElement {
     this.providedKey = key;
     this.actionsUnsub?.();
     this.actionsUnsub = undefined;
+    this.currentRowUnsub?.();
+    this.currentRowUnsub = undefined;
     if (key) {
       this.provideUnsub = provideVisibleRows(key, this.visibleRowsDetail);
       // The way back: a pane docked into this window can narrow or sort it.
@@ -881,6 +890,14 @@ export class DataTable extends LitElement {
       this.actionsUnsub = providePaneActions(key, {
         filter: (field, value) => this.filterFromPane(field, value),
         sort: (field, additive) => void this.toggleSort(field, additive),
+      });
+      // And the SELECTION, for a record pane. The grid is the only thing that
+      // can say whether a remembered row id is still here — deleted, or filtered
+      // off screen — and answering null is what makes the pane fall back to the
+      // first visible row instead of drawing a record the grid is not showing.
+      this.currentRowUnsub = provideCurrentRow(key, () => {
+        const id = rememberedCurrentRow(key);
+        return id && this.renderedRows?.some((r) => r.id === id) ? id : null;
       });
     }
   }
@@ -1728,7 +1745,7 @@ export class DataTable extends LitElement {
    * can be typed in the first place. See `scriptDeclined`.
    */
   private renderScriptedCell(row: Row, col: ColumnSpec) {
-    const run = runColumnScript(activeColumnScript(col), row.data);
+    const run = runColumnScript(activeColumnScript(col), withRowMeta(row));
     if (!run.ok) {
       return html`<span class="script-err" title=${run.message}>⚠ ${run.label}</span>`;
     }
@@ -1744,7 +1761,7 @@ export class DataTable extends LitElement {
       .value=${run.value}
       .rawValue=${row.data[col.field] ?? ''}
       .column=${col}
-      .row=${row.data}
+      .row=${withRowMeta(row)}
       .rowId=${row.id}
       .tableId=${this.tableId}
       .readonly=${true}
@@ -1795,6 +1812,8 @@ export class DataTable extends LitElement {
       // `.row` is the full row data object, passed through for any renderer
       // that wants neighbouring fields (built-ins currently ignore it —
       // `renderScriptedCell` above is where a column's own script gets `.row`).
+      // It carries `_` as well — the record's own metadata, `views/row-meta.ts`
+      // — so `row._.rowId` reads the same in a renderer, a script and a template.
       // `.rowId` / `.tableId` are the record's IDENTITY, which `.row` does not
       // carry — a renderer needs both to act on the whole record instead of on
       // its own value. The `preview` cell's "Edit record" button is the one
@@ -1808,7 +1827,7 @@ export class DataTable extends LitElement {
       return staticHtml`<${tag}
         .value=${raw ?? ''}
         .column=${col}
-        .row=${row.data}
+        .row=${withRowMeta(row)}
         .rowId=${row.id}
         .tableId=${this.tableId}
         .suggestions=${this.tagOptions.get(col.field) ?? EMPTY_OPTIONS}
@@ -2692,7 +2711,7 @@ export class DataTable extends LitElement {
                         .value=${this.filters[c.field] ?? ''}
                         .options=${opts}
                         placeholder="filter…"
-                        title="Filter: *text* = contains, text* = starts with, *text = ends with, &quot;text&quot; = the whole cell, !text = not, NULL = empty, !NULL = has a value. Comma-separate for several values (a,b = a OR b; !a,b excludes a and keeps b). A plain value follows the &quot;Default to substring&quot; setting. Quote the WHOLE box to search for the text as typed, commas and all. Comparisons: >=2026-01-01, <=2026-12-31, >100, <100 — and on a date column a relative bound like >=-3m (last 3 months) or >=ytd (year to date)."
+                        title='Filter: *text* = contains, text* = starts with, *text = ends with, "text" = the whole cell, !text = not, NULL = empty, !NULL = has a value. Comma-separate for several values (a,b = a OR b; !a,b excludes a and keeps b). A plain value follows the "Default to substring" setting. Quote the WHOLE box to search for the text as typed, commas and all. Comparisons: >=2026-01-01, <=2026-12-31, >100, <100 — and on a date column a relative bound like >=-3m (last 3 months) or >=ytd (year to date).'
                         @filter-change=${(e: Event) => this.onFilterInput(c.field, (e as CustomEvent<{ value: string }>).detail.value)}
                       ></filter-combobox>
                     </th>

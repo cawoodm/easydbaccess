@@ -154,9 +154,9 @@ describe('the rejection message reaches the caller', () => {
 });
 
 describe('RENDER_SAMPLES', () => {
-  it('offers exactly ten samples, each with a distinct label', () => {
-    expect(RENDER_SAMPLES).toHaveLength(10);
-    expect(new Set(RENDER_SAMPLES.map((s) => s.label)).size).toBe(10);
+  it('offers exactly twelve samples, each with a distinct label', () => {
+    expect(RENDER_SAMPLES).toHaveLength(12);
+    expect(new Set(RENDER_SAMPLES.map((s) => s.label)).size).toBe(12);
   });
 
   it('every sample compiles and defines render(row)', () => {
@@ -247,6 +247,28 @@ describe('each render sample computes what it says it does', () => {
     // Whole days, so a date-only value reads the same all day long.
     expect(render(L, { due: inDays(0) })).toBe('today');
     expect(render(L, { due: 'not a date' })).toBe('');
+  });
+
+  it('the record link addresses the row by id, encoded', () => {
+    // `row._` is the metadata the host puts on every row it hands to a script —
+    // see `views/row-meta.ts`. `record/` is the one verb that takes a row id.
+    const L = 'Open this record in a window (row._.rowId)';
+    expect(render(L, { _: { rowId: 'r-7' } })).toBe('<a href="#record/Notes/r-7">open</a>');
+    // An id with a slash in it cannot break out of its segment.
+    expect(render(L, { _: { rowId: 'a/b' } })).toBe('<a href="#record/Notes/a%2Fb">open</a>');
+    // The sample guards `_`, because the editor runs samples against a bare
+    // object to check they never leak "undefined" into a cell.
+    expect(render(L, {})).toBe('');
+  });
+
+  it('last changed reads the row’s own stamp, in words', () => {
+    const L = 'Last changed, in words (row._.updatedAt)';
+    expect(render(L, { _: { updatedAt: Date.now() - 5 * 60000 } })).toBe('5 min ago');
+    expect(render(L, { _: { updatedAt: Date.now() - 3 * 3600000 } })).toBe('3 h ago');
+    expect(render(L, { _: { updatedAt: Date.now() - 2 * 86400000 } })).toBe('2 d ago');
+    // A row the store never stamped says nothing rather than "56 y ago".
+    expect(render(L, { _: { updatedAt: 0 } })).toBe('');
+    expect(render(L, {})).toBe('');
   });
 });
 

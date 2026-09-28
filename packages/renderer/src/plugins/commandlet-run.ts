@@ -14,7 +14,7 @@ import { focusTableWindow } from '../window-mgr/table-window-manager.js';
 import { revealViewWindow } from '../window-mgr/view-window-manager.js';
 import { CommandletError, parseCommandlets, substituteCommandlet, type Commandlet } from './commandlet-lang.js';
 import { planEditKey } from './commandlet-edit.js';
-import { keyColumnOf, planPreview } from './commandlet-preview.js';
+import { keyColumnOf, namesAField, planPreview } from './commandlet-preview.js';
 import { openHtmlEditor } from './html-cell-editor.js';
 import { openPreviewPopup, previewFrame, renderValue } from './preview-popup.js';
 import { validateValue } from '../table/validate-value.js';
@@ -116,6 +116,11 @@ async function describe(cmd: Commandlet, ctx: CommandletContext = {}): Promise<s
       const table = await resolveTable(cmd, ctx);
       return `edit the ${table.name} record where ${describeFilters(editFilters(table, cmd))}`;
     }
+    case 'record': {
+      const table = await resolveTable(cmd, ctx);
+      const byId = rowIdTarget(cmd);
+      return byId ? `open the ${table.name} record ${byId}` : `open the ${table.name} record where ${describeFilters(editFilters(table, cmd))}`;
+    }
     case 'ui':
       throw new CommandletError(`"${cmd.verb}" is not wired up yet.`);
   }
@@ -148,6 +153,8 @@ async function runOne(cmd: Commandlet, ctx: CommandletContext = {}): Promise<voi
       return runPreview(cmd, ctx);
     case 'edit':
       return runEdit(cmd, ctx);
+    case 'record':
+      return runRecord(cmd, ctx);
     case 'ui':
       throw new CommandletError(`"${cmd.verb}" is not wired up yet.`);
   }
@@ -298,6 +305,33 @@ async function runPreview(cmd: Commandlet, ctx: CommandletContext): Promise<void
     app.api.ui.dialogs.toast(`${matches.toLocaleString()} rows match ${describeFilters(filters)} — showing the first.`, { kind: 'warning', title: 'Preview' });
   }
 
+  // A RECORD PANE beside this table is a better answer than a one-field popup:
+  // it shows the whole record, laid out, and it is editable in place. So a
+  // `preview/notes/n-17` that named no field selects the row there instead.
+  //
+  // Only when no field was named — `preview/notes/Body/n-17` asked for one
+  // column and keeps getting it — and only when something is actually following
+  // this table's selection, which is what `current-row.ts` answers. Every link
+  // already written therefore keeps working, and gets better where a pane exists.
+  if (!namesAField(table, cmd.targets.slice(1))) {
+    // Imported here, not at the top. `commandlet-run.ts` is pulled in by the
+    // document-wide click handler that every cell link goes through, and one
+    // verb's hand-off has no business enlarging that module's graph — see
+    // `plugins/commandlets.ts`.
+    const { currentRowWanted, setCurrentRow } = await import('../table/current-row.js');
+    if (currentRowWanted(table.id)) {
+      focusTableWindow(table.id);
+      setCurrentRow(table.id, row.id);
+      return;
+    }
+  }
+  // **Not the record window.** A double-click opens one, and it was tempting to
+  // make `preview/notes/n-17` agree — but a key-only preview is a designed
+  // feature with its own rules for WHICH field is worth a window
+  // (`commandlet-preview.ts`, pure and unit-tested), and every link already
+  // written expects them. A record pane is different: it is already on screen,
+  // and the reader asked for it.
+
   // Scripted columns are computed first, exactly as the grid and a view compute
   // them. The stored cell behind a script is empty, so previewing one without
   // this showed an empty window for a column plainly full of text on screen.
@@ -406,6 +440,81 @@ async function runEdit(cmd: Commandlet, ctx: CommandletContext): Promise<void> {
   }
 
   await openRecordForm(table.id, row.id);
+}
+
+// -- record -------------------------------------------------------------------
+
+/**
+ * Open ONE record in the record WINDOW: `record/<table>/<rowId>`,
+ * `record/<table>/<key>`, `record/<table>/<field>/<value>` or
+ * `record/<table>?<filters>`.
+ *
+ * `edit`'s twin, and deliberately every shape `edit` takes — the difference is
+ * where the record lands, not how it is named. A window rather than a modal form
+ * is what lets two records sit open side by side, and it is what a row
+ * double-click gives, so a link and the gesture now agree.
+ *
+ * **It is the one place a ROW ID addresses a row.** Everywhere else a record is
+ * named by its key column, which is a convention (`keyColumnOf`) and not always
+ * unique. `$_.rowId` / `row._.rowId` is the handle a template has on a record
+ * that has no key of its own — an imported table with repeated values, a row the
+ * user has not named yet — and without a verb that accepts it the metadata would
+ * be visible and useless.
+ *
+ * The id is tried FIRST and falls through silently: a table whose key column
+ * really does hold row-id-shaped values still resolves by key, because the
+ * lookup that failed cost one `findOne`.
+ */
+async function runRecord(cmd: Commandlet, ctx: CommandletContext): Promise<void> {
+  const app = await getContext();
+  const table = await resolveTable(cmd, ctx);
+
+  const wanted = rowIdTarget(cmd);
+  let row: Row | undefined;
+  if (wanted) {
+    row = ((await app.store.rows(table.id).findOne(wanted)) as Row | null) ?? undefined;
+  }
+  if (!row) {
+    const filters = editFilters(table, cmd);
+    const page = await readRows(app.store.rows(table.id), { columns: table.columns, filters, limit: 2 });
+    row = page.rows[0];
+    if (!row) {
+      throw new CommandletError(`No row in "${table.name}" matches ${describeFilters(filters)}.`);
+    }
+    const matches = page.total ?? page.rows.length;
+    if (matches > 1) {
+      app.api.ui.dialogs.toast(`${matches.toLocaleString()} rows match ${describeFilters(filters)} — opening the first.`, { kind: 'warning', title: 'Record' });
+    }
+  }
+
+  // A record PANE beside this table is already showing records, so it is the
+  // better answer than a new window — the same order a row double-click follows
+  // (`plugins/record-popup.ts`), and the reason a link and the gesture agree.
+  const { currentRowWanted, setCurrentRow } = await import('../table/current-row.js');
+  if (currentRowWanted(table.id)) {
+    focusTableWindow(table.id);
+    setCurrentRow(table.id, row.id);
+    return;
+  }
+  const { openRecordPopup } = await import('./record-popup.js');
+  if (openRecordPopup(table.id, row.id)) return;
+  // The Record visualization is switched off, so there is no window to open.
+  // The FORM shows the same record and is always there — a verb that did
+  // nothing because of a plugin toggle would be worse than one that lands
+  // somewhere slightly different.
+  await openRecordForm(table.id, row.id);
+}
+
+/**
+ * The second target, where it could be a row id — `record/<table>/<id>`.
+ *
+ * Only the two-target form: `record/notes/Title/Berlin` named a field, so the
+ * third segment is that field's value and not an id. Returns `''` when there is
+ * nothing to try, which is also what a caller reads as "not by id".
+ */
+function rowIdTarget(cmd: Commandlet): string {
+  if (cmd.targets.length !== 2) return '';
+  return (cmd.targets[1] ?? '').trim();
 }
 
 /**

@@ -33,6 +33,7 @@ import { ROW_FETCH_CAP } from '../db/data-store-bridge.js';
 import { truncationNote } from '../db/truncation-note.js';
 import { readSortSpecs } from '../table/row-sort.js';
 import { runColumnScript } from '../util/column-script.js';
+import { withRowMeta } from '../views/row-meta.js';
 import { requestVisibleRows, watchVisibleRows, type VisibleRowsDetail } from '../table/visible-rows.js';
 import { paneFilter, paneSort } from '../table/pane-actions.js';
 import { persistPillFilters, withPillValue } from '../views/pill-filters.js';
@@ -47,6 +48,9 @@ import { defineCharts } from './elements/chart-element.js';
 import { definePointMap } from './elements/point-map.js';
 import { defineWordCloud } from './elements/word-cloud.js';
 import { defineCustomHtml, type VizFilterRequest, type VizSortRequest } from './viz-custom-html.js';
+import { defineVizRecord, type VizRecord, type VizRecordEditRequest } from './viz-record.js';
+import { requestCurrentRow, watchCurrentRow } from '../table/current-row.js';
+import { mayWrite, patchFor } from '../views/input-writeback.js';
 import type { ChartData, CloudTerm, MapPoint } from './elements/chart-data.js';
 
 // Registers the built-in drawing tags once, at module load. The elements
@@ -56,6 +60,7 @@ defineCharts();
 definePointMap();
 defineWordCloud();
 defineCustomHtml();
+defineVizRecord();
 
 @customElement('viz-panel')
 export class VizPanel extends LitElement {
@@ -145,6 +150,25 @@ export class VizPanel extends LitElement {
   private rowsUnsub?: (() => void) | undefined;
   private tableUnsub?: (() => void) | undefined;
   private dockUnsub?: (() => void) | undefined;
+  private currentRowUnsub?: (() => void) | undefined;
+
+  /**
+   * Which row a record pane draws, followed from the host grid.
+   *
+   * Only a `record` pane reads it, but it is watched for every docked kind: the
+   * subscription costs one registry entry and the alternative is re-subscribing
+   * whenever the instance's kind changes under an open pane.
+   */
+  @state() private currentRowId: string | null = null;
+
+  /**
+   * Renderer name → custom-element tag, for a record pane's `$FIELD` slots.
+   *
+   * A snapshot, re-taken on `app:ready` so a hot-installed cell renderer reaches
+   * an open pane — exactly what `views/view-window.ts` does with the same
+   * registry.
+   */
+  private cellRenderers: Map<string, string> = new Map();
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -161,10 +185,12 @@ export class VizPanel extends LitElement {
     this.rowsUnsub?.();
     this.tableUnsub?.();
     this.dockUnsub?.();
+    this.currentRowUnsub?.();
     this.instUnsub = undefined;
     this.rowsUnsub = undefined;
     this.tableUnsub = undefined;
     this.dockUnsub = undefined;
+    this.currentRowUnsub = undefined;
     this.rowColl = null;
   }
 
@@ -300,6 +326,15 @@ export class VizPanel extends LitElement {
 
     this.tileUrl = await readTileUrl(ctx.api.settings);
     this.tileAttribution = await readTileAttribution(ctx.api.settings);
+    // A record pane mounts the column's own renderer into each `$FIELD` slot, so
+    // it needs the same registry snapshot the view window takes — and re-takes on
+    // `app:ready`, which is what carries a hot-installed cell renderer into a pane
+    // that is already open.
+    this.cellRenderers = new Map(ctx.registries.cellRenderers);
+    ctx.events.on('app:ready', () => {
+      this.cellRenderers = new Map(ctx.registries.cellRenderers);
+      this.requestUpdate();
+    });
 
     this.template = (await ctx.store.viewTemplates.findOne(inst.templateId)) ?? null;
     if (!this.template) {
@@ -339,10 +374,13 @@ export class VizPanel extends LitElement {
       // window's under the table id.
       const key = inst.dock.host.kind === 'view' ? inst.dock.host.viewInstanceId : inst.dock.host.tableId;
       this.dockUnsub = watchVisibleRows(key, (d) => this.acceptPublishedRows(d));
-      // Then PULL, because the grid publishes only when somebody is already
-      // listening and we just became that somebody — one render too late. Without
-      // this the pane says "No data" beside a full grid until something happens to
-      // make the grid re-render, which for a table nobody is touching is never.
+      // The selection, on the same key and for the same reason: push for
+      // updates, pull for the first value. A record pane is the only kind that
+      // reads it, but watching unconditionally means an instance switched TO the
+      // record kind under an open pane is already following the grid. Watching
+      // is also what tells `edit-record` to stand down — see `current-row.ts`.
+      this.currentRowUnsub = watchCurrentRow(key, (rowId) => (this.currentRowId = rowId));
+      this.currentRowId = requestCurrentRow(key);
       // Then PULL, because the grid publishes only when somebody is already
       // listening and we just became that somebody — one render too late. Without
       // this the pane said "No data" beside a full grid until something happened to
@@ -459,7 +497,7 @@ export class VizPanel extends LitElement {
     return this.rows.map((r) => {
       const data = { ...r.data };
       for (const c of scripted) {
-        const run = runColumnScript(activeColumnScript(c), r.data);
+        const run = runColumnScript(activeColumnScript(c), withRowMeta(r));
         // A script that declined leaves the stored cell in place, so a chart
         // aggregates what the grid shows.
         if (run.ok && scriptDeclined(run.value)) continue;
@@ -642,6 +680,11 @@ export class VizPanel extends LitElement {
     // decide on a redraw (`elements/same-input.ts`), so a fresh array here would
     // redraw every chart on every render.
     if (this.frame?.categories.some((c) => c.key === OTHER_LABEL)) o['mutedCategory'] = OTHER_LABEL;
+    // A record pane mounts the column's real cell renderer into each `$FIELD`
+    // slot, so it needs the registry the view window reads. Kept out of every
+    // other kind's options because it is a Map, and `same-input.ts` compares
+    // options shallowly — a fresh Map per render would redraw every chart.
+    if (this.spec?.id === 'record') o['renderers'] = this.cellRenderers;
     return o;
   }
 
@@ -687,6 +730,47 @@ export class VizPanel extends LitElement {
     const ctx = await getContext();
     const current = target === inst.id ? inst.pillFilters : (await ctx.store.viewInstances.findOne(target))?.pillFilters;
     await persistPillFilters(target, withPillValue(current, field, value));
+  };
+
+  /**
+   * "Write this cell" — a record pane's `$input.FIELD` control changed.
+   *
+   * The pane element has no store and no table id, so it asks and this writes,
+   * the same shape `viz-filter-request` keeps for a pill. Everything that
+   * decides WHETHER is in `views/input-writeback.ts`, which is the grid's own
+   * rule set lifted out of `view-window.ts` — a value a user cannot type into a
+   * cell must not be writable through a template either.
+   *
+   * A refusal is an alert, not a toast: the user typed something and the control
+   * still shows it, so a message that vanishes would leave the field looking
+   * saved. The row is re-read afterwards, which puts the control back to the
+   * stored value.
+   */
+  private onRecordEditRequest = async (e: Event): Promise<void> => {
+    const { rowId, field, value } = (e as CustomEvent<VizRecordEditRequest>).detail;
+    const inst = this.instance;
+    if (!inst || !rowId || !field) return;
+    const ctx = await getContext();
+    const row = this.rows.find((r) => r.id === rowId) ?? ((await ctx.store.rows(inst.tableId).findOne(rowId)) as Row | null) ?? undefined;
+    const col = this.columns.find((c) => c.field === field);
+    const table = (await ctx.store.tables.findOne(inst.tableId)) as Table | null;
+    const verdict = mayWrite({ rowId, field, value }, col, row, {
+      readonly: inst.readonly === true,
+      tableReadonly: table?.readonly === true,
+      // Every row the pane was given. `unique` can then be checked against what
+      // is on screen, which is more than one record and less than the table —
+      // the honest middle, and what `validate-value.ts` documents.
+      allRows: this.rows,
+    });
+    if (!verdict.ok) {
+      await ctx.api.ui.dialogs.alert(verdict.reason, 'Edit record');
+      // Put the control back: it is still showing what was refused. The pane's
+      // own redraw guard would skip a plain `requestUpdate` — nothing it draws
+      // from changed — so ask the element directly.
+      this.renderRoot.querySelector<VizRecord>('viz-record')?.redraw();
+      return;
+    }
+    await ctx.store.rows(inst.tableId).patch(rowId, patchFor({ rowId, field, value }, row as Row));
   };
 
   /** "Sort what I am showing." Only a host grid can honour this. */
@@ -761,7 +845,7 @@ export class VizPanel extends LitElement {
     // does not declare, and branching the template per kind would mean this host
     // knowing which kinds exist — the thing `channelOfKind` avoids.
     return html`
-      <div class="chart ${spec.bleed ? 'bleed' : ''}" @viz-filter-request=${this.onFilterRequest} @viz-sort-request=${this.onSortRequest}>
+      <div class="chart ${spec.bleed ? 'bleed' : ''}" @viz-filter-request=${this.onFilterRequest} @viz-sort-request=${this.onSortRequest} @viz-record-edit-request=${this.onRecordEditRequest}>
         ${staticHtml`<${tag}
           .data=${this.chartData()}
           .points=${this.mapPoints()}
@@ -769,6 +853,8 @@ export class VizPanel extends LitElement {
           .rows=${this.evaluatedRows()}
           .columns=${this.columns}
           .options=${opts}
+          .currentRowId=${this.currentRowId}
+          .readonly=${this.instance?.readonly === true}
         ></${tag}>`}
       </div>
       ${note ? html`<div class="note" role="status">${note}</div>` : nothing}

@@ -19,6 +19,7 @@ import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.
 import { requestVisibleRows } from '../table/visible-rows.js';
 import { KEEP_ENABLED_HINT, RUN_AND_DISABLE, RUN_AND_KEEP, materializeColumnScript, materializeSummary } from '../table/materialize-script.js';
 import { isErrorField } from '../table/row-errors.js';
+import { checkScriptOnRows, scriptWarning } from '../table/column-preview.js';
 
 /**
  * Which script is being edited. They share this one editor because everything
@@ -290,6 +291,19 @@ export class ScriptEditorDialog extends LitElement {
         resize: vertical;
         tab-size: 2;
       }
+      /* Under the textarea, not above it: the answer belongs next to the code
+         that caused it, and a banner at the top would push the editor down on
+         every keystroke that broke the script. */
+      .script-issue {
+        margin: 0.4rem 0 0;
+        padding: 0.4rem 0.6rem;
+        border-radius: 0.25rem;
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        color: #991b1b;
+        font-size: 0.8rem;
+        overflow-wrap: anywhere;
+      }
     `,
   ];
 
@@ -327,6 +341,32 @@ export class ScriptEditorDialog extends LitElement {
    * have nothing to switch off.
    */
   @state() private active: boolean | null = null;
+  /**
+   * The rows the columns editor is previewing, so the script can be TRIED as it
+   * is typed — see {@link scriptIssue}. Empty for a caller that has none, which
+   * still catches a compile error.
+   */
+  private previewRows: readonly Row[] = [];
+  /**
+   * What trying the script on those rows found, or null when it is fine.
+   *
+   * Recomputed on every keystroke rather than on Save. The whole value of this
+   * is catching the typo while the cursor is still next to it — a warning that
+   * waited for Save would be indistinguishable from the run failing later.
+   */
+  @state() private scriptIssue: string | null = null;
+  /**
+   * Add the column to the table, and come back with somewhere to write.
+   *
+   * Set by the columns editor for a column that has been TYPED but not saved.
+   * Without it, Run on a new scripted column could only explain that there was
+   * nothing to write to — which is true, and useless: the user wants to see the
+   * script work, and "save, reopen, press Run" is three steps to learn nothing.
+   *
+   * It takes the text because the editor is holding it: committing without it
+   * would add an empty column and then run a script the table does not have.
+   */
+  private commit: ((text: string, active: boolean) => Promise<ScriptTarget | null>) | null = null;
   private dialogEl: HTMLDialogElement | null = null;
   private resolver: ((v: ScriptEdit | null) => void) | null = null;
 
@@ -360,7 +400,15 @@ export class ScriptEditorDialog extends LitElement {
     initial: string,
     columnLabel: string,
     kind: ScriptKind = 'render',
-    opts?: { field?: string; target?: ScriptTarget | undefined; active?: boolean | undefined },
+    opts?: {
+      field?: string;
+      target?: ScriptTarget | undefined;
+      active?: boolean | undefined;
+      /** Rows to try the script on as it is typed. */
+      previewRows?: readonly Row[] | undefined;
+      /** Add the column and come back with a target — see {@link commit}. */
+      commit?: ((text: string, active: boolean) => Promise<ScriptTarget | null>) | undefined;
+    },
   ): Promise<ScriptEdit | null> {
     if (this.resolver) {
       // Caller opened a new editor before resolving the previous one —
@@ -383,6 +431,13 @@ export class ScriptEditorDialog extends LitElement {
     // existing script wins — we never overwrite the user's source.
     this.text = initial && initial.trim() ? initial : this.blankFor(kind, opts?.field ?? '');
     this.columnLabel = columnLabel ?? '';
+    // Only a `render` script computes a cell from a row, so it is the only kind
+    // these rows can judge. A `validate` rule takes (value, row) and a
+    // visualization script takes the whole set — running either as `render(row)`
+    // would report a failure that is only the wrong calling convention.
+    this.previewRows = kind === 'render' ? (opts?.previewRows ?? []) : [];
+    this.commit = kind === 'render' ? (opts?.commit ?? null) : null;
+    this.recheck();
     // Read on every open, not once: another dialog (or another device, through
     // sync) may have added a sample since the last time this one was shown.
     this.userSamples = await readUserSamples();
@@ -483,18 +538,39 @@ export class ScriptEditorDialog extends LitElement {
     this.undoText = this.text;
     this.text = sample.source;
     this.pickedUserId = value.startsWith('u:') ? value.slice(2) : null;
+    this.recheck();
   }
 
   private undoSample() {
     if (this.undoText === null) return;
     this.text = this.undoText;
     this.undoText = null;
+    this.recheck();
   }
 
   private onInput(e: Event) {
     this.text = (e.target as HTMLTextAreaElement).value;
     // They're editing the sample now, not still deciding about it.
     this.undoText = null;
+    this.recheck();
+  }
+
+  /**
+   * Try the script on the preview rows and keep the verdict.
+   *
+   * Synchronous and unthrottled: `checkScriptOnRows` compiles once (the compiler
+   * is memoized per source) and runs over at most `PREVIEW_ROWS` rows, which is
+   * the same work the columns editor's own preview does on every keystroke
+   * behind this dialog. A debounce here would only delay the answer.
+   *
+   * Never for a `validate` or visualization script — see the note in `open`.
+   */
+  private recheck(): void {
+    if (this.kind !== 'render') {
+      this.scriptIssue = null;
+      return;
+    }
+    this.scriptIssue = scriptWarning(checkScriptOnRows(this.text, this.previewRows));
   }
 
   /**
@@ -566,7 +642,32 @@ export class ScriptEditorDialog extends LitElement {
       await dialogs.alert('There is no script to run. Write a render(row) function first, or pick one from the samples.', 'Run script');
       return;
     }
-    const target = this.target;
+    let target = this.target;
+    // A column that has been typed but not added yet: offer to add it, rather
+    // than explaining that there is nowhere to write. Wanting to see a new
+    // script work is the ordinary case, and "save, reopen, press Run" teaches
+    // nothing on the way.
+    if (!target && this.commit) {
+      const ok = await dialogs.confirm(
+        `“${this.columnLabel}” is not part of the table yet. Add it — along with any other changes in the columns editor — and then run this script over the rows?`,
+        'Run script',
+      );
+      if (!ok) return;
+      this.running = true;
+      try {
+        target = await this.commit(this.text, this.active !== false);
+      } finally {
+        this.running = false;
+      }
+      if (!target) {
+        // `commit` puts the reason on the columns editor's own error banner,
+        // which is behind this dialog — so say that there is one rather than
+        // leaving a click that visibly did nothing.
+        await dialogs.alert('The table could not be saved, so there is nothing to run against yet. Close this editor to see why.', 'Run script');
+        return;
+      }
+      this.target = target;
+    }
     if (!target) {
       await dialogs.alert('This column has no rows to write to yet. Create the table first, then open this script again and press Run.', 'Run script');
       return;
@@ -801,6 +902,7 @@ export class ScriptEditorDialog extends LitElement {
               ${this.undoText !== null ? html`<button type="button" class="link" @click=${() => this.undoSample()}>Undo</button>` : null}
             </div>
             <textarea spellcheck="false" autofocus .value=${this.text} @input=${(e: Event) => this.onInput(e)}></textarea>
+            ${this.scriptIssue ? html`<p class="script-issue" role="status" data-testid="script-issue">⚠ ${this.scriptIssue}</p>` : null}
           </div>
         </form>
       </dialog>

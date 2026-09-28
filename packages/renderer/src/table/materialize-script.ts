@@ -14,6 +14,7 @@
 
 import type { DataCollection, Row } from '@easydb/shared';
 import { runColumnScript } from '../util/column-script.js';
+import { withRowMeta } from '../views/row-meta.js';
 
 /**
  * What the app says when it is about to materialize a script that is still
@@ -24,8 +25,7 @@ import { runColumnScript } from '../util/column-script.js';
  * script costs — it recomputes on every draw — and therefore of why a run is
  * usually the moment to park it. Two copies would drift.
  */
-export const KEEP_ENABLED_HINT =
-  'If you leave the script enabled, it will run continuously. For better performance, disable scripts after you have Run them and loaded data.';
+export const KEEP_ENABLED_HINT = 'If you leave the script enabled, it will run continuously. For better performance, disable scripts after you have Run them and loaded data.';
 
 /** The two answers to it. Compared by value, so they live beside the question. */
 export const RUN_AND_DISABLE = 'Run and disable';
@@ -129,7 +129,7 @@ export async function materializeColumnScript(
   for (let i = 0; i < total; i++) {
     const row = targets[i];
     if (!row) continue;
-    const run = runColumnScript(source, row.data);
+    const run = runColumnScript(source, withRowMeta(row));
     if (!run.ok) {
       result.failed++;
       result.firstError ??= run.message || run.label;

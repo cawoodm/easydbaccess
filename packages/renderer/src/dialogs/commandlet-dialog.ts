@@ -197,7 +197,7 @@ export class CommandletDialog extends LitElement {
             <div class="verdict ${v ? (v.ok ? 'ok' : 'bad') : ''}">${v ? html`<span class="mark">${v.ok ? '✓' : '✕'}</span><span>${v.message}</span>` : nothing}</div>
             <p class="hint">
               <code>goto/&lt;table&gt;?&lt;Column&gt;=&lt;filter&gt;</code> — add <code>@sort=-Field</code>, <code>@search=…</code> or <code>@clear=1</code>; chain with <code>;</code>. Also
-              <code>search/…</code>, <code>view/…</code> and <code>cmd/&lt;id&gt;</code>.
+              <code>search/…</code>, <code>view/…</code>, <code>record/&lt;table&gt;/&lt;key&gt;</code> and <code>cmd/&lt;id&gt;</code>.
             </p>
           </div>
         </form>

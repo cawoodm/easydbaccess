@@ -1,6 +1,10 @@
 // packages/renderer/src/plugins/edit-record.ts
 //
-// Double-click a grid row, get the record form.
+// Double-click a grid row, get the record.
+//
+// This module owns the GESTURE and hands it on — see `plugins/record-popup.ts`
+// for the order and why each hand-off is a registry rather than an import. The
+// form below is the last answer, the one that needs nothing else loaded.
 //
 // A plugin rather than grid code, and that is the whole design: the grid edits
 // in place, so a double-click inside a cell would otherwise select a word. Some
@@ -19,13 +23,16 @@
 
 import type { HostApi, PluginModule } from '@easydb/shared';
 import { openEditRecordDialog } from '../dialogs/new-record-dialog.js';
+import { currentRowWanted } from '../table/current-row.js';
+import { openRecordPopup } from './record-popup.js';
 
 export const meta: NonNullable<PluginModule['meta']> = {
   id: 'edit-record',
   name: 'Edit record on double-click',
   type: 'ui',
   version: '0.1.0',
-  description: 'Double-click a row to open it in the record form. Switch off to get double-click text selection back inside cells.',
+  description:
+    'Double-click a row to open that record — in a record window where the Record visualization is on, in a record pane where one is docked beside the grid, otherwise in the record form. Switch off to get double-click text selection back inside cells.',
   author: 'Marc Cawood',
   icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4v16h16v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>',
   repo: 'https://github.com/cawoodm/easydbaccess/blob/main/packages/renderer/src/plugins/edit-record.ts',
@@ -50,6 +57,27 @@ function onDoubleClick(e: MouseEvent): void {
     if (!tableId && node.tagName === 'DATA-TABLE') tableId = (node as HTMLElement & { tableId?: string }).tableId ?? '';
   }
   if (!rowId || !tableId) return;
+
+  // A RECORD PANE beside this grid means the same gesture already has a job:
+  // selecting the row the pane draws, which is editable in place. Two things
+  // opening for one double-click would be one too many, so this one stands down
+  // — and does nothing else, so switching the pane off gives the form straight
+  // back.
+  //
+  // Read through `table/current-row.ts` rather than by looking for a pane: the
+  // question is "is anything following this grid's selection", which is exactly
+  // what that registry answers, and it means neither plugin imports the other.
+  if (currentRowWanted(tableId)) return;
+
+  // No pane, but the RECORD WINDOW is available: one record in a panel of its
+  // own, which is the whole record laid out and editable — more use than the
+  // form for reading, and it can sit open beside a second record. The form is
+  // still one click away in that window's header.
+  //
+  // Asked the same way and for the same reason (`plugins/record-popup.ts`): a
+  // registry, so this plugin does not import the record visualization and either
+  // can be switched off without the other noticing.
+  if (openRecordPopup(tableId, rowId)) return;
 
   void openEditRecordDialog(tableId, rowId);
 }

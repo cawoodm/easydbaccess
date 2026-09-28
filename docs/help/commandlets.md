@@ -119,6 +119,46 @@ a read-only table or column says **View source** instead and has nothing to save
 one cell and the answer to "is this the wrong value?" is usually in the fields
 beside it. On a read-only table it says **View record**.
 
+## Opening a whole record
+
+`record/…` opens one record in a **window of its own** — the same window you get
+by double-clicking its row. It takes every shape `edit/…` does, plus one nothing
+else takes: a **row id**.
+
+| Type this                    | And you get                                     |
+| ---------------------------- | ----------------------------------------------- |
+| `record/notes/n-17`          | record `n-17` — the key is the first column      |
+| `record/notes/Author/Smith`  | the first note whose Author is Smith             |
+| `record/notes?Title==Berlin` | the note titled Berlin                           |
+| `record/notes/<row id>`      | exactly that row, whatever its columns say       |
+
+One window per record, so two records can sit open side by side; asking for the
+same one again brings its window to the front instead of opening a second.
+
+The row id is the useful part. Every other way of naming a record goes through
+the **first column**, which is a convention rather than a guarantee — on an
+imported table with repeated names there is no key that picks one row. A script
+or a template can read the row's own id and build a link that always lands:
+
+```js
+function render(row) {
+  // Renderer: html
+  return `<a href="${cmdlet(['record', 'Notes', row._.rowId])}">open</a>`;
+}
+```
+
+In a view or record template it is `$_.rowId`, with no script at all:
+
+```html
+<a href="#record/Notes/$_.rowId">open</a>
+```
+
+See **`_` — what a row knows about itself** in
+[Editing cells](editing-cells.md) for the rest of what is on `row._`.
+
+If the **Record** plugin is switched off there is no window to open, so
+`record/…` opens the record form instead.
+
 ## Correcting one record
 
 `edit/…` opens a record in the **record form** — the same form the **+** button
@@ -132,10 +172,15 @@ and editing cell by cell.
 | `edit/notes/Author/Smith` | the first note whose Author is Smith        |
 | `edit/notes?Title==Berlin` | the note titled Berlin                     |
 
-A **double-click on any row** opens the same form for that row, so you rarely
-have to type this at all. If you would rather double-click select a word inside a
-cell, switch the **Edit record on double-click** plugin off in the Plugin
-Manager.
+A **double-click on any row** opens that record, so you rarely have to type this
+at all. What it opens depends on what is on screen: a **record pane** docked
+beside the grid just switches to that row, otherwise a **record window** opens,
+and the window's header has an **Edit record** button that brings you to this
+form. With the Record plugin switched off, the double-click opens the form
+directly, as it always did.
+
+If you would rather double-click select a word inside a cell, switch the **Edit
+record on double-click** plugin off in the Plugin Manager.
 
 Save writes only the fields the form shows you; everything else in the record is
 left as it was. A **read-only** table opens read-only: you see the whole record,

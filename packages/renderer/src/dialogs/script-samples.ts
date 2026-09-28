@@ -247,6 +247,42 @@ export const RENDER_SAMPLES: ReadonlyArray<ScriptSample> = [
 }
 `,
   },
+  {
+    label: 'Open this record in a window (row._.rowId)',
+    source: `function render(row) {
+  // Renderer: \`html\` — NOT \`link\`, which wants a scheme (https:, mailto:) and
+  // leaves a \`#…\` commandlet as plain text. So the anchor is built here.
+  //
+  // Opens THIS record in its own window — the same window a double-click on the
+  // row gives you.
+  //
+  // \`row._\` is what the record knows about itself, beside its columns:
+  //   row._.rowId   row._.tableId   row._.updatedAt (ms)   row._.updated (ISO)
+  // A view or record template says the same thing as $_.rowId.
+  //
+  // By ROW ID, so it works on a table whose first column repeats — an import
+  // with duplicate names, or rows nobody has keyed yet. \`record\` is the one
+  // verb that accepts an id; every other one names a record by its key column.
+  const TABLE = 'Notes'; // the table's name, as the app shows it
+  if (!row._) return '';
+  return \`<a href="\${cmdlet(['record', TABLE, row._.rowId])}">open</a>\`;
+}
+`,
+  },
+  {
+    label: 'Last changed, in words (row._.updatedAt)',
+    source: `function render(row) {
+  // No column has to store this: the row carries its own last-write stamp.
+  const at = row._?.updatedAt;
+  if (!at) return '';
+  const mins = Math.round((Date.now() - at) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return \`\${mins} min ago\`;
+  const hours = Math.round(mins / 60);
+  return hours < 24 ? \`\${hours} h ago\` : \`\${Math.round(hours / 24)} d ago\`;
+}
+`,
+  },
 ];
 
 /** `validate(value, row)` samples — see the header note on the house style. */

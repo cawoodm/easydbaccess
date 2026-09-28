@@ -11,6 +11,7 @@ import { activeColumnScript, arrayMembers, composeColumnFilter, matchesColumnFil
 import { defaultSubstring } from './../util/filter-settings.js';
 import { runColumnScript } from '../util/column-script.js';
 import { formatByType } from '../util/local-datetime.js';
+import { metaValue, withRowMeta } from './row-meta.js';
 
 /**
  * Matches a `$TOKEN` placeholder. An optional prefix decides how it renders:
@@ -21,19 +22,33 @@ import { formatByType } from '../util/local-datetime.js';
  *  - `filter.` — a clickable PILL,
  *  - `raw.` — the value as plain text, skipping the renderer.
  *
- * Group 1 is the prefix (or undefined), group 2 is the token NAME
- * (letters/digits/underscore, not starting with a digit); the name — without any
- * prefix — is the mapping key, so `$TITLE`, `$input.TITLE`, `$filter.TITLE` and
- * `$raw.TITLE` all map to the same column and differ only in presentation.
+ * One form stands apart: **`$_.KEY` is the row's own metadata** — `$_.rowId`,
+ * `$_.updated` — not a column and not mappable. See `views/row-meta.ts`. It is
+ * the FIRST alternative so it wins over the general form, which would otherwise
+ * read `$_.rowId` as the token `_` followed by the literal text `.rowId`. That
+ * is also why adding it could not break an existing template: the general form
+ * never resolved `_` to anything, so nothing can have depended on it.
+ *
+ * Group 1 is the metadata key (only for the `$_.` form). Group 2 is the prefix
+ * (or undefined) and group 3 the token NAME (letters/digits/underscore, not
+ * starting with a digit); the name — without any prefix — is the mapping key, so
+ * `$TITLE`, `$input.TITLE`, `$filter.TITLE` and `$raw.TITLE` all map to the same
+ * column and differ only in presentation.
  */
-const TOKEN_RE = /\$((?:input|filter|raw)[.:])?([A-Za-z_][A-Za-z0-9_]*)/g;
+const TOKEN_RE = /\$_\.([A-Za-z_][A-Za-z0-9_]*)|\$((?:input|filter|raw)[.:])?([A-Za-z_][A-Za-z0-9_]*)/g;
 
-/** Distinct token names (without the `$` or any `input.`/`filter.` prefix) found across the fragments. */
+/**
+ * Distinct token names (without the `$` or any `input.`/`filter.` prefix) found
+ * across the fragments.
+ *
+ * `$_.KEY` is not among them: these are the names a view INSTANCE maps to
+ * columns, and the row's own metadata is not a column to map.
+ */
 export function extractTokens(...fragments: string[]): string[] {
   const seen = new Set<string>();
   for (const frag of fragments) {
     if (!frag) continue;
-    for (const m of frag.matchAll(TOKEN_RE)) seen.add(m[2]!);
+    for (const m of frag.matchAll(TOKEN_RE)) if (m[3]) seen.add(m[3]);
   }
   return [...seen];
 }
@@ -51,7 +66,7 @@ export function extractFilterTokens(...fragments: string[]): string[] {
   for (const frag of fragments) {
     if (!frag) continue;
     for (const m of frag.matchAll(TOKEN_RE)) {
-      if (m[1]?.startsWith('filter')) seen.add(m[2]!);
+      if (m[3] && m[2]?.startsWith('filter')) seen.add(m[3]);
     }
   }
   return [...seen];
@@ -139,7 +154,7 @@ function renderFilterPill(field: string, value: unknown, spec: ColumnSpec | unde
  * blank result renders nothing.
  */
 function renderScripted(src: string, row: Row): string {
-  const run = runColumnScript(src, row.data);
+  const run = runColumnScript(src, withRowMeta(row));
   if (!run.ok) return `<span class="eda-script-error" title="${escapeAttr(run.message)}">⚠ ${escapeHtml(run.label)}</span>`;
   return run.value == null ? '' : String(run.value);
 }
@@ -157,7 +172,7 @@ export const CELL_SLOT_CLASS = 'eda-cell';
  */
 export function tokenValue(row: Row, field: string, script?: string | undefined): unknown {
   if (script?.trim()) {
-    const run = runColumnScript(script, row.data);
+    const run = runColumnScript(script, withRowMeta(row));
     return run.ok ? run.value : `⚠ ${run.label}`;
   }
   return row.data[field];
@@ -232,7 +247,14 @@ export function substituteRow(
     raw?: Record<string, boolean> | undefined;
   } = {},
 ): string {
-  return html.replace(TOKEN_RE, (_full, prefix: string | undefined, token: string, offset: number, whole: string) => {
+  return html.replace(TOKEN_RE, (_full, metaKey: string | undefined, prefix: string | undefined, token: string, offset: number, whole: string) => {
+    // `$_.rowId` — the row's own metadata, which is neither mapped nor rendered
+    // by a column. Escaped like any other text: a value going into `<a href="…">`
+    // or into the page must not be able to close a tag.
+    if (metaKey !== undefined) {
+      const mv = metaValue(row, metaKey);
+      return mv == null ? '' : escapeAttr(String(mv));
+    }
     const field = mapping[token];
     const script = opts.scripts?.[token];
     if (!prefix && script?.trim()) return renderScripted(script, row);
@@ -289,7 +311,7 @@ export function evaluateRow(row: Row, columns: readonly ColumnSpec[]): Row {
   for (const c of columns) {
     const src = activeColumnScript(c);
     if (src === undefined) continue;
-    const run = runColumnScript(src, row.data);
+    const run = runColumnScript(src, withRowMeta(row));
     // A script that DECLINED (null/undefined) leaves the stored value alone, so
     // the view filters, sorts and searches the same value the grid shows — see
     // `scriptDeclined`.

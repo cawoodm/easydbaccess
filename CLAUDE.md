@@ -196,7 +196,7 @@ the renderer's `plugin-host/`, the `DataStore` adapter, or the event bus.
   `projection`, `command-palette-button`, `electron-db` (+ `electron-folder`), `sqlitefile-source`,
   `tips`, `new-plugins`, `commandlets`, `edit-record`, `edb-file`, `legacy-import`, `validate`, `run-scripts`,
   `viz-charts`,
-  `viz-map`, `viz-wordcloud`, `viz-custom`, `date-filter`.
+  `viz-map`, `viz-wordcloud`, `viz-custom`, `viz-record`, `date-filter`.
   Don't add a feature to
   the core if it can be a plugin. (Exception: the Plugin Manager button is core
   chrome in `app-shell.ts`, not a plugin — it opens the manager that governs

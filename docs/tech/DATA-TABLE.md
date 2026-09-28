@@ -63,6 +63,16 @@ runtime-determined tag name), passing `.value`, `.column`, and `.row` (the
 full row data, for renderers like `script` that need neighbouring fields),
 and wiring its `change` event to `setCell()`.
 
+`.row` carries one key the stored row does not: **`_`, the record's own
+metadata** — `row._.rowId`, `row._.tableId`, `row._.updatedAt`,
+`row._.updated`. A column script's `row` is the same object, so
+`row._.rowId` reads identically in a script, a renderer and a template
+(`$_.rowId`). The rule is `views/row-meta.ts`: the object is memoized per
+`Row`, because a fresh one per render would redraw every renderer in the
+grid on every render; and `row.data` is spread AFTER `_`, so a table that
+really has a column called `_` keeps it rather than being shadowed. Nothing
+writes `_` back — a patch is built from the stored `Row`.
+
 No renderer, or an unregistered name, falls back to a native editor chosen
 by `col.type`: a checkbox for `boolean`, `<input type=date>` /
 `datetime-local` for `date`/`datetime`, a plain text/number input

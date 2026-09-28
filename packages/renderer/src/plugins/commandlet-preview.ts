@@ -67,6 +67,22 @@ export function previewFieldOf(table: Pick<Table, 'columns'>): ColumnSpec | unde
   return rest.find((c) => c.renderer && PREVIEW_RENDERERS.has(c.renderer)) ?? rest.find((c) => c.type === 'text') ?? rest[0] ?? key;
 }
 
+/**
+ * Did the user NAME a field, or leave the choice to us?
+ *
+ * The difference decides who shows the record. With a record pane docked beside
+ * the grid, `preview/notes/n-17` means "show me that record" and the pane is the
+ * better answer than a one-field popup — but `preview/notes/Body/n-17` asked for
+ * one column and must keep getting it.
+ *
+ * The same rule `planPreview` reads the targets by, exported so
+ * `commandlet-run.ts` can ask it without re-deriving it.
+ */
+export function namesAField(table: Pick<Table, 'columns'>, targets: readonly string[]): boolean {
+  if (targets.length > 1) return true;
+  return findColumn(table.columns, targets[0] ?? '') !== undefined;
+}
+
 /** What a `preview/…` resolved to, before any row is read. */
 export interface PreviewPlan {
   /** The column whose value the window shows. */

@@ -41,6 +41,7 @@ import * as vizCharts from '../plugins/viz-charts.js';
 import * as vizMap from '../plugins/viz-map.js';
 import * as vizWordcloud from '../plugins/viz-wordcloud.js';
 import * as vizCustom from '../plugins/viz-custom.js';
+import * as vizRecord from '../plugins/viz-record.js';
 import * as commandPaletteButton from '../plugins/command-palette-button.js';
 import * as electronDb from '../plugins/electron-db.js';
 import * as sqliteFileSource from '../plugins/sqlitefile-source.js';
@@ -112,6 +113,7 @@ const modules: PluginModule[] = [
   vizMap,
   vizWordcloud,
   vizCustom,
+  vizRecord,
   commandPaletteButton,
   electronDb,
   sqliteFileSource,

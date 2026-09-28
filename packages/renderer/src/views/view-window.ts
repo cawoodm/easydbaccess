@@ -7,6 +7,8 @@ import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViews } from '../dialogs/open-views.js';
 import { openViewColumnsDialog } from '../dialogs/view-columns-dialog.js';
 import { CELL_SLOT_CLASS, cyclePillValue, evaluateRows, extractFilterTokens, hasRowHtml, removePillValue, substituteRow, tokenValue, viewRows } from './view-render.js';
+import { withRowMeta } from './row-meta.js';
+import { inputTargetOf, mayWrite, patchFor, readInputValue } from './input-writeback.js';
 import { persistPillFilters, withPillValue } from './pill-filters.js';
 import { viewColumnSpecs } from './view-columns.js';
 import { activeColumnScript, parseColumnFilter } from '@easydb/shared';
@@ -328,6 +330,9 @@ export class ViewWindow extends LitElement {
   /** Renderer name → custom-element tag, snapshotted from the registries. */
   @state() private cellRenderers: Map<string, string> = new Map();
 
+  /** The TABLE is read-only, whatever this view says. See `onInputChange`. */
+  private tableReadonly = false;
+
   /**
    * The read stopped at the row cap, so what the view shows is a slice of its
    * table. The grid has said this for a while; a template view said nothing, and
@@ -424,7 +429,7 @@ export class ViewWindow extends LitElement {
       };
       cell.value = tokenValue(row, field, scripts[el.dataset.edaToken ?? '']) ?? '';
       cell.column = spec;
-      cell.row = row.data;
+      cell.row = withRowMeta(row);
       cell.readonly = true;
       cell.sourceReadonly = true;
       // Not a grid row: a renderer that flattens its value to one line for the
@@ -464,6 +469,10 @@ export class ViewWindow extends LitElement {
     this.template = (await ctx.store.viewTemplates.findOne(inst.templateId)) ?? null;
     const table = await ctx.store.tables.findOne(inst.tableId);
     this.tableColumns = table?.columns ?? [];
+    // A read-only TABLE refuses an `$input` write however the view is marked —
+    // the same rule `openEditRecordDialog` reads for itself, so a template
+    // cannot be a way round it.
+    this.tableReadonly = table?.readonly === true;
     // Keep the table-name snapshot current while the table exists, so the
     // reconnect-by-name path (view-window-manager) has an up-to-date value to
     // match against after a delete + recreate.
@@ -607,29 +616,31 @@ export class ViewWindow extends LitElement {
    * simply disappears. No-ops for a readonly view (the inputs are disabled too).
    */
   private onInputChange = async (e: Event): Promise<void> => {
-    const t = e.target;
-    if (!(t instanceof HTMLInputElement) || !t.classList.contains('eda-input')) return;
-    if (!this.instance || this.instance.readonly === true) return;
-    const rowId = t.getAttribute('data-eda-row');
-    const field = t.getAttribute('data-eda-field');
-    const type = t.getAttribute('data-eda-type') ?? 'string';
-    if (!rowId || !field) return;
-    const existing = this.allRows.find((r) => r.id === rowId);
-    if (!existing) return;
-    let value: unknown;
-    if (type === 'boolean') {
-      value = t.checked;
-    } else if (type === 'number') {
-      const n = Number(t.value);
-      value = t.value.trim() === '' ? null : Number.isNaN(n) ? t.value : n;
-    } else {
-      value = t.value;
-    }
-    const ctx = await getContext();
-    await ctx.store.rows(this.instance.tableId).patch(rowId, {
-      data: { ...existing.data, [field]: value },
-      updatedAt: Date.now(),
+    const target = inputTargetOf(e.target);
+    if (!target || !this.instance) return;
+    const existing = this.allRows.find((r) => r.id === target.rowId);
+    const value = readInputValue(e.target as HTMLInputElement, target.type);
+    const edit = { rowId: target.rowId, field: target.field, value };
+    const col = this.tableColumns.find((c) => c.field === target.field);
+    // The grid's rules, through the module both this and a record pane use. Up
+    // to v0.0.493 a view's `$input` wrote whatever was typed: a Not-null column
+    // could be emptied, a read-only column could be edited and a `validate`
+    // script was never run — none of which the same column permits in the grid.
+    // A template is not a way round a column's own constraints.
+    const verdict = mayWrite(edit, col, existing, {
+      readonly: this.instance.readonly === true,
+      tableReadonly: this.tableReadonly,
+      // Every row the view holds, so `unique` is checked against what is here.
+      allRows: this.allRows,
     });
+    const ctx = await getContext();
+    if (!verdict.ok) {
+      await ctx.api.ui.dialogs.alert(verdict.reason, 'Edit');
+      // Put the control back: it is still showing what was refused.
+      this.requestUpdate();
+      return;
+    }
+    await ctx.store.rows(this.instance.tableId).patch(target.rowId, patchFor(edit, existing as Row));
   };
 
   /**

@@ -18,6 +18,7 @@ import { ROW_FETCH_CAP } from '../db/data-store-bridge.js';
 import { filterRows } from '../views/view-render.js';
 import { readSortSpecs, sortRowsBySpecs } from '../table/row-sort.js';
 import { runColumnScript } from '../util/column-script.js';
+import { withRowMeta } from '../views/row-meta.js';
 import { formatByType } from '../util/local-datetime.js';
 
 /** The general options a plain "everything, as stored" export would use. */
@@ -105,7 +106,7 @@ function withScriptValues(rows: Row[], columns: readonly ColumnSpec[]): Row[] {
     const data = { ...r.data };
     for (const col of scripted) {
       if (data[col.field] != null && data[col.field] !== '') continue;
-      const run = runColumnScript(activeColumnScript(col), r.data);
+      const run = runColumnScript(activeColumnScript(col), withRowMeta(r));
       // A declined script leaves the (empty) stored cell as it is — writing its
       // `null` in would export the word "null" for a blank.
       if (run.ok && !scriptDeclined(run.value)) data[col.field] = run.value as never;

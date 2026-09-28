@@ -237,6 +237,17 @@ matches EXACTLY: a bare value means "contains" to `column-filter.ts`, and a key
 that is a prefix of another key would otherwise take whichever row came back
 first.
 
+**A key-only preview goes to a RECORD PANE where one is docked.**
+`preview/notes/n-17` named no field, so it means the record, and a pane beside
+that table is already showing records — it selects the row there instead
+(`currentRowWanted`, `table/current-row.ts`). Only when no field was named, and
+only when something is actually following that table's selection.
+
+It does **not** open the record window, even though a row double-click does. A
+key-only preview is a designed feature with its own rules for which field is
+worth a window, and every link already written expects them; a pane is different
+because the reader put it there and it is already on screen.
+
 **Which field a key-only preview shows**, in order: a column whose renderer is
 `markdown` or `preview` (someone has already declared it too long for its cell),
 then a `text` column (prose by the type system's own definition), then the first
@@ -319,13 +330,41 @@ disabled, because an existing row already has a value there and a form that hid
 it would show a different record from the grid. They are never written back, and
 neither is any key the row does not already have.
 
+## `record/…` — the same record, in a window
+
+`record` is `edit`'s twin and takes every shape `edit` takes; the difference is
+where the record lands. `runRecord` follows the same order a row double-click
+does (`plugins/record-popup.ts`): a docked record PANE takes the selection, else
+the record WINDOW opens, else — with the Record visualization switched off —
+the record form, so the verb always does something.
+
+**It is the one place a ROW ID addresses a row.** Everywhere else a record is
+named through `keyColumnOf`, which is a convention and not a uniqueness
+guarantee: on an imported table with repeated names, no key picks one row. A
+template has `$_.rowId` and a script has `row._.rowId` (`views/row-meta.ts`), and
+without a verb that accepts one that metadata would be visible and useless.
+
+The id is tried FIRST, with one `findOne`, and falls through silently to the key
+form — so a table whose key column genuinely holds row-id-shaped values still
+resolves by key. Only the two-target form is tried as an id:
+`record/notes/Title/Berlin` named a field, so the third segment is that field's
+value.
+
 ### Double-click
 
-`plugins/edit-record.ts` opens the same form when a grid row is double-clicked.
-It is a plugin, not grid code, and that is the design: the grid edits in place,
-so this takes over the double-click that would otherwise select a word inside a
-cell. Switching the plugin off in the Plugin Manager gives that back, because
-nothing in the core listens for a double-click on a row.
+`plugins/edit-record.ts` owns the double-click on a grid row. It is a plugin, not
+grid code, and that is the design: the grid edits in place, so this takes over
+the double-click that would otherwise select a word inside a cell. Switching the
+plugin off in the Plugin Manager gives that back, because nothing in the core
+listens for a double-click on a row.
+
+**It hands the gesture on rather than acting on it.** In order: a docked record
+pane selects the row (`currentRowWanted`, `table/current-row.ts`); else the
+**record window** opens that record in a panel of its own (`openRecordPopup`,
+`plugins/record-popup.ts`); else the record form below, which is where this
+started and what a workspace with the Record visualization switched off still
+gets. Both hand-offs are registries holding one function, so none of the three
+plugins imports another and each can be switched off alone.
 
 The plugin reads `data-row-id` off the `<tr>` and `tableId` off the
 `<data-table>` element, both from the event's composed path — the same technique

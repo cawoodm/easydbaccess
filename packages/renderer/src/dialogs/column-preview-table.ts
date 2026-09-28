@@ -36,6 +36,7 @@ import type { ColumnSpec, Row } from '@easydb/shared';
 import { getContext } from '../app-context.js';
 import { clampPreviewHeight, PREVIEW_HEIGHT_DEFAULT, previewCells, previewText, type PreviewCell } from '../table/column-preview.js';
 import { readUserSetting, writeUserSetting } from '../db/user-settings.js';
+import { withRowMeta } from '../views/row-meta.js';
 
 /**
  * The dragged height, device-local rather than in the workspace.
@@ -304,7 +305,7 @@ export class ColumnPreviewTable extends LitElement {
       .value=${cell.value ?? ''}
       .rawValue=${cell.raw ?? ''}
       .column=${col}
-      .row=${row.data}
+      .row=${withRowMeta(row)}
       .readonly=${true}
       .sourceReadonly=${true}
     ></${el}></td>`;

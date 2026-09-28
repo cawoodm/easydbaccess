@@ -90,6 +90,26 @@ describe('parseCommandlets', () => {
     expect(() => parseCommandlets('edit?Title==Berlin')).toThrow(CommandletError);
   });
 
+  it('accepts record in every shape edit takes', () => {
+    // `record` is `edit`'s window twin, so the shapes are the same ones — a
+    // link author should not have to learn a second addressing scheme to send
+    // a record to a window instead of to the form.
+    expect(parseCommandlets('record/notes?Title==Berlin')[0]?.targets).toEqual(['notes']);
+    expect(parseCommandlets('record/notes/n-17')[0]?.targets).toEqual(['notes', 'n-17']);
+    expect(parseCommandlets('record/notes/Author/Smith')[0]?.targets).toEqual(['notes', 'Author', 'Smith']);
+    expect(parseCommandlets('record/notes/n-17')[0]?.verb).toBe('record');
+  });
+
+  it('refuses record with no table, for the reason edit does', () => {
+    expect(() => parseCommandlets('record?Title==Berlin')).toThrow(CommandletError);
+  });
+
+  it('keeps a row id in one segment, encoded slash and all', () => {
+    // `cmdlet(['record', t, row._.rowId])` encodes each segment, so an id with a
+    // `/` in it must come back out whole rather than reading as a field/value.
+    expect(parseCommandlets('record/notes/a%2Fb')[0]?.targets).toEqual(['notes', 'a/b']);
+  });
+
   it('keeps a named view in one target, trailing slash and all', () => {
     expect(parseCommandlets('view/AnotherView/?@search=foo')[0]?.targets).toEqual(['AnotherView']);
     // A `/` inside the name is part of it — `view` owns the rest of the path.
@@ -101,6 +121,7 @@ describe('looksLikeCommandlet', () => {
   it('is true only for a known verb, so a plain anchor stays an anchor', () => {
     expect(looksLikeCommandlet('goto/bible?Book=Matthew')).toBe(true);
     expect(looksLikeCommandlet('cmd/windows:close-all')).toBe(true);
+    expect(looksLikeCommandlet('record/notes/n-17')).toBe(true);
     expect(looksLikeCommandlet('/view?Title==Psalms 139')).toBe(true);
     expect(looksLikeCommandlet('Matthew')).toBe(false);
     expect(looksLikeCommandlet('/Matthew')).toBe(false);

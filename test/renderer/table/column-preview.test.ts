@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampPreviewHeight, previewCells, previewText, PREVIEW_HEIGHT_DEFAULT, PREVIEW_ROWS } from '../../../packages/renderer/src/table/column-preview.js';
+import { checkScriptOnRows, clampPreviewHeight, previewCells, previewText, scriptWarning, PREVIEW_HEIGHT_DEFAULT, PREVIEW_ROWS } from '../../../packages/renderer/src/table/column-preview.js';
 import type { ColumnSpec, Row } from '../../../packages/shared/src/types.js';
 
 /**
@@ -158,5 +158,69 @@ describe('clampPreviewHeight', () => {
 
   it('has a default that survives clamping on any usable window', () => {
     expect(clampPreviewHeight(PREVIEW_HEIGHT_DEFAULT, 800)).toBe(PREVIEW_HEIGHT_DEFAULT);
+  });
+});
+
+/**
+ * Trying the script on the preview rows — the other question the same evidence
+ * answers. The preview grid marks a failing CELL ("is this row odd?"); this says
+ * whether the SCRIPT is wrong, while it is still being typed.
+ */
+describe('checkScriptOnRows', () => {
+  const ROWS = [row('1', { a: 'x' }), row('2', { a: 'y' }), row('3', {})];
+
+  it('says nothing about a script that works', () => {
+    const out = checkScriptOnRows('function render(row) { return row.a ?? "" }', ROWS);
+    expect(out).toEqual({ total: 3, failed: 0, message: '' });
+    expect(scriptWarning(out)).toBeNull();
+  });
+
+  it('says nothing when there is no script at all', () => {
+    expect(scriptWarning(checkScriptOnRows('', ROWS))).toBeNull();
+    expect(scriptWarning(checkScriptOnRows(undefined, ROWS))).toBeNull();
+    // Whitespace is not a script either — an editor opened and closed.
+    expect(scriptWarning(checkScriptOnRows('   \n ', ROWS))).toBeNull();
+  });
+
+  it('reports a compile error against every row', () => {
+    const out = checkScriptOnRows('function render(row) { retrun row.a }', ROWS);
+    expect(out.failed).toBe(3);
+    expect(out.message).toContain('compile error');
+    expect(scriptWarning(out)).toMatch(/fails on all 3 preview rows/);
+  });
+
+  it('counts the rows that break, because the number IS the diagnosis', () => {
+    // One row missing a field is a row with a surprise in it; all of them is a
+    // wrong script. A warning that did not distinguish the two would send
+    // people hunting in the wrong place.
+    const out = checkScriptOnRows('function render(row) { return row.a.toUpperCase() }', ROWS);
+    expect(out).toMatchObject({ total: 3, failed: 1 });
+    expect(out.message).toContain('runtime error');
+    expect(scriptWarning(out)).toMatch(/fails on 1 of 3 preview rows/);
+  });
+
+  it('still catches a compile error with no rows to try', () => {
+    // `new table` mode has none. A script that cannot parse is broken whatever
+    // the data would be, so staying silent would hide the one unambiguous error.
+    const out = checkScriptOnRows('function render(row) { retrun 1 }', []);
+    expect(out.total).toBe(0);
+    expect(scriptWarning(out)).toMatch(/^This script will not run/);
+  });
+
+  it('does NOT report a runtime error with no rows to try', () => {
+    // `row.first.trim()` throwing on `{}` says nothing about a table where
+    // `first` is always filled in. Guessing here would cry wolf on every
+    // perfectly good script written before the table had data.
+    expect(scriptWarning(checkScriptOnRows('function render(row) { return row.first.trim() }', []))).toBeNull();
+  });
+
+  it('gives the script the row metadata, as every other caller does', () => {
+    const out = checkScriptOnRows('function render(row) { return row._.rowId }', [row('r-9', {})]);
+    expect(out.failed).toBe(0);
+  });
+
+  it('reports the FIRST failure, not the last', () => {
+    const out = checkScriptOnRows('function render(row) { throw new Error("boom " + (row.a ?? "?")) }', ROWS);
+    expect(out.message).toContain('boom x');
   });
 });

@@ -25,6 +25,7 @@
 
 import type { ColumnSpec, Row } from '@easydb/shared';
 import { runColumnScript } from '../util/column-script.js';
+import { withRowMeta } from '../views/row-meta.js';
 import { createValidator } from './validate-rules.js';
 
 /** Rows a preview reads. Enough to judge a column against real data, bounded so
@@ -72,7 +73,7 @@ export function previewCells(columns: readonly ColumnSpec[], rows: readonly Row[
     const failed = new Map<string, string>();
     const data = { ...r.data };
     for (const c of scripted) {
-      const run = runColumnScript(c.script, r.data);
+      const run = runColumnScript(c.script, withRowMeta(r));
       if (run.ok) data[c.field] = run.value;
       else failed.set(c.field, run.message ? `${run.label}: ${run.message}` : run.label);
     }
@@ -108,6 +109,74 @@ export function previewCells(columns: readonly ColumnSpec[], rows: readonly Row[
       };
     }),
   );
+}
+
+/** What trying a script against the preview rows found. */
+export interface ScriptCheck {
+  /** Rows it was tried on. `0` ⇒ there were none, so only a compile error counts. */
+  total: number;
+  failed: number;
+  /** The first failure, ready to show. Empty when there is nothing to say. */
+  message: string;
+}
+
+/**
+ * Try a script against the rows the column editor is previewing, and say what
+ * broke.
+ *
+ * The preview grid already marks each failing CELL, which answers "is this row
+ * odd?". This answers the other question — "is my script wrong?" — from the same
+ * evidence, so the script editor can say it while the script is being written
+ * rather than after it has been saved and run over the whole table.
+ *
+ * **A compile error counts with no rows at all; a runtime error does not.**
+ * `function render(row) { retrun x }` is broken whatever the data is, and
+ * refusing to say so until a table has rows would leave the one unambiguous
+ * error silent in `new table` mode. A script that THROWS on an empty object, by
+ * contrast, is usually fine on real rows — `row.first.trim()` says nothing about
+ * a table where `first` is always filled in — so it is not evidence and is not
+ * reported.
+ *
+ * Pure, like the rest of this module.
+ */
+export function checkScriptOnRows(src: string | undefined, rows: readonly Row[]): ScriptCheck {
+  if (!src || !src.trim()) return { total: rows.length, failed: 0, message: '' };
+
+  if (rows.length === 0) {
+    const run = runColumnScript(src, {});
+    const broken = !run.ok && run.label === 'compile error';
+    return { total: 0, failed: 0, message: broken && !run.ok ? describeRun(run.label, run.message) : '' };
+  }
+
+  let failed = 0;
+  let message = '';
+  for (const r of rows) {
+    const run = runColumnScript(src, withRowMeta(r));
+    if (run.ok) continue;
+    failed++;
+    if (!message) message = describeRun(run.label, run.message);
+  }
+  return { total: rows.length, failed, message };
+}
+
+function describeRun(label: string, message: string): string {
+  return message ? `${label}: ${message}` : label;
+}
+
+/**
+ * The script check as one sentence, or `null` when there is nothing to warn
+ * about.
+ *
+ * Says how MANY rows broke, because the difference is the whole diagnosis: all
+ * of them is a wrong script, one of them is a row with a surprise in it, and a
+ * warning that did not distinguish the two would send people hunting in the
+ * wrong place.
+ */
+export function scriptWarning(check: ScriptCheck): string | null {
+  if (!check.message) return null;
+  if (check.total === 0) return `This script will not run — ${check.message}`;
+  if (check.failed >= check.total) return `This script fails on all ${check.total.toLocaleString()} preview ${check.total === 1 ? 'row' : 'rows'} — ${check.message}`;
+  return `This script fails on ${check.failed.toLocaleString()} of ${check.total.toLocaleString()} preview rows — ${check.message}`;
 }
 
 /**

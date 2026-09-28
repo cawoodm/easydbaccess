@@ -491,3 +491,55 @@ describe('view-render', () => {
     expect(out.map((r) => r.data.n)).toEqual([3, 4]);
   });
 });
+
+/**
+ * `$_.KEY` — the row's own metadata in a template.
+ *
+ * Not a column, so it is not mapped and not mappable. The tests that matter are
+ * the two boundaries: that it beats the general token form (which would read
+ * `$_.rowId` as the token `_` plus the literal text `.rowId`), and that adding
+ * it could not change what an existing template renders.
+ */
+describe('row metadata tokens', () => {
+  const meta = row({ title: 'Bern' });
+
+  it('resolves $_.rowId to the record id', () => {
+    expect(substituteRow('<b>$_.rowId</b>', meta, { title: 'title' })).toBe('<b>r</b>');
+  });
+
+  it('resolves $_.tableId and $_.updated', () => {
+    const at = 1_750_000_000_000;
+    const r: Row = { id: 'r9', tableId: 't9', data: {}, updatedAt: at };
+    expect(substituteRow('$_.tableId', r, {})).toBe('t9');
+    expect(substituteRow('$_.updated', r, {})).toBe(new Date(at).toISOString());
+  });
+
+  it('needs no mapping, and is not offered as one', () => {
+    // An instance maps TOKENS to columns. Metadata is not a column, so it must
+    // not turn up in the mapping dialog asking to be pointed at one.
+    expect(substituteRow('$_.rowId', meta, {})).toBe('r');
+    expect(extractTokens('$_.rowId $TITLE')).toEqual(['TITLE']);
+    expect(extractFilterTokens('$_.rowId $filter.TITLE')).toEqual(['TITLE']);
+  });
+
+  it('renders an unknown key as nothing, like an unmapped token', () => {
+    expect(substituteRow('[$_.nope]', meta, { title: 'title' })).toBe('[]');
+  });
+
+  it('escapes the value, so it is safe in an href', () => {
+    const r: Row = { id: 'a"><script>', tableId: 't', data: {}, updatedAt: 0 };
+    const out = substituteRow('<a href="#preview/notes/$_.rowId">x</a>', r, {});
+    expect(out).not.toContain('<script>');
+    expect(out).toContain('&quot;');
+  });
+
+  it('leaves a bare $_ exactly as it always behaved', () => {
+    // The general form never resolved `_` to anything, which is why adding the
+    // `$_.` form cannot break a template anyone has already written.
+    expect(substituteRow('[$_]', meta, { title: 'title' })).toBe('[]');
+  });
+
+  it('does not eat a token that merely ENDS in a dot', () => {
+    expect(substituteRow('$TITLE. Next', meta, { TITLE: 'title' })).toBe('Bern. Next');
+  });
+});

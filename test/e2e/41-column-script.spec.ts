@@ -141,10 +141,10 @@ test('the script editor offers ready-made render scripts, and can undo picking o
 
   const editor = page.locator('script-editor-dialog dialog');
   await expect(editor.locator('h2')).toContainText('Edit script');
-  // Ten render samples plus the "— choose —" placeholder. A different list
+  // Twelve render samples plus the "— choose —" placeholder. A different list
   // from the validation editor's, which the 64- spec covers.
   const samples = editor.locator('select#sample');
-  await expect(samples.locator('option')).toHaveCount(11);
+  await expect(samples.locator('option')).toHaveCount(13);
   await expect(samples.locator('option', { hasText: 'markdownToHtml' })).toHaveCount(1);
 
   await samples.selectOption({ label: 'Build a URL from a field' });

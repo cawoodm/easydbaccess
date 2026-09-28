@@ -11,16 +11,7 @@ import { ScriptEditorDialog } from './script-editor-dialog.js';
 import { allColumnsFlagged, buildColumnSpec, toggleColumnFlag, type ColumnFlag, type ColumnRow } from './column-row.js';
 import { isErrorField } from '../table/row-errors.js';
 import { renameRowFields, type FieldRename } from '../table/column-merge.js';
-import {
-  conditionalPatch,
-  constraintErrorMessage,
-  draftProblem,
-  migrateRowData,
-  planColumnChanges,
-  saveStageError,
-  tightenedConstraints,
-  type SaveStage,
-} from '../table/table-save.js';
+import { conditionalPatch, constraintErrorMessage, draftProblem, migrateRowData, planColumnChanges, saveStageError, tightenedConstraints, type SaveStage } from '../table/table-save.js';
 import { createValidator, issueMessages } from '../table/validate-rules.js';
 import { readRows } from '../db/row-reader.js';
 import { offerableRenderers, rendererOptionsFor } from '../table/renderer-options.js';
@@ -791,11 +782,92 @@ export class NewTableDialog extends LitElement {
     // rename in this editor has not moved yet — the save re-keys them after.
     // Absent in "new table" mode, where there is nothing to write to.
     const saved = this.editTableId && c.origField ? { tableId: this.editTableId, field: c.origField } : undefined;
-    const next = await dlg.open(c.script ?? '', c.label || c.field, 'render', { target: saved, active: c.scriptActive !== false });
+    // A column TYPED here but not saved yet has no target — so hand the editor a
+    // way to make one. Only in edit mode: in "new table" mode there is no table
+    // and no rows, so there is nothing a Run could write to whatever we saved.
+    const commit =
+      !saved && this.editTableId
+        ? async (text: string, active: boolean): Promise<{ tableId: string; field: string } | null> => {
+            // The script first: committing without it would add an empty column
+            // and then run a script the table does not have.
+            this.patchColumn(idx, { script: text.trim() ? text : undefined, scriptActive: active ? undefined : false });
+            return await this.commitForRun(idx);
+          }
+        : undefined;
+    const next = await dlg.open(c.script ?? '', c.label || c.field, 'render', {
+      target: saved,
+      active: c.scriptActive !== false,
+      // The same rows the preview below the column list is drawing, so the
+      // editor's verdict and the preview's error chips cannot disagree.
+      previewRows: this.previewRows,
+      commit,
+    });
     if (next === null) return;
     // Both halves come back together, so ticking the box IS a save — there is no
     // state where the editor says "off" and the column still runs.
     this.patchColumn(idx, { script: next.text.trim() ? next.text : undefined, scriptActive: next.active ? undefined : false });
+  }
+
+  /**
+   * Save the table NOW, from inside the script editor, so a column that has only
+   * just been typed has cells to write to.
+   *
+   * It is the SAME save the dialog's own button does — the whole draft, not just
+   * this column. A save of one column would be a second, quieter write path with
+   * its own rules about renames and constraints, and the two would drift; and a
+   * user who has typed a script has usually typed the column's type and flags
+   * too, all of which the run should see.
+   *
+   * Returns where Run should write, or null when the save was refused — the
+   * reason is on the dialog's own error banner, which is where the same refusal
+   * from the Save button appears.
+   */
+  private async commitForRun(idx: number): Promise<{ tableId: string; field: string } | null> {
+    const tableId = this.editTableId;
+    const c = this.columns[idx];
+    if (!tableId || !c) return null;
+
+    const name = this.name.trim();
+    const ctx = await getContext();
+    const workspaceTables = (await ctx.store.tables.find()).filter((t) => t.workspaceId === ctx.workspaceId);
+    const problem = draftProblem({ name, fields: this.columns.map((x) => x.field), tables: workspaceTables, selfId: tableId });
+    if (problem) {
+      this.errorMsg = problem;
+      return null;
+    }
+
+    // Read the renames BEFORE the save: afterwards every column's `origField` is
+    // its current field, which is exactly what makes the pending-rename list
+    // empty again.
+    const renames = this.fieldRenames();
+    const columns = this.columns.map(buildColumnSpec);
+    if (!(await this.applyTableEdit(tableId, name, columns, workspaceTables))) return null;
+    this.adoptSaved(renames, columns);
+    return { tableId, field: c.field.trim() };
+  }
+
+  /**
+   * Re-base the draft on what was just written, so the dialog can stay open.
+   *
+   * Without this a second save would try to apply the same renames again —
+   * `origField` still naming a column the store no longer has — and the filter
+   * maps, which are keyed by the saved name, would point at the old keys.
+   *
+   * Cheaper and more predictable than re-reading the table: the save is what
+   * decided these values, so adopting them is the truth by construction, and a
+   * re-read would also throw away any edit made while it was in flight.
+   */
+  private adoptSaved(renames: readonly FieldRename[], columns: readonly ColumnSpec[]): void {
+    const moved = new Map(renames.map((r) => [r.from, r.to]));
+    const rekey = (m: Record<string, string>): Record<string, string> => Object.fromEntries(Object.entries(m).map(([k, v]) => [moved.get(k) ?? k, v]));
+    this.filters = rekey(this.filters);
+    this.filtersOff = rekey(this.filtersOff);
+    const specs = new Map(columns.map((s) => [s.field, s]));
+    this.columns = this.columns.map((c) => {
+      const field = c.field.trim();
+      const spec = specs.get(field);
+      return { ...c, field, origField: field, ...(spec ? { orig: spec } : {}) };
+    });
   }
 
   /**

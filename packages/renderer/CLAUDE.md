@@ -13,7 +13,7 @@ Lit web components + sqlite-wasm + Vite. The identical bundle runs in the browse
 | `src/db/legacy-idb/` | The pre-SQLite browser store, read-only. `read.ts` opens the old `easydb` IndexedDB database with plain IDB (Dexie is not coming back for it), `remap.ts` is the PURE re-id used when a copy has to keep both, and `legacy-store.ts` dresses the result as a `DataStore` so `db/edb/convert.ts` can copy it with no engine of its own. Driven by `plugins/legacy-import.ts`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `src/events/`        | The typed event bus (`AppEvents` from shared).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `src/plugin-host/`   | `loader.ts` (built-in plugin list + lifecycle), `url-loader.ts` (URL-fetched plugins with localStorage cache), `registries.ts` (slot lists), `api-factory.ts` (`HostApi` constructor).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `src/plugins/`       | Built-in plugins. **Each one IS a plugin** — same contract as URL-loaded modules. Current roster: `new-table-button`, `csv-import`, `json-import`, `sql-import` (+ the pure `sql-parse`), `csv-export`, `dump-export`, `sql-export` (+ `projection-sql`), `gist-sync`, `server-sync` (+ `server-sync-core`), `auto-sync`, `cell-color`, `cell-image`, `cell-link`, `cell-date`, `cell-datetime`, `cell-boolean`, `cell-tags`, `cell-markdown` (+ the shared `preview-cell`), `auto-renderer`, `import-data`, `table-copy`, `sql-console` (registers nothing unless `store.sql` exists — see `docs/tech/SQL.md`), `views` (+ the DOM-free `views-seed`, which reconciles the four built-in templates and must write NOTHING when there is nothing to do — see below), `settings`, `projection` (+ `projection-compute`, `projection-collection`, `projection-create`), `electron-db` (+ `electron-folder`, the workspace folder) and `sqlitefile-source` (all register nothing outside the desktop build), `edb-file` (the `.edb` file commands + the header Save button — registers nothing INSIDE the desktop build, so the two never both appear), `tips`, `new-plugins` (mentions catalog plugins never installed here, once each — see `plugin-host/plugin-catalog.ts`), `validate` (+ the pure `table/validate-rules`, `table/validate-scan`), `run-scripts` (owns the footer's ▶ **Run** button and runs every column's render script over the rows, via the same `table/materialize-script` the script editor's Run uses; `validate` puts its own item on that button's menu through `table/run-actions.ts`, and `dialogs/run-picker-dialog.ts` asks both halves which columns and which rows), `commandlets` (+ the pure `commandlet-lang`, `commandlet-run`, `commandlet-edit`), `edit-record` (double-click a row to open it in the record form — a plugin so the double-click can be given back to the cell editors), `legacy-import` (copies the pre-SQLite IndexedDB store across; registers commands but only ever acts when that database exists — see `db/legacy-idb/`). `date-filter` (a `registerFilterPicker` for `date` columns — presets plus a from/to range, built on `chrome/filter-picker-shell.ts`) + the pure `date-presets` (parses the `date-filter:presets` setting into labelled rows). (The Plugin Manager button is **core**, not a plugin — see `app-shell.ts`. The URL-loadable demo plugins under `public/plugins/` — `header-clock`, `cell-image-url`, `cell-email` — are separate from these bundled built-ins.) |
+| `src/plugins/`       | Built-in plugins. **Each one IS a plugin** — same contract as URL-loaded modules. Current roster: `new-table-button`, `csv-import`, `json-import`, `sql-import` (+ the pure `sql-parse`), `csv-export`, `dump-export`, `sql-export` (+ `projection-sql`), `gist-sync`, `server-sync` (+ `server-sync-core`), `auto-sync`, `cell-color`, `cell-image`, `cell-link`, `cell-date`, `cell-datetime`, `cell-boolean`, `cell-tags`, `cell-markdown` (+ the shared `preview-cell`), `auto-renderer`, `import-data`, `table-copy`, `sql-console` (registers nothing unless `store.sql` exists — see `docs/tech/SQL.md`), `views` (+ the DOM-free `views-seed`, which reconciles the four built-in templates and must write NOTHING when there is nothing to do — see below), `settings`, `projection` (+ `projection-compute`, `projection-collection`, `projection-create`), `electron-db` (+ `electron-folder`, the workspace folder) and `sqlitefile-source` (all register nothing outside the desktop build), `edb-file` (the `.edb` file commands + the header Save button — registers nothing INSIDE the desktop build, so the two never both appear), `tips`, `new-plugins` (mentions catalog plugins never installed here, once each — see `plugin-host/plugin-catalog.ts`), `validate` (+ the pure `table/validate-rules`, `table/validate-scan`), `run-scripts` (owns the footer's ▶ **Run** button and runs every column's render script over the rows, via the same `table/materialize-script` the script editor's Run uses; `validate` puts its own item on that button's menu through `table/run-actions.ts`, and `dialogs/run-picker-dialog.ts` asks both halves which columns and which rows), `commandlets` (+ the pure `commandlet-lang`, `commandlet-run`, `commandlet-edit`), `edit-record` (double-click a row to open it in the record form — a plugin so the double-click can be given back to the cell editors), `legacy-import` (copies the pre-SQLite IndexedDB store across; registers commands but only ever acts when that database exists — see `db/legacy-idb/`). `viz-record` (the `record` visualization — one row of the grid beside it, tokens that are column names, editable with `$input.field`; owns the row double-click and hands it to `edit-record` when no pane is following), `date-filter` (a `registerFilterPicker` for `date` columns — presets plus a from/to range, built on `chrome/filter-picker-shell.ts`) + the pure `date-presets` (parses the `date-filter:presets` setting into labelled rows). (The Plugin Manager button is **core**, not a plugin — see `app-shell.ts`. The URL-loadable demo plugins under `public/plugins/` — `header-clock`, `cell-image-url`, `cell-email` — are separate from these bundled built-ins.) |
 | `src/views/`         | The **View system**: `view-render.ts` (pure token-substitution + filter/sort helpers) and the `<view-window>` element that renders one `ViewInstance` read-only. A View Template (`viewTemplates`, workspace-global) is header/row/footer HTML; blank row HTML ⇒ a read-only columns table, else the row HTML repeats per row with `$TOKEN` → column substitution. A View Instance (`viewInstances`, per-table) snapshots the table's sort/filter/visible-columns + the token→column map and opens in its own floating panel window. Managed via the footer "Views" button → `dialogs/views-dialog.ts`. **Window management is core** — see `window-mgr/view-window-manager.ts`; the `views` plugin only seeds templates and adds the button.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `src/table/`         | `<data-table>` element. Cell rendering looks up `registries.cellRenderers` first, falls back to the built-in switch.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `src/window-mgr/`    | Core window management (behaviour, geometry, persistence, boot-restore) for ALL panels — plugins never touch the window system directly. Windows are floating panels from the in-repo `panel-shell/` module (jsPanel4 was removed in v0.0.221). `table-window-manager.ts` opens one panel per Table (geometry on `Table.windowGeometry`) and starts the canvas pan/zoom, whose handle lives in `shell-viewport.ts` so a plugin can open a panel without importing a manager; `view-window-manager.ts` opens one panel per open `ViewInstance` (geometry on `ViewInstance.windowGeometry`, driven by the `open` flag), mirroring it; maximize-fill is built into the shell; `panzoom.ts` drives the canvas transform.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -104,6 +104,113 @@ is one capture-phase listener on `document` that catches the click first and put
 the path on the clipboard. It covers all four renderers at once because
 `composedPath()` reaches into their shadow roots, and it stands aside in the
 desktop build, whose own page is `file:`.
+
+## A record pane is a visualization, and its tokens are field names
+
+`plugins/viz-record.ts` draws ONE row beside the grid. Two things about it are
+load-bearing and neither is obvious:
+
+- **A token IS a column name.** A view template's `$TOKEN` is a mapping key —
+  `ViewInstance.mapping` says which column it reads — because one global
+  template serves many tables. A record layout is written against one table, so
+  `views/record-html.ts` hands `substituteRow` an IDENTITY mapping and the token
+  becomes the field. **Nothing in `view-render.ts` changed**: every prefix,
+  every renderer slot and every `$input` control behaves exactly as in a view.
+  Do not add a second token grammar here.
+- **Selecting is not filtering.** `table/current-row.ts` is a separate seam from
+  `table/pane-actions.ts`. A record pane COULD have read `rows[0]` and let the
+  double-click narrow the host grid to one row — no new module — but that throws
+  away the filter the user is working in every time they look at a record.
+
+`table/current-row.ts` is the twin of `table/visible-rows.ts`: push for updates,
+pull for the first value, a plain registry so it is testable with no DOM. One
+extra rule — **a registered provider's answer wins, `null` included**. The grid
+is the only thing that knows whether the remembered row is still on screen, so
+its `null` is a veto and the pane falls back to the first visible row.
+
+### Three plugins want the double-click. They are asked in order.
+
+`plugins/edit-record.ts` owns the listener and hands the gesture on:
+
+1. a **docked pane** — `currentRowWanted(key)` (`table/current-row.ts`),
+2. the **record window** — `openRecordPopup()` (`plugins/record-popup.ts`),
+3. the **record form**, which needs nothing else loaded.
+
+Both hand-offs are registries holding one function, for the same reason: no two
+of the three plugins may import each other, so each can be switched off alone.
+`plugins/record-popup.ts` is deliberately three lines of state with no store and
+no DOM — `plugins/record-window.ts` is what it opens, loaded on demand, and that
+module has no business in the graph of a document-wide listener.
+
+The window is `<viz-record>` again, given one row, with the table's own record
+layout (`recordLayoutFor`) or a generated editable card. Its panel id is
+`easydb-record-<tableId>-<rowId>`, which is what makes it **one window per row**
+rather than one per double-click, and nothing about it is persisted.
+
+**`commandlet-run.ts` reaches `current-row.ts` and `record-popup.ts` through
+DYNAMIC imports**, on purpose. That module is pulled in by the document-wide
+click handler every cell link goes through; a static import there made
+`89-commandlets.spec.ts` fail in the full file while passing alone.
+
+## `_` — what a row knows about itself
+
+Everything user-authored is handed `row.data`, never the `Row`: a column
+script's `row` IS the data object, a cell renderer's `.row` is the data object,
+a template token is a key of it. So the record's own id — the one thing needed
+to link back to it — was the one thing user code could not see.
+
+`views/row-meta.ts` adds one key:
+
+```
+script / renderer:   row._.rowId   row._.tableId   row._.updatedAt   row._.updated
+template:            $_.rowId      $_.tableId      $_.updatedAt      $_.updated
+```
+
+Four rules, each of which has a failure mode behind it:
+
+- **`withRowMeta` is memoized per `Row`** (a `WeakMap`). A cell renderer takes
+  `.row` as a Lit property and redraws when the reference changes, so a fresh
+  object per call would redraw every renderer in the grid on every render.
+- **`row.data` is spread AFTER `_`**, so a table that really has a column called
+  `_` keeps it. Shadowing a user's own column would break a working script with
+  nothing on screen to say why.
+- **It is never written back.** A patch is built from the stored `Row`
+  (`patchFor`, `commitCell`), so `_` cannot become a column.
+- **`$_.KEY` is the FIRST alternative in `TOKEN_RE`**, or the general form would
+  read it as the token `_` plus the literal text `.rowId`. It is not returned by
+  `extractTokens`: metadata is not a column, so it must never appear in the
+  mapping dialog asking to be pointed at one. Nothing existing can break, because
+  the general form never resolved `_` to anything.
+
+Every place that hands a row to user code goes through it — `view-render`,
+`data-table`, `viz-record`, `view-window`, `viz-panel`, `column-preview`,
+`materialize-script`, `export-rows`, `column-preview-table`. A new one must too,
+or a script will behave differently depending on where it runs.
+
+**`record/<table>/<rowId>` is what accepts it.** The metadata would be visible
+and useless without a verb that takes an id — every other way of naming a record
+goes through `keyColumnOf`, which is a convention, not a uniqueness guarantee.
+See `docs/tech/COMMANDLETS.md`.
+
+## The script editor answers two questions the column editor already could
+
+Both are in `dialogs/script-editor-dialog.ts`, and both exist because the
+information was already on screen two inches away:
+
+- **Is this script broken?** `checkScriptOnRows` (in `table/column-preview.ts`,
+  beside the preview that runs the same scripts) tries the text on the rows the
+  columns editor is previewing, on every keystroke. The COUNT is the diagnosis
+  and the warning says it: all of them is a wrong script, one of them is a row
+  with a surprise in it. A compile error counts with no rows at all; a runtime
+  error on an empty object does not — `row.first.trim()` throwing on `{}` says
+  nothing about a table where `first` is always filled in.
+- **Can I run it yet?** A column typed but not saved has nowhere to write, and
+  the old answer was "close, save, reopen, press Run". The columns editor now
+  passes a `commit` callback: it patches the script onto the draft column and
+  runs its OWN save — the whole draft, not one column, because a second write
+  path would grow its own rules about renames and constraints and drift from the
+  first. `adoptSaved` then re-bases the draft on what was written, so the dialog
+  can stay open without trying to apply the same renames twice.
 
 ## One folder feature, two builds
 

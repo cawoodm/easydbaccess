@@ -235,7 +235,14 @@ Because the stored value is real data, a scripted column also appears on the
 **+** form when you add a record — otherwise there would be no way to give a new
 row the value its script reads.
 
-This editor has its own **Start from a sample** dropdown, with ten scripts
+**A broken script says so while you type it.** Under the editor, the script is
+tried on the same rows the preview below the column list is showing, and a red
+line appears when it fails — with the count, because the count is the diagnosis:
+_fails on all 100 preview rows_ is a wrong script, _fails on 1 of 100_ is one row
+with a surprise in it. A script that cannot be parsed at all is reported even
+before the table has any rows.
+
+This editor has its own **Start from a sample** dropdown, with twelve scripts
 covering what people actually ask a column for:
 
 - **Text from other fields** — joining two columns into one.
@@ -248,6 +255,8 @@ covering what people actually ask a column for:
   `mailto:` with a prefilled subject. Pair these with the `link` renderer.
 - **Maths** — quantity × price, an amount as money via `Intl.NumberFormat`, a
   percentage that refuses to divide by zero, and days between a date and today.
+- **The record itself** — a link that opens this record in its own window, and
+  when it was last changed. Both read `row._`, described below.
 
 Same **Undo** as the validation editor if you pick the wrong one. Each sample
 says in its first line which renderer it expects — the dropdown can't set that
@@ -266,6 +275,27 @@ blue / red as the rule button beside it.
 A script that is not enabled is not dead: **Run…** still runs it on demand and
 writes what it returns into the cells. That is the difference between parking a
 script and deleting it — see below.
+
+#### `_` — what a row knows about itself
+
+Besides its columns, every row a script is given carries one extra key:
+
+| Read this          | And you get                                     |
+| ------------------ | ----------------------------------------------- |
+| `row._.rowId`      | the record's own id — unique, and never reused   |
+| `row._.tableId`    | the table it belongs to                          |
+| `row._.updatedAt`  | when it was last written, as a number            |
+| `row._.updated`    | the same moment as text (`2026-09-24T09:12:…`)   |
+
+In a **view or record template** the same things are `$_.rowId`, `$_.tableId`,
+`$_.updatedAt` and `$_.updated` — no script needed.
+
+The id is what lets you link to a record that has nothing unique to name it by:
+see `record/…` in [Commandlets](commandlets.md). There is no "created" time —
+the app only records when a row was last changed.
+
+If your table really does have a column called `_`, your column wins and the
+metadata is not available in scripts on that table.
 
 #### Turning a computed column into data
 
@@ -291,6 +321,11 @@ It asks before writing:
 The write happens straight away. Rows the script throws on are skipped and
 counted — the message says how many. The editor stays open, so nothing you have
 typed is lost.
+
+**A column you have only just typed can be run too.** It has no cells yet, so
+Run offers to add it first — that saves the columns editor exactly as its own
+**Save** button would, including any other changes you have made there — and
+then runs. Say no and nothing is written at all.
 
 A progress bar appears in the editor while it writes, with the row count and a
 percentage, so a long run over a big table does not look like a hang. Writes go

@@ -24,13 +24,14 @@
 // touches the store, a window or the registry lives in `commandlet-run.ts`.
 
 /** Verbs the language knows. `table` is an alias of `goto`. */
-export type CommandletVerb = 'goto' | 'search' | 'preview' | 'edit' | 'view' | 'cmd' | 'ui';
+export type CommandletVerb = 'goto' | 'search' | 'preview' | 'record' | 'edit' | 'view' | 'cmd' | 'ui';
 
 const VERB_ALIASES: Record<string, CommandletVerb> = {
   goto: 'goto',
   table: 'goto',
   search: 'search',
   preview: 'preview',
+  record: 'record',
   edit: 'edit',
   view: 'view',
   cmd: 'cmd',
@@ -55,6 +56,11 @@ const ARITY: Record<CommandletVerb, { min: number; rest: boolean }> = {
   // `edit/n-17` would then be unreadable: table name, or key in the table the
   // click came from?
   edit: { min: 1, rest: false },
+  // `record` is `edit`'s window twin and takes the same shapes, so it takes the
+  // same arity. Its second target may also be a ROW ID — the only place in the
+  // language where one is accepted, because `$_.rowId` is the only handle a
+  // template has on a record with no unique key of its own.
+  record: { min: 1, rest: false },
   view: { min: 0, rest: true },
   cmd: { min: 1, rest: true },
   ui: { min: 1, rest: false },

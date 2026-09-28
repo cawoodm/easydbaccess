@@ -77,6 +77,7 @@ calls them). Don't mistake them for this seam.
 | `viz-map` | `map` | `leaflet` |
 | `viz-wordcloud` | `wordcloud` | `d3-cloud` |
 | `viz-custom` | `custom` | none |
+| `viz-record` | `record` | none |
 
 The first three are split **by library**, so a user who wants bar
 charts and no mapping can switch exactly that off — and so an offline deployment
@@ -96,6 +97,75 @@ to WRITE to its host: a `$filter.FIELD` pill calls `table/pane-actions.ts`, the
 mirror of `visible-rows.ts`. That seam is deliberately not custom-visualization
 machinery; making a bar click filter the grid is now a few lines in
 `chart-element.ts`.
+
+`viz-record` is the second odd one, and it is odd in a third direction: it draws
+**one row**, not the set.
+
+- **Its tokens are the VIEW TEMPLATE vocabulary**, not the aggregate one. A
+  custom pane says `$COUNT` and `$SUM.amount`, which describe the whole set; a
+  record pane says `$title` and `$input.body`, which describe one record. It is
+  the same `substituteRow` a view window uses — handed an identity mapping
+  (`views/record-html.ts`), so a token IS its field name and `view-render.ts`
+  needed no change at all.
+- **It is the first visualization to write DATA.** A `$input.FIELD` control makes
+  the pane a form. The element itself reaches no store: it dispatches
+  `viz-record-edit-request` and `viz-panel` validates and patches, the same shape
+  `viz-filter-request` keeps for a pill. The rules are the grid's own, lifted to
+  `views/input-writeback.ts` and now shared with the view window.
+- **It needs a selection**, which nothing else does — see `table/current-row.ts`.
+  A pane is handed rows, plural; this one picks one of them.
+- **It is the only kind that also runs outside a pane** — see the record window
+  below.
+
+## The record WINDOW
+
+A record does not have to be docked. Double-click a grid row and it opens in a
+panel of its own: `plugins/record-window.ts`, which mounts the same
+`<viz-record>` element with one row, the table's own record layout if it has one
+(`recordLayoutFor`), otherwise a generated card with every field editable.
+
+Three decisions are worth keeping:
+
+- **One window per ROW, not per double-click.** The panel id is
+  `easydb-record-<tableId>-<rowId>`, so the same record fronts the window it
+  already has while a second record opens beside it. That is what makes two
+  records comparable, and it is what stops a fast reader burying the canvas.
+- **Transient.** No `ViewInstance` is written, so nothing accumulates in the
+  workspace and nothing returns on reload — the same trade `openPreviewPopup`
+  makes. The view-window reconciler ignores it: that loop only closes ids in its
+  own map.
+- **It is not a fourth answer to the double-click.** The gesture belongs to
+  `plugins/edit-record.ts`, which hands it on: a docked pane first
+  (`currentRowWanted`), then the window (`recordPopupWanted`), then the record
+  form. Both hand-offs are registries, so no two of the three plugins import each
+  other and any of them can be switched off alone.
+
+The window's header carries **Edit record**, which opens the form. The form is
+still the surface that handles a record as a whole — required fields, a new row,
+the delete — and the window deliberately does not.
+
+## Which row — the selection
+
+Every other kind draws the set `visible-rows.ts` publishes. A record pane needs
+ONE of those rows, and the grid had no selection anybody could read: its hover
+state and its cell-edit focus both die when you leave the cell.
+
+`table/current-row.ts` is that channel, built as the exact twin of
+`visible-rows.ts` — same keying, same registry-not-event reasoning, same
+push-for-updates / pull-for-the-first-value arrangement. Two rules are its own:
+
+- **A registered provider's answer wins, `null` included.** The grid is the only
+  thing that can say whether the remembered row is still on screen — deleted, or
+  filtered away — so its `null` is a veto, and the pane falls back to the first
+  visible row rather than drawing a record the grid is not showing.
+- **`currentRowWanted(key)` is a handover.** `viz-record` selects on a row
+  double-click only when something is following; `edit-record` falls through to
+  the record window, and then to the record form, only when nothing is. Exactly
+  one acts, and none of the three imports another.
+
+**Selecting is not filtering.** A record pane could have read `rows[0]` and let
+the double-click narrow the host through `pane-actions.ts` — no new module — and
+it would have thrown away the user's filter every time they looked at a row.
 
 ## Where the rows come from
 
