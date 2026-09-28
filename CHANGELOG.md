@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## 28 Sep 2026
+
+### Features
+
+- 🪶 Double-click a row to open that record in a window of its own — a card of every field, editable (v0.0.497)
+- ✨ A Record visualization docks beside a grid and follows the row you double-click (v0.0.497)
+- ✨ A `record/` commandlet opens one record by id, from a link in a cell or a template (v0.0.497)
+- ✨ Scripts and templates can read a row's own id and last-changed time as `row._` and `$_` (v0.0.497)
+- ✨ The script editor says, while you type, when a script fails on the rows being previewed (v0.0.497)
+- ✨ Run on a column you have only just typed offers to add it to the table first (v0.0.497)
+
+### Bugs
+
+- 🪲 A view template's `$input` wrote whatever was typed, ignoring Not-null, read-only and validation rules (v0.0.497)
+
+## 24 Sep 2026
+
+### Features
+
+- ✨ Sync workspace settles this workspace against its own `.edb`, without re-reading every file in the folder (v0.0.496)
+
+### Chores
+
+- 🔧 The Hono server is gone, and with it server sync, the auto-sync timer, the URL proxy and the server plugin registry (v0.0.496)
+
+### Bugs
+
+- 🪲 Filtering a number column by `=180` found nothing, and a plain `180` also matched 1800 and 180.5 (v0.0.495)
+- 🪲 A template's filter pills and the view header's chips were three hand-kept copies of one control, free to drift apart (v0.0.494)
+
 ## 23 Sep 2026
 
 ### Features

@@ -7,9 +7,24 @@
 // fills it from THAT row. A visualization has no such row — a KPI tile, a pill
 // strip and a summary line are all statements about the dataset — so reusing
 // `substituteRow` here would have produced a per-row repeat, which is exactly
-// what a view window already is. Same spelling, different scope; nothing is
-// shared between the two beyond the `eda-filter-pill` markup contract, which is
-// deliberate so a pill looks and behaves the same wherever it appears.
+// what a view window already is. Same spelling, different scope.
+//
+// The pill this file emits is the SAME shape a view's `$filter.TOKEN` prints
+// (`views/view-render.ts`'s `pillChip`): the value alone, one click, one
+// action. Both take their classes from `views/pill-chip.ts` so there is one
+// definition rather than the hand-synchronised copies this comment used to
+// have to warn about.
+//
+// What differs is only where the click LANDS, and it is worth knowing which
+// half of the app each one reaches. A view pill writes the view's own
+// `ViewInstance.pillFilters`, which the view header then draws as a split
+// `field = value` chip that can cycle to `≠`, offer the field's other values,
+// or be dropped. A `viz-custom` pane has no such header and no filter layer of
+// its own: it asks its HOST GRID to narrow itself through
+// `table/pane-actions.ts`, and `PaneActionHost.filter(field, value)` can only
+// OR-append a value. So there is nowhere here to grow the split chip into, and
+// nothing that could answer "is this value already filtered?" if one tried.
+// See `viz-custom-html.ts`'s click handler for the other half of this.
 //
 // The vocabulary is CLOSED, and that is what lets an unrecognised `$WORD` be
 // left alone rather than blanked. In a view a token comes from the mapping
@@ -28,6 +43,7 @@
 
 import type { ColumnSpec, Row } from '@easydb/shared';
 import { arrayMembers } from '@easydb/shared';
+import { pillChipClass, PILL_CHIP_VALUE_CLASS } from '../views/pill-chip.js';
 
 /**
  * `$NAME` or `$NAME.ARG` — the head names the function (or `filter`), the
@@ -173,15 +189,20 @@ export function aggregate(fn: string, rows: readonly Row[], field: string, spec?
 }
 
 /**
- * One clickable pill. Identical markup to a view's pill (`view-render.ts`) —
- * same class, same data attributes — so one stylesheet and one click handler
- * shape serve both, and a user who has met a pill in a view meets the same
- * thing here.
+ * One clickable pill: the value alone, in the shared chip's SOLID shape
+ * (`pill-chip.ts`) — byte-for-byte the shape a view's `$filter.TOKEN` prints,
+ * so a reader who has met one has met the other. Solid rather than the dashed
+ * `off` variant because this pill always carries a real value; dashed is the
+ * header's way of offering a field with no value picked yet, and this pane has
+ * no header. See the note at the top of this file for where the click lands.
  */
 function pillButton(field: string, text: string): string {
   const field_ = escapeAttr(field);
   const value_ = escapeAttr(text);
-  return `<button type="button" class="eda-filter-pill" data-eda-filter-field="${field_}" data-eda-filter-value="${value_}" title="Filter by ${field_}: ${value_}">${escapeHtml(text)}</button>`;
+  return (
+    `<span class="${pillChipClass('on')}"><button type="button" class="${PILL_CHIP_VALUE_CLASS}" ` +
+    `data-eda-filter-field="${field_}" data-eda-filter-value="${value_}" title="Filter by ${field_}: ${value_}">${escapeHtml(text)}</button></span>`
+  );
 }
 
 /** The pills for one `$filter.FIELD`, capped and honest about the cap. */

@@ -29,8 +29,8 @@ rebuilt to be faster, larger-capacity, and extensible through plugins.
   URLs and phone numbers become clickable links.
 - **Per-column filters with autocomplete** — pick from the values that
   actually exist in the column, with faceted drill-down across filters.
-- **Sync between devices** through a tiny optional server, or via a
-  private GitHub Gist. Bring your own backend or use none.
+- **Sync between devices** via a private GitHub Gist. No backend of ours —
+  bring your own GitHub account.
 - **Plugins are just `.js` files.** Add a button, a new cell renderer, an
   import format, or a whole view — by pasting a URL.
 - **Runs anywhere:** browser tab, or installable desktop app (Windows / Mac /
@@ -84,15 +84,13 @@ window positions, column settings).
 
 ### Sync to your other devices (optional)
 
-Two flavours, pick one — or neither:
-
-- **Your own tiny server.** Run the bundled Hono server on a Raspberry Pi,
-  Render, Fly, anywhere. Click **Sync ↑** to push, **Sync ↓** to pull.
-- **A private GitHub  Gist.** No server needed — your workspace is the gist.
+**A private GitHub Gist.** No server needed — your workspace is the gist.
+Push, pull, or share a read/write link. There is also a local option: settle
+two copies of the same workspace file, table by table and row by row.
 
 See [`docs/help/sharing-and-sync.md`](./docs/help/sharing-and-sync.md) for
 the full walkthrough, or [`docs/tech/SYNCH.md`](./docs/tech/SYNCH.md) for
-the wire protocol.
+the technical detail.
 
 ---
 
@@ -100,12 +98,12 @@ the wire protocol.
 
 | Where it runs | Where data lives |
 |---|---|
-| Browser | IndexedDB (via Dexie) |
-| Desktop (Electron) | A real SQLite file on disk |
-| Server (optional, for sync) | One JSON-per-workspace, in a folder or SQLite |
+| Browser | A real SQLite file (`.edb`), kept durable in the browser's origin-private storage |
+| Desktop (Electron) | A real SQLite file (`.db`/`.edb`) on disk |
 
-You can copy, back up, or version-control the data files yourself. There is
-no proprietary format — JSON in, JSON out.
+You can copy, back up, or version-control the data file yourself — it opens
+in DB Browser, Datasette, or `node --experimental-sqlite`. There is no
+proprietary format.
 
 ---
 
@@ -142,12 +140,11 @@ A few reference plugins live in
 
 ## Running it locally
 
-You need Node 20+.
+You need Node 24+.
 
 ```bash
 npm install
 npm run dev:renderer       # browser app at http://localhost:5190
-npm run dev:server         # sync server at http://localhost:3000
 npm run dev:electron       # desktop shell
 ```
 
@@ -173,17 +170,16 @@ and [`docs/tech/INDEX.md`](./docs/tech/INDEX.md) for the detailed notes.
 
 ## Status
 
-Active rewrite. The browser app, the sync server, the URL-loaded plugin
-manager and the Electron shell with native SQLite storage all work today.
-Live multi-device replication and running the sync server inside Electron are
-the next milestones — see [`docs/tech/TECH.md`](./docs/tech/TECH.md#status).
+Active rewrite. The browser app, Gist Sync, the URL-loaded plugin manager and
+the Electron shell with native SQLite storage all work today. Live
+multi-device replication beyond Gist Sync's manual push/pull is the next
+milestone — see [`docs/tech/TECH.md`](./docs/tech/TECH.md#status).
 
 ## Project layout
 
 ```
 packages/shared/    types, schemas, plugin API contract
 packages/renderer/  the Lit-based UI (browser + Electron renderer)
-packages/server/    the Hono sync server (also embedded in Electron)
 packages/electron/  the desktop shell
 plugins-examples/   reference plugins
 docs/help/          user guide + screenshots

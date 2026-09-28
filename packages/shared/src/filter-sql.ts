@@ -147,6 +147,25 @@ function tokenSql(columnSql: string, t: FilterToken, defaultSubstring: boolean, 
     if (type === 'number' && !Number.isFinite(param as number)) return { sql: '0', params: [] };
     return { sql: `(${guard} AND ${expr} ${t.cmp} ?)`, params: [param] };
   }
+  // Equality on a NUMBER column compares NUMERICALLY, through the same
+  // `numberExpr` the comparison operators use above, so `=180` and `>=180` can
+  // never disagree about what "180" is — reused rather than a second numeric
+  // expression, see `matchesTerm` in `column-filter.ts` for the matcher's
+  // twin. A REAL-affinity column stores `180` as the TEXT `180.0`, so the
+  // naive `LOWER(col) = '180'` this used to fall through to would miss it —
+  // `numberExpr` re-parses the column's text instead of comparing it as-is.
+  // A bare term (no anchor) means equals too, same as `=`, per the language's
+  // "no operator means =" rule — both land here since neither sets `prefix`,
+  // `suffix` nor `contains`. Falls through to plain text equality when the
+  // term itself is not a valid number (a dirty cell after import).
+  if (type === 'number' && !t.prefix && !t.suffix && !t.contains) {
+    const bound = t.term.trim();
+    if (isValidBound(bound, 'number')) {
+      const expr = numberExpr(columnSql);
+      const guard = `${columnSql} IS NOT NULL AND ${expr} IS NOT NULL`;
+      return { sql: `(${guard} AND ${expr} = ?)`, params: [Number(bound)] };
+    }
+  }
   const term = t.term.toLowerCase();
   // Exact matches the WHOLE cell and is NOT trimmed (see the matcher).
   const equals = () => ({ sql: `LOWER(${columnSql}) = ?`, params: [term] });

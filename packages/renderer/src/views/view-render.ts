@@ -12,6 +12,9 @@ import { defaultSubstring } from './../util/filter-settings.js';
 import { runColumnScript } from '../util/column-script.js';
 import { formatByType } from '../util/local-datetime.js';
 import { metaValue, withRowMeta } from './row-meta.js';
+import { PILL_CHIP_VALUE_CLASS, pillChipClass, type PillValueState } from './pill-chip.js';
+
+export type { PillValueState };
 
 /**
  * Matches a `$TOKEN` placeholder. An optional prefix decides how it renders:
@@ -106,11 +109,40 @@ function renderInput(field: string, value: unknown, rowId: string, spec: ColumnS
   return `<label class="eda-input-field" title="${caption}">${control}<span class="eda-input-label">${caption}</span></label>`;
 }
 
-/** One clickable pill for one value of one field. */
-function pillButton(field: string, text: string): string {
-  const field_ = escapeAttr(field);
-  const value_ = escapeAttr(text);
-  return `<button type="button" class="eda-filter-pill" data-eda-filter-field="${field_}" ` + `data-eda-filter-value="${value_}" title="Filter by ${field_}: ${value_}">${escapeHtml(text)}</button>`;
+/**
+ * One clickable pill for one row's value of one field — **the VALUE and
+ * nothing else**. `Food`, not `Category = Food`.
+ *
+ * The field name is deliberately absent, and that is the whole division of
+ * labour between the two places a pill appears. In the body a pill sits in the
+ * flow of a card's own text, under a heading or a label that has already said
+ * which field it is; repeating the field there says nothing the reader did not
+ * just read, and it makes a row of tags three times as wide. The SPLIT
+ * `field = value` control belongs to the header, where a chip has no such
+ * context and has to name its own field — see `view-window.ts`'s
+ * `renderPillChips`.
+ *
+ * So the click is the handover: clicking `Food` here OR-appends an exact-match
+ * filter onto `ViewInstance.pillFilters`, and the header grows the split chip
+ * `Category = | Food | ×` that can then cycle to `≠`, open the field's other
+ * values, or be dropped. One thing to press in the body; every operation on it
+ * in one place above.
+ *
+ * Drawn from `pill-chip.ts`'s shared class names so the body pill, the header
+ * chip and a `viz-custom` pane's pill are one visual family rather than three
+ * hand-synchronised copies. The SOLID chip, not the dashed `off` one: a body
+ * pill always carries a real value, while dashed means "a field you could
+ * filter on, with no value chosen yet", which only the header ever shows.
+ */
+function pillChip(field: string, text: string): string {
+  const fieldAttr = escapeAttr(field);
+  const valueAttr = escapeAttr(text);
+  return (
+    `<span class="${pillChipClass('on')}">` +
+    `<button type="button" class="${PILL_CHIP_VALUE_CLASS}" data-eda-filter-field="${fieldAttr}" data-eda-filter-value="${valueAttr}" ` +
+    `title="${escapeAttr(`Filter by ${field}: ${text}`)}">${escapeHtml(text)}</button>` +
+    `</span>`
+  );
 }
 
 /**
@@ -126,9 +158,10 @@ function listMembers(value: unknown, spec: ColumnSpec | undefined): string[] | n
 
 /**
  * Render a `$filter.TOKEN` as a clickable pill showing the row's value for the
- * mapped field. Clicking it (wired up in the view window) OR-appends an
- * exact-match pill filter for that field/value. A null/empty value renders
- * nothing — there is no pill for an empty cell.
+ * mapped field, and only that value (see {@link pillChip}). Clicking it (wired
+ * up in the view window) OR-appends an exact-match pill filter for that
+ * field/value, which the header then shows as a split `field = value` chip. A
+ * null/empty value renders nothing — there is no pill for an empty cell.
  *
  * An `array` field renders ONE PILL PER MEMBER, each carrying that member alone.
  * A single pill for the whole cell would have filtered on `=foo,bar`, and a list
@@ -139,9 +172,9 @@ function listMembers(value: unknown, spec: ColumnSpec | undefined): string[] | n
  */
 function renderFilterPill(field: string, value: unknown, spec: ColumnSpec | undefined): string {
   const members = listMembers(value, spec);
-  if (members) return members.map((m) => pillButton(field, m)).join('');
+  if (members) return members.map((m) => pillChip(field, m)).join('');
   if (value == null || value === '') return '';
-  return pillButton(field, String(value));
+  return pillChip(field, String(value));
 }
 
 /**
@@ -372,9 +405,6 @@ export function removePillValue(current: string | undefined, value: string): str
   const tokens = parseColumnFilter(current ?? '').filter((t) => !isExactPillToken(t, value));
   return composeColumnFilter(tokens);
 }
-
-/** What a pill-filter column string says about ONE value. */
-export type PillValueState = 'on' | 'not' | 'off';
 
 /** Does an exact-match token EXCLUDE `value`, case-insensitively? */
 function isExcludedPillToken(t: FilterToken, value: string): boolean {

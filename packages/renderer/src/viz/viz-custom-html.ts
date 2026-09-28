@@ -33,6 +33,7 @@ import type { ColumnSpec, Row } from '@easydb/shared';
 import { runVizScript } from '../util/column-script.js';
 import { sameRowRefs, sameVizOptions } from './elements/same-input.js';
 import { substituteVizTokens } from './viz-tokens.js';
+import { PILL_CHIP_VALUE_CLASS, pillChipStyles } from '../views/pill-chip.js';
 
 /** What the pane asks its host to do. Handled by `viz-panel`. */
 export interface VizFilterRequest {
@@ -68,7 +69,12 @@ export interface VizScriptApi {
 }
 
 export class VizCustomHtml extends LitElement {
-  static override styles = css`
+  static override styles = [
+    // The pill's own class family (.eda-pill-chip and friends) — see
+    // `viz-tokens.ts`'s `pillButton` for why this pane's pill is drawn on the
+    // shared chip's IDLE shape rather than the view's full field=value one.
+    pillChipStyles,
+    css`
     :host {
       display: block;
       height: 100%;
@@ -98,22 +104,6 @@ export class VizCustomHtml extends LitElement {
       background: #fee2e2;
       white-space: pre-wrap;
     }
-    /* Same pill as a view template's $filter.TOKEN (see views/view-window.ts)
-       — one look for one thing, wherever it is met. */
-    .canvas .eda-filter-pill {
-      font: inherit;
-      display: inline;
-      padding: 0.05rem 0.5rem;
-      margin: 0 0.1rem;
-      border: none;
-      border-radius: 1rem;
-      background: #e0f2fe;
-      color: #0369a1;
-      cursor: pointer;
-    }
-    .canvas .eda-filter-pill:hover {
-      background: #bae6fd;
-    }
     .canvas .eda-pill-more {
       margin: 0 0.25rem;
       color: var(--viz-muted-text, rgba(127, 127, 127, 0.9));
@@ -125,7 +115,8 @@ export class VizCustomHtml extends LitElement {
       background: #fee2e2;
       color: #b91c1c;
     }
-  `;
+  `,
+  ];
 
   rows: Row[] = [];
   columns: ColumnSpec[] = [];
@@ -213,11 +204,20 @@ export class VizCustomHtml extends LitElement {
     };
   }
 
-  /** A `$filter.FIELD` pill in the user's markup was clicked. */
+  /**
+   * A `$filter.FIELD` pill in the user's markup was clicked.
+   *
+   * Matched on the VALUE button rather than on the chip wrapper, because that
+   * button is the only half this pane's pill has — `viz-tokens.ts` draws it on
+   * the shared chip's idle shape, with no cycling field half, since
+   * `pane-actions.ts` cannot express exclusion or answer what is already
+   * filtered. Selecting the wrapper instead would also swallow a click on the
+   * `+N` overflow marker beside it.
+   */
   private onCanvasClick = (e: Event): void => {
     const t = e.target;
     if (!(t instanceof HTMLElement)) return;
-    const pill = t.closest('.eda-filter-pill');
+    const pill = t.closest(`.${PILL_CHIP_VALUE_CLASS}`);
     if (!pill) return;
     const field = pill.getAttribute('data-eda-filter-field');
     const value = pill.getAttribute('data-eda-filter-value');

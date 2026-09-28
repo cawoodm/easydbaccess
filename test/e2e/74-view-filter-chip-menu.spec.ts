@@ -59,10 +59,15 @@ async function makeFilterView(page: import('@playwright/test').Page): Promise<st
   return tableId;
 }
 
-const chips = (page: import('@playwright/test').Page) => page.locator('view-window .eda-pill-chip');
+// A body pill (one per row, from the `$filter.TAG` template) carries the SAME
+// `.eda-pill-chip` / `.eda-pill-chip-value` classes as the header's toolbar
+// chip's value half — see `pill-chip.ts`. That is why every helper below
+// scopes to the HEADER's toolbar (`.vw-sortbar`) when it means "the chip":
+// unscoped, a chip locator would also match a body pill.
+const chips = (page: import('@playwright/test').Page) => page.locator('view-window .vw-sortbar .eda-pill-chip');
 /** Chips that are actually filtering — an idle chip carries `.off`. */
-const activeChips = (page: import('@playwright/test').Page) => page.locator('view-window .eda-pill-chip:not(.off)');
-const idleChips = (page: import('@playwright/test').Page) => page.locator('view-window .eda-pill-chip.off');
+const activeChips = (page: import('@playwright/test').Page) => page.locator('view-window .vw-sortbar .eda-pill-chip:not(.off)');
+const idleChips = (page: import('@playwright/test').Page) => page.locator('view-window .vw-sortbar .eda-pill-chip.off');
 /**
  * The tri-state value checklist — the grid's funnel popover. A native popover,
  * so a closed one is `display: none` and the visibility assertions below are
@@ -70,6 +75,15 @@ const idleChips = (page: import('@playwright/test').Page) => page.locator('view-
  */
 const checklist = (page: import('@playwright/test').Page) => page.locator('filter-popover');
 const option = (page: import('@playwright/test').Page, value: string) => checklist(page).locator('li', { hasText: value });
+/**
+ * A body pill for one value — the template's `.card` row, not the header's
+ * toolbar. It is ONE button, the value alone (`Food`, not `Category = Food`):
+ * clicking it OR-appends an exact-match filter, exactly as clicking a value
+ * always did before chips existed. Everything else a filter can become —
+ * excluded, dropped, widened to another value — is the split chip that click
+ * grows in the header.
+ */
+const bodyPill = (page: import('@playwright/test').Page, value: string) => page.locator(`view-window .card .eda-pill-chip-value[data-eda-filter-value="${value}"]`);
 
 test('the chips ride in the same bar as the sort controls', async ({ page }) => {
   await makeFilterView(page);
@@ -79,7 +93,7 @@ test('the chips ride in the same bar as the sort controls', async ({ page }) => 
   await expect(vw.locator('.vw-sortbar')).toBeVisible();
   await expect(vw.locator('.vw-pillbar')).toHaveCount(0);
 
-  await vw.locator('.eda-filter-pill', { hasText: 'blue' }).first().click();
+  await bodyPill(page, 'blue').first().click();
 
   // One bar holds both — the chip sits INSIDE the bar with the sort dropdown.
   const bar = vw.locator('.vw-sortbar');
@@ -95,7 +109,7 @@ test('clicking the chip FIELD cycles = then ≠ then off', async ({ page }) => {
   const vw = page.locator('view-window');
   const names = vw.locator('.nm');
 
-  await vw.locator('.eda-filter-pill', { hasText: 'blue' }).first().click();
+  await bodyPill(page, 'blue').first().click();
   await expect(names).toHaveCount(2); // Bert + Dora
   await expect(chips(page).locator('.eda-pill-chip-field')).toHaveText(/tag =/);
 
@@ -153,7 +167,7 @@ test("clicking the chip VALUE opens a checklist of the field's other values", as
   await makeFilterView(page);
   const vw = page.locator('view-window');
 
-  await vw.locator('.eda-filter-pill', { hasText: 'blue' }).first().click();
+  await bodyPill(page, 'blue').first().click();
   await expect(vw.locator('.nm')).toHaveCount(2);
 
   await chips(page).locator('.eda-pill-chip-value').click();
@@ -177,7 +191,7 @@ test('the checklist is faceted by the OTHER fields still filtered', async ({ pag
   await makeFilterView(page);
   const vw = page.locator('view-window');
 
-  await vw.locator('.eda-filter-pill', { hasText: 'blue' }).first().click();
+  await bodyPill(page, 'blue').first().click();
   await page.evaluate(async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ctx = (window as any).__easydb;
@@ -203,7 +217,7 @@ test('the chip × still drops just that value', async ({ page }) => {
   // The second value has to come from the checklist: once `blue` is filtered on,
   // the only pills left in the template are blue ones. That is the whole reason
   // the checklist exists.
-  await vw.locator('.eda-filter-pill', { hasText: 'blue' }).first().click();
+  await bodyPill(page, 'blue').first().click();
   await chips(page).locator('.eda-pill-chip-value').click();
   await option(page, 'green').click();
   await expect(chips(page)).toHaveCount(2);
@@ -212,4 +226,27 @@ test('the chip × still drops just that value', async ({ page }) => {
   await chips(page).filter({ hasText: 'green' }).locator('.eda-pill-chip-remove').click();
   await expect(chips(page)).toHaveCount(1);
   await expect(vw.locator('.nm')).toHaveCount(2); // blue only
+});
+
+/**
+ * The user's stated design, pinned end to end: a body pill is the value
+ * alone — no field name repeated, one button — and clicking it is the
+ * handover to the header, which grows the split `field = value` chip that
+ * can then cycle, offer other values, or be dropped.
+ */
+test('a body pill is the bare value, and clicking it grows a split header chip', async ({ page }) => {
+  await makeFilterView(page);
+  const vw = page.locator('view-window');
+
+  const pill = bodyPill(page, 'blue').first();
+  await expect(pill).toHaveText('blue'); // the value alone — no field name
+  await expect(page.locator('view-window .card .eda-pill-chip-field')).toHaveCount(0); // no field half in the body at all
+
+  await pill.click();
+  await expect(vw.locator('.nm')).toHaveCount(2); // Bert + Dora
+
+  const chip = chips(page);
+  await expect(chip).toHaveCount(1);
+  await expect(chip.locator('.eda-pill-chip-field')).toHaveText('tag =');
+  await expect(chip.locator('.eda-pill-chip-value')).toHaveText('blue');
 });

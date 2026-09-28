@@ -443,8 +443,6 @@ export class PluginManagerDialog extends LitElement {
   @state() private addUrl = '';
   @state() private catalog: CatalogResolved[] = [];
   @state() private catalogError: string | null = null;
-  @state() private serverCatalog: CatalogResolved[] = [];
-  @state() private serverCatalogError: string | null = null;
   @state() private installing: Set<string> = new Set();
   @state() private catalogUrls: string[] = [defaultCatalogUrl()];
   @state() private activeCatalogUrl: string = defaultCatalogUrl();
@@ -484,12 +482,9 @@ export class PluginManagerDialog extends LitElement {
     this.statusFilter = undefined;
     await this.updateComplete;
     this.dialogEl?.showModal();
-    // Catalog fetches run after the dialog is visible so a slow network
-    // doesn't block opening; rows just appear once the responses land. The
-    // server registry is independent of the host catalog — both run in
-    // parallel.
+    // The catalog fetch runs after the dialog is visible so a slow network
+    // doesn't block opening; rows just appear once the response lands.
     void this.refreshCatalog(this.activeCatalogUrl);
-    void this.refreshServerRegistry();
   }
 
   /**
@@ -504,33 +499,6 @@ export class PluginManagerDialog extends LitElement {
     } catch (err) {
       this.catalog = [];
       this.catalogError = describeNetworkError(err, catalogUrl);
-    }
-  }
-
-  /**
-   * Fetches an operator-curated plugin list from the configured server
-   * (`${server-sync:url}/plugins/registry`). Silently no-ops when no server
-   * URL is set. Network / parse errors surface inline so misconfiguration is
-   * visible without breaking the rest of the dialog.
-   */
-  private async refreshServerRegistry(): Promise<void> {
-    const ctx = await getContext();
-    const setting = await ctx.store.settings.findOne('server-sync:url');
-    const raw = setting?.value;
-    if (typeof raw !== 'string' || raw.length === 0) {
-      this.serverCatalog = [];
-      this.serverCatalogError = null;
-      return;
-    }
-    const base = raw.replace(/\/+$/, '');
-    const registryUrl = `${base}/plugins/registry`;
-    try {
-      // The same shape as a catalog file, so the same reader — see `plugin-catalog.ts`.
-      this.serverCatalog = await fetchCatalog(registryUrl);
-      this.serverCatalogError = null;
-    } catch (err) {
-      this.serverCatalog = [];
-      this.serverCatalogError = describeNetworkError(err, registryUrl);
     }
   }
 
@@ -768,7 +736,7 @@ export class PluginManagerDialog extends LitElement {
       });
     }
 
-    for (const entry of [...this.catalog, ...this.serverCatalog]) {
+    for (const entry of this.catalog) {
       const installedByUrl = this.urls.includes(entry.absUrl);
       const rec = this.records.get(entry.absUrl);
       const categories: Category[] = installedByUrl ? ['available', 'installed'] : ['available'];
@@ -959,7 +927,6 @@ export class PluginManagerDialog extends LitElement {
               <button type="button" class="ghost" @click=${this.reloadCatalogSource}><span class="mi sm">refresh</span> Reload</button>
             </div>
             ${this.catalogError ? html`<div class="meta err">Catalog unavailable: ${this.catalogError}</div>` : ''}
-            ${this.serverCatalogError ? html`<div class="meta err">Server registry unavailable: ${this.serverCatalogError}</div>` : ''}
 
             <div class="plugin-list">${rows.length === 0 ? html`<p class="hint">No plugins match the current filters/search.</p>` : ''} ${rows.map((row) => this.renderRow(row))}</div>
 

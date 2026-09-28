@@ -290,6 +290,43 @@ test.describe('a file written by another origin', () => {
   });
 
   /**
+   * The same outside write, answered by the NARROW command.
+   *
+   * `Sync workspace folder` re-reads every enabled `.edb` to settle the
+   * workspace list; `Sync workspace` opens this tab's own file and nothing
+   * else. They share the rule (`refreshActiveFile`), so the question and the
+   * answers must be identical — which is what this pins. A user reaching for
+   * "sync" means this one far more often than the folder walk, and before it
+   * existed the only way to ask "did anyone write MY file" was to re-read the
+   * whole folder.
+   */
+  test('Sync workspace re-reads this tab own file without walking the folder', async ({ page }, testInfo) => {
+    const ws = `own-${testInfo.testId}`.toLowerCase();
+    const file = `${ws}.edb`;
+    test.setTimeout(180_000);
+    await boot(page, ws);
+
+    const mine = await createTable(page, 'mine', [{ field: 'part', type: 'string' }]);
+    await waitForPanel(page, mine);
+    await saveIntoNewFolder(page, file);
+    await settleClean(page, file);
+
+    await otherOriginAddsTable(page, ws, file, 'theirs');
+    expect(await tableNames(page)).toEqual(['mine']);
+
+    // The narrow command, reached by its own exact title — the palette match is
+    // exact, so this cannot fall through to `Sync workspace folder`.
+    await runFileCommand(page, 'Sync workspace');
+
+    const offer = page.locator('host-dialogs');
+    await expect(offer.getByText(new RegExp(`${file} has been written since this tab last read it`, 'i'))).toBeVisible({ timeout: 20_000 });
+    await offer.getByRole('button', { name: 'Load disk version', exact: true }).click();
+
+    await expect.poll(() => tableNames(page), { timeout: 60_000 }).toEqual(['mine', 'theirs']);
+    await ready(page);
+  });
+
+  /**
    * The other half: switching INTO a workspace whose file has moved on.
    *
    * A `?space=` switch used to prefer this browser's own copy over the file every

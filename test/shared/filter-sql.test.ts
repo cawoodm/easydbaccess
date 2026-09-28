@@ -327,7 +327,7 @@ describe('comparison tokens as SQL', () => {
   });
 
   it('agrees with the matcher on a number column', () => {
-    for (const f of ['>=9', '<=9', '>9', '<9', '>=0 AND <=100', '!>=10']) {
+    for (const f of ['>=9', '<=9', '>9', '<9', '>=0 AND <=100', '!>=10', '=9', '9', '!9', '!=9', '=10', '!=abc']) {
       crossCheck(NUMBERS, f, 'number');
     }
   });
@@ -339,6 +339,49 @@ describe('comparison tokens as SQL', () => {
 
   it('agrees with the matcher on an untyped column', () => {
     for (const f of ['>=n', '<=n']) crossCheck(VALUES, f, 'string');
+  });
+});
+
+/**
+ * `crossCheck` above stores every value as TEXT, which never exercises the
+ * real bug: a `number` column is created with SQLite's REAL affinity
+ * (`sql-mapping.ts` maps `number` → REAL), and REAL storage renders `180` back
+ * as the text `180.0`. `equals()`'s old `LOWER(col) = ?` compared that text
+ * straight against `'180'` and lost — a REAL-affinity column is the one case a
+ * TEXT-backed cross-check cannot see, and it is exactly the case the backlog
+ * bug report was filed against. This table is REAL-typed and fed real JS
+ * numbers so the affinity conversion actually happens.
+ */
+function crossCheckReal(values: Array<number | null>, filter: string): void {
+  const d2 = new DatabaseSync(':memory:');
+  try {
+    d2.exec(`CREATE TABLE t (v REAL)`);
+    const ins = d2.prepare(`INSERT INTO t (v) VALUES (?)`);
+    for (const v of values) ins.run(v);
+    const frag = columnFilterToSql('"v"', filter, { type: 'number' });
+    expect(frag.expressible).toBe(true);
+    const where = frag.sql ? `WHERE ${frag.sql}` : '';
+    const sql = (d2.prepare(`SELECT v FROM t ${where}`).all(...(frag.params as never[])) as Array<{ v: number | null }>).map((r) => r.v);
+    const mem = values.filter((v) => matchesColumnFilter(v, filter, { type: 'number' }));
+    expect(sql, `filter ${filter} on a REAL column`).toEqual(mem);
+  } finally {
+    d2.close();
+  }
+}
+
+const REAL_NUMBERS: Array<number | null> = [180, 1800, 180.5, -5, 0, 9.5, null];
+
+describe('number equality survives REAL column affinity', () => {
+  it('=180 finds only the REAL 180, not 1800 or the text rendering "180.0"', () => {
+    // The regression this whole task exists to fix: before, `equals()` bound
+    // the raw term text and lost to SQLite's REAL-to-text rendering.
+    crossCheckReal(REAL_NUMBERS, '=180');
+  });
+
+  it('agrees with the matcher across equality, negation and a bare term', () => {
+    for (const f of ['=180', '!=180', '180', '!180', '=1800', '=180.5', '=0', '=9.5']) {
+      crossCheckReal(REAL_NUMBERS, f);
+    }
   });
 });
 

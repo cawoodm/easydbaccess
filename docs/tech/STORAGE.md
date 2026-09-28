@@ -20,8 +20,9 @@ differs is only where that database lives and which SQLite the code is bound to.
   **main process**, and the workspace is a `.db` file on disk.
 
 Neither case involves a server-side database — a device with no network still
-has a fully working, persistent app. `packages/server`'s `/sync` route stores
-workspace *snapshots* (JSON blobs), not a live copy; see `SYNCH.md`.
+has a fully working, persistent app. Moving a workspace between devices is
+Gist Sync's job, and it pushes a *snapshot* (whole tables as JSON, per Gist
+file), not a live copy; see `SYNCH.md`.
 
 ```
                               Plugin
@@ -328,9 +329,8 @@ afterward.
 - **`settings`** — the **workspace layer** of a two-layer settings model
   (see below): a flat `key → value` bag, keyed by convention as
   `${pluginId}:${key}` for anything going through `api.settings`, or a
-  bespoke key for older direct `store.settings` writes (`server-sync:url`,
-  `server-sync:etag:<workspaceId>`). This layer syncs with the workspace
-  (dump-export, gist-sync). **Anything written here directly is still
+  bespoke key for an older direct `store.settings` write. This layer syncs
+  with the workspace (dump-export, gist-sync). **Anything written here directly is still
   plaintext** — there is no encryption layer — but the settings system now
   steers actual secrets away from this collection entirely (see below).
 - **`plugins`** — one record per installed third-party plugin URL, keyed by
@@ -446,7 +446,7 @@ with the file.
 | View templates | `_easydb` → `coll='viewTemplates'` |
 | View instances (incl. their own `windowGeometry`) | `_easydb` → `coll='viewInstances'` |
 | Workspace record (`title`, `pluginUrls`, `id`, `name`) | `_easydb` → `coll='workspaces'` |
-| Workspace-layer settings (`${pluginId}:${key}`, e.g. `user`/`gist_id`, `server-sync:url`, non-token `datasette:*`) | `_easydb` → `coll='settings'`, keyed `<workspaceId>::<name>` |
+| Workspace-layer settings (`${pluginId}:${key}`, e.g. `gist-sync`'s `user`/`gist_id`, non-token `datasette:*`) | `_easydb` → `coll='settings'`, keyed `<workspaceId>::<name>` |
 | Installed third-party plugin state + cached module body, and toggled built-ins (`builtin:<id>`) | `_easydb` → `coll='plugins'` |
 | User-layer settings (any field promoted to `scope: 'user'`, e.g. `gist_token`) | `localStorage` blob `/easydbaccess/settings.json` |
 | Secrets referenced via `${secret:name}` | `localStorage` blob `/easydbaccess/secrets.txt` |
@@ -577,8 +577,10 @@ download.
 
 Cross-reference with `SYNCH.md`: `gist-sync` only ever touches the `tables`,
 `rows`, `viewTemplates`, `viewInstances` collections and the workspace-layer
-`settings` (filtered to exclude `gist:`/`datasette:token:`/`server-sync:`
-keys). Everything in the `workspaces` and `plugins` tables, all user-layer
+`settings` (filtered by `withoutRawSecrets` — see `db/secret-guard.ts` —
+to exclude any setting holding a raw secret value rather than a
+`${secret:name}` reference). Everything in the `workspaces` and `plugins`
+tables, all user-layer
 settings, and the secrets store are never read or written by gist-sync — a
 pulled workspace never gets the pusher's title, installed plugin list, or
 credentials.

@@ -42,7 +42,6 @@ jobs:
             'package.json',
             'packages/electron/package.json',
             'packages/renderer/package.json',
-            'packages/server/package.json',
             'packages/shared/package.json',
           ];
           for (const f of files) {
@@ -54,9 +53,6 @@ jobs:
 
       - name: Build shared
         run: npm run build --workspace @easydb/shared
-
-      - name: Build server
-        run: npm run build --workspace @easydb/server
 
       - name: Build renderer for Electron (base=./, outputs to packages/electron/frontend/)
         run: npm run build:electron --workspace @easydb/renderer

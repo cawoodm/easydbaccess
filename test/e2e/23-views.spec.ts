@@ -507,8 +507,8 @@ test.describe('views', () => {
     await expect(grid.locator('tbody tr')).toHaveCount(2);
 
     // Type a column filter, then — while the debounced save is still pending —
-    // force a viewInstances write (a geometry save / auto-sync would do this in
-    // the wild). The filter must survive rather than revert to "all rows".
+    // force a viewInstances write (a geometry save would do this in the
+    // wild). The filter must survive rather than revert to "all rows".
     await grid.locator('tr.filter-row filter-combobox input').first().fill('Alpha');
     await expect(grid.locator('tbody tr')).toHaveCount(1);
     await page.evaluate(async (ws) => {

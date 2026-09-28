@@ -56,10 +56,11 @@ and `plugins/*`. It excludes `*.map` (devtools-only, roughly two thirds of
 `dist/` by size) and `*.woff` (every `@font-face` lists `woff2` first, so the
 `.woff` copies are never requested).
 
-Cross-origin is deliberate. Map tiles, the GitHub Gist API, the sync server and
-remote plugin URLs must keep failing honestly — caching opaque responses is
-unbounded against a storage quota shared with the OPFS database, which is the one
-thing that must never be evicted.
+Cross-origin is deliberate. Map tiles, the GitHub Gist API, a plugin's own
+`backend.fetch` targets and remote plugin URLs must keep failing honestly —
+caching opaque responses is unbounded against a storage quota shared with the
+OPFS database, which is the one thing that must never be evicted. There is no
+sync server of our own to name here — see [`SYNCH.md`](./SYNCH.md).
 
 ### Updates: prompt, never silent
 
@@ -122,8 +123,14 @@ unreachable URLs cost ten seconds, not ten timeouts in series.
 
 Deliberately exempt: `api.backend.fetch`. Imports pull multi-hundred-megabyte
 files through it, and a blanket deadline would break them. Its callers own their
-own deadlines — as `plugins/server-sync.ts` and `plugins/auto-sync.ts` do, both
-of which raise the limit for a request carrying a whole workspace.
+own deadlines — as `plugins/gist-sync.ts` does, raising the limit for a
+request carrying a whole workspace.
+
+`api.backend.fetch` is always a direct browser fetch now — there used to be a
+Hono `/fetch` proxy that sidestepped a target site's CORS restrictions when a
+sync server was configured. That server is gone, so URL ingestion (a CSV/JSON
+import from a URL, a `url-source` table, any plugin's own fetch) now depends
+on the target host sending CORS headers that allow it.
 
 **2. `navigator.onLine` is only a hint.** `true` means there is a network
 interface, not that the internet is reachable. `isOffline()` may skip work that
@@ -139,8 +146,7 @@ wording, so the user reads one explanation rather than the browser's.
 | ------------------------------------ | ---------------------------------------------------------------------------------------------- |
 | `plugin-host/url-loader.ts`          | A cached plugin body loads with no request at all. An uncached one fails inside the shared budget, records `lastError`, and does **not** toast — a 404 or broken JS still does |
 | `plugin-host/plugin-catalog.ts`      | Bounded; `new-plugins` already swallows the failure                                            |
-| `plugins/auto-sync.ts`               | Skips the whole tick, before serializing the workspace                                         |
-| `plugins/server-sync.ts`             | Says so **before** the destructive pull confirm, not after it                                  |
+| `plugins/gist-sync.ts`               | A failed push/pull surfaces as a toast, worded via `describeNetworkError`                      |
 | `dialogs/plugin-manager-dialog.ts`   | Inline "Catalog unavailable" line, worded for offline                                          |
 | `import/fetch-source.ts`, `plugins/url-source.ts` | Lead with the offline fact instead of guessing at CORS               |
 | `viz/elements/point-map.ts`          | Points still plot; the tile banner says the background needs a connection                      |
@@ -155,8 +161,6 @@ sync or a blank map tile needs no further explanation of its own.
   unmeasurable against a quota shared with the OPFS database, and needing an LRU
   the worker otherwise does not. The tile-error banner and the repointable tile
   URL setting already answer the air-gapped case.
-- **Background Sync for `auto-sync`.** Chromium-only, needs a persisted outbox,
-  and the ETag conflict protocol assumes a live prompt.
 - **PNG and maskable icons.** The manifest ships SVG-only, which Chromium accepts
   as installable. What that costs: no maskable icon on Android, and iOS ignores
   manifest icons entirely (it wants an `apple-touch-icon` PNG). Adding a

@@ -62,15 +62,18 @@ const cards = (page: import('@playwright/test').Page) => page.locator('view-wind
  * so which card comes first is not something the filtering promises.
  */
 const shownNames = async (page: import('@playwright/test').Page) => (await page.locator('view-window .nm').allTextContents()).sort();
-const pillsOf = (page: import('@playwright/test').Page, name: string) => page.locator('view-window .card', { hasText: name }).locator('.eda-filter-pill');
+// A body chip (see `pill-chip.ts`) is the VALUE alone — one wrapper span
+// around one button. This returns the wrapper for one member; `.eda-pill-chip-value`
+// both reads its text and is what a click has to target to apply the filter.
+const pillsOf = (page: import('@playwright/test').Page, name: string) => page.locator('view-window .card', { hasText: name }).locator('.eda-pill-chip');
 
 test('a list cell renders one chip per member', async ({ page }) => {
   await makeArrayPillView(page);
 
-  await expect(pillsOf(page, 'Anna')).toHaveText(['red', 'blue']);
-  await expect(pillsOf(page, 'Bert')).toHaveText(['blue']);
+  await expect(pillsOf(page, 'Anna').locator('.eda-pill-chip-value')).toHaveText(['red', 'blue']);
+  await expect(pillsOf(page, 'Bert').locator('.eda-pill-chip-value')).toHaveText(['blue']);
   // JSON-array spelling reads the same way.
-  await expect(pillsOf(page, 'Cleo')).toHaveText(['green', 'red']);
+  await expect(pillsOf(page, 'Cleo').locator('.eda-pill-chip-value')).toHaveText(['green', 'red']);
   // An empty list gets no chip, exactly as an empty cell never did.
   await expect(pillsOf(page, 'Dora')).toHaveCount(0);
 });
@@ -79,24 +82,26 @@ test('clicking one member keeps every row carrying it', async ({ page }) => {
   await makeArrayPillView(page);
   await expect(cards(page)).toHaveCount(4);
 
-  await pillsOf(page, 'Anna').filter({ hasText: 'red' }).click();
+  await pillsOf(page, 'Anna').filter({ hasText: 'red' }).locator('.eda-pill-chip-value').click();
 
   // Anna (red,blue) and Cleo (green,red) carry red; Bert and Dora do not.
   await expect(cards(page)).toHaveCount(2);
   expect(await shownNames(page)).toEqual(['Anna', 'Cleo']);
 
-  // The chip in the toolbar names the member, not the whole cell.
-  await expect(page.locator('view-window .eda-pill-chip')).toHaveCount(1);
-  await expect(page.locator('view-window .eda-pill-chip-value')).toHaveText('red');
+  // The chip in the toolbar names the member, not the whole cell. Scoped to
+  // the sortbar: the surviving cards (Anna, Cleo) still draw their OWN body
+  // chips for every member they carry, which share these same classes.
+  await expect(page.locator('view-window .vw-sortbar .eda-pill-chip')).toHaveCount(1);
+  await expect(page.locator('view-window .vw-sortbar .eda-pill-chip-value')).toHaveText('red');
 });
 
 test('a second member ORs onto the first', async ({ page }) => {
   await makeArrayPillView(page);
-  await pillsOf(page, 'Anna').filter({ hasText: 'red' }).click();
+  await pillsOf(page, 'Anna').filter({ hasText: 'red' }).locator('.eda-pill-chip-value').click();
   await expect(cards(page)).toHaveCount(2);
 
   // Anna still shows both her chips, so the sibling value stays reachable.
-  await pillsOf(page, 'Anna').filter({ hasText: 'blue' }).click();
+  await pillsOf(page, 'Anna').filter({ hasText: 'blue' }).locator('.eda-pill-chip-value').click();
   await expect(cards(page)).toHaveCount(3);
   expect(await shownNames(page)).toEqual(['Anna', 'Bert', 'Cleo']);
 });

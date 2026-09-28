@@ -5,11 +5,9 @@ function main() {
   $SrcDir = $PSScriptRoot
   Push-Location $SrcDir
 
-  # 1. Build shared + server (electron pulls them as workspace deps)
+  # 1. Build shared (electron pulls it as a workspace dep)
   npm run build --workspace @easydb/shared
   if ($LASTEXITCODE -ne 0) { throw "shared build failed" }
-  npm run build --workspace @easydb/server
-  if ($LASTEXITCODE -ne 0) { throw "server build failed" }
 
   # 2. Build renderer into packages/electron/frontend/ with base=./ so
   #    assets resolve under file://. Kept separate from packages/renderer/dist/

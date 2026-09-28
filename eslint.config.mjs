@@ -88,8 +88,8 @@ export default [
     languageOptions: { globals: { ...globals.browser } },
   },
   {
-    // Server + Electron main: Node environment.
-    files: ['packages/server/**/*.ts', 'packages/electron/**/*.ts'],
+    // Electron main: Node environment.
+    files: ['packages/electron/**/*.ts'],
     languageOptions: { globals: { ...globals.node } },
   },
   {

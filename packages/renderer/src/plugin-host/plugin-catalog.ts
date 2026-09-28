@@ -7,8 +7,9 @@
 // and the settings key live in one place rather than in two copies that drift.
 //
 // A catalog is `{ plugins: [...] }`. `public/plugins/catalog.json` is the built-in
-// one and is GENERATED (see `scripts/generate-plugin-catalog.mjs`); a server's
-// `/plugins/registry` answers the same shape, which is why one reader serves both.
+// one and is GENERATED (see `scripts/generate-plugin-catalog.mjs`); the reader
+// below is generic, so a user can add any other URL serving the same shape
+// (e.g. a self-hosted catalog file) as an extra source.
 
 import type { PluginType } from '@easydb/shared';
 import { fetchWithTimeout } from '../util/net.js';

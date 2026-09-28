@@ -7,6 +7,7 @@ import { materialIconStyles } from '../chrome/material-icon-css.js';
 import { openViews } from '../dialogs/open-views.js';
 import { openViewColumnsDialog } from '../dialogs/view-columns-dialog.js';
 import { CELL_SLOT_CLASS, cyclePillValue, evaluateRows, extractFilterTokens, hasRowHtml, removePillValue, substituteRow, tokenValue, viewRows } from './view-render.js';
+import { PILL_CHIP_FIELD_CLASS, PILL_CHIP_VALUE_CLASS, pillChipClass, pillChipStyles, pillFieldLabel } from './pill-chip.js';
 import { withRowMeta } from './row-meta.js';
 import { inputTargetOf, mayWrite, patchFor, readInputValue } from './input-writeback.js';
 import { persistPillFilters, withPillValue } from './pill-filters.js';
@@ -42,6 +43,7 @@ import '../table/data-table.js';
 export class ViewWindow extends LitElement {
   static override styles = [
     materialIconStyles,
+    pillChipStyles,
     css`
       :host {
         display: flex;
@@ -129,22 +131,6 @@ export class ViewWindow extends LitElement {
       .eda-input-field .eda-input-label:empty {
         display: none;
       }
-      /* $filter.TOKEN pill rendered inline in a template's row HTML — looks
-         clickable, sits in the flow of the text around it. */
-      .eda-filter-pill {
-        font: inherit;
-        display: inline;
-        padding: 0.05rem 0.5rem;
-        margin: 0 0.1rem;
-        border: none;
-        border-radius: 1rem;
-        background: #e0f2fe;
-        color: #0369a1;
-        cursor: pointer;
-      }
-      .eda-filter-pill:hover {
-        background: #bae6fd;
-      }
       /* A token script that will not compile, or that throws. Marked in place —
          a blank card would read as "no data" and hide the broken script. */
       .eda-script-error {
@@ -156,73 +142,10 @@ export class ViewWindow extends LitElement {
         font-size: 0.8rem;
         cursor: help;
       }
-      .eda-pill-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.3rem;
-        padding: 0.1rem 0.3rem 0.1rem 0.55rem;
-        border-radius: 1rem;
-        background: #e0f2fe;
-        color: #0369a1;
-        font-size: 0.8rem;
-      }
-      /* A chip is two buttons, because it does two things: the FIELD (with the
-         operator) cycles = / != / off, and the VALUE opens the field's other
-         values as a checklist. */
-      .eda-pill-chip-field,
-      .eda-pill-chip-value {
-        padding: 0;
-        border: none;
-        background: transparent;
-        color: inherit;
-        font: inherit;
-        cursor: pointer;
-      }
-      .eda-pill-chip-field {
-        font-weight: 600;
-      }
-      .eda-pill-chip-field:hover,
-      .eda-pill-chip-value:hover {
-        text-decoration: underline;
-      }
-      /* Idle: the template offers this filter, nothing is filtering on it. Quiet
-         and dashed so it reads as an offer, not as an active filter. */
-      .eda-pill-chip.off {
-        background: transparent;
-        border: 1px dashed #7dd3fc;
-        color: #0369a1;
-        opacity: 0.75;
-        padding: 0 0.3rem;
-      }
-      .eda-pill-chip.off:hover {
-        opacity: 1;
-        border-style: solid;
-      }
-      /* An excluded value reads as excluded at a glance, not only by its ≠. */
-      .eda-pill-chip.not {
-        background: #fee2e2;
-        color: #b91c1c;
-      }
-      .eda-pill-chip.not .eda-pill-chip-remove:hover {
-        background: rgba(185, 28, 28, 0.15);
-      }
-      .eda-pill-chip-remove {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 1.1rem;
-        height: 1.1rem;
-        padding: 0;
-        border: none;
-        border-radius: 50%;
-        background: transparent;
-        color: inherit;
-        cursor: pointer;
-        line-height: 1;
-      }
-      .eda-pill-chip-remove:hover {
-        background: rgba(3, 105, 161, 0.15);
-      }
+      /* The chip itself (.eda-pill-chip and friends) is pillChipStyles,
+         imported from pill-chip.ts — the one definition the header's chips
+         AND a body pill (same shadow root; the template HTML lands here via
+         unsafeHTML) both draw from. See that module for why. */
       /* One toolbar at the top of a view: the sort controls (template mode) and
          the active filter chips, which used to sit in a second bar of their own. */
       .vw-sortbar {
@@ -469,7 +392,7 @@ export class ViewWindow extends LitElement {
     this.template = (await ctx.store.viewTemplates.findOne(inst.templateId)) ?? null;
     const table = await ctx.store.tables.findOne(inst.tableId);
     this.tableColumns = table?.columns ?? [];
-    // A read-only TABLE refuses an `$input` write however the view is marked —
+    // A read-only TABLE refuses an `` write however the view is marked —
     // the same rule `openEditRecordDialog` reads for itself, so a template
     // cannot be a way round it.
     this.tableReadonly = table?.readonly === true;
@@ -644,15 +567,22 @@ export class ViewWindow extends LitElement {
   };
 
   /**
-   * A `$filter.TOKEN` pill was clicked in the template. Adds an exact-match
-   * pill filter for that field/value (OR-appended to any existing value on the
-   * same field) and persists it on the instance's SEPARATE `pillFilters`
-   * layer — never touching the view's snapshotted `filters`. Filtering is not
-   * editing, so this runs even on a readonly view.
+   * A `$filter.TOKEN` pill was clicked in the template body. Adds an
+   * exact-match pill filter for that field/value (OR-appended to any existing
+   * value on the same field) and persists it on the instance's SEPARATE
+   * `pillFilters` layer — never touching the view's snapshotted `filters`.
+   * Filtering is not editing, so this runs even on a readonly view.
+   *
+   * One action, because a body pill is one button (`view-render.ts`'s
+   * `pillChip` prints the value alone). Everything else the filter can then
+   * be — excluded, swapped for another value, dropped — is the split chip this
+   * click grows in the HEADER, where `renderPillChips` gives each of those its
+   * own half. Delegated from one listener rather than a Lit `@click` because
+   * the body is a plain HTML string inside `unsafeHTML`, not a Lit template.
    */
   private onPillClick = async (e: Event): Promise<void> => {
     const t = e.target;
-    if (!(t instanceof HTMLElement) || !t.classList.contains('eda-filter-pill')) return;
+    if (!(t instanceof HTMLElement) || !t.classList.contains(PILL_CHIP_VALUE_CLASS)) return;
     if (!this.instance) return;
     const field = t.getAttribute('data-eda-filter-field');
     const value = t.getAttribute('data-eda-filter-value');
@@ -972,8 +902,8 @@ export class ViewWindow extends LitElement {
       .filter((f) => !filtering.has(f))
       .map(
         (field) =>
-          html`<span class="eda-pill-chip off">
-            <button type="button" class="eda-pill-chip-value" title=${`Filter this view by ${field}`} @click=${(e: Event) => void this.openPillValues(field, e.currentTarget as HTMLElement)}>
+          html`<span class=${pillChipClass('off')}>
+            <button type="button" class=${PILL_CHIP_VALUE_CLASS} title=${`Filter this view by ${field}`} @click=${(e: Event) => void this.openPillValues(field, e.currentTarget as HTMLElement)}>
               ${field} ▾
             </button>
           </span>`,
@@ -982,16 +912,16 @@ export class ViewWindow extends LitElement {
       ...idle,
       ...chips.map(
         (c) =>
-          html`<span class=${`eda-pill-chip${c.state === 'not' ? ' not' : ''}`}>
+          html`<span class=${pillChipClass(c.state)}>
             <button
               type="button"
-              class="eda-pill-chip-field"
+              class=${PILL_CHIP_FIELD_CLASS}
               title=${c.state === 'not' ? `Excluding this value — click to stop filtering on ${c.field}` : `Only this value — click to EXCLUDE it instead`}
               @click=${() => void this.cyclePill(c.field, c.value)}
             >
-              ${c.field}${c.state === 'not' ? ' ≠' : ' ='}
+              ${pillFieldLabel(c.field, c.state)}
             </button>
-            <button type="button" class="eda-pill-chip-value" title=${`Other values of ${c.field}`} @click=${(e: Event) => void this.openPillValues(c.field, e.currentTarget as HTMLElement)}>
+            <button type="button" class=${PILL_CHIP_VALUE_CLASS} title=${`Other values of ${c.field}`} @click=${(e: Event) => void this.openPillValues(c.field, e.currentTarget as HTMLElement)}>
               ${c.value}
             </button>
             <button type="button" class="eda-pill-chip-remove" aria-label=${`Remove filter ${c.field}: ${c.value}`} title="Remove this filter" @click=${() => void this.removePill(c.field, c.value)}>

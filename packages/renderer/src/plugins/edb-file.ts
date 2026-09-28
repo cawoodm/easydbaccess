@@ -27,7 +27,7 @@ import { deleteWorkspace } from '../db/delete-workspace.js';
 import { createAutosavePolicy, type AutosavePolicy } from '../db/edb/dirty.js';
 import { edbBridge, edbHandle, setEdbHandle, storeBridge } from '../db/edb/active-bridge.js';
 import { copyWorkspace } from '../db/edb/convert.js';
-import { syncFolder } from '../db/edb/folder-sync.js';
+import { syncActiveWorkspace, syncFolder } from '../db/edb/folder-sync.js';
 import { confirmDataLoss } from '../db/edb/copy-choice.js';
 import { openLocalDataDialog } from '../dialogs/local-data-dialog.js';
 import { describeActiveOutcome } from '../db/edb/active-file-sync.js';
@@ -1172,6 +1172,49 @@ export function init(api: HostApi): void {
     await syncFolderNow(dir);
   }
 
+  /**
+   * Sync THIS workspace with its own `.edb` — the narrow half of the command
+   * above.
+   *
+   * `Sync workspace folder` re-reads every enabled file in the folder to settle
+   * the workspace LIST. That is the right job when files have been added or
+   * moved, and the wrong one for the ordinary question: another machine wrote
+   * MY file, what now. This opens that one file and nothing else.
+   *
+   * Every outcome is said out loud, including the two the folder report leaves
+   * silent. `describeActiveOutcome` returns an empty clause for `no-file` and
+   * `missing` on purpose — inside a folder report they are noise about
+   * something the user did not ask about — but here they ARE the answer, and a
+   * command that ran and said nothing is the bug this whole area already fixed
+   * once.
+   */
+  async function syncActiveWorkspaceNow(): Promise<void> {
+    if ((await rememberedFolder()) === null) {
+      api.ui.dialogs.toast('No workspace folder is connected yet.', { kind: 'info', title: 'Sync workspace' });
+      return;
+    }
+    const dir = await workspaceFolder();
+    if (!dir) return;
+    const { outcome, file } = await syncActiveWorkspace(dir, api.store, api.ui.dialogs, (localId, name, fileId) => overwriteInFile(dir, localId, name, fileId), async (handle, mode) => {
+      const ctx = mergeContext(handle);
+      return ctx ? (await mergeWithFile(ctx, mode)).merged : false;
+    });
+
+    // This tab is on the browser's own database, so there is no file to sync
+    // with. Named as the next step rather than as a refusal: a Save into the
+    // connected folder is what gives this workspace a file.
+    if (outcome === 'no-file') {
+      api.ui.dialogs.toast('This workspace has no file yet. Save it into the folder first.', { kind: 'info', title: 'Sync workspace' });
+      return;
+    }
+    if (outcome === 'missing') {
+      api.ui.dialogs.toast(`${file ?? 'That file'} is not in this folder.`, { kind: 'warning', title: 'Sync workspace' });
+      return;
+    }
+    // `loaded` ends in a reload, so this toast is the last thing this page does.
+    api.ui.dialogs.toast(describeActiveOutcome(outcome, file ?? '').trim(), { kind: 'success', title: 'Sync workspace' });
+  }
+
   async function syncFolderNow(dir: FileSystemDirectoryHandle): Promise<void> {
     const report = await syncFolder(
       dir,
@@ -1464,12 +1507,25 @@ export function init(api: HostApi): void {
 
   if (canPickFolder()) {
     api.ui.registerCommand(folderCommand);
+    // Listed BEFORE the folder sync, because it is the narrower of the two and
+    // the one a user reaching for "sync" usually means: this workspace against
+    // its own file. The titles are deliberately prefix-shared so both surface
+    // on the same search, and the longer one says out loud that it is the
+    // bigger job.
+    api.ui.registerCommand({
+      id: 'edb-file:sync-workspace',
+      title: 'Sync workspace',
+      group: FILE_GROUP,
+      icon: 'sync',
+      keywords: ['refresh', 're-read', 'workspace', 'file', 'edb'],
+      run: () => syncActiveWorkspaceNow(),
+    });
     api.ui.registerCommand({
       id: 'edb-file:sync-folder',
       title: 'Sync workspace folder',
       group: FILE_GROUP,
       icon: 'sync',
-      keywords: ['refresh', 're-read', 'folder', 'file'],
+      keywords: ['refresh', 're-read', 'folder', 'file', 'all'],
       run: () => syncConnectedFolder(),
     });
     api.ui.registerCommand({

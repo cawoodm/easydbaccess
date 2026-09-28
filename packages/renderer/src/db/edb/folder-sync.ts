@@ -15,6 +15,7 @@ import {
   folderConflicts,
   isEmptyWorkspace,
   partitionConflicts,
+  readFolderIndex,
   readFolderSelection,
   writeFolderIndex,
   type FolderClash,
@@ -456,6 +457,54 @@ export async function syncFolder(
     ...(adoptedFileName() === null ? {} : { activeFile: adoptedFileName() as string }),
     reloadedActive: active === 'loaded',
   };
+}
+
+/** What a single-workspace sync did, and to which file. */
+export interface ActiveSyncReport {
+  outcome: ActiveFileOutcome;
+  /** The `.edb` this tab has adopted, or null when it is on browser storage. */
+  file: string | null;
+}
+
+/**
+ * Sync THIS workspace with its own `.edb`, and nothing else.
+ *
+ * The distinction from {@link syncFolder} is the whole reason this exists.
+ * That one is about the folder: it reads every enabled `.edb` in it, settles
+ * which file holds which workspace, writes the index, asks about every clash
+ * between a file and a copy this browser holds, and files the workspaces that
+ * live nowhere on disk. The file this tab has open is the LAST thing it
+ * touches. Most of that work is about workspaces the user is not looking at,
+ * and all of it needs every file in the folder opened and parsed.
+ *
+ * This is the one question a user means by "sync my workspace": has anyone
+ * written MY file since I last read it, and what should happen about it. It
+ * opens exactly one file — this tab's own — and asks nothing about any other.
+ *
+ * The rule it applies is `refreshActiveFile`'s, unchanged, so the two commands
+ * cannot answer the same situation differently: `file-newer` is offered,
+ * `conflict` and `unknown` are asked about with the four answers (Take newest,
+ * Compare, Overwrite, Load), `same` and `ahead` do nothing and say why.
+ *
+ * The folder index is read from the last scan rather than rebuilt, because the
+ * only thing it contributes is the table and view COUNTS shown beside each copy
+ * in the dialog, and rebuilding it would mean opening every file — the cost this
+ * command exists to avoid. A stale or absent index costs a line of description,
+ * never a wrong decision: `fileTotals` yields nothing for a file it has not
+ * seen, and the facts that decide anything — the file's size and mtime — are
+ * read live from the handle every time.
+ */
+export async function syncActiveWorkspace(
+  dir: FileSystemDirectoryHandle,
+  store: DataStore,
+  dialogs: Dialogs,
+  overwrite: OverwriteInFile,
+  merge: MergeActiveFile | null = null,
+): Promise<ActiveSyncReport> {
+  const open = await store.workspaces.find();
+  const index = readFolderIndex() ?? { folder: dir.name, at: 0, workspaces: [] };
+  const outcome = await refreshActiveFile(dir, dialogs, overwrite, open, index, merge);
+  return { outcome, file: adoptedFileName() };
 }
 
 /**

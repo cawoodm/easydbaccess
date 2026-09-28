@@ -19,7 +19,7 @@ test.describe('new workspace clone choice', () => {
     await page.evaluate(async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (window as any).__easydb.store.settings.upsert({
-        name: 'server-sync:url',
+        name: 'example-sync:url',
         value: 'https://example.test',
       });
     });
@@ -63,7 +63,7 @@ test.describe('new workspace clone choice', () => {
     await createWorkspace(page, /Empty workspace/);
     const out = await contents(page);
     expect(out.tables).toEqual([]);
-    expect(out.settingNames).not.toContain('server-sync:url');
+    expect(out.settingNames).not.toContain('example-sync:url');
   });
 
   test('settings only brings the settings across without the data', async ({ page }) => {
@@ -71,7 +71,7 @@ test.describe('new workspace clone choice', () => {
     await createWorkspace(page, /Clone settings only/);
     const out = await contents(page);
     expect(out.tables).toEqual([]);
-    expect(out.settingNames).toContain('server-sync:url');
+    expect(out.settingNames).toContain('example-sync:url');
   });
 
   test('clone everything brings tables and settings', async ({ page }) => {
@@ -79,7 +79,7 @@ test.describe('new workspace clone choice', () => {
     await createWorkspace(page, /Clone everything/);
     const out = await contents(page);
     expect(out.tables).toContain('Feed');
-    expect(out.settingNames).toContain('server-sync:url');
+    expect(out.settingNames).toContain('example-sync:url');
   });
 
   test('the source workspace keeps its own settings', async ({ page, workspaceId }) => {
@@ -89,7 +89,7 @@ test.describe('new workspace clone choice', () => {
     await page.evaluate(async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (window as any).__easydb.store.settings.upsert({
-        name: 'server-sync:url',
+        name: 'example-sync:url',
         value: 'https://changed.test',
       });
     });
@@ -100,7 +100,7 @@ test.describe('new workspace clone choice', () => {
     );
     const url = await page.evaluate(async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (await (window as any).__easydb.store.settings.findOne('server-sync:url'))?.value;
+      return (await (window as any).__easydb.store.settings.findOne('example-sync:url'))?.value;
     });
     expect(url).toBe('https://example.test');
   });

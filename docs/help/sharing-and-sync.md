@@ -48,16 +48,6 @@ and **Database → Open…** opens one again. See
 
 ## Syncing to other devices
 
-Two ways to sync, pick one — or neither:
-
-### Your own server
-
-Run the small bundled server anywhere (a Raspberry Pi, a free hosting tier,
-your own machine). The footer's **Sync** menu gives you **Push** (send your
-workspace up) and **Pull** (bring the server's copy down). If someone else
-pushed since your last pull, easyDBAccess detects the conflict and won't
-silently overwrite anything.
-
 ### A private GitHub Gist
 
 No server to run — your workspace lives as a private Gist. The footer's
@@ -71,8 +61,15 @@ No server to run — your workspace lives as a private Gist. The footer's
 - **View gist** — opens the Gist on GitHub.
 
 A table connected to a live source (like a Datasette instance) only syncs
-its **definition** through Gist or server sync, never its rows — since those
-rows already live at the source and would just be re-fetched there.
+its **definition** through Gist sync, never its rows — since those rows
+already live at the source and would just be re-fetched there.
+
+### Two local copies of the same workspace
+
+On desktop, if you keep a workspace's `.edb` file in two places (say, a
+synced folder), easyDBAccess can settle them against each other table by
+table and row by row, using each row's last-changed time. See
+[Database Files](database-files.md).
 
 ## Keeping secrets out of your data
 

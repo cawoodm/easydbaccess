@@ -24,8 +24,6 @@ playwright-report
 # be able to bring package.json back).
 packages/electron/*
 !packages/electron/package.json
-packages/server/*
-!packages/server/package.json
 *.log
 .vscode
 Dockerfile

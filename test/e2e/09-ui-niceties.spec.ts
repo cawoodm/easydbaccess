@@ -84,14 +84,6 @@ test.describe('ui niceties', () => {
     await expect(header.locator('.search-clear')).toHaveCount(0);
   });
 
-  test('the consolidated server-sync button uses the cloud_sync (cloud + refresh) icon', async ({ page }) => {
-    const footer = page.locator('app-shell footer');
-    // Push/Pull were merged into one "Sync" button that opens a menu.
-    const syncBtn = footer.getByRole('button', { name: 'Sync', exact: true });
-    await expect(syncBtn).toBeVisible();
-    await expect(syncBtn.locator('.mi')).toHaveText('cloud_sync');
-  });
-
   test('drag-over the app-shell shows the page-level drop overlay', async ({ page }) => {
     const shell = page.locator('app-shell');
     await expect(shell).not.toHaveClass(/drag-over/);

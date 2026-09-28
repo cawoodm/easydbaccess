@@ -98,15 +98,22 @@ describe('distinctValues', () => {
 describe('$filter.FIELD pills', () => {
   it('emits one pill per distinct value, carrying the field and the value', () => {
     const out = substituteVizTokens('$filter.country', SALES, cols({ field: 'country' }));
-    expect(out.match(/eda-filter-pill/g)).toHaveLength(2);
+    // A viz-custom pill is the shared chip's SOLID shape: a wrapper span plus
+    // ONE value button, no field half — so `eda-pill-chip-value` (one per
+    // pill) is the count to use, not `eda-pill-chip` (also in the wrapper's
+    // class, which would double it).
+    expect(out.match(/eda-pill-chip-value/g)).toHaveLength(2);
     expect(out).toContain('data-eda-filter-field="country"');
     expect(out).toContain('data-eda-filter-value="CH"');
+    // Solid, not the dashed `off` variant — this pill always carries a real
+    // value, so it never reads as "a field you could filter, not yet chosen".
+    expect(out).not.toContain('eda-pill-chip off');
   });
 
   it('caps the row and says how many it left out', () => {
     const many = rows(...Array.from({ length: MAX_PILLS + 7 }, (_, i) => ({ c: `v${String(i).padStart(3, '0')}` })));
     const out = substituteVizTokens('$filter.c', many);
-    expect(out.match(/eda-filter-pill/g)).toHaveLength(MAX_PILLS);
+    expect(out.match(/eda-pill-chip-value/g)).toHaveLength(MAX_PILLS);
     expect(out).toContain('+7');
   });
 

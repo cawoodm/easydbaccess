@@ -39,7 +39,7 @@ export function init(api: HostApi): void {
       default: true,
       scope: 'workspace',
       description:
-        'A filter value with no wildcard and no quotes matches any cell CONTAINING it. Turn this off to make it match the whole cell instead, which is what a list of values usually means. Either way `*foo*` asks for a substring and `"foo bar"` asks for the whole cell, so both are explicit. Workspace-wide rather than per device, because it decides what the filters saved in this workspace mean.',
+        'A filter value with no wildcard and no quotes matches any cell CONTAINING it. Turn this off to make it match the whole cell instead, which is what a list of values usually means. Either way `*foo*` asks for a substring and `"foo bar"` asks for the whole cell, so both are explicit. This setting has no effect on a NUMBER column: a bare value there always means EQUALS, never substring, so `180` never matches `1800`. Workspace-wide rather than per device, because it decides what the filters saved in this workspace mean.',
     },
     {
       key: 'highlightNulls',

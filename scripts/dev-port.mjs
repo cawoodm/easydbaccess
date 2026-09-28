@@ -3,14 +3,13 @@
 // e2e specs all agree without any of them hardcoding a port. See CLAUDE.md's
 // "Servers" section for the fixed assignments this enforces.
 //
-// Three ports per branch:
+// Two ports per branch:
 //   - the renderer (Vite) port         → resolveDevPort()
-//   - the e2e backing Hono server      → resolveServerPort()
 //   - the offline preview (`npm run preview`) → resolvePreviewPort()
 //
-// Override any of them for a one-off with RENDERER_PORT=<n> /
-// EASYDB_SERVER_PORT=<n> / EASYDB_PREVIEW_PORT=<n> (e.g. exposing via ngrok
-// alongside an already-running server on the branch's normal port).
+// Override either of them for a one-off with RENDERER_PORT=<n> /
+// EASYDB_PREVIEW_PORT=<n> (e.g. exposing via ngrok alongside an
+// already-running server on the branch's normal port).
 
 import { execSync } from 'node:child_process';
 
@@ -26,23 +25,12 @@ const FIXED_PORTS = {
 const FALLBACK_RANGE_START = 5200;
 const FALLBACK_RANGE_SIZE = 100;
 
-// The e2e backing Hono server (playwright.config.ts's second webServer) needs
-// its own per-branch port for the same reason the renderer does: two worktrees
-// running `npm run test:e2e` at once would otherwise fight over one port, and
-// the loser silently fails 6 specs — its renderer origin isn't in the winning
-// server's CORS_ORIGINS. Deriving it from the renderer port keeps the pair in
-// lockstep and inherits the per-branch uniqueness for free.
-//
-// The offset lands every server port in 6190+, clear of the user's own dev
-// servers (3000/3001) and of Chrome's blocked-port list (6000, 6665-6669).
-const SERVER_PORT_OFFSET = 1000;
-
-// The offline preview (`scripts/preview.mjs`) gets a third per-branch port for
+// The offline preview (`scripts/preview.mjs`) gets a second per-branch port for
 // the same reason, and it matters more here than it looks: a service worker is
 // scoped to an ORIGIN, so two worktrees sharing one preview port would share
 // one worker registration and one cache, and each rebuild would fight the
-// other. 7190+ is clear of the renderer and server ranges above and of
-// Chrome's blocked-port list.
+// other. 7190+ is clear of the renderer range above and of Chrome's
+// blocked-port list.
 const PREVIEW_PORT_OFFSET = 2000;
 
 function currentBranch() {
@@ -67,11 +55,6 @@ export function resolveDevPort() {
   const branch = currentBranch();
   if (!branch) return FIXED_PORTS.main;
   return FIXED_PORTS[branch] ?? hashPort(branch);
-}
-
-export function resolveServerPort() {
-  if (process.env.EASYDB_SERVER_PORT) return Number(process.env.EASYDB_SERVER_PORT);
-  return resolveDevPort() + SERVER_PORT_OFFSET;
 }
 
 export function resolvePreviewPort() {

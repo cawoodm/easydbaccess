@@ -642,6 +642,62 @@ describe('type-aware comparison', () => {
   });
 });
 
+/**
+ * `=180` and a bare `180` on a `number` column both mean NUMERIC equality —
+ * see `matchesTerm`'s comment in `column-filter.ts`. A `number` cell has many
+ * text spellings of the same value ("180", "180.0", " 180 "), and string
+ * equality used to answer a different question than the user asked.
+ */
+describe('number column equality', () => {
+  const num = { type: 'number' } as const;
+
+  it('=180 matches every text spelling of the number 180', () => {
+    expect(matchesColumnFilter('180', '=180', num)).toBe(true);
+    expect(matchesColumnFilter(180, '=180', num)).toBe(true);
+    expect(matchesColumnFilter('180.0', '=180', num)).toBe(true);
+    expect(matchesColumnFilter('180.00', '=180', num)).toBe(true);
+    expect(matchesColumnFilter(' 180 ', '=180', num)).toBe(true);
+    expect(matchesColumnFilter('1.8e2', '=180', num)).toBe(true);
+  });
+
+  it('=180 does not match 1800', () => {
+    expect(matchesColumnFilter('1800', '=180', num)).toBe(false);
+  });
+
+  it('a bare term also means equals, regardless of defaultSubstring', () => {
+    expect(matchesColumnFilter('180', '180', { ...num, defaultSubstring: true })).toBe(true);
+    expect(matchesColumnFilter('1800', '180', { ...num, defaultSubstring: true })).toBe(false);
+    expect(matchesColumnFilter('180', '180', { ...num, defaultSubstring: false })).toBe(true);
+    expect(matchesColumnFilter('1800', '180', { ...num, defaultSubstring: false })).toBe(false);
+  });
+
+  it('negation is the numeric not-equal', () => {
+    expect(matchesColumnFilter('180', '!180', num)).toBe(false);
+    expect(matchesColumnFilter('180.0', '!=180', num)).toBe(false);
+    expect(matchesColumnFilter('1800', '!180', num)).toBe(true);
+    expect(matchesColumnFilter('181', '!=180', num)).toBe(true);
+  });
+
+  it('a term that is not a valid number falls back to text matching', () => {
+    // Dirt a number column can hold after an import — still findable.
+    expect(matchesColumnFilter('abc', '=abc', num)).toBe(true);
+    expect(matchesColumnFilter('xabcx', 'abc', { ...num, defaultSubstring: true })).toBe(true);
+    expect(matchesColumnFilter('xabcx', 'abc', { ...num, defaultSubstring: false })).toBe(false);
+  });
+
+  it('does not change equality on a non-number column', () => {
+    expect(matchesColumnFilter('180.0', '=180')).toBe(false);
+    expect(matchesColumnFilter('1800', '180')).toBe(true); // substring, default setting
+  });
+
+  it('an array column with numeric-looking members is unaffected — still per-member text', () => {
+    // `type: 'array'`, not `'number'`, so the numeric-equality branch never
+    // runs here; members keep matching as text, exactly as before.
+    expect(matchesColumnFilter('180,1800', '=180', { type: 'array' })).toBe(true);
+    expect(matchesColumnFilter('180,1800', '180', { type: 'array', defaultSubstring: true })).toBe(true);
+  });
+});
+
 describe('relative date terms', () => {
   const now = new Date(2026, 8, 23); // 23 Sep 2026
 
