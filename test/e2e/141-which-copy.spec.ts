@@ -101,7 +101,7 @@ async function reopen(page: Page, ws: string): Promise<void> {
 /**
  * The tables on screen, safe to POLL across a reload.
  *
- * Answering "open the copy in the file" imports those bytes over the database
+ * Answering "use the file copy" imports those bytes over the database
  * this tab has open, which closes the worker's store on the way to the reload
  * (`worker.ts`'s `importBytes`) — so a read taken in that window rejects. An
  * empty answer keeps the poll going until the new page is up; a wrong one still
@@ -129,26 +129,50 @@ test('asks which copy to open, and says what each one holds', async ({ page }, t
   await expect(dialog.getByText('cannot tell which is newer')).toBeVisible({ timeout: 20_000 });
   // Both sides, counted. The question used to be asked on a name alone — and both
   // copies have the same name, so the answer was a guess.
-  await expect(dialog.getByText('In this browser: 0 tables')).toBeVisible();
-  await expect(dialog.getByText(`${ws}.edb: 1 table`)).toBeVisible();
+  await expect(dialog.getByText('Browser: 0 tables')).toBeVisible();
+  await expect(dialog.getByText(`File — ${ws}.edb: 1 table`)).toBeVisible();
 
-  for (const label of ['Open the copy in the file', 'Keep the copy in this browser', 'Compare them…']) {
+  for (const label of ['Use the file copy', 'Use the browser copy', 'Compare them…']) {
     await expect(dialog.getByRole('button', { name: label, exact: true })).toBeVisible();
   }
 });
 
-test('opening the copy in the file brings its tables in', async ({ page }, testInfo) => {
+test('using the file copy brings its tables in', async ({ page }, testInfo) => {
   const ws = `takefile-${testInfo.testId}`.toLowerCase();
   await bootWithFolder(page, `elsewhere-${testInfo.testId}`.toLowerCase());
   await seedBothCopies(page, ws);
   await reopen(page, ws);
 
   const dialog = dialogs(page);
-  await dialog.getByRole('button', { name: 'Open the copy in the file', exact: true }).click({ timeout: 20_000 });
+  await dialog.getByRole('button', { name: 'Use the file copy', exact: true }).click({ timeout: 20_000 });
 
   await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
   await expect.poll(() => tableNames(page), { timeout: 20_000 }).toEqual(['fromfile']);
   expect(await page.evaluate((k) => localStorage.getItem(k), ACTIVE_KEY)).toBe(`${ws}.edb`);
+});
+
+test('Compare them… opens the comparison instead of denying there is a file', async ({ page }, testInfo) => {
+  // The reported bug. "Compare them…" is answered BEFORE the browser's copy is
+  // open — it has to be, or there is nothing to compare the file against — so the
+  // comparison runs on the other side of a reload, and at that moment the
+  // session's file handle has not been restored yet. The answer was "there is no
+  // file to compare it with", about the very file whose size and date the dialog
+  // had just shown; running the Compare command by hand a second later worked.
+  const ws = `comparetwo-${testInfo.testId}`.toLowerCase();
+  await bootWithFolder(page, `elsewhere-${testInfo.testId}`.toLowerCase());
+  await seedBothCopies(page, ws);
+  await reopen(page, ws);
+
+  const dialog = dialogs(page);
+  await dialog.getByRole('button', { name: 'Compare them…', exact: true }).click({ timeout: 20_000 });
+
+  // The table-by-table dialog — the one the Compare command already opened. The
+  // inner `<dialog>`, not the host: a modal lives in the top layer, so the custom
+  // element around it has no box of its own and reads as hidden.
+  const merge = page.locator('merge-dialog').locator('dialog');
+  await expect(merge).toBeVisible({ timeout: 20_000 });
+  await expect(merge).toContainText('fromfile');
+  await expect(dialog.getByText('no file to compare it with')).toHaveCount(0);
 });
 
 test('keeping the empty copy is confirmed before anything is lost', async ({ page }, testInfo) => {
@@ -158,10 +182,10 @@ test('keeping the empty copy is confirmed before anything is lost', async ({ pag
   await reopen(page, ws);
 
   const dialog = dialogs(page);
-  await dialog.getByRole('button', { name: 'Keep the copy in this browser', exact: true }).click({ timeout: 20_000 });
+  await dialog.getByRole('button', { name: 'Use the browser copy', exact: true }).click({ timeout: 20_000 });
 
   // Keeping nothing over a table is almost certainly a slip, and the three
   // buttons cannot carry that warning themselves.
-  await expect(dialog.getByText('is empty, and the copy in')).toBeVisible();
+  await expect(dialog.getByText('is empty, and the file copy')).toBeVisible();
   await expect(dialog.getByText('holds 1 table')).toBeVisible();
 });

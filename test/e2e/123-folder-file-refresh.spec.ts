@@ -339,7 +339,7 @@ test.describe('a file written by another origin', () => {
     // what another machine saved, and the user asked to be told before that.
     const offer = page.locator('host-dialogs');
     await expect(offer.getByText(new RegExp(`${file} has been written since this tab last read it`, 'i'))).toBeVisible({ timeout: 20_000 });
-    await offer.getByRole('button', { name: 'Load disk version', exact: true }).click();
+    await offer.getByRole('button', { name: 'Use the file copy', exact: true }).click();
 
     // Then it reloads onto the file. Polled rather than waited on: the reload
     // happens inside the sync, so there is no moment to hold on to between the
@@ -391,7 +391,7 @@ test.describe('a file written by another origin', () => {
 
     const offer = page.locator('host-dialogs');
     await expect(offer.getByText(new RegExp(`${file} has been written since this tab last read it`, 'i'))).toBeVisible({ timeout: 20_000 });
-    await offer.getByRole('button', { name: 'Load disk version', exact: true }).click();
+    await offer.getByRole('button', { name: 'Use the file copy', exact: true }).click();
 
     await expect.poll(() => tableNames(page), { timeout: 60_000 }).toEqual(['mine', 'theirs']);
     await ready(page);
@@ -480,8 +480,8 @@ test.describe('a file written by another origin', () => {
     const dialog = page.locator('host-dialogs');
     await expect(dialog.getByText(/no record of when the two last agreed/i)).toBeVisible({ timeout: 20_000 });
     // Both answers are offered, because either copy may be the real one.
-    await expect(dialog.getByRole('button', { name: 'Overwrite disk version', exact: true })).toBeVisible();
-    await dialog.getByRole('button', { name: 'Load disk version', exact: true }).click();
+    await expect(dialog.getByRole('button', { name: 'Use the browser copy', exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Use the file copy', exact: true }).click();
 
     await expect.poll(() => tableNames(page), { timeout: 60_000 }).toEqual(['mine', 'theirs']);
     await ready(page);
@@ -517,9 +517,9 @@ test.describe('a file written by another origin', () => {
     // Both copies are described. Neither answer can be reasoned about from a name
     // alone — both copies have the same one — so the prompt says what each holds,
     // and for the file how big it is and when it was written.
-    await expect(dialog.getByText(/Here: \d+ workspace/)).toBeVisible();
+    await expect(dialog.getByText(/Browser: \d+ workspace/)).toBeVisible();
     await expect(dialog.getByText(new RegExp(`${file}: .*\\d+ KB, saved `))).toBeVisible();
-    await dialog.getByRole('button', { name: 'Load disk version', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Use the file copy', exact: true }).click();
 
     // Answered with Load, so the file wins — including the table the other origin
     // saved, and without the local one that was never written.

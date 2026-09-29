@@ -101,6 +101,29 @@ export function sizeChangeNote(was: number | undefined, now: number | undefined)
 export interface LabelledCopy {
   label: string;
   facts: CopyFacts;
+  /** True on the side that is known to be the newer of the two. */
+  newer?: boolean | undefined;
+}
+
+/**
+ * The two words every one of these questions is asked in: **Browser** and
+ * **File**.
+ *
+ * They used to be asked in four vocabularies — "local" and "disk" in the Save
+ * clash, "this copy" and "the disk version" in the folder sync, "here" and "the
+ * file" in the table-by-table merge, "In this browser" in the open question —
+ * and the reader had to work out each time which of the two things they already
+ * understood was being named. There are only ever two sides, so there are only
+ * two words for them.
+ *
+ * "Browser" is right in Electron too: the desktop app's renderer holds its copy
+ * the same way, and it is still not the file.
+ */
+export const BROWSER_SIDE = 'Browser';
+
+/** The file side, named with the file so two files are never confused. */
+export function fileSide(file: string): string {
+  return `File — ${file}`;
 }
 
 /**
@@ -110,8 +133,14 @@ export interface LabelledCopy {
  * message a plain sentence in a browser that told us nothing. A side with no
  * facts is dropped on its own too — a lone labelled line still helps, because the
  * other copy's numbers are the ones the reader cannot otherwise see.
+ *
+ * The `← newer` marker is the one thing the counts cannot say. Tables and views
+ * tell the reader which copy is BIGGER, and the answer they are looking for is
+ * which is LATER — the two come apart exactly when a table was deleted on the
+ * machine that is ahead. Only marked where something actually knows; a guess
+ * dressed as a fact is worse than the silence it replaces.
  */
 export function compareCopies(sides: readonly LabelledCopy[], locale?: string): string {
-  const lines = sides.map((s) => ({ label: s.label, text: describeCopy(s.facts, locale) })).filter((s) => s.text !== '');
-  return lines.length === 0 ? '' : `\n\n${lines.map((s) => `${s.label}: ${s.text}`).join('\n')}`;
+  const lines = sides.map((s) => ({ label: s.label, text: describeCopy(s.facts, locale), newer: s.newer === true })).filter((s) => s.text !== '');
+  return lines.length === 0 ? '' : `\n\n${lines.map((s) => `${s.label}: ${s.text}${s.newer ? '  ← newer' : ''}`).join('\n')}`;
 }

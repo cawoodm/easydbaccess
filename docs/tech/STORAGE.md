@@ -477,8 +477,8 @@ every moment a copy and its file are known to agree (an import, a Save) and a
 
   | Verdict      | What the sync does                                                 |
   | ------------ | ------------------------------------------------------------------ |
-  | `file-newer` | Offers it: Load disk version / Keep this copy                      |
-  | `conflict`   | Asks: Load disk version / Overwrite disk version                    |
+  | `file-newer` | Offers it: Use the file copy / Keep the browser copy                |
+  | `conflict`   | Asks: Use the file copy / Use the browser copy                      |
   | `unknown`    | Asks the same, because either copy may be the real one              |
   | `same`       | Nothing. The report says "up to date"                              |
   | `ahead`      | Nothing. Being ahead wants a Save, not a Sync                       |

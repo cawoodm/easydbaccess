@@ -38,8 +38,8 @@ async function boot(page: Page, workspaceId: string): Promise<void> {
 
 const saveButton = (page: Page) => page.locator('app-shell').getByRole('button', { name: /Save/ });
 /** The two blunt answers, as the buttons word them. */
-const PUSH = 'Push — overwrite the file from here';
-const PULL = 'Pull — overwrite this copy from the file';
+const PUSH = 'Push — overwrite the file from the browser';
+const PULL = 'Pull — overwrite the browser from the file';
 const dialog = (page: Page) => page.locator('host-dialogs');
 
 /** Size and mtime of a file in the stub folder. */
@@ -122,7 +122,7 @@ test('a file written by something else stops the save and says so', async ({ pag
   expect(await statFile(page, 'guarded.edb')).toEqual(before);
 });
 
-test('choosing the local version goes ahead and writes', async ({ page }) => {
+test('choosing the browser copy goes ahead and writes', async ({ page }) => {
   await savedIntoFolder(page, 'forced');
   await outsideWrite(page, 'forced.edb');
   const before = await statFile(page, 'forced.edb');
@@ -176,7 +176,7 @@ test('the question shows both sides', async ({ page }) => {
   await expect(dialog(page).getByText(/has been written since this tab last saved it/)).toBeVisible({ timeout: 20_000 });
   // Which copy to keep is not answerable from the file name alone — both sides
   // are named, with what each holds.
-  await expect(dialog(page)).toContainText('In this browser');
+  await expect(dialog(page)).toContainText('Browser');
   await expect(dialog(page)).toContainText('sided.edb');
 });
 

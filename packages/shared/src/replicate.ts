@@ -269,7 +269,7 @@ function plural(n: number, noun: string): string {
 }
 
 /**
- * The comparison as one sentence: `2 tables differ, 1 only here, 3 only in the
+ * The comparison as one sentence: `2 tables differ, 1 only in the browser, 3 only in the
  * file`.
  *
  * Says nothing about the tables that MATCH — a list of what is fine is not what
@@ -279,7 +279,7 @@ function plural(n: number, noun: string): string {
 export function describeDiffs(counts: DiffCounts, noun = 'table'): string {
   const parts: string[] = [];
   if (counts.differs > 0) parts.push(`${plural(counts.differs, noun)} differ${counts.differs === 1 ? 's' : ''}`);
-  if (counts.hereOnly > 0) parts.push(`${plural(counts.hereOnly, noun)} only here`);
+  if (counts.hereOnly > 0) parts.push(`${plural(counts.hereOnly, noun)} only in the browser`);
   if (counts.diskOnly > 0) parts.push(`${plural(counts.diskOnly, noun)} only in the file`);
   return parts.join(', ');
 }

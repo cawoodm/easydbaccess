@@ -26,8 +26,8 @@ import {
 import { afterRename, misfiledFiles, withoutFiles, type FileIdentity } from './file-identity.js';
 import { factsOf, factsOfHandle, readStamp, recordDivergence, verdictFor } from './file-stamp.js';
 import { decideActiveFileSync, type ActiveFileOutcome } from './active-file-sync.js';
-import { compareCopies, sizeChangeNote, type CopyFacts } from './copy-facts.js';
-import { confirmDataLoss } from './copy-choice.js';
+import { BROWSER_SIDE, compareCopies, fileSide, sizeChangeNote, type CopyFacts } from './copy-facts.js';
+import { confirmDataLoss, newerSide, USE_BROWSER_COPY, USE_FILE_COPY } from './copy-choice.js';
 import { COMPARE, NEWEST } from './merge-answers.js';
 import { activeEdbName, adoptedFileName } from './session.js';
 import { adoptFolderFile, reloadActiveFromFile } from './space-adopt.js';
@@ -35,23 +35,29 @@ import { adoptFolderFile, reloadActiveFromFile } from './space-adopt.js';
 /**
  * The two answers to one conflicting workspace. Compared by value.
  *
- * Both name **the disk version** — the copy the user cannot see — because that is
- * the one the answer turns on, and "Overwrite" alone never said what was being
- * overwritten. There is no explicit Cancel: `dialogs.choice` carries its own
- * dismiss, a dismissed dialog is neither of these, and neither branch runs — which
- * is exactly what Cancel meant.
+ * The SAME two strings the Open-workspace question and the Save clash use
+ * (`copy-choice.ts`), because it is the same question: there are two copies and
+ * one of them is going to win. They were "Load disk version" / "Overwrite disk
+ * version" here and two other pairs elsewhere, so a user who had answered one of
+ * these dialogs had learned nothing about the next.
+ *
+ * There is no explicit Cancel: `dialogs.choice` carries its own dismiss, a
+ * dismissed dialog is neither of these, and neither branch runs — which is
+ * exactly what Cancel meant.
  */
-const LOAD = 'Load disk version';
-const OVERWRITE = 'Overwrite disk version';
+const LOAD = USE_FILE_COPY;
+const OVERWRITE = USE_BROWSER_COPY;
 
 /**
  * The third answer, for the one question where nothing is at stake.
  *
  * `file-newer` means the file moved and this copy holds nothing unsaved, so
  * declining costs nothing — there is no work here to write out and no reason to
- * offer Overwrite. "Keep this copy" says what declining does.
+ * offer {@link OVERWRITE}. Deliberately NOT the same string: this one keeps the
+ * browser copy without writing it anywhere, and the two are never offered
+ * together.
  */
-const KEEP = 'Keep this copy';
+const KEEP = 'Keep the browser copy';
 
 /**
  * The two answers to a file whose name and contents disagree.
@@ -395,10 +401,10 @@ function sinceWeRead(file: string, nowSize: number | undefined): string {
  * the time the folder arrives. Asking which of the two is real is a question
  * about nothing — the file is taken, unasked (`partitionConflicts`).
  *
- *  - **Load disk version** adopts that file and reloads. The data does not move;
+ *  - **Use the file copy** adopts that file and reloads. The data does not move;
  *    the tab changes which database it is looking at, so everything else in that
  *    file comes with it. This returns only if the file has gone since the scan.
- *  - **Overwrite disk version** writes the open workspace out over the file's copy
+ *  - **Use the browser copy** writes the open workspace out over the file's copy
  *    of it, leaving the file's OTHER workspaces alone. Replacing the whole file
  *    would be the simpler read of "overwrite", and it would silently destroy
  *    workspaces the user never mentioned.
@@ -439,8 +445,8 @@ export async function syncFolder(
     const mine = contentsAsFacts(counted.get(clash.file.id));
     const theirs = fileAsFacts(clash.file);
     const sides = compareCopies([
-      { label: 'In this browser', facts: mine },
-      { label: clash.file.file, facts: theirs },
+      { label: BROWSER_SIDE, facts: mine },
+      { label: fileSide(clash.file.file), facts: theirs },
     ]);
     const answer = await dialogs.choice(
       `"${workspaceLabel(clash.file)}" is in this browser and in ${clash.file.file}. The two may differ — which copy do you want to keep?${sides}`,
@@ -450,10 +456,10 @@ export async function syncFolder(
     // A dismissed dialog keeps both, which is the safe answer and the only one
     // that touches nothing.
     if (answer === LOAD) {
-      if (!(await confirmDataLoss(dialogs, workspaceLabel(clash.file), theirs, mine, 'the copy in this browser'))) continue;
+      if (!(await confirmDataLoss(dialogs, workspaceLabel(clash.file), theirs, mine, 'the browser copy'))) continue;
       await adoptFolderFile(clash.file.id, clash.file.file);
     } else if (answer === OVERWRITE) {
-      if (!(await confirmDataLoss(dialogs, workspaceLabel(clash.file), mine, theirs, `the copy in ${clash.file.file}`))) continue;
+      if (!(await confirmDataLoss(dialogs, workspaceLabel(clash.file), mine, theirs, `the file copy`))) continue;
       await overwrite(clash.file.id, clash.file.file);
     }
   }
@@ -578,9 +584,12 @@ async function refreshActiveFile(
   // What each side holds, for a question about the whole FILE rather than one
   // workspace — every workspace in this database came from those bytes.
   const now = handle ? await factsOfHandle(handle) : null;
+  // The stamp already said which side moved, and it is the one thing the counts
+  // cannot say. `ask-unknown` marks neither, which is the honest answer there.
+  const newer = newerSide(verdict);
   const sides = compareCopies([
-    { label: 'Here', facts: await openFileFacts(open) },
-    { label: file, facts: { ...fileTotals(index, file), ...(now ?? {}) } },
+    { label: BROWSER_SIDE, facts: await openFileFacts(open), newer: newer === 'browser' },
+    { label: fileSide(file), facts: { ...fileTotals(index, file), ...(now ?? {}) }, newer: newer === 'file' },
   ]);
   const since = sinceWeRead(file, now?.size);
 

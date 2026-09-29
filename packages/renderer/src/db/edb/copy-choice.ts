@@ -19,17 +19,26 @@
 // other side of the reload.
 
 import type { Dialogs } from '@easydb/shared';
-import { compareCopies, sizeChangeNote, type CopyFacts } from './copy-facts.js';
+import { BROWSER_SIDE, compareCopies, fileSide, sizeChangeNote, type CopyFacts } from './copy-facts.js';
 import type { FileVerdict } from './file-stamp.js';
 import { overwriteLosesData } from './folder-index.js';
 
 /** The dialog's own heading. Named for what the user asked for, not for the mechanism. */
 const TITLE = 'Open workspace';
 
-/** The file wins: its copy is imported over the one this browser holds. */
-export const OPEN_FILE_COPY = 'Open the copy in the file';
-/** The browser wins: the file is left exactly as it is. */
-export const KEEP_BROWSER_COPY = 'Keep the copy in this browser';
+/**
+ * The two answers every one of these questions comes down to, in the two words
+ * the sides are named in (`BROWSER_SIDE` / `fileSide`).
+ *
+ * Exported and shared rather than re-spelled per dialog: the Save clash asked
+ * this with "Use disk version" / "Use local version", the folder sync with "Load
+ * disk version" / "Overwrite disk version", and this one with a sentence each.
+ * Three wordings for one question is what made the answer hard to give — the
+ * reader had to first work out which of the four nouns meant the copy in front
+ * of them.
+ */
+export const USE_FILE_COPY = 'Use the file copy';
+export const USE_BROWSER_COPY = 'Use the browser copy';
 /** Open the browser's copy, then settle the two table by table. */
 export const COMPARE_COPIES = 'Compare them…';
 
@@ -43,8 +52,8 @@ export type CopyChoice = 'file' | 'browser' | 'compare' | 'none';
  * nothing" — the only answer that is safe to infer from silence.
  */
 export function copyChoiceOf(chosen: string | null): CopyChoice {
-  if (chosen === OPEN_FILE_COPY) return 'file';
-  if (chosen === KEEP_BROWSER_COPY) return 'browser';
+  if (chosen === USE_FILE_COPY) return 'file';
+  if (chosen === USE_BROWSER_COPY) return 'browser';
   if (chosen === COMPARE_COPIES) return 'compare';
   return 'none';
 }
@@ -71,6 +80,25 @@ export function whyAsking(verdict: FileVerdict, file: string): string {
       // every new origin, browser profile and machine.
       return `Both this browser and ${file} hold this workspace, and there is no record of when the two last agreed — so easyDBAccess cannot tell which is newer.`;
   }
+}
+
+/**
+ * Which side is the later of the two, where anything knows.
+ *
+ * The counts beside each side say which copy is BIGGER, and that is not the
+ * question — a machine that deleted a table is ahead with fewer tables in it.
+ * The stamp's verdict is the only thing in this layer that knows about time, so
+ * it is what the marker comes from.
+ *
+ * Null for `conflict` and `unknown`, which are the two cases where nothing knows:
+ * a conflict means BOTH moved since they last agreed, and `unknown` is every
+ * origin that has never read the file. Marking either would be a guess, and the
+ * sentence above the counts already says which of the two situations this is.
+ */
+export function newerSide(verdict: FileVerdict): 'file' | 'browser' | null {
+  if (verdict === 'file-newer') return 'file';
+  if (verdict === 'ahead') return 'browser';
+  return null;
 }
 
 /** The two copies of one workspace, as much as each side could be counted. */
@@ -102,17 +130,18 @@ export interface CopyQuestion extends CopySides {
  * stop happening silently.
  */
 export async function askWhichCopy(dialogs: Dialogs, q: CopyQuestion): Promise<CopyChoice> {
+  const newer = newerSide(q.verdict);
   const sides = compareCopies([
-    { label: 'In this browser', facts: q.here },
-    { label: q.file, facts: q.there },
+    { label: BROWSER_SIDE, facts: q.here, newer: newer === 'browser' },
+    { label: fileSide(q.file), facts: q.there, newer: newer === 'file' },
   ]);
-  const chosen = await dialogs.choice(`${whyAsking(q.verdict, q.file)}${sides}${sizeChangeNote(q.knownSize, q.there.size)}`, [OPEN_FILE_COPY, KEEP_BROWSER_COPY, COMPARE_COPIES], TITLE);
+  const chosen = await dialogs.choice(`${whyAsking(q.verdict, q.file)}${sides}${sizeChangeNote(q.knownSize, q.there.size)}`, [USE_FILE_COPY, USE_BROWSER_COPY, COMPARE_COPIES], TITLE);
   const answer = copyChoiceOf(chosen);
 
   // Comparing loses nothing by construction — it opens one copy and then settles
   // the two — so only the two outright answers are worth a second question.
-  if (answer === 'file' && !(await confirmDataLoss(dialogs, q.file, q.there, q.here, 'the copy in this browser', TITLE))) return 'none';
-  if (answer === 'browser' && !(await confirmDataLoss(dialogs, q.file, q.here, q.there, `the copy in ${q.file}`, TITLE))) return 'none';
+  if (answer === 'file' && !(await confirmDataLoss(dialogs, q.file, q.there, q.here, 'the browser copy', TITLE))) return 'none';
+  if (answer === 'browser' && !(await confirmDataLoss(dialogs, q.file, q.here, q.there, `the file copy`, TITLE))) return 'none';
   return answer;
 }
 

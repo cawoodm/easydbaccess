@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compareCopies, describeCopy, formatBytes, formatWhen, sizeChangeNote } from '../../../packages/renderer/src/db/edb/copy-facts.js';
+import { BROWSER_SIDE, compareCopies, describeCopy, fileSide, formatBytes, formatWhen, sizeChangeNote } from '../../../packages/renderer/src/db/edb/copy-facts.js';
 
 /**
  * What the "which copy do you want to keep?" prompts say about each copy.
@@ -62,10 +62,18 @@ describe('formatWhen', () => {
 describe('compareCopies', () => {
   it('puts each side on its own line, under the question', () => {
     const block = compareCopies([
-      { label: 'In this browser', facts: { tables: 2 } },
-      { label: 'sales.edb', facts: { tables: 5, size: 1024 } },
+      { label: BROWSER_SIDE, facts: { tables: 2 } },
+      { label: fileSide('sales.edb'), facts: { tables: 5, size: 1024 } },
     ]);
-    expect(block).toBe('\n\nIn this browser: 2 tables\nsales.edb: 5 tables, 1 KB');
+    expect(block).toBe('\n\nBrowser: 2 tables\nFile — sales.edb: 5 tables, 1 KB');
+  });
+
+  it('marks the newer side, and only where something said so', () => {
+    const block = compareCopies([
+      { label: BROWSER_SIDE, facts: { tables: 2 } },
+      { label: fileSide('sales.edb'), facts: { tables: 5 }, newer: true },
+    ]);
+    expect(block).toBe('\n\nBrowser: 2 tables\nFile — sales.edb: 5 tables  ← newer');
   });
 
   it('drops a side it knows nothing about, and keeps the other', () => {
@@ -73,7 +81,7 @@ describe('compareCopies', () => {
     // line still helps.
     expect(
       compareCopies([
-        { label: 'In this browser', facts: {} },
+        { label: BROWSER_SIDE, facts: {} },
         { label: 'sales.edb', facts: { tables: 5 } },
       ]),
     ).toBe('\n\nsales.edb: 5 tables');

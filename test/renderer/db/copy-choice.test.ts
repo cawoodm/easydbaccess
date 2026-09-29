@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { COMPARE_COPIES, KEEP_BROWSER_COPY, OPEN_FILE_COPY, askWhichCopy, confirmDataLoss, copyChoiceOf, whyAsking } from '../../../packages/renderer/src/db/edb/copy-choice.js';
+import { COMPARE_COPIES, USE_BROWSER_COPY, USE_FILE_COPY, askWhichCopy, newerSide, confirmDataLoss, copyChoiceOf, whyAsking } from '../../../packages/renderer/src/db/edb/copy-choice.js';
 
 /**
  * The question asked when this browser and the folder each hold a copy of the
@@ -33,8 +33,8 @@ function dialogs(answers: { choice?: string | null; confirm?: boolean } = {}) {
 
 describe('copyChoiceOf', () => {
   it('reads each answer off the button that was pressed', () => {
-    expect(copyChoiceOf(OPEN_FILE_COPY)).toBe('file');
-    expect(copyChoiceOf(KEEP_BROWSER_COPY)).toBe('browser');
+    expect(copyChoiceOf(USE_FILE_COPY)).toBe('file');
+    expect(copyChoiceOf(USE_BROWSER_COPY)).toBe('browser');
     expect(copyChoiceOf(COMPARE_COPIES)).toBe('compare');
   });
 
@@ -70,34 +70,49 @@ describe('whyAsking', () => {
   });
 });
 
+describe('newerSide', () => {
+  it('names the side the stamp says moved last', () => {
+    expect(newerSide('file-newer')).toBe('file');
+    expect(newerSide('ahead')).toBe('browser');
+  });
+
+  it('marks neither when nothing knows', () => {
+    // A conflict means BOTH moved since they last agreed, and `unknown` is every
+    // origin that has never read the file. A marker on either would be a guess
+    // wearing the clothes of a fact.
+    expect(newerSide('conflict')).toBeNull();
+    expect(newerSide('unknown')).toBeNull();
+  });
+});
+
 describe('askWhichCopy', () => {
   const sides = { here: { tables: 3, views: 1 }, there: { tables: 9, views: 4, size: 7_061_504, mtime: 1_787_000_000_000 } };
 
   it('puts both copies in the question, so the answer is not a guess', async () => {
-    const d = dialogs({ choice: KEEP_BROWSER_COPY });
+    const d = dialogs({ choice: USE_BROWSER_COPY });
     await askWhichCopy(d.api, { file: 'northwind.edb', verdict: 'unknown', ...sides });
     const message = d.asked.choice[0] ?? '';
-    expect(message).toContain('In this browser: 3 tables');
-    expect(message).toContain('northwind.edb: 9 tables');
+    expect(message).toContain('Browser: 3 tables');
+    expect(message).toContain('File — northwind.edb: 9 tables');
   });
 
   it('offers the three answers in the order that names the file first', async () => {
-    const d = dialogs({ choice: OPEN_FILE_COPY });
+    const d = dialogs({ choice: USE_FILE_COPY });
     expect(await askWhichCopy(d.api, { file: 'northwind.edb', verdict: 'unknown', ...sides })).toBe('file');
-    expect(d.api.choice.mock.calls[0]?.[1]).toEqual([OPEN_FILE_COPY, KEEP_BROWSER_COPY, COMPARE_COPIES]);
+    expect(d.api.choice.mock.calls[0]?.[1]).toEqual([USE_FILE_COPY, USE_BROWSER_COPY, COMPARE_COPIES]);
   });
 
   it('asks again before an empty copy is kept over a full one', async () => {
     // The whole point. Keeping nothing over 9 tables is almost certainly a slip,
     // and the three buttons cannot carry that warning themselves.
-    const d = dialogs({ choice: KEEP_BROWSER_COPY, confirm: false });
+    const d = dialogs({ choice: USE_BROWSER_COPY, confirm: false });
     const answer = await askWhichCopy(d.api, { file: 'northwind.edb', verdict: 'unknown', here: { tables: 0, views: 0 }, there: { tables: 9, views: 4 } });
     expect(d.asked.confirm).toHaveLength(1);
     expect(answer).toBe('none');
   });
 
   it('carries the answer through when the user confirms the loss anyway', async () => {
-    const d = dialogs({ choice: KEEP_BROWSER_COPY, confirm: true });
+    const d = dialogs({ choice: USE_BROWSER_COPY, confirm: true });
     expect(await askWhichCopy(d.api, { file: 'northwind.edb', verdict: 'unknown', here: { tables: 0, views: 0 }, there: { tables: 9, views: 4 } })).toBe('browser');
   });
 
@@ -107,8 +122,25 @@ describe('askWhichCopy', () => {
     expect(d.asked.confirm).toHaveLength(0);
   });
 
+  it('marks which side is newer, which the counts cannot say', async () => {
+    // Bigger is not later: a machine that deleted a table is ahead with fewer
+    // tables in it, so the counts beside each side answer a different question.
+    const d = dialogs({ choice: USE_FILE_COPY });
+    await askWhichCopy(d.api, { file: 'northwind.edb', verdict: 'file-newer', ...sides });
+    const message = d.asked.choice[0] ?? '';
+    expect(message).toContain('File — northwind.edb: 9 tables, 4 views, 6.7 MB, saved');
+    expect(message).toMatch(/File — northwind\.edb:.*← newer/);
+    expect(message).not.toMatch(/Browser:.*← newer/);
+  });
+
+  it('marks nothing when the stamp cannot say which moved last', async () => {
+    const d = dialogs({ choice: USE_FILE_COPY });
+    await askWhichCopy(d.api, { file: 'northwind.edb', verdict: 'unknown', ...sides });
+    expect(d.asked.choice[0] ?? '').not.toContain('← newer');
+  });
+
   it('says what the file used to weigh, when this browser once agreed with it', async () => {
-    const d = dialogs({ choice: KEEP_BROWSER_COPY });
+    const d = dialogs({ choice: USE_BROWSER_COPY });
     await askWhichCopy(d.api, { file: 'northwind.edb', verdict: 'file-newer', ...sides, knownSize: 4_000_000 });
     expect(d.asked.choice[0]).toContain('when this tab last read it');
   });
@@ -131,7 +163,7 @@ describe('confirmDataLoss', () => {
 
   it('names what is being lost, in the units the user can check', async () => {
     const d = dialogs({ confirm: true });
-    expect(await confirmDataLoss(d.api, 'sales.edb', { tables: 0, views: 0 }, { tables: 1, views: 2 }, 'the copy in sales.edb')).toBe(true);
+    expect(await confirmDataLoss(d.api, 'sales.edb', { tables: 0, views: 0 }, { tables: 1, views: 2 }, 'the file copy')).toBe(true);
     expect(d.asked.confirm[0]).toContain('1 table and 2 views');
   });
 });

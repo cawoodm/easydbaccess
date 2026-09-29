@@ -261,8 +261,8 @@ loading costs you nothing, but it does replace what is on screen:
 
 | Choice                | What happens                                 |
 | --------------------- | -------------------------------------------- |
-| **Load disk version** | What the other machine saved appears here.   |
-| **Keep this copy**    | Nothing changes. The file stays where it is. |
+| **Use the file copy**     | What the other machine saved appears here.   |
+| **Keep the browser copy** | Nothing changes. The file stays where it is. |
 
 When there is nothing to load, the message after the sync says which: the file is
 up to date, or you have unsaved changes here — a Save is what that wants.
@@ -295,8 +295,8 @@ them. See [When both copies have work in them](#when-both-copies-have-work-in-th
 | -------------------------- | ---------------------------------------------------------------------------------------------------- |
 | **Take newest**            | Settles it table by table, by the clock. Nothing that only one side has is lost.                     |
 | **Compare tables…**        | Decide table by table, and record by record.                                                          |
-| **Load disk version**      | The file wins, whole. What is here is replaced by what the other machine saved.                      |
-| **Overwrite disk version** | Your copy wins, written over the file's copy of that workspace. Its other workspaces are left alone. |
+| **Use the file copy**    | The file wins, whole. What is here is replaced by what the other machine saved.                      |
+| **Use the browser copy** | Your copy wins, written over the file's copy of that workspace. Its other workspaces are left alone. |
 | Closing the dialog         | Neither. Both copies stay as they are.                                                               |
 
 The question describes both copies first, so you are not choosing blind:
@@ -305,8 +305,8 @@ The question describes both copies first, so you are not choosing blind:
 "sales" is in this browser and in sales.edb. The two may differ —
 which copy do you want to keep?
 
-In this browser: 4 tables, 2 views
-sales.edb: 6 tables, 128 KB, saved 19 Aug 2026, 14:32
+Browser: 4 tables, 2 views
+File — sales.edb: 6 tables, 128 KB, saved 19 Aug 2026, 14:32  ← newer
 ```
 
 When it is your own file that moved, it also says what the file used to be — "It

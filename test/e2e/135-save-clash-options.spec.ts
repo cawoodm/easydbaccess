@@ -140,8 +140,8 @@ test('the clash offers two named copies, not a yes/no about replacing', async ({
   // Each button names a copy. The old wording asked "Replace it…?" and left the
   // reader to work out which side "it" was.
   await expect(dialog(page).getByText(/which one do you want to keep/i)).toBeVisible({ timeout: 20_000 });
-  await expect(dialog(page).getByRole('button', { name: 'Use disk version', exact: true })).toBeVisible();
-  await expect(dialog(page).getByRole('button', { name: 'Use local version', exact: true })).toBeVisible();
+  await expect(dialog(page).getByRole('button', { name: 'Use the file copy', exact: true })).toBeVisible();
+  await expect(dialog(page).getByRole('button', { name: 'Use the browser copy', exact: true })).toBeVisible();
 });
 
 test('the question shows both sides, so the answer can be reasoned about', async ({ page }) => {
@@ -153,17 +153,17 @@ test('the question shows both sides, so the answer can be reasoned about', async
   // The file's own line names it; the browser's line says where it is. Without
   // these the two copies are indistinguishable — they share the only other thing
   // a reader was given, the name.
-  await expect(dialog(page)).toContainText('In this browser');
+  await expect(dialog(page)).toContainText('Browser');
   await expect(dialog(page)).toContainText('sides.edb');
 });
 
-test('Use local version writes the browser copy over the file', async ({ page }) => {
+test('Use the browser copy writes the browser copy over the file', async ({ page }) => {
   await twoDifferingCopies(page, 'local-wins');
   await createTable(page, 'FromBrowser', [{ field: 'x', renderer: 'link' }]);
 
   await saveButton(page).click();
   await expect(dialog(page).getByText(/which one do you want to keep/i)).toBeVisible({ timeout: 20_000 });
-  await dialog(page).getByRole('button', { name: 'Use local version', exact: true }).click();
+  await dialog(page).getByRole('button', { name: 'Use the browser copy', exact: true }).click();
 
   await expect(page.locator('toast-host')).toContainText('local-wins.edb', { timeout: 30_000 });
   // The browser's copy is what is open, and it is now what the file holds too —
@@ -172,13 +172,13 @@ test('Use local version writes the browser copy over the file', async ({ page })
   await expect.poll(() => tablesInFile(page, 'local-wins.edb'), { timeout: 20_000 }).toEqual(['FromBrowser']);
 });
 
-test('Use disk version takes the file, and the file’s tables come back', async ({ page }) => {
+test('Use the file copy takes the file, and the file’s tables come back', async ({ page }) => {
   await twoDifferingCopies(page, 'disk-wins');
   await createTable(page, 'FromBrowser', [{ field: 'x', renderer: 'link' }]);
 
   await saveButton(page).click();
   await expect(dialog(page).getByText(/which one do you want to keep/i)).toBeVisible({ timeout: 20_000 });
-  await dialog(page).getByRole('button', { name: 'Use disk version', exact: true }).click();
+  await dialog(page).getByRole('button', { name: 'Use the file copy', exact: true }).click();
 
   // This is the answer the old dialog could not express at all: No abandoned the
   // Save and left the browser copy in front of the user.
@@ -209,7 +209,7 @@ test('keeping an empty copy over one holding tables asks a second time', async (
 
   await saveButton(page).click();
   await expect(dialog(page).getByText(/which one do you want to keep/i)).toBeVisible({ timeout: 20_000 });
-  await dialog(page).getByRole('button', { name: 'Use local version', exact: true }).click();
+  await dialog(page).getByRole('button', { name: 'Use the browser copy', exact: true }).click();
 
   await expect(dialog(page).getByText(/The copy you are keeping .* is empty/)).toBeVisible();
 });

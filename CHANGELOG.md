@@ -5,11 +5,13 @@
 ### Features
 
 - 🪶 Your settings and secrets live in the workspace folder, so connecting it on another browser or machine needs nothing typed again (v0.0.510)
+- ✨ Every "which copy?" question names the same two sides — Browser and File — and marks the newer one (v0.0.511)
 - ✨ A workspace has one technical name — the name of its file — and a title you set; the third name it carried is gone (v0.0.506)
 
 ### Bugs
 
 - 🪲 Convert, a dropped `.edb`, the folder sync and a rename-in-file each broke the open workspace, leaving the app answering nothing (v0.0.508)
+- 🪲 Choosing "Compare them…" when opening a workspace answered that there was no file to compare it with (v0.0.511)
 - 🪲 A workspace file could be handed a second workspace, or an id no file name could spell (v0.0.506)
 - 🪲 Deleting the last workspace of a workspace file left the app unable to start, on every reload (v0.0.507)
 - 🪲 Save As on the desktop proposed the generic file name for every workspace, and writing it made the file unwritable afterwards (v0.0.507)

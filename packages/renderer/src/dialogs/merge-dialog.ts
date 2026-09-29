@@ -9,8 +9,8 @@
 // the answer stops being one decision about the whole file and becomes one per
 // table, with the same four choices at every level:
 //
-//   Push    this copy wins — the file is brought into line with it
-//   Pull    the file wins — this copy is brought into line with it
+//   Push    the browser copy wins — the file is brought into line with it
+//   Pull    the file wins — the browser copy is brought into line with it
 //   Newest  whichever was written last wins, and nothing one-sided is lost
 //   Skip    leave both copies exactly as they are
 //
@@ -29,8 +29,8 @@ import { formatWhen } from '../db/edb/copy-facts.js';
 /** The four answers, in the order the user reads them, with what each does. */
 const CHOICES: ReadonlyArray<{ value: MergeChoice; label: string; hint: string }> = [
   { value: 'newest', label: 'Newest', hint: 'Whichever was written last wins. Nothing that only one side has is lost.' },
-  { value: 'here', label: 'Push', hint: 'This copy wins — the file is brought into line with it.' },
-  { value: 'disk', label: 'Pull', hint: 'The file wins — this copy is brought into line with it.' },
+  { value: 'here', label: 'Push', hint: 'The browser copy wins — the file is brought into line with it.' },
+  { value: 'disk', label: 'Pull', hint: 'The file wins — the browser copy is brought into line with it.' },
   { value: 'skip', label: 'Skip', hint: 'Leave both copies exactly as they are.' },
 ];
 
@@ -38,7 +38,7 @@ const CHOICES: ReadonlyArray<{ value: MergeChoice; label: string; hint: string }
 const STATE_LABEL: Record<DiffState, string> = {
   same: 'in step',
   differs: 'differs',
-  'here-only': 'only here',
+  'here-only': 'only in the browser',
   'disk-only': 'only in the file',
 };
 
@@ -376,7 +376,7 @@ export class MergeDialog extends LitElement {
         <span class="main">
           <span class="name">${d.name}</span>
           <span class="sides">
-            <span class=${d.newer === 'here' ? 'win' : ''}><b>Here:</b> ${describeStamp(d.here)}</span>
+            <span class=${d.newer === 'here' ? 'win' : ''}><b>Browser:</b> ${describeStamp(d.here)}</span>
             <span class=${d.newer === 'disk' ? 'win' : ''}><b>File:</b> ${describeStamp(d.disk)}</span>
           </span>
         </span>
@@ -402,7 +402,7 @@ export class MergeDialog extends LitElement {
         <span class="main">
           <span class="name">${r.label}</span>
           <span class="sides">
-            <span class=${r.diff.newer === 'here' ? 'win' : ''}><b>Here:</b> ${r.diff.hereAt ? formatWhen(r.diff.hereAt) : '—'}</span>
+            <span class=${r.diff.newer === 'here' ? 'win' : ''}><b>Browser:</b> ${r.diff.hereAt ? formatWhen(r.diff.hereAt) : '—'}</span>
             <span class=${r.diff.newer === 'disk' ? 'win' : ''}><b>File:</b> ${r.diff.diskAt ? formatWhen(r.diff.diskAt) : '—'}</span>
             ${changed ? html`<span class="changed">${changed}</span>` : nothing}
           </span>

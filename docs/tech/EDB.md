@@ -243,8 +243,8 @@ current copy is what they asked for.
 
 `db/edb/copy-choice.ts`. Three answers, each naming the copy that survives:
 
-- **Open the copy in the file** — import it over the browser's copy
-- **Keep the copy in this browser** — the file is not touched
+- **Use the file copy** — import it over the browser's copy
+- **Use the browser copy** — the file is not touched
 - **Compare them…** — open the browser's copy, then settle the two table by
   table with the machinery in [Settling two copies](#settling-two-copies-table-by-table-and-row-by-row)
 
@@ -253,10 +253,35 @@ store, and at this moment neither copy has been adopted. So it adopts the side
 that destroys nothing and leaves a one-shot `sessionStorage` marker that
 `edb-file.ts`'s `load()` picks up after the reload.
 
+That reload is also why `compareWithOwnFile` looks the file up in the connected
+folder when the session has no handle (`ownFile`). The handle is restored further
+down in the same `load()`, and boot's own path never remembers one at all — so
+the comparison ran before either, and answered "there is no file to compare it
+with" about the file whose size and date the question had just shown. Running the
+Compare command by hand a second later worked, which is exactly how the bug was
+reported.
+
 Both sides are described with `copy-facts.ts`, and neither read is expensive: the
 file's counts come out of the folder index (the scan already had it open), and the
 browser's come from `peekDatabase` — a worker op that opens the pool file on a
 second connection and runs two aggregates. No rows on either side.
+
+### Two words: Browser and File
+
+Every one of these questions has exactly two sides, and `copy-facts.ts` owns the
+two words for them — `BROWSER_SIDE` and `fileSide(name)` — with the answers
+(`USE_FILE_COPY` / `USE_BROWSER_COPY`, `copy-choice.ts`) spelled the same way
+wherever they are offered. There used to be four vocabularies: "local" and "disk"
+in the Save clash, "disk version" in the folder sync, "here" in the merge dialog,
+"In this browser" here. A user who had answered one of these had learned nothing
+about the next.
+
+The `← newer` marker beside a side is the one thing the counts cannot say: tables
+and views tell the reader which copy is BIGGER, and the question is which is
+LATER — the two come apart exactly when a table was deleted on the machine that
+is ahead. It comes from the stamp's verdict (`newerSide`), so `conflict` and
+`unknown` mark neither. Both are cases where nothing knows, and a guess dressed
+as a fact is worse than the silence it replaces.
 
 **Who asks depends on who has a gesture.** A click on the workspace selector has
 one, so `openWorkspaceInFile` asks before it switches anything. A boot has none
@@ -660,7 +685,7 @@ inventing an empty workspace in its place would be a lie the list told the user.
 
 ### What this deliberately does NOT do
 
-`overwriteInFile` (the sync's _Overwrite disk version_) still merges into the file
+`overwriteInFile` (the sync's _Use the browser copy_) still merges into the file
 rather than replacing it, because a passenger in a file the tab never adopted may
 have no other copy at all — damage limitation on a file that is already wrong, not
 an endorsement of it. And the producers above still add to a file-backed

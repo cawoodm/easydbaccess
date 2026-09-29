@@ -10,10 +10,10 @@
 // another is a branch that never runs — so they live here, where importing them
 // costs nothing.
 
-/** This copy wins: the file is brought into line with it. */
-export const PUSH = 'Push — overwrite the file from here';
-/** The file wins: this copy is brought into line with it. */
-export const PULL = 'Pull — overwrite this copy from the file';
+/** The browser copy wins: the file is brought into line with it. */
+export const PUSH = 'Push — overwrite the file from the browser';
+/** The file wins: the browser copy is brought into line with it. */
+export const PULL = 'Pull — overwrite the browser from the file';
 /** Whichever part was written last wins, and nothing one-sided is lost. */
 export const NEWEST = 'Take newest';
 /** Open the table-by-table comparison and decide there. */

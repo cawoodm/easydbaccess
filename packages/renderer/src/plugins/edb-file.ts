@@ -29,12 +29,12 @@ import { createAutosavePolicy, type AutosavePolicy } from '../db/edb/dirty.js';
 import { edbBridge, edbHandle, setEdbHandle, storeBridge } from '../db/edb/active-bridge.js';
 import { copyWorkspace } from '../db/edb/convert.js';
 import { syncActiveWorkspace, syncFolder } from '../db/edb/folder-sync.js';
-import { confirmDataLoss } from '../db/edb/copy-choice.js';
+import { confirmDataLoss, newerSide, USE_BROWSER_COPY, USE_FILE_COPY } from '../db/edb/copy-choice.js';
 import { openLocalDataDialog } from '../dialogs/local-data-dialog.js';
 import { describeActiveOutcome } from '../db/edb/active-file-sync.js';
 import { createEdbBridge } from '../db/edb/worker-bridge.js';
 import type { PeekedWorkspace } from '../db/edb/protocol.js';
-import { compareCopies, type CopyFacts } from '../db/edb/copy-facts.js';
+import { BROWSER_SIDE, compareCopies, fileSide, type CopyFacts } from '../db/edb/copy-facts.js';
 import { askAboutFile, mergeWithFile, type MergeContext } from '../db/edb/merge-file.js';
 import { PULL, PUSH } from '../db/edb/merge-answers.js';
 import { countWorkspaceContents } from '../db/delete-workspace.js';
@@ -506,8 +506,8 @@ export function init(api: HostApi): void {
 
     const ctx = mergeContext(handle);
     const sides = compareCopies([
-      { label: 'In this browser', facts: await openContentsFacts() },
-      { label: file, facts: { ...(await countsInFileHandle(handle)), ...now } },
+      { label: BROWSER_SIDE, facts: await openContentsFacts(), newer: newerSide(verdict) === 'browser' },
+      { label: fileSide(file), facts: { ...(await countsInFileHandle(handle)), ...now }, newer: newerSide(verdict) === 'file' },
     ]);
     const lead = `${file} has been written since this tab last saved it — by another tab, another browser or another machine. Saving now would replace that work.`;
     // Without a bridge there is nothing to compare WITH, so the old pair of
@@ -539,6 +539,39 @@ export function init(api: HostApi): void {
   }
 
   /**
+   * The file this tab is backed by — the session's handle, or the one in the
+   * connected folder that the adopted-file marker names.
+   *
+   * The fallback is what makes "Compare them…" work at all. That answer is given
+   * BEFORE a reload (the browser's copy has to be open before the two can be
+   * compared), so the comparison runs in the next page's `load()` — and at that
+   * moment the session handle is still empty: `load()` restores it further down,
+   * after the two pending questions. Boot's own path never had one to restore,
+   * because taking the browser's copy remembers no handle. Either way the answer
+   * was "there is no file to compare it with", about the very file the user had
+   * just been shown the size and date of, and running the Compare command by hand
+   * a second later worked — by then the handle was back.
+   *
+   * The folder is asked WITHOUT a prompt: a reload has no user gesture, so a
+   * `requestPermission` here would be refused by the browser anyway. A folder the
+   * user connected in this session is already granted, which is every case where
+   * this question can arise.
+   */
+  async function ownFile(): Promise<FileSystemFileHandle | null> {
+    const open = edbHandle();
+    if (open) return open;
+    const file = adoptedFileName();
+    if (!file) return null;
+    const dir = await rememberedFolder();
+    if (!dir || !(await ensureWritable(dir, false))) return null;
+    const found = await fileInFolder(dir, file, false);
+    // Kept for the rest of the session: Save and Sync look the file up the same
+    // way, and the tab is demonstrably connected to it.
+    if (found) setEdbHandle(found);
+    return found;
+  }
+
+  /**
    * Compare this workspace with its own file, on demand.
    *
    * The same machinery the two clash prompts reach, offered as a command so it
@@ -548,7 +581,7 @@ export function init(api: HostApi): void {
    * waiting for the moment it is hardest to think about.
    */
   async function compareWithOwnFile(): Promise<void> {
-    const handle = edbHandle();
+    const handle = (await ownFile()) ?? null;
     if (!handle) {
       await api.ui.dialogs.alert('This workspace is stored in this browser, so there is no file to compare it with. Save it into a folder first.', 'Compare');
       return;
@@ -710,12 +743,13 @@ export function init(api: HostApi): void {
    *
    * Each names the copy that SURVIVES, not the mechanism. "Replace it?" made the
    * reader work out which side "it" was, and "Overwrite" never said what was being
-   * overwritten. The pair here can be read in either order and still means one
-   * thing. (The folder sync asks the same question with its own older pair,
-   * "Load disk version" / "Overwrite disk version" — see `folder-sync.ts`.)
+   * overwritten. The strings themselves are shared with the Open-workspace
+   * question and the folder sync (`copy-choice.ts`): this used to say "disk" and
+   * "local" where the sync said "disk version" and the open question said "the
+   * copy in this browser", which is three vocabularies for two things.
    */
-  const USE_DISK = 'Use disk version';
-  const USE_LOCAL = 'Use local version';
+  const USE_DISK = USE_FILE_COPY;
+  const USE_LOCAL = USE_BROWSER_COPY;
 
   /**
    * How many tables and views the FILE holds for this workspace.
@@ -755,11 +789,16 @@ export function init(api: HostApi): void {
     } catch {
       /* a build that cannot count — the file's own side is the half that matters */
     }
-    const there: CopyFacts = { ...((handle ? await factsOfHandle(handle) : null) ?? {}), ...(handle ? await countsInFile(handle, workspaceId) : {}) };
+    const facts = handle ? await factsOfHandle(handle) : null;
+    const there: CopyFacts = { ...(facts ?? {}), ...(handle ? await countsInFile(handle, workspaceId) : {}) };
+    // Usually `unknown` — a Save into a folder meets files this browser has never
+    // read — and then neither side is marked. Where there IS a stamp, the marker
+    // is the one fact the counts cannot carry.
+    const newer = newerSide(compareWithFile(readStamp(file), facts));
     return {
       text: compareCopies([
-        { label: 'In this browser', facts: here },
-        { label: file, facts: there },
+        { label: BROWSER_SIDE, facts: here, newer: newer === 'browser' },
+        { label: fileSide(file), facts: there, newer: newer === 'file' },
       ]),
       here,
       there,
@@ -787,12 +826,12 @@ export function init(api: HostApi): void {
     if (answer === USE_DISK) {
       // Adopting IS the save: the tab switches to that database, so there is
       // nothing left to write out. The same branch the folder sync takes.
-      if (!(await confirmDataLoss(api.ui.dialogs, name, sides.there, sides.here, 'the copy in this browser', 'Save'))) return false;
+      if (!(await confirmDataLoss(api.ui.dialogs, name, sides.there, sides.here, 'the browser copy', 'Save'))) return false;
       await adoptFolderFile(workspaceId, name);
       return false;
     }
     if (answer !== USE_LOCAL) return false; // dismissed: neither copy is touched
-    return (await confirmDataLoss(api.ui.dialogs, name, sides.here, sides.there, `the copy in ${name}`, 'Save')) === true;
+    return (await confirmDataLoss(api.ui.dialogs, name, sides.here, sides.there, `the file copy`, 'Save')) === true;
   }
 
   async function saveIntoFolder(dir: FileSystemDirectoryHandle): Promise<void> {
@@ -973,8 +1012,8 @@ export function init(api: HostApi): void {
       /* a build that cannot count — the file's side is still worth showing */
     }
     return compareCopies([
-      { label: 'In this browser', facts: here },
-      { label: file.name, facts: { tables: source.tables, views: source.views, size: file.size, mtime: file.lastModified } },
+      { label: BROWSER_SIDE, facts: here },
+      { label: fileSide(file.name), facts: { tables: source.tables, views: source.views, size: file.size, mtime: file.lastModified } },
     ]);
   }
 

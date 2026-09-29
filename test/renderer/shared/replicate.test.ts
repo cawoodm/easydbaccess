@@ -200,6 +200,6 @@ describe('countDiffs / describeDiffs', () => {
 
   it('reads as a sentence', () => {
     const counts = countDiffs([{ state: 'differs' }, { state: 'here-only' }, { state: 'disk-only' }, { state: 'disk-only' }]);
-    expect(describeDiffs(counts)).toBe('1 table differs, 1 table only here, 2 tables only in the file');
+    expect(describeDiffs(counts)).toBe('1 table differs, 1 table only in the browser, 2 tables only in the file');
   });
 });

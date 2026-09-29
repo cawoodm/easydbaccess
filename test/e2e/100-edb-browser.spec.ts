@@ -808,7 +808,7 @@ test.describe('the workspace folder', () => {
  *
  * The labels used to be "Load from Disk" / "Overwrite", and the question was
  * "which one is the real one?" — which asked the user to rule on a metaphysical
- * point rather than to pick a copy. Both answers now name **the disk version**,
+ * point rather than to pick a copy. Both answers now name **the file copy**,
  * because that is the copy the user cannot see and the one the answer turns on.
  *
  * Driven through `syncFolder` with a stub `Dialogs`, as the test above is: the
@@ -897,14 +897,14 @@ test.describe('the folder-sync conflict prompt', () => {
     }, answer);
   }
 
-  test('names the disk version in both answers', async ({ page }, testInfo) => {
+  test('names the file copy in both answers', async ({ page }, testInfo) => {
     const ws = `clash-${testInfo.testId}`;
     await bothSidesDiffer(page, ws);
 
     const asked = await syncAnswering(page, 'nothing');
     expect(asked.message).toContain(`"${ws}" is in this browser and in ${ws}.edb`);
     expect(asked.message).toContain('which copy do you want to keep?');
-    expect(asked.options).toEqual(['Load disk version', 'Overwrite disk version']);
+    expect(asked.options).toEqual(['Use the file copy', 'Use the browser copy']);
   });
 
   /**
@@ -917,17 +917,17 @@ test.describe('the folder-sync conflict prompt', () => {
     await bothSidesDiffer(page, ws);
 
     const asked = await syncAnswering(page, 'nothing');
-    expect(asked.message).toContain('In this browser: 1 table');
+    expect(asked.message).toContain('Browser: 1 table');
     expect(asked.message).toContain(`${ws}.edb: 2 tables`);
     // The file's own facts, which is the half of the answer the user cannot look up.
     expect(asked.message).toMatch(/, \d+ KB, saved /);
   });
 
-  test('Overwrite disk version writes this browser copy out to the file', async ({ page }, testInfo) => {
+  test('Use the browser copy writes this browser copy out to the file', async ({ page }, testInfo) => {
     const ws = `clash-${testInfo.testId}`;
     await bothSidesDiffer(page, ws);
 
-    await syncAnswering(page, 'Overwrite disk version');
+    await syncAnswering(page, 'Use the browser copy');
     // The plugin's overwrite callback is what actually rewrites the file, so the
     // proof at this level is that the sync asked for it, naming the workspace and
     // the file.
