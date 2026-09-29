@@ -39,6 +39,12 @@ export type EdbRequest =
    * throwaway worker: the `opfs-sahpool` VFS is exclusive origin-wide, so a
    * second worker never gets the pool and writes its copy somewhere the boot
    * does not read.
+   *
+   * Importing over the database THIS worker has open closes it and re-opens the
+   * imported one, so the session keeps answering until the caller's reload
+   * arrives. It used to be left closed, which put the app in the same
+   * `store used before the database was opened` state a stray `pooled` did — from
+   * the ordinary Open path, with nothing on screen to say so.
    */
   | { id: number; op: 'importBytes'; name: string; bytes: Uint8Array }
   /** The OPFS mirror's bytes for a workspace, if it has any. Needs no file permission. */

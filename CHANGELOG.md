@@ -10,6 +10,7 @@
 
 ### Bugs
 
+- 🪲 Opening a `.edb` over the workspace already open left the app on screen answering nothing until it was reloaded (v0.0.512)
 - 🪲 Convert, a dropped `.edb`, the folder sync and a rename-in-file each broke the open workspace, leaving the app answering nothing (v0.0.508)
 - 🪲 Choosing "Compare them…" when opening a workspace answered that there was no file to compare it with (v0.0.511)
 - 🪲 A workspace file could be handed a second workspace, or an id no file name could spell (v0.0.506)

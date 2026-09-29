@@ -159,21 +159,28 @@ async function openInMemory(bytes: Uint8Array | null, name: string, scratch = fa
  * hence the op. On the memory fallback the mirror plays the same role, so the
  * bytes go there instead.
  *
- * **Importing over the database this worker has OPEN closes it first**, and the
- * caller must then reload. An open connection holds cached pages and a journal
- * for the file it was given; leaving it open means SQLite writing those back
- * over the bytes just imported, so the import appeared to work and the reload
- * came up on the OLD database. Restoring a copy of the workspace you are in is
- * exactly that case, and it is the common one. After this the worker has no
- * store, so every later call fails loudly rather than answering from a database
- * that is no longer the one on disk.
+ * **Importing over the database this worker has OPEN closes it first, and opens
+ * the imported one in its place.** An open connection holds cached pages and a
+ * journal for the file it was given; leaving it open means SQLite writing those
+ * back over the bytes just imported, so the import appeared to work and the
+ * reload came up on the OLD database. Restoring a copy of the workspace you are
+ * in is exactly that case, and it is the common one.
+ *
+ * Closing is therefore not optional — but leaving it closed was. Until v0.0.511
+ * the worker was left with no store at all, and the caller's reload is a round
+ * trip away: in between, every call threw `store used before the database was
+ * opened`, so the app stayed on screen answering nothing — no grid, no palette,
+ * no way back except the reload the user could not know to make. Re-opening is
+ * the same thing the reload does, one step earlier, and it answers from the
+ * bytes just imported rather than from the database they replaced.
  */
 async function importBytes(name: string, bytes: Uint8Array): Promise<void> {
   sqlite3 ??= await sqlite3InitModule();
   // The boot that opens what this places would be the one to hit `CANTOPEN`, a
   // reload away from the import that caused it. See `wal-header.ts`.
   clearWalHeader(bytes);
-  if (name === dbName) {
+  const wasLive = name === dbName;
+  if (wasLive) {
     driver?.close();
     mirror?.dispose();
     driver = null;
@@ -189,9 +196,16 @@ async function importBytes(name: string, bytes: Uint8Array): Promise<void> {
     // behind — see `ensureRoomToImport`.
     await ensureRoomToImport(pool, path);
     await pool.importDb(path, bytes);
+    // From the POOL, not from `bytes`: the file is now what the import placed,
+    // and this is the same open the next boot would do.
+    if (wasLive) await open(null, name, true);
     return;
   }
   await writeMirror(name, bytes);
+  // The fallback has no file to re-read, so the bytes ARE the database. `true`
+  // asks for the pool anyway and lands back here if it is still unavailable —
+  // the session's own boot makes the same request.
+  if (wasLive) await open(bytes, name, true);
 }
 
 /**
