@@ -8,7 +8,7 @@
 // This TypeScript build-in mirrors the runnable, unit-tested reference in
 // ../../../../eda-datasette-plugin/datasette-client.js (21 node --test cases).
 
-import type { ColumnSpec, ColumnType, FetchOpts, TableInfo } from '@easydb/shared';
+import type { ColumnSpec, ColumnType, FetchOpts, FilterToken, TableInfo } from '@easydb/shared';
 import { hasInnerWildcard, parseColumnFilter } from '@easydb/shared';
 import { isInternalField } from '../util/internal-fields.js';
 import { inferColumnType as inferType } from '../import/infer-type.js';
@@ -392,12 +392,84 @@ export function rowPk(rowData: Record<string, unknown>, pks: string[]): string |
   return pks.map((k) => tildeEncode(rowData[k])).join(',');
 }
 
+/** No character above U+007F — the range SQLite's `LIKE` folds case over. */
+const ASCII_ONLY = /^[\x20-\x7E\t\r\n]*$/;
+
+/**
+ * One token as the Datasette param that returns its rows and possibly more.
+ *
+ * A term carrying a star BETWEEN two pieces of text is a pattern, and `%` is
+ * LIKE's spelling of the same thing — so it goes out as `__like` with the stars
+ * translated and the token's own anchoring written into the ends. That is a
+ * gain, not a workaround: the old code sent no param at all for this shape,
+ * because it could only think in whole-string operators.
+ *
+ * `exact` is `__like` with nothing added, which is a whole-cell match and
+ * case-insensitive — what the matcher means, and what `__exact` would get
+ * wrong. A star inside an `exact` term is a literal asterisk (`hasInnerWildcard`
+ * says so), and an asterisk means nothing to LIKE either, so the two agree.
+ *
+ * A BARE token — no anchor at all — reads as "contains" or as "is exactly"
+ * depending on the `defaultSubstring` setting, which this function is not told.
+ * Contains is the wider of the two, so it is the safe answer to a question we
+ * cannot ask.
+ */
+function likeFor(col: string, t: FilterToken): [key: string, value: string] {
+  if (hasInnerWildcard(t.term, t)) {
+    const body = t.term.split('*').join('%');
+    if (t.prefix) return [`${col}__like`, `${body}%`];
+    if (t.suffix) return [`${col}__like`, `%${body}`];
+    return [`${col}__like`, `%${body}%`];
+  }
+  if (t.exact) return [`${col}__like`, t.term];
+  if (t.prefix) return [`${col}__startswith`, t.term];
+  if (t.suffix) return [`${col}__endswith`, t.term];
+  return [`${col}__contains`, t.term];
+}
+
 /**
  * Translate an eda table's persisted sort + column filters into Datasette query
- * params (Phase-2 server-side windowing). Filter mini-language:
- *   >n >=n <n <=n =v *v* ^v ; bare text ⇒ __contains.
- * A comma-separated multi-token filter (see `search/column-filter.ts`) maps its
- * included values to `__in` and its `!`-negated ones to `__notin`.
+ * params — the HTTP sibling of `filter-sql.ts`.
+ *
+ * **The whole contract is one word: SUPERSET.** Whatever comes back is narrowed
+ * again in memory by `matchesColumnFilter`, so a param that returns too MUCH
+ * costs a bigger page and nothing else. A param that returns too LITTLE drops
+ * rows the user never excluded, and no later filtering can put them back — see
+ * the note on `RowQuery` in `@easydb/shared/row-query.ts`. So every rule below
+ * is chosen to be equal to or wider than the matcher, never narrower, and a
+ * shape that cannot meet that bar sends NO param for its column.
+ *
+ * Which is why this reads `FilterToken` FLAGS and not the term text. The old
+ * version re-parsed the term with regexes (`/^=\s*(.+)$/` and friends), but
+ * `parseColumnFilter` has already eaten the operator — `=marc` arrives as
+ * `{term:'marc', exact:true}` — so the `=` arm never fired and an exact filter
+ * went out as `__contains`. That one was merely loose; the same blindness sent
+ * `__in` for a comma list, which is exact and case-SENSITIVE where the matcher
+ * means substring, and that direction loses rows.
+ *
+ * The operators that are safe are the LIKE-backed ones. SQLite's `LIKE` is
+ * case-insensitive for ASCII, which is the matcher's rule too, so `__like`,
+ * `__contains`, `__startswith` and `__endswith` all agree with it. `__exact`
+ * and `__in` are `=` and `IN`, which are case-sensitive, so neither is ever
+ * emitted. `%` and `_` inside a term stay live wildcards — LIKE has no escape
+ * clause through a query param — but that only ever WIDENS the answer.
+ *
+ * Deliberately sending nothing, each because it would narrow:
+ *
+ *  - **A negated token.** `NOT LIKE` is unknown for a NULL cell, so SQL drops
+ *    the row; the matcher passes it (a null cell contains nothing, so it
+ *    satisfies "does not contain").
+ *  - **A comparison** (`>=`, `<`, …). What one MEANS is type-aware here
+ *    (`compare-cell.ts` normalises a zoned datetime to UTC, reads a number
+ *    numerically); Datasette compares by the column's SQLite affinity, which is
+ *    not the same question.
+ *  - **`NULL` / `!NULL`.** The matcher's "blank" is blank-after-TRIM;
+ *    `__isblank` is null-or-empty-string and misses a whitespace-only cell.
+ *  - **More than one token.** Datasette takes one operator per column, and an
+ *    OR of substrings has no single operator.
+ *  - **The global search.** `_search` is FTS: it matches whole indexed words in
+ *    FTS-enabled columns, where this app's search is a plain substring over
+ *    every searchable column. Strictly narrower, in two ways at once.
  */
 export function translateQuery(
   state: {
@@ -408,56 +480,26 @@ export function translateQuery(
   } = {},
 ): Record<string, string> {
   const params: Record<string, string> = {};
+  // Sorting narrows nothing, so it needs none of the care below.
   if (state.sortColumn) params[state.sortAsc === false ? '_sort_desc' : '_sort'] = state.sortColumn;
-  if (state.search) params._search = state.search;
   for (const [col, raw] of Object.entries(state.filters || {})) {
     const val = String(raw).trim();
     if (val === '') continue;
     const tokens = parseColumnFilter(val);
-    // A star BETWEEN two pieces of text has no Datasette operator: `__contains`
-    // is a literal substring, so `*Marc*Julian*` would ask the server for the
-    // characters "Marc*Julian" and come back empty — and a wrong param is worse
-    // than none, because it narrows the page the client-side filter then reads.
-    // Same rule, and same reason, as the `^`-anchored and `AND` cases below.
-    if (tokens.some((t) => hasInnerWildcard(t.term, t))) continue;
-    // A single plain (un-negated) token keeps the comparison-operator ladder.
-    if (tokens.length === 1 && !tokens[0]!.negate) {
-      const one = tokens[0]!.term;
-      if (tokens[0]!.prefix) {
-        params[`${col}__startswith`] = one;
-        continue;
-      }
-      // DEAD since comparisons joined the filter grammar: the parser now
-      // consumes a leading `>` / `<` into `FilterToken.cmp`, so a term can no
-      // longer start with one and the four comparison arms below never fire.
-      // Left as-is on purpose. This whole function has no callers, and
-      // `row-query.ts:25-34` lists three further ways it disagrees with the
-      // matcher — reconciling it needs the treatment `filter-sql.ts` got, every
-      // case run both ways and required to agree, not a patch to one arm.
-      let m: RegExpMatchArray | null;
-      if ((m = one.match(/^>=\s*(.+)$/))) params[`${col}__gte`] = m[1]!.trim();
-      else if ((m = one.match(/^<=\s*(.+)$/))) params[`${col}__lte`] = m[1]!.trim();
-      else if ((m = one.match(/^>\s*(.+)$/))) params[`${col}__gt`] = m[1]!.trim();
-      else if ((m = one.match(/^<\s*(.+)$/))) params[`${col}__lt`] = m[1]!.trim();
-      else if ((m = one.match(/^=\s*(.+)$/))) params[`${col}__exact`] = m[1]!.trim();
-      else if ((m = one.match(/^\*(.+)\*$/))) params[`${col}__contains`] = m[1]!;
-      else params[`${col}__contains`] = one;
-      continue;
-    }
-    // Datasette has one operator per column, so a `^`-anchored token mixed into
-    // a multi-token set cannot be expressed: an `__in` over the OTHER included
-    // values would drop the rows the anchored token was meant to add. Send no
-    // param for this column and let the client-side filter narrow the page.
-    if (tokens.some((t) => t.prefix)) continue;
-    // Same reason for an `AND` group: `!NULL AND Biden` is two conditions on one
-    // column, and Datasette takes one operator per column. The client-side
-    // filter still narrows the page it does return.
-    if (tokens.some((t) => t.and)) continue;
-    // Multi-value / negated: include set → __in, exclude set → __notin.
-    const include = tokens.filter((t) => !t.negate).map((t) => t.term);
-    const exclude = tokens.filter((t) => t.negate).map((t) => t.term);
-    if (include.length) params[`${col}__in`] = include.join(',');
-    if (exclude.length) params[`${col}__notin`] = exclude.join(',');
+    // One operator per column, so one token is the only shape that fits.
+    if (tokens.length !== 1) continue;
+    const t = tokens[0]!;
+    // Each of these would return LESS than the matcher — see the header.
+    if (t.negate || t.cmp) continue;
+    // The NULL test: an empty term, or `NULL` with no anchor claiming it as text.
+    if (t.term.trim() === '' || (!t.prefix && !t.exact && !t.suffix && !t.contains && t.term.toUpperCase() === 'NULL')) continue;
+    // SQLite's `LIKE` folds case for ASCII and ONLY for ASCII, so `%ärger%`
+    // does not find "Ärger" — while the matcher's `toLowerCase()` is Unicode-
+    // aware and does. That is the narrowing direction, so a term carrying any
+    // non-ASCII character is not pushed down at all.
+    if (!ASCII_ONLY.test(t.term)) continue;
+    const [key, value] = likeFor(col, t);
+    params[key] = value;
   }
   return params;
 }

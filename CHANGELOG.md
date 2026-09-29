@@ -4,6 +4,7 @@
 
 ### Bugs
 
+- 🪲 The Datasette filter translation could ask the server for fewer rows than the filter meant (v0.0.502)
 - 🪲 The red two-step warning before a save that would empty a file never appeared (v0.0.501)
 
 ## 28 Sep 2026

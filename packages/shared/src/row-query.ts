@@ -22,16 +22,20 @@
  *   - HTTP — the sync server, or a Datasette instance, where it becomes query
  *     parameters.
  *
- * Neither HTTP implementation exists yet, and there is a trap in the obvious
- * candidate: `plugins/datasette-client.ts`'s `translateQuery` looks like this
- * translation but does NOT agree with `column-filter.ts`. It reads a filter as a
- * comparison ladder (`>n`, `<=n`, `=v`) that the matcher has never had, maps a
- * comma list to Datasette's `__in` (exact equality) where the matcher means
- * substring, and uses case-sensitive `__exact`. Each of those is NARROWER than
- * the matcher, so wiring it would drop rows the user did not exclude — the one
- * failure `partial` cannot rescue, since that promises a superset. It has no
- * callers today. Reconciling it needs the treatment `filter-sql.ts` got: every
- * case run both ways and required to agree.
+ * Neither HTTP implementation exists yet. `plugins/datasette-client.ts`'s
+ * `translateQuery` is the half-built one, and the rule it is built to is worth
+ * knowing before writing the other: a translation must be a SUPERSET of the
+ * matcher, never narrower. Anything it returns is filtered again in memory, so
+ * too many rows cost bandwidth — but too few drop rows the user did not
+ * exclude, and `partial` cannot rescue that, since it promises a superset.
+ *
+ * It used to fail that rule three ways (an `__in` for a comma list, a
+ * case-sensitive `__exact`, a comparison ladder the matcher never had). It now
+ * emits only LIKE-backed operators, which fold case the way the matcher does,
+ * and sends NO param for any shape it cannot express that widely. Still no
+ * callers — but its unit tests now run every case through the matcher AND
+ * through a simulation of Datasette's own operators, and require the second to
+ * contain the first.
  *
  * Being serialisable is therefore part of the contract, not a convenience:
  * `filters` and `search` stay in the app's own filter LANGUAGE (the strings

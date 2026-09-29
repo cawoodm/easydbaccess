@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FetchOpts } from '@easydb/shared';
+import { matchesColumnFilter } from '@easydb/shared';
 import {
   parseDatabaseList,
   parseTableList,
@@ -36,26 +37,181 @@ import {
 } from '../../../packages/renderer/src/plugins/datasette-client.js';
 
 describe('translateQuery', () => {
-  it('sends the operators it can express', () => {
+  it('reads the token flags, not the term text', () => {
     expect(translateQuery({ filters: { name: '*marc*' } })).toEqual({ name__contains: 'marc' });
     expect(translateQuery({ filters: { name: '^marc' } })).toEqual({ name__startswith: 'marc' });
-    // An `=` token arrives here with the `=` already eaten by the parser, so it
-    // goes out as `__contains` — a superset the client-side filter then narrows.
-    expect(translateQuery({ filters: { name: '=marc' } })).toEqual({ name__contains: 'marc' });
+    expect(translateQuery({ filters: { name: '*marc' } })).toEqual({ name__endswith: 'marc' });
+    // The reported bug: `parseColumnFilter` eats the `=` into `exact`, so the
+    // old regex ladder never saw one and sent `__contains`. `__like` with no
+    // wildcards is the whole cell, and unlike `__exact` it folds case.
+    expect(translateQuery({ filters: { name: '=marc' } })).toEqual({ name__like: 'marc' });
+    // A bare token means "contains" or "is exactly" depending on a setting this
+    // function is not told, so it takes the wider of the two.
+    expect(translateQuery({ filters: { name: 'marc' } })).toEqual({ name__contains: 'marc' });
   });
 
-  it('sends NO param for a star between two pieces of text', () => {
-    // `__contains` is a literal substring, so the pattern would ask the server
-    // for the characters "Marc*Julian" and come back empty — and a wrong param
-    // is worse than none, because it narrows the page the client-side filter
-    // then reads. Same rule as the `^`-in-a-set and `AND` cases.
-    expect(translateQuery({ filters: { name: '*Marc*Julian*' } })).toEqual({});
-    expect(translateQuery({ filters: { name: 'Marc*Julian' } })).toEqual({});
-    expect(translateQuery({ filters: { name: '*Marc*Julian*,Open' } })).toEqual({});
+  it('sends a star between two pieces of text as a LIKE pattern', () => {
+    // These used to send nothing at all: the old code could only think in
+    // whole-string operators, and `__contains` would have asked for the literal
+    // characters "Marc*Julian".
+    expect(translateQuery({ filters: { name: '*Marc*Julian*' } })).toEqual({ name__like: '%Marc%Julian%' });
+    expect(translateQuery({ filters: { name: 'Marc*Julian*' } })).toEqual({ name__like: 'Marc%Julian%' });
+    expect(translateQuery({ filters: { name: '*Marc*Julian' } })).toEqual({ name__like: '%Marc%Julian' });
   });
 
-  it('still sends a param when the star is literal by the grammar', () => {
-    expect(translateQuery({ filters: { name: '=a*b' } })).toEqual({ name__contains: 'a*b' });
+  it('keeps a literal star literal when the grammar says so', () => {
+    // `=` turns the wildcards off, and an asterisk means nothing to LIKE, so
+    // the two agree with no translation at all.
+    expect(translateQuery({ filters: { name: '=a*b' } })).toEqual({ name__like: 'a*b' });
+  });
+
+  it('sends nothing for the shapes that would return LESS than the matcher', () => {
+    // Every one of these is explained in the function's own header.
+    expect(translateQuery({ filters: { name: '!marc' } })).toEqual({}); // NULL cell passes the matcher
+    expect(translateQuery({ filters: { name: '>=2026-01-01' } })).toEqual({}); // type-aware comparison
+    expect(translateQuery({ filters: { name: 'NULL' } })).toEqual({}); // blank-after-trim
+    expect(translateQuery({ filters: { name: '!NULL' } })).toEqual({});
+    expect(translateQuery({ filters: { name: 'a,b' } })).toEqual({}); // one operator per column
+    expect(translateQuery({ filters: { name: 'a AND b' } })).toEqual({});
+    expect(translateQuery({ filters: { name: 'ärger' } })).toEqual({}); // LIKE folds ASCII only
+    // The global search is FTS — whole indexed words, in FTS columns only.
+    expect(translateQuery({ search: 'marc' })).toEqual({});
+  });
+
+  it('still sorts, which narrows nothing', () => {
+    expect(translateQuery({ sortColumn: 'name' })).toEqual({ _sort: 'name' });
+    expect(translateQuery({ sortColumn: 'name', sortAsc: false })).toEqual({ _sort_desc: 'name' });
+  });
+});
+
+/**
+ * The one property that matters: what Datasette returns must be a SUPERSET of
+ * what the matcher accepts.
+ *
+ * The page is narrowed again in memory, so a param that returns too much costs
+ * bandwidth. A param that returns too little drops rows the user never
+ * excluded, and nothing downstream can put them back (`RowQuery`'s `partial`
+ * promises a superset, not a different answer).
+ *
+ * There is no Datasette to ask, so its operators are reproduced here from the
+ * documented SQL each one compiles to. That is the whole risk of this test and
+ * it is a small one: all four are `LIKE`, whose rules are short and fixed.
+ */
+const LIKE_SQL: Record<string, (v: string) => string> = {
+  __like: (v) => v,
+  __contains: (v) => `%${v}%`,
+  __startswith: (v) => `${v}%`,
+  __endswith: (v) => `%${v}`,
+};
+
+/**
+ * A SQLite `LIKE` pattern as a regex. `%` is any run, `_` is any one character,
+ * and case folding applies to ASCII letters ONLY — which is why each one
+ * becomes its own two-character class instead of the `i` flag being used. Get
+ * that wrong and the test would bless a param that silently drops `Ärger`.
+ */
+function likeToRegex(pattern: string): RegExp {
+  let out = '';
+  for (const ch of pattern) {
+    if (ch === '%') out += '[\\s\\S]*';
+    else if (ch === '_') out += '[\\s\\S]';
+    else if (/[a-zA-Z]/.test(ch)) out += `[${ch.toLowerCase()}${ch.toUpperCase()}]`;
+    else out += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+  return new RegExp(`^${out}$`);
+}
+
+/** The rows Datasette would answer with for these params. */
+function viaDatasette(values: readonly (string | null)[], params: Record<string, string>): (string | null)[] {
+  const entries = Object.entries(params).filter(([k]) => !k.startsWith('_'));
+  if (entries.length === 0) return [...values]; // no param: the whole table
+  return values.filter((v) =>
+    entries.every(([key, value]) => {
+      const op = key.slice(key.indexOf('__'));
+      const build = LIKE_SQL[op];
+      if (!build) throw new Error(`the simulator does not know ${op} — add it before emitting it`);
+      // `NULL LIKE x` is NULL, never true, so a null cell matches nothing.
+      return v != null && likeToRegex(build(value)).test(v);
+    }),
+  );
+}
+
+const CORPUS: (string | null)[] = [
+  'Sweden',
+  'sweden',
+  'SWEDEN',
+  'Norway',
+  'Berlin, DE',
+  'Closed',
+  'Open',
+  'urgent Open',
+  '100%',
+  'under_score',
+  'null',
+  '',
+  '   ',
+  null,
+  'Dr Marc Julian Smith',
+  'Julian Marc',
+  'MarcJulian',
+  'marc',
+  ' Bern ',
+  'Bern',
+  'Ärger',
+  'ärger',
+];
+
+const FILTERS = [
+  'Sweden',
+  'sweden',
+  'SWEDEN',
+  '=Open',
+  '=marc',
+  '^S',
+  '^s',
+  '*den',
+  '*wede*',
+  'marc',
+  'Marc',
+  '*Marc*Julian*',
+  'Marc*Julian*',
+  '*Marc*Julian',
+  '=a*b',
+  '100%',
+  'under_score',
+  'Bern',
+  '^Bern',
+  '=Bern',
+  'ärger',
+  'Ärger',
+  '!Closed',
+  'a,b',
+  'NULL',
+  '!NULL',
+  '>=2026-01-01',
+  'a AND b',
+];
+
+describe('translateQuery never asks for less than the matcher', () => {
+  for (const defaultSubstring of [true, false]) {
+    it(`holds with defaultSubstring ${defaultSubstring ? 'on' : 'off'}`, () => {
+      for (const filter of FILTERS) {
+        const params = translateQuery({ filters: { v: filter } });
+        const fromServer = new Set(viaDatasette(CORPUS, params));
+        const wanted = CORPUS.filter((v) => matchesColumnFilter(v, filter, { defaultSubstring }));
+        for (const v of wanted) {
+          expect(fromServer.has(v), `filter ${JSON.stringify(filter)} would drop ${JSON.stringify(v)}`).toBe(true);
+        }
+      }
+    });
+  }
+
+  it('is tight where it can be, so the pushdown is worth doing', () => {
+    // Soundness alone is satisfied by sending nothing at all. These say the
+    // common shapes really do narrow the page.
+    expect(viaDatasette(CORPUS, translateQuery({ filters: { v: '^Bern' } }))).toEqual(['Bern']);
+    expect(viaDatasette(CORPUS, translateQuery({ filters: { v: '=Open' } }))).toEqual(['Open']);
+    expect(viaDatasette(CORPUS, translateQuery({ filters: { v: '*Marc*Julian*' } }))).toEqual(['Dr Marc Julian Smith', 'MarcJulian']);
   });
 });
 
