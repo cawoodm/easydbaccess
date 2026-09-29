@@ -840,12 +840,21 @@ one before it found something:
 
 The file's copy is opened in a throwaway `createEdbBridge()` and dressed as a
 plain `DataStore`, so the merge is written against the same interface as the rest
-of the app rather than against SQL. That worker opens with `{ scratch: true }`,
-which is **not** cosmetic: `opfs-sahpool` is exclusive origin-wide, and a second
-worker asking for it makes the browser refuse the access handles the LIVE worker
-is already holding — a real error in the session the user is looking at, caused
-by a database nobody will keep. `scratch` also skips the OPFS mirror, which would
-otherwise leave a file behind for a copy with no history worth recovering.
+of the app rather than against SQL. That worker takes the DEFAULT `open`, which
+is the throwaway one — and the default is that way round for a reason:
+`opfs-sahpool` is exclusive origin-wide, and a second worker asking for it makes
+the browser refuse the access handles the LIVE worker is already holding, a real
+error in the session the user is looking at caused by a database nobody will
+keep. A throwaway also writes no OPFS mirror, which would otherwise leave a file
+behind for a copy with no history worth recovering, and is opened UNNAMED so the
+one-workspace-per-`.edb` guard does not refuse work that never reaches a file.
+
+**`{ pooled: true }` is the opt-in, and `session.ts` is the only caller of it**
+— the worker that IS this tab's database. The flag used to be the other way
+round (`{ scratch: true }`, opt-out) and ten call sites across the app and the
+e2e suite forgot it, including one whose own comment said it must never ask for
+the pool; each of them left the live session answering `store used before the
+database was opened` to everything. Inverted in v0.0.508.
 
 ### The two directions are disjoint
 

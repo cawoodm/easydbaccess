@@ -200,9 +200,15 @@ async function importBytes(name: string, bytes: Uint8Array): Promise<void> {
  * A near no-op on the pooled path — SQLite already committed it to the file —
  * and the forced mirror write on the fallback, where Open and Convert need the
  * bytes on disk before the reload they trigger.
+ *
+ * A THROWAWAY flushes nothing. Its whole point is to touch no OPFS, and a mirror
+ * is an OPFS file: writing one here would leave behind exactly what the
+ * throwaway path exists to avoid, under this worker's `workspaceKey`. Nothing
+ * calls `flush()` on a throwaway bridge today — this is the invariant being kept
+ * by the flag rather than by who happens to call what.
  */
 async function flushNow(): Promise<void> {
-  if (pooled) return;
+  if (pooled || !mirror) return;
   await writeMirror(workspaceKey, require(driver, 'flush requested').export());
 }
 

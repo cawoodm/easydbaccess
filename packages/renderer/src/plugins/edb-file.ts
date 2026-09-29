@@ -1113,7 +1113,7 @@ export function init(api: HostApi): void {
    * The throwaway runs on the MEMORY substrate, not the pool: the pool's files are
    * exclusive origin-wide and the live session already holds it, so a second
    * worker in this tab cannot install one. `buildEdbFile` relies on the same
-   * thing. The scratch name keeps its mirror away from any real database's.
+   * thing. It writes no mirror at all, so there is nothing to keep apart.
    */
   async function overwriteInFile(dir: FileSystemDirectoryHandle, workspaceId: string, file: string): Promise<void> {
     const handle = await fileInFolder(dir, file, false);
