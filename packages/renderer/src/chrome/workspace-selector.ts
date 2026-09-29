@@ -2,7 +2,7 @@ import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { Workspace } from '@easydb/shared';
 import { getContext } from '../app-context.js';
-import { activeWorkspaces, mergeWorkspaceList, readFolderIndex, readFolderSelection, workspaceLabel, type ListEntry } from '../db/edb/folder-index.js';
+import { activeWorkspaces, listLabels, mergeWorkspaceList, readFolderIndex, readFolderSelection, type ListEntry } from '../db/edb/folder-index.js';
 import { ACTIVE_FILE_CHANGED_EVENT, activeEdbName, adoptedFileName } from '../db/edb/session.js';
 import { backendActiveFile } from '../db/file-workspaces.js';
 import { materialIconStyles } from './material-icon-css.js';
@@ -141,7 +141,8 @@ export class WorkspaceSelector extends LitElement {
    * The FILE is a tooltip, never part of the text. A list of
    * "workspace ┈ workspace.edb" is a list of names read twice, and the file name
    * matters only when the user is asking which of two copies they are about to
-   * open — which is what hovering answers.
+   * open — which is what hovering answers. Where hovering CANNOT answer it, because
+   * two rows come out of one file, `listLabels` qualifies the text itself.
    *
    * EVERY entry gets one, including the open workspace. `ListEntry.file` is set
    * only for the ones in other files (that is what makes them a switch), so the
@@ -150,10 +151,11 @@ export class WorkspaceSelector extends LitElement {
    * likely to be asking about.
    */
   override render() {
+    const labels = listLabels(this.entries);
     return html`
       <select @change=${(e: Event) => this.switchWorkspace((e.target as HTMLSelectElement).value)}>
         ${this.entries.map(
-          (e) => html`<option value=${`${e.id}\u0000${e.file ?? ''}`} title=${this.whereItLives(e)} ?selected=${e.file === undefined && e.id === this.current}>${workspaceLabel(e)}</option>`,
+          (e, i) => html`<option value=${`${e.id}\u0000${e.file ?? ''}`} title=${this.whereItLives(e)} ?selected=${e.file === undefined && e.id === this.current}>${labels[i]}</option>`,
         )}
       </select>
       <button @click=${newWorkspaceFlow} title="New workspace">

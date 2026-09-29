@@ -138,6 +138,16 @@ export interface SyncReport {
    * for.
    */
   ignored: string[];
+  /**
+   * Files that hold more than one workspace, which a `.edb` may not.
+   *
+   * Listed and usable, unlike {@link ignored} — nothing was written to them and
+   * nothing was hidden. They are reported because the selector shows one row per
+   * workspace and two rows out of one file read as the same thing, which is what
+   * sent the user here. The repair is to open such a file and Save: that writes the
+   * open workspace alone and gives every passenger a file of its own.
+   */
+  shared: string[];
   /** What happened to the file this tab has open. Never silent — see `active-file-sync.ts`. */
   active: ActiveFileOutcome;
   /** The name of that file, for the report to say. Absent on the local database. */
@@ -232,12 +242,25 @@ async function settleIdentities(
   activeFile: string,
   dialogs: Dialogs,
   rename: RenameInFile,
-): Promise<{ workspaces: FolderWorkspace[]; renamed: string[]; ignored: string[] }> {
+): Promise<{ workspaces: FolderWorkspace[]; renamed: string[]; ignored: string[]; shared: string[] }> {
   let workspaces = [...found];
   const renamed: string[] = [];
   const ignored: string[] = [];
+  const shared: string[] = [];
 
   for (const bad of misfiledFiles(found)) {
+    // A file holding several workspaces is named in the report and otherwise left
+    // exactly as it is — including the one this tab has open, which is the case the
+    // user can act on. Not a dialog: the file still works, every passenger in it is
+    // reachable, and a modal on every sync about a state the user may be living with
+    // on purpose is the kind of warning people learn to click away. Not dropped
+    // either, which is what the other two cases come to: dropping it would take real
+    // workspaces out of the list and the app cannot put them anywhere else.
+    if (bad.fix === 'shared') {
+      shared.push(bad.file);
+      continue;
+    }
+
     if (bad.file.toLowerCase() === activeFile.toLowerCase()) continue;
 
     if (bad.fix === 'ambiguous') {
@@ -268,7 +291,7 @@ async function settleIdentities(
     }
   }
 
-  return { workspaces, renamed, ignored };
+  return { workspaces, renamed, ignored, shared };
 }
 
 /**
@@ -453,6 +476,7 @@ export async function syncFolder(
     wrote,
     renamed: identity.renamed,
     ignored: identity.ignored,
+    shared: identity.shared,
     active,
     ...(adoptedFileName() === null ? {} : { activeFile: adoptedFileName() as string }),
     reloadedActive: active === 'loaded',

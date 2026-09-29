@@ -21,6 +21,10 @@
 
 ### Bugs
 
+- 🪲 Two workspaces out of one file read exactly the same in the workspace list, tooltip included (v0.0.504)
+- 🪲 Deleting a workspace asked about its technical name, which is shown nowhere else on screen (v0.0.504)
+- 🪲 New workspace ▸ Simple wrote a second workspace into a file named after the first (v0.0.504)
+- 🪲 A `.edb` holding several workspaces went through every sync unmentioned (v0.0.504)
 - 🪲 On a table big enough to page, a `^` or `=` filter counted cells with surrounding spaces that it did not show (v0.0.500)
 - 🪲 A workspace the desktop app had opened could not be compared, adopted or even listed in the browser (v0.0.499)
 - 🪲 Editing a row out of its own filter left the row below it showing that edit, over a record that never changed (v0.0.498)

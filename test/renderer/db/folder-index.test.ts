@@ -6,6 +6,7 @@ import {
   fileActive,
   folderConflicts,
   isEmptyWorkspace,
+  listLabels,
   mergeWorkspaceList,
   overwriteLosesData,
   partitionConflicts,
@@ -120,6 +121,52 @@ describe('workspaceLabel', () => {
 
   it('treats a blank title as none, the same way the header does', () => {
     expect(workspaceLabel({ name: 'q3', title: '   ' })).toBe('q3');
+  });
+});
+
+/**
+ * Two rows that read the same.
+ *
+ * The reported bug: `powerplants.edb` held two workspaces, so the selector showed
+ * "PowerPlants" twice with the same file in both tooltips — nothing on screen told
+ * them apart. Across two FILES that is fine and deliberate, because the tooltip
+ * names the file.
+ */
+describe('listLabels', () => {
+  const entry = (id: string, name: string, title?: string, file?: string) => ({ id, name, ...(title === undefined ? {} : { title }), ...(file === undefined ? {} : { file }) });
+
+  it('leaves a label alone when nothing else reads like it', () => {
+    expect(listLabels([entry('a', 'a', 'Alpha'), entry('b', 'b', 'Beta')])).toEqual(['Alpha', 'Beta']);
+  });
+
+  it('qualifies two workspaces in one file with the technical name', () => {
+    const labels = listLabels([entry('powerplants', 'powerplants', 'PowerPlants'), entry('simon', 'simon', 'PowerPlants')]);
+    expect(labels).toEqual(['PowerPlants (powerplants)', 'PowerPlants (simon)']);
+  });
+
+  it('qualifies two entries of the open database, which is one place too', () => {
+    expect(listLabels([entry('a', 'a', 'Shared'), entry('b', 'b', 'Shared')])).toEqual(['Shared (a)', 'Shared (b)']);
+  });
+
+  it('leaves one label per file alone — the file tooltip already tells those apart', () => {
+    const labels = listLabels([entry('sales', 'sales', 'Sales'), entry('sales', 'sales', 'Sales', 'backup.edb')]);
+    expect(labels).toEqual(['Sales', 'Sales']);
+  });
+
+  it('falls back to the id where the names repeat as well', () => {
+    const labels = listLabels([entry('sales', 'sales', 'Sales', 'a.edb'), entry('sales-2', 'sales', 'Sales', 'a.edb')]);
+    expect(labels).toEqual(['Sales (sales)', 'Sales (sales-2)']);
+  });
+
+  it('does not repeat a title that is already the technical name', () => {
+    // `sales` and `sales` under one roof: the second carries a title that spells
+    // its neighbour's name. "sales (sales)" would say nothing twice.
+    expect(listLabels([entry('sales', 'sales'), entry('q3', 'q3', 'sales')])).toEqual(['sales', 'sales (q3)']);
+  });
+
+  it('answers one label per entry, in order, so a caller can index into it', () => {
+    const entries = [entry('a', 'a', 'X'), entry('b', 'b', 'X'), entry('c', 'c', 'Y')];
+    expect(listLabels(entries)).toHaveLength(entries.length);
   });
 });
 

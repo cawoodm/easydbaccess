@@ -177,6 +177,37 @@ test('a workspace saved into the folder gets a file holding only itself', async 
   expect(workspacesIn(await fileBytes(page, 'alpha.edb'), testInfo.outputPath('alpha.edb'))).toEqual(['alpha']);
 });
 
+test('New workspace does not offer to put one alongside the workspace in a file', async ({ page }, testInfo) => {
+  // The third way a `.edb` came to hold two workspaces, and the one still open
+  // after the other two were closed: "Simple — alongside this workspace" clones
+  // into whichever database is open, which in a tab holding `alpha.edb` is a second
+  // workspace inside a file named after the first. `mayCreateWorkspaceIn` says no,
+  // so the question is not asked at all and the new workspace gets its own file.
+  await boot(page, 'alpha');
+  await createTable(page, 'Parts', [{ field: 'part', renderer: 'link' }]);
+  await saveButton(page).click();
+  const dialog = page.locator('host-dialogs');
+  await expect(dialog.getByText(/stored in this browser/)).toBeVisible();
+  await dialog.getByRole('button', { name: 'Connect a folder…', exact: true }).click();
+  await expect(page.locator('toast-host')).toContainText('Workspace saved to alpha.edb', { timeout: 30_000 });
+
+  await page.locator('workspace-selector').getByTitle('New workspace').click();
+  const name = dialog.locator('input[type="text"]').first();
+  await name.waitFor();
+  await name.fill('zz');
+  await dialog.getByRole('button', { name: 'OK', exact: true }).click();
+
+  // Straight to a file of its own — no "where should it keep its data?".
+  await expect(dialog.getByText(/now lives in zz\.edb/)).toBeVisible({ timeout: 30_000 });
+  await expect(dialog.getByRole('button', { name: /^Simple/ })).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'OK', exact: true }).click();
+  await page.waitForURL(/space=zz/, { timeout: 20_000 });
+
+  expect(await folderHas(page, 'zz.edb')).toBe(true);
+  // And the file it was created from still holds the one workspace its name says.
+  expect(workspacesIn(await fileBytes(page, 'alpha.edb'), testInfo.outputPath('alpha-after-new.edb'))).toEqual(['alpha']);
+});
+
 test('the workspace left behind gets a file of its own rather than a seat in somebody elses', async ({ page }, testInfo) => {
   await boot(page, 'alpha');
   await createTable(page, 'Parts', [{ field: 'part', renderer: 'link' }]);

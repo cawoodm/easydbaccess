@@ -406,14 +406,56 @@ write and every clash), and offers the two answers that exist:
   it must not act on either.
 
 Two cases are deliberately not repaired. A file holding SEVERAL workspaces is left
-alone — that is the pre-v0.0.427 shape above, and no rename makes it right. And two
-names that slugify to one id (`My Data.edb` beside `my-data.edb`) cannot be told
-apart by any rename, so the file carrying the name Save would have written wins and
-the other is set aside until the user renames it on disk.
+alone — that is the pre-v0.0.427 shape above, and no rename makes it right; since
+v0.0.504 it is at least **named in the sync report**, see below. And two names that
+slugify to one id (`My Data.edb` beside `my-data.edb`) cannot be told apart by any
+rename, so the file carrying the name Save would have written wins and the other is
+set aside until the user renames it on disk.
 
 The file this tab has OPEN is never touched. Its workspace is live — the store, the
 panels and every plugin are bound to that id — so a rename inside the file would
 leave the tab saving under an id the file no longer holds.
+
+### A file with two workspaces in it, and two rows that read the same
+
+Reported from the field: the selector showed **"PowerPlants" twice, and hovering
+both said `powerplants.edb`**. Deleting one of them then asked
+`Delete the workspace "Simon"?`.
+
+Three separate things, each with its own fix (v0.0.504):
+
+- **The file really did hold two workspaces.** `fileIdentities` used to leave such
+  a file out of its answer entirely, on the grounds that `one-per-file.ts` owned
+  that shape — but `one-per-file.ts` only governs what a Save WRITES, and nothing
+  ever looked at a folder file that already held two. It is a fourth `IdentityFix`
+  now, `shared`, and the sync report names the file: _"powerplants.edb holds more
+  than one workspace; a workspace file holds one. Open it and save to give each its
+  own file."_ It is **not** a dialog and the file is **not** dropped: both
+  passengers are real work, they are reachable, and the repair — Save, which gives
+  every passenger a file of its own — can only be done by the tab that has that
+  file open. Dropping it would take real workspaces out of the list with nowhere
+  else to show them.
+- **New workspace → Simple was still making them.** "Alongside this workspace"
+  clones into whichever database is open, and in a tab that has `powerplants.edb`
+  open that is a second workspace inside a file named after the first — the same
+  mistake `?space=zz` made before `mayCreateWorkspaceIn` existed. That rule is now
+  checked here too: where it says no, the question is not asked at all and the new
+  workspace gets a file of its own, which is the only legal shape.
+- **The list could not tell the two rows apart.** The FILE is what distinguishes
+  two same-titled workspaces, and it is a tooltip — which says nothing when both
+  came out of one file. `listLabels` (`db/edb/folder-index.ts`, pure) qualifies
+  only the rows that would otherwise read identically **within one file**, with the
+  technical name, or the id where the names repeat too. Two rows from two files
+  are left alone: that is the deliberate "keep both" state, and hovering answers it.
+  The switch picker takes the same labels and matches the answer by POSITION —
+  it used to `find` the workspace by the label it got back, so the second of two
+  identical lines could never be chosen.
+
+And the question that started it: **a workspace has a title and a technical name**,
+the whole UI shows the title, and the delete prompt quoted the name. It now reads
+`Delete the workspace "PowerPlants" (simon)?` — the title first, because that is
+what the list says, and the name after it, because two workspaces may share a title
+and the user is about to delete data.
 
 ### The selector opens the file, not the name
 

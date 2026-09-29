@@ -1300,11 +1300,16 @@ export function init(api: HostApi): void {
     // that sent us looking in the first place.
     const misfiled = report.ignored.length > 0 ? ` ${report.ignored.join(', ')} left out: the name does not match the workspace inside.` : '';
     const fixed = report.renamed.length > 0 ? ` Renamed the workspace in ${report.renamed.join(', ')}.` : '';
+    // A file holding several workspaces. Said rather than asked: it is still listed
+    // and still works, and the repair is the ordinary Save, which only the tab that
+    // has that file open can do. Two rows out of one file are indistinguishable in
+    // the selector otherwise, which is how this was found.
+    const shared = report.shared.length > 0 ? ` ${report.shared.join(', ')} holds more than one workspace; a workspace file holds one. Open it and save to give each its own file.` : '';
     // What happened to THIS tab's file, in the same breath. Without it the toast
     // read the same whether the sync had loaded the file or decided it could not,
     // which is what "Sync does nothing" looked like from the outside.
     const own = describeActiveOutcome(report.active, report.activeFile ?? '');
-    api.ui.dialogs.toast(`"${dir.name}": ${report.found} workspace(s) in ${report.files} file(s).${off}${skipped}${fixed}${misfiled}${written}${own}`, { kind: 'success' });
+    api.ui.dialogs.toast(`"${dir.name}": ${report.found} workspace(s) in ${report.files} file(s).${off}${skipped}${fixed}${misfiled}${shared}${written}${own}`, { kind: 'success' });
     // The selector reads the index once, on connect, so it has to be told.
     window.dispatchEvent(new CustomEvent('easydb:folder-index-changed'));
   }

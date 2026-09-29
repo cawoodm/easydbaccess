@@ -32,10 +32,38 @@ describe('fileIdentities', () => {
     expect(fileIdentities([found('My Data.edb', 'my-data')])[0]?.fix).toBe('matches');
   });
 
-  it('leaves a file holding several workspaces alone — that is a different broken shape', () => {
+  describe('a file holding several workspaces', () => {
     // Written before v0.0.427, when Save wrote the whole database into one file.
-    // `one-per-file.ts` owns it, and no rename would make the file right.
-    expect(fileIdentities([found('a.edb', 'a'), found('a.edb', 'b')])).toEqual([]);
+    // No rename repairs it, and it used to be left out of this answer entirely —
+    // so the selector listed its passengers as rows that read the same.
+    it('is one `shared` entry naming every workspace in it', () => {
+      const identities = fileIdentities([found('a.edb', 'a'), found('a.edb', 'b')]);
+      expect(identities).toHaveLength(1);
+      expect(identities[0]).toMatchObject({ file: 'a.edb', fix: 'shared', claimed: 'a', holds: ['a', 'b'] });
+    });
+
+    it('quotes the passenger the file name is about, where it holds it', () => {
+      expect(fileIdentities([found('a.edb', 'b'), found('a.edb', 'a')])[0]).toMatchObject({ id: 'a' });
+    });
+
+    it('quotes the first one it found when the file holds nothing of its own name', () => {
+      expect(fileIdentities([found('a.edb', 'b'), found('a.edb', 'c')])[0]).toMatchObject({ id: 'b' });
+    });
+
+    it('does not make a neighbouring file ambiguous — no rename can repair the shared one', () => {
+      // `a.edb` holds two workspaces and `A.edb` holds the one workspace `x`.
+      // Counting the shared file as a rival claimant would withhold the rename
+      // that would actually fix the neighbour.
+      const identities = fileIdentities([found('a.edb', 'a'), found('a.edb', 'b'), found('A Copy.edb', 'x')]);
+      expect(identities.map((i) => [i.file, i.fix])).toEqual([
+        ['a.edb', 'shared'],
+        ['A Copy.edb', 'rename'],
+      ]);
+    });
+
+    it('is reported, not silently dropped — misfiledFiles carries it to the sync', () => {
+      expect(misfiledFiles([found('a.edb', 'a'), found('a.edb', 'b')]).map((i) => i.fix)).toEqual(['shared']);
+    });
   });
 
   it('carries the file date and size through, so the question can show them', () => {

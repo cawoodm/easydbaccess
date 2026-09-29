@@ -7,8 +7,11 @@
 
 import type { Dialogs } from '@easydb/shared';
 import { forgetLastWorkspace, getContext, slugifyWorkspace } from '../app-context.js';
-import { workspaceLabel, type ListEntry } from '../db/edb/folder-index.js';
+import { listLabels, workspaceLabel, type ListEntry } from '../db/edb/folder-index.js';
 import { openWorkspaceInFile } from '../db/edb/space-adopt.js';
+import { activeEdbName } from '../db/edb/session.js';
+import { mayCreateWorkspaceIn } from '../db/edb/space-resolve.js';
+import { backendActiveFile } from '../db/file-workspaces.js';
 import { storeBridge } from '../db/edb/active-bridge.js';
 import { cloneWorkspace, type CloneMode } from '../db/clone-workspace.js';
 import { countWorkspaceContents, deleteWorkspace, describeWorkspaceContents } from '../db/delete-workspace.js';
@@ -32,6 +35,18 @@ const CLONE_NOTHING = 'Empty workspace';
 // is actually choosing is whether the new workspace shares a file with this one.
 const SIMPLE = 'Simple — alongside this workspace';
 const ADVANCED = 'Advanced — in a file of its own (.edb)';
+
+/**
+ * The name of the database this tab has open, whichever build is asking.
+ *
+ * The same two answers the selector's tooltip takes: the desktop learns its path
+ * from the main process, the browser keeps the name in its own session marker. The
+ * only thing read off it here is the EXTENSION — `.edb` holds one workspace, `.edp`
+ * holds any number.
+ */
+function openDatabaseName(): string {
+  return backendActiveFile() ?? activeEdbName();
+}
 
 /**
  * Can this build keep a workspace in a file of its own?
@@ -124,12 +139,15 @@ export async function switchWorkspaceFlow(): Promise<void> {
     return;
   }
   // Titles, like the header selector — the same list of the same things must not
-  // be spelled two ways. The pick comes back as a LABEL, so it is mapped to the
-  // name `?space=` routes on; two workspaces may even carry the same title, and
-  // the first match is as good an answer as a list of identical labels allows.
-  const pick = await ctx.api.ui.dialogs.choice('Open which workspace?', others.map(workspaceLabel), 'Switch workspace');
+  // be spelled two ways, down to `listLabels` qualifying two workspaces that carry
+  // one title. It used to offer the bare titles and map the pick back with a
+  // `find`, so a repeated title was a list of identical lines of which only the
+  // first could ever be chosen. The pick is matched by POSITION now, which is the
+  // only thing a choice dialog can promise is unique.
+  const labels = listLabels(others);
+  const pick = await ctx.api.ui.dialogs.choice('Open which workspace?', labels, 'Switch workspace');
   if (!pick) return;
-  const chosen = others.find((w) => workspaceLabel(w) === pick);
+  const chosen = others[labels.indexOf(pick)];
   // By id, not by name: two workspaces in one database may share a name
   // (`freeWorkspaceId` puts `sales-2` beside `sales` and both stay called
   // `sales`), and `?space=` would then resolve to whichever came first.
@@ -147,6 +165,17 @@ export async function newWorkspaceFlow(): Promise<void> {
   // different creation paths runs. Only asked where a file is possible at all —
   // a question with one usable answer is not a question.
   if (await canUseFileStorage()) {
+    // And not asked at all when "Simple" is not a legal answer. A `.edb` holds the
+    // one workspace its name says (`mayCreateWorkspaceIn`, the same rule boot obeys),
+    // so putting a new one "alongside this workspace" while such a file is open
+    // writes a second workspace into it. That is how the folder came to hold a file
+    // with two workspaces in it, which the selector then listed as two rows reading
+    // the same thing — see `file-identity.ts`. In that tab a new workspace gets a
+    // file of its own, which is the only shape the rule allows.
+    if (!mayCreateWorkspaceIn(openDatabaseName(), slugifyWorkspace(name))) {
+      await newFileWorkspace(ctx.api.ui.dialogs, name);
+      return;
+    }
     const where = await ctx.api.ui.dialogs.choice(`Where should "${name}" keep its data?`, [SIMPLE, ADVANCED], 'New workspace');
     if (!where) return;
     if (where === ADVANCED) {
@@ -201,6 +230,24 @@ async function newFileWorkspace(dialogs: Dialogs, name: string): Promise<void> {
 }
 
 /**
+ * Name a workspace in a question the way the list names it, and say which one it is.
+ *
+ * A workspace has a TITLE and a technical NAME, and the two need not agree. The
+ * whole UI shows the title (`workspaceLabel`) while this question quoted the name,
+ * so deleting the workspace the header called "PowerPlants" asked about deleting
+ * "Simon" — one workspace read as two, and the question reads as being about
+ * something else entirely.
+ *
+ * The title alone is not enough either: two workspaces may carry one title, which
+ * is exactly the state that makes the question worth reading. So the technical name
+ * comes along whenever it differs, the same qualifier the selector shows.
+ */
+function quoteWorkspace(w: { name: string; title?: string | undefined }): string {
+  const label = workspaceLabel(w);
+  return label === w.name ? `"${label}"` : `"${label}" (${w.name})`;
+}
+
+/**
  * Delete the OPEN workspace: say what that removes, ask yes or no, remove all of it.
  *
  * The workspace is not chosen, it is the one on screen. This used to ask "delete
@@ -223,7 +270,8 @@ export async function deleteWorkspaceFlow(): Promise<void> {
   const what = describeWorkspaceContents(await countWorkspaceContents(storeBridge(), target.id));
   const isLast = all.length === 1;
   const ok = await ctx.api.ui.dialogs.confirm(
-    `Delete the workspace "${target.name}"?\n\n${what} will be deleted. This cannot be undone.` + (isLast ? '\n\nIt is the only workspace, so an empty one will be created in its place.' : ''),
+    `Delete the workspace ${quoteWorkspace(target)}?\n\n${what} will be deleted. This cannot be undone.` +
+      (isLast ? '\n\nIt is the only workspace, so an empty one will be created in its place.' : ''),
     'Delete workspace',
   );
   if (!ok) return;

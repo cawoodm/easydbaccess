@@ -48,7 +48,18 @@ export type IdentityFix =
    * claims lands on the id the other one already has. Only the user can say which
    * file is the real `my-data`, by renaming a file on disk.
    */
-  | 'ambiguous';
+  | 'ambiguous'
+  /**
+   * The file holds SEVERAL workspaces, so its name cannot be about one of them.
+   *
+   * Written before v0.0.427, when Save wrote the whole database into one file. No
+   * rename repairs it and this layer cannot split it — every passenger would need
+   * a file written for it, and only the tab that has the file OPEN can do that
+   * (Save gives every other workspace in its database a file of its own, see
+   * `one-per-file.ts`). So this is REPORTED and the file stays in the list: its
+   * passengers are real workspaces the user still has to be able to reach.
+   */
+  | 'shared';
 
 /** One file in the folder, and how its name stands against what is inside it. */
 export interface FileIdentity {
@@ -62,6 +73,8 @@ export interface FileIdentity {
   fix: IdentityFix;
   /** For `ambiguous`: the other files whose names claim the same id. */
   rivals: string[];
+  /** For `shared`: every workspace id the file holds, in the order found. */
+  holds?: string[] | undefined;
   /** When the file was last written, so a question about it can say. */
   mtime?: number | undefined;
   /** Its size, for the same reason. */
@@ -76,11 +89,14 @@ function sameFile(a: string, b: string): boolean {
 /**
  * One entry per file, saying whether its name and its contents agree.
  *
- * **A file holding several workspaces is left out entirely.** That is a different
- * broken shape — a file written before v0.0.427, when Save wrote the whole database
- * into one file — and it has an owner already (`one-per-file.ts`). Renaming one of
- * several passengers would not make the file right, and picking which passenger the
- * name is about is a guess. Such a file keeps working as it does today.
+ * A file holding several workspaces is `shared` — it used to be left out of this
+ * answer entirely, on the grounds that `one-per-file.ts` owned that shape. It does
+ * own the WRITING side, and only for the database the tab has open: nothing ever
+ * looked at a folder file holding two workspaces, so the selector listed its
+ * passengers as separate rows carrying the same file name, and the file qualifier
+ * that tells two copies apart everywhere else said nothing. That is the bug this
+ * case exists for. Such a file is still listed — its passengers are real work —
+ * but it is now named in the sync report instead of passing unremarked.
  */
 export function fileIdentities(found: readonly FolderWorkspace[]): FileIdentity[] {
   const perFile = new Map<string, FolderWorkspace[]>();
@@ -91,10 +107,13 @@ export function fileIdentities(found: readonly FolderWorkspace[]): FileIdentity[
     else perFile.set(key, [w]);
   }
 
-  const alone = [...perFile.values()].filter((list) => list.length === 1).map((list) => list[0]!);
+  const groups = [...perFile.values()];
+  const alone = groups.filter((list) => list.length === 1).map((list) => list[0]!);
 
   // Which files claim each id. A group of more than one is the ambiguous case, and
   // it is decided here rather than per file because no file can see its rivals.
+  // Shared files are left out of the count: no rename can repair one, so letting it
+  // make a neighbour "ambiguous" would only withhold a repair the neighbour can have.
   const claimants = new Map<string, string[]>();
   for (const w of alone) {
     const claimed = workspaceIdFromFileName(w.file);
@@ -103,30 +122,42 @@ export function fileIdentities(found: readonly FolderWorkspace[]): FileIdentity[
     else claimants.set(claimed, [w.file]);
   }
 
-  return alone.map((w) => {
-    const claimed = workspaceIdFromFileName(w.file);
-    const group = claimants.get(claimed) ?? [w.file];
-    const rivals = group.filter((f) => !sameFile(f, w.file));
+  const facts = (w: FolderWorkspace) => ({
+    ...(w.mtime === undefined ? {} : { mtime: w.mtime }),
+    ...(w.size === undefined ? {} : { size: w.size }),
+  });
+
+  return groups.map((list) => {
+    const first = list[0]!;
+    const claimed = workspaceIdFromFileName(first.file);
+
+    if (list.length > 1) {
+      // Quoted by the id the file name claims where the file holds it, because that
+      // is the passenger the name is about. Otherwise the first one found — the
+      // report names every id anyway.
+      const inside = list.find((w) => w.id === claimed) ?? first;
+      return { file: first.file, id: inside.id, name: inside.name, claimed, fix: 'shared' as const, rivals: [], holds: list.map((w) => w.id), ...facts(first) };
+    }
+
+    const group = claimants.get(claimed) ?? [first.file];
+    const rivals = group.filter((f) => !sameFile(f, first.file));
     // With rivals, the file this app would itself have written for that id wins:
     // `spaceFileName` is the one name Save produces, so `my-data.edb` is the real
     // `my-data` and `My Data.edb` is a copy somebody renamed. Where no file carries
     // the canonical name, none of them can be preferred.
-    const ambiguous = rivals.length > 0 && !sameFile(w.file, spaceFileName(claimed));
-    const fix: IdentityFix = ambiguous ? 'ambiguous' : w.id === claimed ? 'matches' : 'rename';
-    return {
-      file: w.file,
-      id: w.id,
-      name: w.name,
-      claimed,
-      fix,
-      rivals,
-      ...(w.mtime === undefined ? {} : { mtime: w.mtime }),
-      ...(w.size === undefined ? {} : { size: w.size }),
-    };
+    const ambiguous = rivals.length > 0 && !sameFile(first.file, spaceFileName(claimed));
+    const fix: IdentityFix = ambiguous ? 'ambiguous' : first.id === claimed ? 'matches' : 'rename';
+    return { file: first.file, id: first.id, name: first.name, claimed, fix, rivals, ...facts(first) };
   });
 }
 
-/** Only the files that need an answer, in the order the scan found them. */
+/**
+ * Only the files something has to be said about, in the order the scan found them.
+ *
+ * Not all of them are a question: a `shared` file is reported and kept, while a
+ * `rename` is asked about and an `ambiguous` one is set aside. The caller
+ * (`folder-sync.ts`) branches on `fix`.
+ */
 export function misfiledFiles(found: readonly FolderWorkspace[]): FileIdentity[] {
   return fileIdentities(found).filter((i) => i.fix !== 'matches');
 }

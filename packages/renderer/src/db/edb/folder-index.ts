@@ -200,6 +200,44 @@ export function workspaceLabel(w: { name: string; title?: string | undefined }):
 const byLabel = (a: ListEntry, b: ListEntry) => workspaceLabel(a).localeCompare(workspaceLabel(b));
 
 /**
+ * What each entry should READ as, qualified where the list could not otherwise
+ * tell two rows apart.
+ *
+ * Two entries carrying one label is normal and fine when they live in different
+ * files: the file name is the tooltip, and that is what the user is asking when
+ * they hover. It is NOT fine inside one file, because then the tooltip says the
+ * same thing too and the two rows are identical — one workspace file holding two
+ * workspaces breaks the rule (`one-per-file.ts`), and while it is broken the list
+ * still has to be readable. The reported case: two rows both saying "PowerPlants",
+ * both in `powerplants.edb`, and no way to tell which is which.
+ *
+ * The qualifier is the TECHNICAL NAME, which is what `?space=` routes on and what
+ * the delete prompt quotes — so a qualified row reads the same way as the question
+ * that comes next. Where several in one file share that too, the id is the last
+ * thing they cannot share.
+ */
+export function listLabels(entries: readonly ListEntry[]): string[] {
+  // Grouped by what a user can see: the label plus the file it lives in. An entry
+  // with no file is in the database this tab has open, which is one place, so they
+  // all fall in one group.
+  const key = (e: ListEntry) => `${workspaceLabel(e)} ${(e.file ?? '').toLowerCase()}`;
+  const groups = new Map<string, ListEntry[]>();
+  for (const e of entries) {
+    const list = groups.get(key(e));
+    if (list) list.push(e);
+    else groups.set(key(e), [e]);
+  }
+  return entries.map((e) => {
+    const group = groups.get(key(e)) ?? [e];
+    if (group.length < 2) return workspaceLabel(e);
+    const names = new Set(group.map((g) => g.name));
+    const qualifier = names.size === group.length ? e.name : e.id;
+    // A title that is already the technical name gains nothing from repeating it.
+    return qualifier === workspaceLabel(e) ? workspaceLabel(e) : `${workspaceLabel(e)} (${qualifier})`;
+  });
+}
+
+/**
  * Only the entries from OTHER files. Deduplicated on (id, file), because two
  * scans of the same folder must not double the list.
  */
