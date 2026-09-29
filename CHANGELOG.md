@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 29 Sep 2026
+
+### Bugs
+
+- 🪲 The red two-step warning before a save that would empty a file never appeared (v0.0.501)
+
 ## 28 Sep 2026
 
 ### Features

@@ -15,7 +15,6 @@ import {
   rememberHandle,
   rememberedFolder,
   rememberedHandle,
-  writeBytes,
 } from '../db/edb/file-handle.js';
 import { activeEdbName, adoptedFileName, reloadWithoutSpace, reloadWithSpace, setActiveEdbName } from '../db/edb/session.js';
 import { saveErrorMessage, saveErrorSummary } from '../db/edb/save-error.js';
@@ -50,6 +49,9 @@ import {
   takeCopyQuestion,
 } from '../db/edb/space-adopt.js';
 import { alsoWroteNote, withoutTheirOwnFile, writableWholesale } from '../db/edb/one-per-file.js';
+import { installWriteGuard, writeUserBytes, type WriteGuardDeps } from '../db/edb/guarded-write.js';
+import { describeHolding, firstWarning, refusedNote, secondWarning, type Holding } from '../db/edb/empty-write.js';
+import { dangerConfirm } from '../dialogs/danger-confirm.js';
 import { freeWorkspaceId, spaceFileName, workspaceIdFromFileName } from '../db/edb/space-resolve.js';
 
 /**
@@ -340,6 +342,48 @@ export function init(api: HostApi): void {
     return out;
   }
 
+  /**
+   * Every write to a file the user owns goes through here.
+   *
+   * The rule itself is in `db/edb/empty-write.ts` and the door in
+   * `db/edb/guarded-write.ts`; this is only the wiring — which bridge peeks the
+   * bytes, which dialog asks, what the user is told when a write is stopped.
+   *
+   * Answers whether the bytes were written. Every caller must treat `false` as
+   * "nothing happened": no stamp recorded, no "saved" toast, and above all no
+   * `markClean`, which would turn a write the user STOPPED into the same data loss
+   * on the next reload.
+   */
+  function writeGuardDeps(): WriteGuardDeps {
+    return {
+      // A missing bridge means nothing can be measured. Answering with a holding
+      // that looks USED keeps today's behaviour — the write goes ahead — rather
+      // than making an unmeasurable moment look like the dangerous one.
+      peek: async (b) => {
+        const live = edbBridge();
+        return live ? await live.peekWorkspaces(b) : [{ tables: 1, views: 0 }];
+      },
+      confirm: (f, onDisk: Holding, writing: Holding) =>
+        dangerConfirm({
+          title: 'This save would empty the file',
+          message: firstWarning(f, onDisk, writing),
+          secondMessage: secondWarning(f, onDisk),
+          confirmLabel: 'Replace the file anyway',
+          secondConfirmLabel: `Delete ${describeHolding(onDisk)}`,
+        }),
+      onRefused: (f) => api.ui.dialogs.toast(refusedNote(f), { kind: 'info', title: 'Save stopped' }),
+    };
+  }
+
+  async function writeUserFile(handle: FileSystemFileHandle, bytes: Uint8Array, file: string, reason: string): Promise<boolean> {
+    return writeUserBytes(handle, bytes, { file, reason }, writeGuardDeps());
+  }
+
+  // Every OTHER writer of a user's file — `new-file.ts` building one from a
+  // picker — reaches the same guard through this, because it cannot reach the
+  // dialog or the live worker itself.
+  installWriteGuard(writeGuardDeps());
+
   async function fileTheStranded(opts: { skipEmpty?: boolean; includeActive?: boolean } = {}): Promise<string[]> {
     const dir = await connectedFolder();
     if (!dir) return [];
@@ -365,7 +409,7 @@ export function init(api: HostApi): void {
       const name = spaceFileName(id);
       const handle = await fileInFolder(dir, name, true);
       if (!handle) continue;
-      await writeBytes(handle, await workspaceOnlyBytes(id, `Giving ${name} its own file`));
+      if (!(await writeUserFile(handle, await workspaceOnlyBytes(id, `Giving ${name} its own file`), name, 'Giving a workspace its own file'))) continue;
       const facts = await factsOfHandle(handle);
       if (facts) recordAgreement(name, facts);
       wrote.push(name);
@@ -422,25 +466,22 @@ export function init(api: HostApi): void {
    * the file (see `db/edb/space-resolve.ts`) would, on the next autosave tick,
    * put that empty database over it. The bytes it replaced were the only copy.
    *
-   * The cheap half runs first: counting THIS workspace is two aggregates, and
-   * anything not empty stops here. Only an empty one pays for reading the file,
-   * which costs a peek — and an empty workspace is not one anybody is saving
-   * often.
+   * **The QUESTION is not asked here.** It is asked at the door, by
+   * `writeUserFile` → `guarded-write.ts`, in two red steps — which is what the
+   * bug report asked for and, being at the door, covers every writer rather
+   * than this one path. A single yes/no here asked FIRST and so pre-empted it:
+   * the two-step guard could never open, because the write was already refused
+   * or already allowed by the time the door saw it.
    *
-   * A count that could not be taken is not a count of none, so an unreadable
-   * store writes as before rather than refusing to save.
+   * What is left is the one thing the door cannot know: whether this is the
+   * autosave TIMER, which must not put a modal on screen every thirty seconds
+   * for a file the user has already declined to overwrite in this exact state.
+   * `persist` records that decline; this reads it.
    */
-  async function mayWriteNothingOverIt(handle: FileSystemFileHandle, file: string, now: { mtime: number; size: number }, auto: boolean): Promise<boolean> {
+  async function mayWriteNothingOverIt(file: string, now: { mtime: number; size: number }, auto: boolean): Promise<boolean> {
+    if (!auto || !writeDeclined(file, now)) return true;
     const mine = await openContentsFacts();
-    if (mine.tables !== 0 || (mine.views ?? 0) !== 0) return true;
-    // The timer asks once per state of the file, like every other question here:
-    // a modal every thirty seconds is worse than the problem it reports.
-    if (auto && writeDeclined(file, now)) return false;
-    const theirs = await countsInFileHandle(handle);
-    if (await confirmDataLoss(api.ui.dialogs, file, mine, theirs, `the copy in ${file}`, 'Save')) return true;
-    markWriteDeclined(file, now);
-    api.ui.dialogs.toast(`Left ${file} as it is. Run "Compare workspace with its file" to bring its tables in.`, { kind: 'info', title: 'Save' });
-    return false;
+    return mine.tables !== 0 || (mine.views ?? 0) !== 0;
   }
 
   async function mayOverwriteFile(handle: FileSystemFileHandle, auto: boolean): Promise<boolean> {
@@ -449,7 +490,7 @@ export function init(api: HostApi): void {
     // Unreadable is not "changed": the permission check above already passed, so
     // this is a transient failure and the write is the user's own instruction.
     if (!now) return true;
-    if (!(await mayWriteNothingOverIt(handle, file, now, auto))) return false;
+    if (!(await mayWriteNothingOverIt(file, now, auto))) return false;
     const verdict = compareWithFile(readStamp(file), now);
     if (verdict !== 'file-newer' && verdict !== 'conflict') return true;
     if (auto && writeDeclined(file, now)) return false;
@@ -567,7 +608,16 @@ export function init(api: HostApi): void {
     // Before the bytes go out, not after: this is the only check standing between
     // an autosave tick and somebody else's afternoon.
     if (!(await mayOverwriteFile(handle, opts.auto === true))) return { where: 'none', alsoWrote: [] };
-    await writeBytes(handle, await bytesForFile(bridge));
+    // The empty-write guard, which is the LAST word: a refusal here means nothing
+    // happened, so no stamp is recorded and the workspace stays dirty.
+    if (!(await writeUserFile(handle, await bytesForFile(bridge), activeEdbName(), 'Save'))) {
+      // Remember the refusal against the file AS IT IS, so the autosave timer does
+      // not put the same red question up every thirty seconds. A manual Save asks
+      // again regardless — `mayWriteNothingOverIt` only reads this for the timer.
+      const declined = await factsOfHandle(handle);
+      if (declined) markWriteDeclined(activeEdbName(), declined);
+      return { where: 'none', alsoWrote: [] };
+    }
     // The file is ours again, so an earlier "leave it alone" no longer applies.
     clearWriteDeclined(activeEdbName());
     // The file now holds this workspace, so record what it looks like. That is what
@@ -1072,7 +1122,7 @@ export function init(api: HostApi): void {
         createIpcDataStore(scratch, () => workspaceId),
         workspaceId,
       );
-      await writeBytes(handle, await scratch.export());
+      if (!(await writeUserFile(handle, await scratch.export(), file, 'Overwrite the copy in a file'))) return;
       api.ui.dialogs.toast(`Wrote this workspace over the copy in ${file}.`, { kind: 'success' });
     } finally {
       scratch.terminate();
@@ -1111,7 +1161,7 @@ export function init(api: HostApi): void {
       await cloneWorkspace(scratch, { from, to, name: to, mode: 'all' });
       if (title) await scratch.patch('workspaces', to, { title });
       await scratch.deleteWorkspace?.(from);
-      await writeBytes(handle, await scratch.export());
+      if (!(await writeUserFile(handle, await scratch.export(), file, 'Rename the workspace in a file'))) return false;
       api.ui.dialogs.toast(`The workspace in ${file} is now "${to}".`, { kind: 'success' });
       return true;
     } catch (err) {
