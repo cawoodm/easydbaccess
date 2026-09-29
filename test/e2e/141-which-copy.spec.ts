@@ -119,6 +119,15 @@ async function tableNames(page: Page): Promise<string[]> {
   }
 }
 
+/** The adopted-file marker, read the same reload-safe way as {@link tableNames}. */
+async function activeMarker(page: Page): Promise<string | null> {
+  try {
+    return await page.evaluate((k) => localStorage.getItem(k), ACTIVE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 test('asks which copy to open, and says what each one holds', async ({ page }, testInfo) => {
   const ws = `twocopies-${testInfo.testId}`.toLowerCase();
   await bootWithFolder(page, `elsewhere-${testInfo.testId}`.toLowerCase());
@@ -148,7 +157,11 @@ test('using the file copy brings its tables in', async ({ page }, testInfo) => {
 
   await page.waitForFunction(() => Boolean((window as unknown as { __easydb?: unknown }).__easydb), { timeout: 20_000 });
   await expect.poll(() => tableNames(page), { timeout: 20_000 }).toEqual(['fromfile']);
-  expect(await page.evaluate((k) => localStorage.getItem(k), ACTIVE_KEY)).toBe(`${ws}.edb`);
+  // POLLED, for the same reason as `tableNames` above. Adopting the file reloads,
+  // and the tables can be readable on the page that is ON ITS WAY OUT — so a
+  // single `evaluate` here races the navigation and dies with "Execution context
+  // was destroyed". Seen once in a full run; the assertion is unchanged.
+  await expect.poll(() => activeMarker(page), { timeout: 20_000 }).toBe(`${ws}.edb`);
 });
 
 test('Compare them… opens the comparison instead of denying there is a file', async ({ page }, testInfo) => {
