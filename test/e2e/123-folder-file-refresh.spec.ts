@@ -268,7 +268,7 @@ async function otherOriginAddsTable(page: Page, workspaceId: string, file: strin
       if (bytes.byteLength === 0) throw new Error(`${fileName} is empty — the save it should follow has not landed`);
       const scratch = createEdbBridge();
       try {
-        await scratch.open(bytes, '__other-origin.edb', { scratch: true });
+        await scratch.open(bytes, '__other-origin.edb');
         const store = createIpcDataStore(scratch, () => ws);
         await store.tables.insert({ id: `${ws}-${table}`, workspaceId: ws, name: table, code: '', columns: [{ field: 'part', type: 'string' }], view: 'table' });
         await writeBytes(handle, await scratch.export());
@@ -292,7 +292,7 @@ async function fileHoldingWorkspace(page: Page, workspaceId: string, file: strin
       const { fileInFolder, writeBytes } = await import('/src/db/edb/file-handle.ts');
       const scratch = createEdbBridge();
       try {
-        await scratch.open(null, '__fixture.edb', { scratch: true });
+        await scratch.open(null, '__fixture.edb');
         const store = createIpcDataStore(scratch, () => ws);
         await store.workspaces.insert({ id: ws, createdAt: Date.now(), pluginUrls: [] });
         await store.tables.insert({ id: `${ws}-${table}`, workspaceId: ws, name: table, code: '', columns: [{ field: 'part', type: 'string' }], view: 'table' });

@@ -161,7 +161,11 @@ export async function startEdbSession(): Promise<EdbSession> {
     if (name === INDEX_DB_NAME) await bridge.renameDatabase(LEGACY_LOCAL_DB_NAME, INDEX_DB_NAME);
     // No bytes: a pooled database opens its own file, and the memory fallback
     // reads its own mirror. Bytes are only passed when ADOPTING a user's file.
-    await bridge.open(null, name);
+    //
+    // `pooled: true` — the ONLY place that asks. This worker IS the tab's
+    // database, so it is the one that may hold the origin-exclusive pool; every
+    // other `open` in the app is a throwaway and takes the default.
+    await bridge.open(null, name, { pooled: true });
     setEdbBridge(bridge);
     return { bridge, name };
   } catch (err) {

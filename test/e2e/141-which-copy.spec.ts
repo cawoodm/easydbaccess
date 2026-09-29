@@ -65,7 +65,7 @@ async function seedBothCopies(page: Page, ws: string): Promise<void> {
       // The real workspace, with a table in it, written into the folder.
       const full = createEdbBridge();
       try {
-        await full.open(null, 'which-copy-fixture.edb', { scratch: true });
+        await full.open(null, 'which-copy-fixture.edb');
         const store = createIpcDataStore(full, () => ws);
         await store.workspaces.insert({ id: ws, createdAt: Date.now(), pluginUrls: [] });
         await store.tables.insert({ id: `${ws}-t`, workspaceId: ws, name: 'fromfile', code: '', columns: [{ field: 'part', type: 'string' }], view: 'table' });
@@ -81,7 +81,7 @@ async function seedBothCopies(page: Page, ws: string): Promise<void> {
       const blank = createEdbBridge();
       let bytes: Uint8Array;
       try {
-        await blank.open(null, 'which-copy-blank.edb', { scratch: true });
+        await blank.open(null, 'which-copy-blank.edb');
         bytes = await blank.export();
       } finally {
         blank.terminate();

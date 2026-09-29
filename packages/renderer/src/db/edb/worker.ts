@@ -71,7 +71,7 @@ function isMutation(req: EdbRequest): req is Extract<EdbRequest, { coll: string 
   }
 }
 
-async function open(bytes: Uint8Array | null, name: string, scratch = false): Promise<void> {
+async function open(bytes: Uint8Array | null, name: string, wantPool = false): Promise<void> {
   sqlite3 ??= await sqlite3InitModule();
   // Neither substrate here can host a WAL, and a file the desktop has written
   // says WAL in its header for good. See `wal-header.ts`.
@@ -83,11 +83,13 @@ async function open(bytes: Uint8Array | null, name: string, scratch = false): Pr
   dbName = name;
   workspaceKey = name;
 
-  // A throwaway copy never asks for the pool. It is exclusive origin-wide and the
-  // LIVE worker holds it, so a second worker asking makes the browser refuse the
-  // access handles that worker is already using — which is a real error in the
-  // session the user is looking at, caused by a database nobody will keep.
-  const pool = scratch ? null : await ensurePool(sqlite3);
+  // A throwaway copy never asks for the pool, and a throwaway is the DEFAULT.
+  // The pool is exclusive origin-wide and the LIVE worker holds it, so a second
+  // worker asking makes the browser refuse the access handles that worker is
+  // already using — a real error in the session the user is looking at, caused
+  // by a database nobody will keep. Ten call sites forgot to opt out of that
+  // when it was opt-out; see `protocol.ts`.
+  const pool = wantPool ? await ensurePool(sqlite3) : null;
   if (pool) {
     // The durable path. The file already holds whatever previous sessions
     // wrote, so there is nothing to restore and nothing to debounce.
@@ -95,15 +97,15 @@ async function open(bytes: Uint8Array | null, name: string, scratch = false): Pr
     tunePooledDb(db);
     pooled = { path: poolPath(name), exportFile: (p) => pool.exportFile(p) };
   } else {
-    await openInMemory(bytes, name, scratch);
+    await openInMemory(bytes, name, !wantPool);
   }
 
   driver = wasmDriver(sqlite3, require(db, 'database opened'));
   // The name goes in so the store can keep the one-workspace-per-`.edb` rule
-  // itself. A scratch database is deliberately left unnamed: it is a throwaway
-  // used to build or read bytes, and holding it to a file's invariant would
-  // refuse work that never reaches a file.
-  store = new EdbStore(driver, scratch ? {} : { fileName: name });
+  // itself. A throwaway is deliberately left unnamed: it is used to build or
+  // read bytes, and holding it to a file's invariant would refuse work that
+  // never reaches a file. `one-per-file.ts` still covers the write that does.
+  store = new EdbStore(driver, wantPool ? { fileName: name } : {});
 }
 
 /**
@@ -416,7 +418,7 @@ async function renameDatabase(from: string, to: string): Promise<boolean> {
 async function handleAsync(req: EdbRequest): Promise<unknown> {
   switch (req.op) {
     case 'open':
-      return open(req.bytes, req.name, req.scratch === true);
+      return open(req.bytes, req.name, req.pooled === true);
     case 'restore':
       // Kept for protocol compatibility only. The pooled database loads itself
       // and the memory fallback reads its own mirror, so nobody needs bytes

@@ -8,6 +8,7 @@
 
 ### Bugs
 
+- 🪲 Convert, a dropped `.edb`, the folder sync and a rename-in-file each broke the open workspace, leaving the app answering nothing (v0.0.508)
 - 🪲 A workspace file could be handed a second workspace, or an id no file name could spell (v0.0.506)
 - 🪲 Deleting the last workspace of a workspace file left the app unable to start, on every reload (v0.0.507)
 - 🪲 Save As on the desktop proposed the generic file name for every workspace, and writing it made the file unwritable afterwards (v0.0.507)

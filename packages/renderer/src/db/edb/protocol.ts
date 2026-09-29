@@ -12,16 +12,24 @@ import type { CloneMode, DistinctQuery, RowQuery } from '@easydb/shared';
 /** A call the main thread makes into the worker. */
 export type EdbRequest =
   /**
-   * Open a database in this worker.
+   * Open a database in this worker. **Throwaway unless `pooled` says otherwise.**
    *
-   * `scratch` marks a THROWAWAY one — a copy opened to be read or filtered and
-   * then discarded. It changes two things, and both are about not fighting the
-   * live session: the `opfs-sahpool` VFS is not touched (it is exclusive
-   * origin-wide, so a second worker asking for it makes the browser refuse
-   * access handles the live worker already holds), and no OPFS mirror is
-   * written, because there is nothing here worth recovering after a crash.
+   * A throwaway is a copy opened to be read or filtered and then discarded. It
+   * differs in two ways, both about not fighting the live session: the
+   * `opfs-sahpool` VFS is not touched (it is exclusive origin-wide, so a second
+   * worker asking for it makes the browser refuse access handles the live worker
+   * already holds), and no OPFS mirror is written, because there is nothing here
+   * worth recovering after a crash.
+   *
+   * **The default is the safe one, and that is the whole point.** This was
+   * `scratch?: boolean`, opt-IN, and ten call sites across the app and the e2e
+   * suite forgot it — including the one whose own comment said the worker must
+   * never ask for the pool. Each of them broke the live session and left it
+   * answering `store used before the database was opened` to everything. Exactly
+   * ONE caller wants the pool (`session.ts`, the tab's own database), so it is
+   * the one that says so.
    */
-  | { id: number; op: 'open'; bytes: Uint8Array | null; name: string; scratch?: boolean | undefined }
+  | { id: number; op: 'open'; bytes: Uint8Array | null; name: string; pooled?: boolean | undefined }
   /**
    * Put a database into the substrate under `name`, WITHOUT switching to it.
    *

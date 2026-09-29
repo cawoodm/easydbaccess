@@ -208,7 +208,7 @@ interface SideTables {
 export async function openComparison(here: DataStore, hereBridge: EdbBridge, bytes: Uint8Array, workspaceId: string): Promise<Comparison> {
   const scratch = createEdbBridge();
   try {
-    await scratch.open(bytes, MERGE_SCRATCH, { scratch: true });
+    await scratch.open(bytes, MERGE_SCRATCH);
     const spaces = (await createIpcDataStore(scratch, () => workspaceId).workspaces.find()) as { id: string }[];
     const diskId = spaces.find((w) => w.id === workspaceId)?.id ?? spaces[0]?.id;
     if (diskId === undefined) throw new Error('That file holds no workspace to compare with.');

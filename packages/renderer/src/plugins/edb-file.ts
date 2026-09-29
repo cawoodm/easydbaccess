@@ -275,7 +275,7 @@ export function init(api: HostApi): void {
   async function workspaceOnlyBytes(workspaceId: string, label: string): Promise<Uint8Array> {
     const scratch = createEdbBridge();
     try {
-      await scratch.open(null, SPLIT_SCRATCH, { scratch: true });
+      await scratch.open(null, SPLIT_SCRATCH);
       await copyWorkspace(
         createIpcDataStore(storeBridge(), () => workspaceId),
         createIpcDataStore(scratch, () => workspaceId),
@@ -1020,7 +1020,7 @@ export function init(api: HostApi): void {
     // the same — one save at the end, not one per chunk.
     autosave.beginBatch();
     try {
-      await scratch.open(bytes, DROP_SCRATCH, { scratch: true });
+      await scratch.open(bytes, DROP_SCRATCH);
       if (mode === 'overwrite') await deleteWorkspace(storeBridge(), target);
       if (mode === 'rename') await cloneWorkspace(scratch, { from: source.id, to: target, title: source.title, mode: 'all' });
       const from = createIpcDataStore(scratch, () => target);
@@ -1123,7 +1123,7 @@ export function init(api: HostApi): void {
     }
     const scratch = createEdbBridge();
     try {
-      await scratch.open(await readBytes(handle), SYNC_SCRATCH, { scratch: true });
+      await scratch.open(await readBytes(handle), SYNC_SCRATCH);
       // One id, because a clash is matched on the id now. This used to take the
       // file's id separately and delete both, since a NAME-matched clash could pair
       // two workspaces whose ids differed — and then the file had to be cleared of
@@ -1167,7 +1167,7 @@ export function init(api: HostApi): void {
     }
     const scratch = createEdbBridge();
     try {
-      await scratch.open(await readBytes(handle), SYNC_SCRATCH, { scratch: true });
+      await scratch.open(await readBytes(handle), SYNC_SCRATCH);
       // The title travels WITH the clone. It used to be read out and patched back
       // afterwards, because a clone carried only the id and the `name` that
       // followed it — there is no such field now, and the title is the one thing

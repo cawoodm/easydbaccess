@@ -19,12 +19,16 @@ export interface EdbBridge extends EasydbStoreBridge {
   /**
    * Replace the contents — a fresh workspace, or a file the user just opened.
    *
-   * `scratch` is for a THROWAWAY worker holding a copy nobody will keep: it stays
-   * off the `opfs-sahpool` VFS and writes no mirror. Both matter, because the
-   * pool is exclusive origin-wide — a second worker asking for it makes the
-   * browser refuse the live session's own access handles.
+   * **Throwaway by default.** Without `pooled` this worker stays off the
+   * `opfs-sahpool` VFS and writes no mirror, which is what a copy nobody will
+   * keep wants: the pool is exclusive origin-wide, and a second worker asking
+   * for it makes the browser refuse the live session's own access handles.
+   *
+   * `pooled: true` is for the ONE worker that owns this tab's database
+   * (`session.ts`). Anything else passing it breaks the session running beside
+   * it — see `protocol.ts` for why the default is this way round.
    */
-  open(bytes: Uint8Array | null, name: string, opts?: { scratch?: boolean }): Promise<void>;
+  open(bytes: Uint8Array | null, name: string, opts?: { pooled?: boolean }): Promise<void>;
   /**
    * Put a database under `name` where the next boot will find it, without
    * switching to it.
@@ -133,7 +137,7 @@ export function createEdbBridge(): EdbBridge {
   }
 
   return {
-    open: (bytes, name, opts) => call<void>({ op: 'open', bytes, name, scratch: opts?.scratch }),
+    open: (bytes, name, opts) => call<void>({ op: 'open', bytes, name, pooled: opts?.pooled }),
     restore: (name) => call<Uint8Array | null>({ op: 'restore', name }),
     importBytes: (name, bytes) => call<void>({ op: 'importBytes', name, bytes }),
     flush: () => call<void>({ op: 'flush' }),
