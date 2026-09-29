@@ -58,7 +58,7 @@ test.describe('workspace title', () => {
     // The index is device-local, so a file entry can be planted without a folder
     // grant — what is under test is how the list DRAWS one.
     await page.evaluate(() => {
-      localStorage.setItem('eda:folderIndex', JSON.stringify({ folder: 'demo-folder', at: Date.now(), workspaces: [{ id: 'elsewhere', name: 'elsewhere', file: 'elsewhere.edb' }] }));
+      localStorage.setItem('eda:folderIndex', JSON.stringify({ folder: 'demo-folder', at: Date.now(), workspaces: [{ id: 'elsewhere', file: 'elsewhere.edb' }] }));
       window.dispatchEvent(new CustomEvent('easydb:folder-index-changed'));
     });
 

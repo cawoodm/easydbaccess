@@ -78,7 +78,9 @@ async function pickFile(page: Page, file: string) {
 test('both copies are listed, and only the file tells them apart', async ({ page, workspaceId }) => {
   await boot(page, workspaceId);
 
-  const twins = selector(page).locator('option').filter({ hasText: /^Simon$/ });
+  const twins = selector(page)
+    .locator('option')
+    .filter({ hasText: /^Simon$/ });
   await expect(twins).toHaveCount(2);
 
   // Identical to read, distinct to act on.

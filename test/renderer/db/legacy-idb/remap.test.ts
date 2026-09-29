@@ -3,7 +3,7 @@ import type { Row, Table, ViewInstance, ViewTemplate, Workspace } from '../../..
 import type { LegacyWorkspaceMeta } from '../../../../packages/renderer/src/db/legacy-idb/read.js';
 import { applyRemap, buildRemap, identityRemap, legacyTableIds, remapRow } from '../../../../packages/renderer/src/db/legacy-idb/remap.js';
 
-const workspace: Workspace = { id: 'demo', name: 'demo', createdAt: 0, pluginUrls: [], title: 'My Demo' };
+const workspace: Workspace = { id: 'demo', createdAt: 0, pluginUrls: [], title: 'My Demo' };
 
 const people: Table = {
   id: 't-people',
@@ -73,10 +73,9 @@ describe('identityRemap', () => {
 });
 
 describe('buildRemap + applyRemap', () => {
-  it('gives the workspace the target id and name, and leaves the title alone', () => {
+  it('gives the workspace the target id and leaves the title alone', () => {
     const out = applyRemap(meta, buildRemap(meta, 'demo-2', counter()));
     expect(out.workspace.id).toBe('demo-2');
-    expect(out.workspace.name).toBe('demo-2');
     // The user's label for this data is still their label for the copy.
     expect(out.workspace.title).toBe('My Demo');
   });

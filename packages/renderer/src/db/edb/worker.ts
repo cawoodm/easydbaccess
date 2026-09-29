@@ -99,7 +99,11 @@ async function open(bytes: Uint8Array | null, name: string, scratch = false): Pr
   }
 
   driver = wasmDriver(sqlite3, require(db, 'database opened'));
-  store = new EdbStore(driver);
+  // The name goes in so the store can keep the one-workspace-per-`.edb` rule
+  // itself. A scratch database is deliberately left unnamed: it is a throwaway
+  // used to build or read bytes, and holding it to a file's invariant would
+  // refuse work that never reaches a file.
+  store = new EdbStore(driver, scratch ? {} : { fileName: name });
 }
 
 /**
@@ -252,7 +256,7 @@ function handle(req: EdbRequest): unknown {
     case 'deleteWorkspace':
       return s().deleteWorkspace(req.workspaceId);
     case 'cloneWorkspace':
-      return s().cloneWorkspace({ from: req.from, to: req.to, name: req.name, mode: req.mode });
+      return s().cloneWorkspace({ from: req.from, to: req.to, title: req.title, mode: req.mode });
     case 'runSql':
       return s().runSql(req.sql, { params: req.params, write: req.write, maxRows: req.maxRows });
     case 'tableStamps':

@@ -69,15 +69,15 @@ function baseTable(overrides: Partial<Record<string, unknown>> = {}): Record<str
 describe('SqliteStore — schema + reopen', () => {
   it('creates the schema idempotently and survives close/reopen', () => {
     const store1 = new SqliteStore({ path: dbPath });
-    store1.insert('workspaces', { id: 'w1', name: 'Workspace One', createdAt: 1, pluginUrls: [] });
+    store1.insert('workspaces', { id: 'w1', title: 'Workspace One', createdAt: 1, pluginUrls: [] });
     store1.close();
 
     expect(existsSync(dbPath)).toBe(true);
 
     const store2 = new SqliteStore({ path: dbPath });
-    const found = store2.findOne('workspaces', 'w1') as { id: string; name: string } | null;
+    const found = store2.findOne('workspaces', 'w1') as { id: string; title?: string } | null;
     expect(found).not.toBeNull();
-    expect(found?.name).toBe('Workspace One');
+    expect(found?.title).toBe('Workspace One');
 
     store2.close();
     const store3 = new SqliteStore({ path: dbPath });
@@ -688,9 +688,9 @@ describe('SqliteStore — patch / upsert semantics', () => {
   it('upsert replaces an existing document wholesale', () => {
     const store = new SqliteStore({ path: dbPath });
     store.insert('workspaces', { id: 'w1', name: 'Original', createdAt: 1, pluginUrls: [] });
-    store.upsert('workspaces', { id: 'w1', name: 'Replaced', createdAt: 1, pluginUrls: ['x'] });
-    const found = store.findOne('workspaces', 'w1') as { name: string; pluginUrls: string[] };
-    expect(found.name).toBe('Replaced');
+    store.upsert('workspaces', { id: 'w1', title: 'Replaced', createdAt: 1, pluginUrls: ['x'] });
+    const found = store.findOne('workspaces', 'w1') as { title?: string; pluginUrls: string[] };
+    expect(found.title).toBe('Replaced');
     expect(found.pluginUrls).toEqual(['x']);
     expect(store.count('workspaces')).toBe(1);
     store.close();

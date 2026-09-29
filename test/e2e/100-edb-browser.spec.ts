@@ -578,7 +578,10 @@ test.describe('the storage strategy question', () => {
     try {
       const rows = db.prepare(`SELECT doc FROM _easydb WHERE coll = 'workspaces'`).all();
       expect(rows).toHaveLength(1);
-      expect((JSON.parse(String(rows[0]!['doc'])) as { name: string }).name).toBe('sales');
+      // The ID is what the file is named after, and the only identifier the doc
+      // carries. It held a `name` beside it until v0.0.504, minted from the same
+      // slug and free to drift from it.
+      expect((JSON.parse(String(rows[0]!['doc'])) as { id: string }).id).toBe('sales');
       expect(db.prepare(`SELECT COUNT(*) AS n FROM _easydb WHERE coll = 'tables'`).get()!['n']).toBe(0);
     } finally {
       db.close();
@@ -664,9 +667,9 @@ test.describe('the workspace folder', () => {
         const { fileInFolder, writeBytes } = await import('/src/db/edb/file-handle.ts');
         const scratch = createEdbBridge();
         try {
-          await scratch.open(null, 'open-fixture.edb');
+          await scratch.open(null, 'open-fixture.edb', { scratch: true });
           const store = createIpcDataStore(scratch, () => ws);
-          await store.workspaces.insert({ id: ws, name: ws, createdAt: Date.now(), pluginUrls: [] });
+          await store.workspaces.insert({ id: ws, createdAt: Date.now(), pluginUrls: [] });
           await store.tables.insert({ id: `${ws}-t`, workspaceId: ws, name: 'fromfile', code: '', columns: [{ field: 'part', type: 'string' }], view: 'table' });
           const root = await navigator.storage.getDirectory();
           const dir = await root.getDirectoryHandle(folder, { create: true });
@@ -729,7 +732,7 @@ test.describe('the workspace folder', () => {
 
         const scratch = createEdbBridge();
         try {
-          await scratch.open(null, 'sync-fixture.edb');
+          await scratch.open(null, 'sync-fixture.edb', { scratch: true });
           await copyWorkspace(
             live,
             createIpcDataStore(scratch, () => name),
@@ -841,7 +844,7 @@ test.describe('the folder-sync conflict prompt', () => {
         const live = (window as unknown as { __easydb: { store: Parameters<typeof copyWorkspace>[0] } }).__easydb.store;
         const scratch = createEdbBridge();
         try {
-          await scratch.open(null, 'conflict-fixture.edb');
+          await scratch.open(null, 'conflict-fixture.edb', { scratch: true });
           await copyWorkspace(
             live,
             createIpcDataStore(scratch, () => name),

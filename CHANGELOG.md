@@ -2,8 +2,14 @@
 
 ## 29 Sep 2026
 
+### Features
+
+- ✨ A workspace has one technical name — the name of its file — and a title you set; the third name it carried is gone (v0.0.506)
+
 ### Bugs
 
+- 🪲 A workspace file could be handed a second workspace, or an id no file name could spell (v0.0.506)
+- 🪲 On the desktop, a second workspace of a name already taken made `q3 (2).edb`, a file whose name denied the workspace inside it (v0.0.506)
 - 🪲 Escape in a tags cell shut the suggestion list instead of cancelling the edit, and needed a second press (v0.0.505)
 - 🪲 The command palette ranked a word matched in a tooltip above the same word in a command's own title (v0.0.503)
 - 🪲 The Datasette filter translation could ask the server for fewer rows than the filter meant (v0.0.502)

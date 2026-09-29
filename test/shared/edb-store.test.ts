@@ -68,10 +68,10 @@ describe('the single _easydb table', () => {
   });
 
   it('holds every document collection, keyed by its own primary key', () => {
-    store.insert('workspaces', { id: 'w1', name: 'Work' });
+    store.insert('workspaces', { id: 'w1', title: 'Work' });
     store.insert('settings', { key: 's1', workspaceId: 'w1', value: 1 });
     store.insert('plugins', { url: 'https://x/p.js', enabled: true });
-    expect(store.findOne('workspaces', 'w1')).toMatchObject({ name: 'Work' });
+    expect(store.findOne('workspaces', 'w1')).toMatchObject({ title: 'Work' });
     expect(store.findOne('settings', 's1')).toMatchObject({ value: 1 });
     expect(store.findOne('plugins', 'https://x/p.js')).toMatchObject({ enabled: true });
   });

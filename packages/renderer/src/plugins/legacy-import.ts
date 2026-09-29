@@ -22,6 +22,7 @@ import { deleteWorkspace } from '../db/delete-workspace.js';
 import { storeBridge } from '../db/edb/active-bridge.js';
 import { compareCopies } from '../db/edb/copy-facts.js';
 import { copyWorkspace } from '../db/edb/convert.js';
+import { workspaceLabel } from '../db/edb/folder-index.js';
 import { reloadWithSpace } from '../db/edb/session.js';
 import { freeWorkspaceId } from '../db/edb/space-resolve.js';
 import { legacyWorkspaceStore } from '../db/legacy-idb/legacy-store.js';
@@ -107,7 +108,7 @@ type Mode = 'fresh' | 'overwrite' | 'rename';
 async function planFor(api: HostApi, ws: LegacyWorkspaceSummary, taken: ReadonlySet<string>): Promise<{ target: string; mode: Mode } | null> {
   if (!taken.has(ws.id)) return { target: ws.id, mode: 'fresh' };
   const answer = await api.ui.dialogs.choice(
-    `"${ws.name}" is already a workspace here. Replace it with the older version's copy, or keep both?${await bothCopies(ws)}`,
+    `"${workspaceLabel(ws)}" is already a workspace here. Replace it with the older version's copy, or keep both?${await bothCopies(ws)}`,
     [OVERWRITE_LOCAL, KEEP_BOTH, SKIP],
     TITLE,
   );
@@ -141,14 +142,14 @@ async function bringOneIn(api: HostApi, db: LegacyDb, ws: LegacyWorkspaceSummary
   const from = legacyWorkspaceStore(db, meta, remap);
   const to = createIpcDataStore(storeBridge(), () => plan.target);
 
-  setAppProgress({ label: `Bringing "${ws.name}" across` });
+  setAppProgress({ label: `Bringing "${workspaceLabel(ws)}" across` });
   try {
     // Replacing means the old contents go first: a copy is additive, so writing
     // over them would leave both sets of tables in one workspace.
     if (plan.mode === 'overwrite') await deleteWorkspace(storeBridge(), plan.target);
-    const result = await copyWorkspace(from, to, plan.target, (p) => setAppProgress({ label: `Bringing "${ws.name}" across`, detail: p.label }));
+    const result = await copyWorkspace(from, to, plan.target, (p) => setAppProgress({ label: `Bringing "${workspaceLabel(ws)}" across`, detail: p.label }));
     taken.add(plan.target);
-    return { name: ws.name, target: plan.target, tables: result.tables, rows: result.rows };
+    return { name: workspaceLabel(ws), target: plan.target, tables: result.tables, rows: result.rows };
   } finally {
     clearAppProgress();
   }
@@ -184,7 +185,7 @@ async function run(api: HostApi, found: { db: LegacyDb; summary: LegacySummary }
         if (one) landed.push(one);
       } catch (err) {
         // One workspace failing must not strand the others.
-        await api.ui.dialogs.alert(`"${ws.name}" could not be copied: ${err instanceof Error ? err.message : String(err)}`, TITLE);
+        await api.ui.dialogs.alert(`"${workspaceLabel(ws)}" could not be copied: ${err instanceof Error ? err.message : String(err)}`, TITLE);
       }
     }
 

@@ -61,7 +61,7 @@ export type EdbRequest =
    */
   | { id: number; op: 'countWorkspaceContents'; workspaceId: string; countRows?: boolean | undefined }
   | { id: number; op: 'deleteWorkspace'; workspaceId: string }
-  | { id: number; op: 'cloneWorkspace'; from: string; to: string; name: string; mode: CloneMode }
+  | { id: number; op: 'cloneWorkspace'; from: string; to: string; title?: string | undefined; mode: CloneMode }
   | { id: number; op: 'export' }
   /**
    * Write the OPFS mirror NOW, without waiting for the debounce.

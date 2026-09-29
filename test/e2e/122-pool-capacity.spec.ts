@@ -28,7 +28,7 @@ test('importing more workspace files than the pool started with', async ({ page 
   // below goes through that same worker, because the pool is exclusive to it.
   const result = await page.evaluate(async (count) => {
     const { createEdbBridge } = (await import('/src/db/edb/worker-bridge.ts')) as {
-      createEdbBridge: () => { open(b: Uint8Array | null, n: string): Promise<unknown>; export(): Promise<Uint8Array>; terminate(): void };
+      createEdbBridge: () => { open(b: Uint8Array | null, n: string, o?: { scratch?: boolean }): Promise<unknown>; export(): Promise<Uint8Array>; terminate(): void };
     };
     const { edbBridge } = (await import('/src/db/edb/active-bridge.ts')) as {
       edbBridge: () => { importBytes(name: string, bytes: Uint8Array): Promise<void> } | null;
@@ -39,7 +39,7 @@ test('importing more workspace files than the pool started with', async ({ page 
     const scratch = createEdbBridge();
     let bytes: Uint8Array;
     try {
-      await scratch.open(null, 'capacity-source.edb');
+      await scratch.open(null, 'capacity-source.edb', { scratch: true });
       bytes = await scratch.export();
     } finally {
       scratch.terminate();

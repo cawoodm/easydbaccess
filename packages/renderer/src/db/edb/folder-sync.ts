@@ -6,7 +6,7 @@
 // read whole to learn what workspaces it holds, and a folder of 600k-row
 // workspaces is not something to pay for on every page load.
 
-import type { DataStore, Dialogs, WorkspaceContents } from '@easydb/shared';
+import { normalizeWorkspaceDoc, type DataStore, type Dialogs, type WorkspaceContents } from '@easydb/shared';
 import { edbBridge, storeBridge } from './active-bridge.js';
 import { countWorkspaceContents } from '../delete-workspace.js';
 import { fileInFolder, listWorkspaceFiles } from './file-handle.js';
@@ -17,6 +17,7 @@ import {
   partitionConflicts,
   readFolderIndex,
   readFolderSelection,
+  workspaceLabel,
   writeFolderIndex,
   type FolderClash,
   type FolderIndex,
@@ -63,14 +64,14 @@ const renameTo = (id: string) => `Rename it to "${id}"`;
 const LEAVE_OUT = 'Leave it out';
 
 /**
- * Write the workspace `localId` into `file`, replacing the copy `fileId` names.
+ * Write this browser's copy of `workspaceId` into `file`, over the copy there.
  *
- * Two ids because a clash is matched by NAME: the copy in the file can carry a
- * different id, and replacing the local id inside that file would leave the
- * file's own copy sitting beside the new one — two workspaces in a file, which
- * `one-per-file.ts` exists to prevent.
+ * ONE id. It used to take two — the local one and the file's — because a clash
+ * was matched by NAME and the two copies could then carry different ids, so the
+ * file had to be cleared of each or it would come out holding both. A clash is
+ * matched on the id itself now, so there is only ever one id in play.
  */
-type OverwriteInFile = (localId: string, file: string, fileId: string) => Promise<void>;
+type OverwriteInFile = (workspaceId: string, file: string) => Promise<void>;
 
 /** Give every workspace the folder does not hold a file of its own; names them. */
 type FileTheRest = () => Promise<string[]>;
@@ -195,12 +196,16 @@ export async function scanFolder(dir: FileSystemDirectoryHandle): Promise<{ inde
       unreadable.push(file);
       continue;
     }
-    for (const { doc, tables, views } of peeked) {
+    for (const peek of peeked) {
+      const { tables, views } = peek;
+      // Through the same rule the store reads by. This path deserializes bytes
+      // into a throwaway connection and queries `_easydb` directly, so nothing
+      // else would turn an older file's `name` into the title it now serves as.
+      const doc = normalizeWorkspaceDoc(peek.doc);
       const id = typeof doc['id'] === 'string' ? doc['id'] : '';
       if (!id) continue;
       workspaces.push({
         id,
-        name: typeof doc['name'] === 'string' ? doc['name'] : id,
         title: typeof doc['title'] === 'string' ? doc['title'] : undefined,
         file,
         tables,
@@ -312,7 +317,7 @@ async function localContents(clashes: readonly FolderClash[]): Promise<Map<strin
   const counts = new Map<string, WorkspaceContents>();
   try {
     const bridge = storeBridge();
-    for (const clash of clashes) counts.set(clash.localId, await countWorkspaceContents(bridge, clash.localId, { countRows: false }));
+    for (const clash of clashes) counts.set(clash.file.id, await countWorkspaceContents(bridge, clash.file.id, { countRows: false }));
   } catch {
     /* no bridge, or a build with no count — every clash gets its prompt */
   }
@@ -431,25 +436,25 @@ export async function syncFolder(
   const { adopt, ask } = partitionConflicts(clashes, emptyOnes(counted));
 
   for (const clash of ask) {
-    const mine = contentsAsFacts(counted.get(clash.localId));
+    const mine = contentsAsFacts(counted.get(clash.file.id));
     const theirs = fileAsFacts(clash.file);
     const sides = compareCopies([
       { label: 'In this browser', facts: mine },
       { label: clash.file.file, facts: theirs },
     ]);
     const answer = await dialogs.choice(
-      `"${clash.file.name}" is in this browser and in ${clash.file.file}. The two may differ — which copy do you want to keep?${sides}`,
+      `"${workspaceLabel(clash.file)}" is in this browser and in ${clash.file.file}. The two may differ — which copy do you want to keep?${sides}`,
       [LOAD, OVERWRITE],
       'Sync workspace folder',
     );
     // A dismissed dialog keeps both, which is the safe answer and the only one
     // that touches nothing.
     if (answer === LOAD) {
-      if (!(await confirmDataLoss(dialogs, clash.file.name, theirs, mine, 'the copy in this browser'))) continue;
-      await adoptFolderFile(clash.localId, clash.file.file);
+      if (!(await confirmDataLoss(dialogs, workspaceLabel(clash.file), theirs, mine, 'the copy in this browser'))) continue;
+      await adoptFolderFile(clash.file.id, clash.file.file);
     } else if (answer === OVERWRITE) {
-      if (!(await confirmDataLoss(dialogs, clash.file.name, mine, theirs, `the copy in ${clash.file.file}`))) continue;
-      await overwrite(clash.localId, clash.file.file, clash.file.id);
+      if (!(await confirmDataLoss(dialogs, workspaceLabel(clash.file), mine, theirs, `the copy in ${clash.file.file}`))) continue;
+      await overwrite(clash.file.id, clash.file.file);
     }
   }
 
@@ -457,7 +462,7 @@ export async function syncFolder(
   // prompts above away mid-question. Only the first one can take effect for the
   // same reason, and that is enough — after the reload the other empty shells sit
   // in a database this tab no longer has open, so they clash with nothing.
-  for (const empty of adopt) await adoptFolderFile(empty.localId, empty.file.file);
+  for (const empty of adopt) await adoptFolderFile(empty.file.id, empty.file.file);
 
   // Everything the folder does NOT hold yet goes out to it, so a sync leaves no
   // workspace living only in this browser. After the prompts: a workspace the
@@ -628,7 +633,7 @@ async function refreshActiveFile(
  * workspace was written from.
  */
 async function overwriteWholeFile(file: string, handle: FileSystemFileHandle | null, open: readonly { id: string }[], overwrite: OverwriteInFile): Promise<ActiveFileOutcome> {
-  for (const w of open) await overwrite(w.id, file, w.id);
+  for (const w of open) await overwrite(w.id, file);
   // What the file looks like NOW, plus the note that this database is not a copy
   // of it — the file may hold workspaces we did not write. See `recordDivergence`.
   const written = handle ? await factsOfHandle(handle) : null;

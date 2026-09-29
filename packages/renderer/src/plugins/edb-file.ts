@@ -1,4 +1,4 @@
-import type { ButtonSpec, CommandSpec, HostApi, PluginModule } from '@easydb/shared';
+import { normalizeWorkspaceDoc, type ButtonSpec, type CommandSpec, type HostApi, type PluginModule } from '@easydb/shared';
 import {
   EDB_EXTENSION,
   canPickFolder,
@@ -36,18 +36,10 @@ import { compareCopies, type CopyFacts } from '../db/edb/copy-facts.js';
 import { askAboutFile, mergeWithFile, type MergeContext } from '../db/edb/merge-file.js';
 import { PULL, PUSH } from '../db/edb/merge-answers.js';
 import { countWorkspaceContents } from '../db/delete-workspace.js';
-import { clearFolderIndex, isEmptyWorkspace } from '../db/edb/folder-index.js';
+import { clearFolderIndex, isEmptyWorkspace, listLabels, workspaceLabel } from '../db/edb/folder-index.js';
 import { createIpcDataStore } from '../db/data-store-bridge.js';
 import { adoptEdbFile, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
-import {
-  adoptFolderFile,
-  clearPendingSpaceRequest,
-  pendingSpaceRequest,
-  reloadActiveFromFile,
-  settleCopyQuestion,
-  takeComparisonRequest,
-  takeCopyQuestion,
-} from '../db/edb/space-adopt.js';
+import { adoptFolderFile, clearPendingSpaceRequest, pendingSpaceRequest, reloadActiveFromFile, settleCopyQuestion, takeComparisonRequest, takeCopyQuestion } from '../db/edb/space-adopt.js';
 import { alsoWroteNote, withoutTheirOwnFile, writableWholesale } from '../db/edb/one-per-file.js';
 import { installWriteGuard, writeUserBytes, type WriteGuardDeps } from '../db/edb/guarded-write.js';
 import { describeHolding, firstWarning, refusedNote, secondWarning, type Holding } from '../db/edb/empty-write.js';
@@ -150,20 +142,26 @@ const KEEP_BOTH = 'Keep both, under a new name';
 /** As much of a workspace record as a dropped file is asked for. */
 interface WorkspaceDoc {
   id: string;
-  name: string;
+  /** What the user calls it, when it carries one. Never derived from the id. */
+  title?: string | undefined;
   /** What that workspace holds inside the file — for the replace-or-keep-both question. */
   tables: number;
   views: number;
 }
 
 /**
- * The workspace records in a peeked file, as ids, names and sizes.
+ * The workspace records in a peeked file, as ids, titles and sizes.
  *
  * `peekWorkspaces` answers raw documents, and a file may have been written by
- * anything: a record with no usable id is dropped rather than trusted.
+ * anything: a record with no usable id is dropped rather than trusted. Through
+ * `normalizeWorkspaceDoc`, so a file written before v0.0.504 hands its `name`
+ * over as the title rather than losing it.
  */
 function workspaceDocs(raw: readonly PeekedWorkspace[]): WorkspaceDoc[] {
-  return raw.map((w) => ({ id: String(w.doc['id'] ?? ''), name: String(w.doc['name'] ?? w.doc['id'] ?? ''), tables: w.tables, views: w.views })).filter((w) => w.id !== '');
+  return raw
+    .map((w) => normalizeWorkspaceDoc(w.doc))
+    .map((doc, i) => ({ id: String(doc['id'] ?? ''), ...(typeof doc['title'] === 'string' && doc['title'] ? { title: doc['title'] } : {}), tables: raw[i]!.tables, views: raw[i]!.views }))
+    .filter((w) => w.id !== '');
 }
 
 /**
@@ -934,7 +932,7 @@ export function init(api: HostApi): void {
     let mode: 'fresh' | 'overwrite' | 'rename' = 'fresh';
     if (taken.has(source.id)) {
       const answer = await api.ui.dialogs.choice(
-        `"${source.name}" is already a workspace here. Replace what is in this browser with the copy from "${file.name}", or keep both?${await bothCopies(source, file)}`,
+        `"${workspaceLabel(source)}" is already a workspace here. Replace what is in this browser with the copy from "${file.name}", or keep both?${await bothCopies(source, file)}`,
         [OVERWRITE_LOCAL, KEEP_BOTH],
         'Open workspace file',
       );
@@ -981,12 +979,13 @@ export function init(api: HostApi): void {
    * file as an ordinary choice.
    */
   async function askWhichWorkspace(inside: readonly WorkspaceDoc[]): Promise<WorkspaceDoc | null> {
-    const pick = await api.ui.dialogs.choice(
-      'This file holds more than one workspace, which a workspace file is not supposed to. Which one should come in?',
-      inside.map((w) => w.name),
-      'Open workspace file',
-    );
-    return inside.find((w) => w.name === pick) ?? null;
+    // Labels, then matched back by POSITION. Two workspaces in one file may carry
+    // the same title — that is ordinary now that a title is free text — and a
+    // `find` on the answer would always return the first of them.
+    const labels = listLabels(inside);
+    const pick = await api.ui.dialogs.choice('This file holds more than one workspace, which a workspace file is not supposed to. Which one should come in?', labels, 'Open workspace file');
+    if (!pick) return null;
+    return inside[labels.indexOf(pick)] ?? null;
   }
 
   /**
@@ -1010,7 +1009,7 @@ export function init(api: HostApi): void {
     try {
       await scratch.open(bytes, DROP_SCRATCH);
       if (mode === 'overwrite') await deleteWorkspace(storeBridge(), target);
-      if (mode === 'rename') await cloneWorkspace(scratch, { from: source.id, to: target, name: target, mode: 'all' });
+      if (mode === 'rename') await cloneWorkspace(scratch, { from: source.id, to: target, title: source.title, mode: 'all' });
       const from = createIpcDataStore(scratch, () => target);
       const to = createIpcDataStore(storeBridge(), () => target);
       const result = await copyWorkspace(from, to, target, (p) => setAppProgress({ label: `Opening ${fileName}`, detail: p.label }));
@@ -1103,7 +1102,7 @@ export function init(api: HostApi): void {
    * worker in this tab cannot install one. `buildEdbFile` relies on the same
    * thing. The scratch name keeps its mirror away from any real database's.
    */
-  async function overwriteInFile(dir: FileSystemDirectoryHandle, workspaceId: string, file: string, fileWorkspaceId = workspaceId): Promise<void> {
+  async function overwriteInFile(dir: FileSystemDirectoryHandle, workspaceId: string, file: string): Promise<void> {
     const handle = await fileInFolder(dir, file, false);
     if (!handle || !(await ensureWritable(handle, true))) {
       await api.ui.dialogs.alert(`easyDBAccess may not write ${file}.`, 'Sync workspace folder');
@@ -1112,11 +1111,11 @@ export function init(api: HostApi): void {
     const scratch = createEdbBridge();
     try {
       await scratch.open(await readBytes(handle), SYNC_SCRATCH);
-      // What comes OUT is the file's own copy, which a name-matched clash may hold
-      // under a different id. Deleting the local id instead would leave the file
-      // holding both — the very thing `one-per-file.ts` is there to prevent.
-      await scratch.deleteWorkspace?.(fileWorkspaceId);
-      if (fileWorkspaceId !== workspaceId) await scratch.deleteWorkspace?.(workspaceId);
+      // One id, because a clash is matched on the id now. This used to take the
+      // file's id separately and delete both, since a NAME-matched clash could pair
+      // two workspaces whose ids differed — and then the file had to be cleared of
+      // each, or it would come out holding both.
+      await scratch.deleteWorkspace?.(workspaceId);
       await copyWorkspace(
         api.store,
         createIpcDataStore(scratch, () => workspaceId),
@@ -1156,10 +1155,13 @@ export function init(api: HostApi): void {
     const scratch = createEdbBridge();
     try {
       await scratch.open(await readBytes(handle), SYNC_SCRATCH);
+      // The title travels WITH the clone. It used to be read out and patched back
+      // afterwards, because a clone carried only the id and the `name` that
+      // followed it — there is no such field now, and the title is the one thing
+      // a rename must not drop.
       const before = (await scratch.findOne('workspaces', from)) as { title?: unknown } | null;
-      const title = typeof before?.title === 'string' ? before.title : '';
-      await cloneWorkspace(scratch, { from, to, name: to, mode: 'all' });
-      if (title) await scratch.patch('workspaces', to, { title });
+      const title = typeof before?.title === 'string' && before.title ? before.title : '';
+      await cloneWorkspace(scratch, { from, to, ...(title ? { title } : {}), mode: 'all' });
       await scratch.deleteWorkspace?.(from);
       if (!(await writeUserFile(handle, await scratch.export(), file, 'Rename the workspace in a file'))) return false;
       api.ui.dialogs.toast(`The workspace in ${file} is now "${to}".`, { kind: 'success' });
@@ -1245,10 +1247,16 @@ export function init(api: HostApi): void {
     }
     const dir = await workspaceFolder();
     if (!dir) return;
-    const { outcome, file } = await syncActiveWorkspace(dir, api.store, api.ui.dialogs, (localId, name, fileId) => overwriteInFile(dir, localId, name, fileId), async (handle, mode) => {
-      const ctx = mergeContext(handle);
-      return ctx ? (await mergeWithFile(ctx, mode)).merged : false;
-    });
+    const { outcome, file } = await syncActiveWorkspace(
+      dir,
+      api.store,
+      api.ui.dialogs,
+      (workspaceId, name) => overwriteInFile(dir, workspaceId, name),
+      async (handle, mode) => {
+        const ctx = mergeContext(handle);
+        return ctx ? (await mergeWithFile(ctx, mode)).merged : false;
+      },
+    );
 
     // This tab is on the browser's own database, so there is no file to sync
     // with. Named as the next step rather than as a refusal: a Save into the
@@ -1270,7 +1278,7 @@ export function init(api: HostApi): void {
       dir,
       api.store,
       api.ui.dialogs,
-      (localId, file, fileId) => overwriteInFile(dir, localId, file, fileId),
+      (workspaceId, file) => overwriteInFile(dir, workspaceId, file),
       // The other half of the sync: a workspace this browser holds and the folder
       // does not gets written out, so connecting a folder leaves nothing behind.
       // Empty ones are skipped — `?space=x` makes a shell before any folder is

@@ -221,9 +221,9 @@ async function fileHoldingWorkspace(page: Page, workspaceId: string, file: strin
       const { fileInFolder, writeBytes } = await import('/src/db/edb/file-handle.ts');
       const scratch = createEdbBridge();
       try {
-        await scratch.open(null, '__fixture.edb');
+        await scratch.open(null, '__fixture.edb', { scratch: true });
         const store = createIpcDataStore(scratch, () => ws);
-        await store.workspaces.insert({ id: ws, name: ws, createdAt: Date.now(), pluginUrls: [] });
+        await store.workspaces.insert({ id: ws, createdAt: Date.now(), pluginUrls: [] });
         await store.tables.insert({ id: `${ws}-${table}`, workspaceId: ws, name: table, code: '', columns: [{ field: 'part', type: 'string' }], view: 'table' });
         const root = await navigator.storage.getDirectory();
         const dir = await root.getDirectoryHandle(folder, { create: true });

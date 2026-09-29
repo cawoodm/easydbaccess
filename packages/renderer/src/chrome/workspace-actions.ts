@@ -194,8 +194,8 @@ export async function newWorkspaceFlow(): Promise<void> {
   // Create the workspace here rather than letting init() do it on first load:
   // only this side knows what to copy, and the copy must be in place before the
   // new workspace boots.
-  await cloneWorkspace(storeBridge(), { from: ctx.workspaceId, to: slugifyWorkspace(name), name, mode });
-  openWorkspace(name);
+  await cloneWorkspace(storeBridge(), { from: ctx.workspaceId, to: slugifyWorkspace(name), title: name, mode });
+  openWorkspace(slugifyWorkspace(name));
 }
 
 /**
@@ -222,11 +222,11 @@ async function newFileWorkspace(dialogs: Dialogs, name: string): Promise<void> {
   const target = await edbTargetNamed(dialogs, `${id}${EDB_EXTENSION}`);
   if (!target) return;
   await buildEdbFile(target, id, async (store) => {
-    await store.workspaces.insert({ id, name, createdAt: Date.now(), pluginUrls: [] });
+    await store.workspaces.insert({ id, ...(name === id ? {} : { title: name }), createdAt: Date.now(), pluginUrls: [] });
   });
   await adoptEdbFile(target);
   await dialogs.alert(`"${name}" now lives in ${target.name}. The page will reload.`, 'New workspace');
-  openWorkspace(name);
+  openWorkspace(id);
 }
 
 /**
@@ -239,12 +239,13 @@ async function newFileWorkspace(dialogs: Dialogs, name: string): Promise<void> {
  * something else entirely.
  *
  * The title alone is not enough either: two workspaces may carry one title, which
- * is exactly the state that makes the question worth reading. So the technical name
- * comes along whenever it differs, the same qualifier the selector shows.
+ * is exactly the state that makes the question worth reading. So the ID comes
+ * along whenever it differs — the same qualifier the selector shows, and the name
+ * of the file about to be emptied.
  */
-function quoteWorkspace(w: { name: string; title?: string | undefined }): string {
+function quoteWorkspace(w: { id: string; title?: string | undefined }): string {
   const label = workspaceLabel(w);
-  return label === w.name ? `"${label}"` : `"${label}" (${w.name})`;
+  return label === w.id ? `"${label}"` : `"${label}" (${w.id})`;
 }
 
 /**
@@ -280,6 +281,6 @@ export async function deleteWorkspaceFlow(): Promise<void> {
   forgetLastWorkspace(target.id);
 
   const survivor = all.find((w) => w.id !== target.id);
-  if (survivor) openWorkspace(survivor.name);
+  if (survivor) openWorkspace(survivor.id);
   else openResolvedWorkspace();
 }

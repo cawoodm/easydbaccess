@@ -30,7 +30,7 @@ describe('indexFromScan', () => {
     const index = indexFromScan(
       scan({
         files: [
-          { file: 'a.edb', size: 10, mtime: 1, workspaces: [{ id: 'a', name: 'A', tables: 1, views: 0 }] },
+          { file: 'a.edb', size: 10, mtime: 1, workspaces: [{ id: 'a', title: 'A', tables: 1, views: 0 }] },
           { file: 'off.edb', size: 20, mtime: 2, workspaces: [] },
         ],
       }),
@@ -44,18 +44,18 @@ describe('indexFromScan', () => {
   it('gives each workspace its own file, and its file its size and date', () => {
     const index = indexFromScan(
       scan({
-        files: [{ file: 'two.edb', size: 4096, mtime: 99, workspaces: [{ id: 'x', name: 'X', tables: 2, views: 1 }] }],
+        files: [{ file: 'two.edb', size: 4096, mtime: 99, workspaces: [{ id: 'x', title: 'X', tables: 2, views: 1 }] }],
       }),
     );
-    expect(index.workspaces).toEqual([{ id: 'x', name: 'X', file: 'two.edb', tables: 2, views: 1, size: 4096, mtime: 99 }]);
+    expect(index.workspaces).toEqual([{ id: 'x', title: 'X', file: 'two.edb', tables: 2, views: 1, size: 4096, mtime: 99 }]);
   });
 
   it('keeps a title when there is one and omits the key when there is not', () => {
     const index = indexFromScan(
       scan({
         files: [
-          { file: 'a.edb', size: 1, mtime: 1, workspaces: [{ id: 'a', name: 'a', title: 'Sales', tables: 0, views: 0 }] },
-          { file: 'b.edb', size: 1, mtime: 1, workspaces: [{ id: 'b', name: 'b', tables: 0, views: 0 }] },
+          { file: 'a.edb', size: 1, mtime: 1, workspaces: [{ id: 'a', title: 'Sales', tables: 0, views: 0 }] },
+          { file: 'b.edb', size: 1, mtime: 1, workspaces: [{ id: 'b', tables: 0, views: 0 }] },
         ],
       }),
     );
@@ -76,8 +76,8 @@ describe('indexFromScan', () => {
             size: 8,
             mtime: 3,
             workspaces: [
-              { id: 'one', name: 'One', tables: 1, views: 0 },
-              { id: 'two', name: 'Two', tables: 2, views: 0 },
+              { id: 'one', title: 'One', tables: 1, views: 0 },
+              { id: 'two', title: 'Two', tables: 2, views: 0 },
             ],
           },
         ],

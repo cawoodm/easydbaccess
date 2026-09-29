@@ -122,7 +122,6 @@ function wrap(db: IDBDatabase): LegacyDb {
 /** What one stranded workspace holds, for the offer and the conflict prompt. */
 export interface LegacyWorkspaceSummary {
   id: string;
-  name: string;
   title?: string | undefined;
   tables: number;
   rows: number;
@@ -152,7 +151,7 @@ export async function summariseLegacy(db: LegacyDb): Promise<LegacySummary> {
     let ownRows = 0;
     for (const t of own) ownRows += await db.countByIndex('rows', 'tableId', t.id);
     const views = (await db.byIndex<ViewInstance>('viewInstances', 'workspaceId', w.id)).length;
-    out.push({ id: w.id, name: w.name, title: w.title, tables: own.length, rows: ownRows, views });
+    out.push({ id: w.id, title: w.title, tables: own.length, rows: ownRows, views });
     tables += own.length;
     rows += ownRows;
   }

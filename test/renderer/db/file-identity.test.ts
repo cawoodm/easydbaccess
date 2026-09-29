@@ -4,7 +4,7 @@ import type { FolderWorkspace } from '../../../packages/renderer/src/db/edb/fold
 
 /** One scanned workspace. Only the fields the rule reads have to be real. */
 function found(file: string, id: string, extra: Partial<FolderWorkspace> = {}): FolderWorkspace {
-  return { id, name: id, file, ...extra };
+  return { id, file, ...extra };
 }
 
 describe('fileIdentities', () => {

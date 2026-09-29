@@ -8,6 +8,7 @@ export * from './filter-sql.js';
 export * from './filter-range.js';
 export * from './sql-mapping.js';
 export * from './setting-key.js';
+export * from './workspace-id.js';
 export * from './change-scope.js';
 export * from './sql-run.js';
 export * from './sql-split.js';

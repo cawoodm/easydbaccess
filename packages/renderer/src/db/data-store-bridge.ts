@@ -66,7 +66,7 @@ export interface EasydbStoreBridge {
    */
   countWorkspaceContents?(workspaceId: string, opts?: { countRows?: boolean | undefined }): Promise<WorkspaceContents>;
   deleteWorkspace?(workspaceId: string): Promise<WorkspaceContents>;
-  cloneWorkspace?(opts: { from: string; to: string; name: string; mode: CloneMode }): Promise<string>;
+  cloneWorkspace?(opts: { from: string; to: string; title?: string | undefined; mode: CloneMode }): Promise<string>;
   findOne(coll: string, key: string): Promise<unknown | null>;
   insert(coll: string, doc: Record<string, unknown>): Promise<unknown>;
   bulkInsert(coll: string, docs: Record<string, unknown>[]): Promise<unknown[]>;
@@ -249,13 +249,12 @@ export interface EasydbDbBridge {
   /** One file name turned back into a path this app can open. */
   folderFilePath?(file: string): Promise<string | null>;
   /** Write a new `.edb` in the folder holding one empty workspace. Answers its path. */
-  newWorkspaceFile?(id: string, name: string): Promise<string | null>;
+  newWorkspaceFile?(id: string, title?: string): Promise<string | null>;
 }
 
 /** One workspace a folder scan found inside one file. */
 export interface EasydbFolderWorkspaceInfo {
   id: string;
-  name: string;
   title?: string | undefined;
   tables: number;
   views: number;
@@ -452,10 +451,7 @@ function rowsViewIpc(bridge: EasydbStoreBridge, tableId: string): DataCollection
       ? {
           bulkUpdate: async (docs: Row[]): Promise<void> => {
             if (docs.length === 0) return;
-            await bridge.bulkUpdate!(
-              'rows',
-              docs.map((d) => ({ ...d, tableId })) as unknown as Record<string, unknown>[],
-            );
+            await bridge.bulkUpdate!('rows', docs.map((d) => ({ ...d, tableId })) as unknown as Record<string, unknown>[]);
           },
         }
       : {}),

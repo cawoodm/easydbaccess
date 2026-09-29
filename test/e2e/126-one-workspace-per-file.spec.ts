@@ -43,7 +43,7 @@ function saveButton(page: Page) {
 async function addWorkspace(page: Page, id: string): Promise<void> {
   await page.evaluate(async (wsId) => {
     const ctx = (window as unknown as { __easydb: { store: { workspaces: { upsert(doc: unknown): Promise<unknown> } } } }).__easydb;
-    await ctx.store.workspaces.upsert({ id: wsId, name: wsId, createdAt: Date.now(), pluginUrls: [] });
+    await ctx.store.workspaces.upsert({ id: wsId, createdAt: Date.now(), pluginUrls: [] });
   }, id);
 }
 

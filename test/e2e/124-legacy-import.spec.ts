@@ -94,7 +94,7 @@ async function readWorkspace(page: Page, workspaceId: string) {
   return page.evaluate(async (id: string) => {
     const ctx = (window as unknown as { __easydb: { store: Record<string, never> } }).__easydb as unknown as {
       store: {
-        workspaces: { find(): Promise<Array<{ id: string; name: string; title?: string }>> };
+        workspaces: { find(): Promise<Array<{ id: string; title?: string }>> };
         tables: { find(q: { workspaceId: string }): Promise<Array<{ id: string; name: string }>> };
         rows(tableId: string): { find(): Promise<Array<{ id: string; data: Record<string, unknown> }>> };
         viewInstances: { find(q: { workspaceId: string }): Promise<Array<{ id: string; tableId: string; templateId: string }>> };

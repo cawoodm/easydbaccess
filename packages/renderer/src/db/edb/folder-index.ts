@@ -20,7 +20,6 @@ import type { WorkspaceContents } from '@easydb/shared';
 /** One workspace found in one file in the folder. */
 export interface FolderWorkspace {
   id: string;
-  name: string;
   title?: string | undefined;
   /** The `.edb` in the connected folder that holds it. */
   file: string;
@@ -173,7 +172,6 @@ export function activeWorkspaces(indexed: readonly FolderWorkspace[], selection:
 /** A workspace as the selector needs to show it. */
 export interface ListEntry {
   id: string;
-  name: string;
   /** The display title, when the workspace has one. See {@link workspaceLabel}. */
   title?: string | undefined;
   /**
@@ -188,13 +186,18 @@ export interface ListEntry {
 /**
  * What to CALL a workspace on screen.
  *
- * `title` is the display name and `name` is the technical one `?space=` routes on
- * (see `types.ts`), so everything a user reads goes through here — the selector
- * showed `name` and went on showing it after a title edit, which reads as the edit
- * not having taken. A blank title is no title, matching the header.
+ * `title` is what the user calls it and `id` is the technical name `?space=`
+ * routes on (see `types.ts`), so everything a user reads goes through here — the
+ * selector showed the technical one and went on showing it after a title edit,
+ * which reads as the edit not having taken. A blank title is no title, matching
+ * the header.
+ *
+ * The fallback is the ID, which is also the file name. It used to be `name`, a
+ * third identifier that was minted from the same slug and then free to drift
+ * from both.
  */
-export function workspaceLabel(w: { name: string; title?: string | undefined }): string {
-  return w.title?.trim() || w.name;
+export function workspaceLabel(w: { id: string; title?: string | undefined }): string {
+  return w.title?.trim() || w.id;
 }
 
 const byLabel = (a: ListEntry, b: ListEntry) => workspaceLabel(a).localeCompare(workspaceLabel(b));
@@ -211,10 +214,10 @@ const byLabel = (a: ListEntry, b: ListEntry) => workspaceLabel(a).localeCompare(
  * still has to be readable. The reported case: two rows both saying "PowerPlants",
  * both in `powerplants.edb`, and no way to tell which is which.
  *
- * The qualifier is the TECHNICAL NAME, which is what `?space=` routes on and what
- * the delete prompt quotes — so a qualified row reads the same way as the question
- * that comes next. Where several in one file share that too, the id is the last
- * thing they cannot share.
+ * The qualifier is the ID, which is what `?space=` routes on, what the delete
+ * prompt quotes and what the file is named after — so a qualified row reads the
+ * same way as the question that comes next. It is also the last thing two
+ * workspaces in one database cannot share: it is their primary key.
  */
 export function listLabels(entries: readonly ListEntry[]): string[] {
   // Grouped by what a user can see: the label plus the file it lives in. An entry
@@ -230,10 +233,9 @@ export function listLabels(entries: readonly ListEntry[]): string[] {
   return entries.map((e) => {
     const group = groups.get(key(e)) ?? [e];
     if (group.length < 2) return workspaceLabel(e);
-    const names = new Set(group.map((g) => g.name));
-    const qualifier = names.size === group.length ? e.name : e.id;
-    // A title that is already the technical name gains nothing from repeating it.
-    return qualifier === workspaceLabel(e) ? workspaceLabel(e) : `${workspaceLabel(e)} (${qualifier})`;
+    // A label that is already the id gains nothing from repeating it: that is an
+    // entry with no title, whose label IS what the qualifier would say.
+    return workspaceLabel(e) === e.id ? e.id : `${workspaceLabel(e)} (${e.id})`;
   });
 }
 
@@ -260,39 +262,36 @@ function elsewhere(indexed: FolderWorkspace[], activeFile: string): FolderWorksp
  * The open database's workspaces come first and unqualified, then everything the
  * folder holds elsewhere, each labelled with its file.
  *
- * A name in BOTH appears twice, on purpose. `Cancel` at the conflict prompt means
- * "leave both", so both have to stay reachable — and the file qualifier is what
- * tells them apart, since the name cannot.
+ * A workspace in BOTH appears twice, on purpose. `Cancel` at the conflict prompt
+ * means "leave both", so both have to stay reachable — and the file qualifier is
+ * what tells them apart, since the id is the same on both sides.
  */
-export function mergeWorkspaceList(open: readonly { id: string; name: string; title?: string | undefined }[], indexed: readonly FolderWorkspace[], activeFile: string): ListEntry[] {
+export function mergeWorkspaceList(open: readonly { id: string; title?: string | undefined }[], indexed: readonly FolderWorkspace[], activeFile: string): ListEntry[] {
   // `title` is omitted rather than set to undefined when there is none:
   // `exactOptionalPropertyTypes` is on, and an absent key is what the callers
   // compare against.
-  const entry = <T extends { id: string; name: string; title?: string | undefined }>(w: T): ListEntry => ({ id: w.id, name: w.name, ...(w.title === undefined ? {} : { title: w.title }) });
+  const entry = <T extends { id: string; title?: string | undefined }>(w: T): ListEntry => ({ id: w.id, ...(w.title === undefined ? {} : { title: w.title }) });
   const mine = [...open].map(entry).sort(byLabel);
   return [...mine, ...elsewhere([...indexed], activeFile).map((w) => ({ ...entry(w), file: w.file }))];
 }
 
 /**
- * One workspace that exists on both sides, and the two ids it goes by.
+ * One workspace that exists on both sides: here, and in a file in the folder.
  *
- * The ids are kept apart because they need not agree. Matching is on the NAME —
- * the technical field the user manages — and two workspaces can carry one name
- * under different ids: `freeWorkspaceId` mints `sales-2` when `sales` is taken,
- * and a rename moves the name without moving the id. Whoever acts on a clash
- * needs both: the local id says what to write, the file's id says what to
- * replace inside that file.
+ * ONE id, on `file.id`. This used to carry two — the local one and the file's —
+ * because a clash was matched on `name`, a third identifier that could pair two
+ * workspaces whose ids differed. With `name` gone the id is the identity on both
+ * sides, so a second one would be the same value under another label: exactly the
+ * kind of duplicate that made this bug.
  */
 export interface FolderClash {
   /** The copy in the folder, as the scan found it. */
   file: FolderWorkspace;
-  /** The id of the workspace HERE that carries the same name. */
-  localId: string;
 }
 
-/** The name two copies are matched by. Case-insensitive, like the file names. */
-function nameKey(name: string): string {
-  return name.trim().toLowerCase();
+/** The id two copies are matched by. Case-insensitive, like the file names. */
+function idKey(id: string): string {
+  return id.trim().toLowerCase();
 }
 
 /**
@@ -301,22 +300,23 @@ function nameKey(name: string): string {
  * This is what gets a prompt, one per workspace: two copies of one workspace
  * exist and only the user knows which is the real one.
  *
- * Matched on `name`, not on `id`. The id is a slug of the name, so the two agreed
- * for as long as nothing renamed anything — and then quietly stopped: a renamed
- * workspace kept an id spelling a name it no longer has, and its copy in the
- * folder was treated as a different workspace and listed twice. The name is the
- * field the user manages, so it is the one they mean by "the same workspace".
+ * Matched on the ID, which is now the only thing a workspace is identified by.
  *
- * The first local workspace of a name wins where several share one. That is a
- * state the app does not make, and picking one beats asking about each pairing.
+ * It used to match on `name`, a third identifier minted from the same slug as the
+ * id and then free to drift from it — so "the same workspace" was a question with
+ * two answers that disagreed the moment anything was renamed. With `name` gone
+ * the question has one answer, and it is the one the file name also gives.
+ *
+ * Case-insensitive, like every other comparison in this layer: two ids differing
+ * only in case are one file on Windows.
  */
-export function folderConflicts(open: readonly { id: string; name: string }[], indexed: readonly FolderWorkspace[], activeFile: string): FolderClash[] {
+export function folderConflicts(open: readonly { id: string }[], indexed: readonly FolderWorkspace[], activeFile: string): FolderClash[] {
   const here = new Map<string, string>();
-  for (const w of open) if (!here.has(nameKey(w.name))) here.set(nameKey(w.name), w.id);
+  for (const w of open) if (!here.has(idKey(w.id))) here.set(idKey(w.id), w.id);
   const out: FolderClash[] = [];
   for (const w of elsewhere([...indexed], activeFile)) {
-    const localId = here.get(nameKey(w.name));
-    if (localId) out.push({ file: w, localId });
+    const localId = here.get(idKey(w.id));
+    if (localId) out.push({ file: w });
   }
   return out;
 }
@@ -371,6 +371,6 @@ export function isEmptyWorkspace(c: WorkspaceContents): boolean {
 export function partitionConflicts(clashes: readonly FolderClash[], emptyLocally: ReadonlySet<string>): { adopt: FolderClash[]; ask: FolderClash[] } {
   const adopt: FolderClash[] = [];
   const ask: FolderClash[] = [];
-  for (const c of clashes) (emptyLocally.has(c.localId) ? adopt : ask).push(c);
+  for (const c of clashes) (emptyLocally.has(c.file.id) ? adopt : ask).push(c);
   return { adopt, ask };
 }

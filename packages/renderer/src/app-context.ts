@@ -146,7 +146,7 @@ async function init(): Promise<AppContext> {
   let workspaceId: string;
   if (requested) {
     const id = slugifyWorkspace(requested);
-    const hit = existing.find((w) => w.id === id || w.name === requested);
+    const hit = existing.find((w) => w.id === id);
     if (hit) {
       workspaceId = hit.id;
     } else {
@@ -168,7 +168,10 @@ async function init(): Promise<AppContext> {
       if (!mayCreateWorkspaceIn(activeEdbName(), id)) await leaveFileForIndex(id);
       const created = await store.workspaces.insert({
         id,
-        name: requested,
+        // What was ASKED for becomes the title, where it is not simply the id
+        // spelled out. `?space=Power Plants` means the workspace `power-plants`,
+        // and the words the user wrote are worth keeping as what it is called.
+        ...(requested === id ? {} : { title: requested }),
         createdAt: Date.now(),
         pluginUrls: [],
       });
@@ -184,7 +187,6 @@ async function init(): Promise<AppContext> {
     } else {
       const ws = await store.workspaces.insert({
         id: 'default',
-        name: 'default',
         createdAt: Date.now(),
         pluginUrls: [],
       });
