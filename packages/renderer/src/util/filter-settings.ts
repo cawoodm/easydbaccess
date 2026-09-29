@@ -16,7 +16,7 @@
 // filters stored INSIDE the `.edb` mean. Device-local would make the same file
 // show different rows on two machines.
 
-import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
+import { SETTINGS_CHANGED_EVENT, settingsChangeAffects, type SettingsChangedDetail } from '../db/settings-events.js';
 import { GRID_SETTINGS_ID } from '../table/grid-settings.js';
 
 export const DEFAULT_SUBSTRING_KEY = 'defaultSubstring';
@@ -60,7 +60,7 @@ export function startFilterDefaults(settings: SettingsReader): () => void {
   if (typeof document === 'undefined') return () => {};
   const onChange = (e: Event) => {
     const detail = (e as CustomEvent<SettingsChangedDetail>).detail;
-    if (detail?.pluginId !== GRID_SETTINGS_ID) return;
+    if (!settingsChangeAffects(detail, GRID_SETTINGS_ID)) return;
     void readDefaultSubstring(settings).then(setDefaultSubstring);
   };
   document.addEventListener(SETTINGS_CHANGED_EVENT, onChange);

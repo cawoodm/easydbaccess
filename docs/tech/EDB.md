@@ -12,14 +12,22 @@ browser tab opens on the desktop and back again.
 
 ## Two extensions, and the difference is the invariant
 
-| Extension | What it is                                          | Workspaces                                  | Where                                                |
-| --------- | --------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------- |
-| `.edb`    | A workspace file the user owns                      | **exactly one**, the one the file name says | the user's workspace folder, or anywhere they put it |
-| `.edp`    | The **project index** — this browser's own database | any number                                  | the origin-private OPFS pool, never on disk          |
+| Extension | What it is                                            | Workspaces                                  | Where                                                |
+| --------- | ----------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------- |
+| `.edb`    | A workspace file the user owns                        | **exactly one**, the one the file name says | the user's workspace folder, or anywhere they put it |
+| `.edp`    | The **project index** — this browser's own database   | any number                                  | the origin-private OPFS pool                         |
+| `.edp`    | The **device state** — `_easydb.edp`                  | **none**                                    | the user's workspace folder                          |
 
 Same format, same store, same code: `.edp` is not a second file type, it is the
-one database that is allowed to hold several workspaces. `index.edp` is its only
-name (`INDEX_DB_NAME`), and no user ever sees it.
+extension for a database that is **not one workspace**. That covers both the
+index, which holds many, and the device-state file, which holds none.
+`index.edp` is the index's only name (`INDEX_DB_NAME`), and no user ever sees it.
+
+`_easydb.edp` is what makes a folder portable — see
+[Device state travels with the folder](#device-state-travels-with-the-folder).
+It gets the same extension for the same reason the index does: everything that
+enumerates a folder for workspaces matches `.edb` (`listWorkspaceFiles`), so a
+file that holds none is skipped without a single exclusion rule to keep correct.
 
 **The extension is load-bearing.** Up to v0.0.427 the index was called
 `local.edb`, so "a `.edb` holds one workspace" was false of the database the app
@@ -280,6 +288,92 @@ The first time a workspace goes into a file, the app asks for a **folder**
 
 All of it is also reachable from **Connect → Local Data**, which is the same
 folder plus the switch below. See "Which files this device uses".
+
+## Device state travels with the folder
+
+The data came across in the `.edb` files; the SETUP did not. Everything
+device-local lived in `localStorage`, which is per ORIGIN — so the same folder
+opened in another browser, on another machine, in a private window, or after
+site data was cleared had no preferences, no tokens and no machine URLs, and the
+user typed them all again. Moving the folder to a new disk did the same, because
+nothing in the folder said what the setup was.
+
+`_easydb.edp` in the folder carries it (`db/edb/device-state.ts`). The only thing
+that stays in the browser is **where the folder is** — the one thing that cannot
+live inside it.
+
+**Two layers, both always written.** `user-settings.ts` reads and writes through
+an installable `StorageLike`; `deviceStorage()` is that shim. It writes to
+`localStorage` AND to an in-memory mirror of the file, and reads the mirror
+first. With no folder connected the mirror is empty and the shim is plain
+`localStorage`, so nothing has to branch on whether a folder exists.
+
+That gating is not decoration. The mirror was populated with no folder connected
+at first, which made it a second cache in front of `localStorage` that nothing
+could clear — `89-new-plugins` ("a mention survives the device layer being
+wiped") wipes the key and expects the app to have forgotten, and the mirror went
+on answering.
+
+**Adopting a folder moves state both ways** (`mergeDeviceState`, pure):
+
+- the **folder wins** where both sides hold a key — that is the whole feature;
+- the **browser seeds** a key the folder does not hold yet, so the first connect
+  after this shipped carried an existing setup INTO the folder instead of
+  resetting it to defaults.
+
+**Every connect goes through `adoptDeviceFolder`**, and there are five: the
+folder command, both "there is nowhere to save this" answers, the reconnect
+prompt, and boot. The last two are the ones that are easy to miss — a browser
+without a persisted grant reaches the folder only through `workspaceFolder()`,
+on every visit, so adopting in the command alone would leave those users on
+their own device's settings forever. Re-adopting the folder already connected
+(`isSameEntry`) is a no-op, so a path that may or may not be a change can just
+call it.
+
+Adopting emits `ALL_SETTINGS` — `easydb:settings-changed` with `pluginId: '*'`.
+Without it, plugins keep the answers they read at load (`util/link-settings.ts`
+is the clearest case) and the app runs on its boot values until a reload. Every
+listener filters on its own plugin id, so they all ask
+`settingsChangeAffects(detail, MY_ID)` rather than comparing the id themselves:
+the obvious `!==` drops the one event that means "re-read everything".
+
+**Seeding stops at the secrets file** where the folder already has a device file
+(`SEED_ONLY_INTO_NEW`). A folder that carries one was set up somewhere else — a
+share, a hand-over, a synced drive — and copying this machine's tokens into it is
+a decision the user never made. Their own folder has none on the first connect,
+so they lose nothing. Reading a token OUT of a folder is unaffected; that is what
+the feature is for.
+
+**What it holds is a list, not "everything"** (`FOLDER_OWNED_KEYS`): the settings
+blob and the secrets file. A key belongs there only if losing it reads as "my
+setup is gone". A cache (`table/row-count-cache.ts`) or a per-tab marker
+(`session.ts`, the pool lock) is neither, and carrying those across would make
+two tabs fight over state that is correctly different in each.
+
+**Secrets are in it by an explicit decision.** They are API tokens, and a folder
+may be synced through Dropbox or handed to someone else. The trade is deliberate:
+without them, "connect the folder and it works" is false, because every connector
+still needs re-authenticating per device.
+
+The seed write is SCHEDULED, not awaited: connecting a folder is nearly always
+the first half of something else — a Save with nowhere to go, an Open — and
+making that wait on a second worker spinning up puts the user's own file behind
+ours. It was a real regression, not a theoretical one:
+`123-folder-file-refresh` saw its `.edb` still at zero bytes.
+
+Writes are coalesced (400 ms), flushed on `pagehide`, and go through
+`writeUserBytes` like every other write to a file the user owns. The empty-write
+guard cannot fire on it — that compares WORKSPACES, and this file holds none on
+either side — but routing around the door is how the next writer gets forgotten.
+Both the read and the write open a **throwaway** worker — the default, and never
+`pooled`: the `opfs-sahpool` VFS is exclusive origin-wide and the live session
+holds it, so a second worker asking for it breaks the session the user is looking
+at over a database nobody keeps. It is also what makes "a fresh database every
+time" true, instead of restoring the last mirror.
+
+Disconnecting the folder disconnects this too. Without that, every later settings
+write is still coalesced into a file in the folder the app was just told to
+forget, and starts failing silently the moment the grant lapses.
 
 ## Which files this device uses
 

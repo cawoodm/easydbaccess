@@ -20,7 +20,9 @@ import { activeEdbName, adoptedFileName, reloadWithoutSpace, reloadWithSpace, se
 import { saveErrorMessage, saveErrorSummary } from '../db/edb/save-error.js';
 import { clearWriteDeclined, compareWithFile, factsOfHandle, markWriteDeclined, markLocalChanges, readStamp, recordAgreement, writeDeclined } from '../db/edb/file-stamp.js';
 import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
-import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
+import { SETTINGS_CHANGED_EVENT, settingsChangeAffects, type SettingsChangedDetail } from '../db/settings-events.js';
+import { adoptDeviceFolder, deviceStorage, disconnectDeviceState, onDeviceStateError } from '../db/edb/device-state.js';
+import { installDeviceStore } from '../db/user-settings.js';
 import { cloneWorkspace } from '../db/clone-workspace.js';
 import { deleteWorkspace } from '../db/delete-workspace.js';
 import { createAutosavePolicy, type AutosavePolicy } from '../db/edb/dirty.js';
@@ -382,6 +384,15 @@ export function init(api: HostApi): void {
   // dialog or the live worker itself.
   installWriteGuard(writeGuardDeps());
 
+  // The device layer reads and writes through the connected folder from here on.
+  // Installed unconditionally: with no folder connected the shim is `localStorage`
+  // and nothing behaves differently, so no caller has to ask which it is.
+  installDeviceStore(deviceStorage());
+  // A folder that stops taking the device state is invisible otherwise: this
+  // browser keeps working on its local copy, and only the NEXT device finds out,
+  // by being wrong.
+  onDeviceStateError((message) => api.ui.dialogs.toast(`The workspace folder would not take the device settings: ${message}`, { kind: 'warning', title: 'Local Data' }));
+
   async function fileTheStranded(opts: { skipEmpty?: boolean; includeActive?: boolean } = {}): Promise<string[]> {
     const dir = await connectedFolder();
     if (!dir) return [];
@@ -638,6 +649,7 @@ export function init(api: HostApi): void {
    */
   async function connectFolder(dir: FileSystemDirectoryHandle): Promise<void> {
     await rememberFolder(dir);
+    await adoptDeviceFolder(dir);
     await refreshFileCommands();
   }
 
@@ -1214,6 +1226,10 @@ export function init(api: HostApi): void {
     if ((await rememberedFolder()) === null) return;
     if (!(await api.ui.dialogs.confirm('Stop using this folder? Every file in it stays where it is — this app just forgets it may read them.', 'Local Data'))) return;
     await forgetFolder();
+    // Stop mirroring settings into it as well, or every later write is still
+    // coalesced into a file in the folder the app was just told to forget — and
+    // once the grant lapses that write starts failing with nothing on screen.
+    disconnectDeviceState();
     clearFolderIndex();
     window.dispatchEvent(new CustomEvent('easydb:folder-index-changed'));
     await refreshFileCommands();
@@ -1481,7 +1497,7 @@ export function init(api: HostApi): void {
    */
   document.addEventListener(SETTINGS_CHANGED_EVENT, (e) => {
     const detail = (e as CustomEvent<SettingsChangedDetail>).detail;
-    if (detail?.pluginId !== meta.id || detail.key !== AUTOSAVE_KEY) return;
+    if (!settingsChangeAffects(detail, meta.id, AUTOSAVE_KEY)) return;
     void (async () => {
       const on = (await api.settings.get(meta.id, AUTOSAVE_KEY)) === true;
       if (on === autosave.enabled()) return;
@@ -1781,6 +1797,9 @@ export async function load(api: HostApi): Promise<void> {
   // has already loaded from the pool. A Chrome user with a persisted grant reads
   // back `granted` and saves silently.
   const folderOk = folder ? await ensureWritable(folder, false) : false;
+  // A folder this browser is already allowed to read carries the device settings,
+  // so they are adopted before anything asks for one.
+  if (folder && folderOk) await adoptDeviceFolder(folder);
   let fileOk = false;
   if (adoptedFileName() !== null) {
     const remembered = await rememberedHandle();

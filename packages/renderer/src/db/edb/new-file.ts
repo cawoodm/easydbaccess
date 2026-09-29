@@ -14,6 +14,7 @@ import {
   rememberHandle,
   rememberedFolder,
 } from './file-handle.js';
+import { adoptDeviceFolder } from './device-state.js';
 import { writeUserBytes } from './guarded-write.js';
 import { edbBridge } from './active-bridge.js';
 import { factsOfHandle, recordAgreement } from './file-stamp.js';
@@ -45,11 +46,19 @@ export interface EdbTarget {
  */
 export async function workspaceFolder(): Promise<FileSystemDirectoryHandle | null> {
   const remembered = await rememberedFolder();
-  if (remembered && (await ensureWritable(remembered, true))) return remembered;
+  if (remembered && (await ensureWritable(remembered, true))) {
+    // The reconnect prompt comes through here, not through the folder command,
+    // and it is the ONLY connect a browser without a persisted grant ever makes.
+    // Adopting only in the command would leave those users on this device's
+    // settings forever. A second adopt of the same folder is a no-op.
+    await adoptDeviceFolder(remembered);
+    return remembered;
+  }
   if (!canPickFolder()) return null;
   const picked = await pickFolder();
   if (!picked) return null;
   await rememberFolder(picked);
+  await adoptDeviceFolder(picked);
   return picked;
 }
 

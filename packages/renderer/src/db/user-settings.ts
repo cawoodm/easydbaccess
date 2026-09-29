@@ -24,8 +24,23 @@ export interface StorageLike {
   removeItem(key: string): void;
 }
 
+/**
+ * The backing store when no shim is passed.
+ *
+ * Installed by `db/edb/device-state.ts` once a workspace folder is connected, so
+ * that the device layer is read from and written to the folder's `_easydb.edp`
+ * as well as this browser. Every function here goes through `store()`, so the
+ * whole module follows from this one line and no caller changes.
+ */
+let installed: StorageLike | null = null;
+
+export function installDeviceStore(s: StorageLike | null): void {
+  installed = s;
+}
+
 function store(shim?: StorageLike): StorageLike | null {
   if (shim) return shim;
+  if (installed) return installed;
   try {
     return globalThis.localStorage ?? null;
   } catch {

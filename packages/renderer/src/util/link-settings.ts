@@ -13,7 +13,7 @@
 // per-use read is not open to us: `safeUrl` runs inside a string replace and
 // `detectLink` inside a cell paint.
 
-import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
+import { SETTINGS_CHANGED_EVENT, settingsChangeAffects, type SettingsChangedDetail } from '../db/settings-events.js';
 import { DEFAULT_PROTOCOLS, parseProtocolPolicy, setProtocolPolicy } from './url-schemes.js';
 
 export const LINK_SETTINGS_ID = 'links';
@@ -48,7 +48,7 @@ export function startLinkPolicy(settings: SettingsReader): () => void {
   if (typeof document === 'undefined') return () => {};
   const onChange = (e: Event) => {
     const detail = (e as CustomEvent<SettingsChangedDetail>).detail;
-    if (detail?.pluginId !== LINK_SETTINGS_ID) return;
+    if (!settingsChangeAffects(detail, LINK_SETTINGS_ID)) return;
     void applyLinkPolicy(settings);
   };
   document.addEventListener(SETTINGS_CHANGED_EVENT, onChange);

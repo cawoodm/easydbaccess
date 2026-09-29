@@ -18,7 +18,7 @@ import { defaultSubstring, readDefaultSubstring, setDefaultSubstring } from '../
 import { matchesColumnFilter } from '@easydb/shared';
 import { FACET_MAX_LEN, FACET_MAX_OPTIONS, facetable, facetCounts, facetValues } from '../search/facet-values.js';
 import { GRID_SETTINGS_ID, readHighlightErrors, readHighlightNulls, readSortDescFirst, readWindowRowsFrom, WINDOW_ROWS_FROM_DEFAULT } from './grid-settings.js';
-import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
+import { SETTINGS_CHANGED_EVENT, settingsChangeAffects, type SettingsChangedDetail } from '../db/settings-events.js';
 import { readSortSpecs, sortRowsBySpecs } from './row-sort.js';
 import { sameFilterMap } from './filter-map.js';
 import { writeColumnDrag } from './column-drag.js';
@@ -767,7 +767,7 @@ export class DataTable extends LitElement {
 
   private onSettingsChanged = (e: Event) => {
     const d = (e as CustomEvent<SettingsChangedDetail>).detail;
-    if (d?.pluginId === GRID_SETTINGS_ID) void this.readGridSettings();
+    if (settingsChangeAffects(d, GRID_SETTINGS_ID)) void this.readGridSettings();
   };
 
   /** The grid preferences that are needed at paint time. Never throws. */

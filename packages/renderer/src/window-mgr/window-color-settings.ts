@@ -13,7 +13,7 @@
 // a change, because `createColorButton` builds its swatches inside a click
 // handler and `api.settings.get` is async.
 
-import { SETTINGS_CHANGED_EVENT, type SettingsChangedDetail } from '../db/settings-events.js';
+import { SETTINGS_CHANGED_EVENT, settingsChangeAffects, type SettingsChangedDetail } from '../db/settings-events.js';
 import { DEFAULT_WINDOW_COLOR_LIST, parseWindowColors, setWindowColors } from './window-color.js';
 
 export const WINDOWS_SETTINGS_ID = 'windows';
@@ -49,7 +49,7 @@ export function startWindowColors(settings: SettingsReader): () => void {
   if (typeof document === 'undefined') return () => {};
   const onChange = (e: Event) => {
     const detail = (e as CustomEvent<SettingsChangedDetail>).detail;
-    if (detail?.pluginId !== WINDOWS_SETTINGS_ID) return;
+    if (!settingsChangeAffects(detail, WINDOWS_SETTINGS_ID)) return;
     void applyWindowColors(settings);
   };
   document.addEventListener(SETTINGS_CHANGED_EVENT, onChange);

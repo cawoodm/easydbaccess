@@ -4,6 +4,7 @@
 
 ### Features
 
+- 🪶 Your settings and secrets live in the workspace folder, so connecting it on another browser or machine needs nothing typed again (v0.0.510)
 - ✨ A workspace has one technical name — the name of its file — and a title you set; the third name it carried is gone (v0.0.506)
 
 ### Bugs

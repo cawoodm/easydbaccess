@@ -25,10 +25,40 @@ export interface SettingsChangedDetail {
 export const SETTINGS_CHANGED_EVENT = 'easydb:settings-changed';
 
 /**
+ * "Assume nothing survived" — every listener re-reads.
+ *
+ * Raised where a whole LAYER was replaced under the app rather than one field
+ * written: adopting a connected folder's device state (`db/edb/device-state.ts`)
+ * swaps the answers to settings nobody named. A plugin id can never be this, so
+ * there is no id it can collide with.
+ */
+export const ALL_SETTINGS = '*';
+
+/**
  * Announce a write. A no-op without a `document` — reporting a change must never
  * be the thing that breaks the write it reports on.
  */
 export function emitSettingsChanged(pluginId: string, key: string): void {
   if (typeof document === 'undefined') return;
   document.dispatchEvent(new CustomEvent<SettingsChangedDetail>(SETTINGS_CHANGED_EVENT, { detail: { pluginId, key } }));
+}
+
+/** Everything changed at once. */
+export function emitAllSettingsChanged(): void {
+  emitSettingsChanged(ALL_SETTINGS, ALL_SETTINGS);
+}
+
+/**
+ * Does this event mean the caller's setting may have moved?
+ *
+ * Every listener filters on its own plugin id, so a listener that compares the
+ * id itself silently ignores {@link ALL_SETTINGS} — the change it most needs to
+ * hear. One helper, so a new listener cannot get that wrong by writing the
+ * obvious `!==`.
+ */
+export function settingsChangeAffects(detail: SettingsChangedDetail | undefined, pluginId: string, key?: string): boolean {
+  if (!detail) return false;
+  if (detail.pluginId === ALL_SETTINGS) return true;
+  if (detail.pluginId !== pluginId) return false;
+  return key === undefined || detail.key === key;
 }
