@@ -8,6 +8,7 @@ import { focusTableWindow } from '../window-mgr/table-window-manager.js';
 import { revealViewWindow } from '../window-mgr/view-window-manager.js';
 import { RECENT_SETTING, orderByRecent, pruneRecent, pushRecent, readRecent } from './palette-recent.js';
 import { orderByGroup } from './palette-groups.js';
+import { orderByRelevance } from './palette-rank.js';
 
 /** One selectable entry in the palette (flattened from commands/buttons/tables). */
 interface PaletteItem {
@@ -224,11 +225,22 @@ export class CommandPaletteDialog extends LitElement {
     return orderByGroup(orderByRecent(items, this.recentIds));
   }
 
+  /**
+   * The rows to draw: everything, or what the query matched — best title first.
+   *
+   * Matching stays generous (the haystack carries the group, the keywords and a
+   * button's tooltip, so `space` finds `Switch workspace`) but no longer decides
+   * the ORDER. With group rank alone, `workspace` listed Export, Save, Settings
+   * and SQL console — four buttons that only mention it in a tooltip — above the
+   * three commands with the word in their title. See `palette-rank.ts`.
+   *
+   * With nothing typed the order is untouched: Recent, then group rank.
+   */
   private get filtered(): PaletteItem[] {
     const raw = this.search.trim();
     if (!raw) return this.items;
     const hits = this.items.filter((it) => it.haystack.includes(raw.toLowerCase()));
-    return hits.length > 0 ? hits : this.fallbackItems(raw);
+    return hits.length > 0 ? orderByRelevance(hits, raw) : this.fallbackItems(raw);
   }
 
   /**

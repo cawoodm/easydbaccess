@@ -85,6 +85,34 @@ test('the palette carries switch, new and delete', async ({ page }) => {
   await expect(palette.locator('.group-head', { hasText: 'Workspace' })).toBeVisible();
 });
 
+/**
+ * The haystack matches a button's TOOLTIP, and `Export tables of this
+ * workspace`, `Save this workspace to its file` and `Workspace and plugin
+ * settings` all carry the word. Those three are `Actions`, which ranks second;
+ * the commands that say "workspace" on their face are in `Workspace`, which
+ * nothing ranks and which therefore came last. The user reads titles.
+ */
+test('typing a word lists the titles that carry it first', async ({ page }) => {
+  await page
+    .locator('app-shell header')
+    .getByTitle(/open the command palette/i)
+    .click();
+  const palette = page.locator('command-palette-dialog dialog');
+  await palette.locator('input').fill('workspace');
+
+  const titles = palette.locator('.item .title');
+  await expect(titles.first()).toHaveText(/workspace/i);
+
+  // No row that only mentions a workspace in its tooltip may come before one
+  // that says it in its title. Which GROUP leads is not asserted: several hold
+  // an equally good title match, and they are ordered among themselves exactly
+  // as an empty palette would order them.
+  const shown = await titles.allTextContents();
+  const named = shown.map((t) => /workspace/i.test(t));
+  const firstUnnamed = named.indexOf(false);
+  if (firstUnnamed !== -1) expect(named.slice(firstUnnamed)).not.toContain(true);
+});
+
 test('New workspace creates one and opens it', async ({ page }) => {
   await createTable(page, 'Feed', [{ field: 'title' }]);
 
