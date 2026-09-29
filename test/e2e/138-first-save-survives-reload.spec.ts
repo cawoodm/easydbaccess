@@ -126,7 +126,7 @@ test('a second workspace is not dragged into the file', async ({ page }) => {
   await waitForPanel(page, id);
   await page.evaluate(async () => {
     const app = (window as unknown as { __easydb: { store: { workspaces: { upsert(d: unknown): Promise<unknown> } } } }).__easydb;
-    await app.store.workspaces.upsert({ id: 'beta', name: 'beta', createdAt: Date.now(), pluginUrls: [] });
+    await app.store.workspaces.upsert({ id: 'beta', createdAt: Date.now(), pluginUrls: [] });
   });
   await firstSaveIntoAFolder(page);
 

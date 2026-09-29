@@ -35,7 +35,7 @@ async function edbBytes(page: Page, workspaceId: string, tableName: string): Pro
       try {
         await scratch.open(null, `source-${ws}.edb`, { scratch: true });
         const store = createIpcDataStore(scratch, () => ws);
-        await store.workspaces.insert({ id: ws, name: ws, createdAt: Date.now(), pluginUrls: [] });
+        await store.workspaces.insert({ id: ws, createdAt: Date.now(), pluginUrls: [] });
         const tableId = `${ws}-t`;
         await store.tables.insert({
           id: tableId,

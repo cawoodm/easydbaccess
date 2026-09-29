@@ -14,6 +14,7 @@ import { app, dialog, type BrowserWindow } from 'electron';
 import * as path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { SqliteStore, copyDatabase } from './sqlite-store';
+import { spaceFileName } from '@easydb/shared';
 import { prepareConvert, suggestConvertedName } from './db-convert';
 import { commitImport, previewImport, probeDatabaseFile, type DatabaseFileKind, type ImportDecision, type ImportedTableResult, type ImportPreview } from './db-import';
 
@@ -30,19 +31,22 @@ const DEFAULT_DB_NAME = 'easydbaccess.db';
 const DEFAULT_WORKSPACE_NAME = 'easydbaccess.edb';
 
 /**
- * `<workspace name>.edb` — the file name Save As proposes.
+ * `<workspace id>.edb` — the file name Save As proposes.
  *
- * Falls back to the generic name when the store holds no workspace yet, and
- * sanitises the name because a workspace may legally contain characters a file
- * name may not.
+ * Falls back to the generic name when the store holds no workspace yet. Nothing
+ * is sanitised any more: an id is a slug by construction, and the store refuses
+ * one that is not.
  */
 function workspaceFileName(): string {
   try {
-    const workspaces = getStore().find('workspaces') as Array<{ name?: string }>;
-    const name = workspaces[0]?.name?.trim();
-    if (!name) return DEFAULT_WORKSPACE_NAME;
-    const safe = name.replace(/[^a-zA-Z0-9 _-]+/g, '_').trim();
-    return `${safe || 'workspace'}.${WORKSPACE_EXTENSION}`;
+    // The ID, which since v0.0.506 IS the file name — and is already a slug, so
+    // there is nothing left to sanitise. It read `name` until then: a third
+    // identifier that no longer exists, so this silently proposed the generic
+    // name for every workspace, and Save As then pointed the store at a file
+    // whose name denied the workspace inside it.
+    const workspaces = getStore().find('workspaces') as Array<{ id?: string }>;
+    const id = workspaces[0]?.id?.trim();
+    return id ? spaceFileName(id) : DEFAULT_WORKSPACE_NAME;
   } catch {
     return DEFAULT_WORKSPACE_NAME;
   }

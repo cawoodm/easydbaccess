@@ -87,13 +87,18 @@ test.describe('general', () => {
     );
     expect(wsId).toBe(newName);
 
-    // The new workspace exists in the store, with the typed name.
+    // The new workspace exists in the store under the typed name, which is its
+    // ID — and the only identifier it has. A `name` sat beside it until v0.0.506,
+    // minted from the same slug and then free to drift from it.
     const ws = await page.evaluate(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       async (id) => (window as any).__easydb.store.workspaces.findOne(id),
       newName,
     );
-    expect(ws?.name).toBe(newName);
+    expect(ws?.id).toBe(newName);
+    // Typed text that IS its own slug needs no title: every screen falls back to
+    // the id, so storing it twice would be the duplication this change removed.
+    expect(ws?.title).toBeUndefined();
   });
 
   test('opening the app without ?space restores the last-active workspace', async ({ page, workspaceId }) => {

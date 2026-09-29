@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createWorkspaceFileIn, freeWorkspaceFileName, listWorkspaceFiles, peekWorkspaceFile, scanFolderAt } from '../../packages/electron/src/db-folder.js';
+import { createWorkspaceFileIn, freeWorkspaceIdIn, listWorkspaceFiles, peekWorkspaceFile, scanFolderAt } from '../../packages/electron/src/db-folder.js';
 import { SqliteStore } from '../../packages/electron/src/sqlite-store.js';
 
 /**
@@ -35,10 +35,10 @@ afterEach(() => {
 });
 
 /** A real workspace file with `tables` tables in it. */
-function makeWorkspace(file: string, id: string, opts: { name?: string; title?: string; tables?: number; views?: number } = {}): void {
+function makeWorkspace(file: string, id: string, opts: { title?: string; tables?: number; views?: number } = {}): void {
   const store = new SqliteStore({ path: join(dir, file) });
   try {
-    store.insert('workspaces', { id, name: opts.name ?? id, createdAt: Date.now(), pluginUrls: [], ...(opts.title ? { title: opts.title } : {}) });
+    store.insert('workspaces', { id, createdAt: Date.now(), pluginUrls: [], ...(opts.title ? { title: opts.title } : {}) });
     for (let i = 0; i < (opts.tables ?? 0); i++) {
       store.insert('tables', { id: `${id}-t${i}`, workspaceId: id, name: `t${i}`, columns: [{ field: 'a', label: 'A', type: 'string' }], view: 'table', updatedAt: Date.now() });
     }
@@ -72,9 +72,9 @@ describe('listWorkspaceFiles', () => {
 
 describe('peekWorkspaceFile', () => {
   it('reads the workspaces in a file, with what each holds', () => {
-    makeWorkspace('sales.edb', 'sales', { name: 'sales', title: 'Sales', tables: 3, views: 2 });
+    makeWorkspace('sales.edb', 'sales', { title: 'Sales', tables: 3, views: 2 });
     const found = peekWorkspaceFile(join(dir, 'sales.edb'));
-    expect(found).toEqual([{ id: 'sales', name: 'sales', title: 'Sales', tables: 3, views: 2 }]);
+    expect(found).toEqual([{ id: 'sales', title: 'Sales', tables: 3, views: 2 }]);
   });
 
   it('leaves the file byte-identical — the peek opens it read-only', () => {
@@ -111,7 +111,7 @@ describe('scanFolderAt', () => {
     makeWorkspace('b.edb', 'b', { tables: 0 });
     const scan = scanFolderAt(dir);
     expect(scan.files.map((f) => f.file)).toEqual(['a.edb', 'b.edb']);
-    expect(scan.files[0]!.workspaces).toEqual([{ id: 'a', name: 'a', tables: 2, views: 0 }]);
+    expect(scan.files[0]!.workspaces).toEqual([{ id: 'a', tables: 2, views: 0 }]);
     expect(scan.files[0]!.size).toBeGreaterThan(0);
     expect(scan.folderPath).toBe(dir);
   });
@@ -145,16 +145,16 @@ describe('scanFolderAt', () => {
   });
 });
 
-describe('freeWorkspaceFileName', () => {
+describe('freeWorkspaceIdIn', () => {
   it('uses the plain name when the folder has no such file', () => {
-    expect(freeWorkspaceFileName(dir, 'sales')).toBe('sales.edb');
+    expect(freeWorkspaceIdIn(dir, 'sales')).toBe('sales');
   });
 
   it('numbers around a name already taken, ignoring case', () => {
     writeFileSync(join(dir, 'Sales.edb'), '');
-    expect(freeWorkspaceFileName(dir, 'sales')).toBe('sales (2).edb');
-    writeFileSync(join(dir, 'sales (2).edb'), '');
-    expect(freeWorkspaceFileName(dir, 'sales')).toBe('sales (3).edb');
+    expect(freeWorkspaceIdIn(dir, 'sales')).toBe('sales-2');
+    writeFileSync(join(dir, 'sales-2.edb'), '');
+    expect(freeWorkspaceIdIn(dir, 'sales')).toBe('sales-3');
   });
 });
 
@@ -162,13 +162,16 @@ describe('createWorkspaceFileIn', () => {
   it('writes a file holding exactly one empty workspace', () => {
     const written = createWorkspaceFileIn(dir, 'q3', 'Q3 numbers');
     expect(written).toBe(join(dir, 'q3.edb'));
-    expect(peekWorkspaceFile(written)).toEqual([{ id: 'q3', name: 'Q3 numbers', tables: 0, views: 0 }]);
+    expect(peekWorkspaceFile(written)).toEqual([{ id: 'q3', title: 'Q3 numbers', tables: 0, views: 0 }]);
   });
 
   it('does not overwrite a file already there', () => {
+    // The new workspace gets a free ID and the file follows it — `q3-2.edb`, not
+    // `q3 (2).edb`, which would be a file whose name denies the `q3` inside it.
     makeWorkspace('q3.edb', 'q3', { tables: 4 });
     const written = createWorkspaceFileIn(dir, 'q3', 'Q3 numbers');
-    expect(written).toBe(join(dir, 'q3 (2).edb'));
+    expect(written).toBe(join(dir, 'q3-2.edb'));
+    expect(peekWorkspaceFile(written)[0]!.id).toBe('q3-2');
     // The original is untouched, tables and all.
     expect(peekWorkspaceFile(join(dir, 'q3.edb'))[0]!.tables).toBe(4);
   });

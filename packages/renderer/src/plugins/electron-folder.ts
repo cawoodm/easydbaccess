@@ -67,7 +67,6 @@ export function indexFromScan(scan: EasydbFolderScan): { folder: string; at: num
     for (const w of f.workspaces) {
       workspaces.push({
         id: w.id,
-        name: w.name,
         ...(w.title === undefined ? {} : { title: w.title }),
         file: f.file,
         tables: w.tables,

@@ -60,10 +60,9 @@ function to(map: Map<string, string>, id: string): string {
 
 export function remapWorkspace(w: Workspace, r: Remap): Workspace {
   if (w.id === r.workspaceId) return w;
-  // `name` follows the id, as it does for a renamed `.edb` import. `title` is
-  // display-only and is left alone: it is the user's label for this data, and it
-  // is still their label for the copy.
-  return { ...w, id: r.workspaceId, name: r.workspaceId };
+  // Only the id moves. `title` is the user's label for this data and is still
+  // their label for the copy, so it travels unchanged.
+  return { ...w, id: r.workspaceId };
 }
 
 export function remapTable(t: Table, r: Remap): Table {

@@ -2,8 +2,18 @@
 
 ## 29 Sep 2026
 
+### Features
+
+- ✨ A workspace has one technical name — the name of its file — and a title you set; the third name it carried is gone (v0.0.506)
+
 ### Bugs
 
+- 🪲 A workspace file could be handed a second workspace, or an id no file name could spell (v0.0.506)
+- 🪲 Deleting the last workspace of a workspace file left the app unable to start, on every reload (v0.0.507)
+- 🪲 Save As on the desktop proposed the generic file name for every workspace, and writing it made the file unwritable afterwards (v0.0.507)
+- 🪲 A new workspace whose name matched one already here replaced it and merged the two together (v0.0.507)
+- 🪲 Clearing the title of a workspace made before v0.0.506 looked as if it had not taken (v0.0.507)
+- 🪲 On the desktop, a second workspace of a name already taken made `q3 (2).edb`, a file whose name denied the workspace inside it (v0.0.506)
 - 🪲 Escape in a tags cell shut the suggestion list instead of cancelling the edit, and needed a second press (v0.0.505)
 - 🪲 The command palette ranked a word matched in a tooltip above the same word in a command's own title (v0.0.503)
 - 🪲 The Datasette filter translation could ask the server for fewer rows than the filter meant (v0.0.502)

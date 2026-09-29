@@ -137,7 +137,7 @@ function registerStoreIpc(): void {
     for (const coll of ALL_COLLECTIONS) broadcastChanged(coll);
     return removed;
   });
-  handle('store:cloneWorkspace', (opts: { from: string; to: string; name: string; mode: CloneMode }) => {
+  handle('store:cloneWorkspace', (opts: { from: string; to: string; title?: string | undefined; mode: CloneMode }) => {
     const id = getStore().cloneWorkspace(opts);
     for (const coll of ALL_COLLECTIONS) broadcastChanged(coll);
     return id;
@@ -291,7 +291,7 @@ function registerFolderIpc(): void {
   handle('db:folderFilePath', (file: string) => fileInWorkspaceFolder(file));
   // A new workspace in its own file. It is WRITTEN here and opened by the
   // caller through `db:openCommit`, so the switch-and-reload stays in one place.
-  handle('db:newWorkspaceFile', (id: string, name: string) => createWorkspaceFile(id, name));
+  handle('db:newWorkspaceFile', (id: string, title?: string) => createWorkspaceFile(id, title));
 }
 
 registerFolderIpc();

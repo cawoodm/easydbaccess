@@ -14,64 +14,20 @@
 // asking for that permission needs a gesture no boot sequence has.
 
 import { EDB_EXTENSION } from './file-handle.js';
+import { workspaceIdFromFileName } from '@easydb/shared';
 import type { FileVerdict } from './file-stamp.js';
 
 /**
- * A workspace id from anything a user typed.
+ * The id ⇄ file name rules, re-exported from `@easydb/shared`.
  *
- * Lives here rather than in `app-context.ts` because it is half of the id ⇄ file
- * name pair below, and the two rules have to agree: a workspace created from the
- * name "My Data" gets the id `my-data`, so opening `My Data.edb` has to arrive at
- * the same id or it would land in a workspace of its own.
- *
- * Only `a-z0-9_-` survive, so an id never contains the `::` that separates a
- * setting's workspace from its name (see `settingId`).
+ * They USED to be defined here, and were copied into `shared` when `EdbStore`
+ * started enforcing them — two byte-identical copies of "which workspace is this
+ * file about", which is the exact shape of bug this module exists to prevent. The
+ * store is what refuses a write, so the store's package owns the rule and this
+ * one re-exports it: every importer keeps its import path and there is one answer
+ * again.
  */
-export function slugifyWorkspace(s: string): string {
-  return (
-    s
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'default'
-  );
-}
-
-/**
- * The file name a workspace id maps to.
- *
- * **An invariant, not a preference: one `.edb` holds one workspace, and this is
- * its name.** Everything in the file layer is built on it — Save writes under it,
- * Open reads the workspace back out of it (`workspaceIdFromFileName`), the folder
- * index maps between the two, and `?space=` switches workspace by adopting that
- * workspace's file. Code that writes a `.edb` under any other name, or writes a
- * second workspace into one, is wrong. See `one-per-file.ts` for the enforcement
- * and `docs/tech/EDB.md` for the rule.
- *
- * (Calling it "only a convention" here is what let Save write the whole database
- * into one file for four versions. A convention is something code may break.)
- *
- * Two holes remain, and neither is a licence to add more. An OS save dialog lets
- * the user rename the file, because the OS owns that field; and a file can arrive
- * from anywhere, including a version of this app that had no rule. That is why the
- * caller still checks what is actually inside a file it opens.
- */
-export function spaceFileName(workspaceId: string): string {
-  return `${workspaceId}${EDB_EXTENSION}`;
-}
-
-/**
- * The workspace a file is about: `a.edb` is the workspace `a`.
- *
- * The same convention as {@link spaceFileName}, read the other way, and it is
- * what Open uses to decide which workspace to land in. A path is accepted because
- * `pickFileToOpen` hands back whatever the OS dialog gave it.
- */
-export function workspaceIdFromFileName(file: string): string {
-  const base = file.split(/[\\/]/).pop() ?? file;
-  const stem = base.toLowerCase().endsWith(EDB_EXTENSION) ? base.slice(0, -EDB_EXTENSION.length) : base;
-  return slugifyWorkspace(stem);
-}
+export { isCanonicalWorkspaceId, slugifyWorkspace, spaceFileName, workspaceIdFromFileName } from '@easydb/shared';
 
 /**
  * A workspace id like `base` that nothing is using yet.

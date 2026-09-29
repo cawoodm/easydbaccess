@@ -35,7 +35,7 @@ const store = {
   runSql: (sql: string, opts?: SqlRunOptions): Promise<SqlRunResult> => ipcRenderer.invoke('store:runSql', sql, opts),
   countWorkspaceContents: (workspaceId: string, opts?: { countRows?: boolean | undefined }): Promise<WorkspaceContents> => ipcRenderer.invoke('store:countWorkspaceContents', workspaceId, opts),
   deleteWorkspace: (workspaceId: string): Promise<WorkspaceContents> => ipcRenderer.invoke('store:deleteWorkspace', workspaceId),
-  cloneWorkspace: (opts: { from: string; to: string; name: string; mode: CloneMode }): Promise<string> => ipcRenderer.invoke('store:cloneWorkspace', opts),
+  cloneWorkspace: (opts: { from: string; to: string; title?: string | undefined; mode: CloneMode }): Promise<string> => ipcRenderer.invoke('store:cloneWorkspace', opts),
   findOne: (coll: string, key: string): Promise<unknown | null> => ipcRenderer.invoke('store:findOne', coll, key),
   insert: (coll: string, doc: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('store:insert', coll, doc),
   bulkInsert: (coll: string, docs: Record<string, unknown>[]): Promise<unknown[]> => ipcRenderer.invoke('store:bulkInsert', coll, docs),
@@ -120,7 +120,7 @@ const db = {
   forgetFolder: (): Promise<void> => ipcRenderer.invoke('db:forgetFolder'),
   scanFolder: (only?: string[]): Promise<FolderScan | null> => ipcRenderer.invoke('db:scanFolder', only),
   folderFilePath: (file: string): Promise<string | null> => ipcRenderer.invoke('db:folderFilePath', file),
-  newWorkspaceFile: (id: string, name: string): Promise<string | null> => ipcRenderer.invoke('db:newWorkspaceFile', id, name),
+  newWorkspaceFile: (id: string, title?: string): Promise<string | null> => ipcRenderer.invoke('db:newWorkspaceFile', id, title),
 };
 
 contextBridge.exposeInMainWorld('easydb', {
@@ -143,7 +143,7 @@ declare global {
         runSql(sql: string, opts?: SqlRunOptions): Promise<SqlRunResult>;
         countWorkspaceContents(workspaceId: string, opts?: { countRows?: boolean | undefined }): Promise<WorkspaceContents>;
         deleteWorkspace(workspaceId: string): Promise<WorkspaceContents>;
-        cloneWorkspace(opts: { from: string; to: string; name: string; mode: CloneMode }): Promise<string>;
+        cloneWorkspace(opts: { from: string; to: string; title?: string | undefined; mode: CloneMode }): Promise<string>;
         findOne(coll: string, key: string): Promise<unknown | null>;
         insert(coll: string, doc: Record<string, unknown>): Promise<unknown>;
         bulkInsert(coll: string, docs: Record<string, unknown>[]): Promise<unknown[]>;
@@ -178,7 +178,7 @@ declare global {
         forgetFolder(): Promise<void>;
         scanFolder(only?: string[]): Promise<FolderScan | null>;
         folderFilePath(file: string): Promise<string | null>;
-        newWorkspaceFile(id: string, name: string): Promise<string | null>;
+        newWorkspaceFile(id: string, title?: string): Promise<string | null>;
       };
     };
   }

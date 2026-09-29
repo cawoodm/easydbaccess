@@ -29,8 +29,8 @@ test('two workspaces out of one file are told apart in the list', async ({ page 
   // What a `.edb` written before v0.0.427 looks like to a scan: one file, two
   // workspaces in it, both carrying the same title.
   await plantIndex(page, [
-    { id: 'powerplants', name: 'powerplants', title: 'PowerPlants', file: 'powerplants.edb' },
-    { id: 'simon', name: 'simon', title: 'PowerPlants', file: 'powerplants.edb' },
+    { id: 'powerplants', title: 'PowerPlants', file: 'powerplants.edb' },
+    { id: 'simon', title: 'PowerPlants', file: 'powerplants.edb' },
   ]);
 
   const twins = options(page).filter({ hasText: 'PowerPlants' });
@@ -48,8 +48,8 @@ test('one title per file is left alone — the tooltip already answers that', as
   // The same workspace in two files is a deliberate state (Cancel at the conflict
   // prompt means "leave both"), and hovering says which is which.
   await plantIndex(page, [
-    { id: 'sales', name: 'sales', title: 'Sales', file: 'sales.edb' },
-    { id: 'sales', name: 'sales', title: 'Sales', file: 'backup.edb' },
+    { id: 'sales', title: 'Sales', file: 'sales.edb' },
+    { id: 'sales', title: 'Sales', file: 'backup.edb' },
   ]);
 
   const both = options(page).filter({ hasText: 'Sales' });

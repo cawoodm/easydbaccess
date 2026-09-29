@@ -101,12 +101,12 @@ describe('createIpcDataStore', () => {
     const bulkRemoveSpy = vi.spyOn(bridge, 'bulkRemove');
     const store = createIpcDataStore(bridge, () => 'ws1');
 
-    const w: Workspace = { id: 'w1', name: 'W1', createdAt: 0, pluginUrls: [] };
+    const w: Workspace = { id: 'w1', createdAt: 0, pluginUrls: [] };
     await store.workspaces.insert(w);
     expect(insertSpy).toHaveBeenCalledWith('workspaces', w);
 
-    await store.workspaces.find({ name: 'W1' });
-    expect(findSpy).toHaveBeenCalledWith('workspaces', { name: 'W1' });
+    await store.workspaces.find({ title: 'W1' });
+    expect(findSpy).toHaveBeenCalledWith('workspaces', { title: 'W1' });
 
     await store.workspaces.findOne('w1');
     expect(findOneSpy).toHaveBeenCalledWith('workspaces', 'w1');
@@ -114,10 +114,10 @@ describe('createIpcDataStore', () => {
     await store.workspaces.upsert(w);
     expect(upsertSpy).toHaveBeenCalledWith('workspaces', w);
 
-    await store.workspaces.patch('w1', { name: 'Renamed' });
-    expect(patchSpy).toHaveBeenCalledWith('workspaces', 'w1', { name: 'Renamed' });
+    await store.workspaces.patch('w1', { title: 'Renamed' });
+    expect(patchSpy).toHaveBeenCalledWith('workspaces', 'w1', { title: 'Renamed' });
 
-    const w2: Workspace = { id: 'w2', name: 'W2', createdAt: 0, pluginUrls: [] };
+    const w2: Workspace = { id: 'w2', createdAt: 0, pluginUrls: [] };
     await store.workspaces.bulkInsert([w2]);
     expect(bulkInsertSpy).toHaveBeenCalledWith('workspaces', [w2]);
 

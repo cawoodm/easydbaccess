@@ -35,7 +35,7 @@ const COLUMNS = [
 function seed(): void {
   const driver = nodeSqliteDriver(path);
   const store = new EdbStore(driver);
-  store.insert('workspaces', { id: 'w1', name: 'Work' });
+  store.insert('workspaces', { id: 'w1', title: 'Work' });
   store.insert('tables', { id: 't1', workspaceId: 'w1', name: 'Parts', columns: COLUMNS, updatedAt: 1 });
   store.bulkInsert('rows', [
     { id: 'r1', tableId: 't1', data: { name: 'bolt', qty: 4 }, updatedAt: 7 },
@@ -49,7 +49,7 @@ describe('a saved .edb', () => {
     seed();
     const driver = nodeSqliteDriver(path);
     const store = new EdbStore(driver);
-    expect(store.findOne('workspaces', 'w1')).toMatchObject({ name: 'Work' });
+    expect(store.findOne('workspaces', 'w1')).toMatchObject({ title: 'Work' });
     expect(store.countRowsIn('t1')).toBe(2);
     expect(store.findOne('rows', 'r1')).toEqual({ id: 'r1', tableId: 't1', data: { name: 'bolt', qty: 4 }, updatedAt: 7 });
     driver.close();

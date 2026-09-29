@@ -19,7 +19,7 @@ export type { CloneMode };
  *
  * Returns the new workspace id. Caller navigates to it (`?space=`).
  */
-export async function cloneWorkspace(bridge: EasydbStoreBridge, opts: { from: string; to: string; name: string; mode: CloneMode }): Promise<string> {
+export async function cloneWorkspace(bridge: EasydbStoreBridge, opts: { from: string; to: string; title?: string | undefined; mode: CloneMode }): Promise<string> {
   if (!bridge.cloneWorkspace) throw new Error('[storage] this build cannot clone a workspace');
   return bridge.cloneWorkspace(opts);
 }

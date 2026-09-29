@@ -67,7 +67,7 @@ async function seedBothCopies(page: Page, ws: string): Promise<void> {
       try {
         await full.open(null, 'which-copy-fixture.edb', { scratch: true });
         const store = createIpcDataStore(full, () => ws);
-        await store.workspaces.insert({ id: ws, name: ws, createdAt: Date.now(), pluginUrls: [] });
+        await store.workspaces.insert({ id: ws, createdAt: Date.now(), pluginUrls: [] });
         await store.tables.insert({ id: `${ws}-t`, workspaceId: ws, name: 'fromfile', code: '', columns: [{ field: 'part', type: 'string' }], view: 'table' });
         const handle = await fileInFolder(dir, `${ws}.edb`, true);
         await writeBytes(handle!, await full.export());

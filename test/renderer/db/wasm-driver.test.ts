@@ -157,8 +157,8 @@ describe('raw SQL through the WASM driver', () => {
   it('writes when asked, and clones a workspace in SQL', () => {
     const { store } = seeded();
     expect(store.runSql(`UPDATE "Parts" SET qty = 0`, { write: true }).changes).toBe(20);
-    store.upsert('workspaces', { id: 'w1', name: 'w1', createdAt: 1, pluginUrls: [] });
-    store.cloneWorkspace({ from: 'w1', to: 'w2', name: 'W2', mode: 'all' });
+    store.upsert('workspaces', { id: 'w1', createdAt: 1, pluginUrls: [] });
+    store.cloneWorkspace({ from: 'w1', to: 'w2', title: 'W2', mode: 'all' });
     // The clone's INSERT ... SELECT and its SQL-side UUID have to work on this
     // binding too, not just on node:sqlite.
     expect(store.countWorkspaceContents('w2', { countRows: true })).toMatchObject({ tables: 1, rows: 20 });

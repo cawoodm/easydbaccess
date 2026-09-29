@@ -65,19 +65,33 @@ CREATE TABLE <sqlTableNameFor(name)> (
 `packages/shared/src/sql-mapping.ts` does the naming and the type mapping, and
 it already serves the desktop and the server — one convention across all three.
 
-## Four rules, each of which has already cost a bug
+## Six rules, each of which has already cost a bug
 
+- **A workspace has exactly TWO names**, and only one of them is an identifier:
+  the **`id`**, which IS the file name (`sales` ⇄ `sales.edb`), routes `?space=`
+  and keys every setting, view and table; and the **`title`**, free text the user
+  edits, which may repeat and from which nothing is ever derived. There was a
+  third until v0.0.506 — `name`, minted from the same slug as the id and shown
+  wherever a title was absent — and nothing kept the three in step, so one
+  workspace could read three ways at once. `workspace-id.ts` owns the id rules;
+  a doc written before v0.0.506 is read with its `name` taken as the title when
+  it has none, on READ only. See
+  [Two names, and only one of them identifies](#two-names-and-only-one-of-them-identifies).
 - **A `.edb` holds exactly ONE workspace: the one its name says.** Not a
   convention — an invariant, and the one this file layer is built on.
   `spaceFileName` writes the name, `workspaceIdFromFileName` reads it back, the
   folder index maps between them, and `?space=` switches workspace by adopting
-  that workspace's file. Two things enforce it, because prose did not for four
-  versions: `one-per-file.ts` at every write, and `mayCreateWorkspaceIn` at the
-  one line that creates a workspace at boot. The project index (`.edp`) is the
-  exemption and says so in its name. A file already holding several — written
-  before v0.0.427 — is read, reported and left alone. A file whose ONE workspace is
-  not the one its name says is asked about on the next sync (`file-identity.ts`):
-  rename the workspace inside it, or leave the file out of the list. See
+  that workspace's file. **The STORE enforces it** since v0.0.506
+  (`EdbStore.guardWorkspaceWrite`): it takes the file name it was opened with and
+  refuses any workspace write that breaks the rule, so no route can go around it.
+  `one-per-file.ts` at every write and `mayCreateWorkspaceIn` at boot are still
+  there, now as the layer that asks a better question earlier rather than as the
+  only line of defence. The project index (`.edp`) is the exemption and says so in
+  its name, as are this app's own `__`-prefixed scratch copies. A file already
+  holding several — written before v0.0.427 — is read, reported and left alone. A
+  file whose ONE workspace is not the one its name says is asked about on the next
+  sync (`file-identity.ts`): rename the workspace inside it, or leave the file out
+  of the list. See
   [A `.edb` holds ONE workspace](#a-edb-holds-one-workspace).
 - **`_sqlTable` is the table's own name, verbatim** — `Order Details`, not
   `Order_Details`. Every reference quotes it (`quoteIdent`), so nothing has to be
@@ -106,6 +120,7 @@ it already serves the desktop and the server — one convention across all three
 | Piece                                 | File                                                     |
 | ------------------------------------- | -------------------------------------------------------- |
 | The store                             | `packages/shared/src/edb-store.ts`                       |
+| Workspace id ⇄ file name rules        | `packages/shared/src/workspace-id.ts`                    |
 | The driver seam                       | `packages/shared/src/sql-driver.ts`                      |
 | sqlite-wasm adapter                   | `renderer/src/db/edb/wasm-driver.ts`                     |
 | Raw SQL                               | see [`SQL.md`](./SQL.md)                                 |
@@ -407,7 +422,7 @@ write and every clash), and offers the two answers that exist:
 
 Two cases are deliberately not repaired. A file holding SEVERAL workspaces is left
 alone — that is the pre-v0.0.427 shape above, and no rename makes it right; since
-v0.0.504 it is at least **named in the sync report**, see below. And two names that
+v0.0.506 it is at least **named in the sync report**, see below. And two names that
 slugify to one id (`My Data.edb` beside `my-data.edb`) cannot be told apart by any
 rename, so the file carrying the name Save would have written wins and the other is
 set aside until the user renames it on disk.
@@ -416,13 +431,58 @@ The file this tab has OPEN is never touched. Its workspace is live — the store
 panels and every plugin are bound to that id — so a rename inside the file would
 leave the tab saving under an id the file no longer holds.
 
+### Two names, and only one of them identifies
+
+A workspace carries an **`id`** and a **`title`**, and they do different jobs:
+
+| | `id` | `title` |
+| --- | --- | --- |
+| What it is | the technical identifier, and the file name | what the user calls it |
+| Unique? | **yes**, enforced by the store | no — two may share one, and often do |
+| Editable? | no; renaming means renaming the file | yes, in Settings |
+| Derived from? | slugified once, at creation | nothing; it is typed |
+| Falls back to | — | the `id`, on any screen with no title |
+
+There was a third until v0.0.506. `name` was minted from the same slug as the id
+and shown wherever a title was absent, and nothing kept the three in step — so one
+workspace could read three ways at once: the list said "PowerPlants", the file said
+`powerplants.edb`, and deleting it asked about "Simon". Every rule that used to
+turn on `name` now turns on `id`: `workspaceLabel` falls back to it,
+`folderConflicts` matches two copies on it, and the delete prompt quotes it.
+
+**The store enforces both halves** (`EdbStore.guardWorkspaceWrite`), because a rule
+the storage layer does not keep is not a rule:
+
+1. **The id is canonical** — `slugifyWorkspace(id) === id`, so id ⇄ file name
+   round-trips. `My Data` would be written to `My Data.edb` and read back as
+   `my-data`: two workspaces to everything downstream, one file on disk.
+2. **A `.edb` takes only the workspace its name says.** `EdbStore` is given the
+   file name it was opened with (`soleWorkspaceOf`); `.edp`, an unnamed scratch
+   database and this app's `__`-prefixed throwaways carry no such rule.
+
+Uniqueness itself needed nothing new: `PRIMARY KEY (coll, key)` is the id, and an
+`insert` onto a key already there has always thrown.
+
+**Reads are deliberately untouched.** A file written by an older version may hold
+anything, and refusing to open it would strand data this app can still show — so a
+broken file is reported (`file-identity.ts`) and left alone, and only new writes
+are held to the rule. The legacy `name` becomes the `title` on the way out of the
+store (`normalizeWorkspaceDoc`) and is **never written back**: a boot that rewrites
+what it reads marks the workspace unsaved, which this app has been bitten by
+before.
+
+One visible consequence on the desktop: asking for a workspace whose file already
+exists now mints a free **id** — `q3-2`, in `q3-2.edb` — where it used to mint a
+free file NAME, `q3 (2).edb`, which slugifies to `q3-2` and so produced a file
+whose name denied the `q3` inside it.
+
 ### A file with two workspaces in it, and two rows that read the same
 
 Reported from the field: the selector showed **"PowerPlants" twice, and hovering
 both said `powerplants.edb`**. Deleting one of them then asked
 `Delete the workspace "Simon"?`.
 
-Three separate things, each with its own fix (v0.0.504):
+Three separate things, each with its own fix (v0.0.506):
 
 - **The file really did hold two workspaces.** `fileIdentities` used to leave such
   a file out of its answer entirely, on the grounds that `one-per-file.ts` owned

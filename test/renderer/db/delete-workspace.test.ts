@@ -63,7 +63,7 @@ describe('delegation to the store', () => {
     const bare = {} as EasydbStoreBridge;
     await expect(countWorkspaceContents(bare, 'w1')).rejects.toThrow(/cannot count/);
     await expect(deleteWorkspace(bare, 'w1')).rejects.toThrow(/cannot delete/);
-    await expect(cloneWorkspace(bare, { from: 'a', to: 'b', name: 'B', mode: 'all' })).rejects.toThrow(/cannot clone/);
+    await expect(cloneWorkspace(bare, { from: 'a', to: 'b', title: 'B', mode: 'all' })).rejects.toThrow(/cannot clone/);
   });
 });
 

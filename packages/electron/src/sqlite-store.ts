@@ -38,7 +38,10 @@ export class SqliteStore {
     // schema, and doing that under the default 2 MB page cache on a large
     // existing file is exactly the case the cache size below exists for.
     this.tune();
-    this.store = new EdbStore(this.driver);
+    // The path goes in so the store keeps the one-workspace-per-`.edb` rule
+    // itself, exactly as the browser's worker does. A `.edp` or any other name
+    // carries no such rule — see `soleWorkspaceOf`.
+    this.store = new EdbStore(this.driver, { fileName: opts.path });
   }
 
   /**
@@ -166,7 +169,7 @@ export class SqliteStore {
   }
 
   /** Create a workspace and copy the requested slice of another into it. */
-  cloneWorkspace(opts: { from: string; to: string; name: string; mode: CloneMode }): string {
+  cloneWorkspace(opts: { from: string; to: string; title?: string | undefined; mode: CloneMode }): string {
     return this.store.cloneWorkspace(opts);
   }
 

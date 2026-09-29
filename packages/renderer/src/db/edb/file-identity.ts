@@ -66,8 +66,6 @@ export interface FileIdentity {
   file: string;
   /** The id the workspace inside the file carries. */
   id: string;
-  /** That workspace's technical name, for the question to quote. */
-  name: string;
   /** The id the file NAME claims. `b.edb` claims `b`. */
   claimed: string;
   fix: IdentityFix;
@@ -136,7 +134,7 @@ export function fileIdentities(found: readonly FolderWorkspace[]): FileIdentity[
       // is the passenger the name is about. Otherwise the first one found — the
       // report names every id anyway.
       const inside = list.find((w) => w.id === claimed) ?? first;
-      return { file: first.file, id: inside.id, name: inside.name, claimed, fix: 'shared' as const, rivals: [], holds: list.map((w) => w.id), ...facts(first) };
+      return { file: first.file, id: inside.id, claimed, fix: 'shared' as const, rivals: [], holds: list.map((w) => w.id), ...facts(first) };
     }
 
     const group = claimants.get(claimed) ?? [first.file];
@@ -147,7 +145,7 @@ export function fileIdentities(found: readonly FolderWorkspace[]): FileIdentity[
     // the canonical name, none of them can be preferred.
     const ambiguous = rivals.length > 0 && !sameFile(first.file, spaceFileName(claimed));
     const fix: IdentityFix = ambiguous ? 'ambiguous' : first.id === claimed ? 'matches' : 'rename';
-    return { file: first.file, id: first.id, name: first.name, claimed, fix, rivals, ...facts(first) };
+    return { file: first.file, id: first.id, claimed, fix, rivals, ...facts(first) };
   });
 }
 

@@ -62,7 +62,7 @@ test.describe('the workspace folder', () => {
     // The peek read each file's own metadata — the workspace, its display title
     // and how many tables are in it.
     const sales = scan!.files.find((f) => f.file === 'sales.edb')!;
-    expect(sales.workspaces).toEqual([{ id: 'sales', name: 'sales', title: 'Sales', tables: 2, views: 0 }]);
+    expect(sales.workspaces).toEqual([{ id: 'sales', title: 'Sales', tables: 2, views: 0 }]);
     expect(sales.size).toBeGreaterThan(0);
   });
 

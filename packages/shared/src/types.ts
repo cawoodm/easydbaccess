@@ -165,15 +165,35 @@ export interface WorkspaceContents {
   settings: number;
 }
 
+/**
+ * A workspace has exactly two names, and they do different jobs.
+ *
+ * There used to be three — `id`, `name` and `title` — with `name` minted from
+ * the same slug as the id and shown wherever a title was absent. Nothing kept
+ * the three in step, so one workspace could read three ways: the list said
+ * "PowerPlants", the file said `powerplants.edb`, and deleting it asked about
+ * "Simon". `name` is gone; a doc written before that is read with its `name`
+ * taken as the `title` when it has none (`EdbStore`).
+ */
 export interface Workspace {
+  /**
+   * The technical identifier, and the file name: `sales` lives in `sales.edb`.
+   *
+   * Unique — the store enforces it, and enforces that a `.edb` holds only the
+   * workspace its own name says (see `workspace-id.ts`). It is what `?space=`
+   * routes on and what keys every setting, view and table in the workspace, so
+   * it is not editable: renaming a workspace means renaming its file.
+   */
   id: string;
-  name: string;
   createdAt: number;
   pluginUrls: string[];
   /**
-   * Optional display title shown in the app header and workspace selector.
-   * Presentation only — `id`/`name` remain the technical identifiers used for
-   * `?space=` routing. Absent/empty ⇒ the header shows "easyDBAccess".
+   * What the user calls it — shown in the header, the selector and every
+   * question about it.
+   *
+   * Free text: it may repeat, and two workspaces sharing a title is an ordinary
+   * state the UI has to cope with rather than a conflict. Nothing is ever
+   * derived from it. Absent or blank ⇒ screens fall back to the `id`.
    */
   title?: string | undefined;
 }

@@ -25,30 +25,24 @@ import {
  * exists twice — that is the conflict the user gets prompted about.
  */
 
-const OPEN = [
-  { id: 'scratch', name: 'scratch' },
-  { id: 'sales', name: 'sales' },
-];
+const OPEN = [{ id: 'scratch' }, { id: 'sales' }];
 
 const FOLDER: FolderWorkspace[] = [
-  { id: 'sales', name: 'sales', file: 'sales.edb' },
-  { id: 'demo', name: 'demo', file: 'demo.edb' },
+  { id: 'sales', file: 'sales.edb' },
+  { id: 'demo', file: 'demo.edb' },
 ];
 
 describe('mergeWorkspaceList', () => {
   it('lists the open database first, unqualified', () => {
     const merged = mergeWorkspaceList(OPEN, FOLDER, 'index.edp');
-    expect(merged.slice(0, 2)).toEqual([
-      { id: 'sales', name: 'sales' },
-      { id: 'scratch', name: 'scratch' },
-    ]);
+    expect(merged.slice(0, 2)).toEqual([{ id: 'sales' }, { id: 'scratch' }]);
   });
 
   it('labels a workspace from another file with that file', () => {
     const merged = mergeWorkspaceList(OPEN, FOLDER, 'index.edp');
     expect(merged.filter((e) => e.file !== undefined)).toEqual([
-      { id: 'demo', name: 'demo', file: 'demo.edb' },
-      { id: 'sales', name: 'sales', file: 'sales.edb' },
+      { id: 'demo', file: 'demo.edb' },
+      { id: 'sales', file: 'sales.edb' },
     ]);
   });
 
@@ -60,11 +54,8 @@ describe('mergeWorkspaceList', () => {
   it('does not list the open file twice over', () => {
     // Scanning the folder finds the file this tab already has open. Its
     // workspaces are in the open database already, so the entry is dropped.
-    const merged = mergeWorkspaceList([{ id: 'sales', name: 'sales' }], FOLDER, 'sales.edb');
-    expect(merged).toEqual([
-      { id: 'sales', name: 'sales' },
-      { id: 'demo', name: 'demo', file: 'demo.edb' },
-    ]);
+    const merged = mergeWorkspaceList([{ id: 'sales' }], FOLDER, 'sales.edb');
+    expect(merged).toEqual([{ id: 'sales' }, { id: 'demo', file: 'demo.edb' }]);
   });
 
   it('survives two scans of the same folder without doubling', () => {
@@ -73,31 +64,21 @@ describe('mergeWorkspaceList', () => {
   });
 
   it('is just the open database when no folder is connected', () => {
-    expect(mergeWorkspaceList(OPEN, [], 'index.edp')).toEqual([
-      { id: 'sales', name: 'sales' },
-      { id: 'scratch', name: 'scratch' },
-    ]);
+    expect(mergeWorkspaceList(OPEN, [], 'index.edp')).toEqual([{ id: 'sales' }, { id: 'scratch' }]);
   });
 
   it('carries a title through, from the open database and from a file', () => {
-    const merged = mergeWorkspaceList([{ id: 'sales', name: 'sales', title: 'Sales 2026' }], [{ id: 'demo', name: 'demo', title: 'The Demo', file: 'demo.edb' }], 'index.edp');
+    const merged = mergeWorkspaceList([{ id: 'sales', title: 'Sales 2026' }], [{ id: 'demo', title: 'The Demo', file: 'demo.edb' }], 'index.edp');
     expect(merged).toEqual([
-      { id: 'sales', name: 'sales', title: 'Sales 2026' },
-      { id: 'demo', name: 'demo', title: 'The Demo', file: 'demo.edb' },
+      { id: 'sales', title: 'Sales 2026' },
+      { id: 'demo', title: 'The Demo', file: 'demo.edb' },
     ]);
   });
 
   it('sorts by what is shown, not by the technical name', () => {
     // `zulu` is titled "Alpha", so it comes first. Sorting on `name` would put it
     // last and the list would look unsorted to the only person reading it.
-    const merged = mergeWorkspaceList(
-      [
-        { id: 'zulu', name: 'zulu', title: 'Alpha' },
-        { id: 'mike', name: 'mike' },
-      ],
-      [],
-      'index.edp',
-    );
+    const merged = mergeWorkspaceList([{ id: 'zulu', title: 'Alpha' }, { id: 'mike' }], [], 'index.edp');
     expect(merged.map((e) => e.id)).toEqual(['zulu', 'mike']);
   });
 });
@@ -105,22 +86,22 @@ describe('mergeWorkspaceList', () => {
 /**
  * What a workspace is CALLED on screen.
  *
- * `Workspace.title` is the display name and `name` is the technical one that
+ * `Workspace.title` is what the user calls it and `id` is the technical one that
  * `?space=` routes on, so anything the user reads has to prefer the title — the
- * selector showed the name and stayed on it after a title edit, which read as the
- * edit not having taken.
+ * selector showed the technical one and stayed on it after a title edit, which
+ * read as the edit not having taken.
  */
 describe('workspaceLabel', () => {
   it('is the title when there is one', () => {
-    expect(workspaceLabel({ name: 'q3', title: 'Newsroom Q3' })).toBe('Newsroom Q3');
+    expect(workspaceLabel({ id: 'q3', title: 'Newsroom Q3' })).toBe('Newsroom Q3');
   });
 
-  it('falls back to the name', () => {
-    expect(workspaceLabel({ name: 'q3' })).toBe('q3');
+  it('falls back to the id, which is also the file name', () => {
+    expect(workspaceLabel({ id: 'q3' })).toBe('q3');
   });
 
   it('treats a blank title as none, the same way the header does', () => {
-    expect(workspaceLabel({ name: 'q3', title: '   ' })).toBe('q3');
+    expect(workspaceLabel({ id: 'q3', title: '   ' })).toBe('q3');
   });
 });
 
@@ -133,74 +114,76 @@ describe('workspaceLabel', () => {
  * names the file.
  */
 describe('listLabels', () => {
-  const entry = (id: string, name: string, title?: string, file?: string) => ({ id, name, ...(title === undefined ? {} : { title }), ...(file === undefined ? {} : { file }) });
+  const entry = (id: string, title?: string, file?: string) => ({ id, ...(title === undefined ? {} : { title }), ...(file === undefined ? {} : { file }) });
 
   it('leaves a label alone when nothing else reads like it', () => {
-    expect(listLabels([entry('a', 'a', 'Alpha'), entry('b', 'b', 'Beta')])).toEqual(['Alpha', 'Beta']);
+    expect(listLabels([entry('a', 'Alpha'), entry('b', 'Beta')])).toEqual(['Alpha', 'Beta']);
   });
 
-  it('qualifies two workspaces in one file with the technical name', () => {
-    const labels = listLabels([entry('powerplants', 'powerplants', 'PowerPlants'), entry('simon', 'simon', 'PowerPlants')]);
+  it('qualifies two workspaces in one file with the id', () => {
+    const labels = listLabels([entry('powerplants', 'PowerPlants'), entry('simon', 'PowerPlants')]);
     expect(labels).toEqual(['PowerPlants (powerplants)', 'PowerPlants (simon)']);
   });
 
   it('qualifies two entries of the open database, which is one place too', () => {
-    expect(listLabels([entry('a', 'a', 'Shared'), entry('b', 'b', 'Shared')])).toEqual(['Shared (a)', 'Shared (b)']);
+    expect(listLabels([entry('a', 'Shared'), entry('b', 'Shared')])).toEqual(['Shared (a)', 'Shared (b)']);
   });
 
   it('leaves one label per file alone — the file tooltip already tells those apart', () => {
-    const labels = listLabels([entry('sales', 'sales', 'Sales'), entry('sales', 'sales', 'Sales', 'backup.edb')]);
+    const labels = listLabels([entry('sales', 'Sales'), entry('sales', 'Sales', 'backup.edb')]);
     expect(labels).toEqual(['Sales', 'Sales']);
   });
 
-  it('falls back to the id where the names repeat as well', () => {
-    const labels = listLabels([entry('sales', 'sales', 'Sales', 'a.edb'), entry('sales-2', 'sales', 'Sales', 'a.edb')]);
+  it('qualifies by id even when both titles are the same word', () => {
+    const labels = listLabels([entry('sales', 'Sales', 'a.edb'), entry('sales-2', 'Sales', 'a.edb')]);
     expect(labels).toEqual(['Sales (sales)', 'Sales (sales-2)']);
   });
 
-  it('does not repeat a title that is already the technical name', () => {
+  it('does not repeat a title that is already the id', () => {
     // `sales` and `sales` under one roof: the second carries a title that spells
-    // its neighbour's name. "sales (sales)" would say nothing twice.
-    expect(listLabels([entry('sales', 'sales'), entry('q3', 'q3', 'sales')])).toEqual(['sales', 'sales (q3)']);
+    // its neighbour's id. "sales (sales)" would say nothing twice.
+    expect(listLabels([entry('sales'), entry('q3', 'sales')])).toEqual(['sales', 'sales (q3)']);
   });
 
   it('answers one label per entry, in order, so a caller can index into it', () => {
-    const entries = [entry('a', 'a', 'X'), entry('b', 'b', 'X'), entry('c', 'c', 'Y')];
+    const entries = [entry('a', 'X'), entry('b', 'X'), entry('c', 'Y')];
     expect(listLabels(entries)).toHaveLength(entries.length);
   });
 });
 
 describe('folderConflicts', () => {
-  it('names only the workspaces that exist on both sides, with both ids', () => {
-    expect(folderConflicts(OPEN, FOLDER, 'index.edp')).toEqual([{ file: { id: 'sales', name: 'sales', file: 'sales.edb' }, localId: 'sales' }]);
+  it('names only the workspaces that exist on both sides', () => {
+    expect(folderConflicts(OPEN, FOLDER, 'index.edp')).toEqual([{ file: { id: 'sales', file: 'sales.edb' } }]);
   });
 
   it('does not call the open file a conflict with itself', () => {
-    expect(folderConflicts([{ id: 'sales', name: 'sales' }], FOLDER, 'sales.edb')).toEqual([]);
+    expect(folderConflicts([{ id: 'sales' }], FOLDER, 'sales.edb')).toEqual([]);
   });
 
   it('finds nothing when the folder holds different workspaces', () => {
-    expect(folderConflicts([{ id: 'scratch', name: 'scratch' }], [{ id: 'demo', name: 'demo', file: 'demo.edb' }], 'index.edp')).toEqual([]);
+    expect(folderConflicts([{ id: 'scratch' }], [{ id: 'demo', file: 'demo.edb' }], 'index.edp')).toEqual([]);
   });
 
-  it('matches on the NAME, so a renamed workspace is still one workspace', () => {
-    // The id is a slug of the name at CREATION and never moves again, so after a
-    // rename the two disagree — and matching on the id listed one workspace twice.
-    const open = [{ id: 'q3-figures', name: 'Sales' }];
-    const folder: FolderWorkspace[] = [{ id: 'sales', name: 'Sales', file: 'sales.edb' }];
-    expect(folderConflicts(open, folder, 'index.edp')).toEqual([{ file: folder[0], localId: 'q3-figures' }]);
+  it('matches on the ID, which is the only thing a workspace is identified by', () => {
+    // This used to match on `name` — a third identifier, minted from the same slug
+    // as the id and then free to drift from it — so "the same workspace" had two
+    // answers that disagreed the moment anything was renamed. A title carries no
+    // weight here at all: two workspaces may share one, and often do.
+    const open = [{ id: 'sales' }];
+    const folder: FolderWorkspace[] = [{ id: 'sales', title: 'Something else entirely', file: 'sales.edb' }];
+    expect(folderConflicts(open, folder, 'index.edp')).toEqual([{ file: folder[0] }]);
+  });
+
+  it('does not pair two workspaces that merely share a title', () => {
+    const open = [{ id: 'q3-figures' }];
+    const folder: FolderWorkspace[] = [{ id: 'sales', title: 'Q3 Figures', file: 'sales.edb' }];
+    expect(folderConflicts(open, folder, 'index.edp')).toEqual([]);
   });
 
   it('ignores case, as the file names do', () => {
-    const open = [{ id: 'sales', name: 'SALES' }];
-    const folder: FolderWorkspace[] = [{ id: 'sales', name: 'sales', file: 'sales.edb' }];
+    const open = [{ id: 'Sales' }];
+    const folder: FolderWorkspace[] = [{ id: 'sales', file: 'sales.edb' }];
     expect(folderConflicts(open, folder, 'index.edp')).toHaveLength(1);
-  });
-
-  it('does not match two workspaces that only share an id spelling', () => {
-    const open = [{ id: 'sales', name: 'Last year' }];
-    const folder: FolderWorkspace[] = [{ id: 'sales', name: 'This year', file: 'sales.edb' }];
-    expect(folderConflicts(open, folder, 'index.edp')).toEqual([]);
   });
 });
 
@@ -244,8 +227,8 @@ describe('isEmptyWorkspace', () => {
  * itself seconds earlier.
  */
 describe('partitionConflicts', () => {
-  const SALES: FolderClash = { file: { id: 'sales', name: 'sales', file: 'sales.edb' }, localId: 'sales' };
-  const SIMON: FolderClash = { file: { id: 'simon', name: 'simon', file: 'simon.edb' }, localId: 'simon' };
+  const SALES: FolderClash = { file: { id: 'sales', file: 'sales.edb' } };
+  const SIMON: FolderClash = { file: { id: 'simon', file: 'simon.edb' } };
 
   it('adopts the file when the local copy is an empty shell', () => {
     expect(partitionConflicts([SIMON], new Set(['simon']))).toEqual({ adopt: [SIMON], ask: [] });

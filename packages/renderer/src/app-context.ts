@@ -146,7 +146,7 @@ async function init(): Promise<AppContext> {
   let workspaceId: string;
   if (requested) {
     const id = slugifyWorkspace(requested);
-    const hit = existing.find((w) => w.id === id || w.name === requested);
+    const hit = existing.find((w) => w.id === id);
     if (hit) {
       workspaceId = hit.id;
     } else {
@@ -168,7 +168,10 @@ async function init(): Promise<AppContext> {
       if (!mayCreateWorkspaceIn(activeEdbName(), id)) await leaveFileForIndex(id);
       const created = await store.workspaces.insert({
         id,
-        name: requested,
+        // What was ASKED for becomes the title, where it is not simply the id
+        // spelled out. `?space=Power Plants` means the workspace `power-plants`,
+        // and the words the user wrote are worth keeping as what it is called.
+        ...(requested === id ? {} : { title: requested }),
         createdAt: Date.now(),
         pluginUrls: [],
       });
@@ -182,9 +185,16 @@ async function init(): Promise<AppContext> {
     } else if (existing.length > 0) {
       workspaceId = existing[0]!.id;
     } else {
+      // The SECOND line that creates a workspace at boot, and it needs the same
+      // guard as the one above. Deleting the last workspace of an adopted
+      // `alpha.edb` lands here with no `?space=` (`openResolvedWorkspace`), and
+      // creating `default` inside that file is exactly what the rule forbids —
+      // the store would throw, `init()` would reject, and the tab would come back
+      // to the same blocking notice on every reload, with the file marker still
+      // pointing at `alpha.edb`.
+      if (!mayCreateWorkspaceIn(activeEdbName(), 'default')) await leaveFileForIndex('default');
       const ws = await store.workspaces.insert({
         id: 'default',
-        name: 'default',
         createdAt: Date.now(),
         pluginUrls: [],
       });

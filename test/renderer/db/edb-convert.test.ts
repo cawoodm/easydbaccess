@@ -60,7 +60,7 @@ function readOnly<T extends Record<string, unknown>>(docs: T[], idKey: string): 
 }
 
 function fakeSource(): DataStore {
-  const workspaces: Workspace[] = [{ id: WS, name: 'work', createdAt: 1, pluginUrls: ['https://example.invalid/p.js'] }];
+  const workspaces: Workspace[] = [{ id: WS, createdAt: 1, pluginUrls: ['https://example.invalid/p.js'] }];
   const settings: Setting[] = [
     { name: 'theme', value: 'dark' },
     { name: 'rows', value: 42 },

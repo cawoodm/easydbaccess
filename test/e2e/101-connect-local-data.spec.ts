@@ -35,9 +35,9 @@ function seedFolder(page: Page) {
           at: Date.now() - 60_000,
           files: ['sales.edb', 'notes.edb', 'archive.edb'],
           workspaces: [
-            { id: 'sales', name: 'sales', title: 'Sales', file: 'sales.edb', tables: 4, views: 2, size: 131072 },
-            { id: 'notes', name: 'notes', title: 'Notes', file: 'notes.edb', tables: 9, views: 1, size: 524288 },
-            { id: 'arch', name: 'arch', title: 'Archive', file: 'archive.edb', tables: 31, views: 0, size: 4300000 },
+            { id: 'sales', title: 'Sales', file: 'sales.edb', tables: 4, views: 2, size: 131072 },
+            { id: 'notes', title: 'Notes', file: 'notes.edb', tables: 9, views: 1, size: 524288 },
+            { id: 'arch', title: 'Archive', file: 'archive.edb', tables: 31, views: 0, size: 4300000 },
           ],
         }),
       );

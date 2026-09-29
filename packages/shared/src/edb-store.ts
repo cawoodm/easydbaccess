@@ -39,11 +39,24 @@ import type { CloneMode, ColumnSpec, Row, WorkspaceContents } from './types.js';
 import type { RowStamp, TableStamp } from './replicate.js';
 import { settingId } from './setting-key.js';
 import { activeColumnScript } from './column-scripts.js';
+import { isCanonicalWorkspaceId, normalizeWorkspaceDoc, soleWorkspaceOf } from './workspace-id.js';
 
 /** What `coll='_meta', key='format'` holds. Read before anything else is trusted. */
 export interface EdbFormat {
   version: number;
   app: 'easydbaccess';
+}
+
+export interface EdbStoreOptions {
+  /**
+   * The name (or path) of the database this store is opening.
+   *
+   * Optional, and absent means "no invariant to keep": a scratch worker opens
+   * unnamed databases and the suites drive the store with no file at all. When
+   * it IS given and names a `.edb`, the store holds that file to its own rule —
+   * one workspace, the one the name says.
+   */
+  fileName?: string | undefined;
 }
 
 export const EDB_FORMAT_VERSION = 2;
@@ -190,9 +203,18 @@ function matchesRow(row: Row, entries: Array<[string, unknown]>): boolean {
 
 export class EdbStore {
   private readonly db: SqlDriver;
+  /**
+   * The one workspace this database may hold, or `null` for any number.
+   *
+   * Read once from the file name (`soleWorkspaceOf`): a `.edb` is named after
+   * its workspace, the project index `.edp` is not. Held here because the
+   * invariant is the STORE's to keep — see {@link guardWorkspaceWrite}.
+   */
+  private readonly soleWorkspace: string | null;
 
-  constructor(driver: SqlDriver) {
+  constructor(driver: SqlDriver, opts: EdbStoreOptions = {}) {
     this.db = driver;
+    this.soleWorkspace = soleWorkspaceOf(opts.fileName);
     this.createSchema();
   }
 
@@ -244,7 +266,9 @@ export class EdbStore {
     if (coll === 'tables') return this.readTableDoc(key);
     if (coll === 'rows') return this.findOneRow(key);
     docPk(coll);
-    return this.getRaw(coll, key);
+    const doc = this.getRaw(coll, key);
+    if (doc && coll === 'workspaces') return normalizeWorkspaceDoc(doc);
+    return doc;
   }
 
   insert(coll: string, doc: Record<string, unknown>): unknown {
@@ -300,9 +324,15 @@ export class EdbStore {
 
   patch(coll: string, key: string, patch: Record<string, unknown>): unknown {
     return this.tx(() => {
-      const current = coll === 'tables' ? this.readTableDoc(key) : coll === 'rows' ? this.findOneRow(key) : this.getRaw(coll, key);
-      if (!current) throw new Error(`EdbStore.patch: no "${coll}" document with key "${key}"`);
-      return this.writeNoTx('upsert', coll, { ...(current as Record<string, unknown>), ...patch });
+      const stored = coll === 'tables' ? this.readTableDoc(key) : coll === 'rows' ? this.findOneRow(key) : this.getRaw(coll, key);
+      if (!stored) throw new Error(`EdbStore.patch: no "${coll}" document with key "${key}"`);
+      // A workspace is patched from its NORMALIZED self, so a patch is the one
+      // write that drops a legacy `name`. Patching the raw doc carried it forward
+      // for ever, and clearing a title then looked as if it had not taken: the
+      // cleared key falls back to `name` on the way out, so the old label came
+      // straight back.
+      const current = coll === 'workspaces' ? normalizeWorkspaceDoc(stored as Record<string, unknown>) : (stored as Record<string, unknown>);
+      return this.writeNoTx('upsert', coll, { ...current, ...patch });
     });
   }
 
@@ -507,13 +537,19 @@ export class EdbStore {
    *
    * The copy is ADDITIVE: it never deletes from the source.
    */
-  cloneWorkspace(opts: { from: string; to: string; name: string; mode: CloneMode }): string {
-    const { from, to, name, mode } = opts;
+  cloneWorkspace(opts: { from: string; to: string; title?: string | undefined; mode: CloneMode }): string {
+    const { from, to, title, mode } = opts;
     return this.tx(() => {
+      // Through `writeDocNoTx`, the same guarded insert every other creation path
+      // takes. It used to call `putRaw` directly — an `INSERT OR REPLACE` with no
+      // existence check — so New workspace ▸ Simple under a name that slugified
+      // onto a workspace already here REPLACED that workspace's record and then
+      // merged the clone's tables into it. An id is unique or it is not; there is
+      // no route on which it may be "mostly".
       const source = this.getRaw('workspaces', from);
-      this.putRaw('workspaces', to, null, {
+      this.writeDocNoTx('insert', 'workspaces', {
         id: to,
-        name,
+        ...(title?.trim() ? { title: title.trim() } : {}),
         createdAt: Date.now(),
         // The plugin list decides which plugins load, so it rides along with the
         // settings rather than with the data.
@@ -722,6 +758,9 @@ export class EdbStore {
     const rows =
       typeof ws === 'string' ? this.db.prepare(`SELECT doc FROM _easydb WHERE coll = ? AND workspaceId = ?`).all(coll, ws) : this.db.prepare(`SELECT doc FROM _easydb WHERE coll = ?`).all(coll);
     let docs = rows.map((r) => JSON.parse(String(r.doc)) as Record<string, unknown>);
+    // Before the query runs, so a caller cannot match on a field this version
+    // does not have — and so `title` is already resolved when it does.
+    if (coll === 'workspaces') docs = docs.map(normalizeWorkspaceDoc);
     const entries = Object.entries(query ?? {}).filter(([k]) => k !== 'workspaceId' || typeof ws !== 'string');
     if (entries.length > 0) docs = docs.filter((d) => matchesAll(d, entries));
     return docs;
@@ -736,9 +775,43 @@ export class EdbStore {
     if (mode === 'insert' && this.getRaw(coll, key)) {
       throw new Error(`EdbStore.insert: "${coll}" doc with ${pk} "${key}" already exists`);
     }
+    if (coll === 'workspaces') this.guardWorkspaceWrite(mode, key);
     const workspaceId = typeof doc.workspaceId === 'string' ? doc.workspaceId : null;
     this.putRaw(coll, key, workspaceId, doc);
     return doc;
+  }
+
+  /**
+   * The workspace invariant, kept where it cannot be gone around.
+   *
+   * Two rules, and both used to live in app code — `mayCreateWorkspaceIn` at the
+   * one line that creates a workspace at boot, `one-per-file.ts` at every save,
+   * `file-identity.ts` at every sync. Three checks, and the gaps between them were
+   * real: New workspace ▸ Simple wrote a second workspace into an open `.edb`
+   * through none of them, and a file that arrived already holding two was nobody's
+   * business at all. A rule the storage layer does not keep is a rule.
+   *
+   * 1. **The id is canonical**, so id ⇄ file name round-trips. `My Data` would be
+   *    written to `My Data.edb` and read back as `my-data`: two workspaces to
+   *    everything downstream, one file on disk.
+   * 2. **A `.edb` holds only the workspace its name says.** The project index
+   *    (`.edp`) is the exemption, and a database this store cannot name has no
+   *    invariant to break.
+   *
+   * Uniqueness itself needs no check here: `PRIMARY KEY (coll, key)` is the id,
+   * and the `insert` above refuses a key that is already taken.
+   *
+   * READS are deliberately untouched. A file written by an older version may hold
+   * anything, and refusing to open it would strand data this app can still show —
+   * so a broken file is reported (`file-identity.ts`) and left alone, and only new
+   * writes are held to the rule.
+   */
+  private guardWorkspaceWrite(mode: 'insert' | 'upsert', id: string): void {
+    if (!isCanonicalWorkspaceId(id)) {
+      throw new Error(`EdbStore.${mode}: "${id}" is not a usable workspace id — it must be its own slug, because the id is the file name`);
+    }
+    if (this.soleWorkspace === null || this.soleWorkspace === id) return;
+    throw new Error(`EdbStore.${mode}: this file holds the workspace "${this.soleWorkspace}", so "${id}" cannot be written into it — a .edb holds the one workspace its name says`);
   }
 
   // -- tables -------------------------------------------------------------

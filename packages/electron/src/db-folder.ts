@@ -24,6 +24,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { patchLocationConfig, readLocationConfig, WORKSPACE_EXTENSION } from './db-files';
 import { SqliteStore } from './sqlite-store';
+import { spaceFileName } from '@easydb/shared';
 
 // Same require-not-import trick as `sqlite-store.ts` — see the comment there.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -35,7 +36,6 @@ const FOLDER_KEY = 'workspaceFolder';
 /** One workspace found inside one file in the folder. Mirrors the browser's `FolderWorkspace`. */
 export interface FolderWorkspaceInfo {
   id: string;
-  name: string;
   title?: string | undefined;
   tables: number;
   views: number;
@@ -158,10 +158,12 @@ export function peekWorkspaceFile(file: string): FolderWorkspaceInfo[] {
       const id = typeof doc.id === 'string' ? doc.id : '';
       if (!id) continue;
       const counted = counts.get(id) ?? { tables: 0, views: 0 };
+      // The same legacy rule the store reads by: up to v0.0.506 a workspace
+      // carried a `name`, and where there is no title it IS the title now.
+      const title = typeof doc.title === 'string' && doc.title.trim() ? doc.title : typeof doc.name === 'string' && doc.name.trim() ? doc.name : '';
       out.push({
         id,
-        name: typeof doc.name === 'string' && doc.name ? doc.name : id,
-        ...(typeof doc.title === 'string' && doc.title ? { title: doc.title } : {}),
+        ...(title ? { title } : {}),
         tables: counted.tables,
         views: counted.views,
       });
@@ -216,15 +218,20 @@ export function scanFolderAt(dir: string, only?: readonly string[]): FolderScan 
 // -- making one --------------------------------------------------------------
 
 /**
- * `name`, or `name (2)`, `name (3)`, … — the first `.edb` the folder does not
- * already hold. Case-insensitive, like every other name rule in this app.
+ * `sales`, or `sales-2`, `sales-3`, … — the first workspace ID whose file the
+ * folder does not already hold. Case-insensitive, like every other name rule here.
+ *
+ * It answers an ID rather than a file name, and the difference is the invariant:
+ * the file is `spaceFileName(id)`, so the two agree by construction. It used to
+ * answer `sales (2).edb`, which slugifies to `sales-2` — a file whose name denied
+ * the workspace `sales` inside it, which is precisely the state `file-identity.ts`
+ * exists to complain about and the store now refuses outright.
  */
-export function freeWorkspaceFileName(dir: string, stem: string): string {
+export function freeWorkspaceIdIn(dir: string, stem: string): string {
   const taken = new Set(listWorkspaceFiles(dir).map((f) => f.toLowerCase()));
-  const candidate = (n: number): string => (n === 1 ? `${stem}.${WORKSPACE_EXTENSION}` : `${stem} (${n}).${WORKSPACE_EXTENSION}`);
   for (let n = 1; ; n++) {
-    const file = candidate(n);
-    if (!taken.has(file.toLowerCase())) return file;
+    const id = n === 1 ? stem : `${stem}-${n}`;
+    if (!taken.has(spaceFileName(id).toLowerCase())) return id;
   }
 }
 
@@ -237,17 +244,19 @@ export function freeWorkspaceFileName(dir: string, stem: string): string {
  *
  * Returns the full path of the file it wrote.
  */
-export function createWorkspaceFile(id: string, name: string): string | null {
+export function createWorkspaceFile(id: string, title?: string): string | null {
   const dir = workspaceFolder();
-  return dir ? createWorkspaceFileIn(dir, id, name) : null;
+  return dir ? createWorkspaceFileIn(dir, id, title) : null;
 }
 
 /** As {@link createWorkspaceFile}, against a folder named outright. Testable. */
-export function createWorkspaceFileIn(dir: string, id: string, name: string): string {
-  const file = path.join(dir, freeWorkspaceFileName(dir, id));
+export function createWorkspaceFileIn(dir: string, id: string, title?: string): string {
+  // The id is settled FIRST and the file named after it, not the other way round.
+  const free = freeWorkspaceIdIn(dir, id);
+  const file = path.join(dir, spaceFileName(free));
   const store = new SqliteStore({ path: file });
   try {
-    store.insert('workspaces', { id, name, createdAt: Date.now(), pluginUrls: [] });
+    store.insert('workspaces', { id: free, ...(title && title !== free ? { title } : {}), createdAt: Date.now(), pluginUrls: [] });
   } finally {
     store.checkpoint();
     store.close();

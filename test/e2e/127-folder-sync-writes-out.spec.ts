@@ -45,7 +45,7 @@ async function addWorkspace(page: Page, id: string, withTable: boolean): Promise
           __easydb: { store: { workspaces: { upsert(doc: unknown): Promise<unknown> }; tables: { upsert(doc: unknown): Promise<unknown> } } };
         }
       ).__easydb;
-      await ctx.store.workspaces.upsert({ id: wsId, name: wsId, createdAt: Date.now(), pluginUrls: [] });
+      await ctx.store.workspaces.upsert({ id: wsId, createdAt: Date.now(), pluginUrls: [] });
       // A workspace is "empty" by tables and views, so one table is what makes it
       // worth a file — see `isEmptyWorkspace`.
       if (table) await ctx.store.tables.upsert({ id: `${wsId}-t`, workspaceId: wsId, name: 'Things', columns: [{ field: 'a' }], createdAt: Date.now(), updatedAt: Date.now() });
