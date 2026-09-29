@@ -84,32 +84,48 @@ test('the keyboard drives it: arrow, Enter, then Enter again to save', async ({ 
   await input.press('Enter'); // takes it, rather than saving the cell
   await expect(input).toHaveValue('green, blue, ');
 
-  // With nothing highlighted, Enter saves — a tag typed by hand needs no mouse.
-  await input.press('Escape'); // close the list only
-  await expect(list(page)).toHaveCount(0);
+  // With nothing highlighted, Enter saves — a tag typed by hand needs no mouse,
+  // and an open list does not block it. Taking a suggestion clears the
+  // highlight and offers the next tag, so the list is still up right here.
+  await expect(list(page)).toBeVisible();
   await input.press('Enter');
   // Saved without the trailing separator the suggestion left behind.
   await expect.poll(async () => (await readRows(page, id)).find((r) => r.data.name === 'b')?.data.tags).toBe('green, blue');
 });
 
-test('Escape closes the list first and cancels the edit second', async ({ page }) => {
+test('one Escape cancels the edit, whether or not the list is open', async ({ page }) => {
+  // This used to take two presses — one to shut the list, one to cancel — so
+  // that dismissing the list could not throw away what had been typed. But the
+  // list is never one the user OPENED: it appears when the editor takes focus
+  // and follows every keystroke. So the first Escape was eaten by something
+  // nobody asked for, and whether Escape cancelled at all came down to whether
+  // the `setTimeout(0)` that opens the list had fired yet.
   const id = await tagsTable(page, 'Escape');
   const input = await edit(page, id, 1);
-  await input.fill('green, nonsense');
-
-  // The list is open (nothing matches "nonsense"? then reopen it deliberately).
   await input.fill('green, ');
   await expect(list(page)).toBeVisible();
 
   await input.press('Escape');
-  await expect(list(page)).toHaveCount(0);
-  // The editor is still open with what was typed — the first Escape must not
-  // throw the edit away.
-  await expect(cell(page, id, 1).locator('input')).toHaveValue('green, ');
 
-  await cell(page, id, 1).locator('input').press('Escape');
+  // One press: the list is gone, the editor is gone, and nothing was written.
+  await expect(list(page)).toHaveCount(0);
   await expect(cell(page, id, 1).locator('input')).toHaveCount(0);
-  // Cancelled: the stored value is untouched.
+  expect((await readRows(page, id)).find((r) => r.data.name === 'b')?.data.tags).toBe('green');
+  // And the window is still there: `panel-shell` closes the window on an Escape
+  // that reaches it, so the handler has to claim this one either way.
+  await expect(page.locator(`#${panelDomId(id)}`)).toBeVisible();
+});
+
+test('Escape cancels with no list open too', async ({ page }) => {
+  const id = await tagsTable(page, 'EscapeNoList');
+  const input = await edit(page, id, 1);
+  // Matches nothing in the column's vocabulary, so the list closes itself.
+  await input.fill('zzz');
+  await expect(list(page)).toHaveCount(0);
+
+  await input.press('Escape');
+
+  await expect(cell(page, id, 1).locator('input')).toHaveCount(0);
   expect((await readRows(page, id)).find((r) => r.data.name === 'b')?.data.tags).toBe('green');
 });
 

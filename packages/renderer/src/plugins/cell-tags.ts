@@ -200,16 +200,23 @@ class CellTags extends HTMLElement {
         return;
       }
       if (e.key === 'Escape') {
-        // One Escape closes the list, a second cancels the edit — dismissing a
-        // list the user never asked for must not throw away their typing.
-        // `stopPropagation` keeps that first Escape from reaching the panel
-        // shell, which would close the window behind the cell.
-        if (this._list) {
-          e.preventDefault();
-          e.stopPropagation();
-          this.closeList();
-          return;
-        }
+        // ONE Escape cancels the edit, list open or not.
+        //
+        // It used to take two — one to close the list, one to cancel — so that
+        // dismissing the list could not throw away what the user had typed. But
+        // the list is never one the user ASKED for: it opens by itself when the
+        // editor takes focus, and follows every keystroke and caret move after
+        // that. So the first Escape was nearly always eaten by something the
+        // user had not opened, and whether Escape cancelled at all came down to
+        // whether the `setTimeout(0)` below had fired yet — the same edit
+        // answering differently depending on how fast the machine was.
+        //
+        // `stopPropagation` stays, with or without a list: `panel-shell` closes
+        // the window on an Escape that reaches it, which is not what cancelling
+        // one cell should do.
+        e.preventDefault();
+        e.stopPropagation();
+        this.closeList();
         // Disown this input first: render() removes it, which fires blur, and
         // that blur must not save the edit being cancelled.
         this._editor = null;

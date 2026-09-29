@@ -4,6 +4,7 @@
 
 ### Bugs
 
+- 🪲 Escape in a tags cell shut the suggestion list instead of cancelling the edit, and needed a second press (v0.0.505)
 - 🪲 The command palette ranked a word matched in a tooltip above the same word in a command's own title (v0.0.503)
 - 🪲 The Datasette filter translation could ask the server for fewer rows than the filter meant (v0.0.502)
 - 🪲 The red two-step warning before a save that would empty a file never appeared (v0.0.501)
