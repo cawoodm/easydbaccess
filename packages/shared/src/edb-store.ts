@@ -324,9 +324,15 @@ export class EdbStore {
 
   patch(coll: string, key: string, patch: Record<string, unknown>): unknown {
     return this.tx(() => {
-      const current = coll === 'tables' ? this.readTableDoc(key) : coll === 'rows' ? this.findOneRow(key) : this.getRaw(coll, key);
-      if (!current) throw new Error(`EdbStore.patch: no "${coll}" document with key "${key}"`);
-      return this.writeNoTx('upsert', coll, { ...(current as Record<string, unknown>), ...patch });
+      const stored = coll === 'tables' ? this.readTableDoc(key) : coll === 'rows' ? this.findOneRow(key) : this.getRaw(coll, key);
+      if (!stored) throw new Error(`EdbStore.patch: no "${coll}" document with key "${key}"`);
+      // A workspace is patched from its NORMALIZED self, so a patch is the one
+      // write that drops a legacy `name`. Patching the raw doc carried it forward
+      // for ever, and clearing a title then looked as if it had not taken: the
+      // cleared key falls back to `name` on the way out, so the old label came
+      // straight back.
+      const current = coll === 'workspaces' ? normalizeWorkspaceDoc(stored as Record<string, unknown>) : (stored as Record<string, unknown>);
+      return this.writeNoTx('upsert', coll, { ...current, ...patch });
     });
   }
 
@@ -534,12 +540,14 @@ export class EdbStore {
   cloneWorkspace(opts: { from: string; to: string; title?: string | undefined; mode: CloneMode }): string {
     const { from, to, title, mode } = opts;
     return this.tx(() => {
-      // Through the guarded write, not `putRaw`: a clone is a workspace being
-      // created, and it is held to the same rule as any other — it used to be the
-      // one creation path that went straight to storage.
+      // Through `writeDocNoTx`, the same guarded insert every other creation path
+      // takes. It used to call `putRaw` directly — an `INSERT OR REPLACE` with no
+      // existence check — so New workspace ▸ Simple under a name that slugified
+      // onto a workspace already here REPLACED that workspace's record and then
+      // merged the clone's tables into it. An id is unique or it is not; there is
+      // no route on which it may be "mostly".
       const source = this.getRaw('workspaces', from);
-      this.guardWorkspaceWrite('insert', to);
-      this.putRaw('workspaces', to, null, {
+      this.writeDocNoTx('insert', 'workspaces', {
         id: to,
         ...(title?.trim() ? { title: title.trim() } : {}),
         createdAt: Date.now(),

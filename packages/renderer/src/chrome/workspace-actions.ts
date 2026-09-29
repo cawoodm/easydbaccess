@@ -194,8 +194,14 @@ export async function newWorkspaceFlow(): Promise<void> {
   // Create the workspace here rather than letting init() do it on first load:
   // only this side knows what to copy, and the copy must be in place before the
   // new workspace boots.
-  await cloneWorkspace(storeBridge(), { from: ctx.workspaceId, to: slugifyWorkspace(name), title: name, mode });
-  openWorkspace(slugifyWorkspace(name));
+  //
+  // The typed text becomes the TITLE — unless it is already the id spelled out,
+  // in which case storing it would be the same string twice and every screen
+  // falls back to the id anyway. Same rule as the other two creation paths
+  // (`newFileWorkspace` and the one in `app-context.ts`).
+  const id = slugifyWorkspace(name);
+  await cloneWorkspace(storeBridge(), { from: ctx.workspaceId, to: id, ...(name === id ? {} : { title: name }), mode });
+  openWorkspace(id);
 }
 
 /**

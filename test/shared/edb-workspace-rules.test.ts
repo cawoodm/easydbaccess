@@ -105,6 +105,34 @@ describe('the id is unique, and the store is what says so', () => {
   });
 });
 
+describe('a clone is a creation, and obeys the same rules', () => {
+  it('refuses to clone onto an id already taken, rather than replacing it', () => {
+    // It wrote through `putRaw` — an INSERT OR REPLACE with no existence check —
+    // so New workspace > Simple under a name that slugified onto a workspace
+    // already here REPLACED that workspace's record and merged the clone's tables
+    // into it. The one creation path where the id was not actually unique.
+    const store = open('index.edp');
+    store.insert('workspaces', ws('sales', { title: 'The real one' }));
+    store.insert('workspaces', ws('scratch'));
+    expect(() => store.cloneWorkspace({ from: 'scratch', to: 'sales', title: 'Clone', mode: 'empty' })).toThrow(/already exists/);
+    expect(store.findOne('workspaces', 'sales')).toMatchObject({ title: 'The real one' });
+  });
+
+  it('carries the title onto the copy', () => {
+    const store = open('index.edp');
+    store.insert('workspaces', ws('sales'));
+    store.cloneWorkspace({ from: 'sales', to: 'sales-2', title: 'Last quarter', mode: 'empty' });
+    expect(store.findOne('workspaces', 'sales-2')).toMatchObject({ id: 'sales-2', title: 'Last quarter' });
+  });
+
+  it('leaves a copy with no title of its own untitled, rather than inventing one', () => {
+    const store = open('index.edp');
+    store.insert('workspaces', ws('sales', { title: 'Sales' }));
+    store.cloneWorkspace({ from: 'sales', to: 'sales-2', mode: 'empty' });
+    expect(store.findOne('workspaces', 'sales-2')).not.toHaveProperty('title');
+  });
+});
+
 describe('a workspace written by an older version', () => {
   /** What v0.0.503 and earlier wrote: an id, a `name`, and maybe a title. */
   const legacy = (doc: Record<string, unknown>) => {
@@ -137,6 +165,23 @@ describe('a workspace written by an older version', () => {
     store.findOne('workspaces', 'powerplants');
     const stored = store.runSql(`SELECT doc FROM _easydb WHERE coll = 'workspaces'`, {});
     expect(String(stored.rows[0]?.[0])).toContain('"name":"PowerPlants"');
+  });
+
+  it('loses its name on the first patch, so a cleared title stays cleared', () => {
+    // `patch` merged onto the RAW doc, so the legacy `name` rode along for ever.
+    // Clearing the title then looked as if it had not taken: the cleared key fell
+    // back to `name` on the way out and the old label came straight back.
+    const store = legacy({ id: 'powerplants', name: 'PowerPlants', title: 'Power Plants', createdAt: 1, pluginUrls: [] });
+    store.patch('workspaces', 'powerplants', { title: undefined });
+    expect(store.findOne('workspaces', 'powerplants')).not.toHaveProperty('title');
+    const stored = store.runSql(`SELECT doc FROM _easydb WHERE coll = 'workspaces'`, {});
+    expect(String(stored.rows[0]?.[0])).not.toContain('"name"');
+  });
+
+  it('keeps every other field through that patch', () => {
+    const store = legacy({ id: 'powerplants', name: 'PowerPlants', createdAt: 7, pluginUrls: ['https://example.test/p.js'] });
+    store.patch('workspaces', 'powerplants', { title: 'Renamed' });
+    expect(store.findOne('workspaces', 'powerplants')).toMatchObject({ id: 'powerplants', title: 'Renamed', createdAt: 7, pluginUrls: ['https://example.test/p.js'] });
   });
 
   it('still opens a file the rule would refuse to write today', () => {

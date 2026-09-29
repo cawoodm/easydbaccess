@@ -185,6 +185,14 @@ async function init(): Promise<AppContext> {
     } else if (existing.length > 0) {
       workspaceId = existing[0]!.id;
     } else {
+      // The SECOND line that creates a workspace at boot, and it needs the same
+      // guard as the one above. Deleting the last workspace of an adopted
+      // `alpha.edb` lands here with no `?space=` (`openResolvedWorkspace`), and
+      // creating `default` inside that file is exactly what the rule forbids —
+      // the store would throw, `init()` would reject, and the tab would come back
+      // to the same blocking notice on every reload, with the file marker still
+      // pointing at `alpha.edb`.
+      if (!mayCreateWorkspaceIn(activeEdbName(), 'default')) await leaveFileForIndex('default');
       const ws = await store.workspaces.insert({
         id: 'default',
         createdAt: Date.now(),

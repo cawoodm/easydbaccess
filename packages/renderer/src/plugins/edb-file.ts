@@ -44,7 +44,7 @@ import { alsoWroteNote, withoutTheirOwnFile, writableWholesale } from '../db/edb
 import { installWriteGuard, writeUserBytes, type WriteGuardDeps } from '../db/edb/guarded-write.js';
 import { describeHolding, firstWarning, refusedNote, secondWarning, type Holding } from '../db/edb/empty-write.js';
 import { dangerConfirm } from '../dialogs/danger-confirm.js';
-import { freeWorkspaceId, spaceFileName, workspaceIdFromFileName } from '../db/edb/space-resolve.js';
+import { freeWorkspaceId, mayCreateWorkspaceIn, spaceFileName, workspaceIdFromFileName } from '../db/edb/space-resolve.js';
 
 /**
  * The `.edb` file surface in the browser: Open, Save, the autosave switch and the
@@ -154,7 +154,7 @@ interface WorkspaceDoc {
  *
  * `peekWorkspaces` answers raw documents, and a file may have been written by
  * anything: a record with no usable id is dropped rather than trusted. Through
- * `normalizeWorkspaceDoc`, so a file written before v0.0.504 hands its `name`
+ * `normalizeWorkspaceDoc`, so a file written before v0.0.506 hands its `name`
  * over as the title rather than losing it.
  */
 function workspaceDocs(raw: readonly PeekedWorkspace[]): WorkspaceDoc[] {
@@ -1000,6 +1000,19 @@ export function init(api: HostApi): void {
    * so the id has to be settled before anything crosses over.
    */
   async function bringWorkspaceIn(bytes: Uint8Array, fileName: string, source: WorkspaceDoc, target: string, mode: 'fresh' | 'overwrite' | 'rename'): Promise<void> {
+    // BEFORE anything is deleted. `overwrite` removes the local copy and then
+    // writes the file's one over it, and the write can be refused: the open
+    // database may be a `.edb` named after a different workspace, which the store
+    // will not take a second one into. Finding that out after the delete would
+    // leave the user with neither copy — the alert below would explain a loss
+    // that had already happened.
+    if (!mayCreateWorkspaceIn(activeEdbName(), target)) {
+      await api.ui.dialogs.alert(
+        `"${target}" cannot be opened into this workspace file. ${activeEdbName()} holds one workspace, and it is not that one — switch to the project index first, or open ${fileName} directly.`,
+        'Open workspace file',
+      );
+      return;
+    }
     const scratch = createEdbBridge();
     setAppProgress({ label: `Opening ${fileName}` });
     // The batch directly rather than through `import:before`: that event carries a

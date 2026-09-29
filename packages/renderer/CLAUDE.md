@@ -219,7 +219,7 @@ information was already on screen two inches away:
 text the user edits, may repeat, and nothing is derived from it — every screen
 falls back to the id when there is none (`workspaceLabel`).
 
-There was a third field until v0.0.504. `name` was minted from the same slug as
+There was a third field until v0.0.506. `name` was minted from the same slug as
 the id and shown wherever a title was absent, and nothing kept the three in step:
 the list said "PowerPlants", the file said `powerplants.edb`, and deleting it
 asked about "Simon". What used to turn on `name` turns on `id` now —

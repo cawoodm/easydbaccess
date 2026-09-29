@@ -84,7 +84,7 @@ export function workspaceIdFromFileName(file: string): string {
 /**
  * A stored workspace doc as this version understands it, whoever wrote it.
  *
- * Up to v0.0.504 a workspace carried a third identifier, `name`, and it was what
+ * Up to v0.0.506 a workspace carried a third identifier, `name`, and it was what
  * the selector showed when there was no title. Dropping it silently would rename
  * every workspace in every existing file to its id, so the name becomes the
  * TITLE where the doc has none — the field that now does that job.

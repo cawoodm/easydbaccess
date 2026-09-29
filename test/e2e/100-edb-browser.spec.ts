@@ -579,7 +579,7 @@ test.describe('the storage strategy question', () => {
       const rows = db.prepare(`SELECT doc FROM _easydb WHERE coll = 'workspaces'`).all();
       expect(rows).toHaveLength(1);
       // The ID is what the file is named after, and the only identifier the doc
-      // carries. It held a `name` beside it until v0.0.504, minted from the same
+      // carries. It held a `name` beside it until v0.0.506, minted from the same
       // slug and free to drift from it.
       expect((JSON.parse(String(rows[0]!['doc'])) as { id: string }).id).toBe('sales');
       expect(db.prepare(`SELECT COUNT(*) AS n FROM _easydb WHERE coll = 'tables'`).get()!['n']).toBe(0);

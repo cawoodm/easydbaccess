@@ -71,17 +71,17 @@ it already serves the desktop and the server — one convention across all three
   the **`id`**, which IS the file name (`sales` ⇄ `sales.edb`), routes `?space=`
   and keys every setting, view and table; and the **`title`**, free text the user
   edits, which may repeat and from which nothing is ever derived. There was a
-  third until v0.0.504 — `name`, minted from the same slug as the id and shown
+  third until v0.0.506 — `name`, minted from the same slug as the id and shown
   wherever a title was absent — and nothing kept the three in step, so one
   workspace could read three ways at once. `workspace-id.ts` owns the id rules;
-  a doc written before v0.0.504 is read with its `name` taken as the title when
+  a doc written before v0.0.506 is read with its `name` taken as the title when
   it has none, on READ only. See
   [Two names, and only one of them identifies](#two-names-and-only-one-of-them-identifies).
 - **A `.edb` holds exactly ONE workspace: the one its name says.** Not a
   convention — an invariant, and the one this file layer is built on.
   `spaceFileName` writes the name, `workspaceIdFromFileName` reads it back, the
   folder index maps between them, and `?space=` switches workspace by adopting
-  that workspace's file. **The STORE enforces it** since v0.0.504
+  that workspace's file. **The STORE enforces it** since v0.0.506
   (`EdbStore.guardWorkspaceWrite`): it takes the file name it was opened with and
   refuses any workspace write that breaks the rule, so no route can go around it.
   `one-per-file.ts` at every write and `mayCreateWorkspaceIn` at boot are still
@@ -422,7 +422,7 @@ write and every clash), and offers the two answers that exist:
 
 Two cases are deliberately not repaired. A file holding SEVERAL workspaces is left
 alone — that is the pre-v0.0.427 shape above, and no rename makes it right; since
-v0.0.504 it is at least **named in the sync report**, see below. And two names that
+v0.0.506 it is at least **named in the sync report**, see below. And two names that
 slugify to one id (`My Data.edb` beside `my-data.edb`) cannot be told apart by any
 rename, so the file carrying the name Save would have written wins and the other is
 set aside until the user renames it on disk.
@@ -443,7 +443,7 @@ A workspace carries an **`id`** and a **`title`**, and they do different jobs:
 | Derived from? | slugified once, at creation | nothing; it is typed |
 | Falls back to | — | the `id`, on any screen with no title |
 
-There was a third until v0.0.504. `name` was minted from the same slug as the id
+There was a third until v0.0.506. `name` was minted from the same slug as the id
 and shown wherever a title was absent, and nothing kept the three in step — so one
 workspace could read three ways at once: the list said "PowerPlants", the file said
 `powerplants.edb`, and deleting it asked about "Simon". Every rule that used to
@@ -482,7 +482,7 @@ Reported from the field: the selector showed **"PowerPlants" twice, and hovering
 both said `powerplants.edb`**. Deleting one of them then asked
 `Delete the workspace "Simon"?`.
 
-Three separate things, each with its own fix (v0.0.504):
+Three separate things, each with its own fix (v0.0.506):
 
 - **The file really did hold two workspaces.** `fileIdentities` used to leave such
   a file out of its answer entirely, on the grounds that `one-per-file.ts` owned

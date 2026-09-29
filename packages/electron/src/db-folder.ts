@@ -158,7 +158,7 @@ export function peekWorkspaceFile(file: string): FolderWorkspaceInfo[] {
       const id = typeof doc.id === 'string' ? doc.id : '';
       if (!id) continue;
       const counted = counts.get(id) ?? { tables: 0, views: 0 };
-      // The same legacy rule the store reads by: up to v0.0.504 a workspace
+      // The same legacy rule the store reads by: up to v0.0.506 a workspace
       // carried a `name`, and where there is no title it IS the title now.
       const title = typeof doc.title === 'string' && doc.title.trim() ? doc.title : typeof doc.name === 'string' && doc.name.trim() ? doc.name : '';
       out.push({
