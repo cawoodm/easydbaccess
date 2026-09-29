@@ -22,7 +22,7 @@ async function edbBytes(page: Page, workspaceId: string, tableName: string): Pro
     async ({ ws, tableName }) => {
       const { createEdbBridge } = (await import('/src/db/edb/worker-bridge.ts')) as {
         createEdbBridge: () => {
-          open(b: Uint8Array | null, n: string): Promise<unknown>;
+          open(b: Uint8Array | null, n: string, o?: { scratch?: boolean }): Promise<unknown>;
           export(): Promise<Uint8Array>;
           terminate(): void;
         };
@@ -33,7 +33,7 @@ async function edbBytes(page: Page, workspaceId: string, tableName: string): Pro
       };
       const scratch = createEdbBridge();
       try {
-        await scratch.open(null, `source-${ws}.edb`);
+        await scratch.open(null, `source-${ws}.edb`, { scratch: true });
         const store = createIpcDataStore(scratch, () => ws);
         await store.workspaces.insert({ id: ws, name: ws, createdAt: Date.now(), pluginUrls: [] });
         const tableId = `${ws}-t`;

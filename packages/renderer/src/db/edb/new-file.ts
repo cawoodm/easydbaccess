@@ -100,7 +100,12 @@ export async function buildEdbFile(target: EdbTarget, workspaceId: string, fill?
   const bridge = createEdbBridge();
   let bytes: Uint8Array;
   try {
-    await bridge.open(null, target.name);
+    // `scratch: true`, and the paragraph above says why: this worker must never
+    // ask for the pool. Without the flag it asks anyway and merely FAILS to get
+    // it — after making the browser refuse the access handles the live worker is
+    // already holding, which leaves the session the user is looking at answering
+    // `store used before the database was opened` to everything.
+    await bridge.open(null, target.name, { scratch: true });
     if (fill) await fill(createIpcDataStore(bridge, () => workspaceId));
     bytes = await bridge.export();
   } finally {

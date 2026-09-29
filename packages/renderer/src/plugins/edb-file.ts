@@ -1008,7 +1008,7 @@ export function init(api: HostApi): void {
     // the same — one save at the end, not one per chunk.
     autosave.beginBatch();
     try {
-      await scratch.open(bytes, DROP_SCRATCH);
+      await scratch.open(bytes, DROP_SCRATCH, { scratch: true });
       if (mode === 'overwrite') await deleteWorkspace(storeBridge(), target);
       if (mode === 'rename') await cloneWorkspace(scratch, { from: source.id, to: target, name: target, mode: 'all' });
       const from = createIpcDataStore(scratch, () => target);
@@ -1111,7 +1111,7 @@ export function init(api: HostApi): void {
     }
     const scratch = createEdbBridge();
     try {
-      await scratch.open(await readBytes(handle), SYNC_SCRATCH);
+      await scratch.open(await readBytes(handle), SYNC_SCRATCH, { scratch: true });
       // What comes OUT is the file's own copy, which a name-matched clash may hold
       // under a different id. Deleting the local id instead would leave the file
       // holding both — the very thing `one-per-file.ts` is there to prevent.
@@ -1155,7 +1155,7 @@ export function init(api: HostApi): void {
     }
     const scratch = createEdbBridge();
     try {
-      await scratch.open(await readBytes(handle), SYNC_SCRATCH);
+      await scratch.open(await readBytes(handle), SYNC_SCRATCH, { scratch: true });
       const before = (await scratch.findOne('workspaces', from)) as { title?: unknown } | null;
       const title = typeof before?.title === 'string' ? before.title : '';
       await cloneWorkspace(scratch, { from, to, name: to, mode: 'all' });

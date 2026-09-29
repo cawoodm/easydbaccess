@@ -47,12 +47,22 @@ function saveButton(page: Page) {
 }
 
 async function runFileCommand(page: Page, title: string): Promise<void> {
-  await page
-    .locator('app-shell header')
-    .getByTitle(/open the command palette/i)
-    .click();
   const palette = page.locator('command-palette-dialog dialog');
-  await expect(palette).toBeVisible();
+  const opener = page.locator('app-shell header').getByTitle(/open the command palette/i);
+  // Clicked until it is open, not once. The shell re-renders on a store change
+  // and on a boot still finishing, and a click that lands mid-render is simply
+  // lost — leaving a five-second wait for a dialog nothing was ever asked to
+  // show. Re-clicking is safe: an already-open palette short-circuits.
+  await expect
+    .poll(
+      async () => {
+        if (await palette.isVisible().catch(() => false)) return true;
+        await opener.click().catch(() => {});
+        return palette.isVisible().catch(() => false);
+      },
+      { timeout: 20_000, message: 'the command palette never opened' },
+    )
+    .toBe(true);
   await palette.locator('input').fill(title);
   await palette
     .locator('.item')
@@ -83,30 +93,85 @@ async function saveIntoNewFolder(page: Page, file: string): Promise<void> {
  * starts from "nothing outstanding here", so it waits for that.
  */
 async function settleClean(page: Page, file: string): Promise<void> {
+  const dialogs = page.locator('host-dialogs');
+
+  // TWO confirms can stand between this Save and the file, and which one comes
+  // depends on what this tab knows about the name it is writing to:
+  //
+  //   - "Yes"              — re-point at a name already in the folder, which is
+  //                          what a tab that ADOPTED the file is asked;
+  //   - "Use local version" — the copies may differ; the choice dialog names
+  //                          what each holds.
+  //
+  // The answer this helper wants is the same either way: write ours out. Only
+  // the first was answered, so the choice dialog sat there unanswered and the
+  // NEXT attempt clicked a Save button covered by it — 180 seconds of
+  // `<host-dialogs> intercepts pointer events`, and this spec's last flake.
+  const answers = [dialogs.getByRole('button', { name: 'Yes', exact: true }), dialogs.getByRole('button', { name: 'Use local version', exact: true })];
+  const answerAny = async (): Promise<void> => {
+    for (const button of answers) {
+      if (await button.isVisible().catch(() => false)) {
+        await button.click().catch(() => {});
+        return;
+      }
+    }
+  };
+
   for (let attempt = 0; attempt < 4; attempt++) {
     const s = await stamp(page, file);
     if (s && s.dirty !== true) return;
+
+    // Never click Save THROUGH a dialog. `.locator('dialog[open]')`, not
+    // `innerText()`: the dialog lives in a shadow root, so the host element
+    // reads as empty while covering the header — which is how the guard that
+    // was here first missed every one of them.
+    await answerAny();
+    const open = dialogs.locator('dialog[open]');
+    if (await open.isVisible().catch(() => false)) {
+      throw new Error(`a dialog is in the way of Save: ${(await open.innerText().catch(() => '?')).trim().slice(0, 200)}`);
+    }
+
     await saveButton(page).click();
-    // A Save that has to re-point at a name already in the folder confirms first
-    // — which it does when the tab adopted the file rather than saving it here.
-    const replace = page.locator('host-dialogs').getByRole('button', { name: 'Yes', exact: true });
-    await replace.waitFor({ state: 'visible', timeout: 2_000 }).catch(() => {});
-    if (await replace.isVisible().catch(() => false)) await replace.click();
-    await expect(page.locator('toast-host')).toContainText(/Workspace saved/i, { timeout: 20_000 });
-    await page.waitForTimeout(1_500);
+
+    // Answer WHENEVER a confirm appears, not inside a two-second window after
+    // the click: it can arrive late, and an unanswered one blocks the next
+    // attempt rather than this one.
+    const deadline = Date.now() + 15_000;
+    for (;;) {
+      await answerAny();
+      const v = await stamp(page, file);
+      if (v != null && v.dirty !== true) return;
+      if (Date.now() > deadline) break;
+      await page.waitForTimeout(250);
+    }
   }
   throw new Error(`${file} never settled: this tab keeps writing`);
 }
 
-/** Is the file in the stub folder yet? */
+/**
+ * Has the save LANDED — is the file in the folder and does it hold anything?
+ *
+ * The size test is the whole point of this helper. A save creates the file
+ * (`fileInFolder(…, true)`) and only then writes it, so "the name exists" is
+ * true a moment before the bytes are there. A writable is atomic at `close()`,
+ * so a non-empty file is a finished one; an empty one is a save still in
+ * flight.
+ *
+ * Waiting on existence alone is what made this spec flake. `otherOriginAddsTable`
+ * runs straight after the save, reads the file and writes it back — so reading
+ * it at zero bytes produced a file holding only the OTHER origin's table, and
+ * the workspace this tab had just saved was gone. Both tests that failed are the
+ * two that go from the save to the outside write with no `settleClean` between
+ * them.
+ */
 async function folderHas(page: Page, file: string): Promise<boolean> {
   return page.evaluate(
     async ({ folder, name }) => {
       try {
         const root = await navigator.storage.getDirectory();
         const dir = await root.getDirectoryHandle(folder);
-        await dir.getFileHandle(name);
-        return true;
+        const handle = await dir.getFileHandle(name);
+        return (await handle.getFile()).size > 0;
       } catch {
         return false;
       }
@@ -195,9 +260,15 @@ async function otherOriginAddsTable(page: Page, workspaceId: string, file: strin
       const dir = await root.getDirectoryHandle(folder, { create: true });
       const handle = await fileInFolder(dir, fileName, false);
       if (!handle) throw new Error(`${fileName} is not in the folder`);
+      const bytes = await readBytes(handle);
+      // Loudly, rather than by quietly writing back a file that never held what
+      // this tab saved. An empty file here means the save had not finished, and
+      // the failure it used to cause named a missing table three assertions
+      // later — see `folderHas`.
+      if (bytes.byteLength === 0) throw new Error(`${fileName} is empty — the save it should follow has not landed`);
       const scratch = createEdbBridge();
       try {
-        await scratch.open(await readBytes(handle), '__other-origin.edb');
+        await scratch.open(bytes, '__other-origin.edb', { scratch: true });
         const store = createIpcDataStore(scratch, () => ws);
         await store.tables.insert({ id: `${ws}-${table}`, workspaceId: ws, name: table, code: '', columns: [{ field: 'part', type: 'string' }], view: 'table' });
         await writeBytes(handle, await scratch.export());
@@ -221,7 +292,7 @@ async function fileHoldingWorkspace(page: Page, workspaceId: string, file: strin
       const { fileInFolder, writeBytes } = await import('/src/db/edb/file-handle.ts');
       const scratch = createEdbBridge();
       try {
-        await scratch.open(null, '__fixture.edb');
+        await scratch.open(null, '__fixture.edb', { scratch: true });
         const store = createIpcDataStore(scratch, () => ws);
         await store.workspaces.insert({ id: ws, name: ws, createdAt: Date.now(), pluginUrls: [] });
         await store.tables.insert({ id: `${ws}-${table}`, workspaceId: ws, name: table, code: '', columns: [{ field: 'part', type: 'string' }], view: 'table' });
