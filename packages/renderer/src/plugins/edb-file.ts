@@ -115,7 +115,7 @@ const FILE_GROUP = 'File';
  * applied — autosave did not actually resume after a reload, while the menu said
  * "Turn on autosave" as if it had never been on.
  */
-let session: { autosave: AutosavePolicy; refreshSaveButton: () => void; refreshFileCommands: () => Promise<void>; compareWithOwnFile: () => Promise<void> } | null = null;
+let session: { autosave: AutosavePolicy; refreshSaveButton: () => void; refreshFileCommands: () => Promise<void>; compareWithOwnFile: () => Promise<void>; ownFile: () => Promise<FileSystemFileHandle | null> } | null = null;
 
 /**
  * The name the throwaway worker opens a file under while Overwrite rewrites it.
@@ -556,12 +556,42 @@ export function init(api: HostApi): void {
    * `requestPermission` here would be refused by the browser anyway. A folder the
    * user connected in this session is already granted, which is every case where
    * this question can arise.
+   *
+   * **Every handle is checked against the marker's NAME, and that is the whole of
+   * a reported data loss.** The two are remembered in different places and neither
+   * knew about the other: the marker is `localStorage`, per tab; the handle is ONE
+   * IndexedDB slot (`CURRENT` in `file-handle.ts`), origin-wide, overwritten by
+   * whichever file was opened last in any tab. So a tab whose marker said
+   * `powerplants.edb` booted, picked up the handle the other tab had left for
+   * `default.edb`, and from then on Save wrote the workspace into `default.edb`
+   * while the toast — which reads the marker — said `powerplants.edb`. The file the
+   * user was told about was never written, and the file that WAS written already
+   * held somebody else's workspace.
+   *
+   * A mismatch is not repaired by taking the other file: it is dropped, and the
+   * folder is asked for the file the marker actually names. When even that fails
+   * there is NO handle, so Save asks where to write rather than guessing — the one
+   * answer that cannot overwrite a file the user never named.
    */
   async function ownFile(): Promise<FileSystemFileHandle | null> {
-    const open = edbHandle();
-    if (open) return open;
     const file = adoptedFileName();
     if (!file) return null;
+    const open = edbHandle();
+    if (open) {
+      if (sameFile(open.name, file)) return open;
+      // Belongs to another workspace's file. Drop it, or every later reader of
+      // `edbHandle()` inherits the same wrong answer.
+      setEdbHandle(null);
+    }
+    // The remembered slot, but only when it names THIS file. It is the sole record
+    // of a file kept outside the folder — the "Another file…" route, which the
+    // lookup below cannot reach — so it has to be asked; it is just no longer
+    // believed on the strength of existing.
+    const remembered = await rememberedHandle();
+    if (remembered && sameFile(remembered.name, file)) {
+      setEdbHandle(remembered);
+      return remembered;
+    }
     const dir = await rememberedFolder();
     if (!dir || !(await ensureWritable(dir, false))) return null;
     const found = await fileInFolder(dir, file, false);
@@ -569,6 +599,17 @@ export function init(api: HostApi): void {
     // way, and the tab is demonstrably connected to it.
     if (found) setEdbHandle(found);
     return found;
+  }
+
+  /**
+   * Two file names for one file.
+   *
+   * Case-insensitive, like every other comparison in this layer: `Sales.edb` and
+   * `sales.edb` are one file on Windows, and treating them as two would throw away
+   * a perfectly good handle on every boot.
+   */
+  function sameFile(a: string, b: string): boolean {
+    return a.toLowerCase() === b.toLowerCase();
   }
 
   /**
@@ -641,7 +682,11 @@ export function init(api: HostApi): void {
   async function persist(opts: { auto?: boolean } = {}): Promise<SaveResult> {
     const bridge = edbBridge();
     if (!bridge) return { where: 'none', alsoWrote: [] };
-    const handle = edbHandle();
+    // Through `ownFile`, never `edbHandle()` straight: that slot is origin-wide and
+    // may hold another workspace's file, and a Save is exactly where writing to the
+    // wrong one costs the user their work. The toast below names the MARKER, so the
+    // two have to be the same file or the message is a lie.
+    const handle = await ownFile();
     if (!handle) return { where: 'no-handle', alsoWrote: [] };
     if (!(await ensureWritable(handle, true))) {
       await api.ui.dialogs.alert('easyDBAccess is not allowed to write that file. Run the "Connect workspace folder" command to grant it again.', 'Save');
@@ -1583,7 +1628,7 @@ export function init(api: HostApi): void {
   // policy does: `load()` is a separate export and cannot see this closure, and
   // both of the answers it has to carry out — a question boot left behind, and a
   // "Compare them…" that survived the reload — end in exactly this call.
-  session = { autosave, refreshSaveButton, refreshFileCommands, compareWithOwnFile };
+  session = { autosave, refreshSaveButton, refreshFileCommands, compareWithOwnFile, ownFile };
 
   api.ui.registerCommand({
     id: 'edb-file:open',
@@ -1841,11 +1886,13 @@ export async function load(api: HostApi): Promise<void> {
   if (folder && folderOk) await adoptDeviceFolder(folder);
   let fileOk = false;
   if (adoptedFileName() !== null) {
-    const remembered = await rememberedHandle();
-    if (remembered) {
-      setEdbHandle(remembered);
-      fileOk = await ensureWritable(remembered, false);
-    }
+    // `rememberedHandle()` is ONE origin-wide slot — whichever file was opened last
+    // in any tab — so it is a candidate, not an answer. `ownFile` takes it only if
+    // its name is the file this tab's marker names, and otherwise looks that file
+    // up in the folder. Handing the raw slot to `setEdbHandle` is what had Save
+    // writing one workspace into another workspace's file.
+    const own = session ? await session.ownFile() : null;
+    if (own) fileOk = await ensureWritable(own, false);
   }
   // This tab is looking at a FILE it can no longer open. The permission answers
   // were read and dropped on the floor until v0.0.434, which is how a workspace

@@ -853,6 +853,44 @@ What this does NOT do is notice the outside write on its own. The File System
 Access API has no change events, so that would be a poll, and nothing polls: the
 tab finds out when it next tries to write, or when the user runs Sync.
 
+## Which file a Save writes: the marker and the handle must agree
+
+Reported from the field, and it cost a workspace. Save said **"Workspace saved to
+`powerplants.edb`"** and the bytes went into **`default.edb`**. The file the user
+was told about was never written; the file that WAS written already held a
+different workspace, which the save then replaced.
+
+Two records say which file a tab has open, and they live in different places:
+
+| | The marker | The handle |
+| --- | --- | --- |
+| Where | `easydb:edb:active` in `localStorage` | `current` in the `easydb-edb-handles` IndexedDB |
+| Scope | **per tab** | **ONE slot for the whole origin** |
+| Written by | `setActiveEdbName` | `rememberHandle`, on every Open and first Save |
+| Read by | the Save toast, the file stamps, boot's database name | `persist()` — what the bytes are written to |
+
+Nothing checked that the two named the same file. Boot handed the slot straight
+to `setEdbHandle`, so opening a second file in any tab left **every other tab
+saving into it**: the toast read the marker and said one name, `persist()` wrote
+the handle and hit another.
+
+`ownFile()` (`plugins/edb-file.ts`) is now the only way to a handle, and it
+compares names at every step — the session handle, the remembered slot, then the
+folder. A handle belonging to another file is **dropped, not used**, and when the
+marker's file cannot be found at all there is NO handle, so Save asks where to
+write. That is the one answer that cannot overwrite a file the user never named.
+`persist()` takes `ownFile()` rather than `edbHandle()` for the same reason.
+
+Two things this does NOT change. The slot is still one per origin — a second
+handle store keyed by file name would be a schema change for a record that heals
+itself on the next Open — and the marker is still what the toast and the stamps
+speak, because after the check they name the same file by construction.
+
+`151-save-writes-its-own-file.spec.ts` holds it down, and covers the gap that let
+it through: `126-one-workspace-per-file` reads the WORKSPACE list out of a saved
+`.edb` and never its tables, so a save that wrote the right workspace record into
+the wrong file passed every test there was.
+
 ## One door in front of every write
 
 `writeBytes` is the primitive that opens a writable and closes it. Since v0.0.458
