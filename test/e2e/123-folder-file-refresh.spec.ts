@@ -98,16 +98,21 @@ async function settleClean(page: Page, file: string): Promise<void> {
   // TWO confirms can stand between this Save and the file, and which one comes
   // depends on what this tab knows about the name it is writing to:
   //
-  //   - "Yes"              — re-point at a name already in the folder, which is
-  //                          what a tab that ADOPTED the file is asked;
-  //   - "Use local version" — the copies may differ; the choice dialog names
-  //                          what each holds.
+  //   - "Yes"                   — re-point at a name already in the folder, which
+  //                               is what a tab that ADOPTED the file is asked;
+  //   - "Use the browser copy"  — the copies may differ; the choice dialog names
+  //                               what each holds.
   //
   // The answer this helper wants is the same either way: write ours out. Only
   // the first was answered, so the choice dialog sat there unanswered and the
   // NEXT attempt clicked a Save button covered by it — 180 seconds of
   // `<host-dialogs> intercepts pointer events`, and this spec's last flake.
-  const answers = [dialogs.getByRole('button', { name: 'Yes', exact: true }), dialogs.getByRole('button', { name: 'Use local version', exact: true })];
+  //
+  // The second label was "Use local version" until v0.0.511, which gave every
+  // one of these dialogs the same two words (`copy-choice.ts`). This helper was
+  // not renamed with it, so the clash dialog became unanswerable again and the
+  // guard below reported it as a dialog in the way of Save.
+  const answers = [dialogs.getByRole('button', { name: 'Yes', exact: true }), dialogs.getByRole('button', { name: 'Use the browser copy', exact: true })];
   const answerAny = async (): Promise<void> => {
     for (const button of answers) {
       if (await button.isVisible().catch(() => false)) {

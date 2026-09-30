@@ -489,6 +489,19 @@ every moment a copy and its file are known to agree (an import, a Save) and a
   (`describeActiveOutcome`).
 - **`?space=` resolution** (`space-resolve.ts` → `fileIsNewer`) lets the file win
   over a local copy, which it otherwise never does.
+- **Open workspace file…** (`edb-file.ts` → `mayImportOver`) asks before it writes
+  the picked file's bytes over this browser's copy of that database. Open imports,
+  and importing replaces — so this route used to take unsaved work away without a
+  word, while every other route that can replace a copy went through
+  `settleTwoCopies`. Only `ahead` and `conflict` ask: those two are the verdicts
+  that PROVE we hold unsaved work. `unknown` proves nothing, and the user has just
+  named the file by hand.
+
+The stamp also answers one question that has nothing to do with syncing: **is
+there unsaved work at BOOT?** `holdsUnsavedWork` is what seeds the autosave
+policy's dirty flag, and so the red dot on the header Save button. Without it a
+reload painted "everything here is saved" over a workspace whose edits had never
+reached the disk.
 
 `dirty` deliberately ignores writes to `settings` and `plugins`: running any
 command through the palette upserts the recent-command list into `settings`, so

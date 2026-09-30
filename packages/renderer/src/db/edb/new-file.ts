@@ -137,11 +137,17 @@ export async function buildEdbFile(target: EdbTarget, workspaceId: string, fill?
  *
  * Shared by Convert (above) and Open (`plugins/edb-file.ts`), which have the
  * same shape: produce a database, then reload into it.
+ *
+ * `adopt` is for the one caller that does NOT reload — the first Save into a
+ * folder, which makes this file the tab's own in the page it is already on. The
+ * live worker switches to it, so the next write goes where the next boot will
+ * look. Nothing to do on the fallback path: a throwaway worker has no session to
+ * switch, and there is no session to leave pointing at the wrong database.
  */
-export async function placeForNextBoot(name: string, bytes: Uint8Array): Promise<void> {
+export async function placeForNextBoot(name: string, bytes: Uint8Array, opts?: { adopt?: boolean }): Promise<void> {
   const live = edbBridge();
   if (live) {
-    await live.importBytes(name, bytes);
+    await live.importBytes(name, bytes, { adopt: opts?.adopt === true });
     return;
   }
   // No live session — the very first boot could not start one. Fall back to a

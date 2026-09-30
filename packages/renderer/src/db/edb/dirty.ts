@@ -28,6 +28,20 @@ export interface AutosavePolicyOptions {
    * static spec and nothing would re-read `isDirty()` on its own.
    */
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * What the flag starts at. Default false.
+   *
+   * A policy is built fresh on every load, so its own flag cannot remember the
+   * load before it — and a workspace whose edits never reached its file came back
+   * from a reload claiming to be saved. The caller knows better, because the
+   * stamp on disk does (`file-stamp.ts`'s `holdsUnsavedWork`), so the caller seeds
+   * it.
+   *
+   * A starting value, NOT a change: `onDirtyChange` does not fire for it. The
+   * caller paints its own button once at boot anyway, and announcing a transition
+   * that never happened would be a lie to every other listener.
+   */
+  initiallyDirty?: boolean;
 }
 
 export interface AutosavePolicy {
@@ -54,7 +68,7 @@ export function createAutosavePolicy(opts: AutosavePolicyOptions): AutosavePolic
   const clearTimer = opts.clearTimer ?? ((h) => globalThis.clearTimeout(h));
 
   let on = false;
-  let dirty = false;
+  let dirty = opts.initiallyDirty === true;
   let depth = 0;
   let timer: number | null = null;
   // A save is async; a change arriving mid-save must not be lost, so the dirty

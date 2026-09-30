@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clearStamp, compareWithFile, markLocalChanges, readStamp, recordAgreement, recordDivergence, type FileStamp } from '../../../packages/renderer/src/db/edb/file-stamp.js';
+import { clearStamp, compareWithFile, holdsUnsavedWork, markLocalChanges, readStamp, recordAgreement, recordDivergence, type FileStamp } from '../../../packages/renderer/src/db/edb/file-stamp.js';
 
 /**
  * What this browser last knew about a `.edb` on disk.
@@ -90,6 +90,44 @@ describe('the stamp store', () => {
     expect(readStamp('a.edb')).toBeNull();
     recordAgreement('a.edb', { mtime: 1, size: 2 });
     expect(readStamp('a.edb')).toEqual({ mtime: 1, size: 2 });
+  });
+});
+
+describe('holdsUnsavedWork', () => {
+  /**
+   * What the Save button asks at BOOT, where the autosave policy's own flag is a
+   * fresh `false` and knows nothing. The stamp is the only thing that outlives a
+   * reload, so it is the only thing that can answer.
+   */
+  it('says yes with no file at all: nothing of this workspace is on disk', () => {
+    expect(holdsUnsavedWork(null)).toBe(true);
+  });
+
+  it('says yes for a file this browser has never agreed with', () => {
+    // No stamp means we have never read that file here. Claiming "saved" would be
+    // a guess, and the expensive direction of a guess.
+    expect(holdsUnsavedWork('a.edb')).toBe(true);
+  });
+
+  it('says no right after an agreement', () => {
+    recordAgreement('a.edb', { mtime: 10, size: 100 });
+    expect(holdsUnsavedWork('a.edb')).toBe(false);
+  });
+
+  it('says yes after a local change, and keeps saying it', () => {
+    // The bug this exists for: the red dot went out on every reload, while the
+    // work sat in the browser and the file knew nothing about it.
+    recordAgreement('a.edb', { mtime: 10, size: 100 });
+    markLocalChanges('a.edb');
+    expect(holdsUnsavedWork('a.edb')).toBe(true);
+    expect(holdsUnsavedWork('a.edb')).toBe(true);
+  });
+
+  it('says no again once the file has been written', () => {
+    recordAgreement('a.edb', { mtime: 10, size: 100 });
+    markLocalChanges('a.edb');
+    recordAgreement('a.edb', { mtime: 11, size: 120 });
+    expect(holdsUnsavedWork('a.edb')).toBe(false);
   });
 });
 

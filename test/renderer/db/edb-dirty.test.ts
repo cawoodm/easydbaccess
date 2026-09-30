@@ -9,7 +9,7 @@ import { createAutosavePolicy } from '../../../packages/renderer/src/db/edb/dirt
  * 600k times. A batch must collapse to one save.
  */
 
-function harness(over: { debounceMs?: number } = {}) {
+function harness(over: { debounceMs?: number; initiallyDirty?: boolean } = {}) {
   const timers = new Map<number, () => void>();
   let nextHandle = 1;
   const save = vi.fn(() => Promise.resolve());
@@ -19,6 +19,7 @@ function harness(over: { debounceMs?: number } = {}) {
     save,
     onError,
     onDirtyChange,
+    ...(over.initiallyDirty === undefined ? {} : { initiallyDirty: over.initiallyDirty }),
     debounceMs: over.debounceMs ?? 1000,
     setTimer: (fn) => {
       const h = nextHandle++;
@@ -62,6 +63,29 @@ describe('the dirty signal', () => {
     const { policy, onDirtyChange } = harness();
     policy.markClean();
     expect(onDirtyChange).not.toHaveBeenCalled();
+  });
+
+  it('starts dirty when the caller says the work is not in a file yet', () => {
+    // A reload builds a new policy, and its own flag knows nothing about the load
+    // before it. The persisted stamp does (`file-stamp.ts`), so the caller seeds
+    // it — otherwise the dot goes out on every refresh while the work sits in the
+    // browser and the file has never heard of it.
+    const { policy, onDirtyChange } = harness({ initiallyDirty: true });
+    expect(policy.isDirty()).toBe(true);
+    // The seed is a starting value, not an announcement: the caller paints the
+    // button itself once, and a change that never happened must not be reported.
+    expect(onDirtyChange).not.toHaveBeenCalled();
+  });
+
+  it('a seeded policy can still be cleared by a save', () => {
+    const { policy, onDirtyChange } = harness({ initiallyDirty: true });
+    policy.markClean();
+    expect(policy.isDirty()).toBe(false);
+    expect(onDirtyChange.mock.calls).toEqual([[false]]);
+  });
+
+  it('starts clean by default', () => {
+    expect(harness().policy.isDirty()).toBe(false);
   });
 
   it('goes back to dirty when the save it announced failed', async () => {

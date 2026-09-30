@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 30 Sep 2026
+
+### Bugs
+
+- 🪲 After a reload the Save button said everything was saved, over work that had never reached the file (v0.0.514)
+- 🪲 Open workspace file wrote the file over unsaved work in this browser, without a word (v0.0.514)
+- 🪲 Everything done right after the first Save into a folder was lost by the next reload (v0.0.514)
+
 ## 29 Sep 2026
 
 ### Features

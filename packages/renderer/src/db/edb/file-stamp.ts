@@ -113,6 +113,30 @@ export function recordDivergence(file: string, facts: FileFacts): void {
   writeAll(all);
 }
 
+/**
+ * Does this browser hold work that is in no file? The question a BOOT asks.
+ *
+ * The header's red dot used to come from the autosave policy alone, and that flag
+ * is a closure variable built fresh on every load. So a reload painted "everything
+ * here is saved" over a workspace whose edits had never reached the disk — and the
+ * one cue for "press Save" went out at exactly the moment it was needed.
+ *
+ * The stamp outlives the reload, so the stamp answers. Three cases, and the two
+ * that cannot be proved clean are called dirty:
+ *
+ * - **No file at all** — the workspace lives in this browser's own database. None
+ *   of it is on disk, which is what the dot says.
+ * - **A file with no stamp** — we have never read that file on this origin. A
+ *   guess either way, and "saved" is the guess that costs the user work.
+ * - **A file with a stamp** — it knows, because every write records it
+ *   ({@link markLocalChanges}) and every save clears it ({@link recordAgreement}).
+ */
+export function holdsUnsavedWork(adoptedFile: string | null): boolean {
+  if (adoptedFile === null) return true;
+  const stamp = readStamp(adoptedFile);
+  return stamp === null || stamp.dirty === true;
+}
+
 /** Forget what we knew, so the next comparison is `unknown` and touches nothing. */
 export function clearStamp(file: string): void {
   const all = readAll();
