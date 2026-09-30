@@ -48,6 +48,25 @@ function store(shim?: StorageLike): StorageLike | null {
   }
 }
 
+/**
+ * The device layer as a plain store: the folder-backed shim when one is
+ * installed, this browser otherwise.
+ *
+ * Exported for the two things that are device state but are NOT settings — the
+ * folder index and the workspace registry (`db/edb/folder-index.ts`,
+ * `db/edb/space-registry.ts`). They are read mid-paint by the workspace selector,
+ * so they cannot go through the async settings API, and they must not go straight
+ * to `localStorage` either: the keys the folder owns have to reach `_easydb.edp`,
+ * which is what makes the workspace list survive a new browser.
+ *
+ * This module imports nothing, which is why the accessor lives here rather than
+ * in `device-state.ts` — reaching for that from `folder-index.ts` would put the
+ * whole worker bridge in the import graph of a pure cache.
+ */
+export function deviceStore(): StorageLike | null {
+  return store();
+}
+
 // -- User settings blob -----------------------------------------------------
 
 export function readUserSettings(shim?: StorageLike): Record<string, unknown> {

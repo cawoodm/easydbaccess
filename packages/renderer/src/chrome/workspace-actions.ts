@@ -9,9 +9,9 @@ import type { Dialogs } from '@easydb/shared';
 import { forgetLastWorkspace, getContext, slugifyWorkspace } from '../app-context.js';
 import { listLabels, workspaceLabel, type ListEntry } from '../db/edb/folder-index.js';
 import { openWorkspaceInFile } from '../db/edb/space-adopt.js';
-import { activeEdbName } from '../db/edb/session.js';
+import { workspaceList } from '../db/edb/space-registry.js';
 import { mayCreateWorkspaceIn } from '../db/edb/space-resolve.js';
-import { backendActiveFile } from '../db/file-workspaces.js';
+import { openDatabaseName } from '../db/file-workspaces.js';
 import { storeBridge } from '../db/edb/active-bridge.js';
 import { cloneWorkspace, type CloneMode } from '../db/clone-workspace.js';
 import { countWorkspaceContents, deleteWorkspace, describeWorkspaceContents } from '../db/delete-workspace.js';
@@ -35,18 +35,6 @@ const CLONE_NOTHING = 'Empty workspace';
 // is actually choosing is whether the new workspace shares a file with this one.
 const SIMPLE = 'Simple — alongside this workspace';
 const ADVANCED = 'Advanced — in a file of its own (.edb)';
-
-/**
- * The name of the database this tab has open, whichever build is asking.
- *
- * The same two answers the selector's tooltip takes: the desktop learns its path
- * from the main process, the browser keeps the name in its own session marker. The
- * only thing read off it here is the EXTENSION — `.edb` holds one workspace, `.edp`
- * holds any number.
- */
-function openDatabaseName(): string {
-  return backendActiveFile() ?? activeEdbName();
-}
 
 /**
  * Can this build keep a workspace in a file of its own?
@@ -93,7 +81,11 @@ export function openWorkspace(name: string): void {
  * (`freeWorkspaceId` mints `sales-2` beside `sales`, both still called `sales`).
  */
 export async function openListEntry(entry: ListEntry): Promise<void> {
-  if (!entry.file) {
+  // A row for the database this tab ALREADY has open goes through `?space=`, not
+  // through an adopt. Since the list stopped treating the open workspace as the one
+  // row without a file, its row carries `powerplants.edb` like every other — and
+  // adopting a file the tab is already on means importing it over itself.
+  if (!entry.file || entry.file.toLowerCase() === openDatabaseName().toLowerCase()) {
     openWorkspace(entry.id);
     return;
   }
@@ -130,10 +122,17 @@ function openResolvedWorkspace(): void {
   location.assign(`${location.pathname}${query ? `?${query}` : ''}${location.hash}`);
 }
 
-/** Ask which workspace to switch to, then open it. */
+/**
+ * Ask which workspace to switch to, then open it.
+ *
+ * The palette's half of the header selector, and it reads the SAME list
+ * (`workspaceList`). It used to offer only `store.workspaces.find()` — the
+ * database this tab has open — so from a tab on `sales.edb` the palette could
+ * reach nothing but `sales`, while the header beside it listed the whole folder.
+ */
 export async function switchWorkspaceFlow(): Promise<void> {
   const ctx = await getContext();
-  const others = (await ctx.store.workspaces.find()).filter((w) => w.id !== ctx.workspaceId);
+  const others = workspaceList(openDatabaseName()).filter((w) => w.id !== ctx.workspaceId);
   if (others.length === 0) {
     ctx.api.ui.dialogs.toast('This is the only workspace.', { kind: 'info', title: 'Workspaces' });
     return;
@@ -148,10 +147,10 @@ export async function switchWorkspaceFlow(): Promise<void> {
   const pick = await ctx.api.ui.dialogs.choice('Open which workspace?', labels, 'Switch workspace');
   if (!pick) return;
   const chosen = others[labels.indexOf(pick)];
-  // By id, not by name: two workspaces in one database may share a name
-  // (`freeWorkspaceId` puts `sales-2` beside `sales` and both stay called
-  // `sales`), and `?space=` would then resolve to whichever came first.
-  if (chosen) openWorkspace(chosen.id);
+  // Through `openListEntry`, like the header selector, because an entry may name a
+  // file: a workspace in another `.edb` is opened by adopting that file, not by
+  // `?space=`, and the file is the only thing that says which one.
+  if (chosen) await openListEntry(chosen);
 }
 
 /** Name a new workspace, choose where it is stored and what it inherits, then open it. */
@@ -274,8 +273,14 @@ export async function deleteWorkspaceFlow(): Promise<void> {
   const target = all.find((w) => w.id === ctx.workspaceId);
   if (!target) return;
 
+  // "Is this the last one?" is a question about every workspace the app can reach,
+  // not about the database this tab has open. From a tab on `sales.edb` the open
+  // database holds exactly one workspace ALWAYS, so the old test said "an empty one
+  // will be created in its place" on every delete, and then left the user in a
+  // freshly made `default` with their other workspaces still sitting in the folder.
+  const reachable = workspaceList(openDatabaseName());
   const what = describeWorkspaceContents(await countWorkspaceContents(storeBridge(), target.id));
-  const isLast = all.length === 1;
+  const isLast = reachable.length === 1;
   const ok = await ctx.api.ui.dialogs.confirm(
     `Delete the workspace ${quoteWorkspace(target)}?\n\n${what} will be deleted. This cannot be undone.` +
       (isLast ? '\n\nIt is the only workspace, so an empty one will be created in its place.' : ''),
@@ -286,7 +291,7 @@ export async function deleteWorkspaceFlow(): Promise<void> {
   await deleteWorkspace(storeBridge(), target.id);
   forgetLastWorkspace(target.id);
 
-  const survivor = all.find((w) => w.id !== target.id);
-  if (survivor) openWorkspace(survivor.id);
+  const survivor = reachable.find((w) => w.id !== target.id);
+  if (survivor) await openListEntry(survivor);
   else openResolvedWorkspace();
 }

@@ -1,10 +1,11 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import type { Workspace } from '@easydb/shared';
 import { getContext } from '../app-context.js';
-import { activeWorkspaces, listLabels, mergeWorkspaceList, readFolderIndex, readFolderSelection, type ListEntry } from '../db/edb/folder-index.js';
-import { ACTIVE_FILE_CHANGED_EVENT, activeEdbName, adoptedFileName } from '../db/edb/session.js';
-import { backendActiveFile } from '../db/file-workspaces.js';
+import { listLabels, type ListEntry } from '../db/edb/folder-index.js';
+import { INDEX_SPACES_CHANGED_EVENT, recordOpenWorkspaces, workspaceList } from '../db/edb/space-registry.js';
+import { ACTIVE_FILE_CHANGED_EVENT } from '../db/edb/session.js';
+import { SETTINGS_CHANGED_EVENT } from '../db/settings-events.js';
+import { openDatabaseName } from '../db/file-workspaces.js';
 import { materialIconStyles } from './material-icon-css.js';
 // The flows themselves are shared with the command palette — see
 // `workspace-actions.ts`. This element is only their mouse-driven entry point.
@@ -38,77 +39,86 @@ export class WorkspaceSelector extends LitElement {
     `,
   ];
 
-  @state() private workspaces: Workspace[] = [];
   @state() private current = '';
   /**
-   * The workspaces the connected folder holds in OTHER files, merged in.
+   * The whole list, and **nothing in it comes out of the open database.**
    *
-   * Read from the device-local index rather than any database, because a
-   * workspace list is a table inside one file and this tab holds one file. See
-   * `db/edb/folder-index.ts`.
+   * It is read from the folder index and the space registry — both device/folder
+   * metadata (`db/edb/space-registry.ts`). A list built even partly from
+   * `store.workspaces` was a property of whichever database this tab happened to
+   * hold, so it changed every time the user switched workspace. That was the
+   * report, twice.
    */
   @state() private entries: ListEntry[] = [];
   private unsubscribe?: () => void;
   private readonly onIndexChanged = () => this.remerge();
+  /**
+   * The tab has changed which file it is backed by, WITHOUT a reload.
+   *
+   * The first Save is the one that does it: it copies the workspace out of the
+   * project index into its own `.edb` and adopts that file where it stands. The
+   * registry still has the workspace filed under `index.edp` at that moment, so
+   * re-reading the list alone would go on saying it is stored in this browser —
+   * about a file whose name the Save toast has just quoted. Recording it under the
+   * new database name is what puts the two in step.
+   */
+  private readonly onActiveFileChanged = () => {
+    void (async () => {
+      const ctx = await getContext();
+      recordOpenWorkspaces(openDatabaseName(), await ctx.store.workspaces.find());
+      this.remerge();
+    })();
+  };
 
   override async connectedCallback() {
     super.connectedCallback();
     const ctx = await getContext();
     this.current = ctx.workspaceId;
+    // The subscription RECORDS, it does not list. Creating, renaming and deleting
+    // a workspace all land here, and the registry is what carries that to the tabs
+    // and reloads that will not have this database open.
     this.unsubscribe = ctx.store.workspaces.subscribe((ws) => {
-      this.workspaces = ws;
+      recordOpenWorkspaces(openDatabaseName(), ws);
       this.remerge();
     });
-    this.workspaces = await ctx.store.workspaces.find();
+    recordOpenWorkspaces(openDatabaseName(), await ctx.store.workspaces.find());
     this.remerge();
     // A folder sync rewrites the index while this element is already mounted, and
     // the index is not a store nothing can subscribe to.
     window.addEventListener('easydb:folder-index-changed', this.onIndexChanged);
     // A first Save adopts a file without reloading, and the tooltip names it.
-    window.addEventListener(ACTIVE_FILE_CHANGED_EVENT, this.onIndexChanged);
+    window.addEventListener(ACTIVE_FILE_CHANGED_EVENT, this.onActiveFileChanged);
+    // Same reason, for the other half of the list.
+    window.addEventListener(INDEX_SPACES_CHANGED_EVENT, this.onIndexChanged);
+    // Adopting a folder swaps the device layer under both of them — what the
+    // folder's `_easydb.edp` holds wins over what this browser had — so the list
+    // has to be read again once that has happened.
+    window.addEventListener(SETTINGS_CHANGED_EVENT, this.onIndexChanged);
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
     this.unsubscribe?.();
     window.removeEventListener('easydb:folder-index-changed', this.onIndexChanged);
-    window.removeEventListener(ACTIVE_FILE_CHANGED_EVENT, this.onIndexChanged);
+    window.removeEventListener(ACTIVE_FILE_CHANGED_EVENT, this.onActiveFileChanged);
+    window.removeEventListener(INDEX_SPACES_CHANGED_EVENT, this.onIndexChanged);
+    window.removeEventListener(SETTINGS_CHANGED_EVENT, this.onIndexChanged);
   }
 
   private remerge() {
-    // `activeWorkspaces` is normally a no-op — a scan already skips the files
-    // this device has switched off, so they are not in the index to begin with.
-    // It matters for the index written BEFORE one was switched off: without it
-    // the list would keep offering that workspace until the next scan, and
-    // picking it would adopt the very file the user said to leave alone.
-    const open = this.openFile();
-    const indexed = activeWorkspaces(readFolderIndex()?.workspaces ?? [], readFolderSelection(), open);
-    this.entries = mergeWorkspaceList(this.workspaces, indexed, open);
-  }
-
-  /**
-   * The file this build has open.
-   *
-   * Two builds answer it two ways. The browser keeps the name in its own marker
-   * (`activeEdbName`); the desktop learns it from the main process and caches it
-   * (`backendActiveFile`). Whichever it is, it is what stops the open file being
-   * listed a second time as if it were somewhere else.
-   */
-  private openFile(): string {
-    return backendActiveFile() ?? activeEdbName();
+    this.entries = workspaceList(openDatabaseName());
   }
 
   /**
    * What to say on hover: the file this workspace lives in.
    *
-   * An entry from another file carries its own name. Everything else is in the
-   * database this tab has open, which is a file too whenever one was adopted —
-   * the project index (`index.edp`) is not, and calling it by name would send the
-   * user looking for a file they never chose and cannot open.
+   * An entry carries its own file whenever one holds it — including the file this
+   * tab has open, which is no longer a special case. Everything left is a
+   * workspace the project index holds, and the project index is not a file the
+   * user has.
    */
   private whereItLives(e: ListEntry): string {
-    if (e.file) return e.file;
-    return backendActiveFile() ?? adoptedFileName() ?? 'Stored in this browser';
+    return e.file ?? 'Stored in this browser';
   }
 
   /**
@@ -144,18 +154,22 @@ export class WorkspaceSelector extends LitElement {
    * open — which is what hovering answers. Where hovering CANNOT answer it, because
    * two rows come out of one file, `listLabels` qualifies the text itself.
    *
-   * EVERY entry gets one, including the open workspace. `ListEntry.file` is set
-   * only for the ones in other files (that is what makes them a switch), so the
-   * open database's own name has to come from the session — otherwise hovering the
-   * workspace you are actually in answered nothing, which is the one you are most
-   * likely to be asking about.
+   * EVERY entry gets one, including the open workspace — its row now carries the
+   * file that holds it like any other, because the list no longer treats "the one
+   * this tab has open" as a different kind of thing.
+   *
+   * Which is also why `selected` is matched on the ID ALONE. It used to require
+   * `file === undefined` as well, on the grounds that the open workspace was the
+   * one row without a file; now that a row can carry one, that test would never
+   * match and the select would fall back to its first option — so the header would
+   * name a workspace the user is not in.
    */
   override render() {
     const labels = listLabels(this.entries);
     return html`
       <select @change=${(e: Event) => this.switchWorkspace((e.target as HTMLSelectElement).value)}>
         ${this.entries.map(
-          (e, i) => html`<option value=${`${e.id}\u0000${e.file ?? ''}`} title=${this.whereItLives(e)} ?selected=${e.file === undefined && e.id === this.current}>${labels[i]}</option>`,
+          (e, i) => html`<option value=${`${e.id}\u0000${e.file ?? ''}`} title=${this.whereItLives(e)} ?selected=${e.id === this.current}>${labels[i]}</option>`,
         )}
       </select>
       <button @click=${newWorkspaceFlow} title="New workspace">

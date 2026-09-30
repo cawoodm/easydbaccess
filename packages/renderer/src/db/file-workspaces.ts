@@ -20,7 +20,7 @@
 // one answer to "how does this build reach a file" — a second registration would
 // be a bug, not a second backend.
 
-import { ACTIVE_FILE_CHANGED_EVENT } from './edb/session.js';
+import { ACTIVE_FILE_CHANGED_EVENT, activeEdbName } from './edb/session.js';
 
 /** How one build opens and creates file-backed workspaces. */
 export interface FileWorkspaceBackend {
@@ -77,6 +77,19 @@ export function setBackendActiveFile(name: string | null): void {
   if (activeFile === name) return;
   activeFile = name;
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(ACTIVE_FILE_CHANGED_EVENT));
+}
+
+/**
+ * The name of the database this tab has open, whichever build is asking.
+ *
+ * The browser keeps it in its own session marker (`activeEdbName`); the desktop
+ * learns it from the main process and caches it here. Four callers read it — the
+ * selector's tooltip, the workspace list, New workspace's "may this go alongside"
+ * rule, and the registry that remembers what the project index holds — and they
+ * each had their own two-line copy of this until one of them drifted.
+ */
+export function openDatabaseName(): string {
+  return activeFile ?? activeEdbName();
 }
 
 /**

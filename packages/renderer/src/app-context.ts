@@ -4,6 +4,8 @@ import { createIpcDataStore } from './db/data-store-bridge.js';
 import { activeEdbName, startEdbSession, type EdbSession } from './db/edb/session.js';
 import { adoptFolderFile, adoptLocalDb, leaveFileForIndex, noteSessionOpened, planForMissingSpace } from './db/edb/space-adopt.js';
 import { mayCreateWorkspaceIn, slugifyWorkspace } from './db/edb/space-resolve.js';
+import { recordOpenWorkspaces } from './db/edb/space-registry.js';
+import { openDatabaseName } from './db/file-workspaces.js';
 import { showStorageFailure } from './chrome/storage-failure.js';
 import { createEventBus } from './events/bus.js';
 import { createRegistries, type Registries } from './plugin-host/registries.js';
@@ -209,6 +211,13 @@ async function init(): Promise<AppContext> {
   // Remember the active workspace so a fresh tab / reload without ?space= comes
   // back to it (see resolution step 2 above).
   persistLastWorkspace(workspaceId);
+
+  // And remember what the PROJECT INDEX holds, so the list survives this tab
+  // adopting a `.edb` — from inside one, nothing can open the index to ask. A
+  // read, not a write to the store: boot must not mark the workspace unsaved. It
+  // re-reads rather than reusing `existing`, which predates the workspace the two
+  // branches above may just have created. See `db/edb/space-registry.ts`.
+  recordOpenWorkspaces(openDatabaseName(), await store.workspaces.find());
 
   const api = createHostApi({
     store,

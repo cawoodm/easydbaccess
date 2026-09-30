@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FOLDER_OWNED_KEYS, mergeDeviceState, SEED_ONLY_INTO_NEW } from '../../../packages/renderer/src/db/edb/device-state.js';
 import { SECRETS_KEY, USER_SETTINGS_KEY } from '../../../packages/renderer/src/db/user-settings.js';
+import { FOLDER_INDEX_KEY, SPACE_REGISTRY_KEY } from '../../../packages/renderer/src/db/edb/device-keys.js';
 
 /**
  * Adopting a folder moves state in BOTH directions, and getting either one
@@ -84,16 +85,22 @@ describe('seeding a folder that is already somebody’s', () => {
     expect(r.seeded).toBe(true);
   });
 
-  it('withholds the secrets file and nothing else', () => {
-    expect(SEED_ONLY_INTO_NEW).toEqual([SECRETS_KEY]);
+  it('withholds the secrets file and the workspace list', () => {
+    // Secrets, because a folder that already has a device file is somebody
+    // else's setup. The workspace list, because it describes the folder it came
+    // out of — seeding one folder's list into another offers workspaces that
+    // folder does not hold.
+    expect([...SEED_ONLY_INTO_NEW].sort()).toEqual([SECRETS_KEY, FOLDER_INDEX_KEY, SPACE_REGISTRY_KEY].sort());
   });
 });
 
 describe('FOLDER_OWNED_KEYS', () => {
-  it('is the settings blob and the secrets file', () => {
+  it('is the settings blob, the secrets file and the workspace list', () => {
     // Secrets are in here by an explicit decision — see the note on the const.
-    // A change to this list is a change to what leaves the browser, so it is
-    // spelled out rather than asserted by length.
-    expect([...FOLDER_OWNED_KEYS].sort()).toEqual([SECRETS_KEY, USER_SETTINGS_KEY].sort());
+    // The workspace list is in here because the list must not live inside a
+    // workspace: it used to be read out of the open database, so it changed
+    // every time the user switched. A change to this list is a change to what
+    // leaves the browser, so it is spelled out rather than asserted by length.
+    expect([...FOLDER_OWNED_KEYS].sort()).toEqual([SECRETS_KEY, USER_SETTINGS_KEY, FOLDER_INDEX_KEY, SPACE_REGISTRY_KEY].sort());
   });
 });

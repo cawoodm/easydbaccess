@@ -266,6 +266,26 @@ Exactly three questions differ, and all three go through
 also tells the browser's boot which database in the OPFS pool to open and
 whether a workspace may be created in it (`mayCreateWorkspaceIn`) — a desktop
 file name in it would answer a question the desktop never asks.
+`openDatabaseName()` in the same file is the one place the two answers are
+joined; four callers read it and each used to carry its own copy.
+
+### The workspace LIST never comes out of a workspace
+
+`workspaceList(openDatabaseName())` in `db/edb/space-registry.ts` is the only
+answer to "which workspaces are there", and **it does not read the open
+database at all**. It used to read it half — and a tab holds one database, so
+opening a `.edb` dropped every workspace living in the project index and the
+user saw a different list per workspace, reported twice.
+
+Two sources, both device/folder metadata that ends up in the connected folder's
+`_easydb.edp`: the folder index (`eda:folderIndex`) and the space registry
+(`eda:spaceRegistry`, which workspaces each DATABASE holds, by name). A tab
+records its own database into the registry while it has it open; that is the
+only way the open database reaches the list, and it reaches it as metadata
+rather than as a list source. The header selector, the palette's Switch
+workspace and the delete prompt all read `workspaceList`. Nothing may build a
+workspace list of its own. Full picture:
+[`docs/tech/EDB.md`](../../docs/tech/EDB.md#the-list-is-not-read-out-of-a-workspace).
 
 ## Storage is hidden from plugins
 

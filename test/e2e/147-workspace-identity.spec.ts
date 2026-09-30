@@ -44,18 +44,20 @@ test('two workspaces out of one file are told apart in the list', async ({ page 
   await expect(twins.nth(1)).toHaveAttribute('title', 'powerplants.edb');
 });
 
-test('one title per file is left alone — the tooltip already answers that', async ({ page }) => {
-  // The same workspace in two files is a deliberate state (Cancel at the conflict
-  // prompt means "leave both"), and hovering says which is which.
+test('one workspace in two files is ONE row, and it is the file named after it', async ({ page }) => {
+  // The same workspace in two files used to be listed twice, so that declining the
+  // conflict prompt left both reachable. The id is the identity now — it is also
+  // the file name — so the list holds one row per id, and the copy it stands for is
+  // the file Save writes and Open reads the id back out of.
   await plantIndex(page, [
-    { id: 'sales', title: 'Sales', file: 'sales.edb' },
     { id: 'sales', title: 'Sales', file: 'backup.edb' },
+    { id: 'sales', title: 'Sales', file: 'sales.edb' },
   ]);
 
-  const both = options(page).filter({ hasText: 'Sales' });
-  await expect(both).toHaveCount(2);
-  await expect(both.nth(0)).toHaveText('Sales');
-  await expect(both.nth(1)).toHaveText('Sales');
+  const rows = options(page).filter({ hasText: 'Sales' });
+  await expect(rows).toHaveCount(1);
+  await expect(rows.nth(0)).toHaveText('Sales');
+  await expect(rows.nth(0)).toHaveAttribute('title', 'sales.edb');
 });
 
 test('the delete prompt names the workspace the way the header does', async ({ page, workspaceId }) => {

@@ -15,7 +15,9 @@
 // changed to make room for it and why a `.edb` handed to someone else carries none
 // of it.
 
-import type { WorkspaceContents } from '@easydb/shared';
+import { spaceFileName, type WorkspaceContents } from '@easydb/shared';
+import { deviceStore } from '../user-settings.js';
+import { FOLDER_INDEX_KEY, FOLDER_SELECTION_KEY } from './device-keys.js';
 
 /** One workspace found in one file in the folder. */
 export interface FolderWorkspace {
@@ -58,11 +60,19 @@ export interface FolderIndex {
   files?: string[] | undefined;
 }
 
-const KEY = 'eda:folderIndex';
-
+/**
+ * Through the DEVICE layer, not `localStorage` directly.
+ *
+ * `deviceStore()` is this browser until a folder is connected and the folder's
+ * `_easydb.edp` after that (`device-state.ts`), and the index is one of the keys
+ * the folder owns. That is what puts the workspace list in the folder's own
+ * metadata rather than in one browser — the whole point of it not living inside a
+ * `.edb`. Writes still reach `localStorage` as well, so the selector can paint
+ * before a folder has been adopted.
+ */
 export function readFolderIndex(): FolderIndex | null {
   try {
-    const raw = globalThis.localStorage?.getItem(KEY);
+    const raw = deviceStore()?.getItem(FOLDER_INDEX_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as FolderIndex;
     // A shape check, not a schema: this is a cache, and a version of the app that
@@ -75,7 +85,7 @@ export function readFolderIndex(): FolderIndex | null {
 
 export function writeFolderIndex(index: FolderIndex): void {
   try {
-    globalThis.localStorage?.setItem(KEY, JSON.stringify(index));
+    deviceStore()?.setItem(FOLDER_INDEX_KEY, JSON.stringify(index));
   } catch {
     /* private mode, or out of room — the app works, the list is just not merged */
   }
@@ -83,7 +93,7 @@ export function writeFolderIndex(index: FolderIndex): void {
 
 export function clearFolderIndex(): void {
   try {
-    globalThis.localStorage?.removeItem(KEY);
+    deviceStore()?.removeItem(FOLDER_INDEX_KEY);
   } catch {
     /* nothing to clear that anything can reach */
   }
@@ -111,7 +121,7 @@ export interface FolderSelection {
   files: string[];
 }
 
-const SELECTION_KEY = 'eda:folderFiles';
+const SELECTION_KEY = FOLDER_SELECTION_KEY;
 
 /** The default: everything, which is exactly how the folder behaved before this existed. */
 export const ALL_FILES: FolderSelection = { all: true, files: [] };
@@ -240,15 +250,20 @@ export function listLabels(entries: readonly ListEntry[]): string[] {
 }
 
 /**
- * Only the entries from OTHER files. Deduplicated on (id, file), because two
- * scans of the same folder must not double the list.
+ * Deduplicated on (id, file), because two scans of one folder must not double
+ * the list.
+ *
+ * It used to drop the file this tab has OPEN, on the grounds that its workspaces
+ * arrived through the open database instead. Nothing arrives that way any more —
+ * the open database is not a list source — so the open file's entry is the only
+ * one there is, and dropping it took the workspace the user is looking at off
+ * their own list.
  */
-function elsewhere(indexed: FolderWorkspace[], activeFile: string): FolderWorkspace[] {
+function deduped(indexed: FolderWorkspace[]): FolderWorkspace[] {
   const seen = new Set<string>();
   const out: FolderWorkspace[] = [];
   for (const w of indexed) {
-    if (w.file === activeFile) continue; // already in the open database
-    const key = `${w.id}\u0000${w.file}`;
+    const key = `${w.id} ${w.file}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(w);
@@ -257,22 +272,61 @@ function elsewhere(indexed: FolderWorkspace[], activeFile: string): FolderWorksp
 }
 
 /**
- * What the workspace selector should list.
+ * What the workspace selector should list. **One row per workspace id.**
  *
- * The open database's workspaces come first and unqualified, then everything the
- * folder holds elsewhere, each labelled with its file.
+ * Two sources, and NEITHER of them is the database this tab has open. That is the
+ * whole fix: the open database changes when the user switches, so anything read
+ * out of it made the list a property of where they were standing rather than of
+ * their setup.
  *
- * A workspace in BOTH appears twice, on purpose. `Cancel` at the conflict prompt
- * means "leave both", so both have to stay reachable — and the file qualifier is
- * what tells them apart, since the id is the same on both sides.
+ * 1. `indexed` — what the last folder scan found, each entry carrying its file.
+ *    First because it is the freshest and it is authoritative about files.
+ * 2. `registered` — what each DATABASE was last seen holding
+ *    (`space-registry.ts`), which is the only thing that can answer for the
+ *    project index while a tab has a `.edb` open.
+ *
+ * A workspace used to be listed TWICE when this browser and a file each held a
+ * copy, so that declining the conflict prompt left both reachable. The id is the
+ * identity now — it is also the file name — and boot settles which copy to open
+ * (`space-resolve.ts`). A list that says the same thing twice is one nobody can
+ * read.
  */
-export function mergeWorkspaceList(open: readonly { id: string; title?: string | undefined }[], indexed: readonly FolderWorkspace[], activeFile: string): ListEntry[] {
+export function mergeWorkspaceList(indexed: readonly FolderWorkspace[], registered: readonly ListEntry[] = []): ListEntry[] {
+  // Case-insensitive, like every other comparison in this layer: two ids differing
+  // only in case are one file on Windows, so they are one workspace to the list too.
+  const seen = new Set<string>();
+  const out: ListEntry[] = [];
+  const take = (e: ListEntry): void => {
+    if (seen.has(idKey(e.id))) return;
+    seen.add(idKey(e.id));
+    out.push(e);
+  };
   // `title` is omitted rather than set to undefined when there is none:
-  // `exactOptionalPropertyTypes` is on, and an absent key is what the callers
-  // compare against.
-  const entry = <T extends { id: string; title?: string | undefined }>(w: T): ListEntry => ({ id: w.id, ...(w.title === undefined ? {} : { title: w.title }) });
-  const mine = [...open].map(entry).sort(byLabel);
-  return [...mine, ...elsewhere([...indexed], activeFile).map((w) => ({ ...entry(w), file: w.file }))];
+  // `exactOptionalPropertyTypes` is on, and an absent key is what callers compare
+  // against.
+  for (const w of canonicalFirst(deduped([...indexed]))) take({ id: w.id, ...(w.title === undefined ? {} : { title: w.title }), file: w.file });
+  for (const e of registered) take(e);
+  return out.sort(byLabel);
+}
+
+/**
+ * Which of two files holding ONE workspace the single row should stand for.
+ *
+ * A folder can hold `simon.edb` and `powerplants.edb` and both hold the workspace
+ * `simon` — a file duplicated in a file manager, a sync tool's second copy, an OS
+ * save dialog that renamed one. One row per id means one of them has to win, and
+ * leaving it to scan order would make the answer change between two scans of the
+ * same folder.
+ *
+ * The file NAMED after the workspace wins, because that is the one everything else
+ * already agrees on: Save writes it, Open reads the id back out of it, and
+ * `settleIdentities` offers to rename the other to match its own contents. The
+ * odd one out is not lost — the sync report names it, and repairing it is what
+ * puts it back on the list under the id its name claims.
+ */
+function canonicalFirst(indexed: readonly FolderWorkspace[]): FolderWorkspace[] {
+  const rank = (w: FolderWorkspace) => (w.file.toLowerCase() === spaceFileName(w.id).toLowerCase() ? 0 : 1);
+  return [...indexed].sort((a, b) => rank(a) - rank(b));
 }
 
 /**
@@ -314,7 +368,7 @@ export function folderConflicts(open: readonly { id: string }[], indexed: readon
   const here = new Map<string, string>();
   for (const w of open) if (!here.has(idKey(w.id))) here.set(idKey(w.id), w.id);
   const out: FolderClash[] = [];
-  for (const w of elsewhere([...indexed], activeFile)) {
+  for (const w of deduped([...indexed].filter((w) => w.file !== activeFile))) {
     const localId = here.get(idKey(w.id));
     if (localId) out.push({ file: w });
   }

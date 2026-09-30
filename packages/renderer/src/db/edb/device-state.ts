@@ -33,6 +33,7 @@ import { writeUserBytes } from './guarded-write.js';
 import { createEdbBridge } from './worker-bridge.js';
 import { emitAllSettingsChanged } from '../settings-events.js';
 import { installDeviceStore, SECRETS_KEY, USER_SETTINGS_KEY, type StorageLike } from '../user-settings.js';
+import { FOLDER_INDEX_KEY, SPACE_REGISTRY_KEY } from './device-keys.js';
 
 /** The device-state file, in the connected folder. */
 export const DEVICE_FILE = '_easydb.edp';
@@ -62,8 +63,19 @@ export const DEVICE_SPACE = '_device';
  * so this trades that risk for the goal of a folder that works on a new machine
  * with nothing typed in. The alternative was re-authenticating every connector
  * per device.
+ *
+ * `FOLDER_INDEX_KEY` and `SPACE_REGISTRY_KEY` are the WORKSPACE LIST, and they are
+ * here because the list must not live inside a workspace. It used to be read half
+ * out of `store.workspaces.find()` — the database this tab has open — and a tab
+ * holds one database, so the list changed every time the user switched. Both keys
+ * are the same kind of thing the two above are: state about the setup rather than
+ * about any one workspace, and the place for that is the folder.
+ *
+ * `FOLDER_SELECTION_KEY` is deliberately NOT here. It says which files THIS machine
+ * wants to look at, and carried into the folder it would hide someone else's
+ * workspaces on their own computer.
  */
-export const FOLDER_OWNED_KEYS: readonly string[] = [USER_SETTINGS_KEY, SECRETS_KEY];
+export const FOLDER_OWNED_KEYS: readonly string[] = [USER_SETTINGS_KEY, SECRETS_KEY, FOLDER_INDEX_KEY, SPACE_REGISTRY_KEY];
 
 /**
  * Keys this browser may put into a folder only if the folder has no device
@@ -75,8 +87,13 @@ export const FOLDER_OWNED_KEYS: readonly string[] = [USER_SETTINGS_KEY, SECRETS_
  * drive — and quietly copying this machine's credentials into it is a decision
  * the user never made. Their own folder has no file on the first connect, so
  * they lose nothing.
+ *
+ * The workspace list is here for a plainer reason: it describes the folder it came
+ * out of. Seeding one folder's list into another would offer workspaces that
+ * folder does not hold. Nothing is lost by not seeding — the next scan writes the
+ * real answer, and a scan runs on every connect.
  */
-export const SEED_ONLY_INTO_NEW: readonly string[] = [SECRETS_KEY];
+export const SEED_ONLY_INTO_NEW: readonly string[] = [SECRETS_KEY, FOLDER_INDEX_KEY, SPACE_REGISTRY_KEY];
 
 /** What the folder said, for the keys it owns. Empty until a folder is read. */
 let mirror = new Map<string, string>();

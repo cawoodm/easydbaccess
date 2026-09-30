@@ -33,42 +33,69 @@ const FOLDER: FolderWorkspace[] = [
 ];
 
 describe('mergeWorkspaceList', () => {
-  it('lists the open database first, unqualified', () => {
-    const merged = mergeWorkspaceList(OPEN, FOLDER, 'index.edp');
-    expect(merged.slice(0, 2)).toEqual([{ id: 'sales' }, { id: 'scratch' }]);
-  });
-
-  it('labels a workspace from another file with that file', () => {
-    const merged = mergeWorkspaceList(OPEN, FOLDER, 'index.edp');
-    expect(merged.filter((e) => e.file !== undefined)).toEqual([
+  it('lists the folder, sorted by what is shown', () => {
+    expect(mergeWorkspaceList(FOLDER)).toEqual([
       { id: 'demo', file: 'demo.edb' },
       { id: 'sales', file: 'sales.edb' },
     ]);
   });
 
-  it('shows a clashing name twice, so Cancel leaves both reachable', () => {
-    const merged = mergeWorkspaceList(OPEN, FOLDER, 'index.edp');
-    expect(merged.filter((e) => e.id === 'sales')).toHaveLength(2);
+  it('takes nothing from the database this tab has open', () => {
+    // The whole fix. The open database changes when the user switches workspace,
+    // so a list built even partly from it was a property of where they were
+    // standing. There is no parameter for it any more.
+    expect(mergeWorkspaceList.length).toBeLessThanOrEqual(2);
   });
 
-  it('does not list the open file twice over', () => {
-    // Scanning the folder finds the file this tab already has open. Its
-    // workspaces are in the open database already, so the entry is dropped.
-    const merged = mergeWorkspaceList([{ id: 'sales' }], FOLDER, 'sales.edb');
-    expect(merged).toEqual([{ id: 'sales' }, { id: 'demo', file: 'demo.edb' }]);
+  it('keeps the file this tab has open on the list', () => {
+    // It used to be dropped, because its workspaces arrived through the open
+    // database instead. Nothing arrives that way now, so dropping it took the
+    // workspace the user is looking at off their own list.
+    expect(mergeWorkspaceList(FOLDER).map((e) => e.id)).toContain('sales');
+  });
+
+  it('adds what only the registry knows — the project index', () => {
+    // A tab inside `sales.edb` cannot open `index.edp` to ask what it holds. The
+    // registry is the record of what it held when a tab last could.
+    const merged = mergeWorkspaceList(FOLDER, [{ id: 'scratch' }, { id: 'sales' }]);
+    expect(merged).toEqual([{ id: 'demo', file: 'demo.edb' }, { id: 'sales', file: 'sales.edb' }, { id: 'scratch' }]);
+  });
+
+  it('shows one row per id, and the folder wins', () => {
+    // `sales` is in the folder AND remembered against the project index. It used
+    // to be two rows so that declining the conflict prompt left both reachable;
+    // the id is the identity now and boot settles which copy to open.
+    const sales = mergeWorkspaceList(FOLDER, [{ id: 'sales' }]).filter((e) => e.id === 'sales');
+    expect(sales).toEqual([{ id: 'sales', file: 'sales.edb' }]);
+  });
+
+  it('ignores case when deciding two entries are one workspace', () => {
+    // Two ids differing only in case are one file on Windows.
+    expect(mergeWorkspaceList(FOLDER, [{ id: 'Sales' }]).map((e) => e.id)).toEqual(['demo', 'sales']);
+  });
+
+  it('picks the file named after the workspace when two hold it', () => {
+    // A folder can hold `simon.edb` and `powerplants.edb` and both hold `simon`.
+    // One row means one wins, and scan order would make the answer change between
+    // two scans of the same folder. The canonical name is what Save writes.
+    const twins: FolderWorkspace[] = [
+      { id: 'simon', title: 'Simon', file: 'powerplants.edb' },
+      { id: 'simon', title: 'Simon', file: 'simon.edb' },
+    ];
+    expect(mergeWorkspaceList(twins)).toEqual([{ id: 'simon', title: 'Simon', file: 'simon.edb' }]);
   });
 
   it('survives two scans of the same folder without doubling', () => {
-    const merged = mergeWorkspaceList([], [...FOLDER, ...FOLDER], 'index.edp');
-    expect(merged).toHaveLength(2);
+    expect(mergeWorkspaceList([...FOLDER, ...FOLDER])).toHaveLength(2);
   });
 
-  it('is just the open database when no folder is connected', () => {
-    expect(mergeWorkspaceList(OPEN, [], 'index.edp')).toEqual([{ id: 'sales' }, { id: 'scratch' }]);
+  it('is just the registry when no folder is connected', () => {
+    expect(mergeWorkspaceList([], OPEN)).toEqual([{ id: 'sales' }, { id: 'scratch' }]);
   });
 
-  it('carries a title through, from the open database and from a file', () => {
-    const merged = mergeWorkspaceList([{ id: 'sales', title: 'Sales 2026' }], [{ id: 'demo', title: 'The Demo', file: 'demo.edb' }], 'index.edp');
+  it('carries a title through, from the folder and from the registry', () => {
+    const merged = mergeWorkspaceList([{ id: 'demo', title: 'The Demo', file: 'demo.edb' }], [{ id: 'sales', title: 'Sales 2026' }]);
+    // By what is SHOWN: "Sales 2026" sorts before "The Demo".
     expect(merged).toEqual([
       { id: 'sales', title: 'Sales 2026' },
       { id: 'demo', title: 'The Demo', file: 'demo.edb' },
@@ -76,21 +103,12 @@ describe('mergeWorkspaceList', () => {
   });
 
   it('sorts by what is shown, not by the technical name', () => {
-    // `zulu` is titled "Alpha", so it comes first. Sorting on `name` would put it
+    // `zulu` is titled "Alpha", so it comes first. Sorting on the id would put it
     // last and the list would look unsorted to the only person reading it.
-    const merged = mergeWorkspaceList([{ id: 'zulu', title: 'Alpha' }, { id: 'mike' }], [], 'index.edp');
-    expect(merged.map((e) => e.id)).toEqual(['zulu', 'mike']);
+    expect(mergeWorkspaceList([], [{ id: 'zulu', title: 'Alpha' }, { id: 'mike' }]).map((e) => e.id)).toEqual(['zulu', 'mike']);
   });
 });
 
-/**
- * What a workspace is CALLED on screen.
- *
- * `Workspace.title` is what the user calls it and `id` is the technical one that
- * `?space=` routes on, so anything the user reads has to prefer the title — the
- * selector showed the technical one and stayed on it after a title edit, which
- * read as the edit not having taken.
- */
 describe('workspaceLabel', () => {
   it('is the title when there is one', () => {
     expect(workspaceLabel({ id: 'q3', title: 'Newsroom Q3' })).toBe('Newsroom Q3');

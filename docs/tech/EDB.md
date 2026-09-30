@@ -683,6 +683,82 @@ And a file that cannot be got at is reported rather than created: the index is a
 cache, so the file may have been moved or renamed since the last scan — and
 inventing an empty workspace in its place would be a lie the list told the user.
 
+### The list is not read out of a workspace
+
+Reported from the field, twice in the same words: **switching workspace showed a
+different list of workspaces.** Open `sales.edb` and everything living in the
+project index fell out of the header list; go back and it returned.
+
+The cause was structural, not a slip. The list was built from two halves and one
+of them was `store.workspaces.find()` — the database THIS TAB has open. A tab holds
+exactly one database (`tab-lock.ts`), so that half changed on every switch, and a
+tab inside a `.edb` cannot open the origin-private `index.edp` to look at the rest.
+
+**So the open database contributes NOTHING to the list** — not first, not last, not
+as a fallback. Merging it in last was the first attempt and it did not fix the
+report: any contribution at all makes the list a property of where the user is
+standing. Since v0.0.514 the list is composed from two records, **one row per
+workspace id**, and both of them are `.edp` metadata:
+
+| Source | Answers for | Key |
+| --- | --- | --- |
+| the folder index | every `.edb` in the connected folder, as the last scan found it | `eda:folderIndex` |
+| the space registry | which workspaces each DATABASE holds, by database name | `eda:spaceRegistry` |
+
+`db/edb/space-registry.ts` is the new half. A tab records what its own database
+holds while it has it open, so every other tab and every later boot can read back
+the contents of a database it cannot open. The project index is the case that needs
+it: origin-private, not a file in the folder, and unreachable from a tab that has
+adopted a `.edb`. `workspaceList(activeFile)` composes the two and is what the
+header selector, the palette's _Switch workspace_ and the delete prompt's "is this
+the last one?" all read; none of them may build a list of their own.
+
+**Both keys are owned by the folder.** They are in `FOLDER_OWNED_KEYS`
+([Device state travels with the folder](#device-state-travels-with-the-folder)), so
+they are written into `_easydb.edp` beside the settings and secrets: connect the
+folder on a new machine and the workspace list is there before anything is scanned
+or opened. `localStorage` is still written too, so the selector can paint before a
+folder has been adopted — that is `deviceStorage()`'s ordinary two-layer behaviour,
+not a second cache. They are in `SEED_ONLY_INTO_NEW` for a plainer reason than
+secrets are: a list describes the folder it came out of, so seeding one folder's
+list into another would offer workspaces that folder does not hold.
+
+`FOLDER_SELECTION_KEY` (`eda:folderFiles`) is deliberately **not** folder-owned. It
+says which files THIS machine wants to look at, and in the folder it would hide
+someone else's workspaces on their own computer.
+
+Three rules worth knowing before touching it:
+
+- **A `.edb` is recorded under its own name**, so its row carries that file and
+  picking it adopts the file. A key that is not a `.edb` is the project index, and
+  its rows carry no file and route through `?space=`.
+- **Stale entries are pruned**, but only against a scan that actually listed the
+  folder's files. An index from before `files` existed proves nothing about what is
+  missing, and guessing there would take a real workspace off the list.
+- **Electron on the project index is skipped.** There is no `index.edp` inside the
+  desktop, and with no folder connected `activeEdbName()` answers `index.edp` for
+  want of a browser session marker. No bridge means Electron — the same test
+  `space-adopt.ts` makes.
+
+**One row per id** reverses a deliberate decision. Two copies of one workspace —
+this browser's and a file's — used to be listed twice so that declining the conflict
+prompt left both reachable. The id IS the file name, boot settles which copy to open
+(`space-resolve.ts`), and a list that says the same thing twice is one nobody can
+read. Where two FILES hold one id — a duplicate left by a file manager or a sync
+tool — the row stands for the file **named after the workspace**, because that is
+the one Save writes, Open reads the id back out of, and `settleIdentities` offers to
+rename the other to match. Leaving it to scan order would make the answer change
+between two scans of one folder.
+
+Two consequences in the selector, both of which bit once: the open workspace's row
+now carries a file like any other, so `selected` is matched on the **id alone** (the
+old `file === undefined` test would never match, and the header named the wrong
+workspace); and `openListEntry` routes a row whose file is already open through
+`?space=` rather than adopting a file the tab is standing on.
+
+`152-workspace-list-is-stable.spec.ts` holds the invariant down by reading the list
+with three different databases marked active and asserting all three are identical.
+
 ### What this deliberately does NOT do
 
 `overwriteInFile` (the sync's _Use the browser copy_) still merges into the file
