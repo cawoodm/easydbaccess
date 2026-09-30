@@ -173,13 +173,22 @@ async function openInMemory(bytes: Uint8Array | null, name: string, scratch = fa
  * no way back except the reload the user could not know to make. Re-opening is
  * the same thing the reload does, one step earlier, and it answers from the
  * bytes just imported rather than from the database they replaced.
+ *
+ * `adopt` asks for that re-open on a name that was never live. The caller has
+ * made this file the tab's own and no reload is coming, so the worker has to
+ * follow it now — otherwise the marker names one database and the worker keeps
+ * writing to another, and every edit until the next load is written where that
+ * load will not look. The first Save into a folder is the one caller.
  */
-async function importBytes(name: string, bytes: Uint8Array): Promise<void> {
+async function importBytes(name: string, bytes: Uint8Array, adopt = false): Promise<void> {
   sqlite3 ??= await sqlite3InitModule();
   // The boot that opens what this places would be the one to hit `CANTOPEN`, a
   // reload away from the import that caused it. See `wal-header.ts`.
   clearWalHeader(bytes);
   const wasLive = name === dbName;
+  // Only the file we HAVE OPEN has to be let go before it is written over. A
+  // name that was never live is another file in the pool, and `open` below
+  // closes whatever is current when the switch actually happens.
   if (wasLive) {
     driver?.close();
     mirror?.dispose();
@@ -189,6 +198,7 @@ async function importBytes(name: string, bytes: Uint8Array): Promise<void> {
     mirror = null;
     pooled = null;
   }
+  const becomesLive = wasLive || adopt;
   const pool = await ensurePool(sqlite3);
   if (pool) {
     const path = poolPath(name);
@@ -198,14 +208,14 @@ async function importBytes(name: string, bytes: Uint8Array): Promise<void> {
     await pool.importDb(path, bytes);
     // From the POOL, not from `bytes`: the file is now what the import placed,
     // and this is the same open the next boot would do.
-    if (wasLive) await open(null, name, true);
+    if (becomesLive) await open(null, name, true);
     return;
   }
   await writeMirror(name, bytes);
   // The fallback has no file to re-read, so the bytes ARE the database. `true`
   // asks for the pool anyway and lands back here if it is still unavailable —
   // the session's own boot makes the same request.
-  if (wasLive) await open(bytes, name, true);
+  if (becomesLive) await open(bytes, name, true);
 }
 
 /**
@@ -445,7 +455,7 @@ async function handleAsync(req: EdbRequest): Promise<unknown> {
       // handed back to pass into `open`.
       return null;
     case 'importBytes':
-      return importBytes(req.name, req.bytes);
+      return importBytes(req.name, req.bytes, req.adopt === true);
     case 'flush':
       return flushNow();
     case 'export':

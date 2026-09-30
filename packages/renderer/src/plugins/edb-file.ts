@@ -18,7 +18,7 @@ import {
 } from '../db/edb/file-handle.js';
 import { activeEdbName, adoptedFileName, reloadWithoutSpace, reloadWithSpace, setActiveEdbName } from '../db/edb/session.js';
 import { saveErrorMessage, saveErrorSummary } from '../db/edb/save-error.js';
-import { clearWriteDeclined, compareWithFile, factsOfHandle, markWriteDeclined, markLocalChanges, readStamp, recordAgreement, writeDeclined } from '../db/edb/file-stamp.js';
+import { clearWriteDeclined, compareWithFile, factsOfHandle, holdsUnsavedWork, markWriteDeclined, markLocalChanges, readStamp, recordAgreement, verdictFor, writeDeclined } from '../db/edb/file-stamp.js';
 import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
 import { SETTINGS_CHANGED_EVENT, settingsChangeAffects, type SettingsChangedDetail } from '../db/settings-events.js';
 import { adoptDeviceFolder, deviceStorage, disconnectDeviceState, onDeviceStateError } from '../db/edb/device-state.js';
@@ -41,7 +41,7 @@ import { countWorkspaceContents } from '../db/delete-workspace.js';
 import { clearFolderIndex, isEmptyWorkspace, listLabels, workspaceLabel } from '../db/edb/folder-index.js';
 import { createIpcDataStore } from '../db/data-store-bridge.js';
 import { adoptEdbFile, placeForNextBoot, workspaceFolder, type EdbTarget } from '../db/edb/new-file.js';
-import { adoptFolderFile, clearPendingSpaceRequest, pendingSpaceRequest, reloadActiveFromFile, settleCopyQuestion, takeComparisonRequest, takeCopyQuestion } from '../db/edb/space-adopt.js';
+import { adoptFolderFile, askForComparison, clearPendingSpaceRequest, pendingSpaceRequest, reloadActiveFromFile, settleCopyQuestion, takeComparisonRequest, takeCopyQuestion } from '../db/edb/space-adopt.js';
 import { alsoWroteNote, withoutTheirOwnFile, writableWholesale } from '../db/edb/one-per-file.js';
 import { installWriteGuard, writeUserBytes, type WriteGuardDeps } from '../db/edb/guarded-write.js';
 import { describeHolding, firstWarning, refusedNote, secondWarning, type Holding } from '../db/edb/empty-write.js';
@@ -738,6 +738,12 @@ export function init(api: HostApi): void {
   }
 
   const autosave = createAutosavePolicy({
+    // A reload does not make work saved. The policy's own flag is built fresh on
+    // every load and starts at false, so the red dot went out on every refresh
+    // while the edits sat in the browser's copy and the file had never seen them
+    // — and the next Open then wrote the file straight over them. The stamp is
+    // what survives a reload, so the stamp is what seeds this.
+    initiallyDirty: holdsUnsavedWork(adoptedFileName()),
     save: async () => {
       if ((await persist({ auto: true })).where !== 'no-handle') return;
       // Same rule as a manual Save: a connected folder needs no question. The
@@ -903,7 +909,13 @@ export function init(api: HostApi): void {
     //
     // Read back from the file rather than exported again, so the pool's copy is the
     // bytes that are actually on disk.
-    await placeForNextBoot(target.name, await readBytes(target.handle));
+    //
+    // `adopt`, because this Save does not reload: the marker now names
+    // `target.name` and the worker still holds the database it booted on, so
+    // without it every edit until the next load was written to a database that
+    // load does not open — the work simply gone, with no error and no dot. The
+    // worker follows the marker here instead.
+    await placeForNextBoot(target.name, await readBytes(target.handle), { adopt: true });
   }
 
   /**
@@ -1504,13 +1516,49 @@ export function init(api: HostApi): void {
     picked ??= await pickFileToOpen();
     if (!picked) return;
     if (await nameDeniesContents(picked.name, picked.bytes)) return;
+    const workspaceId = workspaceIdFromFileName(picked.name);
+    if (!(await mayImportOver(picked.name, picked.handle, workspaceId))) return;
     // The boot never reads the user's file (see `session.ts`), so the bytes go
     // into this tab's own substrate first, and the reload finds them there.
     await placeForNextBoot(picked.name, picked.bytes);
     // This copy came straight out of that file, so the two agree.
     const opened = picked.handle ? await factsOfHandle(picked.handle) : null;
     if (opened) recordAgreement(picked.name, opened);
-    await adopt({ name: picked.name, handle: picked.handle }, `Opening "${picked.name}" as the workspace "${workspaceIdFromFileName(picked.name)}". The page will reload.`);
+    await adopt({ name: picked.name, handle: picked.handle }, `Opening "${picked.name}" as the workspace "${workspaceId}". The page will reload.`);
+  }
+
+  /**
+   * May this Open write the file's bytes over the copy this browser holds?
+   *
+   * Open imports, and importing replaces. The copy being replaced may hold work
+   * the file has never seen — the ordinary state after editing a workspace and
+   * not saving it — and this route took it away without a word. Every OTHER path
+   * that can replace a copy asks first: the workspace selector and the boot both
+   * go through `settleTwoCopies`, and the Sync through `decideActiveFileSync`.
+   *
+   * Answers false when the Open is finished — either the user dismissed the
+   * question, or they kept the browser's copy, which is an Open in its own right:
+   * the tab ends up backed by that file, so a Save or a Compare has somewhere to
+   * go, and nothing was imported.
+   *
+   * Only `ahead` and `conflict` ask. Those two are the verdicts that PROVE we
+   * hold unsaved work — the stamp says so, written by every change since the last
+   * agreement. `unknown` proves nothing, and the user has just named this file by
+   * hand, so a question there would be a modal in front of every ordinary Open of
+   * a file first read on another origin.
+   */
+  async function mayImportOver(file: string, handle: FileSystemFileHandle | null, workspaceId: string): Promise<boolean> {
+    const verdict = await verdictFor(file, handle);
+    if (verdict !== 'ahead' && verdict !== 'conflict') return true;
+    const answer = await settleCopyQuestion(api.ui.dialogs, file, workspaceId, verdict);
+    if (answer === 'none') return false;
+    if (answer === 'file') return true;
+    // Comparing opens the browser's copy first — the side that destroys nothing —
+    // and the comparison then settles the two against the file. Same order as the
+    // workspace selector's answer to the same question.
+    if (answer === 'compare') askForComparison(file);
+    await adopt({ name: file, handle }, `Opening "${file}" as the workspace "${workspaceId}", keeping the copy in this browser. The page will reload.`);
+    return false;
   }
 
   async function leaveFileMode(): Promise<void> {

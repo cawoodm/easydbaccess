@@ -45,8 +45,12 @@ export type EdbRequest =
    * arrives. It used to be left closed, which put the app in the same
    * `store used before the database was opened` state a stray `pooled` did — from
    * the ordinary Open path, with nothing on screen to say so.
+   *
+   * `adopt` asks for that same re-open on a name that was NOT live: the caller
+   * has just made this file the tab's own and there is no reload coming. The
+   * first Save into a folder is the one caller — see `saveIntoFolder`.
    */
-  | { id: number; op: 'importBytes'; name: string; bytes: Uint8Array }
+  | { id: number; op: 'importBytes'; name: string; bytes: Uint8Array; adopt?: boolean | undefined }
   /** The OPFS mirror's bytes for a workspace, if it has any. Needs no file permission. */
   | { id: number; op: 'restore'; name: string }
   | { id: number; op: 'find'; coll: string; query?: Record<string, unknown> | undefined; limit?: number | undefined }

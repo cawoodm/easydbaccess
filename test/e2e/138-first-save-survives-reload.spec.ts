@@ -117,6 +117,33 @@ test('rows written before the save come back with it', async ({ page }) => {
   expect(values).toEqual(['kept']);
 });
 
+/**
+ * The other half of the same step: the tab must WRITE to the file it has just
+ * adopted, not only read it on the next load.
+ *
+ * `saveIntoFolder` pointed the marker at `alpha.edb` and placed its bytes in the
+ * pool, but the worker went on holding `index.edp` — `importBytes` re-opened only
+ * when the name was already the live one, and this name had never been live. So
+ * every edit between that Save and the next reload landed in a database the next
+ * boot does not open, and vanished with no error and no dot.
+ */
+test('a change made after the first save is not lost by the reload', async ({ page }) => {
+  await boot(page, 'alpha');
+  const id = await createTable(page, 'mine', [{ field: 'a' }]);
+  await waitForPanel(page, id);
+  await firstSaveIntoAFolder(page);
+
+  // No reload in between: this is the same page load the Save happened on.
+  const later = await createTable(page, 'later', [{ field: 'b' }]);
+  await waitForPanel(page, later);
+
+  await page.reload();
+  await ready(page);
+
+  // Before the fix this came back `['mine']`.
+  await expect.poll(() => tableNames(page), { timeout: 30_000 }).toEqual(['later', 'mine']);
+});
+
 test('a second workspace is not dragged into the file', async ({ page }) => {
   // The file holds one workspace (`one-per-file.ts`), and placing its bytes in the
   // pool must not undo that: the boot after the save opens the FILE, so a passenger

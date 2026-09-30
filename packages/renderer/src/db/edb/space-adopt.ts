@@ -289,7 +289,7 @@ export function takeCopyQuestion(): CopyQuestionNote | null {
  */
 const COMPARE_KEY = 'eda:compareWithFile';
 
-function askForComparison(file: string): void {
+export function askForComparison(file: string): void {
   try {
     globalThis.sessionStorage?.setItem(COMPARE_KEY, file);
   } catch {

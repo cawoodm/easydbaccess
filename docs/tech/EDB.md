@@ -201,6 +201,14 @@ it safe in the file on disk, none of it on screen, and the boot re-creating the
 workspace record on top. Fixed in v0.0.449;
 `138-first-save-survives-reload.spec.ts` holds it, rows included.
 
+**And changing the marker means moving the WORKER too, where nothing reloads.**
+That same first Save is the only route that repoints the tab without a reload
+behind it, so the marker named `alpha.edb` while the worker went on holding
+`index.edp`: every edit until the next load was written to a database that load
+does not open, and went with no error and no dot. `importBytes` re-opened only
+when the name was already the live one, which it never is here — hence its
+`adopt` flag, and `saveIntoFolder` is its one caller.
+
 ## Which copy, when both exist
 
 Boot reading the pool has a second consequence, and for four versions it was
@@ -848,6 +856,13 @@ knowing:
 - The marker is pushed by `AutosavePolicy.onDirtyChange`, not polled. A workspace
   that has never been saved is dirty from boot — creating the workspace record and
   seeding the view templates are both writes, and none of it is in a file yet.
+- **A reload does not make work saved.** The policy is built fresh on every load
+  and its flag starts at false, so the dot went out on every refresh while the
+  edits sat in the browser's copy and the file had never seen them. It is seeded
+  now — `initiallyDirty`, from `file-stamp.ts`'s `holdsUnsavedWork`, which is the
+  only thing that outlives the reload. Three cases, and the two that cannot be
+  proved clean count as dirty: no file at all, a file with no stamp, a stamp that
+  says dirty.
 
 Save and the autosave switch are offered whether or not a file has been adopted.
 They used to appear only in file mode, which read as "this app cannot save" in the

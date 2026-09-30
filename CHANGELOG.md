@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 30 Sep 2026
+
+### Bugs
+
+- 🪲 After a reload the Save button said everything was saved, over work that had never reached the file (v0.0.514)
+- 🪲 Open workspace file wrote the file over unsaved work in this browser, without a word (v0.0.514)
+- 🪲 Everything done right after the first Save into a folder was lost by the next reload (v0.0.514)
+- 🪲 Save wrote the workspace into another workspace's file, while the toast named the right one (v0.0.515)
+- 🪲 Switching workspace showed a different list of workspaces (v0.0.516)
+
 ## 29 Sep 2026
 
 ### Features

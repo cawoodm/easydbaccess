@@ -37,8 +37,11 @@ export interface EdbBridge extends EasydbStoreBridge {
    * first. Only this worker can put them there: the `opfs-sahpool` VFS is
    * exclusive origin-wide, so the throwaway worker that BUILT them never got the
    * pool and wrote its copy where no boot looks.
+   *
+   * `adopt: true` switches to it as well — for the caller that has just made
+   * this file the tab's own with no reload to follow (`saveIntoFolder`).
    */
-  importBytes(name: string, bytes: Uint8Array): Promise<void>;
+  importBytes(name: string, bytes: Uint8Array, opts?: { adopt?: boolean }): Promise<void>;
   /**
    * The OPFS mirror's bytes for a workspace, or null.
    *
@@ -139,7 +142,7 @@ export function createEdbBridge(): EdbBridge {
   return {
     open: (bytes, name, opts) => call<void>({ op: 'open', bytes, name, pooled: opts?.pooled }),
     restore: (name) => call<Uint8Array | null>({ op: 'restore', name }),
-    importBytes: (name, bytes) => call<void>({ op: 'importBytes', name, bytes }),
+    importBytes: (name, bytes, opts) => call<void>({ op: 'importBytes', name, bytes, adopt: opts?.adopt }),
     flush: () => call<void>({ op: 'flush' }),
     hasDatabase: (name) => call<boolean>({ op: 'hasDatabase', name }),
     renameDatabase: (from, to) => call<boolean>({ op: 'renameDatabase', from, to }),
