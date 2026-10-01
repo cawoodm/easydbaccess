@@ -24,7 +24,7 @@ import {
   type FolderWorkspace,
 } from './folder-index.js';
 import { afterRename, misfiledFiles, withoutFiles, type FileIdentity } from './file-identity.js';
-import { factsOf, factsOfHandle, readStamp, recordDivergence, verdictFor } from './file-stamp.js';
+import { changedHere, factsOf, factsOfHandle, readStamp, recordDivergence, verdictFor } from './file-stamp.js';
 import { decideActiveFileSync, type ActiveFileOutcome } from './active-file-sync.js';
 import { BROWSER_SIDE, compareCopies, fileSide, sizeChangeNote, type CopyFacts } from './copy-facts.js';
 import { confirmDataLoss, newerSide, USE_BROWSER_COPY, USE_FILE_COPY } from './copy-choice.js';
@@ -337,7 +337,16 @@ function emptyOnes(counts: ReadonlyMap<string, WorkspaceContents>): Set<string> 
   return empty;
 }
 
-/** What a counted workspace looks like to the prompt. A file has a size; this side has not. */
+/**
+ * What a counted workspace looks like to the prompt. A file has a size; this side
+ * has not.
+ *
+ * It has a DATE, though, and that is the one fact the browser line was missing
+ * while the file line carried `saved 30 Sept 2026, 12:59`. It comes from this
+ * tab's own file stamp — the open database is what the browser side IS — so it is
+ * absent for a tab on the project index, which has no file to have moved away
+ * from.
+ */
 function contentsAsFacts(c: WorkspaceContents | undefined): CopyFacts {
   return c ? { tables: c.tables, views: c.views } : {};
 }
@@ -442,7 +451,10 @@ export async function syncFolder(
   const { adopt, ask } = partitionConflicts(clashes, emptyOnes(counted));
 
   for (const clash of ask) {
-    const mine = contentsAsFacts(counted.get(clash.file.id));
+    // The browser side IS this tab's own database, so its date is that file's
+    // stamp. A tab on the project index has no file and no date, and the line
+    // reads as it always did.
+    const mine = { ...contentsAsFacts(counted.get(clash.file.id)), ...changedHere(activeEdbName()) };
     const theirs = fileAsFacts(clash.file);
     const sides = compareCopies([
       { label: BROWSER_SIDE, facts: mine },
@@ -588,7 +600,7 @@ async function refreshActiveFile(
   // cannot say. `ask-unknown` marks neither, which is the honest answer there.
   const newer = newerSide(verdict);
   const sides = compareCopies([
-    { label: BROWSER_SIDE, facts: await openFileFacts(open), newer: newer === 'browser' },
+    { label: BROWSER_SIDE, facts: { ...(await openFileFacts(open)), ...changedHere(file) }, newer: newer === 'browser' },
     { label: fileSide(file), facts: { ...fileTotals(index, file), ...(now ?? {}) }, newer: newer === 'file' },
   ]);
   const since = sinceWeRead(file, now?.size);

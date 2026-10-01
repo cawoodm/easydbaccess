@@ -15,7 +15,7 @@ import type { Dialogs } from '@easydb/shared';
 import { edbBridge } from './active-bridge.js';
 import { activeEdbName, reloadWithSpace, setActiveEdbName } from './session.js';
 import { canPickFolder, ensureWritable, fileInFolder, listWorkspaceFiles, readBytes, rememberHandle, rememberedFolder } from './file-handle.js';
-import { factsOfHandle, readStamp, recordAgreement, verdictFor } from './file-stamp.js';
+import { changedHere, factsOfHandle, readStamp, recordAgreement, verdictFor } from './file-stamp.js';
 import type { FileVerdict } from './file-stamp.js';
 import { askWhichCopy, type CopySides } from './copy-choice.js';
 import { readFolderIndex } from './folder-index.js';
@@ -186,6 +186,10 @@ async function sidesFor(file: string, workspaceId: string, handle: FileSystemFil
     here.tables = mine?.tables ?? 0;
     here.views = mine?.views ?? 0;
   }
+  // When this browser's copy last moved away from the file, so the two lines can
+  // be read against each other. Absent while the two agree, which is the state in
+  // which there is nothing to date.
+  Object.assign(here, changedHere(file));
 
   const there: CopyFacts = { ...(handle ? ((await factsOfHandle(handle)) ?? {}) : {}) };
   const indexed = readFolderIndex()?.workspaces.find((w) => w.file === file && w.id === workspaceId);

@@ -39,6 +39,48 @@ describe('describeCopy', () => {
   });
 });
 
+/**
+ * The browser side's date.
+ *
+ * Reported: the file line read `11.7 MB, saved 30 Sept 2026, 12:59` and the
+ * browser line was two counts and nothing else — so the question the reader is
+ * actually asking, which copy is later, was answerable on one side only.
+ */
+describe('describeCopy, on the browser side', () => {
+  // LOCAL times, not `Date.UTC`: the renderer formats on the reader's clock, so a
+  // UTC fixture asserts the machine's offset rather than the format.
+  const at = (h: number, m: number) => new Date(2026, 8, 30, h, m).getTime();
+  const CHANGED = at(13, 40);
+
+  it('says WHEN this browser last changed its copy', () => {
+    expect(describeCopy({ tables: 1, views: 2, changedAt: CHANGED }, 'en-GB')).toBe('1 table, 2 views, changed 30 Sept 2026, 13:40');
+  });
+
+  it('says "changed", never "saved" — the browser copy is not on disk', () => {
+    // Calling both sides "saved" would state the thing the prompt exists to warn
+    // about is not true.
+    expect(describeCopy({ changedAt: CHANGED }, 'en-GB')).not.toContain('saved');
+  });
+
+  it('leaves the line alone when there is nothing to date', () => {
+    // A copy that still agrees with its file has not changed since it was
+    // written, and the other line already says when that was.
+    expect(describeCopy({ tables: 1, views: 2 })).toBe('1 table, 2 views');
+  });
+
+  it('reads against the file line, one date each', () => {
+    const text = compareCopies(
+      [
+        { label: BROWSER_SIDE, facts: { tables: 1, views: 2, changedAt: CHANGED } },
+        { label: fileSide('powerplants.edb'), facts: { tables: 1, views: 2, size: 12_268_339, mtime: at(12, 59) } },
+      ],
+      'en-GB',
+    );
+    expect(text).toContain('Browser: 1 table, 2 views, changed 30 Sept 2026, 13:40');
+    expect(text).toContain('File — powerplants.edb: 1 table, 2 views, 11.7 MB, saved 30 Sept 2026, 12:59');
+  });
+});
+
 describe('formatBytes', () => {
   it('uses the unit a file manager would', () => {
     expect(formatBytes(0)).toBe('0 bytes');

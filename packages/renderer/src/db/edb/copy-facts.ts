@@ -32,6 +32,20 @@ export interface CopyFacts {
   size?: number | undefined;
   /** When the file was last written, as epoch ms. */
   mtime?: number | undefined;
+  /**
+   * When THIS BROWSER'S copy last changed, as epoch ms.
+   *
+   * The browser's answer to `mtime`, and the thing these prompts were missing: the
+   * file side read `11.7 MB, saved 30 Sept 2026, 12:59` and the browser side was
+   * two counts and no date at all, so the question the reader is actually asking —
+   * which copy is later — had an answer on one line and nothing on the other.
+   *
+   * Only ever on the browser side, and only once there is something unsaved to
+   * date: a copy that agrees with its file has not changed since it was written,
+   * and `saved …` on the other line already says when that was. Comes from
+   * `file-stamp.ts`, so it survives the reload these prompts often follow.
+   */
+  changedAt?: number | undefined;
 }
 
 /** One noun, singular or plural. */
@@ -63,12 +77,17 @@ export function formatWhen(mtime: number, locale?: string): string {
 }
 
 /**
- * One copy as one phrase: `3 tables, 2 views, 128 KB, saved 20 Aug 2026, 09:14`.
+ * One copy as one phrase: `3 tables, 2 views, 128 KB, saved 20 Aug 2026, 09:14`,
+ * or `1 table, 2 views, changed 30 Sept 2026, 13:40` on the browser side.
  *
  * Absent facts are left out rather than shown as zero or as "unknown": a count
  * this side could not take is not the same as a count of none, and a dialog that
  * says "0 tables" about a workspace full of them is worse than one that says
  * nothing.
+ *
+ * **`saved` and `changed` are different words on purpose.** The file was written;
+ * the browser's copy merely moved on and is still only in the browser. Calling
+ * both "saved" would say the thing the prompt exists to warn about is not true.
  *
  * Empty when nothing is known, so a caller can drop the whole line.
  */
@@ -81,6 +100,7 @@ export function describeCopy(facts: CopyFacts, locale?: string): string {
   if (facts.views !== undefined && facts.views > 0) parts.push(plural(facts.views, 'view'));
   if (facts.size !== undefined) parts.push(formatBytes(facts.size));
   if (facts.mtime !== undefined) parts.push(`saved ${formatWhen(facts.mtime, locale)}`);
+  if (facts.changedAt !== undefined) parts.push(`changed ${formatWhen(facts.changedAt, locale)}`);
   return parts.join(', ');
 }
 

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clearStamp, compareWithFile, holdsUnsavedWork, markLocalChanges, readStamp, recordAgreement, recordDivergence, type FileStamp } from '../../../packages/renderer/src/db/edb/file-stamp.js';
+import { changedHere, clearStamp, compareWithFile, holdsUnsavedWork, markLocalChanges, readStamp, recordAgreement, recordDivergence, type FileStamp } from '../../../packages/renderer/src/db/edb/file-stamp.js';
 
 /**
  * What this browser last knew about a `.edb` on disk.
@@ -69,9 +69,11 @@ describe('the stamp store', () => {
     // later verdict was `unknown`, so the machine that had just pushed its work out
     // could never be told that another had pushed theirs.
     recordAgreement('a.edb', { mtime: 10, size: 100 });
-    recordDivergence('a.edb', { mtime: 30, size: 300 });
+    recordDivergence('a.edb', { mtime: 30, size: 300 }, 1_700);
 
-    expect(readStamp('a.edb')).toEqual({ mtime: 30, size: 300, dirty: true });
+    // `changedAt` rides along: our copy moved away from the file at that moment,
+    // and the "which copy?" prompts show it on the Browser line.
+    expect(readStamp('a.edb')).toEqual({ mtime: 30, size: 300, dirty: true, changedAt: 1_700 });
     // The file as it is now, plus "this database is not a copy of it" — so an
     // outside write comes back as a conflict rather than as silence.
     expect(compareWithFile(readStamp('a.edb'), { mtime: 30, size: 300 })).toBe('ahead');
@@ -81,8 +83,8 @@ describe('the stamp store', () => {
   it('records a divergence for a file it has never seen', () => {
     // Unlike `markLocalChanges`, this one HAS just read the file, so there is
     // something real to write down.
-    recordDivergence('new.edb', { mtime: 5, size: 50 });
-    expect(readStamp('new.edb')).toEqual({ mtime: 5, size: 50, dirty: true });
+    recordDivergence('new.edb', { mtime: 5, size: 50 }, 1_700);
+    expect(readStamp('new.edb')).toEqual({ mtime: 5, size: 50, dirty: true, changedAt: 1_700 });
   });
 
   it('survives rubbish in the key rather than throwing', () => {
@@ -90,6 +92,64 @@ describe('the stamp store', () => {
     expect(readStamp('a.edb')).toBeNull();
     recordAgreement('a.edb', { mtime: 1, size: 2 });
     expect(readStamp('a.edb')).toEqual({ mtime: 1, size: 2 });
+  });
+});
+
+/**
+ * When this browser's copy last moved away from the file.
+ *
+ * The browser side of every "which copy do you want?" prompt had no date at all
+ * while the file side had one, so the reader could not tell which copy was later.
+ */
+describe('changedAt', () => {
+  it('is recorded on the first change since the save', () => {
+    recordAgreement('a.edb', { mtime: 10, size: 100 });
+    markLocalChanges('a.edb', 5_000);
+    expect(readStamp('a.edb')).toEqual({ mtime: 10, size: 100, dirty: true, changedAt: 5_000 });
+  });
+
+  it('moves to the LATEST change, not the first', () => {
+    // The old early-return kept the oldest unsaved change, and a reader comparing
+    // that with the file's save time would draw the wrong conclusion.
+    recordAgreement('a.edb', { mtime: 10, size: 100 });
+    markLocalChanges('a.edb', 5_000);
+    markLocalChanges('a.edb', 9_000);
+    expect(readStamp('a.edb')?.changedAt).toBe(9_000);
+  });
+
+  it('is not rewritten for every change within a second', () => {
+    // It runs from the store's change broadcast — an import is thousands of them
+    // — so a write per row would be the cost of a date nobody reads to the second.
+    recordAgreement('a.edb', { mtime: 10, size: 100 });
+    markLocalChanges('a.edb', 5_000);
+    markLocalChanges('a.edb', 5_400);
+    expect(readStamp('a.edb')?.changedAt).toBe(5_000);
+  });
+
+  it('goes when the copies agree again', () => {
+    recordAgreement('a.edb', { mtime: 10, size: 100 });
+    markLocalChanges('a.edb', 5_000);
+    recordAgreement('a.edb', { mtime: 20, size: 200 });
+    expect(readStamp('a.edb')).toEqual({ mtime: 20, size: 200 });
+  });
+
+  it('is never invented for a file this browser has not read', () => {
+    markLocalChanges('never-seen.edb', 5_000);
+    expect(readStamp('never-seen.edb')).toBeNull();
+  });
+});
+
+describe('changedHere', () => {
+  it('is empty while the copies agree, so the line reads as it always did', () => {
+    recordAgreement('a.edb', { mtime: 10, size: 100 });
+    expect(changedHere('a.edb')).toEqual({});
+    expect(changedHere('never-seen.edb')).toEqual({});
+  });
+
+  it('carries the date once there is something unsaved to date', () => {
+    recordAgreement('a.edb', { mtime: 10, size: 100 });
+    markLocalChanges('a.edb', 5_000);
+    expect(changedHere('a.edb')).toEqual({ changedAt: 5_000 });
   });
 });
 

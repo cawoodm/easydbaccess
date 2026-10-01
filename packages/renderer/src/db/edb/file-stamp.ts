@@ -32,6 +32,19 @@ export interface FileStamp extends FileFacts {
    * exists (see `space-adopt.ts`).
    */
   dirty?: boolean | undefined;
+  /**
+   * When our copy last changed, as epoch ms. Absent while it agrees with the file.
+   *
+   * The answer to a question the "which copy do you want?" prompts could not
+   * answer: the file side said `saved 30 Sept 2026, 12:59` and the browser side
+   * said nothing at all about WHEN, so the one thing the reader was trying to work
+   * out — which copy is later — was the one thing not on screen.
+   *
+   * It belongs here rather than in memory for the same reason `dirty` does: the
+   * prompts run at boot, and an in-memory time would be `undefined` in exactly the
+   * session that needs it.
+   */
+  changedAt?: number | undefined;
 }
 
 /** How our copy of a file stands against the file itself. */
@@ -73,7 +86,14 @@ export function readStamp(file: string): FileStamp | null {
   return s && typeof s.mtime === 'number' && typeof s.size === 'number' ? s : null;
 }
 
-/** Our copy and the file are the same right now — an import, or a write we just made. */
+/**
+ * Our copy and the file are the same right now — an import, or a write we just
+ * made.
+ *
+ * Writes the whole stamp rather than patching it, which is what drops both
+ * `dirty` and `changedAt`: there are no unsaved changes, so there is no time at
+ * which our copy last moved away from the file.
+ */
 export function recordAgreement(file: string, facts: FileFacts): void {
   const all = readAll();
   all[file] = { mtime: facts.mtime, size: facts.size };
@@ -81,18 +101,34 @@ export function recordAgreement(file: string, facts: FileFacts): void {
 }
 
 /**
+ * How often {@link markLocalChanges} may rewrite the stamp once it is dirty.
+ *
+ * It runs from the store's change broadcast — once per write, and an import is
+ * thousands — so recording every one would put a `localStorage` write behind every
+ * row. A second is far finer than the thing this feeds: a dialog that reads
+ * `changed 30 Sept 2026, 13:40`.
+ */
+const CHANGE_RESOLUTION_MS = 1000;
+
+/**
  * Our copy has moved on from the file.
  *
  * Only meaningful once there IS a stamp: a file we have never agreed with is
  * `unknown` either way, and inventing a stamp for it would claim knowledge of a
  * file nobody has read.
+ *
+ * The first change since the last save is what flips `dirty`; every change after
+ * it moves `changedAt`, which is what the prompts show. It used to return early
+ * on an already-dirty stamp, so the recorded time — had there been one — would
+ * have been the OLDEST unsaved change rather than the newest, and the reader
+ * comparing it with the file's save time would have drawn the wrong conclusion.
  */
-export function markLocalChanges(file: string): void {
+export function markLocalChanges(file: string, now: number = Date.now()): void {
   const all = readAll();
   const stamp = all[file];
   if (!stamp) return;
-  if (stamp.dirty === true) return;
-  all[file] = { ...stamp, dirty: true };
+  if (stamp.dirty === true && now - (stamp.changedAt ?? 0) < CHANGE_RESOLUTION_MS) return;
+  all[file] = { ...stamp, dirty: true, changedAt: now };
   writeAll(all);
 }
 
@@ -107,9 +143,9 @@ export function markLocalChanges(file: string): void {
  * Recording the file's facts with `dirty` keeps the pair comparable, and the next
  * outside write comes back as `conflict` rather than as silence.
  */
-export function recordDivergence(file: string, facts: FileFacts): void {
+export function recordDivergence(file: string, facts: FileFacts, now: number = Date.now()): void {
   const all = readAll();
-  all[file] = { mtime: facts.mtime, size: facts.size, dirty: true };
+  all[file] = { mtime: facts.mtime, size: facts.size, dirty: true, changedAt: now };
   writeAll(all);
 }
 
@@ -135,6 +171,23 @@ export function holdsUnsavedWork(adoptedFile: string | null): boolean {
   if (adoptedFile === null) return true;
   const stamp = readStamp(adoptedFile);
   return stamp === null || stamp.dirty === true;
+}
+
+/**
+ * The browser side's date, ready to spread into a `CopyFacts`.
+ *
+ * Every "which copy do you want?" prompt needs it and every one of them reaches
+ * it the same way, so the four of them share this rather than each remembering to
+ * ask. Empty when there is nothing to date — no stamp, or a copy that still
+ * agrees with its file — which is what leaves the line reading as it always did.
+ *
+ * Typed structurally rather than as a `CopyFacts`: this module is the RECORD of
+ * what a file looked like, and `copy-facts.ts` is what renders a comparison. The
+ * record should not have to import the renderer.
+ */
+export function changedHere(file: string): { changedAt?: number | undefined } {
+  const at = readStamp(file)?.changedAt;
+  return at === undefined ? {} : { changedAt: at };
 }
 
 /** Forget what we knew, so the next comparison is `unknown` and touches nothing. */

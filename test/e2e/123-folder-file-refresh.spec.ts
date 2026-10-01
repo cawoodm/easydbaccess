@@ -513,7 +513,6 @@ test.describe('a file written by another origin', () => {
     const extra = await createTable(page, 'unsaved', [{ field: 'part', type: 'string' }]);
     await waitForPanel(page, extra);
     await expect.poll(() => stamp(page, file).then((s) => s?.dirty === true), { timeout: 20_000 }).toBe(true);
-
     await runFileCommand(page, 'Sync workspace folder');
 
     // A question, not a decision.
@@ -524,6 +523,15 @@ test.describe('a file written by another origin', () => {
     // and for the file how big it is and when it was written.
     await expect(dialog.getByText(/Browser: \d+ workspace/)).toBeVisible();
     await expect(dialog.getByText(new RegExp(`${file}: .*\\d+ KB, saved `))).toBeVisible();
+    // And a DATE on the browser line too. Reported: the file line read
+    // "11.7 MB, saved 30 Sept 2026, 12:59" and the browser line was counts and
+    // nothing else — so the question the reader is actually asking, which copy is
+    // later, was answerable on one side only. "changed", not "saved": this copy is
+    // not on disk, which is the whole thing the prompt is warning about.
+    // `\S`, not `\d`: the date is formatted on the READER's clock and in their
+    // locale, so it starts with a month name as readily as a day number —
+    // `changed Oct 1, 2026` in en-US, `changed 1 Oct 2026` in en-GB.
+    await expect(dialog.getByText(/Browser: .*changed \S/)).toBeVisible();
     await dialog.getByRole('button', { name: 'Use the file copy', exact: true }).click();
 
     // Answered with Load, so the file wins — including the table the other origin

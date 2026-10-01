@@ -18,7 +18,7 @@ import {
 } from '../db/edb/file-handle.js';
 import { activeEdbName, adoptedFileName, reloadWithoutSpace, reloadWithSpace, setActiveEdbName } from '../db/edb/session.js';
 import { saveErrorMessage, saveErrorSummary } from '../db/edb/save-error.js';
-import { clearWriteDeclined, compareWithFile, factsOfHandle, holdsUnsavedWork, markWriteDeclined, markLocalChanges, readStamp, recordAgreement, verdictFor, writeDeclined } from '../db/edb/file-stamp.js';
+import { changedHere, clearWriteDeclined, compareWithFile, factsOfHandle, holdsUnsavedWork, markWriteDeclined, markLocalChanges, readStamp, recordAgreement, verdictFor, writeDeclined } from '../db/edb/file-stamp.js';
 import { clearAppProgress, setAppProgress } from '../chrome/app-progress-signal.js';
 import { SETTINGS_CHANGED_EVENT, settingsChangeAffects, type SettingsChangedDetail } from '../db/settings-events.js';
 import { adoptDeviceFolder, deviceStorage, disconnectDeviceState, onDeviceStateError } from '../db/edb/device-state.js';
@@ -506,7 +506,7 @@ export function init(api: HostApi): void {
 
     const ctx = mergeContext(handle);
     const sides = compareCopies([
-      { label: BROWSER_SIDE, facts: await openContentsFacts(), newer: newerSide(verdict) === 'browser' },
+      { label: BROWSER_SIDE, facts: { ...(await openContentsFacts()), ...changedHere(file) }, newer: newerSide(verdict) === 'browser' },
       { label: fileSide(file), facts: { ...(await countsInFileHandle(handle)), ...now }, newer: newerSide(verdict) === 'file' },
     ]);
     const lead = `${file} has been written since this tab last saved it — by another tab, another browser or another machine. Saving now would replace that work.`;
@@ -840,6 +840,11 @@ export function init(api: HostApi): void {
     } catch {
       /* a build that cannot count — the file's own side is the half that matters */
     }
+    // When this browser's copy last moved away from that file. Without it the
+    // browser line carried no date at all while the file line did, so the question
+    // the reader is asking — which copy is later — was answerable on one side only.
+    const changedAt = readStamp(file)?.changedAt;
+    if (changedAt !== undefined) here.changedAt = changedAt;
     const facts = handle ? await factsOfHandle(handle) : null;
     const there: CopyFacts = { ...(facts ?? {}), ...(handle ? await countsInFile(handle, workspaceId) : {}) };
     // Usually `unknown` — a Save into a folder meets files this browser has never

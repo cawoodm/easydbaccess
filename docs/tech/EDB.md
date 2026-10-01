@@ -793,10 +793,54 @@ tab wrote this morning, and the name cannot tell them apart because a file is na
 after its workspace.
 
 `db/edb/copy-facts.ts` is the one builder for what they now show: tables, views,
-the file's size, when the file was last written, and — for this tab's own file —
-what its size was when we last agreed with it (`sizeChangeNote`, off the stamp).
-It is pure, every field is optional, and an absent one is LEFT OUT rather than
-shown as zero: a count that could not be taken is not a count of none.
+the file's size, when the file was last written, when THIS BROWSER's copy last
+changed, and — for this tab's own file — what its size was when we last agreed
+with it (`sizeChangeNote`, off the stamp). It is pure, every field is optional,
+and an absent one is LEFT OUT rather than shown as zero: a count that could not be
+taken is not a count of none.
+
+### Both sides carry a date
+
+Reported from the field. The prompt read:
+
+```
+powerplants.edb has been written since this browser last read it, and this
+browser holds changes of its own.
+
+Browser: 1 table, 2 views
+File — powerplants.edb: 1 table, 2 views, 11.7 MB, saved 30 Sept 2026, 12:59
+```
+
+One side says when; the other says nothing at all. The question the reader is
+actually answering is **which copy is later**, and it was answerable on one line
+only — the counts are identical, so the whole message came down to a date the
+browser line did not have.
+
+The browser's answer to `mtime` is `CopyFacts.changedAt`, and it comes off the
+file stamp (`FileStamp.changedAt`, `changedHere(file)`): when this browser's copy
+last moved away from the file. It lives there rather than in memory for the same
+reason `dirty` does — these prompts run at boot, and an in-memory time would be
+`undefined` in exactly the session that needs it.
+
+Three rules, each with a failure behind it:
+
+- **`changed`, not `saved`.** The file was written; the browser's copy merely moved
+  on and is still only in the browser. Calling both "saved" would state that the
+  very thing the prompt is warning about is not true.
+- **It is the LATEST change, not the first.** `markLocalChanges` used to return
+  early on an already-dirty stamp, which would have pinned the time to the OLDEST
+  unsaved change — and a reader comparing that with the file's save time would draw
+  the wrong conclusion. It is rewritten at most once a second, because it runs from
+  the store's change broadcast and an import is thousands of those.
+- **Absent while the copies agree.** `recordAgreement` writes the whole stamp
+  rather than patching it, which drops `changedAt` with `dirty`: a copy that
+  matches its file has not changed since it was written, and the other line already
+  says when that was.
+
+What this does NOT do is mark one side `← newer` from the two timestamps. The file
+mtime comes from whichever machine wrote it and `changedAt` from this one, so on
+the `conflict` verdict — which is precisely when both have moved — comparing them
+would be a guess dressed as a fact. `newerSide` still answers from the stamp alone.
 
 Where the numbers come from matters, because none of it may cost a second read:
 

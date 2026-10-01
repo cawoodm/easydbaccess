@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 1 Oct 2026
+
+### Bugs
+
+- 🪲 The "which copy do you want?" prompts dated the file and left the browser copy undated (v0.0.517)
+
 ## 30 Sep 2026
 
 ### Bugs
